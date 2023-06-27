@@ -27,6 +27,7 @@ from pytorch_test_common import (
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
     skipDtypeChecking,
+    skipIfQuantizationBackendQNNPack,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
@@ -756,6 +757,63 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         model = Logit(eps=1e-6)
         self.run_test(model, torch.randn(1, 3, 640, 640))
+
+    class Atleast1d(torch.nn.Module):
+        def forward(self, t, w, x, y, z):
+            return torch.atleast_1d((t, w, x, y, z))
+
+    class Atleast2d(torch.nn.Module):
+        def forward(self, t, w, x, y, z):
+            return torch.atleast_2d((t, w, x, y, z))
+
+    class Atleast3d(torch.nn.Module):
+        def forward(self, t, w, x, y, z):
+            return torch.atleast_3d((t, w, x, y, z))
+
+    class Atleast1dTensor(torch.nn.Module):
+        def forward(self, x):
+            return torch.atleast_1d(x)
+
+    class Atleast2dTensor(torch.nn.Module):
+        def forward(self, x):
+            return torch.atleast_2d(x)
+
+    class Atleast3dTensor(torch.nn.Module):
+        def forward(self, x):
+            return torch.atleast_3d(x)
+
+    @skipScriptTest()  # tracing uses prim::ListUnpack to avoid onnx::SequenceConstruct
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @common_utils.parametrize("module_class", (Atleast1d, Atleast2d, Atleast3d))
+    def test_atleast_nd_list_input(self, module_class: torch.nn.Module):
+        inputs = (
+            torch.tensor(1.0),
+            torch.randn(2),
+            torch.randn(2, 3),
+            torch.randn(2, 3, 4),
+            torch.randn(2, 3, 4, 5),
+        )
+        self.run_test(module_class(), inputs)
+
+    @skipScriptTest()  # tracing uses prim::ListUnpack to avoid onnx::SequenceConstruct
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @common_utils.parametrize(
+        "module_class", (Atleast1dTensor, Atleast2dTensor, Atleast3dTensor)
+    )
+    @common_utils.parametrize(
+        "inputs",
+        [
+            torch.tensor(1.0),
+            torch.randn(2),
+            torch.randn(2, 3),
+            torch.randn(2, 3, 4),
+            torch.randn(2, 3, 4, 5),
+        ],
+    )
+    def test_atleast_nd_single_tensor_input(
+        self, module_class: torch.nn.Module, inputs: torch.Tensor
+    ):
+        self.run_test(module_class(), inputs)
 
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     @skipIfUnsupportedMinOpsetVersion(15)
@@ -12337,6 +12395,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, input_tensor)
 
     @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_conv1d(self):
+        model = torch.ao.nn.quantized.Conv1d(16, 33, 3, stride=2)
+        # Manually initialize model weight and bias to random numbers.
+        # By default all zeros.
+        q_weight = torch.quantize_per_tensor(
+            torch.randn(33, 16, 3), 0.5, 0, torch.qint8
+        )
+        bias = torch.arange(33).to(torch.float) - 16
+        model.set_weight_bias(q_weight, bias)
+        input = torch.randn(3, 16, 32)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
+        self.run_test(model, q_input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv2d(self):
         model = torch.ao.nn.quantized.Conv2d(16, 33, 3, stride=2)
         # Manually initialize model weight and bias to random numbers.
@@ -12351,10 +12423,39 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfQuantizationBackendQNNPack
+    def test_quantized_conv3d(self):
+        model = torch.ao.nn.quantized.Conv3d(16, 33, [2, 3, 4], stride=[3, 1, 2])
+        # Manually initialize model weight and bias to random numbers.
+        # By default all zeros.
+        q_weight = torch.quantize_per_tensor(
+            torch.randn(33, 16, 2, 3, 4), 0.5, 0, torch.qint8
+        )
+        bias = torch.arange(33).to(torch.float) - 16
+        model.set_weight_bias(q_weight, bias)
+        input = torch.randn(3, 16, 8, 8, 8)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
+        self.run_test(model, q_input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_adaptive_avg_pool2d(self):
         model = torch.nn.AdaptiveAvgPool2d((5, 7))
         input = torch.randn(4, 3, 10, 14)
         q_input = torch.quantize_per_tensor(input, 0.2, 128, torch.quint8)
+        self.run_test(model, q_input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_conv1d_relu(self):
+        model = torch.ao.nn.intrinsic.quantized.ConvReLU1d(16, 33, 3, stride=2)
+        # Manually initialize model weight and bias to random numbers.
+        # By default all zeros.
+        q_weight = torch.quantize_per_tensor(
+            torch.randn(33, 16, 3), 0.5, 0, torch.qint8
+        )
+        bias = torch.arange(33).to(torch.float) - 16
+        model.set_weight_bias(q_weight, bias)
+        input = torch.randn(3, 16, 32)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
@@ -12372,16 +12473,64 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, q_input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
-    def test_quantized_conv1d_relu(self):
-        model = torch.ao.nn.intrinsic.quantized.ConvReLU1d(16, 33, 3, stride=2)
+    @skipIfQuantizationBackendQNNPack
+    def test_quantized_conv3d_relu(self):
+        model = torch.ao.nn.intrinsic.quantized.ConvReLU3d(
+            16, 33, [2, 3, 4], stride=[3, 1, 2]
+        )
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
         q_weight = torch.quantize_per_tensor(
-            torch.randn(33, 16, 3), 0.5, 0, torch.qint8
+            torch.randn(33, 16, 2, 3, 4), 0.5, 0, torch.qint8
+        )
+        bias = torch.arange(33).to(torch.float) - 16
+        model.set_weight_bias(q_weight, bias)
+        input = torch.randn(3, 16, 8, 8, 8)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
+        self.run_test(model, q_input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_conv_transpose1d(self):
+        model = torch.ao.nn.quantized.ConvTranspose1d(16, 33, 3, stride=2)
+        # Manually initialize model weight and bias to random numbers.
+        # By default all zeros.
+        q_weight = torch.quantize_per_tensor(
+            torch.randn(16, 33, 3), 0.5, 0, torch.qint8
         )
         bias = torch.arange(33).to(torch.float) - 16
         model.set_weight_bias(q_weight, bias)
         input = torch.randn(3, 16, 32)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
+        self.run_test(model, q_input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_conv_transpose2d(self):
+        model = torch.ao.nn.quantized.ConvTranspose2d(16, 33, 3, stride=2)
+        # Manually initialize model weight and bias to random numbers.
+        # By default all zeros.
+        q_weight = torch.quantize_per_tensor(
+            torch.randn(16, 33, 3, 3), 0.5, 0, torch.qint8
+        )
+        bias = torch.arange(33).to(torch.float) - 16
+        model.set_weight_bias(q_weight, bias)
+        input = torch.randn(3, 16, 32, 32)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
+        self.run_test(model, q_input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfQuantizationBackendQNNPack
+    def test_quantized_conv_transpose3d(self):
+        model = torch.ao.nn.quantized.ConvTranspose3d(
+            16, 33, [2, 3, 4], stride=[3, 1, 2]
+        )
+        # Manually initialize model weight and bias to random numbers.
+        # By default all zeros.
+        q_weight = torch.quantize_per_tensor(
+            torch.randn(16, 33, 2, 3, 4), 0.5, 0, torch.qint8
+        )
+        bias = torch.arange(33).to(torch.float) - 16
+        model.set_weight_bias(q_weight, bias)
+        input = torch.randn(3, 16, 8, 8, 8)
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 

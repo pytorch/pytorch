@@ -5,9 +5,14 @@ name: Upload Alerts to AWS/Rockset
 on:
   schedule:
     - cron: '*/10 * * * *'
+  pull_request:
+    paths:
+      - 'tools/alerts/create_alerts.py'
+      - '.github/workflows/upload-alerts.yml'
 
 jobs:
   upload-alerts:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: [self-hosted, linux.2xlarge]
     steps:
       - name: Checkout repo
@@ -23,7 +28,7 @@ jobs:
 
       - name: Create alerts
         run: |
-          output=$(python3 "tools/alerts/create_alerts.py")
+          output=$(PYTHONPATH=$PYTHONPATH:$(pwd) python3 "tools/alerts/create_alerts.py")
           echo "uploading following alerts"
           echo "$output"
           echo "script-output=$output" >> "$GITHUB_OUTPUT"
@@ -38,5 +43,5 @@ jobs:
           organization: "pytorch"
           repo: "pytorch"
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
