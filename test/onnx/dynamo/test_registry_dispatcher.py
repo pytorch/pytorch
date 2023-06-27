@@ -31,25 +31,27 @@ class TestRegistration(common_utils.TestCase):
         self.registry._registry.pop("test::test_op", None)
 
     def test_onnx_custom_symbolic_registers_function(self):
-        self.assertFalse(self.registry.is_registered_op("test::test_op"))
+        self.assertFalse(self.registry.is_registered_op("test", "test_op", "default"))
 
         @onnxscript.script(self.custom_domain)
         def test(x, y):
             return op.Add(x, y)
 
-        self.registry.register_custom_op("test::test_op", test)
-        self.assertTrue(self.registry.is_registered_op("test::test_op"))
+        self.registry.register_custom_op(test, "test", "test_op", "default")
+        self.assertTrue(self.registry.is_registered_op("test", "test_op", "default"))
 
-        function_group = self.registry.get_functions("test::test_op")
+        function_group = self.registry.get_functions("test", "test_op", "default")
         assert function_group is not None
         self.assertEqual({func.onnx_function for func in function_group}, {test})
 
-        function_group = self.registry._get_custom_functions("test::test_op")
+        function_group = self.registry._get_custom_functions(
+            "test", "test_op", "default"
+        )
         assert function_group is not None
         self.assertEqual({func.onnx_function for func in function_group}, {test})
 
     def test_custom_onnx_symbolic_joins_existing_function(self):
-        self.assertFalse(self.registry.is_registered_op("test::test_op"))
+        self.assertFalse(self.registry.is_registered_op("test", "test_op"))
 
         @onnxscript.script(self.custom_domain)
         def test_original(x, y):
@@ -59,22 +61,22 @@ class TestRegistration(common_utils.TestCase):
             test_original, op_name="test::test_op"
         )
         self.registry._register(symbolic_fn)
-        self.assertTrue(self.registry.is_registered_op("test::test_op"))
+        self.assertTrue(self.registry.is_registered_op("test", "test_op"))
 
         @onnxscript.script(self.custom_domain)
         def test_custom(x, y):
             return op.Add(x, y)
 
-        self.registry.register_custom_op("test::test_op", test_custom)
+        self.registry.register_custom_op(test_custom, "test", "test_op")
 
-        function_group = self.registry.get_functions("test::test_op")
+        function_group = self.registry.get_functions("test", "test_op")
         assert function_group is not None
         self.assertEqual(
             {func.onnx_function for func in function_group},
             {test_custom, test_original},
         )
 
-        function_group = self.registry._get_custom_functions("test::test_op")
+        function_group = self.registry._get_custom_functions("test", "test_op")
         assert function_group is not None
         self.assertEqual({func.onnx_function for func in function_group}, {test_custom})
 
@@ -103,7 +105,7 @@ class TestDispatcher(common_utils.TestCase):
                     args=(torch.tensor(3), torch.tensor(4)),
                     kwargs={},
                 ),
-                "aten::add.Tensor",
+                ("aten", "add", "Tensor"),
             ),
             (
                 torch.fx.Node(
@@ -114,7 +116,7 @@ class TestDispatcher(common_utils.TestCase):
                     args=(),
                     kwargs={},
                 ),
-                "aten::sym_size",
+                ("aten", "sym_size", None),
             ),
             (
                 torch.fx.Node(
@@ -125,7 +127,7 @@ class TestDispatcher(common_utils.TestCase):
                     args=(1, 2),
                     kwargs={},
                 ),
-                "aten::add",
+                ("aten", "add", None),
             ),
         ]
     )
@@ -193,10 +195,10 @@ class TestDispatcher(common_utils.TestCase):
         )
         self.assertEqual(
             self.dispatcher.get_function_overloads(
-                node_overload, "aten::add.Tensor", self.diagnostic_context
+                node_overload, "aten", "add", "Tensor", self.diagnostic_context
             ),
             self.dispatcher.get_function_overloads(
-                node_overloadpacket, "aten::add", self.diagnostic_context
+                node_overloadpacket, "aten", "add", None, self.diagnostic_context
             ),
         )
         unsupported_op_node = torch.fx.Node(
@@ -209,7 +211,11 @@ class TestDispatcher(common_utils.TestCase):
         )
         with self.assertRaises(RuntimeError):
             self.dispatcher.get_function_overloads(
-                unsupported_op_node, "aten::made_up_node", self.diagnostic_context
+                unsupported_op_node,
+                "aten",
+                "made_up_node",
+                None,
+                self.diagnostic_context,
             )
 
     def test_warnings_in_find_the_perfect_or_nearest_match_onnxfunction(self):
@@ -229,11 +235,13 @@ class TestDispatcher(common_utils.TestCase):
                 function_overloads,
                 custom_overloads,
             ) = self.dispatcher.get_function_overloads(
-                op_overload, "aten::add", self.diagnostic_context
+                op_overload, "aten", "add", None, self.diagnostic_context
             )
             self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
                 op_overload,
-                "aten::add",
+                "aten",
+                "add",
+                None,
                 function_overloads,
                 custom_overloads,  # custom function overloads
                 op_overload.args,
@@ -298,7 +306,9 @@ class TestDispatcher(common_utils.TestCase):
 
         symbolic_fn = self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
             node,
-            "aten::add",
+            "aten",
+            "add",
+            None,
             function_overloads,
             custom_overloads,  # custom function overloads
             node.args,
