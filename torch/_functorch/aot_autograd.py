@@ -474,6 +474,9 @@ class ViewAndMutationMeta:
             for i, m in enumerate(self.output_info)
             if m.output_type not in [OutputType.non_alias, OutputType.unsafe_view_alias]
         ]
+        unsafe_view_out_indices = [
+            i for i, m in enumerate(self.output_info) if m.output_type is OutputType.unsafe_view_alias
+        ]
 
         self.mutated_inp_indices = mutated_inp_indices
         # This is pre-computed in post_init for perf.
@@ -484,6 +487,7 @@ class ViewAndMutationMeta:
         # It contains the index of every element
         # of output_info that corresponds to an alias (either of an input or intermediate)
         self.aliased_out_indices = aliased_out_indices
+        self.unsafe_view_out_indices = unsafe_view_out_indices
         self.num_outputs = len(self.output_info)
         self.num_outputs_non_aliased = len(
             [x for x in self.output_info if x.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias]]
@@ -498,6 +502,7 @@ class ViewAndMutationMeta:
                 ]
             ]
         )
+        self.num_unsafe_view_outputs = len(self.unsafe_view_out_indices)
         self.num_outputs_aliased_to_intermediates = len(
             [
                 x
@@ -1158,9 +1163,6 @@ def fn_prepped_for_autograd(
         for i, (o, info) in enumerate(zip(outs, meta.output_info)):
             if info.output_type == OutputType.alias_of_intermediate_save_as_output:
                 intermediate_bases.append(o._base)
-            elif info.output_type == OutputType.unsafe_view_alias:
-                # See Note [Intermediate Bases Optimization]
-                outs[i] = torch.ops.aten._unsafe_view.default(o, o.shape)
 
         assert meta.num_intermediate_bases == len(intermediate_bases)
 
@@ -2788,7 +2790,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
         @staticmethod
         def _compiled_autograd_key(ctx):
-            return aot_config.aot_id
+            return (aot_config.aot_id, *ctx.symints)
 
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
@@ -2809,12 +2811,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             )
 
             num_outputs = CompiledFunction.metadata.num_outputs
-            num_outputs_aliased_to_inputs = (
-                CompiledFunction.metadata.num_outputs_aliased_to_inputs
-            )
-            num_outputs_aliased_to_intermediates = (
-                CompiledFunction.metadata.num_outputs_aliased_to_intermediates
-            )
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
@@ -2879,6 +2875,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         x for x in CompiledFunction.metadata.input_info if x.mutates_data or x.mutates_metadata
                     ]
                     assert len(user_mutated_inputs_raw) == len(mut_inp_infos)
+
+            if CompiledFunction.metadata.num_unsafe_view_outputs > 0:
+                for idx in CompiledFunction.metadata.unsafe_view_out_indices:
+                    raw_return_idx = num_mutated_inputs + idx
+                    o = raw_returns[raw_return_idx]
+                    raw_returns[raw_return_idx] = torch.ops.aten._unsafe_view(o, o.shape)
 
             if num_outputs_aliased > 0:
                 for idx in CompiledFunction.metadata.aliased_out_indices:
@@ -2983,14 +2985,20 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # Add the seed and offset to args
                 rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
-            all_args = (
-                list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args) + list(rng_args)
-            )
-
+            all_args = [
+                *ctx.symints,
+                *ctx.saved_tensors,
+                *contiguous_args,
+                *rng_args
+            ]
             del contiguous_args
 
             def call_compiled_backward():
                 if ctx._compiled_autograd_tracing:
+                    # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
+                    symints = ctx._compiled_autograd_symints
+                    assert len(symints) == len(ctx.symints)
+                    all_args[:len(symints)] = symints
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
                     with context():
                         out = normalize_as_list(bw_module(*all_args))
@@ -3724,11 +3732,13 @@ def aot_module_simplified(
         no_tangents=False,
     )
 
-    compiled_fn = create_aot_dispatcher_function(
-        functional_call,
-        full_args,
-        aot_config,
-    )
+    from torch._dynamo import compiled_autograd
+    with compiled_autograd.disable():
+        compiled_fn = create_aot_dispatcher_function(
+            functional_call,
+            full_args,
+            aot_config,
+        )
 
     # TODO: There is something deeply wrong here; compiled_fn running with
     # the boxed calling convention, but aot_module_simplified somehow

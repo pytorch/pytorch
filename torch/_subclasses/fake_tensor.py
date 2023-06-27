@@ -15,7 +15,6 @@ import torch._logging
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
-    check,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -1495,7 +1494,7 @@ class FakeTensorMode(TorchDispatchMode):
                 ) = FakeTensor._find_common_device(func, args, kwargs)
 
             if isinstance(e, FakeTensor):
-                check(
+                torch._check(
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )

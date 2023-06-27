@@ -122,14 +122,16 @@ struct TORCH_API TensorGeometry {
   c10::SymInt& mutable_storage_offset() {
     return storage_offset_;
   }
-  void set_symbolic_sizes_strides(bool v) {
-    has_symbolic_sizes_strides_ = v;
-  }
-  void recompute_numel() {
+  void recompute() {
+    // recalculate numel after a change
     c10::SymInt numel = 1;
-    for (auto i : sizes_)
+    bool symbolic = false;
+    for (const auto& i : sizes_) {
       numel = numel * i;
+      symbolic = symbolic || i.is_heap_allocated();
+    }
     numel_ = numel;
+    has_symbolic_sizes_strides_ = symbolic;
   }
 
  private:

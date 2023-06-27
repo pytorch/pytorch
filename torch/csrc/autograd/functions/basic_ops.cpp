@@ -65,6 +65,12 @@ auto ImplicitAdd::apply(variable_list&& grads) -> variable_list {
 }
 
 #ifdef COMPILED_AUTOGRAD
+variable_list ImplicitAdd::apply_with_saved(
+    const variable_list& inputs,
+    SwapSavedVariables& saved) {
+  return apply(variable_list(inputs));
+}
+
 variable_list GraphRoot::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
@@ -72,12 +78,6 @@ variable_list GraphRoot::apply_with_saved(
   variable_list result(outputs);
   saved.after(outputs);
   return result;
-}
-
-variable_list ImplicitAdd::apply_with_saved(
-    const variable_list& inputs,
-    SwapSavedVariables& saved) {
-  return apply(variable_list(inputs));
 }
 
 void GraphRoot::compiled_args(CompiledNodeArgs& args) {

@@ -12,6 +12,12 @@ namespace generated {
 struct TypeAndSize;
 }
 
+struct SizeInput {
+  enum DynType : uint8_t { STATIC = 0, DYNAMIC = 1 };
+  DynType dyn_type;
+  int64_t value;
+};
+
 struct CacheKeyBuffer {
   CacheKeyBuffer() : data(nullptr) {}
   CacheKeyBuffer(const char* key, uint16_t len) : data(new char[len]) {
@@ -101,7 +107,8 @@ struct NodeCall {
 
 struct AutogradCompilerCall {
   AutogradCompilerCall(bool accumulate_grad_)
-      : accumulate_grad(accumulate_grad_) {}
+      : accumulate_grad(accumulate_grad_),
+        default_dyn_type(SizeInput::STATIC) {}
 
   void add_tensor_input(const at::Tensor& tensor) {
     inputs.emplace_back(tensor);
@@ -112,7 +119,7 @@ struct AutogradCompilerCall {
   }
 
   void add_size_input(const c10::SymInt& s) {
-    all_size_inputs.emplace_back(s.expect_int());
+    all_size_inputs.emplace_back(SizeInput{default_dyn_type, s.expect_int()});
   }
 
   int emplace_hook(c10::SafePyObject&& fn) {
@@ -120,12 +127,13 @@ struct AutogradCompilerCall {
     return hooks.size() - 1;
   }
 
-  std::vector<int64_t> all_size_inputs;
+  std::vector<SizeInput> all_size_inputs;
   std::vector<int64_t> dyn_size_inputs;
   std::vector<at::Tensor> inputs;
   std::vector<at::Tensor> set_grad_targets;
   std::vector<c10::SafePyObject> hooks;
   bool accumulate_grad;
+  SizeInput::DynType default_dyn_type;
 };
 
 class CompiledNodeArgs {
@@ -355,6 +363,10 @@ class CompiledNodeArgs {
     }
   }
 
+  SizeInput::DynType set_default_dyn_type(SizeInput::DynType default_dyn_type) {
+    return std::exchange(_compiler.default_dyn_type, default_dyn_type);
+  }
+
  protected:
   template <typename T>
   void specialize_on_bytes(const T& t) {
@@ -452,15 +464,13 @@ class SwapSavedVariables {
     before(t.mutable_sizes());
     before(t.mutable_strides());
     before(t.mutable_storage_offset());
-    t.set_symbolic_sizes_strides(true);
-    t.recompute_numel();
+    t.recompute();
   }
   void after(at::TensorGeometry& t) {
     after(t.mutable_sizes());
     after(t.mutable_strides());
     after(t.mutable_storage_offset());
-    t.set_symbolic_sizes_strides(false);
-    t.recompute_numel();
+    t.recompute();
   }
   void before(torch::autograd::generated::TypeAndSize& t);
   void after(torch::autograd::generated::TypeAndSize& t);

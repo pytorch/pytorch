@@ -102,6 +102,7 @@ struct THPFunction {
 
   // Cause AotAutograd to call the original FX graph rather than compiling.
   bool compiled_autograd_tracing;
+  std::vector<c10::SymInt> compiled_autograd_symints;
 
   std::vector<torch::autograd::VariableInfo> output_info;
   std::vector<torch::autograd::VariableInfo> input_info;

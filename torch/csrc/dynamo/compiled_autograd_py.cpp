@@ -12,7 +12,6 @@ namespace torch {
 namespace dynamo {
 using namespace torch::autograd;
 using c10::SymInt;
-enum IsDynamic : uint8_t { STATIC = 0, DYNAMIC = 1 };
 
 static PyObject* wrap_variable_list(const variable_list& inputs) {
   PyObject* pyinput = PyList_New(inputs.size());
@@ -109,26 +108,28 @@ struct CacheNode {
     */
     bool cache_hit = compiled_fn.get() != nullptr;
     auto len = call.all_size_inputs.size();
-    const int64_t* data = call.all_size_inputs.data();
+    const SizeInput* data = call.all_size_inputs.data();
     if (expected_sizes.empty()) {
       expected_sizes.reserve(len);
       for (const auto i : c10::irange(len)) {
-        // static shape until we see it change
-        expected_sizes.emplace_back(std::make_pair(STATIC, data[i]));
-      }
-    } else {
-      TORCH_CHECK(expected_sizes.size() == call.all_size_inputs.size());
-      for (const auto i : c10::irange(len)) {
-        auto& expected = expected_sizes[i];
-        if (expected.first == DYNAMIC || expected.second != data[i]) {
-          cache_hit = cache_hit && expected.first == DYNAMIC;
-          expected = std::make_pair(DYNAMIC, data[i]);
-          if (call.dyn_size_inputs.empty())
-            call.dyn_size_inputs.reserve(len);
-          call.dyn_size_inputs.emplace_back(data[i]);
-        }
+        expected_sizes.emplace_back(data[i]);
       }
     }
+
+    TORCH_CHECK(expected_sizes.size() == call.all_size_inputs.size());
+    for (const auto i : c10::irange(len)) {
+      auto& expected = expected_sizes[i];
+      if (expected.dyn_type == SizeInput::DYNAMIC ||
+          expected.value != data[i].value) {
+        cache_hit = cache_hit && expected.dyn_type == SizeInput::DYNAMIC;
+        if (expected.value != data[i].value)
+          expected = SizeInput{SizeInput::DYNAMIC, data[i].value};
+        if (call.dyn_size_inputs.empty())
+          call.dyn_size_inputs.reserve(len);
+        call.dyn_size_inputs.emplace_back(data[i].value);
+      }
+    }
+
     if (!cache_hit) {
       compiled_fn = nullptr;
     }
@@ -139,14 +140,14 @@ struct CacheNode {
     size_t dynamic_count = 0;
     size_t idx = 0;
     for (const auto& i : expected_sizes) {
-      if (i.first == DYNAMIC) {
+      if (i.dyn_type == SizeInput::DYNAMIC) {
         ++dynamic_count;
       }
     }
     PyObject* pyinput = PyTuple_New(dynamic_count);
     for (const auto& i : expected_sizes) {
-      if (i.first == DYNAMIC) {
-        PyTuple_SET_ITEM(pyinput, idx++, PyLong_FromSsize_t(i.second));
+      if (i.dyn_type == SizeInput::DYNAMIC) {
+        PyTuple_SET_ITEM(pyinput, idx++, PyLong_FromSsize_t(i.value));
       }
     }
     TORCH_CHECK(idx == dynamic_count);
@@ -160,7 +161,7 @@ struct CacheNode {
     std::vector<c10::optional<SymInt>> result;
     result.reserve(expected_sizes.size());
     for (const auto& i : expected_sizes) {
-      if (i.first == DYNAMIC) {
+      if (i.dyn_type == SizeInput::DYNAMIC) {
         TORCH_CHECK(idx < result_len);
         result.emplace_back(
             py::cast<c10::SymInt>(PyList_GET_ITEM(pyresult, idx++)));
@@ -175,7 +176,7 @@ struct CacheNode {
   // TODO(jansel): benchmark map vs unordered_map
   std::unordered_map<CacheKey, std::unique_ptr<CacheNode>> next;
   std::vector<CacheKeyBuffer> key_storage;
-  std::vector<std::pair<IsDynamic, int64_t>> expected_sizes;
+  std::vector<SizeInput> expected_sizes;
   THPObjectPtr compiled_fn;
 };
 

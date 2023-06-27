@@ -14,7 +14,7 @@ def compiler_fn(gm):
         counters["compiled_autograd"]["compiles"] += 1
         return inductor.compile(gm_, example_inputs_)
 
-    return torch.compile(gm, backend=inner_compiler, fullgraph=True)
+    return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
 
 
 # TODO(jansel): hooks as lambdas creates recompiles in dynamo, we should fix that
@@ -33,7 +33,7 @@ def hook3(gI, gO):
 
 
 class TestCompiledAutograd(TestCase):
-    def _common(self, fn):
+    def _common(self, fn, count=1):
         with torch.autograd.set_multithreading_enabled(False):
             torch._dynamo.reset()
             counters["compiled_autograd"].clear()
@@ -43,8 +43,8 @@ class TestCompiledAutograd(TestCase):
             with compiled_autograd.enable(compiler_fn):
                 actual = list(fn())
             self.assertEqual(expected, actual)
-            self.assertEqual(counters["compiled_autograd"]["captures"], 1)
-            self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
+            self.assertEqual(counters["compiled_autograd"]["captures"], count)
+            self.assertEqual(counters["compiled_autograd"]["compiles"], count)
 
     def test_basic(self):
         def fn():
@@ -192,6 +192,50 @@ class TestCompiledAutograd(TestCase):
                 yield gz
 
         self._common(fn)
+
+    def test_dynamic_shapes(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+            )
+            opt_model = torch.compile(model, dynamic=True)
+
+            for b in range(10, 100, 10):
+                x = torch.randn([b, 4])
+                result = opt_model(x).sum()
+                result.backward()
+                yield model[0].weight.grad
+                yield model[0].bias.grad
+                yield model[2].weight.grad
+                yield model[2].bias.grad
+                model.zero_grad()
+
+        self._common(fn, count=2)
+
+    def test_accumulate_without_zero(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+            )
+            opt_model = torch.compile(model, dynamic=True)
+
+            for _ in range(10):
+                x = torch.randn([10, 4])
+                result = opt_model(x).sum()
+                result.backward()
+                # Note we change aliasing relationships of gradients with respect to eager
+                yield model[0].weight.grad.clone()
+                yield model[0].bias.grad.clone()
+                yield model[2].weight.grad.clone()
+                yield model[2].bias.grad.clone()
+
+        self._common(fn, count=2)
 
 
 if __name__ == "__main__":

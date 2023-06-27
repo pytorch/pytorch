@@ -37,8 +37,12 @@ def get_ema_multi_avg_fn(decay=0.999):
 def get_swa_multi_avg_fn():
     @torch.no_grad()
     def swa_update(averaged_param_list, current_param_list, num_averaged):
-        diffs = torch._foreach_sub(current_param_list, averaged_param_list)
-        torch._foreach_addcdiv_(averaged_param_list, diffs, [num_averaged + 1] * len(averaged_param_list))
+        # foreach lerp only handles float and complex
+        if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(averaged_param_list[0]):
+            torch._foreach_lerp_(averaged_param_list, current_param_list, 1 / (num_averaged + 1))
+        else:
+            diffs = torch._foreach_sub(current_param_list, averaged_param_list)
+            torch._foreach_addcdiv_(averaged_param_list, diffs, [num_averaged + 1] * len(averaged_param_list))
 
     return swa_update
 
@@ -194,7 +198,7 @@ class AveragedModel(Module):
         if self.n_averaged > 0:
             if self.multi_avg_fn is not None or self.avg_fn is None:
                 grouped_tensors = _group_tensors_by_device_and_dtype([self_param_detached, model_param_detached])
-                for ((device, _), [self_params, model_params]) in grouped_tensors.items():
+                for ((device, _), ([self_params, model_params], _)) in grouped_tensors.items():
                     if self.multi_avg_fn:
                         self.multi_avg_fn(self_params, model_params, self.n_averaged.to(device))
                     elif device.type in _get_foreach_kernels_supported_devices():
@@ -248,8 +252,7 @@ def update_bn(loader, model, device=None):
     momenta = {}
     for module in model.modules():
         if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
-            module.running_mean = torch.zeros_like(module.running_mean)
-            module.running_var = torch.ones_like(module.running_var)
+            module.reset_running_stats()
             momenta[module] = module.momentum
 
     if not momenta:
@@ -259,7 +262,6 @@ def update_bn(loader, model, device=None):
     model.train()
     for module in momenta.keys():
         module.momentum = None
-        module.num_batches_tracked *= 0
 
     for input in loader:
         if isinstance(input, (list, tuple)):

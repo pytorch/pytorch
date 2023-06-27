@@ -43,7 +43,6 @@ class AutogradCompilerInstance:
 
     def begin_capture(self, inputs: List[torch.Tensor], sizes: List[int]):
         counters["compiled_autograd"]["captures"] += 1
-        print("BEGIN_CAPTURE", len(inputs))
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
@@ -139,8 +138,6 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
-        print(self.fx_tracer.graph)
-        print("END_CAPTURE", len(outputs))
         return self.compiler_fn(
             GraphModule(self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd")
         )
