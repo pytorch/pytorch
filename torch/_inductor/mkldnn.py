@@ -311,8 +311,9 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # NB: free_symbols test here is a BIG hammer.  ShapeProp doesn't
     # work with symbolic shapes though, see
     # https://github.com/pytorch/pytorch/pull/103512
-    if config.cpp.weight_prepack and not any(free_symbols(e) for e in example_inputs):
-        ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
+    if config.cpp.weight_prepack:
+        if not any(free_symbols(e) for e in example_inputs):
+            ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
         gm = pack_module(gm)
     return gm
 
@@ -356,7 +357,7 @@ def pack_module(gm: torch.fx.GraphModule):
                     and not torch.ops.mkldnn._is_mkldnn_bf16_supported()
                 ):
                     continue
-                if free_symbols(node.args[0].meta.get("tensor_meta").shape):
+                if node.args[0].meta.get("tensor_meta") is None:
                     computation_node_input_size = None
                     # Conv2d and ConvTranspose2d weight format are dependent on input size,
                     # but ShapeProp may be failed to get the input size, so we skip them.
@@ -383,7 +384,7 @@ def pack_module(gm: torch.fx.GraphModule):
                     elif type(cur_module) in [nn.LSTM]:
                         # pack_padded_sequence input is not supported.
                         # For pack_padded_sequence input, the len(computation_node_input_size) == 4
-                        if len(computation_node_input_size) != 3:
+                        if len(computation_node_input_size) not in [2, 3]:
                             continue
                     else:
                         if len(computation_node_input_size) != 4:
