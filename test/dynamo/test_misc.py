@@ -27,7 +27,6 @@ import torch.onnx.operators
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
 from torch._dynamo.exc import Unsupported
-from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
@@ -50,12 +49,11 @@ from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
     SM80OrLater,
+    TEST_CUDA,
+    TEST_MULTIGPU,
 )
 from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
-
-TEST_CUDA = torch.cuda.is_available()
-TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
@@ -4280,60 +4278,6 @@ def fn():
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
 
-    # Note - here be mild dragons.
-    # This test relies a ton on internal implementation. Future refactor efforts
-    # are welcome to delete it if necessary, rewriting this test constantly is a chore, not
-    # a feature. We kept it around with some amount of saddness, as it was extremely useful in debugging.
-    def test_restore_graphstate_internals(self):
-        def fn(x, y):
-            x = x + 1
-            y = y + 1
-            return x * y
-
-        _, guards = torch._dynamo.export(
-            fn, torch.tensor([0.25, 0.25]), torch.tensor([0.25, 0.25])
-        )
-        # Dummy ctor
-        graph = OutputGraph(
-            code_options={},
-            compiler_fn=None,
-            root_tx=None,
-            export=False,
-            export_constraints=None,
-            frame_state={"_id": 0},
-            local_scope={},
-            global_scope={},
-        )
-        graph.nn_modules_sources = {}
-        # Contrived generation timestamp
-        graph.timestamp = 4
-        # Contrived guards
-        graph.tracing_context.guards_context.dynamo_guards = guards
-
-        # Save the state
-        state = graph.copy_graphstate()
-        # Saving increments the generation
-        self.assertEqual(graph.timestamp, 5)
-
-        # Assure that the saved state is valid
-        self.assertEqual(state.timestamp, 4)
-
-        # Ensure that the guards reflect the expected state
-        self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
-        self.assertEqual(graph.guards, guards)
-
-        # Mess around with the state
-        graph.tracing_context.guards_context.dynamo_guards = set()
-        self.assertEqual(graph.guards, set())
-
-        # Restore the state
-        graph.restore_graphstate(state)
-
-        # Make sure it restored correctly
-        self.assertEqual(graph.timestamp, 4)
-        self.assertEqual(graph.guards, guards)
-        self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
-
     def test_call_parent_non_class_methods_from_child(self):
         class A:
             def add(self, x):
@@ -5734,6 +5678,103 @@ def ___make_guard_fn():
 
         opt = torch._dynamo.optimize("eager")(fn)
         opt()
+
+    def test_tracing_py_tree(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+
+        counter = CompileCounter()
+        torch._dynamo.optimize(counter, nopython=True)(fn)(xs)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 3)
+
+    def test_tracing_nested_py_tree(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+        xsl = [xs, xs, xs, xs]
+
+        counter = CompileCounter()
+        comp_out = torch._dynamo.optimize(counter, nopython=True)(fn)(xsl)
+        real_out = fn(xsl)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 12)
+
+    def test_tracing_nested_py_tree_tuples(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+        xsl = (xs, xs, xs, xs)
+
+        counter = CompileCounter()
+        comp_out = torch._dynamo.optimize(counter, nopython=True)(fn)(xsl)
+        real_out = fn(xsl)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 12)
+
+    def test_tracing_nested_py_tree_dicts(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+        xsl = {
+            "a": xs,
+            "b": xs,
+            "c": xs,
+        }
+
+        counter = CompileCounter()
+        comp_out = torch._dynamo.optimize(counter, nopython=True)(fn)(xsl)
+        real_out = fn(xsl)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 9)
+
+    def test_tracing_nested_py_tree_mixed_all(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+        xsa = (xs, xs)
+        xsb = {"aa": xsa, "ab": xs}
+        xsl = {
+            "a": xs,
+            "b": xsa,
+            "c": xsb,
+        }
+
+        counter = CompileCounter()
+        comp_out = torch._dynamo.optimize(counter, nopython=True)(fn)(xsl)
+        real_out = fn(xsl)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 18)
 
 
 class TestTracer(JitTestCase):

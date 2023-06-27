@@ -108,7 +108,7 @@ class QuantDecodeOp final : public Operator<CPUContext> {
   explicit QuantDecodeOp(Args&&... args)
       : Operator<CPUContext>(std::forward<Args>(args)...) {}
 
-  ~QuantDecodeOp() {}
+  ~QuantDecodeOp() override {}
 
   bool RunOnDevice() override {
     CAFFE_ENFORCE_GT(InputSize(), 1);
@@ -144,7 +144,7 @@ class QuantDecodeGradientOp final : public Operator<CPUContext> {
   template <class... Args>
   explicit QuantDecodeGradientOp(Args&&... args)
       : Operator<CPUContext>(std::forward<Args>(args)...) {}
-  ~QuantDecodeGradientOp() {}
+  ~QuantDecodeGradientOp() override {}
 
   bool RunOnDevice() override {
     // Inputs: 1 codebook, n tensors of codes, and n corresponding gradients.

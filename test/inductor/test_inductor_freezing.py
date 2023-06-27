@@ -197,6 +197,42 @@ class OptimizeForInferenceTemplate(TestCase):
             torch._dynamo.mark_dynamic(inp2, 1)
             self.assertEqual(fn(inp2), fn_opt(inp2))
 
+    def test_unfolded_bn(self):
+        x = torch.rand([3, 32, 15, 15]).to(self.device)
+
+        mod = torch.nn.BatchNorm2d(32, eps=0.001).eval().to(self.device)
+
+        @torch.compile()
+        def foo(mod, x):
+            return mod(x) + 10
+
+        out_compiled_no_inference = foo(mod, x)
+
+        # would error if not decomposed
+        with torch.no_grad():
+            out_compiled = foo(mod, x)
+
+            self.assertEqual(out_compiled_no_inference, out_compiled)
+
+    def test_folded_conv_bn(self):
+        mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
+        x = torch.rand(3, 3, 32, 32).to(self.device)
+
+        @torch.compile()
+        def foo(mod, x):
+            return mod(x)
+
+        # TODO - bias is separate kernel right now, we should only unfuse it
+        # from conv if it can be fused
+
+        with torch.no_grad():
+            out_eager = mod(x)
+            out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
+
+        FileCheck().check_not("native_batch_norm_legit_no_training").run(code[0])
+
+        self.assertEqual(out_optimized_for_infernece, out_eager)
+
     def test_param_deallocated(self):
         # TODO: cpu path keeps an extra copy of graph around somewhere,
         # memory not as important for cpu
