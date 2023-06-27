@@ -311,7 +311,7 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
         2: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
     }
     binary_op_configs: List[BackendPatternConfig] = []
-    for op in [operator.add, torch.add]:
+    for op in [operator.add, torch.add, operator.sub, torch.sub, operator.mul, torch.mul]:
         bop_patterns = [
             (op, torch.nn.ReLU),
             (op, torch.nn.functional.relu),
@@ -354,6 +354,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         torch.nn.MaxPool2d,
         torch.nn.ReLU6,
         torch.nn.Hardtanh,
+        torch.flatten,
         torch.mean,
         torch.squeeze,
         "mean",

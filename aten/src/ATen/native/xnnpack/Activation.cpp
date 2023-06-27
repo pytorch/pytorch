@@ -4,9 +4,7 @@
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/native/utils/Factory.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 
 
 bool use_hardswish(
@@ -91,8 +89,6 @@ Tensor& hardswish_(Tensor& input) {
   }
 }
 
-}
-}
-}
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */
