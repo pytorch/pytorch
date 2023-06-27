@@ -5,6 +5,7 @@ import logging
 import math
 import operator
 import typing
+from collections import defaultdict
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -745,9 +746,10 @@ class GraphModuleSerializer:
 
 class ExportedProgramSerializer:
     def __init__(self, opset_version: Optional[Dict[str, int]] = None):
-        self.opset_version: Dict[str, int] = (
-            {} if opset_version is None else opset_version
-        )
+        self.opset_version = defaultdict(int)
+        self.opset_version.update(opset_version)
+        if "aten" not in opset_version:
+            self.opset_version["aten"] = torch._C._get_max_operator_version()
 
     def serialize(self, exported_program: ep.ExportedProgram) -> Tuple[ExportedProgram, bytes]:
         serialized_graph_module = (
@@ -1040,9 +1042,10 @@ class GraphModuleDeserializer:
 
 class ExportedProgramDeserializer:
     def __init__(self, expected_opset_version: Optional[Dict[str, int]] = None):
-        self.expected_opset_version: Dict[str, int] = (
-            {} if expected_opset_version is None else expected_opset_version
-        )
+        self.expected_opset_version: Dict[str, int] = defaultdict(int)
+        self.expected_opset_version.update(expected_opset_version)
+        if "aten" not in expected_opset_version:
+            self.expected_opset_version["aten"] = torch._C._get_max_operator_version()
 
     def deserialize_range_constraints(
         self,
