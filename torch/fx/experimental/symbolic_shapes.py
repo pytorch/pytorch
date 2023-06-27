@@ -36,6 +36,7 @@ from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame
+from torch._utils_internal import signpost_event
 
 InputList = List
 DimList = List
@@ -350,20 +351,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if max is None:
         max = sympy.oo
     if not isinstance(a, SymInt):
-        if not (min <= a <= max):
-            raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
-
-        if (
-            (fake_mode := detect_fake_mode()) is not None and
-            getattr(fake_mode, "shape_env", None) is not None
-        ):
-            # If we are tracing with a fake mode then add this integer to the
-            # shape_env's var_to_range
-            sym_integer = sympy.Integer(a)
-            shape_env = fake_mode.shape_env
-            _constrain_symbol_range(shape_env, sym_integer, min, max)
-            shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
-
+        constrain_range_int(a, min=min, max=max)
         return
 
     if isinstance(a.node.expr, sympy.Integer):
@@ -377,6 +365,30 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
     _constrain_symbol_range(a.node.shape_env, a.node.expr, min, max)
+
+def constrain_range_int(a, *, min, max):
+    """
+    Constrain range on concrete int value.
+    This can happens for the following scenarios:
+    - Eager mode execution and real int value is provided.
+    - During tracing the traced symbol is resolved as a static integer (see
+      PR #101655 for more details).
+    """
+
+    assert not isinstance(a, SymInt)
+    if not (min <= a <= max):
+        raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
+
+    if (
+        (fake_mode := detect_fake_mode()) is not None and
+        getattr(fake_mode, "shape_env", None) is not None
+    ):
+        # If we are tracing with a fake mode then add this integer to the
+        # shape_env's var_to_range
+        sym_integer = sympy.Integer(a)
+        shape_env = fake_mode.shape_env
+        _constrain_symbol_range(shape_env, sym_integer, min, max)
+        shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
 
 def constrain_unify(a, b):
     """
@@ -1495,7 +1507,7 @@ class ShapeGuardPrinter(StrPrinter):
                 for symbol, sources in self.symbol_to_source.items()
             })
 
-        assert expr in self.symbol_to_source, (
+        assert self.symbol_to_source.get(expr), (
             f"{expr} (could be from {[s.name() for s in self.var_to_sources[expr]]}) "
             f"not in {repr_symbol_to_source()}.  If this assert is failing, it could be "
             "due to the issue described in https://github.com/pytorch/pytorch/pull/90665"
@@ -1960,6 +1972,7 @@ class ShapeEnv:
         duck_shape=True,
         # For debugging
         frame_id=None,
+        co_fields=None,
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
@@ -2000,6 +2013,10 @@ class ShapeEnv:
         self.log.info("create_env")
         self.frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
+        self.counter = collections.Counter()
+        # A selection of important fields on co_field; solely used for
+        # signpost_event
+        self.co_fields = co_fields if co_fields else {}
 
         # Cache for FX nodes.
         # Maps an already built node a tuple of:
@@ -2299,6 +2316,7 @@ Target Guards:
 
     def create_unbacked_symfloat(self):
         symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges.unknown()
 
@@ -2309,6 +2327,7 @@ Target Guards:
 
     def create_unbacked_symint(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
 
@@ -2319,6 +2338,7 @@ Target Guards:
 
     def create_unbacked_symbool(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(0, 1)
 
@@ -2365,6 +2385,7 @@ Target Guards:
             # value before, we also create a new symbol
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
             self.log.info("create_symbol %s = %s for %s", sympy_expr, val, source.name())
+            self.counter["create_symbol"] += 1
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
@@ -2668,7 +2689,7 @@ Target Guards:
                 # Small optimization
                 if (
                     isinstance(expr, sympy.Symbol) and
-                    expr in symbol_to_source and
+                    symbol_to_source.get(expr) and
                     source == symbol_to_source[expr][0]
                 ):
                     continue
@@ -2806,6 +2827,17 @@ Target Guards:
             elif len(warn_msgs) > 0:
                 log.debug("%s Warning only constraints violated", len(warn_msgs))
 
+        signpost_event(
+            "dynamic",
+            "produce_guards",
+            {
+                **self.co_fields,
+                **self.counter,
+                "num_guards": len(exprs),
+                "free_symbols": sum(1 for v in symbol_to_source.values() if v),
+            },
+        )
+
         if _translation_validator_enabled():
             from torch.fx.experimental.validator import PopulateValidator
 
@@ -2937,6 +2969,7 @@ Target Guards:
             new_expr = replace(expr, new_shape_env)
         except RecursionError:
             log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
+            self.counter["sympy_recursion_error"] += 1
             return None
 
         floor_div_replace = {}
@@ -3116,6 +3149,7 @@ Target Guards:
             except NotImplementedError:
                 pass
             except RecursionError:
+                self.counter["sympy_recursion_error"] += 1
                 self.log.warning("RecursionError in sympy.solve(%s - %s, %s)", lhs, rhs, free[0])
         if expr.has(sympy.Mod):
             mod_expr = tuple(expr.atoms(sympy.Mod))[0]
@@ -3200,6 +3234,15 @@ Target Guards:
             expr = new_expr
 
         if self.frozen:
+            self.counter["ignored_backward_guard"] += 1
+            signpost_event(
+                "dynamic",
+                "evaluate_expr_frozen",
+                {
+                    **self.co_fields,
+                    "ignored_guard": f"{expr} == {concrete_val}",
+                },
+            )
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
         if isinstance(expr, (sympy.Eq, sympy.Ne)):

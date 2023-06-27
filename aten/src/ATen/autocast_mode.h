@@ -26,10 +26,18 @@ TORCH_API bool is_xpu_enabled();
 TORCH_API void set_xpu_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_xpu_dtype();
 TORCH_API void set_autocast_xpu_dtype(at::ScalarType dtype);
+TORCH_API bool is_ipu_enabled();
+TORCH_API void set_ipu_enabled(bool enabled);
+TORCH_API at::ScalarType get_autocast_ipu_dtype();
+TORCH_API void set_autocast_ipu_dtype(at::ScalarType dtype);
 TORCH_API bool is_hpu_enabled();
 TORCH_API void set_hpu_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_hpu_dtype();
 TORCH_API void set_autocast_hpu_dtype(at::ScalarType dtype);
+TORCH_API bool is_xla_enabled();
+TORCH_API void set_xla_enabled(bool enabled);
+TORCH_API at::ScalarType get_autocast_xla_dtype();
+TORCH_API void set_autocast_xla_dtype(at::ScalarType dtype);
 TORCH_API bool is_privateuseone_enabled();
 TORCH_API void set_privateuseone_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_privateuseone_dtype();
@@ -48,8 +56,12 @@ bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
           tensor.is_floating_point();
     case DeviceType::XPU:
       return tensor.is_xpu() && tensor.is_floating_point();
+    case DeviceType::IPU:
+      return tensor.is_ipu() && tensor.is_floating_point();
     case DeviceType::HPU:
       return tensor.is_hpu() && tensor.is_floating_point();
+    case DeviceType::XLA:
+      return tensor.is_xla() && tensor.is_floating_point();
     case DeviceType::PrivateUse1:
       return tensor.device().type() == DeviceType::PrivateUse1 &&
           tensor.is_floating_point();
@@ -68,8 +80,12 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
       return DispatchKey::AutocastCPU;
     case DeviceType::XPU:
       return DispatchKey::AutocastXPU;
+    case DeviceType::IPU:
+      return DispatchKey::AutocastIPU;
     case DeviceType::HPU:
       return DispatchKey::AutocastHPU;
+    case DeviceType::XLA:
+      return DispatchKey::AutocastXLA;
     case DeviceType::PrivateUse1:
       return DispatchKey::AutocastPrivateUse1;
     default:
@@ -87,8 +103,12 @@ inline at::ScalarType get_lower_precision_fp_from_device_type(
       return get_autocast_cpu_dtype();
     case DeviceType::XPU:
       return get_autocast_xpu_dtype();
+    case DeviceType::IPU:
+      return get_autocast_ipu_dtype();
     case DeviceType::HPU:
       return get_autocast_hpu_dtype();
+    case DeviceType::XLA:
+      return get_autocast_xla_dtype();
     case DeviceType::PrivateUse1:
       return get_autocast_privateuseone_dtype();
     default:
@@ -268,16 +288,20 @@ inline T set_opt_dtype(at::ScalarType to_type, T arg) {
 }
 
 template <typename... Args>
-inline bool firstarg_is_eligible(const Tensor& arg, Args... args) {
-  return is_eligible(arg);
+inline bool firstarg_is_eligible(
+    DeviceType device_type,
+    const Tensor& arg,
+    Args... args) {
+  return is_eligible(arg, device_type);
 }
 
 template <typename... Args>
 inline at::ScalarType type_from_firstarg(
+    DeviceType device_type,
     at::ScalarType to_type,
     const Tensor& arg,
     Args... args) {
-  return (is_eligible(arg) ? to_type : arg.scalar_type());
+  return (is_eligible(arg, device_type) ? to_type : arg.scalar_type());
 }
 
 // Policies correspond to op categories that need code-divergent handling.
@@ -391,7 +415,7 @@ struct WrapFunction_<
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocast(
         get_autocast_dispatch_key_from_device_type(device_type));
-    if (firstarg_is_eligible(args...)) {
+    if (firstarg_is_eligible(device_type, args...)) {
       return (*F)(set_opt_dtype(at::kFloat, args)...);
     } else {
       // If ineligible, calls F with unaltered args.  Does not set opt dtype,
@@ -419,7 +443,8 @@ struct WrapFunction_<
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocast(
         get_autocast_dispatch_key_from_device_type(device_type));
-    at::ScalarType out_type = type_from_firstarg(at::kFloat, args...);
+    at::ScalarType out_type =
+        type_from_firstarg(device_type, at::kFloat, args...);
     return (*F)(args..., out_type);
   }
 };
@@ -512,25 +537,28 @@ wouldn't try to get clever about it Therefore, for the moment, this is all
 copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 ********************************************************************************************************************/
 
+} // namespace autocast
+} // namespace at
+
 #define ADD_NS(RAW_OP) at::RAW_OP
 
 // Common cases where registration signature matches redispatch signature
 // (that's why SIGNATURE is repeated in the WrapFunction instantiation)
-#define KERNEL(DISPATCHKEY, OP, POLICY)   \
-  m.impl(                                 \
-      TORCH_SELECTIVE_NAME("aten::" #OP), \
-      &WrapFunction<                      \
-          CastPolicy::POLICY,             \
-          DISPATCHKEY,                    \
-          decltype(ATEN_FN(OP)),          \
-          decltype(ATEN_FN(OP)),          \
+#define KERNEL(DISPATCHKEY, OP, POLICY)       \
+  m.impl(                                     \
+      TORCH_SELECTIVE_NAME("aten::" #OP),     \
+      &::at::autocast::WrapFunction<          \
+          ::at::autocast::CastPolicy::POLICY, \
+          DISPATCHKEY,                        \
+          decltype(ATEN_FN(OP)),              \
+          decltype(ATEN_FN(OP)),              \
           &ATEN_FN(OP)>::type::call);
 
 #define KERNEL2(DISPATCHKEY, OP, OVERLOAD, POLICY)      \
   m.impl(                                               \
       TORCH_SELECTIVE_NAME("aten::" #OP "." #OVERLOAD), \
-      &WrapFunction<                                    \
-          CastPolicy::POLICY,                           \
+      &::at::autocast::WrapFunction<                    \
+          ::at::autocast::CastPolicy::POLICY,           \
           DISPATCHKEY,                                  \
           decltype(ATEN_FN2(OP, OVERLOAD)),             \
           decltype(ATEN_FN2(OP, OVERLOAD)),             \
@@ -547,8 +575,8 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
     POLICY)                                         \
   m.impl(                                           \
       TORCH_SELECTIVE_NAME("aten::" REGISTER_NAME), \
-      &WrapFunction<                                \
-          CastPolicy::POLICY,                       \
+      &::at::autocast::WrapFunction<                \
+          ::at::autocast::CastPolicy::POLICY,       \
           DISPATCHKEY,                              \
           REGISTER_SIGNATURE,                       \
           REDISPATCH_SIGNATURE,                     \
@@ -618,6 +646,3 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
       REGISTER_SIGNATURE,                                    \
       REDISPATCH_SIGNATURE,                                  \
       POLICY)
-
-} // namespace autocast
-} // namespace at
