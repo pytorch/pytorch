@@ -90,39 +90,13 @@ void cpu_max_pool(
 
 template <typename scalar_t>
 vec::Vectorized<scalar_t> isnan(vec::Vectorized<scalar_t> vec) {
-  return vec.isnan();
+  if (std::is_integral<scalar_t>::value) {
+    Vectorized<scalar_t> ret(false);
+    return ret;
+  } else {
+    return vec.isnan();
+  }
 }
-
-template <>
-vec::Vectorized<unsigned char> isnan<unsigned char>(vec::Vectorized<unsigned char> vec) {
-  Vectorized<unsigned char> ret(false);
-  return ret;
-}
-
-template <>
-vec::Vectorized<signed char> isnan<signed char>(vec::Vectorized<signed char> vec) {
-  Vectorized<signed char> ret(false);
-  return ret;
-}
-
-template <>
-vec::Vectorized<short> isnan<short>(vec::Vectorized<short> vec) {
-  Vectorized<short> ret(false);
-  return ret;
-}
-
-template <>
-vec::Vectorized<int> isnan<int>(vec::Vectorized<int> vec) {
-  Vectorized<int> ret(false);
-  return ret;
-}
-
-template <>
-vec::Vectorized<int64_t> isnan<int64_t>(vec::Vectorized<int64_t> vec) {
-  Vectorized<int64_t> ret(false);
-  return ret;
-}
-
 
 template <typename scalar_t>
 void cpu_max_pool_channels_last(
