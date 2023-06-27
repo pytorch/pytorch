@@ -12742,7 +12742,7 @@ class TestNNDeviceType(NNTestCase):
         for numel in (2147483650, 2147483650 + 1):
             x = torch.empty([1, 1, numel], device=device, dtype=torch.float16)
             x.fill_(1.0 / numel)
-            out = torch._softmax_backward_data(x, x, 2, x)
+            out = torch._softmax_backward_data(x, x, 2, x.dtype)
             self.assertEqual(out[0, 0, 0], 1 / numel)
 
 
