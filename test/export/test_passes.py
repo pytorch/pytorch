@@ -29,6 +29,7 @@ from functorch.experimental.control_flow import cond
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner, Partition
 from torch.fx._symbolic_trace import symbolic_trace
+from torch.utils._pytree import tree_flatten
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
@@ -37,6 +38,30 @@ def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> 
         if node.op == "call_function" and node.target == target:
             count += 1
     return count
+
+
+class _AddOperatorSupport(OperatorSupport):
+    def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+        return node.op == "call_function" and node.target in {operator.add}
+
+
+class _AtenAddOperatorSupport(OperatorSupport):
+    def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+        return node.op == "call_function" and node.target in {
+            torch.ops.aten.add.Tensor
+        }
+
+
+def _to_partition_names(partitions: List[Partition]) -> List[Set[str]]:
+    return [{n.name for n in p.nodes} for p in partitions]
+
+
+def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
+    output_node = next(n for n in gm.graph.nodes if n.op == "output")
+    args = tree_flatten(output_node.args)[0]
+    # if isinstance(args, tuple) and len(args) == 1:
+    #     args = args[0]
+    return [str(arg) for arg in args]
 
 
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
@@ -544,29 +569,17 @@ class TestPasses(TestCase):
         )
         self.assertTrue(torch._dynamo.utils.same(ep(inp), Foo()(inp)))
 
-    def test_graph_partition(self) -> None:
-        class _AddOperatorSupport(OperatorSupport):
-            def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-                return node.op == "call_function" and node.target in {operator.add}
-
-        class _AtenAddOperatorSupport(OperatorSupport):
-            def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-                return node.op == "call_function" and node.target in {
-                    torch.ops.aten.add.Tensor
-                }
-
-        def _to_partition_names(partitions: List[Partition]) -> List[Set[str]]:
-            return [{n.name for n in p.nodes} for p in partitions]
-
+    def test_graph_partition_after_assertion_functionalization(self) -> None:
         def f1(a, b):
             add = a + b
             add_1 = add + b
+            add_2 = add_1 + add
 
-            relu_1 = add_1.relu()  # blocked by this
+            relu_1 = add_2.relu()  # blocked by this
 
-            add_3 = add_1 + relu_1
-            add_4 = add_1 + add_3
-            return add_4, add_1
+            add_3 = add_2 + relu_1
+            add_4 = add_2 + add_3
+            return add_4, add_2
 
         partitioner1 = CapabilityBasedPartitioner(
             graph_module=symbolic_trace(f1),
@@ -576,22 +589,23 @@ class TestPasses(TestCase):
 
         self.assertEqual(
             _to_partition_names(partitions1),
-            [{"add_3", "add_2"}, {"add_1", "add"}],
+            [{"add_3", "add_4"}, {"add", "add_1", "add_2"}],
         )
 
         def f2(a, b):
             add = a + b
             add_1 = add + b
+            add_2 = add_1 + add
 
-            relu_1 = add_1.relu()  # blocked by this
+            assert add_1[0] == 5
 
-            assert add_1.shape[0] == 2
+            relu_1 = add_2.relu()  # blocked by this
 
-            add_3 = add_1 + relu_1
-            add_4 = add_1 + add_3
-            return add_4, add_1
+            add_3 = add_2 + relu_1
+            add_4 = add_2 + add_3
+            return add_4, add_2
 
-        inps = (torch.rand(2, 3), torch.rand(2, 3))
+        inps = (torch.tensor([1, 3, 2]), torch.tensor([2, 3, 4]))
         gm = export(
             f2,
             inps,
@@ -606,16 +620,27 @@ class TestPasses(TestCase):
 
         self.assertEqual(
             _to_partition_names(partitions2),
-            [{"add_tensor_2", "add_tensor_3"}, {"add_tensor", "add_tensor_1"}]
+            [
+                {"add_tensor_3", "add_tensor_4"},
+                {"add_tensor_1", "add_tensor_2", "add_tensor"},
+            ]
         )
 
         fused_gm1 = partitioner1.fuse_partitions(partitions1)
         fused_gm2 = partitioner2.fuse_partitions(partitions2)
 
-        inps = (torch.rand(2, 3), torch.rand(2, 3))
+        inps = (torch.tensor([1, 4, 6]), torch.tensor([2, 4, 6]))
         self.assertTrue(
             torch._dynamo.utils.same(fused_gm1(*inps)[0], fused_gm2(*inps)[0]),
         )
+
+        # Sub-module `fused_1` is for logic `add = ..., ..., add_2 = ...`
+        output_names1 = _get_output_names(fused_gm1.get_submodule("fused_1"))
+        output_names2 = _get_output_names(fused_gm2.get_submodule("fused_1"))
+
+        self.assertEqual(output_names1, ["add_2"])
+        # The extra output `add_tensor_1` is consumed by assertion.
+        self.assertEqual(output_names2, ["add_tensor_1", "add_tensor_2"])
 
 
 if __name__ == '__main__':
