@@ -45,12 +45,13 @@ def _composable(module: nn.Module) -> bool:
 # `FlatParameter` registration, which is not needed for `use_orig_params=True`.
 def _get_fsdp_states_with_modules(
     module: nn.Module,
+    dedup: bool = True,
 ) -> Tuple[List[_FSDPState], List[nn.Module]]:
     """
     Returns a tuple containing:
     1. A list of the ``_FSDPState`` instances in the module tree rooted at
-    ``module`` without any duplicates and following the ``module.modules()``
-    traversal order (which is assumed to be depth-first).
+    ``module`` without any duplicates if ``dedup=True`` and following the
+    ``module.modules()`` traversal order (which is assumed to be depth-first).
     2. A corresponding list of the modules owning the states in the first list.
 
     For the wrapper code path, both returned lists are the same, each
@@ -74,8 +75,7 @@ def _get_fsdp_states_with_modules(
     # Perform depth-first search from `module` to ensure that we do not
     # traverse into an incompatible API's subtree (use DFS instead of BFS to
     # match `.modules()` order)
-    deque: Deque[nn.Module] = collections.deque()
-    deque.append(module)
+    deque: Deque[nn.Module] = collections.deque([module])
     while deque:
         submodule = deque.popleft()
         visited_modules.add(submodule)
@@ -85,7 +85,9 @@ def _get_fsdp_states_with_modules(
             if child_module not in visited_modules:
                 deque.appendleft(child_module)
         optional_state = _get_module_fsdp_state(submodule)
-        if optional_state is not None and optional_state not in visited_fsdp_states:
+        if optional_state is not None:
+            if dedup and optional_state in visited_fsdp_states:
+                continue
             visited_fsdp_states.add(optional_state)
             fsdp_states.append(optional_state)
             fsdp_modules.append(submodule)

@@ -258,8 +258,15 @@ def _unshard_params_recurse(
             # TODO (awgu): The traversal function does not traverse through
             # incompatible composable APIs. Verify if this is the desired
             # behavior for this function.
+            # TODO: We have to add this `dedup=False` to support the current
+            # auto wrapping implementation. Unlike for the wrapper path, the
+            # composable path does not construct a new FSDP state object when
+            # "wrapping" a submodule. This means that for auto wrapping, this
+            # `_get_fsdp_states_with_modules()` should multiple entries for the
+            # same FSDP state (namely, 1 for every "wrap"). However, in other
+            # places like `_get_fsdp_handles()`, we do want to dedup.
             for state, fsdp_module in zip(
-                *traversal_utils._get_fsdp_states_with_modules(module)
+                *traversal_utils._get_fsdp_states_with_modules(module, dedup=False)
             ):
                 stack.enter_context(
                     _unshard_params_recurse(
@@ -279,7 +286,12 @@ def _unshard_params_recurse(
         raise AssertionError(
             "Cannot manually unshard parameters during forward/backward"
         )
-    elif state.training_state == TrainingState.SUMMON_FULL_PARAMS:
+    elif (
+        state.training_state == TrainingState.SUMMON_FULL_PARAMS
+        # TODO: Relax this for now due to composable FSDP + auto wrapping
+        # not constructing a separate state object and hence having >1 handles.
+        and len(state._handles) <= 1
+    ):
         raise AssertionError(
             "Cannot manually unshard parameters when already unsharding parameters"
         )
