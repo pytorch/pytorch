@@ -1358,7 +1358,7 @@ class TritonKernel(Kernel):
                 # taking two reductions doesn't increase memory usage.
                 sum_ = self.cse.generate(
                     self.compute,
-                    f"tl.sum({masked_value}, {dim}){self.reduction_size_str()}",
+                    self.reduction_resize(f"tl.sum({masked_value}, {dim})"),
                 )
                 rnumel = ops.index_expr(self.numels[-1], self.index_dtype)
                 rnumel = self.cse.generate(self.compute, f"{rnumel}.to({acc_type})")
@@ -1371,7 +1371,7 @@ class TritonKernel(Kernel):
                 )
                 result_var = self.cse.generate(
                     self.compute,
-                    f"tl.sum({dx2_masked}, {dim}){self.reduction_size_str()}",
+                    self.reduction_resize(f"tl.sum({dx2_masked}, {dim})"),
                 )
             else:
                 result_var = self.cse.generate(
