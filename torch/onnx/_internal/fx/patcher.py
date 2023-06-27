@@ -4,11 +4,10 @@ from typing import List
 import torch
 
 
-class FxToOnnxContext:
-    """Context manager to make PyTorch friendly to FX-to-ONNX exporter.
-    This class means to collect all "patches" required by FX-to-ONNX
-    exporter. If PyTorch needs to be patched, please use this class to
-    manage the patch.
+class ONNXTorchPatcher:
+    """Context manager to temporarily patch PyTorch during FX-to-ONNX export.
+
+    This class is a collection of "patches" required by FX-to-ONNX exporter.
 
     This context overrides several torch functions to support symbolic
     export of large scale models.
@@ -26,7 +25,7 @@ class FxToOnnxContext:
         This list is extended with (torch.Tensor, "__getitem__") so that
         weight[x, :, y] becomes exportable with torch.fx.symbolic_trace.
 
-    Search for FxToOnnxContext in test_fx_to_onnx_with_onnxruntime.py for
+    Search for ONNXTorchPatcher in test_fx_to_onnx_with_onnxruntime.py for
     example usage.
     """
 
@@ -51,6 +50,7 @@ class FxToOnnxContext:
                 )
                 return t.set_(storage._untyped_storage, storage_offset, size, stride)
 
+            # import pdb; pdb.set_trace()
             mode = _get_current_dispatch_mode()
             if isinstance(mode, FakeTensorMode):
                 # Create a real tensor and then convert it to FakeTensor.

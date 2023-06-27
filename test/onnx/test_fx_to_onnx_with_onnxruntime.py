@@ -20,8 +20,8 @@ from torch import nn
 from torch._subclasses import fake_tensor
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import (
-    context as fx_context,
     fx_symbolic_graph_extractor,
+    patcher,
     serialization as fx_serialization,
 )
 from torch.testing._internal import common_utils
@@ -682,7 +682,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             ftm = fake_tensor.FakeTensorMode(
                 allow_non_fake_inputs=True, allow_fallback_kernels=False
             )
-            ctx = fx_context.FxToOnnxContext()
+            ctx = patcher.ONNXTorchPatcher()
             # NOTE: FakeTensorMode disallows symbolic shape of fx graph
             # The following coed block does several things.
             #  1. Create a model whose parameters and buffers are all FakeTensor's.

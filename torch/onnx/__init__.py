@@ -50,6 +50,7 @@ from ._internal.exporter import (  # usort:skip. needs to be last to avoid circu
     ExportOutput,
     ExportOutputSerializer,
     dynamo_export,
+    enable_fake_mode,
 )
 
 __all__ = [
@@ -93,6 +94,7 @@ __all__ = [
     "ExportOutput",
     "ExportOutputSerializer",
     "dynamo_export",
+    "enable_fake_mode",
 ]
 
 # Set namespace for exposed private names
