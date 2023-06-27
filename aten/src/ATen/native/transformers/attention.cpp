@@ -32,6 +32,8 @@ namespace native {
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
 REGISTER_NO_CPU_DISPATCH(_fused_sdp_choice_stub);
 
+DEFINE_DISPATCH(efficient_attention_kernel);
+
 namespace {
 
 Tensor gemm_nt(const Tensor& self, const Tensor& other) {
@@ -481,6 +483,35 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
     qkt /= num_head;
   }
   return std::make_tuple(std::move(proj), std::move(qkt));
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cpu(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    bool compute_logsumexp,
+    double dropout_p,
+    bool is_causal,
+    c10::optional<double> scale) {
+
+  int64_t B = query.size(0);
+  int64_t H = query.size(1);
+  int64_t M = query.size(2);
+  int64_t Kv = value.size(-1);
+
+  auto attn = at::empty({B, M, H, Kv}, query.options());
+  auto lse = at::empty({B, compute_logsumexp ? M : 0, H}, query.options());
+
+  auto q_t = query.transpose(1, 2);
+  auto k_t = key.transpose(1, 2);
+  auto v_t = value.transpose(1, 2);
+
+  efficient_attention_kernel(kCPU, attn, lse, q_t, k_t, v_t, compute_logsumexp, is_causal, scale);
+
+  attn = attn.transpose(1, 2);
+  lse = lse.transpose(1, 2);
+
+  return std::make_tuple(std::move(attn), std::move(lse), Tensor{}, Tensor{});
 }
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,

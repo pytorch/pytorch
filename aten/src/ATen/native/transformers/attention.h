@@ -1,5 +1,5 @@
 #pragma once
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <c10/macros/Export.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/attention.h>
@@ -36,6 +36,14 @@ TORCH_API Tensor qkv_projection(
     const Tensor& value,
     const int64_t embed_dim,
     const Tensor& qkv_weight);
+
+using efficient_attention_fn = void (*)(const Tensor& attn, const Tensor& lse,
+    const Tensor& query, const Tensor& key, const Tensor& value,
+    bool compute_logsumexp, bool is_causal, c10::optional<double> scale);
+
+DECLARE_DISPATCH(efficient_attention_fn, efficient_attention_kernel);
+
+
 
 } // namespace native
 } // namespace at
