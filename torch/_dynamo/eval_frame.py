@@ -1174,7 +1174,7 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn, recursive=True):
+def disable(fn=None, recursive=True):
     """
     Decorator and context manager to disable TorchDynamo
 
@@ -1193,9 +1193,13 @@ def disable(fn, recursive=True):
     def lazy_disable(*args, **kwargs):
         nonlocal fn, recursive
         if recursive:
-            fn = innermost_fn(fn)
-            assert callable(fn)
-            return DisableContext()(fn)(*args, **kwargs)
+            if fn is not None:
+                fn = innermost_fn(fn)
+                assert callable(fn)
+                return DisableContext()(fn)(*args, **kwargs)
+            # fn=None points to decorator usage, *args will point to the actual
+            # fn when decorator is applied
+            return DisableContext()(*args, **kwargs)
         else:
             return skip(fn)(*args, **kwargs)
 
