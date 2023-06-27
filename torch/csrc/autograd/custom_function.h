@@ -180,8 +180,11 @@ struct CppNode : public Node {
   std::vector<bool> is_variable_input_;
   std::vector<VariableInfo> input_info_;
   std::vector<VariableInfo> output_info_;
+  std::unordered_set<int> non_differentiable_idx_;
 
   void release_variables() override;
+  void set_non_differentiable_idx(
+      std::unordered_set<int> non_differentiable_idx) override;
 
   void set_ctx_grad_fn(const std::shared_ptr<Node>& node);
   void save_variables_to_ctx();
@@ -342,7 +345,9 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
   for (const auto i : c10::irange(num_inputs)) {
-    if (inputs[i].defined() || !ctx_.materialize_grads_) {
+    bool non_differentiable =
+        non_differentiable_idx_.find(i) != non_differentiable_idx_.end();
+    if (inputs[i].defined() || !ctx_.materialize_grads_ || non_differentiable) {
       backward_inputs.emplace_back(inputs[i]);
     } else {
       backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));
@@ -417,6 +422,12 @@ void CppNode<T>::save_variables_to_ctx() {
 template <class T>
 void CppNode<T>::set_ctx_grad_fn(const std::shared_ptr<Node>& node) {
   ctx_.grad_fn_ = node;
+}
+
+template <class T>
+void CppNode<T>::set_non_differentiable_idx(
+    std::unordered_set<int> non_differentiable_idx) {
+  non_differentiable_idx_ = non_differentiable_idx;
 }
 
 } // namespace autograd

@@ -92,7 +92,10 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   for (const auto i : c10::irange(num_inputs)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject* input;
-    if (inputs[i].defined() || !py_fn->materialize_grads) {
+    bool non_differentiable = py_fn->non_differentiable_idx_.find(i) !=
+        py_fn->non_differentiable_idx_.end();
+    if (inputs[i].defined() || !py_fn->materialize_grads ||
+        non_differentiable) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
       input = THPVariable_Wrap(output_info[i].zeros(_device_guard));
@@ -199,6 +202,13 @@ auto PyNode::name() const -> std::string {
   auto f = (THPFunction*)obj;
   auto name = std::string(Py_TYPE(f)->tp_name);
   return name;
+}
+
+auto PyNode::set_non_differentiable_idx(
+    std::unordered_set<int> non_differentiable_idx) -> void {
+  pybind11::gil_scoped_acquire gil;
+  auto f = (THPFunction*)obj;
+  f->non_differentiable_idx_ = non_differentiable_idx;
 }
 
 } // namespace autograd

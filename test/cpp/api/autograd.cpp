@@ -530,6 +530,27 @@ TEST(CustomAutogradTest, DontMaterializeGrads) {
   UndefinedGrad().apply({MyFunction::apply(x)})[0].backward();
 }
 
+TEST(CustomAutogradTest, DontMaterializeGradsNonDifferentiableOutput) {
+  struct MyFunction : public Function<MyFunction> {
+    static variable_list forward(AutogradContext* ctx, Variable var) {
+      auto out1 = var.clone();
+      auto out2 = var.clone();
+      ctx->mark_non_differentiable({out2});
+      return {out1, out2};
+    }
+
+    static variable_list backward(
+        AutogradContext* ctx,
+        variable_list grad_output) {
+      EXPECT_FALSE(grad_output[1].defined());
+      return {grad_output[0]};
+    }
+  };
+
+  auto x = torch::ones(1, torch::requires_grad());
+  MyFunction::apply(x)[0].backward();
+}
+
 TEST(CustomAutogradTest, NoGradCustomFunction) {
   // Custom Function should respect grad mode
   struct MyOp : public Function<MyOp> {
@@ -611,7 +632,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiableMixed) {
         AutogradContext* ctx,
         variable_list grad_output) {
       const Variable &grad_a = grad_output[0], &grad_b = grad_output[1];
-      EXPECT_VARIABLE_EQ(grad_a, torch::zeros({5, 5}));
+      EXPECT_FALSE(grad_a.defined());
       EXPECT_VARIABLE_EQ(grad_b, torch::ones({5, 5}));
       return {grad_b};
     }

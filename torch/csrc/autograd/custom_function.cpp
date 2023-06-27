@@ -361,6 +361,7 @@ static optional_variable_list _process_backward_mode_ad(
   std::unordered_set<at::TensorImpl*> outputs_impl; // For dirty_inputs check
   outputs.reserve(num_outputs);
   int num_diff_outputs = 0;
+  std::unordered_set<int> non_differentiable_idx{};
 
   for (const auto i : c10::irange(num_outputs)) {
     // For outputs that are not tensors, put a placeholder undefined input.
@@ -381,6 +382,9 @@ static optional_variable_list _process_backward_mode_ad(
     bool is_differentiable = cdata &&
         non_differentiable.count(out_tensor_impl) == 0 &&
         isDifferentiableType(var.scalar_type());
+    if (!is_differentiable) {
+      non_differentiable_idx.insert(i);
+    }
     bool is_saved_and_setup_context =
         to_save_if_setup_context.count(out_tensor_impl) > 0;
 
@@ -413,6 +417,10 @@ static optional_variable_list _process_backward_mode_ad(
 
     outputs_impl.insert(out_tensor_impl);
     outputs.emplace_back(var);
+  }
+
+  if (cdata) {
+    cdata->set_non_differentiable_idx(non_differentiable_idx);
   }
 
   // If multiple differentiable outputs are returned, we do not allow views to
