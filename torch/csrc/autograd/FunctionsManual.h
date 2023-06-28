@@ -38,6 +38,11 @@ Tensor toNonOptFwGrad(const c10::optional<Tensor>& t);
 Tensor toNonOptPrimal(const c10::optional<Tensor>& t);
 Tensor toNonOptTensor(const c10::optional<Tensor>& t);
 
+inline c10::optional<Tensor> wrap_opt_if(const Tensor& t, const bool cond) {
+  using OptTensor = c10::optional<Tensor>;
+  return cond ? OptTensor(t) : static_cast<OptTensor>(c10::nullopt);
+}
+
 Tensor apply_loss_reduction(const Tensor& unreduced, int64_t reduction);
 bool any_variable_defined(const variable_list& variables);
 void copy_range(variable_list& out, IndexRange range, const at::Tensor& t);
@@ -292,6 +297,14 @@ at::Tensor mm_mat1_sparse_backward(
     const at::Tensor& mat1,
     const at::Tensor& mat2,
     const at::Scalar& alpha);
+std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const c10::optional<Tensor>& mat1,
+    const c10::optional<Tensor>& mat2,
+    const Scalar& alpha,
+    const Scalar& beta,
+    const std::array<bool, 3>& grad_input_mask);
 at::Tensor sparse_sparse_matmul_backward(
     const at::Tensor& grad,
     const at::Tensor& mat1,
@@ -639,9 +652,9 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
     std::array<bool, 2> output_mask);
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
     const Tensor& grad_out,
-    const Tensor& i1,
-    const Tensor& i2,
-    const Tensor& i3,
+    const c10::optional<Tensor>& i1,
+    const c10::optional<Tensor>& i2,
+    const c10::optional<Tensor>& i3,
     IntArrayRef expand1,
     IntArrayRef expand2,
     IntArrayRef expand3,
