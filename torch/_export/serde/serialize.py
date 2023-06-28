@@ -5,7 +5,6 @@ import logging
 import math
 import operator
 import typing
-from collections import defaultdict
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -746,7 +745,7 @@ class GraphModuleSerializer:
 
 class ExportedProgramSerializer:
     def __init__(self, opset_version: Optional[Dict[str, int]] = None):
-        self.opset_version = {}
+        self.opset_version: Dict[str, int] = {}
         if opset_version:
             self.opset_version.update(opset_version)
         if "aten" not in self.opset_version:
