@@ -351,6 +351,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "scatter_add",
     "sigmoid",
     "sigmoid_backward",
+    "sparse_mask",
     "trapezoid",
     "cumulative_trapezoid",
     "conj_physical_",
