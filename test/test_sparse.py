@@ -2163,9 +2163,8 @@ class TestSparse(TestSparseBase):
                     lhs_data.shape
                 )._coalesced_(rhs_is_coalesced)
 
-                # setting masked = True is required because of the broken backward of to_dense().
-                # See https://github.com/pytorch/pytorch/issues/95550.
-                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(), (lhs,), masked=True, check_sparse_nnz=True)
+                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=True), (lhs,), masked=True)
+                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False)
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
