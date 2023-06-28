@@ -5800,13 +5800,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {{}}
 module = cpp_extension.load_inline(
     name='{name}',
     cpp_sources=custom_allocator_code,
-    build_directory='.',
+    build_directory='/tmp',
     with_cuda=True,
 )
 
 # Load the allocator
 new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
-    '{name}.so', 'my_malloc', 'my_free')
+    '/tmp/{name}.so', 'my_malloc', 'my_free')
 
 # Swap the current allocator
 torch.cuda.memory.change_current_allocator(new_alloc)
@@ -5838,7 +5838,7 @@ print('done')
             'done',
         ]
         self.assertTrue(all(msg in rc for msg in expected_messages))
- 
+
     def test_pluggable_allocator_with_error_initialized(self):
         from torch.utils.cpp_extension import load_inline
         custom_allocator_code = """
@@ -5866,12 +5866,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
         module = load_inline(
             name='allocator',
             cpp_sources=custom_allocator_code,
-            build_directory='.',
+            build_directory='/tmp',
             with_cuda=True,
         )
         # Load the allocator
         new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
-            'allocator.so', 'my_malloc', 'my_free')
+            '/tmp/allocator.so', 'my_malloc', 'my_free')
         # Swap the current allocator
         with self.assertRaisesRegex(RuntimeError, "swap an already initialized"):
             torch.cuda.memory.change_current_allocator(new_alloc)
@@ -5932,7 +5932,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
                 cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
         except subprocess.CalledProcessError as e:
             expected_message = "bad custom free"
-            print(e.output.decode)
             self.assertTrue(expected_message in e.output.decode('ascii'))
             error = True
         self.assertTrue(error)
@@ -5948,7 +5947,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
                 cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
         except subprocess.CalledProcessError as e:
             expected_message = "custom free failed"
-            print(e.output.decode)
             self.assertTrue(expected_message in e.output.decode('ascii'))
             error = True
         self.assertTrue(error)

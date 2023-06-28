@@ -519,41 +519,41 @@ compilation process.
 
     import torch
     from torch.utils import cpp_extension
-    
+
     custom_allocator_code = """
     #include <sys/types.h>
     #include <cuda_runtime_api.h>
     #include <torch/extension.h>
-    
+
     extern "C" {
     int my_malloc(void** ptr, ssize_t size, int device, cudaStream_t stream) {
        int err = cudaMalloc(ptr, size);
        std::cout<<"alloc "<<ptr<<" "<<size<<" "<<err<<std::endl;
        return err;
     }
-    
+
     int my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
        int err = cudaFree(ptr);
        std::cout<<"free "<<ptr<< " "<<err<<std::endl;
        return err;
     }
     }
-    
+
     // Needed for torch extension to work
     PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
     """
-    
+
     module = cpp_extension.load_inline(
         name='allocator',
         cpp_sources=custom_allocator_code,
         build_directory='.',
         with_cuda=True,
     )
-    
+
     # Load the allocator
     new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
         'allocator.so', 'my_malloc', 'my_free')
-    
+
     # Swap the current allocator
     torch.cuda.memory.change_current_allocator(new_alloc)
 
@@ -564,8 +564,8 @@ To deal with errors, the custom allocator user defined functions need to raise
 an exception or use `TORCH_CHECK`. Note that errors that happen during `free`
 calls may not be propagated instantly to Python due the GIL being released
 during free functions calls. The error will be stored and rethrown the next time
-a memory allocation is attempted.
- 
+a memory allocation is attempted. 
+
 .. cublas-workspaces:
 
 cuBLAS workspaces

@@ -145,10 +145,10 @@ void CUDAPluggableAllocator::raw_delete(void* ptr) {
   // We store it and rethrow it on the next memory allocation to avoid
   // a `SIGABRT` without any error message
   try {
-      free_fn_(ptr, size, device_idx, stream);
+    free_fn_(ptr, size, device_idx, stream);
   } catch (...) {
-      const std::lock_guard<std::mutex> lock(allocator_mutex_);
-      last_error_ = std::current_exception();
+    const std::lock_guard<std::mutex> lock(allocator_mutex_);
+    last_error_ = std::current_exception();
   }
 }
 
@@ -156,9 +156,9 @@ void CUDAPluggableAllocator::check_last_error() {
   if (last_error_) {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);
     if (last_error_) {
-        auto to_throw = last_error_;
-        last_error_ = nullptr;
-        std::rethrow_exception(to_throw);
+      auto to_throw = last_error_;
+      last_error_ = nullptr;
+      std::rethrow_exception(to_throw);
     }
   }
 }
