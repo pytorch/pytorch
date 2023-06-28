@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
+import torch._dynamo
 import torch.nn as nn
 
 from torch.distributed._tensor.debug.op_coverage import get_inductor_decomp_graphs

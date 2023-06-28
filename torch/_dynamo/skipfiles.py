@@ -176,6 +176,10 @@ if torch.distributed.is_available():
     }
 
     FILENAME_ALLOWLIST |= {
+        inspect.getfile(torch.distributed.fsdp._runtime_utils._get_fsdp_root_states_with_modules)
+    }
+
+    FILENAME_ALLOWLIST |= {
         inspect.getfile(torch.distributed.distributed_c10d.all_gather_into_tensor)
     }
 
