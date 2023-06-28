@@ -304,6 +304,7 @@ class UserMethodVariable(UserFunctionVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         module_attr = getattr(self.fn, "__module__", "")
+
         def do_call_method():
             return self.obj.call_method(
                 tx, self.fn.__name__, args, kwargs, constant=self.is_constant
@@ -335,7 +336,7 @@ class UserMethodVariable(UserFunctionVariable):
                 if isinstance(self.obj, variables.NNModuleVariable):
                     mod = tx.output.get_submodule(self.obj.module_key)
                     if self.fn.__name__ in ("_call_impl", "_wrapped_call_impl") and \
-                    not is_allowed(mod.__class__):
+                       not is_allowed(mod.__class__):
                         # If we would've inlined anyway, we don't want to hide the
                         # graph break
                         raise

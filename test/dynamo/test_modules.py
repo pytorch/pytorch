@@ -19,11 +19,8 @@ from torch._dynamo.testing import same
 from torch.nn import functional as F
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
-from torch.testing._internal.common_modules import module_db, modules
-from torch.testing._internal.common_methods_invocations import DecorateInfo
+from torch.testing._internal.common_modules import module_db, modules, decorateForModules
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-import torch.utils._pytree as pytree
-from torch.nn.utils.rnn import PackedSequence
 
 try:
     from . import test_functions
@@ -1840,7 +1837,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 def _inline_module_test_helper(self, device, dtype, training, module_info):
     module_cls = module_info.module_cls
     module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
-                                                requires_grad=True, training=training)
+                                                   requires_grad=True, training=training)
 
     def run_test():
         for i, module_input in enumerate(module_inputs):
@@ -1937,7 +1934,7 @@ class TestDynamoInlineNNModules(torch._dynamo.test_case.TestCase):
     @modules(module_db, allowed_dtypes=(torch.float,))
     @decorateForModules(unittest.expectedFailure, dynamo_inlining_module_failures)
     def test_dynamo_inline_module(self, device, dtype, training, module_info):
-       _inline_module_test_helper(self, device, dtype, training, module_info)
+        _inline_module_test_helper(self, device, dtype, training, module_info)
 
 dynamo_inlining_module_failures_no_fallback = set({
     torch.nn.TransformerDecoderLayer,  # TensorVariable() <built-in function is_not> TensorVariable()
@@ -1961,7 +1958,7 @@ class TestDynamoInlineNNModulesNoFallback(torch._dynamo.test_case.TestCase):
     @modules(module_db, allowed_dtypes=(torch.float,))
     @decorateForModules(unittest.expectedFailure, dynamo_inlining_module_failures_no_fallback)
     def test_dynamo_inline_module_no_fallback(self, device, dtype, training, module_info):
-       _inline_module_test_helper(self, device, dtype, training, module_info)
+        _inline_module_test_helper(self, device, dtype, training, module_info)
 
 instantiate_device_type_tests(TestDynamoInlineNNModules, globals(), only_for=("cpu",))
 instantiate_device_type_tests(TestDynamoInlineNNModulesNoFallback, globals(), only_for=("cpu",))

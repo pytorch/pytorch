@@ -3116,7 +3116,8 @@ class TestCase(expecttest.TestCase):
         # Checks whether the test is instantiated for a device type by testing
         # if the test class has defined the device_type attribute and,
         # if so, tests whether the instantiated device type is native or not
-        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES and self.device_type != "mps":  # type: ignore[attr-defined]
+        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES \
+           and self.device_type != "mps":  # type: ignore[attr-defined]
             # empty string matches any string
             expected_regex = ''
 
@@ -4400,28 +4401,6 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Op doesn't support autograd for this dtype.")
         if not op.supports_autograd and not op.supports_forward_ad:
             self.skipTest("Skipped! autograd not supported.")
-
-
-def decorateForModules(decorator, module_classes, device_type=None, dtypes=None):
-    # This decorator doesn't modify fn in any way
-    def wrapped(fn, module_classes=module_classes, decorator=decorator,
-                device_type=device_type, dtypes=dtypes):
-        name_parts = fn.__qualname__.split('.')
-        assert len(name_parts) == 2, "Decorator only applies to a test function of a test class"
-        test_case_name, base_test_name = name_parts
-        for module_cls in module_classes:
-            matching_module_infos = [m for m in module_db if m.module_cls == module_cls]
-            assert len(matching_module_infos) == 1, f"Couldn't find single ModuleInfo for {module_cls}"
-            module_info = matching_module_infos[0]
-            decorators = list(module_info.decorators)
-            new_decorator = DecorateInfo(decorator,
-                                         test_case_name, base_test_name,
-                                         device_type=device_type,
-                                         dtypes=dtypes)
-            decorators.append(new_decorator)
-            module_info.decorators = tuple(decorators)
-        return fn
-    return wrapped
 
 
 def make_lazy_class(cls):
