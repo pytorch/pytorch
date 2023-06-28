@@ -33,7 +33,7 @@ from torch import (  # noqa: F401
     SymInt,
 )
 from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, LShift
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame
@@ -756,6 +756,9 @@ class SymNode:
     def floordiv(self, other) -> "SymNode":  # noqa: F811
         return self._floordiv(other)  # type: ignore[attr-defined]
 
+    def lshift(self, other) -> "SymNode":  # noqa: F811
+        return self._lshift(other)  # type: ignore[attr-defined]
+
     def sym_not(self) -> "SymNode":  # noqa: F811
         return self._sym_not()  # type: ignore[attr-defined]
 
@@ -940,6 +943,7 @@ reflectable_magic_methods = {
     'or': lambda a, b: sympy.Or(a, b),
     'truediv': lambda a, b: TrueDiv(a, b),
     'floordiv': lambda a, b: FloorDiv(a, b),
+    'lshift': lambda a, b: LShift(a, b),
 }
 
 
