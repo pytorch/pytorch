@@ -3,15 +3,14 @@ from typing import Any, cast, Dict, Type
 
 import torch
 
-from torch.distributed.utils import _apply_to_tensors
-from torch.utils._mode_utils import no_dispatch
-
 
 def _override_module_mixed_precision(
     root: torch.nn.Module,
     module_cls_to_override: Type[torch.nn.Module],
     wrap_override_dict: Dict[str, Any] = {"mixed_precision": None},  # noqa: B006
 ):
+    from torch.distributed.utils import _apply_to_tensors
+
     for mod in root.modules():
         if isinstance(mod, module_cls_to_override):
             mod._wrap_overrides = wrap_override_dict  # type: ignore[assignment]
@@ -55,6 +54,8 @@ def _same_storage_as_data_ptr(x: torch.Tensor, data_ptr: int) -> bool:
 
 
 def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.cuda.Stream) -> None:
+    from torch.utils._mode_utils import no_dispatch
+
     # FIXME record_stream doesn't work with non-cuda tensors
     if not tensor.is_cuda:
         return

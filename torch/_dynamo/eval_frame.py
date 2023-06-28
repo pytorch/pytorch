@@ -1321,11 +1321,6 @@ class TorchPatcher:
         torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()
         torch._dynamo.variables.dicts._register_dynamo_dict_to_tree_spec()
 
-        if torch.distributed.is_available():
-            torch.distributed.distributed_c10d.is_initialized._dynamo_marked_constant = (
-                True
-            )
-
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
         def inner_fn(*args, **kwargs):

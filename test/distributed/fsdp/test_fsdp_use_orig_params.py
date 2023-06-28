@@ -9,6 +9,7 @@ import unittest
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
+import torch._dynamo
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import (
