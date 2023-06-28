@@ -486,6 +486,9 @@ inductor_override_kwargs = {
 # Always test with all sample for following ops
 inductor_all_samples = {
     "arange",
+    "diagonal",
+    "diagonal_copy",
+    "diagonal_scatter",
     "softmax.with_dtype",
     "index_add",
     "index_copy",

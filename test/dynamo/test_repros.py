@@ -3287,6 +3287,25 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_check_type(torch.randn(4), [torch.Tensor])
         self.assertEqual(ref, res)
 
+    # Test for https://github.com/pytorch/pytorch/issues/103132
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    def test_inference_mode_dynamic_shapes(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, param):
+                z = torch.matmul(param, param)
+                return z
+
+        model = Repro()
+        # Need a 3d tensor to actually cause the error:
+        # we go down a path of the C++ matmul decomp that calls sizes().
+        inp = torch.randn(4, 4, 4, requires_grad=True)
+        model = torch.compile(model, backend="aot_eager", dynamic=True)
+        with torch.inference_mode():
+            model(inp)
+
     def test_kwargs_out_list_variable(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -3326,6 +3345,34 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         res = fn(x)
         ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_unspecialized_nn_module_with_torch_variable_attribute(self):
+        """
+        In this case self.fn = something that should be a TorchVariable.
+        When it's not a TorchVariable, dynamo tries to trace through and fails.
+        This makes sure that the self.fn is handled as a TorchVariable.
+        """
+
+        class UserModule(torch.nn.Module):
+            torchdynamo_force_dynamic = True  # forced to be a UnspecializedNNModule
+
+            def __init__(self, fn):
+                super().__init__()
+                self.fn = fn
+
+            def forward(self, **inp):
+                return self.fn(**inp)
+
+        inputs = {
+            "input": torch.randn([2, 9]).uniform_(0, 1),
+            "target": torch.randn([2, 9]).uniform_(0, 1),
+            "reduction": "mean",
+        }
+
+        mod = UserModule(torch.nn.functional.binary_cross_entropy)
+        ref = mod(**inputs)
+        res = torch._dynamo.optimize("eager", nopython=True)(mod)(**inputs)
         self.assertEqual(ref, res)
 
 

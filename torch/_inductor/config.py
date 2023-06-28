@@ -45,11 +45,14 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
-# Optimize away split cat patterns (Experimental)
-split_cat_fx_passes = True
+# enable experimental patterns for match+replace optimizations
+experimental_patterns = False
 
 # enable reordering pass
 reordering = True
+
+# inductor engine name
+dll_name = "inductor_engine.so"
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"

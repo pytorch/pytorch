@@ -20,7 +20,6 @@ from torch.optim.lr_scheduler import (
 )
 from torch.testing._internal.common_utils import (
     TestCase,
-    TEST_WITH_UBSAN,
     load_tests,
     gradcheck,
     skipIfRocm,
@@ -1527,7 +1526,6 @@ class TestOptim(TestCase):
             ignore_multidevice=True,
         )
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_lbfgs_returns_consistent_type(self):
         params = [torch.randn(10, 5), torch.randn(10)]
         opt1 = optim.LBFGS(params, 0.01, tolerance_grad=math.inf)

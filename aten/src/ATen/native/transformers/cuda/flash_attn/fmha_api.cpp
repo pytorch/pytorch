@@ -48,7 +48,7 @@
 
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
-namespace fmha {
+namespace pytorch_fmha {
 
 void set_params_fprop(FMHA_fprop_params &params,
                       // sizes
