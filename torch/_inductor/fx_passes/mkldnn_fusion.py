@@ -629,7 +629,7 @@ if torch._C._has_mkldnn:
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
         ):
-            if not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            if not mkldnn._is_mkldnn_bf16_supported():
                 return False
         is_transposed = conv_node.args[-3]
         if is_transposed:
@@ -687,7 +687,7 @@ if torch._C._has_mkldnn:
             input_meta_value.dtype == torch.bfloat16
             or weight_meta_value.dtype == torch.bfloat16
         ):
-            if not torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            if not mkldnn._is_mkldnn_bf16_supported():
                 return False
             if free_symbols(batch_size):
                 # TODO: support symbolic input size for bfloat16 path
@@ -723,15 +723,11 @@ if torch._C._has_mkldnn:
                 )
                 constant_args = [args[4], args[3], args[5], args[-1]]
                 packed_weight_op = torch._C._nn.mkldnn_reorder_conv2d_weight
-                packed_conv_op = torch.ops.mkldnn._convolution_pointwise.default
+                packed_conv_op = mkldnn._convolution_pointwise.default
                 if is_transposed:
                     constant_args.insert(1, args[-2])  # output_padding
-                    packed_weight_op = (
-                        torch.ops.mkldnn._reorder_convolution_transpose_weight
-                    )
-                    packed_conv_op = (
-                        torch.ops.mkldnn._convolution_transpose_pointwise.default
-                    )
+                    packed_weight_op = mkldnn._reorder_convolution_transpose_weight
+                    packed_conv_op = mkldnn._convolution_transpose_pointwise.default
 
                 packed_weight_inputs = (
                     (mkldnn_tensor_node,) + tuple(constant_args) + (input_size,)
@@ -776,7 +772,7 @@ if torch._C._has_mkldnn:
                 batch_size = input.meta.get("val").shape[0]
                 packed_weight_inputs = (mkldnn_tensor_node, batch_size)
                 packed_weight_op = (
-                    torch.ops.mkldnn._reorder_linear_weight
+                    mkldnn._reorder_linear_weight
                     if is_bf16_weight
                     else torch.ops.mkl._mkl_reorder_linear_weight
                 )
@@ -786,7 +782,7 @@ if torch._C._has_mkldnn:
                 packed_linear_inputs = (input, packed_weight_node)
                 if is_bf16_weight:
                     packed_linear_inputs += (bias, "none", [], "")
-                    packed_linear_op = torch.ops.mkldnn._linear_pointwise.default
+                    packed_linear_op = mkldnn._linear_pointwise.default
                 else:
                     packed_linear_inputs += (weight, bias, batch_size)
                     packed_linear_op = torch.ops.mkl._mkl_linear
@@ -821,8 +817,8 @@ if torch._C._has_mkldnn:
                         gm.graph.erase_node(user_node)
         packed_weight_ops = [
             torch._C._nn.mkldnn_reorder_conv2d_weight,
-            torch.ops.mkldnn._reorder_convolution_transpose_weight,
-            torch.ops.mkldnn._reorder_linear_weight,
+            mkldnn._reorder_convolution_transpose_weight,
+            mkldnn._reorder_linear_weight,
             torch.ops.mkl._mkl_reorder_linear_weight,
         ]
         for node in gm.graph.nodes:
