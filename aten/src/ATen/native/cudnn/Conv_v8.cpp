@@ -158,7 +158,6 @@ struct CacheKeyFused {
 
 struct CacheKeyWrapper : ParamsWrapper<CacheKey> {
   CacheKeyWrapper(const cudnnBackendDescriptorType_t operation, const Tensor& y, const Tensor& x, const Tensor& w, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
-    memset(&(this->pod), 0, sizeof(CacheKey));
     at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(x, w);
     setConvolutionParams(&(this->pod.params), x, w, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
     this->pod.operation = operation;
@@ -170,7 +169,6 @@ struct CacheKeyWrapper : ParamsWrapper<CacheKey> {
 
 struct CacheKeyFusedWrapper : ParamsWrapper<CacheKeyFused> {
   CacheKeyFusedWrapper(const Tensor& y, const Tensor& x, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
-    memset(&(this->pod), 0, sizeof(CacheKeyFused));
     at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(x, w);
     setConvolutionParams(&(this->pod).params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
     this->pod.x_alignment = getAlignment(x);
