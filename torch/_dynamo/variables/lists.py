@@ -12,7 +12,7 @@ from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
-from ..utils import check_constant_args, namedtuple_fields
+from ..utils import check_constant_args, namedtuple_fields, guard_if_dyn
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
@@ -624,14 +624,7 @@ class SliceVariable(BaseListVariable):
         return slice
 
     def as_python_constant(self):
-        def _to_constant(arg):
-            if isinstance(arg, variables.SymNodeVariable):
-                return arg.evaluate_expr()
-            else:
-                return arg.as_python_constant()
-
-        constant_items = list(map(_to_constant, self.items))
-        return slice(*[_to_constant(x) for x in self.items])
+        return slice(*[guard_if_dyn(x) for x in self.items])
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
