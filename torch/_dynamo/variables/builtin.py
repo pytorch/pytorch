@@ -27,6 +27,7 @@ from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
+    guard_if_dyn,
     is_utils_checkpoint,
     istype,
     proxy_args_kwargs,
@@ -725,14 +726,6 @@ class BuiltinVariable(VariableTracker):
             args, _ = specialize_args_kwargs(tx, args, {})
             return variables.RangeVariable(args)
         elif self._dynamic_args(*args):
-
-            def guard_if_dyn(arg):
-                if isinstance(arg, SymNodeVariable):
-                    return arg.evaluate_expr(tx.output)
-                elif isinstance(arg, ConstantVariable):
-                    return arg.as_python_constant()
-                return arg
-
             args = [variables.ConstantVariable(guard_if_dyn(arg)) for arg in args]
             return variables.RangeVariable(args)
         # None no-ops this handler and lets the driving function proceed
