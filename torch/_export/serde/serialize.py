@@ -746,7 +746,7 @@ class GraphModuleSerializer:
 
 class ExportedProgramSerializer:
     def __init__(self, opset_version: Optional[Dict[str, int]] = None):
-        self.opset_version = defaultdict(int)
+        self.opset_version = {}
         if opset_version:
             self.opset_version.update(opset_version)
         if "aten" not in self.opset_version:
@@ -1043,7 +1043,7 @@ class GraphModuleDeserializer:
 
 class ExportedProgramDeserializer:
     def __init__(self, expected_opset_version: Optional[Dict[str, int]] = None):
-        self.expected_opset_version: Dict[str, int] = defaultdict(int)
+        self.expected_opset_version: Dict[str, int] = {}
         if expected_opset_version:
             self.expected_opset_version.update(expected_opset_version)
         if "aten" not in self.expected_opset_version:
