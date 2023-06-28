@@ -68,7 +68,7 @@ struct DispatchStub;
  */
 struct TORCH_API DispatchStubImpl {
   void* get_call_ptr(
-    DeviceType device_type
+    c10::DeviceType device_type
     , void *DEFAULT
 #ifdef HAVE_AVX512_CPU_DEFINITION
       , void *AVX512
@@ -131,7 +131,7 @@ struct DispatchStub<rT (*)(Args...), T> {
   DispatchStub& operator=(const DispatchStub&) = delete;
 
 private:
-  FnPtr get_call_ptr(DeviceType device_type) {
+  FnPtr get_call_ptr(c10::DeviceType device_type) {
     return reinterpret_cast<FnPtr>(
       impl.get_call_ptr(device_type
       , reinterpret_cast<void*>(DEFAULT)
@@ -153,7 +153,7 @@ private:
 
 public:
   template <typename... ArgTypes>
-  rT operator()(DeviceType device_type, ArgTypes&&... args) {
+  rT operator()(c10::DeviceType device_type, ArgTypes&&... args) {
     FnPtr call_ptr = get_call_ptr(device_type);
     return (*call_ptr)(std::forward<ArgTypes>(args)...);
   }

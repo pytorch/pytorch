@@ -96,19 +96,19 @@ class TORCH_API Context {
     return detail::getMPSHooks().hasMPS();
   }
   static bool hasIPU() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::IPU);
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::IPU);
   }
   static bool hasXLA() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::XLA);
   }
   static bool hasXPU() {
     return detail::getXPUHooks().hasXPU();
   }
   static bool hasLazy() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::Lazy);
   }
   static bool hasORT() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::ORT);
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::ORT);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -450,7 +450,7 @@ static inline void manual_seed(uint64_t seed) {
   }
 
   if (hasMPS()) {
-    auto mps_gen = globalContext().defaultGenerator(DeviceType::MPS);
+    auto mps_gen = globalContext().defaultGenerator(c10::DeviceType::MPS);
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(mps_gen.mutex());
     mps_gen.set_current_seed(seed);
