@@ -10,6 +10,7 @@ import torch._functorch.config
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.utils.checkpoint import checkpoint
 
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -46,6 +47,25 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(
+            count_ops, freq=3, op=torch.ops.aten.mm.default
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(fn, backend, x, y)
+
+    @requires_cuda()
+    def test_tags_function_via_global_checkpoint(self):
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            # This goes through VariableBuilder
+            return checkpoint(gn, torch.sin(x), y)
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
         y = torch.randn(4, 4, device="cuda", requires_grad=True)
