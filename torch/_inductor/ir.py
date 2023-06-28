@@ -2823,11 +2823,7 @@ class ExternKernel(InputsKernel):
         if config.size_asserts and not V.graph.cpp_wrapper:
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-            code_line = f"assert_size_stride({self.get_name()}, {size}, {stride})"
-            if config.multiple_streams:
-                wrapper.generate_codegen_size_asserts(self.get_name(), [code_line])
-            else:
-                wrapper.writeline(code_line)
+            wrapper.writeline(f"assert_size_stride({self.get_name()}, {size}, {stride})", self)
 
     def get_group_stride(self):
         """
@@ -2975,7 +2971,7 @@ class InplaceBernoulliFallback(ExternKernel):
     def codegen(self, wrapper):
         (x,) = [t.codegen_reference() for t in self.inputs]
         wrapper.writeline(
-            f"{self.kernel}({x}, {', '.join(map(repr, self.constant_args))})"
+            f"{self.kernel}({x}, {', '.join(map(repr, self.constant_args))})", self
         )
 
     def should_allocate(self):
@@ -3015,7 +3011,7 @@ class ScatterFallback(ExternKernel):
         else:
             line += ", ".join([""] + self.codegen_kwargs())
         line += ")"
-        wrapper.writeline(line)
+        wrapper.writeline(line, self)
 
     def should_allocate(self):
         return False
@@ -3068,7 +3064,7 @@ class IndexPutFallback(ExternKernel):
 
         indices_str = f"{V.graph.wrapper_code.open_bracket}{', '.join(indices)}{V.graph.wrapper_code.closed_bracket}"
         args = [x, indices_str, values, *self.codegen_const_args()]
-        wrapper.writeline(wrapper.wrap_kernel_call(self.kernel, args))
+        wrapper.writeline(wrapper.wrap_kernel_call(self.kernel, args), self)
 
     def should_allocate(self):
         return False
@@ -3353,7 +3349,7 @@ class MultiOutput(ExternKernel):
         line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
         line += V.graph.wrapper_code.ending
         V.graph.wrapper_code.writeline(line)
-        self.codegen_size_asserts(V.graph.wrapper_code)
+        self.codegen_size_asserts(V.graph.wrapper_code, self)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
@@ -4643,13 +4639,13 @@ class CollectiveKernel(ExternKernel):
 
         # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
         wrapper.writeline(
-            f"{output_name}_pg = c10d._find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+            f"{output_name}_pg = c10d._find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})", self
         )
 
         self.codegen_output(wrapper, output_name, input_names)
         self.codegen_collective(wrapper, output_name, input_names)
         wrapper.writeline(
-            f"fun_col._register_tensor_work({output_name}, {output_name}_work)"
+            f"fun_col._register_tensor_work({output_name}, {output_name}_work)", self
         )
 
 
@@ -4744,7 +4740,7 @@ class InPlaceHint(ExternKernel):
         input_name = self.inputs[0].codegen_reference()
         output_name = self.get_name()
         if not wrapper.did_reuse(self, self.inputs[0]):
-            wrapper.writeline(f"{output_name}.copy_({input_name}) #no reuse")
+            wrapper.writeline(f"{output_name}.copy_({input_name}) #no reuse", self)
 
     def __init__(self, layout, input):
         input = self.realize_input(input)

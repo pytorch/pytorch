@@ -465,26 +465,6 @@ class WrapperCodeGen(CodeGen):
         ssnode = V.graph.stream_graph.name_mapping[node_name]
         kernel_IndentedBuffer.writeline(f"event_{ssnode.get_name()}.record(stream{ssnode.stream_id}_raw)")  
 
-    def generate_codegen_size_asserts(self, node_name, call_strs):
-        wrapper_code = V.graph.wrapper_code
-        kernel_IndentedBuffer = IndentedBuffer()
-        wrapper_code.cuda_event_dependency(node_name, kernel_IndentedBuffer)
-        ssnode = V.graph.stream_graph.name_mapping[node_name]
-        if ssnode.cuda_event:
-            wrapper_code.cuda_event_create(node_name, kernel_IndentedBuffer)
-        stream_id = ssnode.stream_id
-        if stream_id != 0:
-            kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
-            with kernel_IndentedBuffer.indent():
-                for call_str in call_strs:
-                    kernel_IndentedBuffer.writeline(call_str)
-        else:
-            for call_str in call_strs:
-                wrapper_code.writeline(call_str)
-        if ssnode.cuda_event:
-            wrapper_code.cuda_event_record(node_name, kernel_IndentedBuffer)
-        for line in [ _ for _ in kernel_IndentedBuffer.getrawvalue().split("\n") if _]:
-            wrapper_code.writeline(line)
 
     def generate_extern_kernel_w_stream(self, node_name, call_strs):
         kernel_IndentedBuffer = IndentedBuffer()
@@ -493,15 +473,21 @@ class WrapperCodeGen(CodeGen):
         if ssnode.cuda_event:
             self.cuda_event_create(node_name, kernel_IndentedBuffer)
         stream_id = ssnode.stream_id
-        writer = kernel_IndentedBuffer
+        kernel_IndentedBuffer = kernel_IndentedBuffer
         if stream_id != 0:
             kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
             with kernel_IndentedBuffer.indent():
-                for call_str in call_strs:
-                    writer.writeline(call_str)
+                if isinstance(call_strs, list):
+                    for call_str in call_strs:
+                        kernel_IndentedBuffer.writeline(call_str)
+                else:
+                    kernel_IndentedBuffer.writeline(call_strs)
         else:
-            for call_str in call_strs:
-                writer.writeline(call_str)
+            if isinstance(call_strs, list):
+                for call_str in call_strs:
+                    kernel_IndentedBuffer.writeline(call_str)
+            else:
+                kernel_IndentedBuffer.writeline(call_strs)
         if ssnode.cuda_event:
             self.cuda_event_record(node_name, kernel_IndentedBuffer)
         for line in [ _ for _ in kernel_IndentedBuffer.getrawvalue().split("\n") if _]:
@@ -521,8 +507,7 @@ class WrapperCodeGen(CodeGen):
         if config.multiple_streams:
             self.generate_extern_kernel_w_stream(output_name, call_strs)
         else:
-            for call_str in call_strs:
-                self.writeline(call_str)
+            self.writeline(call_strs)
 
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel, node_name=None):
@@ -828,8 +813,18 @@ class WrapperCodeGen(CodeGen):
         else:
             writer.writeline(self.wrap_kernel_call(name, call_args))
 
-    def writeline(self, line):
-        self.lines.append(line)
+    def writeline(self, line, caller=None):
+        if caller is not None:
+            from ..ir import ExternKernel
+            assert(isinstance(caller, ExternKernel))
+            node_name = caller.name
+            self.generate_extern_kernel_w_stream(node_name, line)
+        else:
+            if isinstance(line, list):
+                for l in line:
+                    self.lines.append(line)
+            else:
+                self.lines.append(line)
 
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
