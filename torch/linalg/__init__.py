@@ -871,8 +871,8 @@ the output has the same batch dimensions.
 """ + r"""
 
 Args:
-    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
-                    `(*, n, n)` where `*` is one or more batch dimensions.
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric or Hermitian matrices.
 
 Keyword args:
     hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
@@ -920,8 +920,8 @@ If ``check_errors=True`` and ``info`` contains positive integers, then a `Runtim
 """ + r"""
 
 Args:
-    A (Tensor): tensor of shape (*, n, n) where * is zero or more batch dimensions consisting of symmetric or Hermitian matrices.
-                    `(*, n, n)` where `*` is one or more batch dimensions.
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions
+                consisting of symmetric or Hermitian matrices.
 
 Keyword args:
     hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.

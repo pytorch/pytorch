@@ -1478,6 +1478,32 @@ static Tensor sparse_mask_like_grad(
   }
 }
 
+std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const c10::optional<Tensor>& mat1,
+    const c10::optional<Tensor>& mat2,
+    const Scalar& alpha,
+    const Scalar& beta,
+    const std::array<bool, 3>& grad_input_mask) {
+  if (!grad.defined()) {
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+  }
+
+  const auto grad_projected = grad.sparse_mask(self);
+  const auto self_requires_grad = grad_input_mask[0];
+  const auto mat1_requires_grad = grad_input_mask[1];
+  const auto mat2_requires_grad = grad_input_mask[2];
+  return std::make_tuple(
+      self_requires_grad ? maybe_multiply(grad, beta.conj()) : Tensor{},
+      mat1_requires_grad
+          ? maybe_multiply(grad_projected.mm(mat2->mH()), alpha.conj())
+          : Tensor{},
+      mat2_requires_grad
+          ? maybe_multiply(mat1->mH().mm(grad_projected), alpha.conj())
+          : Tensor{});
+}
+
 Tensor sparse_mask_backward(
     const Tensor& grad,
     const Tensor& mask,
@@ -1513,7 +1539,6 @@ Tensor sparse_sparse_matmul_backward(
   TORCH_CHECK(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
-
 
   // NOTE: _sparse_sparse_matmul returns a coalesced gradient,
   //   // hence there is no need in accumulating matches.
@@ -4887,9 +4912,9 @@ infinitely_differentiable_native_group_norm_backward(
 
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
     const Tensor& grad_out,
-    const Tensor& i1,
-    const Tensor& i2,
-    const Tensor& i3,
+    const c10::optional<Tensor>& i1,
+    const c10::optional<Tensor>& i2,
+    const c10::optional<Tensor>& i3,
     IntArrayRef expand1,
     IntArrayRef expand2,
     IntArrayRef expand3,
@@ -4899,13 +4924,13 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
   if (grad_out.defined()) {
     if (grad_mask[0])
       grad_i1 =
-          at::_trilinear(grad_out, i2, i3, sumdim, expand2, expand3, expand1);
+          at::_trilinear(grad_out, *i2, *i3, sumdim, expand2, expand3, expand1);
     if (grad_mask[1])
       grad_i2 =
-          at::_trilinear(i1, grad_out, i3, expand1, sumdim, expand3, expand2);
+          at::_trilinear(*i1, grad_out, *i3, expand1, sumdim, expand3, expand2);
     if (grad_mask[2])
       grad_i3 =
-          at::_trilinear(i1, i2, grad_out, expand1, expand2, sumdim, expand3);
+          at::_trilinear(*i1, *i2, grad_out, expand1, expand2, sumdim, expand3);
   }
   return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
 }
