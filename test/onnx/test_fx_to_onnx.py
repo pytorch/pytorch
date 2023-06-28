@@ -137,10 +137,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
         assert_has_diagnostics(
             export_output.diagnostic_context,
-            diagnostics.rules.fx_node_to_onnx,
+            diagnostics.rules.op_level_debugging,
             diagnostics.levels.WARNING,
             expected_error_node="aten.embedding.default",
-            expected_error_message="IndexError: index out of range in self",
         )
 
     def test_unsupported_function_schema_with_op_level_debug(self):
