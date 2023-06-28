@@ -7908,6 +7908,24 @@ for shape in [(1,), ()]:
             with self.assertRaisesRegex(CustomError, "unpack"):
                 out.backward()
 
+    def test_saved_tensor_hooks_custom_function_intermediates(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                intermediate = x.exp()
+                ctx.save_for_backward(intermediate.clone().detach_().requires_grad_(True))
+                return x.exp()
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                intermediate, = ctx.saved_tensors
+                return grad_out * intermediate
+
+        a = torch.tensor(1., requires_grad=True)
+
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
+            out = Func.apply(a)
+        out.backward()
 
     def test_save_on_cpu_and_checkpoint(self):
         a = torch.randn(2, 2, requires_grad=True)

@@ -44,7 +44,7 @@ class AllgatherOp final : public Operator<Context> {
     }
   }
 
-  virtual ~AllgatherOp() {}
+  ~AllgatherOp() override {}
 
   bool RunOnDevice() override {
     std::call_once(once_, [&] { initialize(); });

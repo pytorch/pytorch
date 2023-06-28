@@ -18,7 +18,7 @@ class Int8AddOp final : public Operator<CPUContext> {
   explicit Int8AddOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
-  ~Int8AddOp() {
+  ~Int8AddOp() override {
     if (this->qnnpackOperator_ != nullptr) {
       qnnp_delete_operator(this->qnnpackOperator_);
       this->qnnpackOperator_ = nullptr;

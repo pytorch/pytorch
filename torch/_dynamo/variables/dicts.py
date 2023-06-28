@@ -2,9 +2,11 @@ import collections
 import dataclasses
 import functools
 import inspect
-from typing import Dict, List
+from typing import Any, Dict, List, Tuple
 
 import torch
+
+from torch.utils import _pytree as pytree
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -12,7 +14,7 @@ from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
-from .base import VariableTracker
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
 
@@ -457,3 +459,37 @@ class HFPretrainedConfigVariable(VariableTracker):
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         return variables.ConstantVariable(hasattr(self.obj, name)).add_options(self)
+
+
+def _dictvariable_flatten(d: ConstDictVariable) -> Tuple[List[Any], pytree.Context]:
+    if d.python_type() is not dict:
+        # Note - ConstDictVariable can contain different kinds of dicts.
+        # However, flattening for those must differ and so cannot share the same registration as even if we
+        # consult the underlying python_type() to guide our flattening, that data will need to be propagated
+        # to unflatten. We do not have a good mechanism of doing this today, so we find it easier to treat this
+        # as unimplemented for now.
+
+        # TODO - Add support for flattening a ConstDictVariable with any underlying user_cls
+        unimplemented(f"Unsupported flattening of {d.python_type()}")
+    return list(d.items.values()), list(d.items.keys())
+
+
+def _dictvariable_unflatten(
+    values: List[Any], context: pytree.Context
+) -> ConstDictVariable:
+    assert all(isinstance(x, VariableTracker) for x in values)
+
+    # Guard propagation happens in the ConstDictVariable constructor
+    return ConstDictVariable(
+        dict(zip(context, values)), user_cls=dict, mutable_local=MutableLocal()
+    )
+
+
+def _register_dynamo_dict_to_tree_spec():
+    pytree._register_pytree_node(
+        ConstDictVariable,
+        _dictvariable_flatten,
+        _dictvariable_unflatten,
+        pytree._dict_to_str,
+        pytree._maybe_str_to_dict,
+    )

@@ -117,6 +117,7 @@ aten::_fft_c2r
 aten::_fft_c2r.out
 aten::_fft_r2c
 aten::_fft_r2c.out
+aten::_fill_mem_eff_dropout_mask_
 aten::_flash_attention_backward
 aten::_flash_attention_forward
 aten::_foobar
@@ -316,6 +317,8 @@ aten::_foreach_trunc_
 aten::_foreach_zero
 aten::_foreach_zero.out
 aten::_foreach_zero_
+aten::_functional_assert_async.msg
+aten::_functional_sym_constrain_range
 aten::_fused_adam
 aten::_fused_adam.out
 aten::_fused_adam_
@@ -364,6 +367,7 @@ aten::_logcumsumexp
 aten::_logcumsumexp.out
 aten::_lstm_mps
 aten::_lstm_mps.out
+aten::_make_dep_token
 aten::_make_dual
 aten::_make_dual_copy
 aten::_make_dual_copy.out
