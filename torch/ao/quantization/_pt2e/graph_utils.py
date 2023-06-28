@@ -28,8 +28,22 @@ def _create_equivalent_types_dict():
     return _DICT
 
 
-_EQUIVALET_TYPES_DICT = _create_equivalent_types_dict()
+_EQUIVALENT_TYPES_DICT = _create_equivalent_types_dict()
 
+def get_equivalent_types() -> List[Set]:
+    return _EQUIVALENT_TYPES
+
+def update_equivalent_types_dict(customized_equivalent_types=None):
+    """Help function for user who wants to customize the _EQUIVALENT_TYPES and _EQUIVALENT_TYPES_DICT.
+    When customized_equivalent_types passes in,
+    re-generate _EQUIVALENT_TYPES and _EQUIVALENT_TYPES_DICT.
+    """
+    if customized_equivalent_types is None:
+        raise ValueError("customized_equivalent_types should not be None")
+    global _EQUIVALENT_TYPES
+    global _EQUIVALENT_TYPES_DICT
+    _EQUIVALENT_TYPES = customized_equivalent_types
+    _EQUIVALENT_TYPES_DICT = _create_equivalent_types_dict()
 
 def _partitions_sequential(partitions: List[SourcePartition]):
     prev_partition = None
@@ -44,8 +58,8 @@ def _partitions_sequential(partitions: List[SourcePartition]):
 
 def _get_matching_types(partition_type):
     matching_types = [partition_type]
-    if partition_type in _EQUIVALET_TYPES_DICT:
-        matching_types.extend(_EQUIVALET_TYPES_DICT[partition_type])
+    if partition_type in _EQUIVALENT_TYPES_DICT:
+        matching_types.extend(_EQUIVALENT_TYPES_DICT[partition_type])
     return matching_types
 
 
