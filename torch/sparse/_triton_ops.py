@@ -900,6 +900,7 @@ if _has_triton():
             size=input.shape,
             layout=input.layout
         )
+
     def _scaled_dot_product_attention(
         query: torch.Tensor,
         key: torch.Tensor,
@@ -914,8 +915,14 @@ if _has_triton():
             f"{f_name}(): is_causal == True is not supported."
         )
         check(
-            attn_mask is not None and attn_mask.layout == torch.sparse_bsr,
-            f"{f_name}(): attn_mask == None is not supported and "
+            attn_mask is not None,
+            f"{f_name}(): attn_mask == None is not supported."
+        )
+        assert attn_mask is not None
+
+        check(
+            attn_mask.layout == torch.sparse_bsr,
+            f"{f_name}(): "
             f"attn_mask.layout must be {torch.sparse_bsr}, but got "
             f"attn_mask.layout == {attn_mask.layout}"
         )
