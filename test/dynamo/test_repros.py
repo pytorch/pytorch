@@ -3347,6 +3347,34 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_unspecialized_nn_module_with_torch_variable_attribute(self):
+        """
+        In this case self.fn = something that should be a TorchVariable.
+        When it's not a TorchVariable, dynamo tries to trace through and fails.
+        This makes sure that the self.fn is handled as a TorchVariable.
+        """
+
+        class UserModule(torch.nn.Module):
+            torchdynamo_force_dynamic = True  # forced to be a UnspecializedNNModule
+
+            def __init__(self, fn):
+                super().__init__()
+                self.fn = fn
+
+            def forward(self, **inp):
+                return self.fn(**inp)
+
+        inputs = {
+            "input": torch.randn([2, 9]).uniform_(0, 1),
+            "target": torch.randn([2, 9]).uniform_(0, 1),
+            "reduction": "mean",
+        }
+
+        mod = UserModule(torch.nn.functional.binary_cross_entropy)
+        ref = mod(**inputs)
+        res = torch._dynamo.optimize("eager", nopython=True)(mod)(**inputs)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
