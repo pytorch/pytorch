@@ -1583,7 +1583,8 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
         index = self.rename_indexing(index)
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
-        dtype = get_current_node_opt_ctx().dtype
+        # Only float reductions are vectorized currently
+        dtype = torch.float
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
             self.reduction_suffix.writeline(
