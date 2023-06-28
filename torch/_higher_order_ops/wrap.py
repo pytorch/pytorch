@@ -6,7 +6,7 @@ uid = count(1)
 # Used for testing the HigherOrderOperator mechanism
 class Wrap(HigherOrderOperator):
     def __init__(self):
-        super().__init__("wrap", _deprecated_global_ns=True)
+        super().__init__("wrap")
 
     def __call__(self, func, *args):
         # Dynamo already traces the body of HigherOrderOp beforehand when it
@@ -41,7 +41,7 @@ class WrapActivationCheckpoint(HigherOrderOperator):
     partitioners. See TagActivationCheckpoint for more information.
     """
     def __init__(self):
-        super().__init__("wrap_activation_checkpoint", _deprecated_global_ns=True)
+        super().__init__("wrap_activation_checkpoint")
 
     def __call__(self, function, *args, **kwargs):
         # use_reentrant is set to False because this op is going to be traced.
@@ -72,7 +72,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
     """
 
     def __init__(self):
-        super().__init__("tag_activation_checkpoint", _deprecated_global_ns=True)
+        super().__init__("tag_activation_checkpoint")
 
     def tag_nodes(self, gmod):
         # TODO - This needs major investigation. Currently, we are tagging all
