@@ -38,7 +38,7 @@ concurrency:
 jobs:
   manywheel-py3_8-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-aarch64.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -50,6 +50,7 @@ jobs:
       DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.8"
       runs_on: linux.t4g.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_8-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
     secrets:
@@ -57,7 +58,7 @@ jobs:
   manywheel-py3_8-cpu-aarch64-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cpu-aarch64-build
-    uses: ./.github/workflows/_binary-test-aarch64.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -71,6 +72,7 @@ jobs:
       build_name: manywheel-py3_8-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
       runs_on: linux.t4g.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_8-cpu-aarch64-upload:  # Uploading
@@ -96,7 +98,7 @@ jobs:
 
   manywheel-py3_9-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-aarch64.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -108,6 +110,7 @@ jobs:
       DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.9"
       runs_on: linux.t4g.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_9-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
     secrets:
@@ -115,7 +118,7 @@ jobs:
   manywheel-py3_9-cpu-aarch64-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cpu-aarch64-build
-    uses: ./.github/workflows/_binary-test-aarch64.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -129,6 +132,7 @@ jobs:
       build_name: manywheel-py3_9-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
       runs_on: linux.t4g.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_9-cpu-aarch64-upload:  # Uploading
@@ -154,7 +158,7 @@ jobs:
 
   manywheel-py3_10-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-aarch64.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -166,6 +170,7 @@ jobs:
       DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.10"
       runs_on: linux.t4g.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
     secrets:
@@ -173,7 +178,7 @@ jobs:
   manywheel-py3_10-cpu-aarch64-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cpu-aarch64-build
-    uses: ./.github/workflows/_binary-test-aarch64.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -187,6 +192,7 @@ jobs:
       build_name: manywheel-py3_10-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
       runs_on: linux.t4g.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_10-cpu-aarch64-upload:  # Uploading
@@ -212,7 +218,7 @@ jobs:
 
   manywheel-py3_11-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-aarch64.yml
+    uses: ./.github/workflows/_binary-build-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -224,6 +230,7 @@ jobs:
       DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.11"
       runs_on: linux.t4g.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
     secrets:
@@ -231,7 +238,7 @@ jobs:
   manywheel-py3_11-cpu-aarch64-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_11-cpu-aarch64-build
-    uses: ./.github/workflows/_binary-test-aarch64.yml
+    uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
@@ -245,6 +252,7 @@ jobs:
       build_name: manywheel-py3_11-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
       runs_on: linux.t4g.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   manywheel-py3_11-cpu-aarch64-upload:  # Uploading

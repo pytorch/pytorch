@@ -52,14 +52,11 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    {%- if "aarch64" in build_environment %}
-    uses: ./.github/workflows/_binary-build-aarch64.yml
-    {%- else %}
     uses: ./.github/workflows/_binary-build-linux.yml
-    {%- endif %}
     with:!{{ upload.binary_env_as_input(config) }}
       {%- if "aarch64" in build_environment %}
       runs_on: linux.t4g.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
       {%- endif %}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
@@ -72,16 +69,13 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
 {%- if config["gpu_arch_type"] != "rocm" %}
-    {%- if "aarch64" in build_environment %}
-    uses: ./.github/workflows/_binary-test-aarch64.yml
-    {%- else %}
     uses: ./.github/workflows/_binary-test-linux.yml
-    {%- endif %}
     with:!{{ upload.binary_env_as_input(config) }}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
       {%- if "aarch64" in build_environment %}
       runs_on: linux.t4g.2xlarge
+      ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
       {%- elif config["gpu_arch_type"] == "cuda" %}
