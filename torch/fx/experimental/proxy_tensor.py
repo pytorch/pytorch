@@ -21,6 +21,8 @@ import operator
 from torch.utils._stats import count
 import logging
 
+from torch.overrides import TorchFunctionMode
+
 from torch.utils._python_dispatch import (
     TorchDispatchMode,
     _pop_mode_temporarily,
@@ -512,6 +514,26 @@ def set_original_aten_op(func):
 
 
 
+# This mode is **only** used for pre_dispatch tracing.
+# In particular, we need to make sure that autograd/autocast API's
+# that do not desugar into dispatcher operators stay in the graph.
+class PreDispatchTorchFunctionMode(TorchFunctionMode):
+
+    def __init__(self, tracer):
+        self.tracer = tracer
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        pre_dispatch_ops = [
+            torch._C._set_grad_enabled,
+            torch.amp._enter_autocast,
+            torch.amp._exit_autocast,
+        ]
+        if func in pre_dispatch_ops:
+            return self.tracer.create_node("call_function", func, args, {})
+            # Don't actually run the function! We just want to trace the calls
+            # into a graph. We don't actualy want to change global autograd state.
+        return func(*args, **kwargs)
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
     def __init__(self, tracer, tracing_mode, pre_dispatch=False, _allow_fake_constant=False):
@@ -735,6 +757,10 @@ def make_fx(f,
         if pre_dispatch:
             pre_dispatch_mode = enable_pre_dispatch()
 
+        proxy_function_mode: Any = nullcontext()
+        if pre_dispatch:
+            proxy_function_mode = PreDispatchTorchFunctionMode(fx_tracer)
+
         proxy_mode = ProxyTorchDispatchMode(fx_tracer,
                                             tracing_mode,
                                             pre_dispatch=pre_dispatch,
@@ -778,7 +804,7 @@ def make_fx(f,
         # We also disable tracing by any other tensor proxy-based tracers except the current. The
         # purpose of `make_fx` is to produce graphmodules as a side effect; its internal execution is
         # thus irrelevant to any external functional trace.
-        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, pre_dispatch_mode, \
+        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, pre_dispatch_mode, proxy_function_mode, \
              sym_mode, proxy_mode, disable_autocast_cache(), disable_proxy_modes_tracing(enable_current=True):
             t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_dispatch), tracer=fx_tracer, concrete_args=tuple(phs))
 
