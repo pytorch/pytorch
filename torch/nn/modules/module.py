@@ -224,7 +224,7 @@ def register_module_forward_hook(hook: Callable[..., None], *, always_call: bool
 
     Parameters:
         hook (Callable): The user defined hook to be registered.
-        always_calle (bool): If ``True`` the ``hook`` will be run regardless of
+        always_call (bool): If ``True`` the ``hook`` will be run regardless of
             whether an exception is raised while calling the Module.
             (Default: ``False``)
     Returns:
