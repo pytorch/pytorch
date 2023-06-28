@@ -58,6 +58,11 @@ def do_bench(*args, **kwargs):
 
     triton_do_bench, quantile_field_name = load_triton()
 
+    if not torch._inductor.config.max_autotune and not "reps" in kwargs:
+        # default is 100
+        kwargs["reps"] = 50
+
+
     if quantile_field_name not in kwargs:
         kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
     return triton_do_bench(*args, **kwargs)[0]
