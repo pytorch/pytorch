@@ -1514,8 +1514,9 @@ Tensor sparse_sparse_matmul_backward(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
 
+
   // NOTE: _sparse_sparse_matmul returns a coalesced gradient,
-  // hence there is no need in accumulating matches.
+  //   // hence there is no need in accumulating matches.
   if (grad_order == 0) {
     auto a_grad = _sparse_sparse_matmul(grad, b.conj().t());
     return sparse_mask_like_grad(a, a_grad, /*accumulate_matches=*/false);
