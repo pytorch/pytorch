@@ -453,13 +453,7 @@ class TestTryMerge(TestCase):
     def test_revert_codev_fails(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 91340)
 
-        class GitRepoCoDev(GitRepo):
-            def __init__(self) -> None:
-                super().__init__(get_git_repo_dir(), get_git_remote_name())
-
-            def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
-                return ["FakeCommitSha"]
-
+        class GitRepoCoDev(DummyGitRepo):
             def commit_message(self, ref: str) -> str:
                 return pr.get_body()
 
@@ -469,6 +463,16 @@ class TestTryMerge(TestCase):
             "landed via phabricator",
             lambda: validate_revert(repo, pr, comment_id=1372496233),
         )
+
+    def test_revert_codev_abandoned_diff_succeeds(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 100652)
+
+        class GitRepoCoDev(DummyGitRepo):
+            def commit_message(self, ref: str) -> str:
+                return pr.get_body()
+
+        repo = GitRepoCoDev()
+        validate_revert(repo, pr, comment_id=1588195237)
 
     def test_pr_changed_submodule_detection(self, *args: Any) -> None:
         # Updates submodule during dev-cycle but reverts it later
