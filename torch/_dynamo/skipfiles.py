@@ -180,6 +180,10 @@ if torch.distributed.is_available():
     }
 
     FILENAME_ALLOWLIST |= {
+        inspect.getfile(torch.distributed.utils._alloc_storage)
+    }
+
+    FILENAME_ALLOWLIST |= {
         inspect.getfile(torch.distributed.distributed_c10d.all_gather_into_tensor)
     }
 
