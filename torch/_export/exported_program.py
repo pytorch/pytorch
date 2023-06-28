@@ -205,9 +205,7 @@ class ExportedProgram:
         # separate step. However this requires augmenting pass infra at fx level
         # to operate on `ExportedProgram` instead of `fx.GraphModule`.
         # TODO: Integrate graph signature update into pass run.
-        ep = _update_graph_signature_after_adding_runtime_assertions(
-            old_ep=self, new_ep=ep,
-        )
+        ep = _fixup_graph_signature(old_ep=self, new_ep=ep)
         if functionalize:
             ep = ep.transform(_FunctionalizeSideEffectfulOpsPass())
             ep = _update_graph_signature_after_assertions_functionalization(ep)
@@ -242,9 +240,8 @@ def _update_graph_signature_after_assertions_functionalization(
         else ep
     )
 
-def _update_graph_signature_after_adding_runtime_assertions(
-    old_ep: ExportedProgram,
-    new_ep: ExportedProgram,
+def _fixup_graph_signature(
+    old_ep: ExportedProgram, new_ep: ExportedProgram,
 ) -> ExportedProgram:
     def _get_output_node_names(gm: torch.fx.GraphModule) -> List[FQN]:
         output_node = next(n for n in gm.graph.nodes if n.op == "output")
@@ -252,11 +249,13 @@ def _update_graph_signature_after_adding_runtime_assertions(
 
     # Update output names since after adding run time assertions, the names of
     # outputs could change.
-    # The assumption here is that `_AddRuntimeAssertionsForConstraintsPass`:
+    # The assumption here is that the pass:
     # - Won't change graph outputs order semantically so it's possible to create
     #   map from old to new output names based on position.
     # - Will keep input names unchanged so no need to update inputs related
     #   fields (`user_inputs`, `inputs_to_parameters`, `inputs_to_buffers`, ...)
+    # If any pass logic breaks the above assumption, it needs to update the
+    # signature accordingly to maintain the assumption.
     outputs = _get_output_node_names(old_ep.graph_module)
     new_outputs = _get_output_node_names(new_ep.graph_module)
     assert len(outputs) == len(new_outputs)
