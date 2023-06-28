@@ -3597,9 +3597,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # TypeError: expected Tensor as element 0 in argument 0, but got float
         xfail('item'),
 
-        # UBSAN: runtime error: shift exponent -1 is negative
-        decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
-        decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # UBSAN: runtime error: -1e+20 is outside the range of representable values of type 'long'
         decorate('special.hermite_polynomial_h', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
     }))
@@ -3735,9 +3732,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
-        # UBSAN: runtime error: shift exponent -1 is negative
-        decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
-        decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # https://github.com/pytorch/pytorch/issues/96560
         decorate('nn.functional.batch_norm', decorator=skipIfRocm),
         decorate('nn.functional.instance_norm', decorator=skipIfRocm),
