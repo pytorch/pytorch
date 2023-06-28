@@ -3457,7 +3457,6 @@ def create_graph_signature(
     num_user_args = len(graph_input_names) - num_params_buffers
 
     if trace_joint:
-        assert fw_metadata.num_outputs_dep_token == 0
         assert num_user_fw_outs is not None
         num_fw_outs = num_user_fw_outs + fw_metadata.num_mutated_inputs
         backward_output_names = graph_output_names[num_fw_outs:]
@@ -3852,6 +3851,7 @@ def aot_export_module(
 
     num_fw_outs = None
 
+    FunctionalAssertionsHelper.check_trace_joint(trace_joint)
     if trace_joint:
         # This helper effectively just adds some extra asserts about what the backward will look like:
         # Outputs must include a scalar loss, that we compute gradients w.r.t.

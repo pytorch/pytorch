@@ -2277,6 +2277,14 @@ class <lambda>(torch.nn.Module):
         mod = TestMod(fn)
         inp = torch.tensor([3, 2, 1])
 
+        with patch(
+            "functorch.compile.config.functionalize_assertion_ops", True
+        ), self.assertRaisesRegex(
+            AssertionError,
+            "Cannot functionalize assertion ops when trace joint is enabled",
+        ):
+            aot_export_module(mod, [inp], trace_joint=True)
+
         with patch("functorch.compile.config.functionalize_assertion_ops", True), patch(
             "functorch.compile.config.functionalize_rng_ops", True
         ), self.assertRaisesRegex(

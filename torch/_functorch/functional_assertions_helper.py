@@ -94,6 +94,14 @@ class FunctionalAssertionsHelper:
         return _traced_forward
 
     @staticmethod
+    def check_trace_joint(trace_joint: bool) -> None:
+        # Don't functionalize asserts when `trace_joint` is enabled for now.
+        if config.functionalize_assertion_ops:
+            assert (
+                not trace_joint
+            ), "Cannot functionalize assertion ops when trace joint is enabled"
+
+    @staticmethod
     def create_asserts_dep_token_output(
         gm: torch.fx.GraphModule, num_outputs_dep_token: int
     ) -> Optional[str]:
@@ -112,6 +120,7 @@ class FunctionalAssertionsHelper:
         )
 
         return dep_token_arg.name
+
 
 def _register_decomposition(aten_op):
     return decomp.register_decomposition(aten_op, _decompositions)
