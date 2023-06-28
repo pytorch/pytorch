@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Histogram.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -7,6 +8,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/sum.h>
 #endif
 
@@ -225,6 +227,13 @@ void histogramdd_kernel_impl(Tensor& hist_output,
     bin_seq_offset += num_bin_edges[dim];
   }
 
+  // for MPSProfiler
+  auto allTensorsList = bin_edges.vec();
+  allTensorsList.push_back(input);
+  if (has_weight) {
+    allTensorsList.push_back(weight.value());
+  }
+
   const uint32_t stridedIndicesNumThreads = input.numel();
   const uint32_t numThreads = N;
   const auto hist_sizes = hist_output.sizes();
@@ -248,8 +257,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       MTLSize gridSize = MTLSizeMake(stridedIndicesNumThreads, 1, 1);
       const IntArrayRef& inputShape = input.sizes();
       std::vector<uint32_t> inputShapeData(inputShape.size());
@@ -279,6 +287,10 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
       const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input.scalar_type());
       id<MTLComputePipelineState> histogramPSO = histogramPipelineState(device, kernel);
+
+      // this function call is a no-op if MPS Profiler is not enabled
+      getMPSProfiler().beginProfileKernel(histogramPSO, "histogram", allTensorsList);
+
       [computeEncoder setComputePipelineState:histogramPSO];
       [computeEncoder setBuffer:inputBuffer offset:input.storage_offset() * input.element_size() atIndex:0];
       [computeEncoder setBuffer:weightBuffer offset:weightOffset atIndex:1];
@@ -305,8 +317,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
 
-      [computeEncoder endEncoding];
-      mpsStream->synchronize(SyncType::COMMIT);
+      getMPSProfiler().endProfileKernel(histogramPSO);
     }
   });
   at::sum_out(hist_output, thread_histograms, /*dim=*/{0});
@@ -386,6 +397,20 @@ static void histogramdd_linear_kernel(const Tensor& self,
   }
 }
 
+static void histogram_select_outer_bin_edges_kernel(const Tensor& input,
+                                                    const int64_t N,
+                                                    std::vector<double>& leftmost_edges,
+                                                    std::vector<double>& rightmost_edges) {
+  Tensor min, max;
+  std::tie(min, max) = at::aminmax(input, 0);
+
+  for (const auto i : c10::irange(N)) {
+    leftmost_edges[i] = min[i].item().to<double>();
+    rightmost_edges[i] = max[i].item().to<double>();
+  }
+}
+
 REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel);
 REGISTER_DISPATCH(histogramdd_linear_stub, &histogramdd_linear_kernel);
+REGISTER_DISPATCH(histogram_select_outer_bin_edges_stub, &histogram_select_outer_bin_edges_kernel);
 } // namespace at::native
