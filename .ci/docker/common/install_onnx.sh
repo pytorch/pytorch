@@ -22,6 +22,7 @@ pip_install "onnx@git+https://github.com/onnx/onnx@213b525a51ead28961d9b4f2764b0
 # Using 1.16dev branch for the following not yet released features and fixes.
 # - Segfault fix for functions.
 # - Duplicated node name fix for function inlining.
+pip install coloredlogs  # dependency of ort-nightly
 pip_install --index-url=https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ ort-nightly==1.16.0.dev20230528001
 
 pip_install \
