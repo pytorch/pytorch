@@ -311,7 +311,7 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
         2: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
     }
     binary_op_configs: List[BackendPatternConfig] = []
-    for op in [operator.add, torch.add, operator.sub, torch.sub]:
+    for op in [operator.add, torch.add, operator.sub, torch.sub, operator.mul, torch.mul]:
         bop_patterns = [
             (op, torch.nn.ReLU),
             (op, torch.nn.functional.relu),
