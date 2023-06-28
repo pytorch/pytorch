@@ -143,7 +143,6 @@ if torch.distributed.is_available():
         if inspect.isclass(obj)
     }
 
-
     FILENAME_ALLOWLIST |= {inspect.getfile(torch.distributed.fsdp._utils._same_storage)}
 
     FILENAME_ALLOWLIST |= {
