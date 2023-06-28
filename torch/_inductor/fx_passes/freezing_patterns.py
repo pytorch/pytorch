@@ -17,6 +17,7 @@ aten = torch.ops.aten
 pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
+    PatternMatcherPass(),
 ]
 
 
@@ -75,13 +76,10 @@ def addmm_patterns_init():
             match.kwargs["w2"],
             match.kwargs["w3"],
         ]
-        out = all(
+        return all(
             w.op == "get_attr" and w.meta["val"].shape == weights[0].meta["val"].shape
             for w in weights
         )
-        if not out:
-            breakpoint()
-        return out
 
     def matmul_fuse_pattern(inp, w1, w2, w3):
         return (inp @ w1, inp @ w2, inp @ w3)
