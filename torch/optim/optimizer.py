@@ -422,11 +422,16 @@ class Optimizer:
                 capturable = pg["capturable"] if "capturable" in pg else False
                 break
 
-        if key != "step" or capturable or fused:
+        if key == 'step':
+            if capturable or fused:
+                return value.to(dtype=torch.float32, device=param.device)
+            else:
+                return value
+        else:
             if param.is_floating_point():
                 return value.to(dtype=param.dtype, device=param.device)
-            return value.to(device=param.device)
-        return value
+            else:
+                return value.to(device=param.device)
 
     def load_state_dict(self, state_dict):
         r"""Loads the optimizer state.
