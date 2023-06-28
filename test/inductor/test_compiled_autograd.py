@@ -54,7 +54,7 @@ class TestCompiledAutograd(TestCase):
                 torch.nn.Linear(4, 4),
                 torch.nn.ReLU(),
             )
-            x = torch.randn([1, 4])
+            x = torch.randn([2, 4])
             result = model(x).sum()
             result.backward()
             yield model[0].weight.grad
@@ -73,7 +73,7 @@ class TestCompiledAutograd(TestCase):
                     torch.nn.Linear(4, 4),
                     torch.nn.ReLU(),
                 )
-                x = torch.randn([1, 4])
+                x = torch.randn([2, 4])
                 result = model(x).sum()
                 result.backward()
                 yield model[0].weight.grad
@@ -90,7 +90,7 @@ class TestCompiledAutograd(TestCase):
                     torch.nn.Linear(4, 4),
                     torch.nn.ReLU(),
                 )
-                x = torch.randn([1, 4])
+                x = torch.randn([2, 4])
 
                 model[0].weight.register_hook(hook1)
 
