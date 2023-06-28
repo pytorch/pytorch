@@ -35,7 +35,10 @@ def get_upgraders() -> Dict[str, Tuple[str, str]]:
     upgraders = torch._C._get_upgraders_entry_map()
     op_version_map = torch._C._get_operator_version_map()
     output = defaultdict(tuple)
-    for opname, entry in op_version_map.items():
+    for opname, entry_list in op_version_map.items():
+        if not entry_list:
+            raise RuntimeError(f"Op version map has an empty entry for opname {opname}")
+        entry = entry_list[0]
         old_schema = entry.old_schema
         upgrader_name = entry.upgrader_name
         upgrader_str = upgraders.get(upgrader_name, None)
