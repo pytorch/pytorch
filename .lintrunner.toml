@@ -862,6 +862,27 @@ command = [
 ]
 
 [[linter]]
+code = 'DEVICE_TYPE'
+include_patterns = [
+    'c10/**',
+    'aten/**',
+    'torch/csrc/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=DeviceType',
+    '--linter-name=DEVICE_TYPE',
+    '--error-name=invalid DeviceType',
+    '--replace-pattern=s/DeviceType/c10::DeviceType/',
+    """--error-description=\
+        Use of DeviceType is forbidden and should be replaced with c10::DeviceType\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'WORKFLOWSYNC'
 include_patterns = [
     '.github/workflows/pull.yml',
