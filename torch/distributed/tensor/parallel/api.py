@@ -42,7 +42,7 @@ def parallelize_module(  # type: ignore[return]
     device_mesh: DeviceMesh,
     parallelize_plan: Union[ParallelStyle, Dict[str, ParallelStyle]],
     tp_mesh_dim: int = 0,
-    sync_rng_state: bool = True,
+    sync_rng_state: bool = False,
 ) -> nn.Module:
     """
     The API to apply Tensor Parallelism (TP) in PyTorch. We parallelize module
@@ -73,7 +73,7 @@ def parallelize_module(  # type: ignore[return]
             Random Number Generator to perform randomized tensor operators (e.g. dropout).
             DTensor is responsible for maintaining the parallel RNG in a synchronous state
             across ranks.
-            Default: True
+            Default: False
 
     Return:
         A :class:`nn.Module` object parallelized.

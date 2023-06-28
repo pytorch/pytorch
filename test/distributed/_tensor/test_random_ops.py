@@ -138,11 +138,13 @@ class DistTensorRandomOpTest(DTensorTestBase):
                         other_slice = slice(4 * other_rank, 4 * other_rank + 4)
                         if enable_distribute_flag:
                             self.assertEqual(
-                                local_tensor[self_slice, :], local_tensor[other_slice, :]
+                                local_tensor[self_slice, :],
+                                local_tensor[other_slice, :],
                             )
                         else:
                             self.assertNotEqual(
-                                local_tensor[self_slice, :], local_tensor[other_slice, :]
+                                local_tensor[self_slice, :],
+                                local_tensor[other_slice, :],
                             )
 
     @with_comms
