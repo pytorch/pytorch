@@ -370,13 +370,17 @@ void cpu_efficient_attention_backward(
         scalar_t* grad_q_ptr = grad_q_data + b * gQ_strideB + m * gQ_strideM + h * gQ_strideH;
 
         // init buf and sum to zeros before accumulation
-        // no need to init buf2
         fill_stub<scalar_t>(buf, 0, kQueriesPerBlock * K);
         fill_stub<scalar_t>(sum, 0, block_size_m);
 
+        // only need to init buf2 to zero when causal mask
+        if (is_causal) {
+          fill_stub<scalar_t>(buf2, 0, kQueriesPerBlock * N);
+        }
+
         // loop over Q and V sequence with block size of kKeysPerBlock
-        //int64_t num_keys = is_causal ? std::min(m + block_size_m, N) : N;
-        for (int64_t n = 0; n < N; n += kKeysPerBlock) {
+        int64_t num_keys = is_causal ? std::min(m + block_size_m, N) : N;
+        for (int64_t n = 0; n < num_keys; n += kKeysPerBlock) {
           int64_t block_size_n = std::min(kKeysPerBlock, N - n);
           scalar_t* k_ptr = k_data + b * k_strideB + n * k_strideN + h * k_strideH;
 
@@ -405,6 +409,15 @@ void cpu_efficient_attention_backward(
                 attn_v + row * kKeysPerBlock,
                 attn_v + row * kKeysPerBlock,
                 block_size_n);
+          }
+
+          // apply causal mask, fill unused with 0
+          if (is_causal && num_keys - n <= kKeysPerBlock) {
+            for (const auto row : c10::irange(block_size_m)) {
+              int64_t last_col = m + row - n;
+              scalar_t* row_ptr = attn_v + row * kKeysPerBlock;
+              fill_stub<scalar_t>(row_ptr + last_col + 1, 0, block_size_n - last_col - 1);
+            }
           }
 
           // calculate the gradient of V
