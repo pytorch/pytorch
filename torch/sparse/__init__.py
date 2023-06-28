@@ -5,6 +5,9 @@ import torch
 from torch._C import _add_docstr, _sparse  # type: ignore[attr-defined]
 from torch import Tensor
 
+# Semi structured sparsity support
+from .semi_structured import SparseSemiStructuredTensor
+
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -23,8 +26,8 @@ __all__ = [
     'sum',
     'softmax',
     'log_softmax',
+    'SparseSemiStructuredTensor',
 ]
-
 
 addmm = _add_docstr(_sparse._sparse_addmm, r"""
 sparse.addmm(mat, mat1, mat2, *, beta=1., alpha=1.) -> Tensor
