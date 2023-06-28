@@ -12,6 +12,7 @@ from torch.nn import functional as F
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
 
+# The dict value is match_nodes
 unary_list = {
     torch.nn.ReLU(): 2,
     torch.nn.Sigmoid(): 2,
@@ -44,6 +45,7 @@ unary_list = {
     lambda x: x.tanh(): 2,
 }
 
+# The dict value is match_nodes
 unary_list_bf16 = {
     torch.nn.ReLU(): 2,
     torch.nn.Sigmoid(): 2,
@@ -59,21 +61,13 @@ unary_list_bf16 = {
     lambda x: x.tanh(): 2,
 }
 
-binary_list = {
-    lambda x, y: torch.add(x, y): 2,  # call_function
-    lambda x, y: torch.add(y, x): 2,  # call_function
-    lambda x, y: x.add(y): 2,  # call_method
-    lambda x, y: x.add_(y): 2,  # call_method
-    lambda x, y: torch.sub(x, y): 2,  # call_function
-    lambda x, y: x.sub(y): 2,  # call_method
-    lambda x, y: x.sub_(y): 2,  # call_method
-}
 
-linear_binary_list = {
-    lambda x, y: torch.add(x, y): (2, 4, False),  # call_function
+# The dict value is (match_count, match_nodes, inplace)
+binary_list = {
+    lambda x, y: torch.add(x, y): (1, 2, False),  # call_function
     lambda x, y: torch.add(y, x): (1, 2, False),  # call_function
-    lambda x, y: x.add(y): (2, 4, False),  # call_method
-    lambda x, y: x.add_(y): (2, 4, True),  # call_method
+    lambda x, y: x.add(y): (1, 2, False),  # call_method
+    lambda x, y: x.add_(y): (1, 2, True),  # call_method
     lambda x, y: torch.sub(x, y): (1, 2, False),  # call_function
     lambda x, y: x.sub(y): (1, 2, False),  # call_method
     lambda x, y: x.sub_(y): (1, 2, True),  # call_method
@@ -269,10 +263,11 @@ class TestPaternMatcher(TestCase):
                 .add(1)
                 .to(memory_format=memory_format)
             )
-            match_nodes = (
-                binary_list[binary_fn] + 1 if has_relu else binary_list[binary_fn]
-            )
-            self._test_common(mod, (v,), 3, match_nodes + 2)
+            match_count = binary_list[binary_fn][0] + 2
+            match_nodes = binary_list[binary_fn][1]
+            if has_relu:
+                match_nodes += 1
+            self._test_common(mod, (v,), match_count, match_nodes + 2)
 
     @expectedFailureDynamicWrapper
     def test_linear_binary(self):
@@ -289,18 +284,17 @@ class TestPaternMatcher(TestCase):
                 x = self.binary_fn(x, y.clone())
                 return x
 
-        options = itertools.product(
-            linear_binary_list, [[2, 3, 10], [2, 10]], [True, False]
-        )
+        options = itertools.product(binary_list, [[2, 3, 10], [2, 10]], [True, False])
         dtype = torch.bfloat16
         out_feature = 30
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             for binary_fn, input_shape, bias in options:
-                match_count = linear_binary_list[binary_fn][0] + 1
-                match_nodes = linear_binary_list[binary_fn][1] + 1
+                # addmm(mm) + (linear+add)
+                match_count = 2
+                match_nodes = 3
                 if len(input_shape) == 3:
-                    is_inplace = linear_binary_list[binary_fn][2]
-                    # view + linear + view(joint_graph+post_grad)
+                    is_inplace = binary_list[binary_fn][2]
+                    # view + linear + view(joint_graph+freeze pass)
                     match_count = match_count + 5 if is_inplace else match_count + 3
                     match_nodes = match_nodes + 7 if is_inplace else match_nodes + 5
                 mod = M(binary_fn, input_shape[-1], out_feature, bias).to(dtype).eval()

@@ -12,7 +12,7 @@ from ..lowering import lowerings as L
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, get_arg_value, KeywordArg
 from ..virtualized import ops
 from .freezing_patterns import register_freezing_graph_pattern
-from .post_grad import register_graph_pattern, register_lowering_pattern
+from .post_grad import register_lowering_pattern
 
 
 if torch._C._has_mkldnn:
@@ -548,12 +548,12 @@ if torch._C._has_mkldnn:
 
     def _recover_linear():
         # convert reshape+linear+reshape to a single linear for applying fusion path.
-        @register_graph_pattern(
+        @register_freezing_graph_pattern(
             CallFunction(
-                aten.reshape.default,
+                aten.view.default,
                 CallFunction(
                     mkldnn._linear_pointwise.default,
-                    CallFunction(aten.reshape.default, Arg(), KeywordArg("reshape_1")),
+                    CallFunction(aten.view.default, Arg(), KeywordArg("reshape_1")),
                     Arg(),
                     Arg(),
                     Arg(),
@@ -562,7 +562,7 @@ if torch._C._has_mkldnn:
                 ),
                 KeywordArg("reshape_2"),
             ),
-            pass_number=0,
+            pass_number=1,
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
             reshape_1 = kwargs.get("reshape_1")
@@ -575,35 +575,41 @@ if torch._C._has_mkldnn:
                 node.replace_all_uses_with(repl)
                 match.erase_nodes(graph)
 
-        # convert linear+bias to a single linear for applying fusion path.
-        @register_graph_pattern(
-            CallFunction(
-                aten.add.Tensor,
-                CallFunction(mkldnn._linear_pointwise.default, *_linear_args),
-                Arg(),
-            ),
-        )
-        def linear_bias_pattern(match, *args):
-            graph = match.graph
+        def is_linear_add_bias(match):
             add_node = match.output_node()
             linear_node = add_node.args[0]
             weight_meta = linear_node.args[1].meta.get("val")
             bias_meta = add_node.args[1].meta.get("val")
             if weight_meta is None or bias_meta is None:
-                return
-            if (
+                return False
+            return (
                 linear_node.args[2] is None
                 and bias_meta.dim() == 1
                 and bias_meta.size(0) == weight_meta.size(0)
-            ):
-                new_args = list(linear_node.args)
-                new_args[2] = add_node.args[1]
-                repl = graph.call_function(
-                    mkldnn._linear_pointwise.default, tuple(new_args)
-                )
-                repl.meta.update(add_node.meta)
-                add_node.replace_all_uses_with(repl)
-                match.erase_nodes(graph)
+            )
+
+        # convert linear+bias to a single linear for applying fusion path.
+        @register_freezing_graph_pattern(
+            CallFunction(
+                aten.add.Tensor,
+                CallFunction(mkldnn._linear_pointwise.default, *_linear_args),
+                Arg(),
+            ),
+            pass_number=1,
+            extra_check=is_linear_add_bias,
+        )
+        def linear_bias_pattern(match, *args):
+            graph = match.graph
+            add_node = match.output_node()
+            linear_node = add_node.args[0]
+            new_args = list(linear_node.args)
+            new_args[2] = add_node.args[1]
+            repl = graph.call_function(
+                mkldnn._linear_pointwise.default, tuple(new_args)
+            )
+            repl.meta.update(add_node.meta)
+            add_node.replace_all_uses_with(repl)
+            match.erase_nodes(graph)
 
     def _is_packable_convolution(match):
         """
@@ -706,7 +712,7 @@ if torch._C._has_mkldnn:
         Arg(),
     )
 
-    def register_weight_pack_pass():
+    def _register_weight_pack_pass():
         @register_freezing_graph_pattern(
             CallFunction(aten.convolution.default, *_aten_conv_args),
             extra_check=_is_packable_convolution,
@@ -835,7 +841,6 @@ if torch._C._has_mkldnn:
     @functools.lru_cache(None)
     def _mkldnn_fusion_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
-            _recover_linear()
             _register_unary_fusion()
             _register_inplace_fusion()
             _register_binary_unary_fusion()
@@ -844,4 +849,5 @@ if torch._C._has_mkldnn:
     @functools.lru_cache(None)
     def _mkldnn_weight_pack_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
-            register_weight_pack_pass()
+            _register_weight_pack_pass()
+            _recover_linear()

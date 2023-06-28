@@ -21,6 +21,7 @@ from ..pattern_matcher import (
     Match,
     MULTIPLE,
     PatternMatcherPass,
+    register_graph_pattern,
     stable_topological_sort,
 )
 from ..virtualized import V
@@ -119,16 +120,6 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
     )
 
 
-def register_graph_pattern(pattern, extra_check=_return_true, pass_number=1):
-    """
-    Register a pattern that runs a function on the FX graph, allowing
-    custom transformation code.
-    """
-    return pattern_matcher.register_graph_pattern(
-        pattern, extra_check, pass_dict=pass_patterns[pass_number]
-    )
-
-
 ################################################################################
 # Actual patterns below this point.
 # Priority of patterns is:
@@ -164,6 +155,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
         1,
         _users=MULTIPLE,
     ),
+    pass_dict=pass_patterns[1],
 )
 def pointless_cumsum_replacement(match: Match, size0, size1, device, dtype):
     """Based on a pattern in OPTForCausalLM"""

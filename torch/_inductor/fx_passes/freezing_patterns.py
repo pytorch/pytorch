@@ -52,7 +52,7 @@ def lazy_init():
 
 
 def register_freezing_graph_pattern(
-    pattern, extra_check=_return_true, pass_number=1, prepend=False
+    pattern, extra_check=_return_true, pass_number=0, prepend=False
 ):
     return register_graph_pattern(
         pattern,
