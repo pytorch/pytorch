@@ -7,10 +7,12 @@ import torch
 import torch._dynamo
 import torch._dynamo.backends.ipex
 import torch._dynamo.test_case
+from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.backends.ipex import has_ipex
 from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -155,15 +157,18 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_cudagraphs(self):
         self._check_backend_works("cudagraphs")
 
+    @skipIfRocm
     @requires_cuda()
     def test_aot_ts_nvfuser(self):
         self._check_backend_works("aot_ts_nvfuser")
 
     @requires_cuda()
+    @unittest.skipIf(IS_FBCODE, "BackendCompilerError")
     def test_nvprims_nvfuser(self):
         self._check_backend_works("nvprims_nvfuser")
 
     @requires_cuda()
+    @unittest.skipIf(IS_FBCODE, "BackendCompilerError")
     def test_nvprims_aten(self):
         self._check_backend_works("nvprims_aten")
 
@@ -202,15 +207,62 @@ class NormalizeIRTests(torch._dynamo.test_case.TestCase):
 
 class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.backends.mps.is_available(), "requires mps")
-    def test_default_mps_to_aot_eager(self):
+    def test_mps_not_supported(self):
         model = Seq().to("mps")
         example_input = torch.randn(1, 10).to("mps")
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.compile(model, backend="inductor")(example_input),
+        )
 
-        # Not sure yet if there's a better way to test this
-        a = torch.compile(model, backend="inductor")(example_input)
-        torch._dynamo.reset()
-        b = torch.compile(model, backend="aot_eager")(example_input)
-        self.assertTrue(torch.equal(a, b))
+
+class TestExplainWithBackend(torch._dynamo.test_case.TestCase):
+    def test_explain_with_backend(self):
+        def fn3(x):
+            x = torch.sin(x)
+            torch._dynamo.graph_break()
+            x = torch.sin(x)
+            return x
+
+        def fn2(x):
+            x = torch.cos(x)
+            x = fn3(x)
+            x = torch.cos(x)
+            return x
+
+        def fn1(x):
+            x = torch.tan(x)
+            x = fn2(x)
+            x = torch.tan(x)
+            return x
+
+        def fn(x):
+            x = torch.sigmoid(x)
+            x = fn1(x)
+            x = torch.sigmoid(x)
+            return x
+
+        # Wrap TorchInductor with explain backend
+        eb = ExplainWithBackend("inductor")
+        optimized_fn = torch.compile(fn, backend=eb)
+        input_tensor = torch.randn(5)
+        result = optimized_fn(input_tensor)
+
+        # Check that fn still produces the same output when wrapped by ExplainWithBackend
+        self.assertTrue(torch.allclose(result, fn(input_tensor)))
+
+        # Verify ExplainOutput object contents, output might change but make sure these fields are present
+        explain_output = eb.output()
+        explain_str = str(explain_output)
+        self.assertIn("Graph Count", explain_str)
+        self.assertIn("Graph Break Count", explain_str)
+        self.assertIn("Op Count", explain_str)
+        self.assertIn("Break Reasons", explain_str)
+
+        # Verify that for the given functions above, we report the correct number of graphs, graph breaks, and ops
+        self.assertEqual(8, explain_output.graph_count)
+        self.assertEqual(7, explain_output.graph_break_count)
+        self.assertEqual(8, explain_output.op_count)
 
 
 if __name__ == "__main__":

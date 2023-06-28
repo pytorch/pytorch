@@ -95,7 +95,7 @@ static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
 //   we repeatedly we slice the input arguments (if they are BatchedTensors),
 //   put the sliced (or a not-sliced) version of the input onto the stack, invoke
 //   the operator, and then pop the results off the stack.
-void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+static void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   warnFallback(schema, /*in_place*/true);
 

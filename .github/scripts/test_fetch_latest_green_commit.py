@@ -140,7 +140,7 @@ class TestPrintCommits(TestCase):
         self.assertFalse(result[0])
         self.assertEqual(
             result[1],
-            "missing required workflows: pull, trunk, lint, linux-binary, windows-binary",
+            "missing required workflows: pull, trunk, lint, linux-binary",
         )
 
 

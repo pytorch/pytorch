@@ -5,7 +5,7 @@ from torch.autograd import DeviceType
 from collections import defaultdict, namedtuple
 from operator import attrgetter
 
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
 import bisect
 import math
@@ -388,7 +388,7 @@ class FunctionEvent(FormattedTimesMixin):
             self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
             is_remote=False, sequence_nr=-1, node_id=-1, device_type=DeviceType.CPU, device_index=0,
-            is_legacy=False, flops=None, trace_name=None):
+            is_legacy=False, flops=None, trace_name=None, concrete_inputs=None):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
@@ -401,6 +401,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.cpu_children: List[FunctionEvent] = []
         self.cpu_parent: Optional[FunctionEvent] = None
         self.input_shapes: Tuple[int, ...] = input_shapes
+        self.concrete_inputs: List[Any] = concrete_inputs
         self.stack: List = stack
         self.scope: int = scope
         self.cpu_memory_usage: int = cpu_memory_usage
@@ -646,7 +647,7 @@ def _filter_stack_entry(entry):
         ("_internal/common_utils", "prof_func_call"),
         ("_internal/common_utils", "prof_meth_call"),
     ]
-    return all([not (f[0] in entry and f[1] in entry) for f in filtered_entries])
+    return all(not (f[0] in entry and f[1] in entry) for f in filtered_entries)
 
 MEMORY_EVENT_NAME = "[memory]"
 OUT_OF_MEMORY_EVENT_NAME = "[OutOfMemory]"
@@ -692,10 +693,10 @@ def _build_table(
     if len(events) == 0:
         return ""
 
-    has_cuda_time = any([event.self_cuda_time_total > 0 for event in events])
-    has_cuda_mem = any([event.self_cuda_memory_usage > 0 for event in events])
+    has_cuda_time = any(event.self_cuda_time_total > 0 for event in events)
+    has_cuda_mem = any(event.self_cuda_memory_usage > 0 for event in events)
     has_input_shapes = any(
-        [(event.input_shapes is not None and len(event.input_shapes) > 0) for event in events])
+        (event.input_shapes is not None and len(event.input_shapes) > 0) for event in events)
 
     if sort_by is not None:
         events = EventList(sorted(
@@ -753,7 +754,7 @@ def _build_table(
         '# of Calls'
     )
     # Only append Node ID if any event has a valid (>= 0) Node ID
-    append_node_id = any([evt.node_id != -1 for evt in events])
+    append_node_id = any(evt.node_id != -1 for evt in events)
     if append_node_id:
         headers.append('Node ID')
 

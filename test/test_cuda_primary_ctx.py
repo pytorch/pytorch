@@ -2,17 +2,11 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocmVersionLessThan, NoTest
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 import sys
 import unittest
 
 # NOTE: this needs to be run in a brand new process
-
-# We cannot import TEST_CUDA and TEST_MULTIGPU from torch.testing._internal.common_cuda here,
-# because if we do that, the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed
-# multiple times as well during the execution of this test suite, and it will
-# cause CUDA OOM error on Windows.
-TEST_CUDA = torch.cuda.is_available()
-TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)

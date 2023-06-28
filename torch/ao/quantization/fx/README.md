@@ -202,10 +202,10 @@ The overall logic to insert QDQStub1 and QDQStub2 inplace is the following:
 # node_name_to_target_dtype_info =
 # {
 #     # this is placeholder node in FX Graph
-#     “input” : {“input_activation”: torch.float32, “output_activation”: torch.float32},
-#     “qat_linear_relu”: {“input_activation”: torch.quint8, “output_activation”: torch.quint8, “weight”: ...}
+#     "input" : {"input_activation": torch.float32, "output_activation": torch.float32},
+#     "qat_linear_relu": {"input_activation": torch.quint8, "output_activation": torch.quint8, "weight": ...}
 #     # this is the return node in FX Graph
-#     “output”: {“input_activation”: torch.float32, “output_activation”: torch.float32}
+#     "output": {"input_activation": torch.float32, "output_activation": torch.float32}
 # }
 ```
 Note: this map is generated before we insert qdqstub to graph1, and will not change in the process.
@@ -259,7 +259,7 @@ Let’s say the output of `qat_linear_relu` Node is configured as float32, both 
 }
 ```
 
-What we’ll do here is when we are trying to insert output QDQStub for `qat_linear_relu`, we look at the target output dtype for this node (node_name_to_target_dtype_info[“qat_linear_relu”][“output_activation”], and find that it is float, which is not a quantized dtype, so
+What we’ll do here is when we are trying to insert output QDQStub for `qat_linear_relu`, we look at the target output dtype for this node (node_name_to_target_dtype_info["qat_linear_relu"]["output_activation"], and find that it is float, which is not a quantized dtype, so
 will do nothing here.
 Note that this does not prevent other operators following `qat_linear_relu` to insert a QDQStub at the output of `qat_linear_relu`, since we are dealing with an `edge` of the graph here, and an `edge` is connected to two nodes, which means
 the output of `qat_linear_relu` will also be the input of a node following `qat_linear_relu`.

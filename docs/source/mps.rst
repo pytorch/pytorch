@@ -16,3 +16,13 @@ torch.mps
     set_per_process_memory_fraction
     current_allocated_memory
     driver_allocated_memory
+
+MPS Profiler
+------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    profiler.start
+    profiler.stop
+    profiler.profile

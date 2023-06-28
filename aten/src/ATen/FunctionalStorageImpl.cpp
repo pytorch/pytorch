@@ -39,7 +39,7 @@ ViewMeta ViewMeta::to_out_idx(int64_t out_idx) {
 // t = view2_inverse(a, t, 0)
 // t = view1_inverse(base, t, 0)  # t now represents the updated storage.
 // storage.base_ = t
-const Tensor apply_update(const FunctionalStorageImpl::Update& update, const Tensor& base) {
+static const Tensor apply_update(const FunctionalStorageImpl::Update& update, const Tensor& base) {
   at::Tensor t = update.new_val;
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
   if (update.view_metas.empty()) return t;
@@ -64,7 +64,7 @@ const Tensor apply_update(const FunctionalStorageImpl::Update& update, const Ten
 }
 
 
-c10::SymInt get_nbytes(const Tensor& value) {
+static c10::SymInt get_nbytes(const Tensor& value) {
   // The functionalization story when wrapping tensors that don't have storage
   // is a bit wonky, but fortunately for some models (e.g., dlrm) we never
   // actually perform mutations on these tensors, so you never really get
@@ -83,6 +83,7 @@ c10::SymInt get_nbytes(const Tensor& value) {
     if (value.key_set().has(c10::DispatchKey::Python)) {
       return value.storage().sym_nbytes();
     }
+    return at::detail::computeStorageNbytes(value.sym_sizes(), value.sym_strides(), value.dtype().itemsize(), value.sym_storage_offset());
   }
   // XLA storage objects also do not properly track nbytes.
   return at::detail::computeStorageNbytes(value.sizes(), value.strides(), value.dtype().itemsize(), value.storage_offset());

@@ -28,3 +28,5 @@ e3900d2ba5c9f91a24a9ce34520794c8366d5c54
 95b15c266baaf989ef7b6bbd7c23a2d90bacf687
 # 2022-06-11 [lint] autoformat test/cpp and torch/csrc
 30fb2c4abaaaa966999eab11674f25b18460e609
+# 2023-06-06 clang-format on Foreach / Multi-Tensor-Apply
+515c4279416f13fcc3c898e560f8ae8f15139a03

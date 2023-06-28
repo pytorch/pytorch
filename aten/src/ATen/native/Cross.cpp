@@ -41,7 +41,7 @@ namespace native {
 
 DEFINE_DISPATCH(cross_stub);
 
-int64_t _default_cross_dim(const c10::optional<int64_t> &dimension, SymIntArrayRef sizes) {
+static int64_t _default_cross_dim(const c10::optional<int64_t> &dimension, SymIntArrayRef sizes) {
   // If dimension is not given, it defaults to the first dimension found with the size 3.
   // Note that this behaviour might be unexpected.
   // _default_cross_dim is called internally inside the cross implementation to calculate

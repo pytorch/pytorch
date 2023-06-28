@@ -20,7 +20,7 @@ echo "cpp_doc_push_script.sh: Invoked with $*"
 #       but since DOCS_INSTALL_PATH can be derived from DOCS_VERSION it's probably better to
 #       try and gather it first, just so we don't potentially break people who rely on this script
 # Argument 2: What version of the Python API docs we are building.
-version="${2:-${DOCS_VERSION:-master}}"
+version="${2:-${DOCS_VERSION:-main}}"
 if [ -z "$version" ]; then
 echo "error: cpp_doc_push_script.sh: version (arg2) not specified"
   exit 1
@@ -35,7 +35,7 @@ echo "error: cpp_doc_push_script.sh: install_path (arg1) not specified"
 fi
 
 is_main_doc=false
-if [ "$version" == "master" ]; then
+if [ "$version" == "main" ]; then
   is_main_doc=true
 fi
 

@@ -262,7 +262,7 @@ void spmm_reduce_backward_input_arg_kernel_impl(
   int64_t M = grad_out.size(0);
   int64_t K = grad_out.size(1);
   auto grad = at::empty({M, K}, grad_out.options());
-  scalar_t* grad_data = grad.data_ptr<scalar_t>();
+  scalar_t* grad_data = grad.mutable_data_ptr<scalar_t>();
 
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
     for (const auto m : c10::irange(begin, end)) {
@@ -344,7 +344,7 @@ void spmm_reduce_backward_other_arg_kernel_impl(
   int64_t M = grad_out.size(0);
   int64_t K = grad_out.size(1);
   auto grad = at::empty({M, K}, grad_out.options());
-  scalar_t* grad_data = grad.data_ptr<scalar_t>();
+  scalar_t* grad_data = grad.mutable_data_ptr<scalar_t>();
 
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
     for (const auto m : c10::irange(begin, end)) {

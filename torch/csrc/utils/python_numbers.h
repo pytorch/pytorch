@@ -32,7 +32,16 @@ inline PyObject* THPUtils_packDoubleAsInt(double value) {
   return PyLong_FromDouble(value);
 }
 
+inline bool THPUtils_checkLongExact(PyObject* obj) {
+  return PyLong_CheckExact(obj) && !PyBool_Check(obj);
+}
+
 inline bool THPUtils_checkLong(PyObject* obj) {
+  // Fast path
+  if (THPUtils_checkLongExact(obj)) {
+    return true;
+  }
+
 #ifdef USE_NUMPY
   if (torch::utils::is_numpy_int(obj)) {
     return true;
@@ -114,6 +123,15 @@ inline bool THPUtils_unpackBool(PyObject* obj) {
   } else {
     throw std::runtime_error("couldn't convert python object to boolean");
   }
+}
+
+inline bool THPUtils_checkBool(PyObject* obj) {
+#ifdef USE_NUMPY
+  if (torch::utils::is_numpy_bool(obj)) {
+    return true;
+  }
+#endif
+  return PyBool_Check(obj);
 }
 
 inline bool THPUtils_checkDouble(PyObject* obj) {

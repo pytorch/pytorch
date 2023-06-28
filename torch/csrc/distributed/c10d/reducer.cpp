@@ -109,6 +109,8 @@ Reducer::Reducer(
       gradient_as_bucket_view_(gradient_as_bucket_view),
       local_used_map_reduced_(false),
       num_iterations_(0),
+      num_bwd_calls_(0),
+      first_autograd_hook_called_(false),
       num_buckets_ready_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
@@ -267,11 +269,11 @@ bool Reducer::dynamic_graph_find_unused() {
 }
 
 bool Reducer::static_graph_first_iteration() {
-  return static_graph_ && num_iterations_ == 1;
+  return static_graph_ && num_bwd_calls_ == 1;
 }
 
 bool Reducer::static_graph_after_first_iteration() {
-  return static_graph_ && num_iterations_ > 1;
+  return static_graph_ && num_bwd_calls_ > 1;
 }
 
 bool Reducer::ddp_graph_static() {
@@ -550,13 +552,13 @@ void Reducer::delay_all_reduce() {
   // unused_parameters_ will not change after 1st iteration.
   unused_parameters_.clear();
 
+  require_finalize_ = true;
   // copy all gradients to buckets
   for (const auto variable_index : c10::irange(params_.size())) {
     // set unused_parameters_
     if (numGradHooksTriggeredMap_[variable_index] == 0) {
       unused_parameters_.push_back(variable_index);
     }
-    require_finalize_ = true;
     set_divide_factor();
     if (expect_sparse_gradients_[variable_index]) {
       mark_variable_ready_sparse(variable_index);
@@ -613,6 +615,10 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(size_t index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
+  if (!first_autograd_hook_called_) {
+    first_autograd_hook_called_ = true;
+    num_bwd_calls_++;
+  }
   // Ignore if we don't expect to be called.
   // This may be the case if the user wants to accumulate gradients
   // for number of iterations before reducing them.
@@ -1464,11 +1470,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     }
 
     if (!gradient_as_bucket_view_) {
-      if (set_grads_to_none_) {
-        runGradCallbackForVariable(variable, [&](auto& grad) {
-          grad.reset();
-          return true;
-        });
+      if (optim_in_backward_) {
+        // Return early if optimizer has already run.
+        runGradCallbackForVariable(variable, [&](auto& grad) { return true; });
       } else {
         RECORD_FUNCTION(
             "torch.distributed.ddp.reducer::copy_bucket_to_grad",
@@ -1486,8 +1490,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         bucket_view_in.copy_(bucket_view_out);
       }
       runGradCallbackForVariable(variable, [&](auto& grad) {
-        if (set_grads_to_none_) {
-          grad.reset();
+        if (optim_in_backward_) {
+          // Return early if optimizer has already run.
           return true;
         }
         // If a parameter is globally unused, we keep its grad untouched.
@@ -1522,6 +1526,8 @@ void Reducer::finalize_backward() {
   // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
+  // reset for the next iteration
+  first_autograd_hook_called_ = false;
 
   // No longer require call to finalize after this function returns.
   TORCH_INTERNAL_ASSERT(require_finalize_);
@@ -1804,10 +1810,6 @@ void Reducer::register_builtin_comm_hook(
       TORCH_WARN_ONCE(
           "Unknown built-in DDP comm hook type is provided. No comm hook will be used.");
   }
-}
-
-void Reducer::set_grads_to_none(bool set_to_none) {
-  set_grads_to_none_ = set_to_none;
 }
 
 void Reducer::ensure_prior_reduction_finished() {
@@ -2243,6 +2245,11 @@ void Reducer::remove_autograd_hooks() {
         "Reducer attempts to delete a non-existing hook.");
   }
   hooks_.clear();
+}
+
+void Reducer::check_finalized() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  ensure_prior_reduction_finished();
 }
 
 } // namespace c10d

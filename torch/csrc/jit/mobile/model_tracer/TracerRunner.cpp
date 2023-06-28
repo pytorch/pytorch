@@ -94,6 +94,44 @@ void call_setup_methods() {
 }
 
 /**
+ * Similar to setup methods there are a suite a functions that often appear
+ * under certain conditions but may avoid getting called in the trace due to the
+ * narrow nature of bundled inputs
+ */
+void call_dependent_methods(std::set<std::string>& root_ops) {
+  bool is_training = false;
+  bool has_batchnorm = false;
+  bool has_dropout = false;
+  for (const std::string& op : root_ops) {
+    if (op.find("backward") != std::string::npos ||
+        op.find("requires_grad_") != std::string::npos) {
+      is_training = true;
+    }
+    if (op.find("batch_norm") != std::string::npos) {
+      has_batchnorm = true;
+    }
+    if (op.find("dropout") != std::string::npos) {
+      has_dropout = true;
+    }
+  }
+  if (is_training && has_batchnorm) {
+    at::batch_norm(
+        at::ones({2, 2}),
+        c10::nullopt,
+        c10::nullopt,
+        c10::nullopt,
+        c10::nullopt,
+        true,
+        0.1,
+        0.1,
+        false);
+  }
+  if (is_training && has_dropout) {
+    at::dropout(at::ones({20, 20, 20}), 0.2, true);
+  }
+}
+
+/**
  * Call methods on the Tensor object that we expect to be called
  * in production on this Tensor.
  */
@@ -306,6 +344,8 @@ TracerResult trace_run(const std::vector<std::string>& input_module_paths) {
           << ex.what() << "\n Skipping FBGEMM execution" << std::endl;
     }
   }
+
+  call_dependent_methods(root_ops);
 
   op_tracer.getCalledOperators().withLock(
       [&](std::set<std::string>& called_operators) {

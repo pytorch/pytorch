@@ -17,7 +17,7 @@ operator can be used in an in-place fashion by using the same input blob as the
 output blob.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/floor_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/floor_op.cc
 
 <details>
 

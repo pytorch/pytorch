@@ -4,6 +4,7 @@ import itertools
 from typing import Optional
 
 import torch
+import torch._dynamo
 import torch.fx
 from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
@@ -19,21 +20,19 @@ class ShapeInferenceWithFakeTensor(_pass.Transform):
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         assert not kwargs, "`kwargs` is not supported."
 
-        # NOTE: torch.fx.Transformer makes a copy of the graph only but shares weights
-        # with the original module.
-        module = torch.fx.Transformer(self.module).transform()
-
         # NOTE(titaiwang): Usually fx graph should have all the node meta value we need,
         # so we don't have to run FakeTensorProp to fill in node meta values. However, this
-        # can be used to validate op-level debugging when we only have symbolic shapes in
-        # graph
+        # is used to fill in static shapes, which are needed by op-level debugging,
+        # when we only have symbolic shapes in graph
 
         # Use this FakeTensorMode to
         # 1. convert nn.Parameter's in nn.Module to FakeTensor
         # 2. run FakeTensorProp
         # If (1) and (2) are done with difference FakeTensorMode's, undefined behavior may
         # happen.
-        fake_tensor_mode = fake_tensor.FakeTensorMode()
+        fake_tensor_mode = (
+            torch._dynamo.utils.detect_fake_mode(args) or fake_tensor.FakeTensorMode()
+        )
 
         def to_fake_tensor(x):
             if isinstance(x, torch.Tensor) and not isinstance(
@@ -47,19 +46,16 @@ class ShapeInferenceWithFakeTensor(_pass.Transform):
         fake_parameters_and_buffers = {
             k: to_fake_tensor(v)
             for k, v in itertools.chain(
-                module.named_parameters(), module.named_buffers()
+                self.module.named_parameters(), self.module.named_buffers()
             )
         }
         # Shape inference via FakeTensorProp
-        with stateless._reparametrize_module(module, fake_parameters_and_buffers):
+        with stateless._reparametrize_module(self.module, fake_parameters_and_buffers):
             # Assign output types and shapes to each node without meta values.
-            FakeTensorPropGetStaticShapes(module, fake_tensor_mode).propagate(*args)
+            FakeTensorPropGetStaticShapes(self.module, fake_tensor_mode).propagate(
+                *args
+            )
 
-        # NOTE: Embed the `nodes with static shape`` into original node metadata
-        for node, node_with_static_shapes in zip(
-            self.module.graph.nodes, module.graph.nodes
-        ):
-            node.meta["node_with_static_shape"] = node_with_static_shapes
         return self.module
 
 
@@ -67,7 +63,7 @@ class FakeTensorPropGetStaticShapes(torch.fx.Interpreter):
     """
     This is heavily referenced from torch.fx.passes.fake_tensor_prop.FakeTensorProp
     The only difference is that FakeTensorPropGetStaticShapes supports int/float/bool in
-    node.meta["val"]
+    node.meta["static_shape"]
 
     Args:
          module (GraphModule): The module to be executed
@@ -84,8 +80,8 @@ class FakeTensorPropGetStaticShapes(torch.fx.Interpreter):
             mode = fake_tensor.FakeTensorMode()
         self._mode = mode
 
-    def run_node(self, n: torch.fx.Node):
-        result = super().run_node(n)
+    def run_node(self, node: torch.fx.Node):
+        result = super().run_node(node)
 
         def extract_val(obj):
             if isinstance(obj, fake_tensor.FakeTensor):
@@ -102,7 +98,8 @@ class FakeTensorPropGetStaticShapes(torch.fx.Interpreter):
 
         meta = map_aggregate(result, extract_val)
         if meta is not None:
-            n.meta["val"] = meta
+            # A new metavalue: static shape is created for op_level_debug.
+            node.meta["static_shape"] = meta
         return result
 
     def propagate(self, *args):

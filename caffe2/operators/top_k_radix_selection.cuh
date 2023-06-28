@@ -6,6 +6,7 @@
 #include "caffe2/utils/GpuScanUtils.cuh"
 #include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
+#include <c10/cuda/CUDADeviceAssertion.h>
 #include <cuda_runtime.h>
 
 namespace caffe2 {
@@ -161,7 +162,11 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
 
   // Scan over all the data. Upon a read, the warp will accumulate
   // counts per each digit in the radix using warp voting.
-  for (int i = threadIdx.x; i < sliceSize; i += blockDim.x) {
+#if !defined(USE_ROCM)
+  // Must be called outside of loop to ensure all threads participate
+  unsigned mask = __ballot_sync(0xffffffff, threadIdx.x < sliceSize);
+#endif
+  for (int i = threadIdx.x; i < sliceSize;) {
     BitDataType val = TopKTypeConfig<DataType>::convert(data[i]);
 
     bool hasVal = ((val & desiredMask) == desired);
@@ -173,9 +178,13 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
 #if defined(USE_ROCM)
       counts[j] += __popcll(__ballot(vote));
 #else
-      counts[j] += __popc(__ballot_sync(__activemask(), vote));
+      counts[j] += __popc(__ballot_sync(mask, vote));
 #endif  // USE_ROCM
     }
+    i += blockDim.x;
+#if !defined(USE_ROCM)
+    mask = __ballot_sync(mask, i < sliceSize);
+#endif
   }
 
   // Now, for each warp, sum values

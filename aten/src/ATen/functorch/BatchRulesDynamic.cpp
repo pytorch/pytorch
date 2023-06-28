@@ -17,6 +17,7 @@
 
 namespace at { namespace functorch {
 
+namespace {
 void unsupportedDynamicOp(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     TORCH_CHECK(false, "vmap: We do not support batching operators that can output dynamic shape. ",
         "Attempted to vmap over ", op.schema().operator_name(), ". ",
@@ -59,6 +60,7 @@ void unsupportedAllclose(const c10::OperatorHandle& op, torch::jit::Stack* stack
     TORCH_CHECK(false,
         "vmap over torch.allclose isn't supported yet. Please voice your ",
         "support over at github.com/pytorch/functorch/issues/275");
+}
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {

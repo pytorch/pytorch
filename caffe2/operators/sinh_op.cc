@@ -45,7 +45,7 @@ Calculates the hyperbolic sine of the given input tensor, element-wise.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/sinh_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/sinh_op.cc
 
 
 <details>
