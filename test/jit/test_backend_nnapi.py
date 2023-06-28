@@ -8,7 +8,6 @@ import torch
 import torch._C
 from pathlib import Path
 from test_nnapi import TestNNAPI
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -27,13 +26,10 @@ Inherits most tests from TestNNAPI, which loads Android NNAPI models
 without the delegate API.
 """
 # First skip is needed for IS_WINDOWS or IS_MACOS to skip the tests.
-# Second skip is because ASAN is currently causing an error.
-# It is still unclear how to resolve this. T95764916
 torch_root = Path(__file__).resolve().parent.parent.parent
 lib_path = torch_root / 'build' / 'lib' / 'libnnapi_backend.so'
 @unittest.skipIf(not os.path.exists(lib_path),
                  "Skipping the test as libnnapi_backend.so was not found")
-@unittest.skipIf(TEST_WITH_ASAN, "Unresolved bug with ASAN")
 class TestNnapiBackend(TestNNAPI):
     def setUp(self):
         super().setUp()

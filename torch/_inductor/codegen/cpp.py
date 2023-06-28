@@ -663,15 +663,6 @@ class CppVecOverrides(OpOverrides):
             return f"cvt_fp32_to_bf16({x})"
         if opt_ctx_x.dtype == torch.bfloat16 and dtype in (torch.float, torch.float32):
             return f"cvt_bf16_to_fp32({x})"
-        if opt_ctx_x.dtype == torch.uint8 and dtype in (torch.float, torch.float32):
-            # Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
-            return f"at::vec::convert_uint8_to_float({x})"
-        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.uint8:
-            # TODO(Leslie): Add fast path to at::vec::convert_float_to_uint8,
-            # if we already handle the saturation previously.
-            # * Pattern match of quantization op in the loop body.
-            # * Skip the explicit saturation and clamp inside at::vec::convert_float_to_uint8.
-            return f"at::vec::convert_float_to_uint8({x})"
         # TODO(jgong5): support conversion for other types
         # currently we only allow load/store torch.uint8 and handle conversion there
         return f"({x})"
@@ -1360,7 +1351,7 @@ class CppVecKernel(CppKernel):
                 loadbuf = f"flag_to_float_scalar({loadbuf})"
             line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
-            line = f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
+            line = f"at::vec::load_uint8_as_float({var_expr})"
         elif is_mask:
             line = f"flag_to_float_vec({loadbuf})"
         elif dtype in [torch.bfloat16]:
@@ -1405,8 +1396,13 @@ class CppVecKernel(CppKernel):
             var_expr = "tmpbuf"
         if V.graph.get_dtype(name) in [torch.bfloat16]:
             line = f"{value}.store({var_expr}, {self.tiling_factor});"
-        elif V.graph.get_dtype(name) in [torch.uint8]:
-            line = f"{value}.store({var_expr}, {self.tiling_factor});"
+        elif (V.graph.get_dtype(name) in [torch.uint8]) and (
+            opt_ctx.is_store_float_as_uint8
+        ):
+            # TODO(Leslie): Optimize the implementation of store_float_as_uint8
+            # * Pattern match of quantization op in the loop body.
+            # * Skip the explicit saturation and clamp inside store_float_as_uint8.
+            line = f"at::vec::store_float_as_uint8({value}, {var_expr});"
         else:
             line = f"{value}.store({var_expr});"
         if non_contiguous:
@@ -1622,7 +1618,7 @@ class CppTile2DKernel(CppVecKernel):
                 V.graph.get_dtype(name) in [torch.uint8]
                 and opt_ctx.is_load_uint8_as_float
             ):
-                line = f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
+                line = f"at::vec::load_uint8_as_float({loadbuf})"
             else:
                 line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             return self.cse.generate(self.loads, line)
@@ -1650,8 +1646,11 @@ class CppTile2DKernel(CppVecKernel):
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
                 line = f"{value}.store({storebuf}, {self.tiling_factor});"
-            elif V.graph.get_dtype(name) in [torch.uint8]:
-                line = f"{value}.store({storebuf}, {self.tiling_factor});"
+            elif (
+                V.graph.get_dtype(name) in [torch.uint8]
+                and opt_ctx.is_store_float_as_uint8
+            ):
+                line = f"at::vec::store_float_as_uint8({value}, {storebuf});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
@@ -1845,7 +1844,10 @@ class CppVecKernelChecker(CppVecKernel):
 
             if store_dtype in [torch.uint8]:
                 value_node = node_ctx.get_fx_node().all_input_nodes[-1]
-                if not self.can_store_fp32_as_uint8(name, value_node):
+                opt_ctx.is_store_float_as_uint8 = self.can_store_fp32_as_uint8(
+                    name, value_node
+                )
+                if not opt_ctx.is_store_float_as_uint8:
                     self.disable_vec("not support store float32 as uint8")
                     return self.simd_vec
 
@@ -2072,8 +2074,13 @@ class CppVecKernelChecker(CppVecKernel):
                                 if input_value.target == "load"
                                 else input_value.args[-1]
                             )
-                            if dtype in [torch.bfloat16, torch.float, torch.uint8]:
-                                # Convert from dtype to torch.float
+                            if (dtype == torch.uint8) and (
+                                input_value.target == "load"
+                            ):
+                                # 1. doing uint8 to float.
+                                # 2. the previous node of uint8 to float is load.
+                                opt_ctx.is_load_uint8_as_float = True
+                            elif dtype in [torch.bfloat16, torch.float]:
                                 pass
                             elif (
                                 dtype in [torch.int32, torch.int64]
@@ -2108,7 +2115,10 @@ class CppVecKernelChecker(CppVecKernel):
                     elif dtype == torch.bool:
                         pass
                     elif dtype == torch.uint8:
-                        if not all(usr.target in ["store"] for usr in cur_node.users):
+                        opt_ctx.is_store_float_as_uint8 = all(
+                            usr.target in ["store"] for usr in cur_node.users
+                        )
+                        if not opt_ctx.is_store_float_as_uint8:
                             self.disable_vec(f"to_dtype: dtype {dtype}")
                     else:
                         self.disable_vec(f"to_dtype: dtype {dtype}")
