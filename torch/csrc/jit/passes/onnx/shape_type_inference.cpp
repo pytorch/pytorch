@@ -488,7 +488,8 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
   uint64_t shape_ratio = 1;
   std::unordered_map<int64_t, int64_t> sym_map;
   for (const c10::ShapeSymbol& input_shape : input_shape_vector) {
-    if (input_shape.is_static()) {
+    // input_shape.static_size() could be zero when torch.tensor([]) is used.
+    if (input_shape.is_static() && input_shape.static_size() != 0) {
       if (shape_ratio >=
           std::numeric_limits<uint64_t>::max() / input_shape.static_size()) {
         TORCH_WARN(
@@ -1820,6 +1821,40 @@ void FetchBlockInputMetadataFromParent(Block* b) {
   }
 }
 
+void RemoveProcessedInputs(const Node* n) {
+  // After processing a node for shape inference, remove intermediate tensors
+  // that are stored in ConstantValueMap to reduce memory usage.
+  // This will only remove tensors that are no longer needed by any other node.
+
+  // Returns whether a node was already processed for shape inference.
+  const auto isNodeProcessed = [](const Node* node) {
+    const auto& outputs = node->outputs();
+    return std::any_of(outputs.begin(), outputs.end(), [](const Value* output) {
+      // Assumes shape inference can at least determine the rank of the outputs.
+      // If this assumption is wrong, some intermediate tensors will only be
+      // deleted once shape inference is completed for the entire graph.
+      return ConstantValueMap::HasRank(output->debugName());
+    });
+  };
+
+  // An input value is no longer needed if all of its consumer nodes
+  // have already been processed.
+  const auto isValueNoLongerNeeded = [isNodeProcessed](const Value* input) {
+    const auto& uses = input->uses();
+    return std::all_of(
+        uses.begin(), uses.end(), [isNodeProcessed](const Use& use) {
+          return isNodeProcessed(use.user);
+        });
+  };
+
+  for (const auto* input : n->inputs()) {
+    if (ConstantValueMap::HasValue(input->debugName()) &&
+        isValueNoLongerNeeded(input)) {
+      ConstantValueMap::EraseValue(input->debugName());
+    }
+  }
+}
+
 void ONNXShapeTypeInference(
     Block* b,
     const ParamMap& params_dict,
@@ -1849,6 +1884,7 @@ void ONNXShapeTypeInference(
       ONNXShapeTypeInference(subblock, params_dict, opset_version);
     }
     ONNXShapeTypeInference(n, params_dict, opset_version);
+    RemoveProcessedInputs(n);
   }
 }
 

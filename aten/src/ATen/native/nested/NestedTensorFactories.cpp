@@ -6,7 +6,7 @@
 namespace at {
 namespace native {
 
-TensorOptions verify_empty_parameters(
+static TensorOptions verify_empty_parameters(
     const at::Tensor& self,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,

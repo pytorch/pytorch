@@ -10,7 +10,7 @@ from ..virtualized import ops
 from .post_grad import register_lowering_pattern
 
 
-if torch._C.has_mkldnn:
+if torch._C._has_mkldnn:
     aten = torch.ops.aten
     mkldnn = torch.ops.mkldnn
     _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
@@ -288,6 +288,7 @@ if torch._C.has_mkldnn:
         if any(
             n.args[0].meta["val"].size() != n.args[1].meta["val"].size()
             or n.args[0].meta["val"].device != n.args[1].meta["val"].device
+            or n.args[0].meta["val"].dtype != n.args[1].meta["val"].dtype
             for n in binary_nodes
         ):
             return False

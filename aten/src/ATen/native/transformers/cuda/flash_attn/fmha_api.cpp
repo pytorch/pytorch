@@ -48,7 +48,7 @@
 
 #define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
-namespace fmha {
+namespace pytorch_fmha {
 
 void set_params_fprop(FMHA_fprop_params &params,
                       // sizes
@@ -341,8 +341,13 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         }
         launch_params.params.philox_args = philox_state;
     } else {
-        seed_t = at::empty({}, at::dtype(at::kLong));
-        offset_t = at::empty({}, at::dtype(at::kLong));
+        if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+            seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+            offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+        } else {
+            seed_t = at::empty({}, at::dtype(at::kLong));
+            offset_t = at::empty({}, at::dtype(at::kLong));
+        }
     }
 
     run_fmha_fwd(launch_params);

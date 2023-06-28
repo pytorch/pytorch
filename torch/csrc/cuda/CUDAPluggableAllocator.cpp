@@ -297,7 +297,7 @@ void CUDAPluggableAllocator::enablePeerAccess(int dev, int dev_to_access) {
   cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
   if (err == cudaErrorPeerAccessAlreadyEnabled) {
     // ignore and clear the error if access was already enabled
-    cudaGetLastError();
+    (void)cudaGetLastError();
   } else {
     C10_CUDA_CHECK(err);
   }

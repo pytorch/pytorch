@@ -498,6 +498,8 @@ def _get_share_qparams_op_configs(dtype_configs):
         torch.nn.MaxPool1d,
         torch.nn.MaxPool2d,
         torch.nn.MaxPool3d,
+        torch.nn.PixelShuffle,
+        torch.nn.PixelUnshuffle,
         torch.nn.ReLU,
         torch.nn.ReLU6,
         torch.adaptive_avg_pool1d,

@@ -6,6 +6,7 @@ import types
 from typing import List
 
 import torch.nn
+from . import utils
 
 from .bytecode_transformation import (
     create_call_function,
@@ -123,14 +124,16 @@ class PyCodegen:
                 )
             else:
                 graph_outputs[graph_outputs_key].merge(value)
-
+            if isinstance(value, NumpyNdarrayVariable):
+                self.load_import_from(utils.__name__, "to_numpy_helper")
             output.append(self.create_load(self.graph_output_var))
             output.append(
                 self._create_load_const(graph_outputs[graph_outputs_key].index)
             )
             output.append(create_instruction("BINARY_SUBSCR"))
-
-            if isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
+            if isinstance(value, NumpyNdarrayVariable):
+                output.extend(create_call_function(1, False))
+            elif isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
                 output.extend(
                     [self.create_load_attr("item")] + create_call_function(0, True)
                 )
@@ -294,12 +297,12 @@ class PyCodegen:
         """
         Generate a LOAD_GLOBAL instruction to fetch a given python module.
         """
-        root_globals = self.tx.output.root_globals
+        global_scope = self.tx.output.global_scope
         name = re.sub(r"^.*[.]", "", mod.__name__)
-        if root_globals.get(name, None) is mod:
+        if global_scope.get(name, None) is mod:
             return self.create_load_global(name, push_null, add=True)
         mangled_name = f"___module_{name}_{id(mod)}"
-        if mangled_name not in root_globals:
+        if mangled_name not in global_scope:
             self.tx.output.install_global(mangled_name, mod)
         return self.create_load_global(mangled_name, push_null, add=True)
 
@@ -313,7 +316,7 @@ class PyCodegen:
                 self.extend_output(
                     [
                         self.create_load_python_module(torch, True),
-                        self.create_load_attr("tensor"),
+                        self.create_load_attr("as_tensor"),
                     ]
                 )
                 self.extend_output(arg.load(self))

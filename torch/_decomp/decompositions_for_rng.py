@@ -75,11 +75,13 @@ class PhiloxState:
         self.seed = torch.tensor(())
         self.base_offset = torch.tensor(())
         self.relative_offset = 0
+        self.offset_advanced_alteast_once = False
 
     def validate_state(self):
         assert self.seed.numel() != 0 and self.base_offset.numel() != 0
 
     def advance_offset(self, consumed_offset):
+        self.offset_advanced_alteast_once = True
         self.relative_offset = self.relative_offset + consumed_offset
 
     def set_state(self, seed, base_offset, relative_offset=0):
@@ -98,7 +100,7 @@ class PhiloxState:
 
     def set_state_from_tensor(self, state):
         # Only needed because we override set_rng_state.
-        self.seed, self.base_offset = torch.split(state, 1)
+        self.seed, self.base_offset = torch.unbind(state)
         self.relative_offset = 0
 
 
@@ -194,12 +196,18 @@ class PhiloxStateTracker:
 
     @classmethod
     def get_updated_fwd_offset(cls):
+        # Short circuit if no rand ops were observed
+        if not cls.fwd_state.offset_advanced_alteast_once:
+            return cls.fwd_state.base_offset
         return cls.multiple_of_4(
             cls.fwd_state.base_offset + cls.fwd_state.relative_offset
         )
 
     @classmethod
     def get_updated_bwd_offset(cls):
+        # Short circuit if no rand ops were observed
+        if not cls.bwd_state.offset_advanced_alteast_once:
+            return cls.bwd_state.base_offset
         return cls.multiple_of_4(
             cls.bwd_state.base_offset + cls.bwd_state.relative_offset
         )

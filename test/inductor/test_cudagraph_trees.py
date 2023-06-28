@@ -10,6 +10,7 @@ import warnings
 import torch
 
 import torch._dynamo
+import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._inductor import config
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
@@ -19,6 +20,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
     IS_WINDOWS,
+    TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -112,6 +114,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         "triton.slow_path_cudagraph_asserts": True,
                     }
                 )
+            )
+            self.graph_stack.enter_context(
+                dynamo_config.patch(automatic_dynamic_shapes=True)
             )
             self.device_idx = torch.rand([0], device="cuda").device.index
             warnings.filterwarnings("ignore")
@@ -693,6 +698,27 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(self.curr_node().cached_tensor_outputs, [None, None])
 
+        def test_empty_storage(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return (x + x + x), torch.zeros([0], device="cuda")
+
+            inp = torch.rand([4], device="cuda")
+            for _ in range(3):
+                out = foo(inp)
+                node = self.curr_node()
+                self.assertEqual(len(list(node.path_live_weakrefs())), 1)
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return (x + x + x), torch.rand([4], device="cuda") + 10
+
+            inp = torch.rand([0], device="cuda")
+            for _ in range(3):
+                out = foo(inp)
+                node = self.curr_node()
+                self.assertEqual(len(list(node.path_live_weakrefs())), 1)
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_aliased_output_checkpoint(self):
             def foo(args):
@@ -894,7 +920,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(self.curr_node().expected_dead_indices_before_graph, [])
             self.assertEqual(
                 self.curr_node().expected_dead_indices_after_graph,
-                [(0, 1), (0, 2), (0, 3)],
+                [(0, 1), (0, 2)],
             )
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
@@ -994,19 +1020,36 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             test()
             self.assertTrue(self.get_manager(device_index=1) is None)
 
-        def test_warnings_on_dealloc(self):
+        def test_error_on_dealloc_use(self):
             @torch.compile()
             def foo(x):
                 return x * x * x
 
             inp = torch.rand([4], device="cuda")
             out = foo(inp)
-            warnings.resetwarnings()
-            with warnings.catch_warnings(record=True) as w:
-                foo(inp)
+            out2 = foo(inp)
 
-            self.assertTrue(len(w) == 1)
-            self.assertTrue("x * x * x" in str(w[0]))
+            with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
+                out + out
+
+            foo(inp)
+
+            with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
+                out2 + out2
+
+        @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+        def test_conv_benchmark(self):
+            with torch.backends.cudnn.flags(
+                enabled=True, benchmark=True, deterministic=False
+            ):
+                m = torch.nn.Conv2d(5, 6, [3, 3]).cuda()
+                inp = torch.randn([2, 5, 16, 16]).cuda()
+
+                @torch.compile()
+                def foo(m, inp):
+                    return m(inp)
+
+                foo(m, inp)
 
         def test_single_stream_use(self):
             @torch.compile()
@@ -1055,9 +1098,43 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
+        def test_warn_on_pending_backward(self):
+            @torch.compile
+            def foo(x):
+                return x * x * x
+
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+
+            warnings.resetwarnings()
+            with warnings.catch_warnings(record=True) as w:
+                out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+
+            FileCheck().check(
+                "Unable to hit fast path of CUDAGraphs because of pending"
+            ).run(str(w[0]))
+            self.assertTrue(self.get_manager().new_graph_id().id == 0)
+
+        def test_mark_step(self):
+            @torch.compile
+            def foo(x):
+                return x * x * x
+
+            torch._inductor.cudagraph_mark_step_begin()
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+
+            torch._inductor.cudagraph_mark_step_begin()
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
+    if not TEST_CUDA_GRAPH:
+        if __name__ == "__main__":
+            sys.exit(0)
+        raise unittest.SkipTest("cuda graph test is skipped")
 
     if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
         run_tests(needs="filelock")

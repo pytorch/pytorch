@@ -1,6 +1,7 @@
 from typing import Optional
-import torch.distributed as dist
 
+import torch
+import torch.distributed as dist
 from .planner import SavePlanner
 from .default_planner import DefaultSavePlanner
 
@@ -76,6 +77,9 @@ def save_state_dict(
         and it is the user's responsibility to ensure that this is set so that
         each rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
+
+    torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
+
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
         planner = DefaultSavePlanner()

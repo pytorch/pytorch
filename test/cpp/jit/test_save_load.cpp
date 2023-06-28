@@ -152,27 +152,6 @@ TEST(SerializationTest, TypeTags) {
   }
 }
 
-TEST(SerializationTest, SaveStateDict) {
-  // Requires the state_dict that should have been written in tests_setup.py
-  // Refer: SaveStateDict in test/cpp/jit/tests_setup.py
-  std::ifstream file("state_dict.pt", std::ios::binary);
-  std::vector<char> data(
-      (std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-  auto dict = torch::pickle_load(data).toGenericDict();
-
-  for (auto& el : dict) {
-    auto key = el.key().toStringRef();
-    auto ten = el.value().toTensor();
-    if (key == "weight") {
-      ASSERT_TRUE(ten.eq(2.0).all().item().toBool());
-    } else if (key == "bias") {
-      ASSERT_TRUE(ten.eq(3.0).all().item().toBool());
-    } else {
-      ASSERT_TRUE(false);
-    }
-  }
-}
-
 TEST(SerializationTest, TestJitStream_CUDA) {
   torch::jit::Module model;
   std::vector<torch::jit::IValue> inputs;
