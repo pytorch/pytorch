@@ -2142,6 +2142,20 @@ class ShapeEnv:
             return int(sym)
         return SymInt(SymNode(sym, self, int, hint))
 
+    def create_symint_and_symbol(self, value, source, dynamic_dim):
+        # TODO: This is wrong wrong wrong, create_symbol will
+        # generate something that is non-negative, but this is
+        # not a sound assumption to make.
+        # Not fixing as this was a preexisting condition.
+        return self.create_symintnode(
+            self.create_symbol(
+                value,
+                source=source,
+                dynamic_dim=dynamic_dim,
+            ),
+            hint=value,
+        )
+
     def create_symboolnode(self, sym: "sympy.Expr"):
         return SymBool(SymNode(sym, self, bool, None))
 

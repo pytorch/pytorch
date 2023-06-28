@@ -2,6 +2,7 @@
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/utils/python_stub.h>
+#include <torch/csrc/utils/torch_dispatch_mode.h>
 #include <iostream>
 #include <typeindex>
 #include <vector>
@@ -437,7 +438,8 @@ class SwapSavedVariables {
   }
 
   void before(SavedVariable& t) {
-    c10::impl::DisableTorchDispatchModeGuard no_modes; // for unpack
+    torch::torch_dispatch_mode::StashTorchDispatchStackGuard
+        no_modes; // for unpack
     bool defined = t.unpack(node).defined();
     stashed_variables.emplace_back(std::move(t));
     if (defined) {

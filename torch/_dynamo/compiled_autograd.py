@@ -38,7 +38,8 @@ class AutogradCompilerInstance:
         assert isinstance(x, torch.Tensor)
         return self.fake_tensor_mode.from_tensor(x, source=source)
 
-    def source(self, name, idx):
+    @staticmethod
+    def source(name, idx):
         return GetItemSource(LocalSource(name), idx)
 
     def begin_capture(self, inputs: List[torch.Tensor], sizes: List[int]):
@@ -60,13 +61,10 @@ class AutogradCompilerInstance:
 
         # size inputs to symints
         sizes = [
-            self.shape_env.create_symintnode(
-                self.shape_env.create_symbol(
-                    val,
-                    self.source("sizes", idx),
-                    dynamic_dim=DimDynamic.DYNAMIC,
-                ),
-                hint=val,
+            self.shape_env.create_symint_and_symbol(
+                val,
+                self.source("sizes", idx),
+                DimDynamic.DYNAMIC,
             )
             for idx, val in enumerate(sizes)
         ]
@@ -81,16 +79,22 @@ class AutogradCompilerInstance:
         self.stack.enter_context(disable_proxy_modes_tracing(enable_current=True))
         return inputs, sizes
 
-    def tensor_pre_hook(self, inputs, hook_id, i: int):
-        hook = self.hooks_proxy[hook_id]
-        proxy = self.fx_tracer.create_proxy(
+    def proxy_call_hook(self, hook, *args):
+        return self.fx_tracer.create_proxy(
             "call_function",
             call_hook,
             (
                 hook,
-                self.to_proxy(inputs[i]),
+                *[self.to_proxy(x) for x in args],
             ),
             {},
+        )
+
+    def tensor_pre_hook(self, inputs, hook_id, i: int):
+        hook = self.hooks_proxy[hook_id]
+        proxy = self.proxy_call_hook(
+            hook,
+            inputs[i],
         )
         with disable_proxy_modes_tracing():
             inputs[i] = inputs[i].clone()
@@ -99,14 +103,9 @@ class AutogradCompilerInstance:
 
     def pre_hook(self, inputs, hook_id):
         hook = self.hooks_proxy[hook_id]
-        proxies = self.fx_tracer.create_proxy(
-            "call_function",
-            call_hook,
-            (
-                hook,
-                self.to_proxy(inputs),
-            ),
-            {},
+        proxies = self.proxy_call_hook(
+            hook,
+            inputs,
         )
         with disable_proxy_modes_tracing():
             inputs = [x.clone() for x in inputs]
@@ -115,15 +114,10 @@ class AutogradCompilerInstance:
 
     def post_hook(self, outputs, inputs, hook_id):
         hook = self.hooks_proxy[hook_id]
-        proxies = self.fx_tracer.create_proxy(
-            "call_function",
-            call_hook,
-            (
-                hook,
-                self.to_proxy(outputs),
-                self.to_proxy(inputs),
-            ),
-            {},
+        proxies = self.proxy_call_hook(
+            hook,
+            outputs,
+            inputs,
         )
         with disable_proxy_modes_tracing():
             outputs = [x.clone() for x in outputs]
