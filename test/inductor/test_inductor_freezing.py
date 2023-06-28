@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import copy
 import functools
 import importlib
 import os
@@ -10,9 +11,18 @@ import weakref
 import torch
 
 import torch._dynamo
+import torch._dynamo as torchdynamo
+import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
 from torch._inductor import config
+from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import run_and_get_code
+from torch.ao.quantization._pt2e.quantizer import X86InductorQuantizer
+from torch.ao.quantization._quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
 from torch.testing import FileCheck
+from torch.testing._internal.common_quantization import (
+    skipIfNoDynamoSupport,
+    skipIfNoONEDNN,
+)
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -154,6 +164,53 @@ class OptimizeForInferenceTemplate(TestCase):
                 FileCheck().check_not("@triton.jit").run(code[0])
                 self.assertEqual(out_eager, out_compiled)
 
+    def test_mm_concat(self):
+        class MM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.t1 = torch.nn.Parameter(torch.rand(10, 10))
+                self.t2 = torch.nn.Parameter(torch.rand(10, 10))
+                self.t3 = torch.nn.Parameter(torch.rand(10, 10))
+
+            def forward(self, x):
+                return x @ self.t1, x @ self.t2, x @ self.t3
+
+        class AddMM(MM):
+            def __init__(self):
+                super().__init__()
+
+                self.b1 = torch.nn.Parameter(torch.rand([10]))
+                self.b2 = torch.nn.Parameter(torch.rand([10]))
+                self.b3 = torch.nn.Parameter(torch.rand([10]))
+
+            def forward(self, x):
+                return [
+                    aten.addmm(b, x, p)
+                    for b, p in [
+                        (self.b1, self.t1),
+                        (self.b2, self.t2),
+                        (self.b3, self.t3),
+                    ]
+                ]
+
+        for mod in [MM().to(self.device), AddMM().to(self.device)][1:]:
+            inp = torch.rand([10, 10]).to(self.device)
+
+            @torch.compile()
+            def foo(mod, inp):
+                return mod(inp)
+
+            kernel_invoke = "kernel_cpp_0" if self.device == "cpu" else "triton.jit"
+
+            with torch.no_grad():
+                out_eager = mod(inp)
+                out, code = run_and_get_code(foo, mod, inp)
+                FileCheck().check_not(kernel_invoke).check_count(
+                    "mm(", count=1, exactly=True
+                ).run(code[0])
+                self.assertEqual(out_eager, out)
+
     def test_error_on_eager(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 
@@ -286,6 +343,40 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
 
 del OptimizeForInferenceTemplate
+
+
+@skipIfNoDynamoSupport
+class OptimizeForInferenceQuantizationPT2E(TestCase):
+    @skipIfNoONEDNN
+    def test_functional_constant_folding_after_dynamo_export(self):
+        m = ConvBN(3, 3, kernel_size=3, stride=2).eval().to("cpu")
+        example_inputs = (torch.randn(1, 3, 9, 9).to("cpu"),)
+        export_model, guards = torchdynamo.export(
+            m,
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+        )
+
+        quantizer = X86InductorQuantizer()
+        operator_config = xiq.get_default_x86_inductor_quantization_config()
+        quantizer.set_global(operator_config)
+        with torch.no_grad(), config.patch({"implicit_fallbacks": True}):
+            # TODO(leslie) Remove implicit_fallbacks=True after we enable the int8 fusion of
+            # int8_weight -> dequant_per_channel -> convolution
+            self.assertTrue(torch._inductor.config.freezing)
+
+            prepare_model = prepare_pt2e_quantizer(export_model, quantizer)
+            prepare_model(*example_inputs)
+
+            convert_model = convert_pt2e(prepare_model)
+            convert_model.eval()
+            compiler_model = compile_fx(convert_model, example_inputs)
+
+            # First Run
+            _ = compiler_model(*example_inputs)
+            # Second Run
+            _ = compiler_model(*example_inputs)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
