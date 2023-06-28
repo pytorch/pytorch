@@ -573,7 +573,7 @@ def _root_pre_forward(
             # increase some overhead, so not turned on for model wrapper path right now where
             # manual wrapping is more broadly used.
             if _is_composable(state):
-                return _root_cast_forward_input(state, args, kwargs)
+                return _root_cast_forward_input(state, module, args, kwargs)
             return args, kwargs
 
         # We cast buffers back to full precision if we're forcing full precision. Disjointly, we check if buffers
@@ -628,7 +628,7 @@ def _root_pre_forward(
             state._streams_unshard,
             state._streams_pre_unshard,
         )
-        _clear_grads_if_needed(state._all_handles)
+        _reset_flat_param_grad_info_if_needed(state._all_handles)
 
         # Prepares the forward inputs by moving them to ``compute_device``
         # TODO: Do not use the side stream for tensor copies for now; investigate
@@ -640,15 +640,17 @@ def _root_pre_forward(
         args = args_tuple[0]
         kwargs = kwargs_tuple[0]
 
-        return _root_cast_forward_input(state, args, kwargs)
+        return _root_cast_forward_input(state, module, args, kwargs)
 
 
 @no_type_check
-def _root_cast_forward_input(state: _FSDPState, args, kwargs) -> Tuple[Any, Any]:
+def _root_cast_forward_input(
+    state: _FSDPState, module: torch.nn.Module, args, kwargs
+) -> Tuple[Any, Any]:
     should_cast_forward_inputs = (
-        all(not handle._force_full_precision for handle in state._handles)
-        and state.mixed_precision.cast_root_forward_inputs
-    )
+        module.training
+        and all(not handle._force_full_precision for handle in state._handles)
+    ) and state.mixed_precision.cast_root_forward_inputs
 
     if should_cast_forward_inputs:
         input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
@@ -683,7 +685,7 @@ def _pre_backward_hook(
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
             _register_post_backward_final_callback(state, module)
-            _clear_grads_if_needed(state._all_handles)
+            _reset_flat_param_grad_info_if_needed(state._all_handles)
         elif _handles_key:
             allowed_states = [TrainingState.IDLE]
             if _is_composable(state):
@@ -1046,6 +1048,10 @@ def _catch_all_reshard(
             already_resharded = (
                 handle.flat_param.data_ptr()
                 == handle.flat_param._local_shard.data_ptr()
+                # If FSDP skipped using sharded views, then the flat parameter
+                # still points to the sharded data, so we need to reshard to
+                # use sharded views
+                and not handle._skipped_use_sharded_views
             )
             if already_resharded:
                 continue
@@ -1069,16 +1075,16 @@ def _finalize_params(
     """Finalizes the parameters before the next iteration."""
     for handle in state._handles:
         flat_param = handle.flat_param
+        if hasattr(flat_param, "_post_backward_hook_state"):
+            post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
+            expected_post_backward_hook_state_len = int(flat_param.requires_grad) + 1
+            _p_assert(
+                post_backward_hook_state_len == expected_post_backward_hook_state_len,
+                f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
+            )
+            flat_param._post_backward_hook_state[-1].remove()
+            delattr(flat_param, "_post_backward_hook_state")
         if flat_param.requires_grad:
-            if hasattr(flat_param, "_post_backward_hook_state"):
-                post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
-                _p_assert(
-                    post_backward_hook_state_len == 1
-                    or post_backward_hook_state_len == 2,
-                    f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
-                )
-                flat_param._post_backward_hook_state[-1].remove()
-                delattr(flat_param, "_post_backward_hook_state")
             if not state._sync_gradients:
                 # Preserve the gradient accumulation state if not synchronizing
                 # gradients: `.grad` remains the unsharded gradient  from prior
@@ -1400,7 +1406,7 @@ def _register_post_backward_reshard_only_hooks(
         hook_handle = register_multi_grad_hook(
             inp_tensors, functools.partial(_post_backward_reshard, state, handle)
         )
-        handle.flat_param._post_backward_hook_state = hook_handle  # type: ignore[attr-defined]
+        handle.flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined]
 
 
 @no_type_check
@@ -1442,7 +1448,7 @@ def _wait_for_computation_stream(
     pre_unshard_stream.wait_stream(computation_stream)
 
 
-def _clear_grads_if_needed(
+def _reset_flat_param_grad_info_if_needed(
     handles: List[FlatParamHandle],
 ):
     """
@@ -1452,7 +1458,7 @@ def _clear_grads_if_needed(
     """
     for handle in handles:
         if handle._use_orig_params:
-            handle._clear_grads_if_needed()
+            handle._reset_flat_param_grad_info_if_needed()
 
 
 @no_type_check

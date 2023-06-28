@@ -412,6 +412,53 @@ class TestFSDPIgnoredModules(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-3)
         self._train_model(model, optim, 3)
 
+    @skip_if_lt_x_gpu(1)
+    def test_ignored_states_check(self):
+        """
+        Tests that passing invalid ``ignored_modules`` or ``ignored_states``
+        raises an appropriate error.
+        """
+        self.run_subtests(
+            {"ignore_modules": [True, False]},
+            self._test_ignored_states_check,
+        )
+
+    def _test_ignored_states_check(self, ignore_modules: bool):
+        model = Model().cuda()
+        ignored_modules = list(model.layer1.children())[1:]
+        ignored_params = {p for m in ignored_modules for p in m.parameters()}
+        ignored_states = ignored_params.union(set(ignored_modules))
+        if ignore_modules:
+            # Check that passing `ignored_modules` not as uniformly `nn.Module`
+            # raises an error
+            with self.assertRaisesRegex(
+                ValueError,
+                "ignored_modules expects nn.Module list elements but got types "
+                r"\[<class 'torch.nn.parameter.Parameter'>\]",
+            ):
+                FSDP(model, ignored_modules=ignored_params)
+            # Check that passing both `ignored_modules` and `ignored_states`
+            # raises an error (and fold this only into `ignore_modules=True`)
+            with self.assertRaisesRegex(
+                ValueError,
+                "Cannot pass both ignored_modules and ignored_states at the same time",
+            ):
+                FSDP(
+                    model,
+                    ignored_modules=ignored_modules,
+                    ignored_states=ignored_params,
+                )
+        else:
+            # Check that passing `ignored_states` not as uniformly
+            # `nn.Parameter` or uniformly `nn.Module` raises an error
+            with self.assertRaisesRegex(
+                ValueError,
+                "ignored_states expects all nn.Parameter or all nn.Module list "
+                r"elements but got types \[<class 'torch.nn.modules.linear.Linear'>, "
+                r"<class 'torch.nn.parameter.Parameter'>\]",
+            ):
+                FSDP(model, ignored_states=ignored_states)
+
 
 instantiate_parametrized_tests(TestFSDPIgnoredModules)
 
