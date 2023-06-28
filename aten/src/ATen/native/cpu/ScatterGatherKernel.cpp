@@ -12,6 +12,7 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
+#include <type_traits>
 
 namespace at::native {
 
@@ -71,7 +72,11 @@ class TensorAssign {
 public:
   template <typename scalar_t>
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
-    *self_data = *src_data;
+    if constexpr (std::is_same_v<scalar_t, bool>) {
+      *self_data = static_cast<scalar_t>(*reinterpret_cast<uint8_t *>(src_data));
+    } else {
+      *self_data = *src_data;
+    }
   }
 };
 static TensorAssign tensor_assign;

@@ -12,7 +12,8 @@ void check_type(const TensorBase& tensor, ScalarType type, c10::string_view type
   TORCH_CHECK(
       tensor.scalar_type() == type
       || (isQIntType(tensor.scalar_type())
-          && toUnderlying(tensor.scalar_type()) == type),
+          && toUnderlying(tensor.scalar_type()) == type)
+      || (tensor.scalar_type() == ScalarType::Bool && type == ScalarType::Byte),
       "expected scalar type ", type_name, " but found ", tensor.scalar_type());
 }
 

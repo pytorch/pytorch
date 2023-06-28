@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <type_traits>
 
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
@@ -24,7 +25,11 @@ void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
     iter.dtype(), "index_cpu", [&] {
     cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-      *(scalar_t*)dst = *(scalar_t*)(src + offset);
+      if constexpr (std::is_same_v<scalar_t,bool>) {
+        *(scalar_t*)dst = static_cast<scalar_t>(*(unsigned char*)(src + offset));
+      } else {
+        *(scalar_t*)dst = *(scalar_t*)(src + offset);
+      }
     });
   });
 }
@@ -258,8 +263,11 @@ void index_copy_kernel(
               "index_copy_(): index ", idx, " is out of bounds for dimension ",
               dim, " with size ", self_dim_size);
 
-        self_data[idx * self_dim_stride] = *source_data;
-
+        if constexpr (std::is_same_v<scalar_t,bool>) {
+          self_data[idx * self_dim_stride] = static_cast<scalar_t>(*reinterpret_cast<unsigned char*>(source_data));
+        } else {
+          self_data[idx * self_dim_stride] = *source_data;
+        }
         self_data_bytes += strides[0];
         index_data_bytes += strides[1];
         source_data_bytes += strides[2];

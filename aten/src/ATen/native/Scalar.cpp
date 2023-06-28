@@ -32,8 +32,13 @@ Scalar _local_scalar_dense_cpu(const Tensor& self) {
   Scalar r;
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
     kComplexHalf, kHalf, kBool, kBFloat16, self.scalar_type(), "_local_scalar_dense_cpu", [&] {
-        scalar_t value = *self.data_ptr<scalar_t>();
-        r = Scalar(value);
+        if constexpr (std::is_same_v<scalar_t, bool>) {
+          scalar_t value = static_cast<scalar_t>(*self.data_ptr<uint8_t>());
+          r = Scalar(value);
+        } else {
+          scalar_t value = *self.data_ptr<scalar_t>();
+          r = Scalar(value);
+        }
       });
   return r;
 }

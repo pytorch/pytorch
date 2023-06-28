@@ -967,7 +967,11 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result.numel()), "index out of range in self");
             scalar_t *self_ip = result_ptr + self_i * result_stride;
-            *self_ip += *(source_ptr + i * source_stride) * alpha_value;
+            if constexpr (std::is_same_v<scalar_t, bool>) {
+              *self_ip += static_cast<scalar_t>(*reinterpret_cast<unsigned char*>(source_ptr + i * source_stride)) * alpha_value;
+            } else {
+              *self_ip += *(source_ptr + i * source_stride) * alpha_value;
+            }
         }
       });
     });

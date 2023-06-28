@@ -37,6 +37,7 @@
 #include <ATen/cpu/vec/vec.h>
 
 #include <utility>
+#include <type_traits>
 
 namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
@@ -207,7 +208,17 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
     data[arg] = data_[arg];
   }
 
-  Vec opt_scalar = Vec(S > 0 ? *(scalar_t*)data[S] : scalar_t(0));
+  scalar_t value(0);
+  if constexpr (std::is_same_v<scalar_t, bool>) {
+    if (S > 0) {
+      value = static_cast<scalar_t>(*(uint8_t*)data[S]);
+    }
+  } else {
+    if (S > 0) {
+      value = *(scalar_t*)data[S];
+    }
+  }
+  Vec opt_scalar(value);
   int64_t i = 0;
   for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
     auto args1 = dereference_vec<traits>(&data[1], opt_scalar, S, i);
