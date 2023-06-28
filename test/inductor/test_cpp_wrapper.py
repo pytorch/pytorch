@@ -3,7 +3,6 @@ import sys
 import unittest
 from typing import NamedTuple
 
-import torch._dynamo
 from torch._inductor import config
 from torch.testing._internal.common_utils import (
     IS_MACOS,
