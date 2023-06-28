@@ -640,6 +640,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       devNCCLCommMap_;
 
+  // The NCCL communicators currently in process of being initialized.
+  std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
+      inInitializationCommMap_;
+
   // Map from ncclUniqueId to appropriate communicator.
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       ncclIdToCommMap_;
