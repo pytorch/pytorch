@@ -45,7 +45,7 @@ class RemovableHandle:
         if self.extra_dict_ref is None:
             return (self.hooks_dict_ref(), self.id)
         else:
-            return (self.hooks_dict_ref(), self.id, (ref() for ref in self.extra_dict_ref))
+            return (self.hooks_dict_ref(), self.id, tuple(ref() for ref in self.extra_dict_ref))
 
     def __setstate__(self, state) -> None:
         if state[0] is None:

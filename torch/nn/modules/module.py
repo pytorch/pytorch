@@ -226,7 +226,7 @@ def register_module_forward_hook(hook: Callable[..., None], *, always_call: bool
         hook (Callable): The user defined hook to be registered.
         always_call (bool): If ``True`` the ``hook`` will be run regardless of
             whether an exception is raised while calling the Module.
-            (Default: ``False``)
+            Default: ``False``
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
             a handle that can be used to remove the added hook by calling
@@ -1472,7 +1472,7 @@ class Module:
                 Default: ``False``
             always_call (bool): If ``True`` the ``hook`` will be run regardless of
                 whether an exception is raised while calling the Module.
-                (Default: ``False``)
+                Default: ``False``
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -1572,14 +1572,14 @@ class Module:
                     *_global_forward_hooks.items(),
                     *self._forward_hooks.items(),
                 ):
+                    # mark that always called hook is run
+                    if hook_id in self._forward_hooks_always_called or hook_id in _global_forward_hooks_always_called:
+                        called_always_called_hooks.add(hook_id)
+
                     if hook_id in self._forward_hooks_with_kwargs:
                         hook_result = hook(self, args, kwargs, result)
                     else:
                         hook_result = hook(self, args, result)
-
-                    # mark that always called hook has been run
-                    if hook_id in self._forward_hooks_always_called or hook_id in _global_forward_hooks_always_called:
-                        called_always_called_hooks.add(hook_id)
 
                     if hook_result is not None:
                         result = hook_result
@@ -1607,7 +1607,7 @@ class Module:
 
             return result
 
-        finally:
+        except Exception:
             # run always called hooks if they have not already been run
             # For now only forward hooks have the always_call option but perhaps
             # this functionality should be added to full backward hooks as well.
@@ -1617,7 +1617,9 @@ class Module:
                         hook_result = hook(self, args, result)
                         if hook_result is not None:
                             result = hook_result
-                    except Exception:
+                    except Exception as e:
+                        warnings.warn("global module forward hook with ``always_call=True`` raised an exception "
+                                      f"that was silenced as another error was raised in forward: {str(e)}")
                         continue
 
             for hook_id, hook in self._forward_hooks.items():
@@ -1629,8 +1631,12 @@ class Module:
                             hook_result = hook(self, args, result)
                         if hook_result is not None:
                             result = hook_result
-                    except Exception:
+                    except Exception as e:
+                        warnings.warn("module forward hook with ``always_call=True`` raised an exception "
+                                      f"that was silenced as another error was raised in forward: {str(e)}")
                         continue
+            # raise exception raised in try block
+            raise
 
 
     __call__ : Callable[..., Any] = _wrapped_call_impl
@@ -1650,6 +1656,8 @@ class Module:
             self._forward_pre_hooks_with_kwargs = OrderedDict()
         if '_forward_hooks_with_kwargs' not in self.__dict__:
             self._forward_hooks_with_kwargs = OrderedDict()
+        if '_forward_hooks_always_called' not in self.__dict__:
+            self._forward_hooks_always_called = OrderedDict()
         if '_state_dict_hooks' not in self.__dict__:
             self._state_dict_hooks = OrderedDict()
         if '_state_dict_pre_hooks' not in self.__dict__:

@@ -128,7 +128,7 @@ class FailsInForwardModel(nn.Module):
 
     def forward(self, x: torch.Tensor, fail: bool = True) -> torch.Tensor:
         if fail:
-            raise RuntimeError
+            raise RuntimeError("failing in forward")
         return self.net1(x)
 
 def kwarg_forward_pre_hook(
@@ -429,20 +429,20 @@ class TestModuleHooks(TestCase):
         def ctx_setup_failure_hook(m, i):
             setup_context()
             ctx.__enter__()
-            raise RuntimeError
+            raise RuntimeError("failing in ctx setup")
 
         def ctx_shutdown_hook(m, i, o):
             ctx.__exit__()
 
         def throw_hook(m, i, o):
-            raise ValueError
+            raise RuntimeError("failing in throw")
 
         forward_pre_hook_handle = model.register_forward_pre_hook(ctx_setup_hook)
         forward_hook_handle = model.register_forward_hook(ctx_shutdown_hook, always_call=True)
         self.assertTrue(len(model._forward_hooks_always_called) == 1)
 
         # make sure always_called forward hook runs when model.forward raises RuntimeError
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "failing in forward"):
             model(x)
         self.assertEqual(stack, [2, -1])
 
@@ -454,7 +454,7 @@ class TestModuleHooks(TestCase):
         forward_pre_hook_handle.remove()
         model.register_forward_pre_hook(ctx_setup_failure_hook)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "failing in ctx setup"):
             model(x, fail=False)
         self.assertEqual(stack, [2, -1, 2, -1, 2, -1])
 
@@ -464,7 +464,7 @@ class TestModuleHooks(TestCase):
                                                            always_call=True)
 
         # error raised should not be error of the forced hook
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "failing in ctx setup"):
             model(x, fail=False)
         self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1])
 
@@ -476,14 +476,14 @@ class TestModuleHooks(TestCase):
         global_forward_hook_handle = nn.modules.module.register_module_forward_hook(ctx_shutdown_hook, always_call=True)
         self.assertTrue(len(nn.modules.module._global_forward_hooks_always_called) == 1)
         # make sure global forward hook runs when forward pre hook raises RuntimeError
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "failing in ctx setup"):
             model(x, fail=False)
         self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1, 2, -1])
 
         # make sure forced global forward hook is properly removed
         global_forward_hook_handle.remove()
         self.assertTrue(len(nn.modules.module._global_forward_hooks_always_called) == 0)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "failing in ctx setup"):
             model(x)
         self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1, 2, -1, 2])
 
