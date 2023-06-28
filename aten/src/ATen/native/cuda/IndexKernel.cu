@@ -140,7 +140,7 @@ void index_fill_kernel_impl(
 
     auto* __restrict__ self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0]);
     auto idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1]);
-    CUDA_KERNEL_ASSERT(idx >= -self_dim_size && idx < self_dim_size && "index out of bounds");
+    CUDA_KERNEL_ASSERT2(idx >= -self_dim_size && idx < self_dim_size && "index out of bounds");
     if (idx < 0) {
       idx += self_dim_size;
     }
@@ -179,7 +179,7 @@ void index_copy_kernel_impl(
     auto* __restrict__ self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0]);
     auto idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1]);
     auto* __restrict__ source_data = reinterpret_cast<scalar_t*>(source_ptr + offsets[2]);
-    CUDA_KERNEL_ASSERT(idx >= 0 && idx < self_dim_size && "index_copy_(): index out of bounds");
+    CUDA_KERNEL_ASSERT2(idx >= 0 && idx < self_dim_size && "index_copy_(): index out of bounds");
 
     self_data[idx * self_dim_stride] = *source_data;
   };
@@ -297,7 +297,7 @@ void cuda_take_put_kernel(
 
     auto& iterated = *reinterpret_cast<scalar_t*>(iterated_ptr + offsets[0]);
     const auto idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1]);
-    CUDA_KERNEL_ASSERT(idx < numel && idx >= -numel && "cuda_take_put_kernel() index out of bounds");
+    CUDA_KERNEL_ASSERT2(idx < numel && idx >= -numel && "cuda_take_put_kernel() index out of bounds");
     index_t offset = static_cast<index_t>(idx);
     if (offset < 0) {
       offset += numel;

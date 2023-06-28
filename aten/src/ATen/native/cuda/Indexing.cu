@@ -38,6 +38,9 @@
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
 #include <ATen/native/quantized/AffineQuantizerBase.h>
+#include <ATen/cuda/Exceptions.h>
+#include <c10/cuda/CUDADeviceAssertion.h>
+#include <c10/cuda/CUDADeviceAssertionHost.h>
 
 #include <limits>
 
@@ -733,7 +736,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     int64_t dstAddDimSize,
                                     int64_t dstNumel,
                                     const func_t& op,
-                                    T alpha) {
+                                    T alpha, TORCH_DSA_KERNEL_ARGS) {
   // In order to avoid reloading the index that we are copying, load
   // it once to handle all of the points that are being selected, so
   // it can be reused as much as possible. This kernel is chosen when
@@ -743,7 +746,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
         indices.data[cuda::detail::IndexToOffset<IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
-    CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
+    CUDA_KERNEL_ASSERT2(dstIndex < dstAddDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -783,7 +786,7 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     int64_t dstAddDimSize,
                                     int64_t dstNumel,
                                     const func_t& op,
-                                    T alpha) {
+                                    T alpha, TORCH_DSA_KERNEL_ARGS) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
@@ -802,7 +805,7 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
         indices.data[cuda::detail::IndexToOffset<IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
-    CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
+    CUDA_KERNEL_ASSERT2(dstIndex < dstAddDimSize);
 
     IndexType dstOffset =
       cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -896,23 +899,22 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
-  indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
+  TORCH_DSA_KERNEL_LAUNCH((indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>),   \
+    smallIndexGrid, smallIndexBlock, 0, at::cuda::getCurrentCUDAStream(), \
       selfInfo, sourceInfo, indexInfo,                                                  \
       selfAddDim, sourceAddDim, sliceSize, selfAddDimSize,                              \
-      selfNumel, reduce_add, alpha_value);                                              \
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+      selfNumel, reduce_add, alpha_value);
+  // C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                        \
                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)            \
-  indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                      \
-                      SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>          \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                       \
+  TORCH_DSA_KERNEL_LAUNCH((indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                      \
+                      SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>),          \
+    largeIndexGrid, largeIndexBlock, 0, at::cuda::getCurrentCUDAStream(),                        \
       selfInfo, sourceInfo, indexInfo,                                      \
       selfAddDim, sourceAddDim, sourceTotalSize,                            \
       (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
-      selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+      selfAddDimSize, selfNumel, reduce_add, alpha_value);
 
   const dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   const dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
@@ -1069,23 +1071,21 @@ void index_reduce_func_cuda_impl(
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)                  \
-  indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>                \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                                \
+  TORCH_DSA_KERNEL_LAUNCH((indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>),                \
+    smallIndexGrid, smallIndexBlock, 0, at::cuda::getCurrentCUDAStream(),                                                \
       selfInfo, sourceInfo, indexInfo,                                                               \
       selfReduceDim, sourceReduceDim, sliceSize, selfReduceDimSize,                                  \
-      selfNumel, reduce_func, alpha_value);                                                          \
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+      selfNumel, reduce_func, alpha_value);
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                                     \
                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)                         \
-  indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                   \
-                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>                        \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                    \
+  TORCH_DSA_KERNEL_LAUNCH((indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                   \
+                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>),                        \
+    largeIndexGrid, largeIndexBlock, 0, at::cuda::getCurrentCUDAStream(),                                    \
       selfInfo, sourceInfo, indexInfo,                                                   \
       selfReduceDim, sourceReduceDim, sourceTotalSize,                                   \
       (IDX_IS_MAJOR) ? sliceSize : numIndex,                                             \
-      selfReduceDimSize, selfNumel, reduce_func, alpha_value);                           \
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+      selfReduceDimSize, selfNumel, reduce_func, alpha_value);
 
   dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
@@ -1224,7 +1224,7 @@ __global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst
                                       int dstSelectDim,
                                       int srcSelectDim,
                                       IndexType innerSize,
-                                      int64_t srcSelectDimSize) {
+                                      int64_t srcSelectDimSize, TORCH_DSA_KERNEL_ARGS) {
   // In order to avoid reloading the index that we are copying, load
   // it once to handle all of the points that are being selected, so
   // it can be reused as much as possible. This kernel is chosen when
@@ -1233,7 +1233,7 @@ __global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst
   for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
     IndexType srcIndex =
       indices.data[cuda::detail::IndexToOffset<IndicesType, IndexType, IdxDim>::get(dstIndex, indices)];
-    CUDA_KERNEL_ASSERT(srcIndex < srcSelectDimSize);
+    CUDA_KERNEL_ASSERT2(srcIndex < srcSelectDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -1268,7 +1268,7 @@ __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst
                                       int srcSelectDim,
                                       IndexType totalSize,
                                       IndexType innerSize,
-                                      int64_t srcSelectDimSize) {
+                                      int64_t srcSelectDimSize, TORCH_DSA_KERNEL_ARGS) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1286,7 +1286,7 @@ __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst
 
     IndexType srcIndex =
       indices.data[cuda::detail::IndexToOffset<IndicesType, IndexType, IdxDim>::get(dstIndex, indices)];
-    CUDA_KERNEL_ASSERT(srcIndex < srcSelectDimSize);
+    CUDA_KERNEL_ASSERT2(srcIndex < srcSelectDimSize);
 
     IndexType dstOffset =
       cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -1363,23 +1363,20 @@ void index_select_out_cuda_impl(
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM)         \
-  indexSelectSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>     \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                                   \
-      outInfo, selfInfo, indicesInfo,                                                   \
-      outSelectDim, selfSelectDim, static_cast<TYPE>(sliceSize),                        \
-      selfSelectDimSize);                                                               \
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  TORCH_DSA_KERNEL_LAUNCH((indexSelectSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>),     \
+    smallIndexGrid, smallIndexBlock, 0, at::cuda::getCurrentCUDAStream(),  \
+      outInfo, selfInfo, indicesInfo, outSelectDim, selfSelectDim, static_cast<TYPE>(sliceSize), selfSelectDimSize);
+  // C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                           \
                     DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)                   \
-  indexSelectLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                       \
-                        DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR>               \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                          \
+  TORCH_DSA_KERNEL_LAUNCH((indexSelectLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                       \
+                        DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR>),               \
+    largeIndexGrid, largeIndexBlock, 0, at::cuda::getCurrentCUDAStream(),                          \
       outInfo, selfInfo, indicesInfo,                                          \
       outSelectDim, selfSelectDim, static_cast<TYPE>(outTotalSize),            \
       static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndices),              \
-      selfSelectDimSize);                                                      \
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+      selfSelectDimSize);
 
   dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
