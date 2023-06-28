@@ -4125,26 +4125,39 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
         yield SampleInput(
             make_arg(shape(400, rank)),
             shape(270, rank, False),
-            None,
-            mode,
-            False,
+            scale_factor=None,
+            mode=mode,
+            align_corners=False,
         )
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     for align_corners in align_corners_options:
         for rank in ranks_for_mode[mode]:
-            yield SampleInput(make_arg(shape(D, rank)),
-                              shape(S, rank, False), None, mode, align_corners)
-            yield SampleInput(make_arg(shape(D, rank)),
-                              shape(L, rank, False), None, mode, align_corners)
+            yield SampleInput(
+                make_arg(shape(D, rank)),
+                shape(S, rank, False),
+                scale_factor=None,
+                mode=mode,
+                align_corners=align_corners,
+            )
+            yield SampleInput(
+                make_arg(shape(D, rank)),
+                shape(L, rank, False),
+                scale_factor=None,
+                mode=mode,
+                align_corners=align_corners,
+            )
             for recompute_scale_factor in [False, True]:
-                yield SampleInput(make_arg(shape(D, rank)),
-                                  None, 1.7, mode, align_corners,
-                                  recompute_scale_factor=recompute_scale_factor)
-                yield SampleInput(make_arg(shape(D, rank)),
-                                  None, 0.6, mode, align_corners,
-                                  recompute_scale_factor=recompute_scale_factor)
+                for scale_factor in [1.7, 0.6]:
+                    yield SampleInput(
+                        make_arg(shape(D, rank)),
+                        size=None,
+                        scale_factor=scale_factor,
+                        mode=mode,
+                        align_corners=align_corners,
+                        recompute_scale_factor=recompute_scale_factor,
+                    )
 
 def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
     N, C = 2, 3
