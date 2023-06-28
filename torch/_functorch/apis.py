@@ -3,8 +3,21 @@
 #       Currently, we can't allow Dynamo to see `eager_transforms.py` as that break a lot of thing
 #       and there isn't a mechanism to selectively expose only some functions (eg. grad) from a file
 #       to Dynamo.
-from torch._functorch.eager_transforms import grad_and_value_impl, exposed_in, Callable, argnums_t, doesnt_support_saved_tensors_hooks
+from torch._functorch.eager_transforms import grad_and_value_impl, exposed_in, Callable, argnums_t
 import functools
+import torch
+
+def doesnt_support_saved_tensors_hooks(f):
+    message = (
+        "torch.func transforms don't yet support saved tensor hooks. "
+        "Please open an issue with your use case."
+    )
+
+    @functools.wraps(f)
+    def fn(*args, **kwargs):
+        with torch.autograd.graph.disable_saved_tensors_hooks(message):
+            return f(*args, **kwargs)
+    return fn
 
 @exposed_in("torch.func")
 def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
@@ -141,7 +154,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
 
     See :func:`grad` for examples
     """
-    @doesnt_support_saved_tensors_hooks
+    # @doesnt_support_saved_tensors_hooks
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         return grad_and_value_impl(func, argnums, has_aux, args, kwargs)

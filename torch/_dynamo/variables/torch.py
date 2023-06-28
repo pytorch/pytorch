@@ -1304,7 +1304,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             if len(kwargs) > 0:
                 # Since speculate_subgraph doesn't support kwargs, we can't handle this for now.
                 unimplemented(
-                    "torch.func.grad: kwargs arguments are currently unsupported."
+                    "torch.func.grad_and_value: kwargs arguments are currently unsupported."
                 )
 
             # Trace through the `func`
@@ -1341,9 +1341,12 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                     post_side_effects.id_to_variable.keys()
                     - pre_side_effects.id_to_variable.keys()
                 )
+                for d in diff:
+                    se = post_side_effects.id_to_variable[d]
+                    print(se)
                 if len(diff) > 0:
                     unimplemented(
-                        "NYI - torch.func.grad(f) where there are side effects in f"
+                        "NYI - torch.func.grad_and_value(f) where there are side effects in f"
                     )
 
             grad_proxy_args = (
@@ -1388,8 +1391,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                     for idx in argnums.value
                 )
 
-            output = body_r.as_proxy().node.meta["example_value"]
-
             if has_aux.value:
                 # case : has_aux = True
                 # NOTE: Currently speculate subgraph allows body_r to be
@@ -1399,8 +1400,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 # (output, some_tensor)
                 body_r_proxy = body_r.as_proxy()
                 aux = body_r_proxy[1].node.meta["example_value"]
+                output = body_r[0].as_proxy().node.meta["example_value"]
                 example_value = example_value, (output, aux)
             else:
+                output = body_r.as_proxy().node.meta["example_value"]
                 example_value = (example_value, output)
 
             fx_proxy = wrap_fx_proxy(
