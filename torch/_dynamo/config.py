@@ -75,7 +75,7 @@ allow_ignore_mark_dynamic = False
 guard_nn_modules = False
 
 # Set this to True to trace through nn modules that are in the torch.* namespace
-inline_nn_modules = False
+inline_nn_modules = True
 
 # If inline_nn_modules=True and a graph break is encountered while tracing, we
 # normally fallback to inserting a call_module into the graph. Set this to true
