@@ -463,8 +463,7 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.BUILTIN_MATCH),
             )
         elif is_utils_checkpoint(value):
-            guards = self.make_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
-            return build_checkpoint_variable(source=self.source, guards=guards)
+            return build_checkpoint_variable(source=self.source)
         elif is_allowed(value):
             return TorchVariable(
                 value,
