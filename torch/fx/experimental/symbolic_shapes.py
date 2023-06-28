@@ -281,7 +281,7 @@ def parallel_or(*args):
     Evaluate the logical OR of several arguments, avoiding guarding on
     unbacked SymInts if another argument is definitely True.
     """
-    if any(definitely_true(args) for a in args):
+    if any(definitely_true(a) for a in args):
         return True
     return any(args)
 
@@ -290,7 +290,7 @@ def parallel_and(*args):
     Evaluate the logical FALSE of several arguments, avoiding guarding on
     unbacked SymInts if another argument is definitely False.
     """
-    if any(definitely_false(args) for a in args):
+    if any(definitely_false(a) for a in args):
         return False
     return all(args)
 
