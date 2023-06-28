@@ -8,6 +8,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    List,
     Optional,
     Sequence,
     Set,
@@ -187,7 +188,7 @@ class OnnxFunctionDispatcher:
 
         # NOTE: Tie breaker: if there are multiple nearest matches, we will choose the one
         # that is custom first
-        symbolic_function_list: list[registration.SymbolicFunction] = sorted(
+        symbolic_function_list: List[registration.SymbolicFunction] = sorted(
             overload_match_ranking,
             key=lambda k: (overload_match_ranking[k], k.is_custom),
             reverse=True,
@@ -197,7 +198,7 @@ class OnnxFunctionDispatcher:
     @_beartype.beartype
     def get_aten_name(
         self, node: torch.fx.Node, diagnostic_context: diagnostics.DiagnosticContext
-    ) -> tuple[str, str, Optional[str]]:
+    ) -> Tuple[str, str, Optional[str]]:
         """Get the aten name from the target.
 
         Args:
@@ -566,7 +567,7 @@ def _find_onnx_data_type(
 
 
 @_beartype.beartype
-def split_opname_to_domain_op_overload(op_name: str) -> tuple[str, str, Optional[str]]:
+def split_opname_to_domain_op_overload(op_name: str) -> Tuple[str, str, Optional[str]]:
     """Split op_name to domain, op, and overload.
 
     Args:
