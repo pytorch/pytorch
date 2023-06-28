@@ -3038,6 +3038,25 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
         dist.reduce_scatter_tensor(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter_tensor_coalesced(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda"
+        input_tensors = [torch.ones(10, 10, device=torch.device(device)) for _ in range(self.world_size)]
+        output_tensors = [torch.zeros(10, 10, device=torch.device(device)) for _ in range(self.world_size)]
+        with dist._coalescing_manager():
+            for i in range(self.world_size):
+                dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
+        for i in range(self.world_size):
+            self.assertEqual(output_tensors[i], input_tensors[i])
+
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
     def setUp(self):
         super(LargeCommTest, self).setUp()
