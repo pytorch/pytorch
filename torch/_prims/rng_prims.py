@@ -164,9 +164,7 @@ def get_device(args, kwargs):
 
 
 def register_run_and_save_rng_state_op():
-    run_and_save_rng_state = HigherOrderOperator(
-        "run_and_save_rng_state", _deprecated_global_ns=True
-    )
+    run_and_save_rng_state = HigherOrderOperator("run_and_save_rng_state")
 
     run_and_save_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
     run_and_save_rng_state.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
@@ -220,9 +218,7 @@ def register_run_and_save_rng_state_op():
 
 
 def register_run_with_rng_state_op():
-    run_with_rng_state = HigherOrderOperator(
-        "run_with_rng_state", _deprecated_global_ns=True
-    )
+    run_with_rng_state = HigherOrderOperator("run_with_rng_state")
 
     run_with_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
     run_with_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
