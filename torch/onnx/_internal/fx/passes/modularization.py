@@ -37,7 +37,7 @@ class ModuleMeta:
         # TODO: Make it look nicer.
         # E.g., from 'L__self___h_1_mlp_c_proj' to 'h.1.mlp.c_proj'
         # NOTE: Need to make sure it works well with Netron.
-        ...
+        raise NotImplementedError()
 
     @property
     def qualified_class_name(self) -> str:
@@ -67,6 +67,9 @@ class ModuleMeta:
 
     def __hash__(self) -> int:
         return hash((self._module_name, self._module_class))
+
+    def __repr__(self) -> str:
+        return f"ModuleMeta(name={self._module_name}, class={self._module_class})"
 
 
 class ModuleStackMeta:
@@ -184,6 +187,9 @@ class ModuleStackMeta:
     def raw_meta(self) -> Optional[Dict[str, Tuple[str, type]]]:
         return self._raw_meta
 
+    def __repr__(self) -> str:
+        return f"ModuleStackMeta({self._module_stack})"
+
 
 @functools.lru_cache()
 def module_stack_meta_from_node(node: torch.fx.Node) -> ModuleStackMeta:
@@ -212,8 +218,8 @@ def extract_module_inputs(nodes: Sequence[torch.fx.Node]) -> Sequence[torch.fx.N
     module_inputs: Dict[torch.fx.Node, None] = {}
 
     # TODO(bowbao): `aten.sym_size` if exist will appear as regular module input. A lot
-    # of this is potentially avoidable by checking to extract that particular symbol
-    # from existing inputs.
+    # of this is potentially avoidable by emitting extraction of that particular symbol
+    # from existing inputs inside the module.
     def _extract_arg_if_node_outside_module(arg: Any):
         if (
             isinstance(arg, torch.fx.Node)
@@ -303,9 +309,8 @@ def create_call_module_node(
             )
             old_output.replace_all_uses_with(module_output)
             module_output.meta = copy.copy(old_output.meta)
-            # NOTE: We don't want to deepcopy everything in meta, but we do want to
-            # copy a new instance of "nn_module_stack". Since we need to pop the
-            # current module from the stack later.
+            # NOTE: We shallow copy everything else in meta except for "nn_module_stack".
+            # Since we need a new instance and pop the current module from the stack later.
             module_output.meta["nn_module_stack"] = copy.copy(
                 old_output.meta["nn_module_stack"]
             )
@@ -421,7 +426,6 @@ class SubModuleBuilder:
 
     def add_fx_node(self, fx_node: torch.fx.Node):
         node_stack_meta = module_stack_meta_from_node(fx_node)
-
         if node_stack_meta == self.stack_meta:
             self._nodes.append(fx_node)
         elif node_stack_meta.is_child_of(self.stack_meta):
@@ -429,12 +433,17 @@ class SubModuleBuilder:
             assert child_stack_meta is not None
             child_meta = child_stack_meta.current()
             assert child_meta is not None
-            if child_meta not in self._submodules:
-                self._submodules[child_meta] = SubModuleBuilder(
-                    self._root, child_stack_meta
+
+            if not (
+                self._nodes
+                and isinstance(last_node := self._nodes[-1], SubModuleBuilder)
+                and (
+                    node_stack_meta.is_child_of(last_node.stack_meta)
+                    or node_stack_meta.is_same(last_node.stack_meta)
                 )
-                self._nodes.append(self._submodules[child_meta])
-            self._submodules[child_meta].add_fx_node(fx_node)
+            ):
+                self._nodes.append(SubModuleBuilder(self._root, child_stack_meta))
+            self._nodes[-1].add_fx_node(fx_node)
         else:
             raise AssertionError(
                 f"Node {fx_node} ({node_stack_meta}) does not belong to module "
@@ -447,10 +456,9 @@ class SubModuleBuilder:
         for node in self._nodes:
             if isinstance(node, SubModuleBuilder):
                 _, module_node, extra_output_nodes = node.build()
-                fx_nodes.extend([module_node, *extra_output_nodes])
+                fx_nodes.extend((module_node, *extra_output_nodes))
             else:
                 fx_nodes.append(node)
-
         return fx_nodes
 
     def build(
@@ -465,18 +473,19 @@ class SubModuleBuilder:
 
         return create_sub_fx_graph_module(self._root, fx_nodes)
 
+    def __repr__(self):
+        return f"SubModuleBuilder({self._stack_meta})"
+
 
 class Modularize(_pass.Transform):
     @_beartype.beartype
-    def _run(self, *args) -> torch.fx.GraphModule:
+    def _run(self) -> torch.fx.GraphModule:
         """Modularize a flattened fx graph module.
 
         This function will try to create sub fx graph modules for all nodes that belong
         to a module. It will recursively create sub fx graph modules for child modules
         first.
 
-        Args:
-            *args: Unused.
         Returns:
             The modularized fx graph module.
         """

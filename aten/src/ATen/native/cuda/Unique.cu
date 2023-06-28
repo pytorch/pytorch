@@ -129,7 +129,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
 
   int64_t num_inp = self.size(dim);
   auto options = self.options().dtype(kLong);
-  Tensor input_flat = self.transpose(dim, 0).contiguous().view({num_inp, -1});
+  Tensor input_flat = self.moveaxis(dim, 0).contiguous().view({num_inp, -1});
   int64_t n = input_flat.size(1);
   const scalar_t *input_flat_ptr = input_flat.const_data_ptr<scalar_t>();
 

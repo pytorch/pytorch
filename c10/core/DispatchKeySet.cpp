@@ -1,6 +1,5 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/irange.h>
-#include <iostream>
 
 namespace c10 {
 
@@ -53,7 +52,9 @@ constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset |
     // where we would like to support composite implicit kernels but not
     // explicit kernels therefore we manually add the key to the
     // math_dispatch_keyset
-    DispatchKeySet{DispatchKey::NestedTensor};
+    DispatchKeySet{DispatchKey::NestedTensor} |
+    // Functionalize should always re-use CompositeImplicit decomps.
+    DispatchKeySet{DispatchKey::Functionalize};
 
 constexpr DispatchKeySet nested_dispatch_keyset =
     DispatchKeySet(

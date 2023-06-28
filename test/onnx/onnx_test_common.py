@@ -328,7 +328,14 @@ def run_ort(
 
         model_proto = onnx.load(buffer)
         inlined_model_proto = onnx.inliner.inline_local_functions(model_proto)
+        # inlined_model_proto = onnx.shape_inference.infer_shapes(inlined_model_proto, check_type=True, strict_mode=False, data_prop=True)
+        # import onnxscript
+        # print(onnxscript.proto2text(inlined_model_proto))
+        # print(onnxscript.proto2text(model_proto))
+        # Comment this line to skip inlining model for ORT.
         ort_model = inlined_model_proto.SerializeToString()
+    # import onnx
+    # onnx.save(onnx.load_from_string(ort_model), "segfault.onnx")
 
     session = onnxruntime.InferenceSession(
         ort_model, providers=["CPUExecutionProvider"]

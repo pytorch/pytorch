@@ -266,6 +266,7 @@ void ImagingResampleVertical(
   auto xout = unpacked_output.size(2);
   auto yout = unpacked_output.size(1);
   const auto num_channels = unpacked_input.size(0);
+  TORCH_INTERNAL_ASSERT(num_channels == unpacked_output.size(0));
 
   auto xout_stride = xout * num_channels;
   for (const auto yy : c10::irange(yout)) {
@@ -284,7 +285,7 @@ void ImagingResampleVertical(
   }
 }
 
-// This is the only public entry point in this file.  It supports bilinear
+// This is the only public entry point in this file.  It supports bilinear or bicubic
 // mode for uint8 dtype when C <= 4, with or without antialias. The
 // implem is based on PIL-SIMD.
 // Its equivalent implementation (fallback) for when AVX isn't supported or when
@@ -300,22 +301,33 @@ void ImagingResampleVertical(
 // here: all these kernels are general enough to handle an arbitrary number of
 // weights, but when aa=False they could be optimized further.
 template <typename scale_type, class F>
-void upsample_avx_bilinear_uint8(
-    const at::Tensor& input,
+void upsample_avx_bilinear_bicubic_uint8(
+    const at::Tensor& input_,
     const at::Tensor& output,
     bool align_corners,
     const scale_type& scales,
     bool antialias) {
-  auto batch_size = input.size(0);
-  auto num_channels = input.size(1);
-  auto xin = input.size(3);
-  auto yin = input.size(2);
+  auto batch_size = input_.size(0);
+  auto num_channels = input_.size(1);
+  auto xin = input_.size(3);
+  auto yin = input_.size(2);
   auto xout = output.size(3);
   auto yout = output.size(2);
 
   if (xin == xout && yin == yout) {
-    output.copy_(input);
+    output.copy_(input_);
     return;
+  }
+
+  at::Tensor input = input_;
+  if (!(input.is_contiguous() || input.is_contiguous(at::MemoryFormat::ChannelsLast))) {
+    // If input is not contiguous with memory format channels first or channels last,
+    // we explicitly convert the input to contiguous channels last memory format.
+    // This simplifies the rest of the code and let us assume that the format is only contiguous channels first or channels last,
+    // Most tensors going through this `if` block won't need to go through unpacking, but those having C < 3 may
+    // have to (this means 2 copies are made). We could avoid the extra copy by handling non-contiguous input
+    // directly within unpack_rgb() and pack_rgb(), but initial attempts showed that this is fairly complex.
+    input = input.contiguous(at::MemoryFormat::ChannelsLast);
   }
 
   auto need_horizontal = xout != xin;

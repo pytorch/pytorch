@@ -64,6 +64,11 @@ bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
              _fastEqualsForContainer);
 }
 
+std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
+  out << v.qualifiedClassName() << "." << v.name();
+  return out;
+}
+
 bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
   return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
 }
@@ -245,7 +250,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     case Tag::Capsule:
       TORCH_CHECK_TYPE(
           false, "Cannot inspect value of type ", this->tagKind());
-      // Fall through
+      [[fallthrough]];
     default:
       // don't record scalars.
       break;
@@ -465,6 +470,10 @@ bool IValue::isOptionalTensorList() const {
 
 bool IValue::isIntList() const {
   return isListOf<c10::IntType>();
+}
+
+bool IValue::isSymIntList() const {
+  return isListOf<c10::SymIntType>();
 }
 
 bool IValue::isBoolList() const {
@@ -757,11 +766,6 @@ IValueComparator getGreaterThanComparator(const IValue& v) {
   return [lt = std::move(lt)](const IValue& a, const IValue& b) {
     return lt(b, a);  // gt(a, b) === lt(b, a)
   };
-}
-
-static std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
-  out << v.qualifiedClassName() << "." << v.name();
-  return out;
 }
 
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
@@ -1076,6 +1080,8 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
         // and contain storage.
+        // TODO (rohan-varma): for tensors created with at::sparse_coo_tensor held
+        // in a python object, this might need a coalesce().
         weakStorageImpls.emplace_back(tensor.indices().storage().getWeakStorageImpl());
         weakStorageImpls.emplace_back(tensor.values().storage().getWeakStorageImpl());
       } else {
@@ -1090,7 +1096,15 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        weakStorageImpls.emplace_back(sub_value.toTensor().storage().getWeakStorageImpl());
+        auto tens = sub_value.toTensor();
+        if (tens.is_sparse()) {
+          // sparse tensors have 2 storages! one for indices one for values
+          auto coalesced = tens.coalesce();
+          weakStorageImpls.emplace_back(coalesced.indices().storage().getWeakStorageImpl());
+          weakStorageImpls.emplace_back(coalesced.values().storage().getWeakStorageImpl());
+        } else {
+          weakStorageImpls.emplace_back(tens.storage().getWeakStorageImpl());
+        }
       }
     }
   }

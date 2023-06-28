@@ -7,7 +7,6 @@
 #include <c10/util/intrusive_ptr.h>
 
 #include <limits>
-#include <memory>
 
 namespace c10 {
 

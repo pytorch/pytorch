@@ -348,6 +348,11 @@ cmake_dependent_option(
 cmake_dependent_option(
     BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 
+option(USE_MIMALLOC "Use mimalloc" OFF)
+# Enable third party mimalloc library to improve memory allocation performance on Windows.
+if(WIN32)
+  set(USE_MIMALLOC ON)
+endif()
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -547,11 +552,6 @@ endif(MSVC)
 
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
 
-if(NOT MSVC)
-  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -g -lineinfo --source-in-ptx")
-  string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -g -lineinfo --source-in-ptx")
-endif(NOT MSVC)
-
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable.
 # Setting `BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN` environment variable can
@@ -715,6 +715,17 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
   "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 
+if(NOT MSVC)
+  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
+  string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")
+  # CUDA-12.1 crashes when trying to compile with --source-in-ptx
+  # See https://github.com/pytorch/pytorch/issues/102372#issuecomment-1572526893
+  if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 12.1)
+    string(APPEND CMAKE_CUDA_FLAGS_DEBUG " --source-in-ptx")
+    string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " --source-in-ptx")
+  endif()
+endif(NOT MSVC)
+
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
@@ -811,6 +822,8 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wvla-extension" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnewline-eof" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Winconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
@@ -855,6 +868,8 @@ if(NOT MSVC)
 
   append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-override" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
@@ -971,11 +986,11 @@ endif()
 
 if(APPLE)
     if(USE_MPS)
-      string(APPEND CMAKE_OBJCXX_FLAGS " -DUSE_MPS")
-      string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS -fno-objc-arc")
+      string(APPEND CMAKE_OBJCXX_FLAGS " -DUSE_MPS -fno-objc-arc")
+      string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS")
       string(APPEND CMAKE_SHARED_LINKER_FLAGS " -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
       # To suppress MPSGraph availability warnings
-      append_cxx_flag_if_supported("-Wno-unguarded-availability-new" CMAKE_CXX_FLAGS)
+      append_cxx_flag_if_supported("-Wno-unguarded-availability-new" CMAKE_OBJCXX_FLAGS)
     endif()
     append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
@@ -1014,6 +1029,12 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
+
+if(USE_MIMALLOC)
+  add_definitions(-DUSE_MIMALLOC)
+  add_subdirectory(third_party/mimalloc)
+  include_directories(third_party/mimalloc/include)
+endif()
 
 # ---[ Main build
 add_subdirectory(c10)

@@ -39,6 +39,19 @@ class TORCH_API HashStore : public Store {
 
   bool deleteKey(const std::string& key) override;
 
+  void append(
+      const std::string& key,
+      const std::vector<uint8_t>& value) override;
+
+  std::vector<std::vector<uint8_t>> multiGet(const std::vector<std::string>& keys) override;
+
+  void multiSet(
+    const std::vector<std::string>& keys,
+    const std::vector<std::vector<uint8_t>>& values) override;
+
+  // Returns true if this store support watchKey, append, multiGet and multiSet
+  bool hasExtendedApi() const override;
+
  protected:
   std::unordered_map<std::string, std::vector<uint8_t>> map_;
   std::mutex m_;

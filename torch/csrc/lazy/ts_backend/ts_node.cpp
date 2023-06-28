@@ -16,7 +16,7 @@ std::string GetFirstUserFrameInPythonIfEnabled() {
 namespace torch {
 namespace lazy {
 
-hash_t OperandHashes(
+static hash_t OperandHashes(
     const OpList& operands,
     const c10::ArrayRef<Shape>& shapes,
     const hash_t& seed,

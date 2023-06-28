@@ -205,13 +205,12 @@
 #      Use system-provided libraries to satisfy the build dependencies.
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
+#
+#   USE_MIMALLOC
+#      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
+#      By default, It is only enabled on Windows.
 
-# This future is needed to print Python2 EOL message
-from __future__ import print_function
 import sys
-if sys.version_info < (3,):
-    print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
-    sys.exit(-1)
 if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     print("32-bit Windows Python runtime is not supported. Please switch to 64-bit Python.")
     sys.exit(-1)
@@ -1057,6 +1056,7 @@ def main():
         'py.typed',
         'bin/*',
         'test/*',
+        '*.pyi',
         '_C/*.pyi',
         'cuda/*.pyi',
         'fx/*.pyi',
@@ -1094,6 +1094,7 @@ def main():
         'include/ATen/hip/detail/*.cuh',
         'include/ATen/hip/detail/*.h',
         'include/ATen/hip/impl/*.h',
+        'include/ATen/mps/*.h',
         'include/ATen/miopen/*.h',
         'include/ATen/detail/*.h',
         'include/ATen/native/*.h',
@@ -1102,6 +1103,7 @@ def main():
         'include/ATen/native/cuda/*.cuh',
         'include/ATen/native/hip/*.h',
         'include/ATen/native/hip/*.cuh',
+        'include/ATen/native/mps/*.h',
         'include/ATen/native/quantized/*.h',
         'include/ATen/native/quantized/cpu/*.h',
         'include/ATen/quantized/*.h',
@@ -1114,6 +1116,7 @@ def main():
         'include/ATen/core/dispatch/*.h',
         'include/ATen/core/op_registration/*.h',
         'include/c10/core/impl/*.h',
+        'include/c10/core/impl/cow/*.h',
         'include/c10/util/*.h',
         'include/c10/cuda/*.h',
         'include/c10/cuda/impl/*.h',
@@ -1151,6 +1154,7 @@ def main():
         'include/torch/csrc/distributed/autograd/context/*.h',
         'include/torch/csrc/distributed/autograd/functions/*.h',
         'include/torch/csrc/distributed/autograd/rpc_messages/*.h',
+        'include/torch/csrc/dynamo/eval_frame.h',
         'include/torch/csrc/jit/*.h',
         'include/torch/csrc/jit/backends/*.h',
         'include/torch/csrc/jit/generated/*.h',
@@ -1180,6 +1184,7 @@ def main():
         'include/torch/csrc/lazy/core/*.h',
         'include/torch/csrc/lazy/core/internal_ops/*.h',
         'include/torch/csrc/lazy/core/ops/*.h',
+        'include/torch/csrc/lazy/python/python_util.h',
         'include/torch/csrc/lazy/ts_backend/*.h',
         'include/pybind11/*.h',
         'include/pybind11/detail/*.h',
@@ -1193,6 +1198,8 @@ def main():
         'include/THH/generic/*.h',
         'include/sleef.h',
         "_inductor/codegen/*.h",
+        "_inductor/aot_inductor_include/*.cpp",
+        "_inductor/aot_inductor_include/*.h",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',
