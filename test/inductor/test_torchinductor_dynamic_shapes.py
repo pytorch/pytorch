@@ -201,10 +201,9 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(res, ref, atol=0, rtol=0)
 
     def test_slice_index_changing_sign(self, device):
-
         def fn(x, y):
             y0, y1 = y.shape
-            return x[:(y0 - y1)].clone()
+            return x[: (y0 - y1)].clone()
 
         a = torch.randn(32, 32, device=device)
         cfn = self.compile_fn(fn)
@@ -220,7 +219,6 @@ class TestInductorDynamic(TestCase):
         expect = fn(a, b)
         actual = cfn(a, b)
         self.assertEqual(expect, actual)
-
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals())

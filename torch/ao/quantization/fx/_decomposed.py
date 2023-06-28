@@ -133,7 +133,7 @@ def dequantize_per_tensor(
     Returns:
        dequantized float32 Tensor
     """
-    assert input.dtype == dtype, f"Expecting input to have dtype: {dtype}"
+    assert input.dtype == dtype, f"Expecting input to have dtype: {dtype}, but got {input.dtype}"
     if dtype in [torch.uint8, torch.int8, torch.int32]:
         # TODO: investigate why
         # (input - zero_point).to(torch.float32) * scale

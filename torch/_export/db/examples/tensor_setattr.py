@@ -13,4 +13,4 @@ def tensor_setattr(x, attr):
     setattr() call onto tensors is not supported.
     """
     setattr(x, attr, torch.randn(3, 2))
-    return x.add_(1)
+    return x + 4

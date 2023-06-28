@@ -151,10 +151,13 @@ class GraphLowering(torch.fx.Interpreter):
         cpp_wrapper=False,
         aot_mode=False,
         user_visible_outputs=frozenset(),
+        layout_opt=None,
     ):
         super().__init__(gm)
 
-        self.layout_opt = self.decide_layout_opt()
+        self.layout_opt = (
+            layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
+        )
         self.num_channels_last_conv = 0
 
         self.extra_traceback = False  # we do our own error wrapping
@@ -204,7 +207,8 @@ class GraphLowering(torch.fx.Interpreter):
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
 
-    def decide_layout_opt(self) -> bool:
+    @staticmethod
+    def decide_layout_opt(gm) -> bool:
         """
         Decide if we should enable layout optimization for this graph based on
         heuristics.
@@ -212,7 +216,6 @@ class GraphLowering(torch.fx.Interpreter):
         if not config.layout_optimization:
             return False
 
-        gm = self.module
         conv_nodes = [
             n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
         ]
