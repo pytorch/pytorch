@@ -734,10 +734,8 @@ class TritonKernel(Kernel):
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
-        is_rocm = torch.version.hip is not None and torch.cuda.is_available()
         self.no_x_dim = (
-            not is_rocm
-            and self.reduction_hint == ReductionHint.INNER
+            self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
             and len(self.numels) == 2
             and self.numels[-1] >= 256
