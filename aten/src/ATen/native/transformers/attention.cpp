@@ -565,6 +565,20 @@ c10::optional<Tensor> convert_boolean_attn_mask(const c10::optional<Tensor>& att
   // Otherwise, attn_mask represents an additive attention tensor
   return attn_mask;
 }
+// Memory Efficient Attention requires a padded attn mask bias
+// This function pads the attn_mask bias to be a multiple of 16
+// Then slices the padded bias to the original size
+// We apply this function to the top level SDPA so that
+// if padding is done it will be tracked for backward automatically
+inline at::Tensor pad_bias(const at::Tensor& attn_bias) {
+  int align_to = 16;
+  if (attn_bias.size(-1) % align_to == 0) {
+    return attn_bias;
+  }
+  int pad_count = align_to - (attn_bias.size(-1) % align_to);
+  auto padded_bias = at::pad(attn_bias, {0, pad_count});
+  return padded_bias.slice(-1, 0, attn_bias.size(-1));
+}
 
 } // namespace
 
@@ -622,6 +636,9 @@ Tensor scaled_dot_product_attention(
       bool compute_logsumexp =
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
+      if(attn_mask.has_value()){
+        attn_mask = pad_bias(attn_mask.value());
+      }
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
       return std::get<0>(out_and_lse);

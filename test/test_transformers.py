@@ -1314,13 +1314,8 @@ class TestSDPAFailureModes(NNTestCase):
                 q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
-    @parametrize(
-        "kernel",
-        [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
-        if SM80OrLater
-        else [SDPBackend.EFFICIENT_ATTENTION],
-    )
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support fused scaled dot product attention")
+    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION])
     def test_invalid_fused_inputs_attn_mask_present(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # Failures for unsupported SDP args
@@ -1328,8 +1323,9 @@ class TestSDPAFailureModes(NNTestCase):
             make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float16)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             # Non-None attention mask
+            mask = torch.ones((2, 2, 3, 3), device=device, dtype=q.dtype)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, torch.ones_like(q), 0.0, False))
+                q, k, v, mask, 0.0, False))
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support fused SDPA or pre-SM80 hardware")
