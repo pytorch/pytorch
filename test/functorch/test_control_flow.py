@@ -214,20 +214,21 @@ class TestControlFlow(TestCase):
 
     def test_scan_autograd_simple(self):
         def f(carry, x):
-            return carry+1, x+carry
+            return carry+1, x + carry
 
         init = torch.tensor([1.0, 2.0], requires_grad=True)
         xs = torch.rand(10, 2, requires_grad=True)
         carry_res, res = control_flow.scan(f, init, xs)
         expected_carry_res, expected_res = _fake_scan(f, init, xs)
-        print(res)
-        print(expected_res)
         self.assertEqual(carry_res, expected_carry_res)
         self.assertEqual(res, expected_res)
+        print(res)
         grad_out = torch.ones_like(res)
         grads = torch.autograd.grad(res, (init, xs), grad_out)
+        print(grads)
         expected_grads = torch.autograd.grad(expected_res, (init, xs), grad_out)
-        self.assertTrue(False)
+        print(expected_grads)
+        self.assertEqual(grads, expected_grads)
 
 class TestControlFlowTraced(TestCase):
     def test_cond_traced_not_nested(self):
