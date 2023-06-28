@@ -114,7 +114,7 @@ def generate_index_rst(example_cases, tag_to_modules, support_level_to_modules):
 
     tag_names = "\n    ".join(t for t in tag_to_modules.keys())
 
-    with open(os.path.join(PWD, "blurb.md"), "r") as file:
+    with open(os.path.join(PWD, "blurb.txt"), "r") as file:
         blurb = file.read()
 
     # Generate contents of the .rst file
