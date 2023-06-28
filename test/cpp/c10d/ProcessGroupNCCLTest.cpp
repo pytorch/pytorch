@@ -168,8 +168,8 @@ class NCCLTest : public NCCLTestBase {
   at::Tensor to_sparse_row_indices_format(at::Tensor& tensor) {
     // Get the indices of all non-zero elements in the dense tensor
     // Get the unique row indices of the non-zero elements
-    auto [row_indices, _] =
-        at::_unique(tensor.nonzero().select(/*dim=*/1, /*index=*/0));
+    auto row_indices = std::get<0>(
+        at::_unique(tensor.nonzero().select(/*dim=*/1, /*index=*/0)));
     at::Tensor sparse_values = tensor.index_select(
         /*dim=*/0, row_indices); // get the values at the non-zero indices
     return at::sparse_coo_tensor(
