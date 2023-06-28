@@ -50,7 +50,6 @@ class ONNXTorchPatcher:
                 )
                 return t.set_(storage._untyped_storage, storage_offset, size, stride)
 
-            # import pdb; pdb.set_trace()
             mode = _get_current_dispatch_mode()
             if isinstance(mode, FakeTensorMode):
                 # Create a real tensor and then convert it to FakeTensor.

@@ -120,8 +120,8 @@ def save_model_with_external_data(
     onnx_input_names = [input.name for input in onnx_model.graph.input]
 
     for path in torch_load_paths:
-        state_ditc = torch.load(path)
-        for name, tensor in state_ditc.items():
+        state_dict = torch.load(path)
+        for name, tensor in state_dict.items():
             # Basically, "transformer.attention.self.query.weight" is mapped
             # to "transformer_attention_self_query_weight" for mimicking the
             # name-modifying code in FX-to-ONNX exporter.

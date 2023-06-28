@@ -12,7 +12,6 @@ from typing import (
     Callable,
     Dict,
     Final,
-    List,
     Mapping,
     Optional,
     Protocol,
@@ -63,37 +62,16 @@ class ONNXFakeContext:
     fake tensors during tracing of a torch.nn.Module into a FX Graph
     """
 
-    model_state_dict: Any
-    """The model's state_dict with real tensors."""
-
     fake_mode: fake_tensor.FakeTensorMode
     """The fake tensor mode to use for symbolic tracing."""
-
-    model_state_dict_files: Optional[List[Any]] = None
-    """List of file-like objects that contain the model's state_dict with real tensors."""
 
     @_beartype.beartype
     def __init__(
         self,
         *,
         fake_mode: fake_tensor.FakeTensorMode,
-        model_state_dict: Optional[Any] = None,
     ):
         self.fake_mode = fake_mode
-        self.model_state_dict = model_state_dict
-
-        # Add initializers when symbolic tracing is enabled
-        if model_state_dict is not None:
-            buffer = io.BytesIO()
-            torch.save(model_state_dict, buffer)
-            ctx = patcher.ONNXTorchPatcher()
-            with ctx:
-                buffer.seek(0)
-                _ = torch.load(buffer)
-            self._model_state_dict_files = ctx.paths
-            # Reset the buffer to the beginning before reading it again
-            for file_obj in ctx.paths:
-                file_obj.seek(0)
 
 
 class ExportOptions:
@@ -243,7 +221,7 @@ class ResolvedExportOptions(ExportOptions):
 
 
 @contextlib.contextmanager
-def enable_fake_mode(model_state_dict: Optional[Any] = None):
+def enable_fake_mode():
     """Enable fake mode for the duration of the context.
 
     User input and model are converted to fake tensors, which means they
@@ -260,11 +238,9 @@ def enable_fake_mode(model_state_dict: Optional[Any] = None):
             allow_scalar_outputs=False, allow_dynamic_output_shape_ops=False
         ),
     )
-    fake_context = ONNXFakeContext(
-        fake_mode=fake_mode, model_state_dict=model_state_dict
-    )
+    fake_context = ONNXFakeContext(fake_mode=fake_mode)
     torch_patcher = patcher.ONNXTorchPatcher()
-    with fake_mode:
+    with fake_mode, torch_patcher:
         yield fake_context
 
 
@@ -325,7 +301,6 @@ class ExportOutput:
     _input_adapter: Final[io_adapter.InputAdapter]
     _output_adapter: Final[io_adapter.OutputAdapter]
     _diagnostic_context: Final[infra.DiagnosticContext]
-    _model_state_dict_files: Final[List[io.BytesIO]]
 
     @_beartype.beartype
     def __init__(
@@ -334,13 +309,11 @@ class ExportOutput:
         input_adapter: io_adapter.InputAdapter,
         output_adapter: io_adapter.OutputAdapter,
         diagnostic_context: infra.DiagnosticContext,
-        model_state_dict_files: List[io.BytesIO],
     ):
         self._model_proto = model_proto
         self._input_adapter = input_adapter
         self._output_adapter = output_adapter
         self._diagnostic_context = diagnostic_context
-        self._model_state_dict_files = model_state_dict_files
 
     @property
     def model_proto(self) -> onnx.ModelProto:
@@ -467,13 +440,45 @@ class ExportOutput:
         self,
         destination: Union[str, io.BufferedIOBase],
         *,
+        model_state_dict: Optional[Any] = None,
         serializer: Optional[ExportOutputSerializer] = None,
     ) -> None:
         """Saves the in-memory ONNX model to ``destination`` using specified ``serializer``.
-        If no ``serializer`` is specified, the model will be serialized as Protobuf."""
+
+        Args:
+            destination: The destination to save the ONNX model. It can be either a string or a file-like object.
+                When used with ``model_state_dict``, it must be a string with a full path to the destination.
+                In that case, besides saving the ONNX model, a folder with "_initializers" suffix (without extension)
+                will be created to store the each initializer of the ONNX model in a separate file. For example, if the
+                destination is "/path/model.onnx", the initializers will be saved in "/path/model_initializers/" folder.
+            model_state_dict: The state_dict of the PyTorch model with all weights on it.
+                Required when ``enable_fake_mode`` is used but real initializers are needed on the ONNX graph.
+                It can be either a string with the path to a checkpoint or a dictionary with the actual model state.
+            serializer: The serializer to use. If not specified, the model will be serialized as Protobuf.
+        """
 
         if serializer is None:
             serializer = ProtobufExportOutputSerializer()
+
+        # Add initializers when symbolic tracing is enabled
+        if model_state_dict is not None:
+            if isinstance(model_state_dict, dict):
+                model_state_dict_file = io.BytesIO()
+                torch.save(model_state_dict, model_state_dict_file)
+                model_state_dict_file.seek(0)
+            else:
+                model_state_dict_file = model_state_dict
+
+            ctx = patcher.ONNXTorchPatcher()
+            with ctx:
+                _ = torch.load(model_state_dict_file)
+            self._model_state_dict_files = ctx.paths
+
+            # Reset the buffer to the beginning before reading it again
+            if isinstance(model_state_dict, dict):
+                for file_obj in ctx.paths:
+                    file_obj.seek(0)
+
         if self._model_state_dict_files is not None:
             if not isinstance(destination, str):
                 raise RuntimeError("Cannot save to file when model has state_dict")
@@ -581,7 +586,6 @@ class Exporter:
             self.options.fx_tracer.input_adapter,
             self.options.fx_tracer.output_adapter,
             self.options.diagnostic_context,
-            self.options.fake_context._model_state_dict_files,
         )
 
     @property
@@ -733,7 +737,7 @@ def pre_export_passes(
         fx_module,
         options.decomposition_table,
         enable_dynamic_axes=options.dynamic_shapes,
-        fake_mode=options.fake_context.fake_mode,
+        allow_fake_constant=options.fake_context.fake_mode is not None,
     ).run(*fx_module_args)
 
     # ONNX does not support views and mutations.
@@ -742,7 +746,7 @@ def pre_export_passes(
         diagnostic_context,
         module,
         enable_dynamic_axes=options.dynamic_shapes,
-        fake_mode=options.fake_context.fake_mode,
+        allow_fake_constant=options.fake_context.fake_mode is not None,
     ).run(*fx_module_args)
 
     # Input mutations are detected and distilled after `Functionalize` pass.

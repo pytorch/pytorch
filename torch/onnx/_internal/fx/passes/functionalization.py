@@ -65,11 +65,11 @@ class Functionalize(_pass.Transform):
         diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
         enable_dynamic_axes: bool,
-        fake_mode: Optional[proxy_tensor.FakeTensorMode],
+        allow_fake_constant: Optional[bool] = False,
     ):
         super().__init__(diagnostic_context, module)
         self.enable_dynamic_axes = enable_dynamic_axes
-        self.fake_mode = fake_mode
+        self.allow_fake_constant = allow_fake_constant
 
     def _functionalize(self, function: Callable) -> Callable:
         # Working around a dispatcher issue with `torch.func.functionalize` when used
@@ -109,7 +109,7 @@ class Functionalize(_pass.Transform):
             decomposition_table={},
             tracing_mode=fx_mode,
             _allow_non_fake_inputs=True,
-            _allow_fake_constant=self.fake_mode is not None,
+            _allow_fake_constant=self.allow_fake_constant,
         )(*args)
 
         # Rename placeholder targets to match the original module's signature since
