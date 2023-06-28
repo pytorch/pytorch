@@ -705,23 +705,32 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
   });
 
   using opmath_t = at::opmath_type<scalar_t>;
-  constexpr bool need_acc = is_reduced_floating_point_v<scalar_t>;
-  auto buffer_type = need_acc ? ScalarType::Float : self.scalar_type();
-  Tensor buffer = at::zeros({num_threads, K}, self.options().dtype(buffer_type));
-  opmath_t* buffer_data = buffer.data_ptr<opmath_t>();
+  Tensor buffer;
+  opmath_t* buffer_data = nullptr;
+  static constexpr bool need_acc = is_reduced_floating_point_v<scalar_t>;
+  if constexpr (need_acc) {
+    auto acc_type = at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true);
+    buffer = at::zeros({num_threads, K}, self.options().dtype(acc_type));
+    buffer_data = buffer.data_ptr<opmath_t>();
+  }
 
   // TODO: do blocking on col dimension to reduce WR bandwidth
   at::parallel_for(0, num_nonzero_rows, 1, [&](int64_t begin, int64_t end) {
     int tid = at::get_thread_num();
     TORCH_CHECK(tid < num_threads,
                 "expect thread id smaller than ", num_threads, ", got thread id ", tid);
-    opmath_t* buffer_ptr = buffer_data + tid * K;
+    opmath_t* buffer_ptr = nullptr;
 
     for (const auto m : c10::irange(begin, end)) {
       int64_t row = row_index[m];
       int64_t off_start = row_index_offset[m];
       int64_t off_end = row_index_offset[m + 1];
       scalar_t* self_ptr = self_data + row * K;
+      if constexpr (need_acc) {
+        buffer_ptr = buffer_data + tid * K;
+      } else {
+        buffer_ptr = reinterpret_cast<opmath_t*>(self_ptr);
+      }
 
       // step 1: reinit rows in `self` if needed
       _init<scalar_t, reduce>(self_ptr, buffer_ptr, K, include_self);
@@ -729,9 +738,11 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
       // step 2: reduce
       for (const auto n : c10::irange(off_start, off_end)) {
         int64_t col = sorted_col_index_values[n];
-        _update<scalar_t, reduce>(src_data, buffer_ptr, col, K);
+        update<scalar_t, reduce>(buffer_ptr, src_data + col * K, K);
       }
-      vec::convert(buffer_ptr, self_ptr, K);
+      if constexpr (need_acc) {
+        vec::convert(buffer_ptr, self_ptr, K);
+      }
 
       // step 3: finalize
       int64_t count = include_self ? 1 : 0;
