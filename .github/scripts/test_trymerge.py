@@ -528,11 +528,10 @@ class TestBypassFailures(TestCase):
         checks = get_classifications(
             checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
         )
+        workflow_name = "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test"
+        job_name = "build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)"
         self.assertTrue(
-            checks[
-                "pull / linux-bionic-cuda12.1-py3.10-gcc9-bazel-test / build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)"
-            ].classification
-            == "UNSTABLE"
+            checks[f"pull / {workflow_name} / {job_name}"].classification == "UNSTABLE"
         )
         pending, failed = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=1
