@@ -17,6 +17,7 @@ def define_targets(rules):
         target_compatible_with = rules.requires_cuda_enabled(),
         deps = [
             "//c10/cuda",
+            "@com_google_googletest//:gmock",
             "@com_google_googletest//:gtest_main",
         ],
     )
@@ -31,6 +32,7 @@ def define_targets(rules):
             target_compatible_with = rules.requires_cuda_enabled(),
             deps = [
                 "//c10/cuda",
+                "@com_google_googletest//:gmock",
                 "@com_google_googletest//:gtest_main",
             ],
         )

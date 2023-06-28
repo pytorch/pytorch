@@ -38,7 +38,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 try:
     # using tools/ to optimize test run.
-    sys.path.append(str(REPO_ROOT))
+    sys.path.insert(0, str(REPO_ROOT))
     from tools.stats.export_test_times import TEST_TIMES_FILE
     from tools.testing.test_selections import (
         calculate_shards,
@@ -61,6 +61,9 @@ except ImportError as e:
     print(
         f"Unable to import test_selections from tools/testing. Running without test selection stats.... Reason: {e}"
     )
+finally:
+    # Make sure to remove REPO_ROOT after import is done
+    sys.path.remove(str(REPO_ROOT))
 
 
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
