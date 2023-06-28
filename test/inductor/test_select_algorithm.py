@@ -62,7 +62,7 @@ class TestSelectAlgorithm(TestCase):
         foo(
             torch.randn(64, 32, device="cuda"),
             torch.randn(16, 32, device="cuda"),
-            torch.randn(16, device="cuda"),
+            torch.randn(1, 16, device="cuda"),
         )
         # Autotuning checks correctness of each version
         self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
