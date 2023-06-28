@@ -564,7 +564,7 @@ To deal with errors, the custom allocator user defined functions need to raise
 an exception or use `TORCH_CHECK`. Note that errors that happen during `free`
 calls may not be propagated instantly to Python due the GIL being released
 during free functions calls. The error will be stored and rethrown the next time
-a memory allocation is attempted. 
+a memory allocation is attempted.
 
 .. cublas-workspaces:
 

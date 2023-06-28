@@ -5775,8 +5775,9 @@ class TestCUDAPluggableAllocator(TestCase):
     def setUp(self):
         super().setUp()
         self._template = """\
+import os
+import tempfile
 import torch
-from setuptools import setup
 from torch.utils import cpp_extension
 
 custom_allocator_code = '''
@@ -5797,16 +5798,18 @@ void my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {{
 // Needed for torch extension to work
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {{}}
 '''
-module = cpp_extension.load_inline(
-    name='{name}',
-    cpp_sources=custom_allocator_code,
-    build_directory='/tmp',
-    with_cuda=True,
-)
+with tempfile.TemporaryDirectory() as tempdir:
+    module = cpp_extension.load_inline(
+        name='{name}',
+        cpp_sources=custom_allocator_code,
+        build_directory=tempdir,
+        with_cuda=True,
+    )
 
-# Load the allocator
-new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
-    '/tmp/{name}.so', 'my_malloc', 'my_free')
+    # Load the allocator
+    allocator_path = os.path.join(tempdir, "{name}.so")
+    new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+        allocator_path, 'my_malloc', 'my_free')
 
 # Swap the current allocator
 torch.cuda.memory.change_current_allocator(new_alloc)
@@ -5863,15 +5866,17 @@ void my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
 """
         a = torch.zeros(10, device='cuda')
-        module = load_inline(
-            name='allocator',
-            cpp_sources=custom_allocator_code,
-            build_directory='/tmp',
-            with_cuda=True,
-        )
-        # Load the allocator
-        new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
-            '/tmp/allocator.so', 'my_malloc', 'my_free')
+        with tempfile.TemporaryDirectory() as tempdir:
+            module = load_inline(
+                name='allocator',
+                cpp_sources=custom_allocator_code,
+                build_directory=tempdir,
+                with_cuda=True,
+            )
+            # Load the allocator
+            allocator_path = os.path.join(tempdir, "allocator.so")
+            new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+                allocator_path, 'my_malloc', 'my_free')
         # Swap the current allocator
         with self.assertRaisesRegex(RuntimeError, "swap an already initialized"):
             torch.cuda.memory.change_current_allocator(new_alloc)
@@ -5895,7 +5900,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
             expected_message = "bad custom alloc"
             self.assertTrue(expected_message in e.output.decode('ascii'))
             error = True
-        self.assertTrue(error)
+        self.assertTrue(error, "Failed to fail")
 
         # Fail using TORCH_CHECK
         error = False
@@ -5912,7 +5917,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
             expected_message = "custom alloc failed"
             self.assertTrue(expected_message in e.output.decode('ascii'))
             error = True
-        self.assertTrue(error)
+        self.assertTrue(error, "Failed to fail")
 
     def test_pluggable_allocator_with_exception_on_free(self):
         # Since we can't swap an already initialized allocator, we fork a new process for these tests
@@ -5934,7 +5939,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
             expected_message = "bad custom free"
             self.assertTrue(expected_message in e.output.decode('ascii'))
             error = True
-        self.assertTrue(error)
+        self.assertTrue(error, "Failed to fail")
 
         free = """
    TORCH_CHECK(false, "custom free failed");
@@ -5949,7 +5954,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
             expected_message = "custom free failed"
             self.assertTrue(expected_message in e.output.decode('ascii'))
             error = True
-        self.assertTrue(error)
+        self.assertTrue(error, "Failed to fail")
 
 instantiate_parametrized_tests(TestCuda)
 
