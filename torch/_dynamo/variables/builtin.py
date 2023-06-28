@@ -27,11 +27,11 @@ from ..utils import (
     check_numpy_ndarray_args,
     check_unspec_python_args,
     get_higher_order_op,
+    guard_if_dyn,
     istype,
     proxy_args_kwargs,
     requires_higher_order_op,
     specialize_args_kwargs,
-    guard_if_dyn,
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable, EnumVariable

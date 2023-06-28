@@ -19,12 +19,12 @@ from ..utils import (
     get_custom_getattr,
     get_fake_value,
     get_real_value,
+    guard_if_dyn,
     HAS_NUMPY_TORCH_INTEROP,
     object_has_getattribute,
     product,
     proxy_args_kwargs,
     tensortype_to_dtype,
-    guard_if_dyn,
 )
 from .base import VariableTracker
 from .constant import ConstantVariable
