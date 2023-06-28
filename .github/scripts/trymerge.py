@@ -59,6 +59,7 @@ class JobCheckState(NamedTuple):
     status: Optional[str]
     classification: Optional[str]
     job_id: Optional[int]
+    title: Optional[str]
 
 
 JobNameToStateDict = Dict[str, JobCheckState]
@@ -126,6 +127,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
           conclusion
           detailsUrl
           databaseId
+          title
         }
         pageInfo {
           endCursor
@@ -317,6 +319,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_c
                     conclusion
                     detailsUrl
                     databaseId
+                    title
                   }
                   pageInfo {
                     endCursor
@@ -441,6 +444,10 @@ MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 ROCKSET_MERGES_COLLECTION = "merges"
 ROCKSET_MERGES_WORKSPACE = "commons"
 REMOTE_MAIN_BRANCH = "origin/main"
+INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
+HAS_NO_CONNECTED_DIFF_TITLE = (
+    "There is no internal Diff connected, this can be merged now"
+)
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -544,8 +551,9 @@ def add_workflow_conclusions(
                             checkrun_name,
                             checkrun_node["detailsUrl"],
                             checkrun_node["conclusion"],
-                            None,
-                            checkrun_node["databaseId"],
+                            classification=None,
+                            job_id=checkrun_node["databaseId"],
+                            title=checkrun_node["title"],
                         )
 
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
@@ -573,8 +581,9 @@ def add_workflow_conclusions(
                 workflow.name,
                 workflow.url,
                 workflow.status,
-                None,
-                None,
+                classification=None,
+                job_id=None,
+                title=None,
             )
     for job_name, job in no_workflow_obj.jobs.items():
         res[job_name] = job
@@ -879,8 +888,9 @@ class GitHubPR:
                     name,
                     status["targetUrl"],
                     status["state"],
-                    None,
-                    None,
+                    classification=None,
+                    job_id=None,
+                    title=None,
                 )
 
         return self.conclusions
@@ -977,13 +987,20 @@ class GitHubPR:
         return rc.group(1) if rc is not None else None
 
     def has_internal_changes(self) -> bool:
-        checkrun_name = "Meta Internal-Only Changes Check"
+        checkrun_name = INTERNAL_CHANGES_CHECKRUN_NAME
         if self.get_diff_revision() is None:
             return False
         checks = self.get_checkrun_conclusions()
         if checks is None or checkrun_name not in checks:
             return False
         return checks[checkrun_name].status != "SUCCESS"
+
+    def has_no_connected_diff(self) -> bool:
+        checkrun_name = INTERNAL_CHANGES_CHECKRUN_NAME
+        checks = self.get_checkrun_conclusions()
+        if checks is None or checkrun_name not in checks:
+            return False
+        return checks[checkrun_name].title == HAS_NO_CONNECTED_DIFF_TITLE
 
     def merge_ghstack_into(
         self,
@@ -1507,11 +1524,17 @@ def get_classifications(
                 check.status,
                 "IGNORE_CURRENT_CHECK",
                 check.job_id,
+                check.title,
             )
             continue
         if "unstable" in name:
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "UNSTABLE", check.job_id
+                check.name,
+                check.url,
+                check.status,
+                "UNSTABLE",
+                check.job_id,
+                check.title,
             )
             continue
         head_sha_job = head_sha_jobs.get(name)
@@ -1523,11 +1546,16 @@ def get_classifications(
             and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
         ):
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "BROKEN_TRUNK", check.job_id
+                check.name,
+                check.url,
+                check.status,
+                "BROKEN_TRUNK",
+                check.job_id,
+                check.title,
             )
         elif any(rule.matches(head_sha_job) for rule in flaky_rules):
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "FLAKY", check.job_id
+                check.name, check.url, check.status, "FLAKY", check.job_id, check.title
             )
     return checks_with_classifications
 
@@ -1562,6 +1590,10 @@ def validate_revert(
             )
         )
     skip_internal_checks = can_skip_internal_checks(pr, comment_id)
+
+    # Ignore associated diff it PR does not have internal changes
+    if pr.has_no_connected_diff():
+        skip_internal_checks = True
 
     # Raises exception if matching rule is not found, but ignores all status checks
     find_matching_merge_rule(
