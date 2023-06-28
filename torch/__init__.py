@@ -56,7 +56,7 @@ __all__ = [
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not',
-    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap', 'disable_dynamo',
+    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
 ]
 
 ################################################################################
@@ -1342,11 +1342,21 @@ for name in dir(_C._VariableFunctions):
 
 
 
-def disable_dynamo(fn=None, recursive=True):
-    def inner(*args, **kwargs):
-        import torch._dynamo
-        return torch._dynamo.disable(fn, recursive)(*args, **kwargs)
-    return inner
+def _disable_dynamo(fn=None, recursive=True):
+    if fn is not None:
+        def inner(*args, **kwargs):
+            import torch._dynamo
+            return torch._dynamo.disable(fn, recursive)(*args, **kwargs)
+        return inner
+    else:
+        # decorator usage like @_disable_dynamo(recursive=False). The resulting
+        # object expects the original decorated function as the arg.
+        def outer(*args, **kwargs):
+            def inner(fn_inner):
+                import torch._dynamo
+                return torch._dynamo.disable(fn_inner, recursive)(*args, **kwargs)
+            return inner
+        return outer
 
 ################################################################################
 # Import interface functions defined in Python
