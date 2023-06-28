@@ -901,7 +901,8 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         opt_test = torch.compile(test, backend="eager")
         inp = torch.ones(3, 3)
-        self.assertFalse(torch.allclose(opt_test(True, inp), opt_test(False, inp)))
+        self.assertTrue(torch.allclose(test(True, inp), opt_test(True, inp)))
+        self.assertTrue(torch.allclose(test(False, inp), opt_test(False, inp)))
 
     def test_map_graph_break(self):
         backend = EagerAndRecordGraphs()
