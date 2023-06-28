@@ -290,7 +290,7 @@ class TestSparseSemiStructured(TestCase):
             c = (c + 1) * 128
             run_test(r, c, device, dtype)
 
-            
+
 instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
 
 if __name__ == "__main__":

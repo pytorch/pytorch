@@ -1,13 +1,10 @@
 import torch
 
 
-__all__ = [
-    "sparse_semi_structured_from_dense",
-    "sparse_semi_structured_to_dense",
-]
-
-
 def _torch_compile_supported(device):
+    # FIXME: reused from torch/utils/_content_store.py, should be
+    # factored out into a common helper.
+
     import torch._dynamo
 
     compile_supported = torch._dynamo.is_dynamo_supported()
@@ -21,7 +18,7 @@ def _torch_compile_supported(device):
         compile_supported = False
 
     return compile_supported
-    
+
 
 def _sparse_semi_structured_from_dense_kernel(dense):
     if dense.dim() != 2:
@@ -325,7 +322,7 @@ def sparse_semi_structured_from_dense(dense):
         return _sparse_semi_structured_from_dense_kernel(dense)
 
     import torch._inductor.config as cfg
-    
+
     cfg.aggressive_fusion = True
 
     kernel = torch.compile(_sparse_semi_structured_from_dense_kernel)
@@ -338,7 +335,7 @@ def sparse_semi_structured_to_dense(sparse, meta):
         return _sparse_semi_structured_to_dense_kernel(sparse, meta)
 
     import torch._inductor.config as cfg
-    
+
     cfg.aggressive_fusion = True
 
     kernel = torch.compile(_sparse_semi_structured_to_dense_kernel)

@@ -4,7 +4,11 @@ from typing import Any, Optional
 
 import torch
 
-from torch.sparse._semi_structured_conversions import *
+from torch.sparse._semi_structured_conversions import (
+    sparse_semi_structured_from_dense,
+    sparse_semi_structured_to_dense,
+)
+
 
 __all__ = [
     "SparseSemiStructuredTensor",
@@ -16,6 +20,7 @@ _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
 _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG = {
     torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 64),
     torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(10, 128),
+    # FIXME: suport for torch.bfloat should be enabled here.
 }
 
 _WARNING_SHOWN = False

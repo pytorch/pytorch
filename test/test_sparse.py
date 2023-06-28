@@ -27,7 +27,6 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
-from torch._inductor.utils import has_triton
 
 
 def _op_supports_any_sparse(op):
