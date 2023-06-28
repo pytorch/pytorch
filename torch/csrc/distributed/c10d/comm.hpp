@@ -25,14 +25,16 @@ class TORCH_API GradBucket {
       std::vector<size_t> offsets,
       std::vector<size_t> lengths,
       std::vector<c10::IntArrayRef> sizes_vec,
-      std::vector<at::Tensor> parameters)
+      std::vector<at::Tensor> parameters,
+      c10::optional<at::Tensor> sparse_grad_indices)
       : index_(index),
         bucket_count_(bucket_count),
         buffer_(std::move(tensor)),
         offsets_(std::move(offsets)),
         lengths_(std::move(lengths)),
         sizes_vec_(std::move(sizes_vec)),
-        parameters_(std::move(parameters)) {}
+        parameters_(std::move(parameters)),
+        sparse_grad_indices_(std::move(sparse_grad_indices)) {}
 
   // Returns the index of the bucket, which is unique across all the buckets.
   size_t getIndex() const {
@@ -70,6 +72,10 @@ class TORCH_API GradBucket {
     return index_ == bucket_count_ - 1;
   }
 
+  c10::optional<at::Tensor>& getSparseGradIndices() {
+    return sparse_grad_indices_;
+  }
+
  private:
   size_t index_;
   size_t bucket_count_;
@@ -79,8 +85,13 @@ class TORCH_API GradBucket {
   std::vector<size_t> offsets_;
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;
+
   // Model parameters for this bucket.
   const std::vector<at::Tensor> parameters_;
+
+  // Predefined sparse indices for this bucket (only used for sparse tensors).
+  // The gradients will be updated to have indices with these tensor values
+  c10::optional<at::Tensor> sparse_grad_indices_;
 };
 
 // Base class of both `PythonCommHook` and `CppCommHook`.

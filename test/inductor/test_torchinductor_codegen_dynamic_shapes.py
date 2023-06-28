@@ -283,8 +283,6 @@ test_failures = {
 if TEST_WITH_ROCM:
     # aten.miopen_batch_norm is not registered for lowering
     test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
-    # Failed to find triton kernel after ROCm aten.prod fallback
-    test_failures["test_prod_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
     CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"

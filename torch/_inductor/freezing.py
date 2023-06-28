@@ -7,7 +7,10 @@ from typing import List, Optional, Tuple
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+
 from torch._dynamo.utils import detect_fake_mode
+from torch._functorch.compile_utils import fx_graph_cse
+from torch._inductor.fx_passes.freezing_patterns import get_freezing_patterns
 from torch.ao.quantization._pt2e.utils import _fuse_conv_bn_
 from torch.fx.experimental.proxy_tensor import make_fx
 from . import config
@@ -218,6 +221,18 @@ def freeze(
     aot_autograd_gm = decompose_unfused_batchnorms(
         aot_autograd_gm, example_inputs, preserved_arg_indices
     )
+    # TODO - further restrict cse ? right now needed to dedup aliasing ops
+    cse_graph = fx_graph_cse(aot_autograd_gm.graph)
+    aot_autograd_gm.graph = cse_graph
+    aot_autograd_gm.recompile()
+
+    patterns = get_freezing_patterns()
+
+    patterns.apply(aot_autograd_gm.graph)
+
+    # TODO - apply legalization in pattern matcher
+    torch.fx.passes.tools_common.legalize_graph(aot_autograd_gm)
+    constant_fold(aot_autograd_gm)
 
     # invalidate nn Modules
     if config.freezing_discard_parameters:
