@@ -347,7 +347,7 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'only available on CUDA'):
                 s0._share_cuda_()
 
-            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+            with self.assertRaisesRegex(TypeError, r"cannot pin 'torch.storage.UntypedStorage' only CPU memory can be pinned"):
                 s0.pin_memory()
 
         with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
