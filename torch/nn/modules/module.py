@@ -94,8 +94,7 @@ _global_backward_hooks: Dict[int, Callable] = OrderedDict()
 _global_is_full_backward_hook: Optional[bool] = None
 _global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks: Dict[int, Callable] = OrderedDict()
-# dict that maps id of forced hook to whether it has been fired
-_global_forward_hooks_forced: Dict[int, bool] = OrderedDict()
+_global_forward_hooks_always_called: Dict[int, bool] = OrderedDict()
 
 _EXTRA_STATE_KEY_SUFFIX = '_extra_state'
 
@@ -204,7 +203,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
     return handle
 
 
-def register_module_forward_hook(hook: Callable[..., None], *, force: bool = False) -> RemovableHandle:
+def register_module_forward_hook(hook: Callable[..., None], *, always_call: bool = False) -> RemovableHandle:
     r"""Registers a global forward hook for all the modules
 
     .. warning ::
@@ -225,8 +224,8 @@ def register_module_forward_hook(hook: Callable[..., None], *, force: bool = Fal
 
     Parameters:
         hook (Callable): The user defined hook to be registered.
-        force (bool): If ``True`` the ``hook`` will be run regardless of
-            whether an exception is raised by the preceding operations.
+        always_calle (bool): If ``True`` the ``hook`` will be run regardless of
+            whether an exception is raised while calling the Module.
             (Default: ``False``)
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
@@ -237,10 +236,10 @@ def register_module_forward_hook(hook: Callable[..., None], *, force: bool = Fal
     ``register_forward_hook``.
     """
     handle = hooks.RemovableHandle(_global_forward_hooks,
-                                   extra_dict=_global_forward_hooks_forced)
+                                   extra_dict=_global_forward_hooks_always_called)
     _global_forward_hooks[handle.id] = hook
-    if force:
-        _global_forward_hooks_forced[handle.id] = False
+    if always_call:
+        _global_forward_hooks_always_called[handle.id] = True
     return handle
 
 
@@ -432,8 +431,8 @@ class Module:
     # As JIT does not support Set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_hooks_with_kwargs: Dict[int, bool]
-    # Marks whether the corresponding forced _forward_hooks have been run
-    _forward_hooks_forced: Dict[int, bool]
+    # Marks whether the corresponding always_called _forward_hooks have been run
+    _forward_hooks_always_called: Dict[int, bool]
     _forward_pre_hooks: Dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
     # As JIT does not support Set[int], this dict is used as a set, where all
@@ -480,7 +479,7 @@ class Module:
         super().__setattr__('_is_full_backward_hook', None)
         super().__setattr__('_forward_hooks', OrderedDict())
         super().__setattr__('_forward_hooks_with_kwargs', OrderedDict())
-        super().__setattr__('_forward_hooks_forced', OrderedDict())
+        super().__setattr__('_forward_hooks_always_called', OrderedDict())
         super().__setattr__('_forward_pre_hooks', OrderedDict())
         super().__setattr__('_forward_pre_hooks_with_kwargs', OrderedDict())
         super().__setattr__('_state_dict_hooks', OrderedDict())
@@ -1436,7 +1435,7 @@ class Module:
         *,
         prepend: bool = False,
         with_kwargs: bool = False,
-        force: bool = False,
+        always_call: bool = False,
     ) -> RemovableHandle:
         r"""Registers a forward hook on the module.
 
@@ -1471,8 +1470,8 @@ class Module:
             with_kwargs (bool): If ``True``, the ``hook`` will be passed the
                 kwargs given to the forward function.
                 Default: ``False``
-            force (bool): If ``True`` the ``hook`` will be run regardless of
-                whether an exception is raised by the preceding operations.
+            always_call (bool): If ``True`` the ``hook`` will be run regardless of
+                whether an exception is raised while calling the Module.
                 (Default: ``False``)
 
         Returns:
@@ -1482,13 +1481,13 @@ class Module:
         """
         handle = hooks.RemovableHandle(
             self._forward_hooks,
-            extra_dict=[self._forward_hooks_with_kwargs, self._forward_hooks_forced],
+            extra_dict=[self._forward_hooks_with_kwargs, self._forward_hooks_always_called],
         )
         self._forward_hooks[handle.id] = hook
         if with_kwargs:
             self._forward_hooks_with_kwargs[handle.id] = True
-        if force:
-            self._forward_hooks_forced[handle.id] = False
+        if always_call:
+            self._forward_hooks_always_called[handle.id] = True
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
@@ -1530,7 +1529,8 @@ class Module:
 
         try:
             result = None
-            # Do not call functions when jit is used
+            called_always_called_hooks = set()
+
             full_backward_hooks, non_full_backward_hooks = [], []
             backward_pre_hooks = []
             if self._backward_pre_hooks or _global_backward_pre_hooks:
@@ -1577,11 +1577,9 @@ class Module:
                     else:
                         hook_result = hook(self, args, result)
 
-                    # mark that forced hook has been run
-                    if hook_id in self._forward_hooks_forced:
-                        self._forward_hooks_forced[hook_id] = True
-                    elif hook_id in _global_forward_hooks_forced:
-                        _global_forward_hooks_forced[hook_id] = True
+                    # mark that always called hook has been run
+                    if hook_id in self._forward_hooks_always_called or hook_id in _global_forward_hooks_always_called:
+                        called_always_called_hooks.add(hook_id)
 
                     if hook_result is not None:
                         result = hook_result
@@ -1610,21 +1608,29 @@ class Module:
             return result
 
         finally:
-            # run forced hooks if they have not already been run
-            # For now only forward hooks have the force option but perhaps this
-            # functionality should be added to full backward hooks as well.
-            if not all(_global_forward_hooks_forced.values()):
-                for hook_id, hook in _global_forward_hooks.items():
-                    if hook_id in _global_forward_hooks_forced and not _global_forward_hooks_forced[hook_id]:
+            # run always called hooks if they have not already been run
+            # For now only forward hooks have the always_call option but perhaps
+            # this functionality should be added to full backward hooks as well.
+            for hook_id, hook in _global_forward_hooks.items():
+                if hook_id in _global_forward_hooks_always_called and hook_id not in called_always_called_hooks:
+                    try:
                         hook_result = hook(self, args, result)
+                        if hook_result is not None:
+                            result = hook_result
+                    except Exception:
+                        continue
 
-            if not all(self._forward_hooks_forced.values()):
-                for hook_id, hook in self._forward_hooks.items():
-                    if hook_id in self._forward_hooks_forced and not self._forward_hooks_forced[hook_id]:
+            for hook_id, hook in self._forward_hooks.items():
+                if hook_id in self._forward_hooks_always_called and hook_id not in called_always_called_hooks:
+                    try:
                         if hook_id in self._forward_hooks_with_kwargs:
                             hook_result = hook(self, args, kwargs, result)
                         else:
                             hook_result = hook(self, args, result)
+                        if hook_result is not None:
+                            result = hook_result
+                    except Exception:
+                        continue
 
 
     __call__ : Callable[..., Any] = _wrapped_call_impl
