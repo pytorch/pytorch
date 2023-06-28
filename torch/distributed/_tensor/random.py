@@ -39,12 +39,14 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
         return False
 
 
-def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
+def manual_seed(seed: int, device_mesh: DeviceMesh, tp_dim: int = 0) -> None:
     """Sets the seed for generating random numbers for the calling rank.
 
     Args:
         seed (int): The desired seed.
         device_mesh (:class:`DeviceMesh`): The device mesh to set the seed.
+        tp_dim (int, optional): The mesh dimension where to apply Tensor Parallel
+            Default: 0
 
     Returns:
         None

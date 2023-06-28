@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Dict, Type, Union
+from typing import Dict, Union
 
 import torch
 import torch.nn as nn
@@ -13,9 +13,7 @@ from torch.distributed._tensor import (
     Shard,
 )
 from torch.distributed._tensor.random import (
-    CudaRNGStateTracker,
     is_rng_supported_mesh,
-    OffsetBasedRNGTracker,
     TensorParallelRNGTracker,
 )
 from torch.distributed._tensor.sharding_prop import _CachingPropagator
@@ -44,8 +42,7 @@ def parallelize_module(  # type: ignore[return]
     device_mesh: DeviceMesh,
     parallelize_plan: Union[ParallelStyle, Dict[str, ParallelStyle]],
     tp_mesh_dim: int = 0,
-    enable_distribute_region: bool = True,
-    rng_tracker_type: Type[CudaRNGStateTracker] = OffsetBasedRNGTracker,
+    sync_rng_state: bool = True,
 ) -> nn.Module:
     """
     The API to apply Tensor Parallelism (TP) in PyTorch. We parallelize module
@@ -71,14 +68,12 @@ def parallelize_module(  # type: ignore[return]
         tp_mesh_dim (int):
             The dimension of ``device_mesh`` where we perform
             Tensor Parallelism on.
-        enable_distribute_region (bool):
+        sync_rng_state (bool):
             This option represents whether or not the parallelized module uses the parallel
             Random Number Generator to perform randomized tensor operators (e.g. dropout).
+            DTensor is responsible for maintaining the parallel RNG in a synchronous state
+            across ranks.
             Default: True
-        rng_tracker_type (Type[:class:`CudaRNGStateTracker`]):
-            The type of the parallel RNG tracker to use, such as :class:`OffsetBasedRNGTracker`
-            or :class:`TensorParallelRNGTracker`.
-            Default: :class:`OffsetBasedRNGTracker`
 
     Return:
         A :class:`nn.Module` object parallelized.
@@ -102,12 +97,12 @@ def parallelize_module(  # type: ignore[return]
     # instantiate a TP RNG state tracker if it's not there
     if (
         is_rng_supported_mesh(device_mesh) and
-        not isinstance(random._rng_tracker, rng_tracker_type)
+        not isinstance(random._rng_tracker, TensorParallelRNGTracker)
     ):
-        random._rng_tracker = rng_tracker_type()
-        if rng_tracker_type == TensorParallelRNGTracker:
-            random._rng_tracker._manual_seed(device_mesh, base_seed=1234, tp_dim=tp_mesh_dim)
-        random._rng_tracker.distribute_region_enabled = enable_distribute_region
+        random._rng_tracker = TensorParallelRNGTracker()
+        # TODO: we should allow user to pass in the default seed from a config
+        random._rng_tracker._manual_seed(device_mesh, base_seed=1234, tp_dim=tp_mesh_dim)
+        random._rng_tracker.distribute_region_enabled = sync_rng_state
 
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
@@ -121,6 +116,15 @@ def parallelize_module(  # type: ignore[return]
             return _parallelize_multihead_attn(module, device_mesh)
         elif _is_mlp_for_pairwise_parallel(module):
             return _parallelize_mlp(module, device_mesh, parallelize_plan)
+        elif isinstance(module, torch.nn.Dropout):
+            distribute_module(
+                module,
+                device_mesh,
+                None,
+                input_fn=parallelize_plan._prepare_input,  # type: ignore[arg-type, misc] # pyre-ignore[6]
+                output_fn=parallelize_plan._prepare_output,  # type: ignore[arg-type, misc] # pyre-ignore[6]
+            )
+            return module
         else:
             for n, m in module.named_children():
                 module.register_module(
