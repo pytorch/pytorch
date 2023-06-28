@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 import torch
 import torch._decomp as decomp
@@ -58,14 +58,18 @@ class DepTokenStateTracker:
 
 class FunctionalAssertionsHelper:
     @staticmethod
-    def can_functionalize(needs_autograd: bool) -> bool:
+    def can_functionalize_asserts(needs_autograd: bool) -> bool:
         if config.functionalize_assertion_ops:
             # The following assertions is aim to limit assertions functionalization
             # to simple case for now.
             # Only handle forward graph.
-            assert not needs_autograd
+            assert (
+                not needs_autograd
+            ), "Cannot functionalize assertion ops when grad is enabled"
             # Avoid rng ops functionalization which also add extra outputs.
-            assert not config.functionalize_rng_ops
+            assert (
+                not config.functionalize_rng_ops
+            ), "Cannot functionalize assertion ops when RNG functionalization is enabled"
 
         return config.functionalize_assertion_ops
 
@@ -89,6 +93,25 @@ class FunctionalAssertionsHelper:
 
         return _traced_forward
 
+    @staticmethod
+    def create_asserts_dep_token_output(
+        gm: torch.fx.GraphModule, num_outputs_dep_token: int
+    ) -> Optional[str]:
+        if num_outputs_dep_token == 0:
+            return None
+        assert num_outputs_dep_token == 1
+
+        output_args = next(
+            n for n in reversed(gm.graph.nodes) if n.op == "output"
+        ).args[0]
+        dep_token_arg = output_args[-1]
+
+        assert dep_token_arg.target in (
+            aten._make_dep_token.default,
+            aten._functional_assert_async.msg,
+        )
+
+        return dep_token_arg.name
 
 def _register_decomposition(aten_op):
     return decomp.register_decomposition(aten_op, _decompositions)

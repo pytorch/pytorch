@@ -1,8 +1,7 @@
 import copy
-from typing import Dict, Optional, Tuple, List, TYPE_CHECKING
+from typing import Dict, Optional, Tuple, List
 
 import torch
-from dataclasses import replace
 from torch._export.pass_base import ExportPassBase, PassResult, Argument
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
@@ -14,10 +13,6 @@ _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS: Dict[OpOverload, OpOverload]
     aten.sym_constrain_range.default: aten._functional_sym_constrain_range,
     aten._assert_async.msg: aten._functional_assert_async.msg,
 }
-
-if TYPE_CHECKING:
-    # Avoid circular dependency
-    from torch._export.exported_program import ExportedProgram, ExportGraphSignature
 
 
 class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
@@ -42,32 +37,6 @@ class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
         return x.add(3), dep_token1
     ```
     """
-
-    @classmethod
-    def update_exported_program_signature(
-        cls,
-        old_ep: "ExportedProgram",
-        new_ep: "ExportedProgram",
-    ) -> Optional["ExportGraphSignature"]:
-        output_node = next(
-            n for n in new_ep.graph_module.graph.nodes if n.op == "output"
-        )
-        dep_token = next(
-            (
-                {idx: str(n)}
-                for idx, n in enumerate(output_node.args[0])
-                if n.target
-                in _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS.values()
-            ),
-            None,
-        )
-        return (
-            replace(
-                copy.deepcopy(new_ep.graph_signature), assertion_dep_token=dep_token
-            )
-            if dep_token is not None
-            else None
-        )
 
     def __init__(self) -> None:
         super().__init__()

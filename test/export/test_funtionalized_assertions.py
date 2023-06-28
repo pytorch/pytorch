@@ -40,12 +40,19 @@ class TestFuntionalAssertions(TestCase):
         )
 
     def test_eager_mode_functionalization(self) -> None:
-        def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+        def my_compiler(
+            gm: torch.fx.GraphModule,
+            example_inputs: List[torch.Tensor],
+        ):
             FileCheck().check_count(
-                "aten._make_dep_token.default", 1, exactly=True,
+                "aten._make_dep_token.default",
+                1,
+                exactly=True,
             ).run(gm.code)
             FileCheck().check_count(
-                "aten._functional_assert_async.msg", 1, exactly=True,
+                "aten._functional_assert_async.msg",
+                1,
+                exactly=True,
             ).run(gm.code)
             return make_boxed_func(gm.forward)
 

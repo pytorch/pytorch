@@ -1959,6 +1959,23 @@ def forward(self, tangents_1):
         with self.assertRaisesRegex(Exception, "Can't call metadata"):
             make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
 
+    def test_functionalized_asserts(self):
+        def fn(x):
+            b = x.sin()
+            x0 = torch.ops.aten.select.int(x, 0, 0)
+            eq = torch.ops.aten.eq.Scalar(x0, 3)
+            torch.ops.aten._assert_async.msg(eq, "test assertion error")
+            return x.cos() + b
+
+        with patch("functorch.compile.config.functionalize_assertion_ops", True), patch(
+            "functorch.compile.config.functionalize_rng_ops", False
+        ):
+            compiled = aot_function(fn, fw_compiler=nop)
+            inp = torch.Tensor([3, 2])
+            self.assertEqual(compiled(inp), fn(inp))
+
+            with self.assertRaisesRegex(RuntimeError, "test assertion error"):
+                compiled(torch.Tensor([4, 2]))
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
@@ -2249,6 +2266,59 @@ class <lambda>(torch.nn.Module):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
 
+    def test_aot_export_functionalized_asserts(self):
+        def fn(p, x):
+            b = x.sin()
+            x0 = torch.ops.aten.select.int(x, 0, 0)
+            eq = torch.ops.aten.eq.Scalar(x0, 3)
+            torch.ops.aten._assert_async.msg(eq, "test assertion error")
+            return (x.cos() + b,)
+
+        mod = TestMod(fn)
+        inp = torch.tensor([3, 2, 1])
+
+        with patch("functorch.compile.config.functionalize_assertion_ops", True), patch(
+            "functorch.compile.config.functionalize_rng_ops", True
+        ), self.assertRaisesRegex(
+            AssertionError,
+            "Cannot functionalize assertion ops when RNG functionalization is enabled",
+        ):
+            aot_export_module(mod, [inp], trace_joint=False)
+
+        with patch("functorch.compile.config.functionalize_assertion_ops", True), patch(
+            "functorch.compile.config.functionalize_rng_ops", False
+        ):
+            fx_gm, signature = aot_export_module(mod, [inp], trace_joint=False)
+            self.assertExpectedInline(fx_gm.print_readable(print_output=False), """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: f32[2], arg1_1: i64[3]):
+        # No stacktrace found for following nodes
+        sin: f32[3] = torch.ops.aten.sin.default(arg1_1)
+        select: i64[] = torch.ops.aten.select.int(arg1_1, 0, 0)
+        eq: b8[] = torch.ops.aten.eq.Scalar(select, 3);  select = None
+        _make_dep_token: f32[] = torch.ops.aten._make_dep_token.default()
+        _functional_assert_async: f32[] = torch.ops.aten._functional_assert_async.msg(eq, 'test assertion error', _make_dep_token);  eq = _make_dep_token = None
+        cos: f32[3] = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
+        add: f32[3] = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
+        return (add, _functional_assert_async)
+        """)  # noqa: B950
+            self.assertEqual(signature.asserts_dep_token, "_functional_assert_async")
+
+        with patch("functorch.compile.config.functionalize_assertion_ops", False):
+            fx_gm, signature = aot_export_module(mod, [inp], trace_joint=False)
+            self.assertExpectedInline(fx_gm.print_readable(print_output=False), """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: f32[2], arg1_1: i64[3]):
+        # No stacktrace found for following nodes
+        sin: f32[3] = torch.ops.aten.sin.default(arg1_1)
+        select: i64[] = torch.ops.aten.select.int(arg1_1, 0, 0)
+        eq: b8[] = torch.ops.aten.eq.Scalar(select, 3);  select = None
+        _assert_async = torch.ops.aten._assert_async.msg(eq, 'test assertion error');  eq = None
+        cos: f32[3] = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
+        add: f32[3] = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
+        return (add,)
+        """)  # noqa: B950
+            self.assertIsNone(signature.asserts_dep_token)
 
 class TestPartitioning(AOTTestCase):
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")

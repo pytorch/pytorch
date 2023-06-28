@@ -4,7 +4,7 @@ import itertools
 import logging
 import warnings
 import pprint
-from contextlib import contextmanager, nullcontext, ExitStack
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
@@ -987,6 +987,10 @@ class GraphSignature:
 
     backward_signature: Optional[BackwardSignature]
 
+    # If assertion functionalization is enabled, an extra dependency token will
+    # be returned.
+    asserts_dep_token: Optional[GraphOutputName] = None
+
     @classmethod
     def from_tracing_metadata(
         cls,
@@ -1002,6 +1006,7 @@ class GraphSignature:
         num_user_outputs: int,
         loss_index: Optional[int],
         backward_signature: Optional[BackwardSignature],
+        asserts_dep_token: Optional[str],
     ) -> "GraphSignature":
         graph_inputs = graph_input_names
         graph_outputs = graph_output_names
@@ -1040,6 +1045,9 @@ class GraphSignature:
         start, stop = stop, stop + num_user_outputs
         user_outputs = graph_outputs[start:stop]
 
+        if asserts_dep_token is not None:
+            start, stop = stop, stop + 1
+
         unused_outputs = len(graph_outputs) - stop
         if backward_signature is not None:
             unused_outputs -= len(backward_signature.gradients_to_parameters) + len(
@@ -1058,6 +1066,7 @@ class GraphSignature:
             in_spec=in_spec,
             out_spec=out_spec,
             backward_signature=backward_signature,
+            asserts_dep_token=asserts_dep_token,
         )
 
 @dataclasses.dataclass
@@ -3189,13 +3198,9 @@ def create_aot_dispatcher_function(
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
 
-    with ExitStack() as stack:
-        stack.enter_context(torch.autograd.set_multithreading_enabled(False))
-        stack.enter_context(preserve_rng_state())
-        stack.enter_context(fake_mode)
-        stack.enter_context(python_dispatcher_mode)
-        stack.enter_context(PhiloxStateTracker())
-
+    with torch.autograd.set_multithreading_enabled(
+        False
+    ), preserve_rng_state(), fake_mode, python_dispatcher_mode, PhiloxStateTracker():
         def process_inputs(flat_args):
             def convert(idx, x):
                 if shape_env is not None:
@@ -3227,15 +3232,21 @@ def create_aot_dispatcher_function(
             any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
             and torch.is_grad_enabled()
         )
-        if FunctionalAssertionsHelper.can_functionalize(needs_autograd=needs_autograd):
-            stack.enter_context(FunctionalAssertionsHelper.get_state_tracker())
+
+        maybe_enable_functionalize_asserts = nullcontext()
+        if FunctionalAssertionsHelper.can_functionalize_asserts(
+            needs_autograd=needs_autograd
+        ):
+            maybe_enable_functionalize_asserts = (
+                FunctionalAssertionsHelper.get_state_tracker()
+            )
             # Update the decompositions with functionalized assertions decompositions
             aot_config.decompositions = {
                 **FunctionalAssertionsHelper.get_decompositions(),
                 **aot_config.decompositions,
             }
 
-        with enable_python_dispatcher():
+        with enable_python_dispatcher(), maybe_enable_functionalize_asserts:
             # Patch set_rng_state as set_rng_state with fake tensors is
             # nonsensical. This does not affect the collection of metadata.
             with patch("torch.cuda.set_rng_state", lambda *args: None):
@@ -3289,7 +3300,10 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
         compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
         # You can put more passes here
 
-        compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata)
+        with maybe_enable_functionalize_asserts:
+            compiled_fn = compiler_fn(
+                flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata,
+            )
         if aot_config.is_export:
 
             mutated_user_inp_locs = [
@@ -3443,6 +3457,7 @@ def create_graph_signature(
     num_user_args = len(graph_input_names) - num_params_buffers
 
     if trace_joint:
+        assert fw_metadata.num_outputs_dep_token == 0
         assert num_user_fw_outs is not None
         num_fw_outs = num_user_fw_outs + fw_metadata.num_mutated_inputs
         backward_output_names = graph_output_names[num_fw_outs:]
@@ -3472,7 +3487,11 @@ def create_graph_signature(
         )
     else:
         backward_signature = None
-        num_user_fw_outs = len(graph_output_names) - fw_metadata.num_mutated_inputs
+        num_user_fw_outs = (
+            len(graph_output_names)
+            - fw_metadata.num_mutated_inputs
+            - fw_metadata.num_outputs_dep_token
+        )
 
     return GraphSignature.from_tracing_metadata(
         in_spec=in_spec,
@@ -3486,6 +3505,10 @@ def create_graph_signature(
         num_user_outputs=num_user_fw_outs,
         loss_index=loss_index,
         backward_signature=backward_signature,
+        asserts_dep_token=FunctionalAssertionsHelper.create_asserts_dep_token_output(
+            gm=fx_g,
+            num_outputs_dep_token=fw_metadata.num_outputs_dep_token,
+        ),
     )
 
 def aot_function(

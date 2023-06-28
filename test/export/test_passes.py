@@ -455,10 +455,17 @@ class TestPasses(TestCase):
             if n.target == torch.ops.aten.select.int
         )
         equal_scalar_node = select_int_node.next
-        dep_token_node = equal_scalar_node.next
+        dep_token_node = next(
+            n
+            for n in ep.graph_module.graph.nodes
+            if (
+                n.target == torch.ops.aten._functional_assert_async.msg
+                and n.args[0] == equal_scalar_node
+            )
+        )
         self.assertIn(
             "call_function[target=torch.ops.aten._functional_assert_async.msg]"
-            "(args = (%eq_scalar, assertion error), kwargs = {dep_token: %dep_token_2}",
+            "(args = (%eq_scalar, assertion error), kwargs = {dep_token: %dep_token1}",
             dep_token_node.format_node(),
         )
 
@@ -505,13 +512,13 @@ class TestPasses(TestCase):
                 inputs_to_buffers={"arg2_1": "L__self___buf"},
                 buffers_to_mutate={"add_tensor": "L__self___buf"},
                 backward_signature=None,
-                assertion_dep_token={2: "dep_token_8"},
+                assertion_dep_token={2: "dep_token7"},
             ),
         )
         outputs = next(n for n in ep.graph.nodes if n.op == "output").args[0]
         self.assertEqual(
             [str(o) for o in outputs],
-            ["add_tensor", "add_tensor_1", "dep_token_8"],
+            ["add_tensor", "add_tensor_1", "dep_token7"],
         )
         self.assertEqual(
             len(outputs), len(gs.buffers_to_mutate) + len(gs.user_outputs) + 1,
