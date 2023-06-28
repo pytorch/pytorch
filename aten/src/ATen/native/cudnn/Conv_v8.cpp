@@ -235,7 +235,6 @@ cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
     TORCH_INTERNAL_ASSERT(engine_cache_order.size() == engine_cache_order_size, "CUDNN V8 LRU Cache Corrupted (list size unexpectedly changed). Please report a bug to PyTorch.");
     TORCH_INTERNAL_ASSERT(engine_cache.size() == engine_cache.size(), "CUDNN V8 LRU Cache Corrupted (cache size unexpectedly changed). Please report a bug to PyTorch.");
   }
-  std::cout << "map size: " << engine_cache.size() << " list size: " << engine_cache_order.size() << std::endl;
   return &(it->second.first);
 }
 
