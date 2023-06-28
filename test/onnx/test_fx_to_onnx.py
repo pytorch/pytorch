@@ -185,11 +185,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 out = self.linear(x)
                 return out
 
-        model_state_dict = Model().state_dict()  # optional
-
-        with torch.onnx.enable_fake_mode(
-            model_state_dict=model_state_dict
-        ) as fake_context:
+        with torch.onnx.enable_fake_mode() as fake_context:
             x = torch.rand(5, 2, 2)
             model = Model()
 
@@ -201,9 +197,24 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         assert export_output.model_proto is not None
         assert len(export_output.model_proto.graph.initializer) == 0
-        with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_file:
-            export_output.save(tmp_file.name)
-            assert len(onnx.load(tmp_file.name).graph.initializer) > 0
+
+        # Save ONNX proto using Model's state_dict()
+        with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
+            model_state_dict = Model().state_dict()  # optional
+            export_output.save(tmp_onnx_file.name, model_state_dict=model_state_dict)
+            assert len(onnx.load(tmp_onnx_file.name).graph.initializer) > 0
+
+        # Save ONNX proto using Model checkpoint file
+        with tempfile.NamedTemporaryFile(
+            suffix=".onnx"
+        ) as tmp_onnx_file, tempfile.NamedTemporaryFile(
+            suffix=".pt"
+        ) as tmp_checkpoint_file:
+            torch.save(Model().state_dict(), tmp_checkpoint_file.name)  # optional
+            export_output.save(
+                tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
+            )
+            assert len(onnx.load(tmp_onnx_file.name).graph.initializer) > 0
 
         assert export_output is not None
         onnx.checker.check_model(export_output.model_proto, full_check=True)
