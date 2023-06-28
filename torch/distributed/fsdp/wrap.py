@@ -39,7 +39,7 @@ __all__ = [
 def _post_order_apply(
     root_module: nn.Module,
     target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
-    fn_to_apply: Callable[[nn.Module, Any], nn.Module],
+    fn_to_apply: Callable[[Any], nn.Module],
 ) -> None:
     """
     This applies a function ``fn_to_apply`` to some target modules with
@@ -85,12 +85,12 @@ def _run_module_wrap_policy(
     TODO: To match the existing ``ModuleWrapPolicy`` behavior, every wrapped
     module shares the same FSDP kwargs.
     """
-    module_classes: Tuple[Type[nn.Module], ...] = tuple(set(module_classes))
+    module_classes_tuple = tuple(set(module_classes))
     target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]] = {}
     for module in root_module.modules():
         if module in ignored_modules:
             continue
-        elif isinstance(module, module_classes):
+        elif isinstance(module, module_classes_tuple):
             # Shallow copy to avoid coupling changes across modules
             target_module_to_kwargs[module] = copy.copy(fsdp_kwargs)
     return target_module_to_kwargs

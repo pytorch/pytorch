@@ -16,7 +16,7 @@ from torch.utils._mode_utils import no_dispatch
 # floating-point input tensors, which may be incorrect. However, since there is
 # not a 1:1 correspondence between input and output tensors, we must use *some*
 # heuristic like this to predict the desired output dtype.
-_MODULE_TO_INP_DTYPE: Dict[nn.Module, torch.dtype] = weakref.WeakKeyDictionary()
+_MODULE_TO_INP_DTYPE = weakref.WeakKeyDictionary()
 
 
 def _override_module_mixed_precision(
