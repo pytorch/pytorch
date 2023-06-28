@@ -49,7 +49,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       DESIRED_PYTHON: "3.8"
-      runs_on: linux.4xlarge
       build_name: conda-py3_8-cpu
       build_environment: linux-binary-conda
     secrets:
@@ -108,7 +107,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
       DESIRED_PYTHON: "3.8"
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: conda-py3_8-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -169,7 +167,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
       DESIRED_PYTHON: "3.8"
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: conda-py3_8-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -229,7 +226,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       DESIRED_PYTHON: "3.9"
-      runs_on: linux.4xlarge
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
     secrets:
@@ -288,7 +284,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
       DESIRED_PYTHON: "3.9"
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -349,7 +344,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
       DESIRED_PYTHON: "3.9"
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -409,7 +403,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       DESIRED_PYTHON: "3.10"
-      runs_on: linux.4xlarge
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
     secrets:
@@ -468,7 +461,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
       DESIRED_PYTHON: "3.10"
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -529,7 +521,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
       DESIRED_PYTHON: "3.10"
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
     secrets:
@@ -589,7 +580,6 @@ jobs:
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       DESIRED_PYTHON: "3.11"
-      runs_on: linux.4xlarge
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
     secrets:
@@ -648,7 +638,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
       DESIRED_PYTHON: "3.11"
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
     secrets:
@@ -709,7 +698,6 @@ jobs:
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
       DESIRED_PYTHON: "3.11"
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
     secrets:

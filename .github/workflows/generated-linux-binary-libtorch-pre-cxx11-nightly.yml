@@ -50,7 +50,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.4xlarge
       build_name: libtorch-cpu-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -111,7 +110,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.4xlarge
       build_name: libtorch-cpu-shared-without-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -172,7 +170,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.4xlarge
       build_name: libtorch-cpu-static-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -233,7 +230,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.4xlarge
       build_name: libtorch-cpu-static-without-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -295,7 +291,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: libtorch-cuda11_8-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -359,7 +354,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: libtorch-cuda11_8-shared-without-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -423,7 +417,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: libtorch-cuda11_8-static-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -487,7 +480,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: libtorch-cuda11_8-static-without-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -551,7 +543,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: libtorch-cuda12_1-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -615,7 +606,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: libtorch-cuda12_1-shared-without-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -679,7 +669,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: libtorch-cuda12_1-static-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -743,7 +732,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.4xlarge.nvidia.gpu
       build_name: libtorch-cuda12_1-static-without-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -807,7 +795,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.4.2
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.rocm.gpu
       build_name: libtorch-rocm5_4_2-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -912,7 +899,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.4.2
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.rocm.gpu
       build_name: libtorch-rocm5_4_2-static-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -1017,7 +1003,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.rocm.gpu
       build_name: libtorch-rocm5_5-shared-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
@@ -1122,7 +1107,6 @@ jobs:
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-      runs_on: linux.rocm.gpu
       build_name: libtorch-rocm5_5-static-with-deps-pre-cxx11
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:

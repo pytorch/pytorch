@@ -12,9 +12,10 @@ on:
         type: string
         description: The build environment
       runs_on:
-        required: true
+        required: false
+        default: linux.t4g.2xlarge
         type: string
-        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, linux.t4g.2xlarge and linux.rocm.gpu
+        description: Hardware to run this job on.
       PYTORCH_ROOT:
         required: true
         type: string

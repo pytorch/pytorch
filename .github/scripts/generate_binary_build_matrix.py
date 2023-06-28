@@ -218,9 +218,7 @@ def generate_wheels_matrix(
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = (
                 ""
-                if arch_version == "cpu" 
-                    or arch_version == "cpu-cxx11-abi"
-                    or arch_version == "cpu-aarch64"
+                if arch_version == "cpu" or arch_version == "cpu-cxx11-abi" or arch_version == "cpu-aarch64"
                 else arch_version
             )
 
