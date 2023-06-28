@@ -14180,7 +14180,7 @@
     NestedTensorCUDA: _scaled_dot_product_efficient_attention_nestedtensor_cuda
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor? attn_bias, Tensor out, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, float dropout_p, bool is_causal=False, *, float? scale=None) -> (Tensor, Tensor, Tensor, Tensor)
+- func: _scaled_dot_product_efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor attn_bias, Tensor out, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, float dropout_p, bool is_causal=False, *, float? scale=None) -> (Tensor, Tensor, Tensor, Tensor)
   device_check: NoCheck
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda

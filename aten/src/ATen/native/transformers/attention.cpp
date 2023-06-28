@@ -612,7 +612,6 @@ Tensor scaled_dot_product_attention(
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
-  std::cout<<"attn mask has a value "<<attn_mask.has_value()<<std::endl;
   switch (backend) {
     case sdp::SDPBackend::flash_attention: {
       auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
@@ -671,6 +670,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         // Replace attn_mask with causal mask; lower triangular elements take part in attention.
         const auto L = query.sym_size(-2), S = key.sym_size(-2);
         attn_mask = at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
+        attn_mask = convert_boolean_attn_mask(attn_mask, query.dtype());
     }
     auto attn = at::matmul(query, key.transpose(-2, -1)*scaling_factor);
     if (attn_mask.has_value()) {
