@@ -707,9 +707,10 @@ def min_cut_rematerialization_partition(
         default_recomputable_ops += [aten.index]
 
         # this takes in a seed, so it's deterministic, and we can recompute it
-        default_recomputable_ops += [prims.inductor_random]
+        if hasattr(prims, "inductor_random"):
+            default_recomputable_ops += [prims.inductor_random]
 
-        random_ops += [prims.inductor_seeds, prims.inductor_seed]
+            random_ops += [prims.inductor_seeds, prims.inductor_seed]
 
     default_recomputable_ops += view_ops
 
