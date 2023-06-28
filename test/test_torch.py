@@ -55,7 +55,7 @@ import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
     tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
 from torch.testing._internal.common_dtype import (
-    floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
+    all_types, floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and
 )
 
@@ -3023,6 +3023,13 @@ else:
             # not the data
             self.assertEqual(x, y)
 
+    # FIXME: Port to a more appropriate test suite
+    @dtypes(*all_types())
+    def test_copy_many_to_one(self, device, dtype):
+        # Testing in-place copy where it attempt to write from many memory
+        # storage to a single storage would cause RuntimeError to be thrown
+        self.assertRaises(RuntimeError, lambda: make_tensor(1, 6, dtype=dtype, device=device).expand(5, 6).copy_(make_tensor(5, 6, dtype=dtype, device=device)))
+
     @onlyCPU
     def test_bfloat16_neg_abs(self, device):
         src = torch.randn(256)
@@ -5374,8 +5381,8 @@ else:
                         check_equal(torch.tensor(True), y, x)
 
 
-    @skipIfTorchInductor("FIXME")
-    def test_hook_remove(self, device):
+    @dtypes(torch.half, torch.float)
+    def test_hook_remove(self, device, dtype):
         # Reference: https://github.com/pytorch/pytorch/issues/58354
         def _test_helper(remove_hook):
             def install_hook(tensor):
@@ -5387,7 +5394,7 @@ else:
                     return torch.zeros_like(tensor)
                 handle = tensor.register_hook(hook)
 
-            t = torch.ones((1, 5), device=device, requires_grad=True)
+            t = make_tensor((1, 5), dtype=dtype, device=device, requires_grad=True)
             install_hook(t)
 
             # First call to backward
@@ -7007,7 +7014,6 @@ class TestTorch(TestCase):
 
     # Test that public functions related to TypedStorage produce a deprecation
     # warning
-    @skipIfTorchInductor("FIXME")
     def test_typed_storage_deprecation_warning(self):
         s0 = torch.FloatStorage(10)
         funcs = [
@@ -8191,15 +8197,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_copy_broadcast(self):
         torch.zeros(5, 6).copy_(torch.zeros(6))
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
-
-    # FIXME: Port to a more appropriate test suite
-    # Fails with inductor (and aot_eager) because functionalization replaces copy_ with copy,
-    # which doesn't properly error on bad inputs.
-    @skipIfTorchInductor("FIXME")
-    def test_copy_many_to_one(self):
-        # Testing in-place copy where it attempt to write from many memory
-        # storage to a single storage would cause RuntimeError to be thrown
-        self.assertRaises(RuntimeError, lambda: torch.zeros(1, 6).expand(5, 6).copy_(torch.zeros(5, 6)))
 
     def test_copy_float16(self):
         # Check that fbgemm code no longer reads memory out of bounds, see
