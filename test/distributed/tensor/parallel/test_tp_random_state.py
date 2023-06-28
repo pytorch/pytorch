@@ -2,7 +2,7 @@
 import torch
 import torch.distributed._tensor.random as random
 
-from torch.distributed._tensor import DeviceMesh, Replicate, Shard
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
@@ -23,6 +23,25 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class TensorParallelRandomStateTests(DTensorTestBase):
+    def get_tensor_slice(self, idx, n, large_tensor):
+        shape = large_tensor.shape
+        assert shape[0] % n == 0
+        local_shape = [shape[0] // n, shape[1]]
+
+        slice_idx = [
+            slice(idx * local_shape[0], (idx + 1) * local_shape[0]),
+            slice(local_shape[1]),
+        ]
+        return large_tensor[slice_idx]
+
+    def check_gathered_tensors(self, self_rank, size, gathered_tensors, assertFunc):
+        for other_rank in range(size):
+            if self_rank != other_rank:
+                assertFunc(
+                    self.get_tensor_slice(self_rank, size, gathered_tensors),
+                    self.get_tensor_slice(other_rank, size, gathered_tensors),
+                )
+
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_model_init(self):
@@ -71,40 +90,36 @@ class TensorParallelRandomStateTests(DTensorTestBase):
 
                 # all-gather local shards
                 tensor_gather = _1d_mesh.all_gather(tensor_local, gather_dim=0)
+                self.assertEqual(_1d_mesh.get_coordinate()[0], tp_rank)
 
                 # compare local shards within the TP group
-                self.assertEqual(_1d_mesh.get_coordinate()[0], tp_rank)
-                for other_rank in range(_1d_mesh.size(dim=0)):
-                    if tp_rank != other_rank:
-                        slice_idx = [
-                            slice(other_rank * local_shape[0], (other_rank + 1) * local_shape[0]),
-                            slice(local_shape[1]),
-                        ]
-                        if enable_distribute_flag:
-                            # each rank within a TP group shall initialize local weights differently
-                            self.assertNotEqual(tensor_gather[slice_idx], tensor_local)
-                        else:
-                            # without the parallel RNG, weight initialization violates the TP setup:
-                            # each rank within a TP group has the same initial weights
-                            self.assertEqual(tensor_gather[slice_idx], tensor_local)
+                def tp_weights_assert(tensor1, tensor2):
+                    if enable_distribute_flag:
+                        # each rank within a TP group shall initialize local weights differently
+                        self.assertNotEqual(tensor1, tensor2)
+                    else:
+                        # without the parallel RNG, weight initialization violates the TP setup:
+                        # each rank within a TP group has the same initial weights
+                        self.assertEqual(tensor1, tensor2)
+
+                self.check_gathered_tensors(tp_rank, 2, tensor_gather, tp_weights_assert)
 
                 # check across TP groups
                 # all-gather local shards
                 tensor_gather = device_mesh.all_gather(tensor_local, mesh_dim=1, gather_dim=0)
-                for other_rank in range(device_mesh.size(dim=1)):
-                    if dp_rank != other_rank:
-                        slice_idx = [
-                            slice(other_rank * local_shape[0], (other_rank + 1) * local_shape[0]),
-                            slice(local_shape[1]),
-                        ]
-                        if enable_distribute_flag:
-                            # local weights shall be initialized the same acorss TP groups
-                            self.assertEqual(tensor_gather[slice_idx], tensor_local)
-                        else:
-                            # without the parallel RNG, weight initialization violates the TP setup:
-                            # local weights are initialized differently acorss TP groups due to different
-                            # random seeds set in data loading.
-                            self.assertNotEqual(tensor_gather[slice_idx], tensor_local)
+
+                # compare local shards across TP groups
+                def dp_weights_assert(tensor1, tensor2):
+                    if enable_distribute_flag:
+                        # local weights shall be initialized the same acorss TP groups
+                        self.assertEqual(tensor1, tensor2)
+                    else:
+                        # without the parallel RNG, weight initialization violates the TP setup:
+                        # local weights are initialized differently acorss TP groups due to different
+                        # random seeds set in data loading.
+                        self.assertNotEqual(tensor1, tensor2)
+
+                self.check_gathered_tensors(dp_rank, 2, tensor_gather, dp_weights_assert)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -142,25 +157,24 @@ class TensorParallelRandomStateTests(DTensorTestBase):
             # check within TP groups
             # all-gather local shards within the TP group
             assert isinstance(out, torch.Tensor)
-            # TODO: absract out this logic and reuse
+
             tensor_local = out
             tensor_gather = device_mesh.all_gather(tensor_local, mesh_dim=0, gather_dim=0)
-            for other_rank in range(device_mesh.size(dim=0)):
-                if tp_rank != other_rank:
-                    slice_idx = [
-                        slice(other_rank * local_shape[0], (other_rank + 1) * local_shape[0]),
-                        slice(local_shape[1]),
-                    ]
-                    if enable_distribute_flag:
-                        # tensor-parallel dropout results should be different
-                        # within a TP group
-                        self.assertNotEqual(tensor_gather[slice_idx], tensor_local)
-                    else:
-                        # without the parallel RNG, dropout in a tensor-parallel region
-                        # (i.e. on sharded DTensor) will have the same behavior with
-                        # that in a non-tensor-parallel region (i.e. dropout on a 
-                        # replicate DTensor).
-                        self.assertEqual(tensor_gather[slice_idx], tensor_local)
+
+            # compare dropout results within the TP group
+            def tp_dropout_tensor_assert(t1, t2):
+                if enable_distribute_flag:
+                    # tensor-parallel dropout results should be different
+                    # within a TP group
+                    self.assertNotEqual(t1, t2)
+                else:
+                    # without the parallel RNG, dropout in a tensor-parallel region
+                    # (i.e. on sharded DTensor) will have the same behavior with
+                    # that in a non-tensor-parallel region (i.e. dropout on a
+                    # replicate DTensor).
+                    self.assertEqual(t1, t2)
+
+            self.check_gathered_tensors(tp_rank, 2, tensor_gather, tp_dropout_tensor_assert)
 
             inp = torch.ones(*local_shape, device=self.device_type)
             out = resid_dropout_tp(inp)
@@ -170,15 +184,13 @@ class TensorParallelRandomStateTests(DTensorTestBase):
             assert isinstance(out, torch.Tensor)
             tensor_local = out
             tensor_gather = device_mesh.all_gather(tensor_local, mesh_dim=1, gather_dim=0)
-            for other_rank in range(device_mesh.size(dim=1)):
-                if dp_rank != other_rank:
-                    slice_idx = [
-                        slice(other_rank * local_shape[0], (other_rank + 1) * local_shape[0]),
-                        slice(local_shape[1]),
-                    ]
-                    # in a non-tensor-parallel region, dropout results should be the same
-                    # across TP groups
-                    self.assertEqual(tensor_gather[slice_idx], tensor_local)
+
+            def resid_dropout_tensor_assert(t1, t2):
+                # in a non-tensor-parallel region, dropout results should be the same
+                # across TP groups
+                self.assertEqual(t1, t2)
+
+            self.check_gathered_tensors(dp_rank, 2, tensor_gather, resid_dropout_tensor_assert)
 
 
 if __name__ == "__main__":
