@@ -213,9 +213,6 @@ def freeze(
     aot_autograd_gm = decompose_unfused_batchnorms(
         aot_autograd_gm, example_inputs, preserved_arg_indices
     )
-    # TODO - apply legalization in pattern matcher
-    torch.fx.passes.tools_common.legalize_graph(aot_autograd_gm)
-    constant_fold(aot_autograd_gm)
 
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)

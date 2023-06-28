@@ -2,8 +2,8 @@ import functools
 
 import torch
 from ..pattern_matcher import (
-    inference_graph,
     _return_true,
+    inference_graph,
     init_once_fakemode,
     PatternMatcherPass,
     register_graph_pattern,
@@ -31,6 +31,7 @@ def freezing_passes(gm: torch.fx.GraphModule):
 
     if torch._C._has_mkldnn:
         from .mkldnn_fusion import _eliminate_duplicate_packed_nodes
+
         _eliminate_duplicate_packed_nodes(gm)
 
     stable_topological_sort(gm.graph)
@@ -67,6 +68,7 @@ def addmm_patterns_init():
     else:
         device = "cpu"
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
+
     def check_concat_weights(match):
         weights = [
             match.kwargs["w1"],
@@ -80,12 +82,15 @@ def addmm_patterns_init():
         if not out:
             breakpoint()
         return out
+
     def matmul_fuse_pattern(inp, w1, w2, w3):
         return (inp @ w1, inp @ w2, inp @ w3)
+
     def matmul_replacement(inp, w1, w2, w3):
         cat_t = torch.cat((w1, w2, w3), dim=1)
         mm = inp @ cat_t
         return mm.chunk(3, dim=1)
+
     register_replacement(
         matmul_fuse_pattern,
         matmul_replacement,
@@ -95,16 +100,19 @@ def addmm_patterns_init():
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2", "w3"),
     )
+
     def addmm_fuse_pattern_second(inp, w1, w2, w3, b1, b2, b3):
         return (
             aten.addmm(b1, inp, w1),
             aten.addmm(b2, inp, w2),
             aten.addmm(b3, inp, w3),
         )
+
     def addmm_fuse_replacement_second(inp, w1, w2, w3, b1, b2, b3):
         cat_w = torch.cat((w1, w2, w3), dim=1)
         cat_b = torch.cat((b1, b2, b3))
         return aten.addmm(cat_b, inp, cat_w).chunk(3, dim=1)
+
     register_replacement(
         addmm_fuse_pattern_second,
         addmm_fuse_replacement_second,
