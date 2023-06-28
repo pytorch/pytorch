@@ -37,7 +37,6 @@ else:
 
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
 import builtins
-import functools
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage',
@@ -1343,19 +1342,12 @@ for name in dir(_C._VariableFunctions):
 
 
 
-def _disable_dynamo(fn=None, recursive=True):
-    if fn is not None:
-        @functools.wraps(fn)
-        def inner(*args, **kwargs):
-            import torch._dynamo
-            return torch._dynamo.disable(fn, recursive)(*args, **kwargs)
-        return inner
-    else:
-        # decorator usage like @_disable_dynamo(recursive=False). The resulting
-        # object expects the original decorated function as the arg.
-        def outer(fn_outer):
-            return _disable_dynamo(fn_outer, recursive)
-        return outer
+################################################################################
+# Import TorchDynamo's lazy APIs to avoid circular dependenices
+################################################################################
+
+# needs to be before from .functional import * to avoid circular dependencies
+from ._compile import _disable_dynamo
 
 ################################################################################
 # Import interface functions defined in Python

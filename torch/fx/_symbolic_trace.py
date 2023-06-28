@@ -693,6 +693,7 @@ class Tracer(TracerBase):
         return root_fn, args
 
     @compatibility(is_backward_compatible=True)
+    @torch._disable_dynamo
     def trace(
         self,
         root: Union[torch.nn.Module, Callable[..., Any]],

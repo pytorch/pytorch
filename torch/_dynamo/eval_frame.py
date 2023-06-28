@@ -1214,12 +1214,6 @@ class TorchPatcher:
         # Disable TorchDynamo on some torch.* compilers generated frames
         torch.jit.trace = disable(torch.jit.trace)
 
-        # symbolic_trace creates new frames. We disable Dynamo on such frames
-        torch.fx._symbolic_trace.Tracer.trace = disable(
-            torch.fx._symbolic_trace.Tracer.trace
-        )
-
-        torch.onnx.export_to_pretty_string = disable(torch.onnx.export_to_pretty_string)
         torch.distributions.Distribution.set_default_validate_args(False)
 
         optimizers = [
@@ -1227,12 +1221,6 @@ class TorchPatcher:
             for opt in torch.optim.__dict__.values()
             if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
         ]
-
-        # # disable dynamo for the wrapper that helps give dynamo hints about entering DDP
-        # if hasattr(DistributedDataParallel, "_inside_ddp_forward"):
-        #     DistributedDataParallel._inside_ddp_forward = disable(
-        #         DistributedDataParallel._inside_ddp_forward, recursive=False
-        #     )
 
         # Note: this excludes the optimizers that are unsupported in excluded_opts below
         from ..optim import (
