@@ -536,7 +536,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
-    const c10::optional<at::Tensor>& attn_bias,
+    const at::Tensor& attn_bias,
     const at::Tensor& out,
     const at::Tensor& logsumexp,
     const at::Tensor& philox_seed,
@@ -555,6 +555,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
 
   Tensor grad_q, grad_k, grad_v, grad_bias;
 
+  // This is needed because SaveVarible automatically converts
+  // c10::optional to undefined tensor
+  c10::optional<Tensor> kernel_bias;
+  if (attn_bias.defined()) {
+    kernel_bias = attn_bias;
+  }
   // Will add with signauter changes for dropout and bias
   // We are only handiling Dense inputs, but this should be passed
   // from forward to backward
@@ -570,7 +576,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
           q_t,
           k_t,
           v_t,
-          attn_bias,
+          kernel_bias,
           out_t,
           c10::nullopt,
           c10::nullopt,
