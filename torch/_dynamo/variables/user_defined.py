@@ -5,6 +5,7 @@ import importlib
 import inspect
 import itertools
 import random
+import threading
 import types
 from typing import Dict, List
 
@@ -372,6 +373,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if (
             isinstance(self.value, torch.nn.Module)
             or "__slots__" in self.value.__class__.__dict__
+            or type(self.value) == threading.local
         ):
             # getattr_static doesn't work on these
             subobj = getattr(self.value, name)
