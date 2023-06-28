@@ -66,8 +66,8 @@ randint = make_prim(
     lambda low, high, size, seed: torch.randint(low, high, size, device=seed.device),
     doc="torch.randint() using backend-specific RNG that can be fused",
 )
-force_stride = make_prim(
-    "inductor_force_stride(Tensor input, SymInt[] stride) -> Tensor",
+force_stride_order = make_prim(
+    "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
     lambda input_tensor, stride: eager_force_stride(input_tensor, stride),
-    doc="Force the stride for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
+    doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
 )

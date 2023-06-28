@@ -266,7 +266,7 @@ def enforce_output_layout(gm):
             # add a node to enforce eager layout
             ft = n.meta["val"]
             new_node = gm.graph.call_function(
-                prims.inductor_force_stride.default, (n, ft.stride())
+                prims.inductor_force_stride_order.default, (n, ft.stride())
             )
 
             # can not call

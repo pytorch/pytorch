@@ -311,7 +311,7 @@ class OptimizeForInferenceTemplate(TestCase):
         num_same_stride = 0
         num_diff_stride = 0
 
-        def debug_inductor_force_stride(orig_fn, input_tensor, stride):
+        def debug_inductor_force_stride_order(orig_fn, input_tensor, stride):
             nonlocal num_same_stride, num_diff_stride
             input_tensor.realize()
             if tuple(input_tensor.get_stride()) == tuple(stride):
@@ -321,7 +321,7 @@ class OptimizeForInferenceTemplate(TestCase):
             return orig_fn(input_tensor, stride)
 
         with override_lowering(
-            prims.inductor_force_stride.default, debug_inductor_force_stride
+            prims.inductor_force_stride_order.default, debug_inductor_force_stride_order
         ):
             opt_mod = torch.compile(mod)
             with torch.no_grad():
