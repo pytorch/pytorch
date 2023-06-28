@@ -242,8 +242,7 @@ void update(const KeyType& key, T& results) {
   int lru_cache_limit = getLRUCacheLimit();
   if (lru_cache_limit < 0) {
     return;
-  }
-  else if (lru_cache_limit) {
+  } else if (lru_cache_limit) {
     auto it = engine_cache.find(key);
     if (it == engine_cache.end()) {
       auto engine_cache_order_size = engine_cache_order.size();
