@@ -18,6 +18,7 @@ import signal
 import subprocess
 import sys
 import time
+import dataclasses
 from contextlib import contextmanager
 
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Tuple, Type
@@ -39,6 +40,8 @@ from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._decomp import core_aten_decompositions
+from torch._export import ExportDynamoConfig
 
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
@@ -1406,6 +1409,20 @@ def optimize_onnx_ctx(
     return run_n_iterations_onnx
 
 
+def optimize_export_ctx(
+    export_fn,
+    export_config,
+    run_n_iterations: Callable,
+) -> Callable:
+
+    def run_one_iteration_export(model, inputs):
+        with torch._dynamo.config.patch(dataclasses.asdict(export_config)):
+            exported_model, _ = export_fn(model, *inputs)
+            return exported_model(*inputs)
+
+    return run_one_iteration_export
+
+
 def read_batch_size_from_file(args, filename, model_name):
     batch_size = None
     if os.path.exists("benchmarks"):
@@ -2661,6 +2678,11 @@ def parse_args(args=None):
         help="Measure speedup with TorchInductor",
     )
     group.add_argument(
+        "--export",
+        action="store_true",
+        help="Measure pass rate with export",
+    )
+    group.add_argument(
         "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
     )
     group.add_argument(
@@ -2970,6 +2992,21 @@ def run(runner, args, original_dir=None):
         )
         experiment = speedup_experiment
         output_filename = "inductor.csv"
+    elif args.export:
+        export_config = ExportDynamoConfig()
+        export_fn = functools.partial(
+            torch._dynamo.export,
+            aten_graph=True,
+            tracing_mode="symbolic",
+            decomposition_table=core_aten_decompositions(),
+            constraints=None,
+            assume_static_by_default=True,
+        )
+        optimize_ctx = functools.partial(
+            optimize_export_ctx, export_fn, export_config
+        )
+        experiment = speedup_experiment
+        output_filename = "export.csv"
     elif args.xla:
         (dev,) = args.devices
         os.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]
