@@ -2552,8 +2552,6 @@ Target Guards:
         def is_dim(src):
             return isinstance(src, TensorPropertySource) and src.prop is TensorProperty.SIZE
 
-        concrete_sources = set()
-
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
         # variable.  If there is no such input, this is an error in our
@@ -2616,7 +2614,6 @@ Target Guards:
 
                 input_guards.append((source, s))
             else:
-                concrete_sources.add(source.name())
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
                 constraint_violated = False
@@ -2670,21 +2667,7 @@ Target Guards:
                     # Ignore sources that were not turned into SymInts.
                     srcname = source.name()
                     if srcname in self.source_to_symbol:
-                        r = sympy.Eq(self.source_to_symbol[srcname], expr)
-                        # TODO: remove before merging
-                        symbol = self.source_to_symbol[srcname]
-                        if r in (sympy.true, sympy.false):
-                            self.log.warning(
-                                "bad equality: Symbol(%s, positive=%s, integer=%s) == %s",
-                                symbol.name,
-                                symbol.is_positive,
-                                symbol.is_integer,
-                                expr
-                            )
-                        self._add_target_expr(r)
-                    elif srcname not in concrete_sources:
-                        # TODO: remove before merging
-                        self.log.warning("source not found: %s (== %s)", srcname, expr)
+                        self._add_target_expr(sympy.Eq(self.source_to_symbol[srcname], expr))
 
                 # Small optimization
                 if (
