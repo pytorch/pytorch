@@ -180,12 +180,7 @@ filegroup(
 
 filegroup(
     name = "aten_native_transformers_cpp",
-    srcs = glob(
-        [
-            "aten/src/ATen/native/transformers/*.cpp",
-            "aten/src/ATen/native/transformers/cpu/*.cpp",
-        ],
-    ),
+    srcs = glob(["aten/src/ATen/native/transformers/*.cpp"]),
 )
 
 filegroup(

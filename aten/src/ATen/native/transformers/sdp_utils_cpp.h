@@ -4,6 +4,7 @@
 #include <c10/core/SymFloat.h>
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 namespace sdp {
 
 constexpr int32_t num_backends = 3;

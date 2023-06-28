@@ -13,7 +13,7 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
-#include <ATen/native/transformers/sdp_utils.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 
 #ifdef USE_FLASH_ATTENTION
