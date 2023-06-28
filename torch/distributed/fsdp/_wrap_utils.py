@@ -2,18 +2,7 @@ import collections
 import functools
 import warnings
 from functools import partial
-from typing import (
-    Any,
-    Callable,
-    Deque,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-)
+from typing import Any, Deque, Dict, List, NamedTuple, Set, Tuple, Type
 
 import torch
 import torch.nn as nn

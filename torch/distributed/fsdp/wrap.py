@@ -14,8 +14,6 @@ from typing import (
     Dict,
     Generator,
     Iterable,
-    List,
-    NamedTuple,
     Optional,
     Sequence,
     Set,
@@ -103,10 +101,11 @@ def _run_mixed_precision_override_policy(
     fsdp_kwargs: Dict[str, Any],
     target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
 ):
+    module_classes_tuple = tuple(set(module_classes))
     for module in root_module.modules():
         if module in ignored_modules:
             continue
-        elif isinstance(module, module_classes):
+        elif isinstance(module, module_classes_tuple):
             # This policy overrides any existing policy
             target_module_to_kwargs[module] = fsdp_kwargs
             target_module_to_kwargs[module]["mixed_precision"] = None
