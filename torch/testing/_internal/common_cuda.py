@@ -199,6 +199,40 @@ def _check_hipsparse_generic_available():
 TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
 TEST_HIPSPARSE_GENERIC = _check_hipsparse_generic_available()
 
+# Shared by test_cuda.py and test_multigpu.py
+def _create_scaling_models_optimizers(device="cuda", optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
+    # Create a module+optimizer that will use scaling, and a control module+optimizer
+    # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
+    mod_control = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
+    mod_scaling = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
+    with torch.no_grad():
+        for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
+            s.copy_(c)
+
+    kwargs = {"lr": 1.0}
+    if optimizer_kwargs is not None:
+        kwargs.update(optimizer_kwargs)
+    opt_control = optimizer_ctor(mod_control.parameters(), **kwargs)
+    opt_scaling = optimizer_ctor(mod_scaling.parameters(), **kwargs)
+
+    return mod_control, mod_scaling, opt_control, opt_scaling
+
+
+def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
+    data = [(torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
+            (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
+            (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
+            (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device))]
+
+    loss_fn = torch.nn.MSELoss().cuda()
+
+    skip_iter = 2
+
+    return _create_scaling_models_optimizers(
+        device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+    ) + (data, loss_fn, skip_iter)
+
+
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
     assert not torch.cuda.is_initialized()
