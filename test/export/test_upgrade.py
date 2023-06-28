@@ -39,10 +39,13 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
 }
 
 TEST_OP_VERSION_MAP = {
-    "aten::div_.Scalar_mode": torch._C._UpgraderEntry(
-        4,
-        "div__Scalar_mode_0_3",
-        "aten::div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)")
+    "aten::div_.Scalar_mode": [
+        torch._C._UpgraderEntry(
+            4,
+            "div__Scalar_mode_0_3",
+            "aten::div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)"
+        )
+    ]
 }
 
 
