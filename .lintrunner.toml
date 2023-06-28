@@ -864,14 +864,14 @@ command = [
 [[linter]]
 code = 'DEVICE_TYPE'
 include_patterns = [
-    'c10/**',
-    'aten/**',
-    'torch/csrc/**',
+    'c10/**/*.h',
+    'aten/**/*.h',
+    'torch/csrc/**/*.h',
 ]
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=DeviceType',
+    '--pattern=\(?:\s|^\)\(?!c10::\)\(DeviceType\)',
     '--linter-name=DEVICE_TYPE',
     '--error-name=invalid DeviceType',
     '--replace-pattern=s/DeviceType/c10::DeviceType/',
