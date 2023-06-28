@@ -434,6 +434,26 @@ class _OpLevelDebugging(infra.Rule):
         return self, level, self.format_message(node=node, symbolic_fn=symbolic_fn)
 
 
+class _NearestMatchSymbolicFunction(infra.Rule):
+    """Can not find the perfect match symbolic function with op schema, but find the nearest match one."""
+
+    def format_message(self, symbolic_fn, node) -> str:  # type: ignore[override]
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'The onnx function: {symbolic_fn} is the nearest match of the node {node}.'
+        """
+        return self.message_default_template.format(symbolic_fn=symbolic_fn, node=node)
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, symbolic_fn, node
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'The onnx function: {symbolic_fn} is the nearest match of the node {node}.'
+        """
+        return self, level, self.format_message(symbolic_fn=symbolic_fn, node=node)
+
+
 class _ArgFormatTooVerbose(infra.Rule):
     """The formatted str for argument to display is too verbose."""
 
@@ -874,7 +894,7 @@ class _POERules(infra.RuleCollection):
                 },
                 "full_description": {
                     "text": "Report any op level validation failure in warnings.",
-                    "markdown": "This warning message indicates that during op level debugging, certain symbolic functions\nhave failed to match the results of torch ops when using real tensors generated from fake\ntensors. It is important to note that the symbolic functions may not necessarily be\nincorrect, as the validation process is non-deterministic and should only be used as a\nreference.\n\nThere are two categories of warnings that can be triggered:\n\n1. Non-validated operators:\n  If the warnings are caused by the following errors, they can be disregarded by users,\n  as these errors occur due to the non-deterministic nature of the validation. However,\n  it is important to be aware that the operators have not been validated.\n\n  - IndexError: Unsupported input arguments of randomized dimensions/indices(INT64).\n  - RuntimeError: Unsupported input arguments for torch ops are generated.\n  - ValueError: Arguments/keyword arguments do not match the signature of the symbolic function.\n\n2. Potentially wrong torchlib operators:\n  If the warnings are triggered by the following error, users should be aware that\n  the results from symbolic functions do not match the results of torch ops, suggesting\n  that the symbolic functions may be incorrect in dispatching or implementation. In such cases,\n  it is recommended to report the issue to the PyTorch-ONNX team. The error is:\n\n  - AssertionError: The symbolic function is potentially wrong.\n",
+                    "markdown": "This warning message indicates that during op level debugging, certain symbolic functions\nhave failed to match the results of torch ops when using real tensors generated from fake\ntensors. It is important to note that the symbolic functions may not necessarily be\nincorrect, as the validation process is non-deterministic and should only be used as a\nreference.\n\nThere are two categories of warnings that can be triggered:\n\n1. Non-validated operators:\n  If the warnings are caused by the following errors, they can be disregarded by users,\n  as these errors occur due to the non-deterministic nature of the validation. However,\n  it is important to be aware that the operators have not been validated.\n\n  - IndexError: Unsupported input arguments of randomized dimensions/indices(INT64).\n  - RuntimeError: Unsupported input arguments for torch ops are generated.\n  - ValueError: Arguments/keyword arguments do not match the signature of the symbolic function.\n\n2. Potentially wrong torchlib operators:\n  If the warnings are triggered by the following error, users should be aware that\n  the results from symbolic functions do not match the results of torch ops, suggesting\n  that the symbolic functions may be incorrect in dispatching or implementation. In such cases,\n  it is recommended to report the issue to the PyTorch-ONNX team, or create/register a custom\n  symbolic function to replace the default one.\n\n  - AssertionError: The symbolic function is potentially wrong.\n",
                 },
                 "message_strings": {
                     "default": {
@@ -888,6 +908,31 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """Report any op level validation failure in warnings."""
+
+    nearest_match_symbolic_function: _NearestMatchSymbolicFunction = dataclasses.field(
+        default=_NearestMatchSymbolicFunction.from_sarif(
+            **{
+                "id": "FXE0014",
+                "name": "nearest-match-symbolic-function",
+                "short_description": {
+                    "text": "Can not find the perfect match symbolic function with op schema, but find the nearest match one."
+                },
+                "full_description": {
+                    "text": "Can not find the perfect match symbolic function with op schema, but find the nearest match one.",
+                    "markdown": "The warning message indicates that the dispatcher was unable to find an exact match for the symbolic\nfunction based on the provided operation schema and input data types. Instead, it found the closest\nmatch available. However, using the nearest match symbolic function should generally still work, as\nsymbolic functions typically adhere to stricter operation schemas. For instance, while the operation\nschema may not allow an empty input list, symbolic functions may allow it.\n\nHere are some suggestions based on the situation:\n\n1. If there are NO errors or mismatches in the results, it is safe to disregard this warning.\n2. If there are errors or mismatches in the results, it is recommended to report the issue to the\n  PyTorch-ONNX team. Alternatively, you can create or register a custom symbolic function to replace\n  the default one.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "The onnx function: {symbolic_fn} is the nearest match of the node {node}."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Can not find the perfect match symbolic function with op schema, but find the nearest match one."""
 
     arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
         default=_ArgFormatTooVerbose.from_sarif(
