@@ -913,8 +913,12 @@ def _post_backward_hook(
                             # invariant that if flat_param.grad is None, then
                             # each orig param grad is None.
                             orig_param.grad = None
-
-                        handle.flat_param.grad = None
+                    # flat_param.grad is set to None for sharded strategies, set it here
+                    # for no_shard.
+                    handle.flat_param.grad = None
+                    handle.flat_param._saved_grad_shard = None
+                    # TODO: remove this
+                    _p_assert(handle.sharded_grad is None, f"Expected handles grad to be None with optim overlap.")
 
 
 def _post_backward_reshard(
@@ -1120,6 +1124,8 @@ def _finalize_params(
                 # `no_sync()` iterations, and `_saved_grad_shard` remains the
                 # sharded gradient from the last synchronized iteration
                 continue
+            # TODO (rohan-varma): check if this needs to be called when running
+            # optimizer in backward.
             handle.prepare_gradient_for_optim()
             _p_assert(
                 hasattr(flat_param, "_post_backward_called"),

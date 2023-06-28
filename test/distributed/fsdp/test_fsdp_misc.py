@@ -294,9 +294,9 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         ):
             fsdp_overlap(inp, inp)
 
-    @skip_if_lt_x_gpu(2)
-    def test_fsdp_optim_overlap_cpu_offload(self):
-        pass
+    # @skip_if_lt_x_gpu(2)
+    # def test_fsdp_optim_overlap_cpu_offload(self):
+    #     pass
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_optimizer_overlap(self):
@@ -310,18 +310,20 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                 return self.b(self.a(x + y))
 
         from copy import deepcopy
-
+        cpu_offload = CPUOffload(offload_params=False)
         model = MyModel().cuda()
         model_overlap = deepcopy(model)
         fsdp = FSDP(
             model.cuda(),
             auto_wrap_policy=always_wrap_policy,
             use_orig_params=True,
+            cpu_offload=cpu_offload,
         )
         fsdp_overlap = FSDP(
             model_overlap.cuda(),
             auto_wrap_policy=always_wrap_policy,
             use_orig_params=True,
+            cpu_offload=cpu_offload,
         )
         optim_cls = torch.optim.SGD
         optim_kwargs = {"lr": 0.03}
@@ -352,6 +354,18 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             fsdp_overlap(inp_clone, inp_clone).sum().backward()
             optim.step()
             optim.zero_grad(set_to_none=True)
+
+            # Both FSDP units should have sharded_grad as None.
+            for fsdp_unit in FSDP.fsdp_modules(fsdp_overlap):
+                handles = fsdp_unit._handles
+                for handle in handles:
+                    handle_grad = handle.sharded_grad
+                    self.assertEqual(None, handle_grad, f"Overlapped FSDP sharded_grad is not None!")
+
+            # Note: FSDP without optimizer overlap won't set sharded_grad to None until the next
+            # pre-forward since it needs to run FSDP specific logic that picks up that set_to_none=True
+            # has been called (or that the gradients have been otherwise set to None)
+
 
             # Verify parameters are different than prev iteration
             with FSDP.summon_full_params(fsdp_overlap, with_grads=True):
