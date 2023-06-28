@@ -179,7 +179,7 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
         MergeRule(
             name="super",
             patterns=["*"],
-            approved_by=["pytorch/metamates"],
+            approved_by=["pytorch/metamates", "ngimel"],
             mandatory_checks_name=[
                 "Lint",
                 "Facebook CLA Check",
@@ -523,14 +523,14 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(failed) == 2)
 
     def test_get_classifications_unstable(self, *args: Any) -> None:
-        pr = GitHubPR("pytorch", "pytorch", 102784)
+        pr = GitHubPR("pytorch", "pytorch", 104312)
         checks = pr.get_checkrun_conclusions()
         checks = get_classifications(
             checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
         )
         self.assertTrue(
             checks[
-                "trunk / win-vs2019-cpu-py3 / test (default, 1, 3, windows.4xlarge.nonephemeral, unstable)"
+                "pull / linux-bionic-cuda12.1-py3.10-gcc9-bazel-test / build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)"
             ].classification
             == "UNSTABLE"
         )
