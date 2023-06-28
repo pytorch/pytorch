@@ -1,4 +1,5 @@
 #include <type_traits>
+#include <limits>
 #include <c10/core/DeviceType.h>
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
@@ -10,8 +11,8 @@
 #include <ATen/cpu/vec/vec256/vec256.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
-#include <type_traits>
 #include <utility>
+#include <c10/util/typeid.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Exception.h>
@@ -535,9 +536,38 @@ inline void validate_sdpa_input(
     TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == query_.dtype(),
       "Expected attn_mask dtype to be bool or to match query dtype, but got attn_mask.dtype: ",
       mask_dtype, " and  query.dtype: ", query_.dtype(), " instead.");
+    TORCH_CHECK(
+      !query_.is_nested() && !key.is_nested(),
+      "Scaled_dot_product_attention: Nested tensors for query / key are not supported "
+      "when an explicit attn_mask is set");
   }
   return;
 }
+// This function is used to produce an attn_mask
+// in a standard format that can be consumed by both
+// the math and memory efficient attn_mask implementation
+//  Args:
+//    attn_mask: attn_mask of shape (B, L, S) or (L, S) or (B, N_heads, L, S)
+c10::optional<Tensor> convert_boolean_attn_mask(const c10::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
+  // Pass through
+  if(!attn_mask.has_value()){
+    return c10::nullopt;
+  }
+  // Convert boolean mask to additive mask; need to invert mask to indicate what
+  // to mask *out*.
+  if (attn_mask->dtype() == at::kBool) {
+    auto new_attn_mask = at::zeros_like(attn_mask.value(), dtype);
+    // TODO Use the max type of the input and output
+    new_attn_mask.masked_fill_(
+        attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
+    return new_attn_mask;
+  }
+  // Otherwise, attn_mask represents an additive attention tensor
+  return attn_mask;
+}
+
+} // namespace
+
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
 // greater than 0.0 is specified.
@@ -581,6 +611,8 @@ Tensor scaled_dot_product_attention(
       query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
+  c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
+  std::cout<<"attn mask has a value "<<attn_mask.has_value()<<std::endl;
   switch (backend) {
     case sdp::SDPBackend::flash_attention: {
       auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
@@ -592,7 +624,7 @@ Tensor scaled_dot_product_attention(
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
-          query_, key, value, attn_mask_, compute_logsumexp, dropout_p, is_causal, scale);
+          query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
       return std::get<0>(out_and_lse);
     }
     case sdp::SDPBackend::math:
@@ -600,7 +632,7 @@ Tensor scaled_dot_product_attention(
           query_,
           key,
           value,
-          attn_mask_,
+          attn_mask,
           dropout_p,
           is_causal,
           c10::nullopt, /*dropout_mask*/
@@ -639,18 +671,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         // Replace attn_mask with causal mask; lower triangular elements take part in attention.
         const auto L = query.sym_size(-2), S = key.sym_size(-2);
         attn_mask = at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
-    }
-    if (attn_mask.has_value()) {
-        TORCH_CHECK(!query.is_nested() && !key.is_nested(),
-                "_scaled_dot_product_attention: Nested tensors for query / key are not supported "
-                "when an explicit attn_mask is set");
-        // Convert boolean mask to additive mask; need to invert mask to indicate what to mask *out*.
-        if (attn_mask->dtype() == at::kBool){
-          auto new_attn_mask = at::zeros_like(*attn_mask, query.dtype());
-          new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
-          attn_mask = new_attn_mask;
-        }
-        // Otherwise, attn_mask represents an additive attention tensor
     }
     auto attn = at::matmul(query, key.transpose(-2, -1)*scaling_factor);
     if (attn_mask.has_value()) {

@@ -531,11 +531,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
 }
 
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cuda(
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cuda(
     const at::Tensor& grad_out_,
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
+    const c10::optional<at::Tensor>& attn_bias,
     const at::Tensor& out,
     const at::Tensor& logsumexp,
     const at::Tensor& philox_seed,
@@ -544,7 +545,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
     bool causal,
     c10::optional<double> scale){
   if (!grad_out_.defined()) {
-    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
   auto grad_out = grad_out_.transpose(1, 2);
   auto out_t = out.transpose(1, 2);
@@ -553,10 +554,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
   auto v_t = value.transpose(1, 2);
 
   Tensor grad_q, grad_k, grad_v, grad_bias;
-
-  // TODO_DRISS
-  // These are place holders unitl we add support for bias
-  auto bias = c10::nullopt;
 
   // Will add with signauter changes for dropout and bias
   // We are only handiling Dense inputs, but this should be passed
@@ -567,14 +564,13 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
   sdp::CustomMaskType custom_mask_type = causal
     ? sdp::CustomMaskType::CausalFromTopLeft
     : sdp::CustomMaskType::NoCustomMask;
-
   std::tie(grad_q, grad_k, grad_v, grad_bias) =
       at::_efficient_attention_backward(
           grad_out,
           q_t,
           k_t,
           v_t,
-          bias,
+          attn_bias,
           out_t,
           c10::nullopt,
           c10::nullopt,
@@ -588,7 +584,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
           scale,
           c10::nullopt);  // num_split_keys
   return std::make_tuple(
-      grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
+      grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), grad_bias);
 }
 
 } // namespace native
