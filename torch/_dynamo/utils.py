@@ -1,3 +1,4 @@
+import atexit
 import collections
 import contextlib
 import copy
@@ -62,7 +63,6 @@ counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
 nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
-
 log = logging.getLogger(__name__)
 
 # profiling compilation time
@@ -232,6 +232,11 @@ def compile_times(repr="str", aggregate=False):
         ]
         headers = list(compilation_metrics.keys())
         return headers, values
+
+
+@atexit.register
+def dump_compile_times():
+    log.info(compile_times(repr="str", aggregate=True))
 
 
 tensortype_to_dtype = {
@@ -760,6 +765,21 @@ def is_safe_constant(v):
             torch.dtype,
         ),
     )
+
+
+def guard_if_dyn(arg):
+    from .variables import ConstantVariable, SymNodeVariable
+
+    if isinstance(arg, SymNodeVariable):
+        # This is because SymNodeVariable intentionally doesn't define
+        # as_python_constant to avoid shunting down some codepaths
+        # that expect consts.   In this case, we know we definitely
+        # want to specialize though.
+        return arg.evaluate_expr()
+    elif isinstance(arg, ConstantVariable):
+        return arg.as_python_constant()
+
+    return arg
 
 
 def check_constant_args(args, kwargs):
@@ -1678,6 +1698,12 @@ def defake(x):
 # NB: The dictionary has to be created lazily after TorchPatcher is called so
 # that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
 # sitting in a separate function.
+# We also need the original untouched/ not disabled torch utils checkpoint
+# becuase distributed checkpointed wrappers import these utils before
+# TorchDynamo TorchPatcher runs.
+untouched_torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
+
+
 def higher_order_op_converter():
     import torch._higher_order_ops.wrap as higher_order_ops
 
@@ -1687,7 +1713,10 @@ def higher_order_op_converter():
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
 
-    return {torch.utils.checkpoint.checkpoint: activation_checkpoint_op}
+    return {
+        torch.utils.checkpoint.checkpoint: activation_checkpoint_op,
+        untouched_torch_utils_checkpoint: activation_checkpoint_op,
+    }
 
 
 def requires_higher_order_op(obj):
