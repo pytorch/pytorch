@@ -439,6 +439,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 if is_utils_checkpoint(func):
                     options["source"] = source
                     return build_checkpoint_variable(**options)
+                elif is_allowed(func):
+                    return variables.TorchVariable(func, source=source, **options)
                 return variables.UserFunctionVariable(func, source=source, **options)
 
         if (
