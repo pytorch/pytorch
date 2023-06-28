@@ -796,9 +796,10 @@ class Module:
             "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
-    def _apply(self, fn):
-        for module in self.children():
-            module._apply(fn)
+    def _apply(self, fn, recurse=True):
+        if recurse:
+            for module in self.children():
+                module._apply(fn)
 
         def compute_should_use_set_data(tensor, tensor_applied):
             if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
@@ -1015,17 +1016,19 @@ class Module:
         """
         return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
 
-    def to_empty(self: T, *, device: Union[str, device]) -> T:
+    def to_empty(self: T, *, device: Union[str, device], recurse: bool = True) -> T:
         r"""Moves the parameters and buffers to the specified device without copying storage.
 
         Args:
             device (:class:`torch.device`): The desired device of the parameters
                 and buffers in this module.
+            recurse (bool): Whether parameters and buffers of submodules should
+                be recursively moved to the specified device.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: torch.empty_like(t, device=device))
+        return self._apply(lambda t: torch.empty_like(t, device=device), recurse=recurse)
 
     @overload
     def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ...,
@@ -1614,7 +1617,14 @@ class Module:
         if '_backward_pre_hooks' not in self.__dict__:
             self._backward_pre_hooks = OrderedDict()
 
-    def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
+    # On the return type:
+    # We choose to return `Any` in the `__getattr__` type signature instead of a more strict `Union[Tensor, Module]`.
+    # This is done for better interop with various type checkers for the end users.
+    # Having a stricter return type doesn't play nicely with `register_buffer()` and forces
+    # people to excessively use type-ignores, asserts, casts, etc.
+    # See full discussion on the problems with returning `Union` here
+    # https://github.com/microsoft/pyright/issues/4213
+    def __getattr__(self, name: str) -> Any:
         if '_parameters' in self.__dict__:
             _parameters = self.__dict__['_parameters']
             if name in _parameters:
