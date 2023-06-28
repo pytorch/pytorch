@@ -32,7 +32,7 @@ def _op_level_debug_message_formatter(
 ) -> str:
     return (
         f"FX Node: {node.op}:{node.target}[name={node.name}]. \n"
-        f"ONNX Node: {symbolic_fn.name}."
+        f"ONNX Node: {symbolic_fn.name}[opset={symbolic_fn.opset}]."
     )
 
 
