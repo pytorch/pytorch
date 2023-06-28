@@ -1,6 +1,7 @@
 import functools
 
 import torch
+from .. import config
 from ..pattern_matcher import (
     _return_true,
     inference_graph,
@@ -30,7 +31,7 @@ def freezing_passes(gm: torch.fx.GraphModule):
     for patterns in pass_patterns:
         patterns.apply(gm.graph)
 
-    if torch._C._has_mkldnn:
+    if torch._C._has_mkldnn and config.cpp.weight_prepack:
         from .mkldnn_fusion import _eliminate_duplicate_packed_nodes
 
         _eliminate_duplicate_packed_nodes(gm)
@@ -42,7 +43,7 @@ def freezing_passes(gm: torch.fx.GraphModule):
 
 @init_once_fakemode
 def lazy_init():
-    if torch._C._has_mkldnn:
+    if torch._C._has_mkldnn and config.cpp.weight_prepack:
         from .mkldnn_fusion import _mkldnn_weight_pack_init
 
         _mkldnn_weight_pack_init()
