@@ -7,7 +7,7 @@ using std::uint16_t;
 using std::vector;
 
 namespace internal {
-static void convertfp32fp16(at::Half* dst, const float* src, size_t N) {
+void convertfp32fp16(at::Half* dst, const float* src, size_t N) {
   for (size_t i = 0; i < N; i++) {
     dst[i] = src[i];
   }

@@ -1318,6 +1318,10 @@ class TorchPatcher:
         torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
         torch.distributed.fsdp._runtime_utils._check_flat_params_on_expected_device._dynamo_marked_constant = True
 
+        torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
+        torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()
+        torch._dynamo.variables.dicts._register_dynamo_dict_to_tree_spec()
+
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
         def inner_fn(*args, **kwargs):

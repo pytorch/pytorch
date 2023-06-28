@@ -1038,9 +1038,6 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
-        if isinstance(obj, variables.UserDefinedClassVariable) and obj.value is torch.distributed.distributed_c10d.GroupMember and name is "WORLD":
-            unimplemented("Fixing this breaks everything lol")
-            # return variables.user_defined.ProcessGroupVariable(obj.value.WORLD)
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name).add_options(options)
         elif isinstance(obj, variables.TensorVariable) and name == "grad":

@@ -41,7 +41,7 @@ C10_DEFINE_int(
 namespace caffe2 {
 namespace tracing {
 
-static int getCounterForNetName(const std::string& net_name) {
+int getCounterForNetName(const std::string& net_name) {
   // Append a unique number suffix because there could be multiple instances
   // of the same net and we want to uniquely associate each instance with
   // a profiling trace.
@@ -432,14 +432,14 @@ bool isTraceableNetName(const std::string& net_name) {
       tracing_nets.end();
 }
 
-static bool hasEnableTracingFlag(const NetBase* net) {
+bool hasEnableTracingFlag(const NetBase* net) {
   if (!net->has_debug_def()) {
     return false;
   }
   return GetFlagArgument(net->debug_def(), "enable_tracing", false);
 }
 
-static TracingConfig getTracingConfigFromNet(const NetBase* net) {
+TracingConfig getTracingConfigFromNet(const NetBase* net) {
   ArgumentHelper arg_helper(net->debug_def());
   TracingConfig cfg;
 

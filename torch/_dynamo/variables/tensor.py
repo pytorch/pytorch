@@ -483,10 +483,22 @@ class TensorVariable(VariableTracker):
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable(index, **options)
+        elif name == "storage_offset":
+            # Constant path
+            if self.storage_offset is not None:
+                return ConstantVariable(self.storage_offset, **options)
+            # dyn shapes path
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + list(args), kwargs),
+                ),
+                **options,
+            )
         elif name == "_typed_storage":
             return TypedStorageVariable(self._typed_storage)
-        elif name == "storage_offset":
-            return ConstantVariable(self.storage_offset)
         else:
             constant_result = None
 
