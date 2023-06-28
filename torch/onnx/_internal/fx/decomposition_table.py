@@ -10,7 +10,7 @@ import torch.fx
 
 from torch.onnx._internal import _beartype
 
-from torch.onnx._internal.fx import onnxfunction_dispatcher, registration
+from torch.onnx._internal.fx import registration
 
 
 @_beartype.beartype
@@ -52,10 +52,9 @@ def _create_onnx_supports_op_overload_table(
 
             exporter_look_up_key = op_overload_packet._qualified_op_name
             # overload name is torch.ops.<domain>.<op_name>.<overload>
+            domain, opname = exporter_look_up_key.split("::")
             if not registry.is_registered_op(
-                *onnxfunction_dispatcher.split_opname_to_domain_op_overload(
-                    exporter_look_up_key
-                )
+                domain=domain, op_name=opname, overload=None
             ):
                 # This aten op doesn't have ONNX overloads.
                 continue
