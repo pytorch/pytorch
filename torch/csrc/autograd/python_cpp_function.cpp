@@ -76,30 +76,37 @@ PyObject* THPCppFunction_call(
 }
 
 int THPCppFunction_traverse(PyObject* self, visitproc visit, void* arg) {
-  auto& fn = *((THPCppFunction*)self)->cdata;
-  for (const auto& hook : fn.tensor_pre_hooks()) {
-    if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
-      Py_VISIT(pyhook->dict);
+  if ((((THPCppFunction*)self)->cdata).use_count() == 1) {
+    // The fields traversed below are owned by the cpp grad_fn, which we own a
+    // reference to. We should only them traverse however if we are the only
+    // owner of the grad_fn, otherwise we risk prematurely gc'ing the grad_fn.
+    //
+    // See: https://github.com/pytorch/pytorch/issues/102174
+    auto& fn = *((THPCppFunction*)self)->cdata;
+    for (const auto& hook : fn.tensor_pre_hooks()) {
+      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
     }
-  }
-  // NOTE [retains_grad_hook PyObject traversal]
-  // In theory this shouldn't be necessary, because retains_grad_hooks should
-  // not contain any PyFunctionTensorPreHooks. The alternative is to have a
-  // check that actually guarantees this.
-  for (const auto& pair : fn.retains_grad_hooks()) {
-    if (auto pyhook =
-            dynamic_cast<PyFunctionTensorPreHook*>(pair.second.get())) {
-      Py_VISIT(pyhook->dict);
+    // NOTE [retains_grad_hook PyObject traversal]
+    // In theory this shouldn't be necessary, because retains_grad_hooks should
+    // not contain any PyFunctionTensorPreHooks. The alternative is to have a
+    // check that actually guarantees this.
+    for (const auto& pair : fn.retains_grad_hooks()) {
+      if (auto pyhook =
+              dynamic_cast<PyFunctionTensorPreHook*>(pair.second.get())) {
+        Py_VISIT(pyhook->dict);
+      }
     }
-  }
-  for (const auto& hook : fn.pre_hooks()) {
-    if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
-      Py_VISIT(pyhook->dict);
+    for (const auto& hook : fn.pre_hooks()) {
+      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
     }
-  }
-  for (const auto& hook : fn.post_hooks()) {
-    if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
-      Py_VISIT(pyhook->dict);
+    for (const auto& hook : fn.post_hooks()) {
+      if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
     }
   }
   return 0;
@@ -124,13 +131,14 @@ void THPCppFunction_dealloc(PyObject* self) {
 
 } // namespace
 
-PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook) {
-  const auto num_next = self->cdata->num_outputs();
+PyObject* THPCppFunction_next_functions(PyObject* self, void* _unused) {
+  auto cdata = reinterpret_cast<const THPCppFunction*>(self)->cdata;
+  const auto num_next = cdata->num_outputs();
   THPObjectPtr py_functions(PyTuple_New(num_next));
   if (!py_functions)
     return nullptr;
   for (const auto i : c10::irange(num_next)) {
-    auto& c_tuple = self->cdata->next_edge(i);
+    auto& c_tuple = cdata->next_edge(i);
     THPObjectPtr tuple(PyTuple_New(2));
     if (!tuple)
       return nullptr;
@@ -147,15 +155,17 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook) {
   return py_functions.release();
 }
 
-PyObject* THPCppFunction_metadata(THPCppFunction* self, void* _unused) {
+PyObject* THPCppFunction_metadata(PyObject* self, void* _unused) {
   auto* metadata =
-      static_cast<PyAnomalyMetadata*>(self->cdata->metadata())->dict();
+      static_cast<PyAnomalyMetadata*>(
+          reinterpret_cast<THPCppFunction*>(self)->cdata->metadata())
+          ->dict();
 
   Py_XINCREF(metadata);
   return metadata;
 }
 
-PyObject* THPCppFunction_requires_grad(THPCppFunction* self, void* unused) {
+PyObject* THPCppFunction_requires_grad(PyObject* self, void* unused) {
   Py_RETURN_TRUE;
 }
 

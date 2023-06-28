@@ -1811,6 +1811,8 @@ class TestOldViewOps(TestCase):
             x.resize_([2, 4, 2**29, 2**29])
         with self.assertRaisesRegex(RuntimeError, 'overflow'):
             x.resize_([8, 8, 2**29, 2**29])
+        with self.assertRaisesRegex(RuntimeError, 'Stride calculation overflowed'):
+            x.resize_([0, 4, 2305843009213693952])
 
     def test_view_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):

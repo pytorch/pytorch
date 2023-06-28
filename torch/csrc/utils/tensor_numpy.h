@@ -14,6 +14,7 @@ at::ScalarType numpy_dtype_to_aten(int dtype);
 
 bool is_numpy_available();
 bool is_numpy_int(PyObject* obj);
+bool is_numpy_bool(PyObject* obj);
 bool is_numpy_scalar(PyObject* obj);
 
 void warn_numpy_not_writeable();

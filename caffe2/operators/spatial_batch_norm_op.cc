@@ -74,8 +74,8 @@ Output when is_test = 0 (train mode): *Y, mean, var, saved_mean, saved_var*
 Output when is_test = 1 (test mode): *Y*
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/spatial_batch_norm_op.cc
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/spatial_batch_norm_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/spatial_batch_norm_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/spatial_batch_norm_op.h
 
 )DOC")
     .ArgIsTest(

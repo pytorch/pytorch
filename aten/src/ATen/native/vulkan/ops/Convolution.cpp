@@ -1001,28 +1001,6 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
       output_max));
 }
 
-c10::intrusive_ptr<Conv2dPackedContext> convert_qconv2d_context(
-    const c10::intrusive_ptr<ConvPackedParamsBase<2>>& packed_params,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max) {
-  std::tuple<Tensor, c10::optional<Tensor>> wb = packed_params->unpack();
-  Tensor weight = std::get<0>(wb);
-  c10::optional<Tensor> bias = std::get<1>(wb);
-
-  return c10::make_intrusive<Conv2dPackedContext>(Conv2dPackedContext(
-      weight,
-      bias,
-      packed_params->stride().vec(),
-      packed_params->padding().vec(),
-      packed_params->dilation().vec(),
-      /* transposed = */ false,
-      /* quantized = */ true,
-      /* output_padding_arg = */ {0},
-      packed_params->groups(),
-      output_min,
-      output_max));
-}
-
 Tensor run_conv2d_context_impl(
     const Tensor& input_arg,
     const c10::intrusive_ptr<Conv2dPackedContext>& conv_context,

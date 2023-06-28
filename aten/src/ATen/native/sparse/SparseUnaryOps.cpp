@@ -7,6 +7,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
 #include <ATen/ops/asin.h>
@@ -187,7 +188,12 @@ COALESCED_UNARY_UFUNC(sqrt);
 COALESCED_UNARY_UFUNC(tan);
 COALESCED_UNARY_UFUNC(tanh);
 COALESCED_UNARY_UFUNC(trunc);
+// relu function has no declaration, it may be unused in Pytorch.
+// But we keep it and ignore the warning here until verified in the future.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
 COALESCED_UNARY_UFUNC(relu);
+#pragma clang diagnostic pop
 
 COALESCED_UNARY_UFUNC_NO_INPLACE(signbit);
 COALESCED_UNARY_UFUNC_NO_INPLACE(isneginf);
@@ -206,14 +212,21 @@ Tensor threshold_backward_sparse(
     const Tensor& grad_output,
     const Tensor& self,
     const Scalar& threshold) {
-  auto self_v = [&self]() {
+  const auto grad = [&]() {
+    if (!grad_output._nnz() && self._nnz() > 0) {
+      return at::sparse::zeros_like_with_indices(self);
+    } else {
+      return grad_output;
+    }
+  }();
+  const auto self_v = [&self]() {
     if (self.is_coalesced()) {
       return self.values();
     } else {
       return self.coalesce().values();
     }
   }();
-  return coalesced_unary_ufunc(grad_output, [&](const Tensor& t) {
+  return coalesced_unary_ufunc(grad, [&](const Tensor& t) {
     return at::threshold_backward(t, self_v, threshold);
   });
 }
@@ -223,6 +236,13 @@ Tensor& threshold_backward_sparse_out(
     const Tensor& self,
     const Scalar& threshold,
     Tensor& grad_input) {
+  const auto grad = [&]() {
+    if (!grad_output._nnz() && self._nnz() > 0) {
+      return at::sparse::zeros_like_with_indices(self);
+    } else {
+      return grad_output;
+    }
+  }();
   auto self_v = [&self]() {
     if (self.is_coalesced()) {
       return self.values();
@@ -231,7 +251,7 @@ Tensor& threshold_backward_sparse_out(
     }
   }();
   return coalesced_unary_ufunc_out(
-      grad_output, grad_input, [&](const Tensor& t, Tensor& out) {
+      grad, grad_input, [&](const Tensor& t, Tensor& out) {
         return at::threshold_backward_outf(t, self_v, threshold, out);
       });
 }

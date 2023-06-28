@@ -1,7 +1,14 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/addcdiv_native.h>
+#include <ATen/ops/addcmul_native.h>
+#endif
 namespace at::native {
 // scope the MPS's internal methods to not expose them to at::native
 namespace mps {
@@ -29,53 +36,40 @@ void addc_mul_div_out_mps(const Tensor& self,
     MPSGraphTensor *inputTensor = nil, *outputTensor = nil;
     MPSGraphTensor *firstTensor = nil, *secondTensor = nil, *valueTensor = nil;
   };
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, tensor1, tensor2});
 
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      ScalarType common_dtype =
+          c10::promoteTypes(self.scalar_type(), c10::promoteTypes(tensor1.scalar_type(), tensor2.scalar_type()));
+      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+      newCachedGraph->firstTensor = mpsGraphRankedPlaceHolder(mpsGraph, tensor1);
+      newCachedGraph->secondTensor = mpsGraphRankedPlaceHolder(mpsGraph, tensor2);
+      newCachedGraph->valueTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(self.scalar_type()), @[ @1 ]);
 
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        ScalarType common_dtype =
-            c10::promoteTypes(self.scalar_type(), c10::promoteTypes(tensor1.scalar_type(), tensor2.scalar_type()));
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-          newCachedGraph->firstTensor = mpsGraphRankedPlaceHolder(mpsGraph, tensor1);
-          newCachedGraph->secondTensor = mpsGraphRankedPlaceHolder(mpsGraph, tensor2);
-          newCachedGraph->valueTensor =
-              mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(self.scalar_type()), @[ @1 ]);
-
-          // the tensor to be optionally multiplied by value_scalar
-          MPSGraphTensor* multiplicandTensor = nil;
-          auto firstTensor = castMPSTensor(mpsGraph, newCachedGraph->firstTensor, common_dtype);
-          auto secondTensor = castMPSTensor(mpsGraph, newCachedGraph->secondTensor, common_dtype);
-          if (is_div) {
-            multiplicandTensor = [mpsGraph divisionWithPrimaryTensor:firstTensor secondaryTensor:secondTensor name:nil];
-          } else {
-            multiplicandTensor = [mpsGraph multiplicationWithPrimaryTensor:firstTensor
-                                                           secondaryTensor:secondTensor
-                                                                      name:nil];
-          }
-          // the tensor to be added to input_tensor
-          MPSGraphTensor* addendTensor = [mpsGraph
-              multiplicationWithPrimaryTensor:multiplicandTensor
-                              secondaryTensor:castMPSTensor(mpsGraph, newCachedGraph->valueTensor, common_dtype)
+      // the tensor to be optionally multiplied by value_scalar
+      MPSGraphTensor* multiplicandTensor = nil;
+      auto firstTensor = castMPSTensor(mpsGraph, newCachedGraph->firstTensor, common_dtype);
+      auto secondTensor = castMPSTensor(mpsGraph, newCachedGraph->secondTensor, common_dtype);
+      if (is_div) {
+        multiplicandTensor = [mpsGraph divisionWithPrimaryTensor:firstTensor secondaryTensor:secondTensor name:nil];
+      } else {
+        multiplicandTensor = [mpsGraph multiplicationWithPrimaryTensor:firstTensor
+                                                       secondaryTensor:secondTensor
+                                                                  name:nil];
+      }
+      // the tensor to be added to input_tensor
+      MPSGraphTensor* addendTensor =
+          [mpsGraph multiplicationWithPrimaryTensor:multiplicandTensor
+                                    secondaryTensor:castMPSTensor(mpsGraph, newCachedGraph->valueTensor, common_dtype)
+                                               name:nil];
+      auto outputTensor =
+          [mpsGraph additionWithPrimaryTensor:castMPSTensor(mpsGraph, newCachedGraph->inputTensor, common_dtype)
+                              secondaryTensor:addendTensor
                                          name:nil];
-          auto outputTensor =
-              [mpsGraph additionWithPrimaryTensor:castMPSTensor(mpsGraph, newCachedGraph->inputTensor, common_dtype)
-                                  secondaryTensor:addendTensor
-                                             name:nil];
-          newCachedGraph->outputTensor = castMPSTensor(mpsGraph, outputTensor, output.scalar_type());
-        }
-        return newCachedGraph;
-      });
-    }
+      newCachedGraph->outputTensor = castMPSTensor(mpsGraph, outputTensor, output.scalar_type());
+    });
 
     // Inputs as placeholders
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor, self);

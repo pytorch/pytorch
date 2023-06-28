@@ -21,8 +21,11 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const std::string& msg) {
       " (please report this error)");
 }
 
-// see TypeMeta::addTypeMetaData
-std::mutex TypeMeta::typeMetaDatasLock;
+std::mutex& TypeMeta::getTypeMetaDatasLock() {
+  static std::mutex lock;
+  return lock;
+}
+
 uint16_t TypeMeta::nextTypeIndex(NumScalarTypes);
 
 // fixed length array of TypeMetaData instances
@@ -62,22 +65,28 @@ uint16_t TypeMeta::existingMetaDataIndexForType(TypeIdentifier identifier) {
   return static_cast<uint16_t>(it - metaDatas);
 }
 
-CAFFE_DEFINE_KNOWN_TYPE(std::string)
-CAFFE_DEFINE_KNOWN_TYPE(uint16_t)
-CAFFE_DEFINE_KNOWN_TYPE(char)
-CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<std::mutex>)
-CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>)
-CAFFE_DEFINE_KNOWN_TYPE(std::vector<int32_t>)
-CAFFE_DEFINE_KNOWN_TYPE(std::vector<int64_t>)
-CAFFE_DEFINE_KNOWN_TYPE(std::vector<unsigned long>)
-CAFFE_DEFINE_KNOWN_TYPE(bool*)
-CAFFE_DEFINE_KNOWN_TYPE(char*)
-CAFFE_DEFINE_KNOWN_TYPE(int*)
+CAFFE_DEFINE_KNOWN_TYPE(std::string, std_string)
+CAFFE_DEFINE_KNOWN_TYPE(uint16_t, uint16_t)
+CAFFE_DEFINE_KNOWN_TYPE(char, char)
+CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<std::mutex>, std_unique_ptr_std_mutex)
+CAFFE_DEFINE_KNOWN_TYPE(
+    std::unique_ptr<std::atomic<bool>>,
+    std_unique_ptr_std_atomic_bool)
+CAFFE_DEFINE_KNOWN_TYPE(std::vector<int32_t>, std_vector_int32_t)
+CAFFE_DEFINE_KNOWN_TYPE(std::vector<int64_t>, std_vector_int64_t)
+CAFFE_DEFINE_KNOWN_TYPE(std::vector<unsigned long>, std_vector_unsigned_long)
+CAFFE_DEFINE_KNOWN_TYPE(bool*, bool_ptr)
+CAFFE_DEFINE_KNOWN_TYPE(char*, char_ptr)
+CAFFE_DEFINE_KNOWN_TYPE(int*, int_ptr)
 
-CAFFE_DEFINE_KNOWN_TYPE(detail::_guard_long_unique<long>);
-CAFFE_DEFINE_KNOWN_TYPE(detail::_guard_long_unique<std::vector<long>>)
+CAFFE_DEFINE_KNOWN_TYPE(
+    detail::_guard_long_unique<long>,
+    detail_guard_long_unique_long);
+CAFFE_DEFINE_KNOWN_TYPE(
+    detail::_guard_long_unique<std::vector<long>>,
+    detail_guard_long_unique_std_vector_long)
 
-CAFFE_DEFINE_KNOWN_TYPE(float*)
-CAFFE_DEFINE_KNOWN_TYPE(at::Half*)
+CAFFE_DEFINE_KNOWN_TYPE(float*, float_ptr)
+CAFFE_DEFINE_KNOWN_TYPE(at::Half*, at_Half)
 
 } // namespace caffe2

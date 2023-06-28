@@ -48,6 +48,38 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
     return dtype(self.size()).copy_(self, non_blocking)
 
 
+def _hpu(self, device=None, non_blocking=False, **kwargs):
+    """Returns a copy of this object in HPU memory.
+
+    If this object is already in HPU memory and on the correct device, then
+    no copy is performed and the original object is returned.
+
+    Args:
+        device (int): The destination HPU id. Defaults to the current device.
+        non_blocking (bool): If ``True`` and the source is in pinned memory,
+            the copy will be asynchronous with respect to the host. Otherwise,
+            the argument has no effect.
+        **kwargs: For compatibility, may contain the key ``async`` in place of
+            the ``non_blocking`` argument.
+    """
+    non_blocking = _get_async_or_non_blocking("hpu", non_blocking, kwargs)
+    hpu = getattr(torch, "hpu", None)
+    assert hpu is not None, "HPU device module is not loaded"
+    if self.is_hpu:
+        if device is None:
+            device = hpu.current_device()
+        if self.get_device() == device:
+            return self
+    else:
+        if device is None:
+            device = -1
+    with hpu.device(device):
+        assert not self.is_sparse, "sparse storage is not supported for HPU tensors"
+        untyped_storage = torch.UntypedStorage(self.size(), device=torch.device("hpu"))
+        untyped_storage.copy_(self, non_blocking)
+        return untyped_storage
+
+
 def _cuda(self, device=None, non_blocking=False, **kwargs):
     """Returns a copy of this object in CUDA memory.
 
@@ -237,8 +269,15 @@ def _rebuild_sparse_tensor(layout, data):
         data (tuple): The tensor's sparse storage representation.
     """
     if layout == torch.sparse_coo:
-        indices, values, size = data
+        if len(data) == 3:
+            # For BC:
+            indices, values, size = data
+            is_coalesced = None
+        else:
+            indices, values, size, is_coalesced = data
         result = torch.sparse_coo_tensor(indices, values, size, check_invariants=False)
+        if is_coalesced is not None:
+            result._coalesced_(is_coalesced)
         _sparse_tensors_to_validate.append(result)
         return result
 
@@ -592,6 +631,19 @@ def annotate(ret, **kwargs):
     return dec
 
 
+def render_call(fn, args, kwargs):
+    str_fn = torch.overrides.resolve_name(fn)
+    if str_fn is None:
+        str_fn = str(fn)
+
+    str_args: List[str] = []
+    with torch._tensor_str.printoptions(threshold=0, edgeitems=0):
+        str_args.extend(repr(a) for a in args)
+        str_args.extend(f"{k}={repr(v)}" for k, v in kwargs.items())
+        r = f"{str_fn}({', '.join(str_args)})"
+    return r
+
+
 # NOTE [ Python Traceback Reference Cycle Problem ]
 #
 # When using sys.exc_info(), it is important to **not** store the exc_info[2],
@@ -650,6 +702,10 @@ def _get_available_device_type():
         return "cuda"
     if hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
         return "xpu"
+    custom_backend_name = torch._C._get_privateuse1_backend_name()
+    custom_device_mod = getattr(torch, custom_backend_name, None)
+    if custom_device_mod and custom_device_mod.is_available():
+        return custom_backend_name
     # add more available device types here
     return None
 
@@ -660,6 +716,8 @@ def _get_device_attr(get_member):
         return get_member(torch.cuda)
     if device_type and device_type.lower() == "xpu":
         return get_member(torch.xpu)  # type: ignore[attr-defined]
+    if device_type == torch._C._get_privateuse1_backend_name():
+        return get_member(getattr(torch, device_type))
     # add more available device types here
     return None
 

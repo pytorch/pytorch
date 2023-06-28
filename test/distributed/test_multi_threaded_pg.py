@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
 import torch
 import torch.distributed as dist
@@ -95,8 +96,13 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         return 4
 
     def setUp(self):
+        os.environ["TORCH_DIST_INIT_BARRIER"] = "1"
         super().setUp()
         self._spawn_threads()
+
+    def tearDown(self):
+        super().tearDown()
+        os.environ["TORCH_DIST_INIT_BARRIER"] = "0"
 
     def test_allgather(self):
         input_tensor = torch.ones(3, 3) * dist.get_rank()
@@ -143,6 +149,21 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         dist.all_reduce(output)
         res_num = ((0 + self.world_size - 1) * self.world_size) / 2
         self.assertEqual(output, torch.ones(3, 3) * res_num)
+
+    def test_all_to_all(self):
+        rank = self.rank
+        world_size = self.world_size
+        input_tensor_list = [
+            torch.ones(3, 3) * x
+            for x in range(rank * world_size, (rank + 1) * world_size)
+        ]
+        output_tensor_list = [torch.empty_like(tensor) for tensor in input_tensor_list]
+        dist.all_to_all(output_tensor_list, input_tensor_list)
+        expected_tensor_list = [
+            torch.ones(3, 3) * x
+            for x in range(rank, world_size * world_size, world_size)
+        ]
+        self.assertEqual(expected_tensor_list, output_tensor_list)
 
     def test_all_reduce_ops(self):
         tensor = torch.tensor([dist.get_rank() + 1])
@@ -219,6 +240,16 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         if dist.get_rank() == 0:
             for i in range(self.world_size):
                 self.assertEqual(gather_list[i], torch.ones(3, 3) * i)
+
+    def test_all_reduce_coalesced(self):
+        t0 = torch.ones(3, 3) * dist.get_rank()
+        t1 = torch.ones(3, 3) * dist.get_rank() * 2
+        dist.all_reduce_coalesced([t0, t1])
+        res_num = ((0 + self.world_size - 1) * self.world_size) / 2
+        self.assertEqual(t0, torch.ones(3, 3) * res_num)
+        self.assertEqual(t1, torch.ones(3, 3) * (res_num * 2))
+
+# def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
 
 if __name__ == "__main__":
     run_tests()

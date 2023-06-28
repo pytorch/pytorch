@@ -4,6 +4,7 @@ import inspect
 import dis
 from .tree_map import tree_flatten, tree_map
 from .wrap_type import wrap_type
+import functorch._C
 from functorch._C import dim as _C
 _C._patch_tensor_class()
 dims, DimList, dimlists = _C.dims, _C.DimList, _C.dimlists

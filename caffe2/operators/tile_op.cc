@@ -116,7 +116,7 @@ OPERATOR_SCHEMA(Tile)
 Constructs a tensor by tiling a given tensor along a specified axis. This operation creates a new tensor by replicating the input tensor a number of times specified by the `tiles` argument along the `axis` dimension. The output tensor's `axis` dimension has $(X.dims(axis) * tiles)$ elements.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/tile_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/tile_op.cc
 
 <details>
 

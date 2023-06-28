@@ -157,7 +157,7 @@ AutogradMeta* materialize_autograd_meta(const at::TensorBase& self) {
   return get_autograd_meta(self);
 }
 
-void update_tensor_hooks_on_new_gradfn(
+static void update_tensor_hooks_on_new_gradfn(
     const at::TensorBase& self,
     const std::shared_ptr<torch::autograd::Node>& old_fn,
     const std::shared_ptr<torch::autograd::Node>& new_fn) {

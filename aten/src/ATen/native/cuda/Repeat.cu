@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Repeat.h>
+#include <c10/cuda/CUDADeviceAssertion.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -16,8 +17,9 @@ __global__ static void compute_cuda_kernel(
     int64_t* cumsum_ptr,
     index_t* result_ptr,
     int64_t size,
-    int64_t result_size) {
-  CUDA_KERNEL_ASSERT(result_size == cumsum_ptr[size - 1]);
+    int64_t result_size,
+    TORCH_DSA_KERNEL_ARGS) {
+  CUDA_KERNEL_ASSERT2(result_size == cumsum_ptr[size - 1]);
   int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   int64_t stride = (blockDim.x * gridDim.x) / C10_WARP_SIZE;
   int warp_id = idx / C10_WARP_SIZE;
@@ -25,7 +27,7 @@ __global__ static void compute_cuda_kernel(
   for (int64_t i = warp_id; i < size; i += stride) {
     int64_t end = cumsum_ptr[i];
     index_t repeat = repeat_ptr[i];
-    CUDA_KERNEL_ASSERT(repeat >= 0);
+    CUDA_KERNEL_ASSERT2(repeat >= 0);
     int64_t start = end - repeat;
     for (int64_t j = start + tid_in_warp; j < end; j += C10_WARP_SIZE) {
       result_ptr[j] = i;
@@ -45,9 +47,9 @@ static void compute_cuda(
   int64_t grid =
       std::min<int64_t>((size + warps_per_block - 1) / warps_per_block, 2048L);
 
-  compute_cuda_kernel<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+  TORCH_DSA_KERNEL_LAUNCH(
+  compute_cuda_kernel, grid, block, 0, at::cuda::getCurrentCUDAStream(),
       repeat_ptr, cumsum_ptr, result_ptr, size, result_size);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 namespace at::native {

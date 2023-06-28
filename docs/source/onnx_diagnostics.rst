@@ -30,6 +30,3 @@ API Reference
 
 .. autoclass:: torch.onnx._internal.diagnostics.ExportDiagnostic
     :members:
-
-.. autoclass:: torch.onnx._internal.diagnostics.infra.DiagnosticEngine
-    :members:

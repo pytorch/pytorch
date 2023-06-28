@@ -209,7 +209,7 @@ def _add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=N
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
         elif isinstance(child, _FusedModule):
-            # activation_post_process are now added directly to nn.Sequentail/_FusedModule
+            # activation_post_process are now added directly to nn.Sequential/_FusedModule
             if needs_observation(child):
                 insert_activation_post_process(child)
         elif non_leaf_module_list is not None and type_before_parametrizations(child) in non_leaf_module_list:
@@ -323,7 +323,7 @@ def _remove_activation_post_process(module):
        _is_activation_post_process(module.activation_post_process):
         delattr(module, 'activation_post_process')
 
-    # remove activation_post_proceess pre and post hooks
+    # remove activation_post_process pre and post hooks
     def remove_hooks(pre_hook=False):
         hook_map = module._forward_pre_hooks if pre_hook else module._forward_hooks
         observer_hook = _observer_forward_pre_hook if pre_hook else _observer_forward_hook

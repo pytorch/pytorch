@@ -91,6 +91,8 @@ TABLE = {
         "inductor_max_autotune_no_cudagraphs": (
             "--inference -n50 --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
         ),
+        "torchscript-onnx": "--inference -n5 --torchscript-onnx",
+        "dynamo-onnx": "--inference -n5 --dynamo-onnx",
     },
 }
 
@@ -715,6 +717,12 @@ class ParsePerformanceLogs(Parser):
                 for idx in range(2, len(frames)):
                     df = pd.merge(df, frames[idx], on=["dev", "name", "batch_size"])
 
+            if testing == "performance":
+                for compiler in self.compilers:
+                    df[compiler] = pd.to_numeric(df[compiler], errors="coerce").fillna(
+                        0
+                    )
+
             df_copy = df.copy()
             df_copy = df_copy.sort_values(
                 by=list(reversed(self.compilers)), ascending=False
@@ -1004,7 +1012,7 @@ def find_last_2_with_filenames(lookup_file, dashboard_archive_path, dtype, filen
         fullpaths = [
             os.path.join(dashboard_archive_path, path, name) for name in filenames
         ]
-        if all([os.path.exists(fullpath) for fullpath in fullpaths]):
+        if all(os.path.exists(fullpath) for fullpath in fullpaths):
             last2.append(output_dir)
         if len(last2) >= 2:
             return last2

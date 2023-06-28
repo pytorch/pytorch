@@ -64,7 +64,7 @@ class SpectralNorm:
         #     Therefore, since the same power iteration is performed on all
         #     devices, simply updating the tensors in-place will make sure that
         #     the module replica on `device[0]` will update the _u vector on the
-        #     parallized module (by shared storage).
+        #     parallelized module (by shared storage).
         #
         #    However, after we update `u` and `v` in-place, we need to **clone**
         #    them before using them to normalize the weight. This is to support

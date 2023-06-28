@@ -2,10 +2,10 @@
 <link rel="canonical" href="{{ theme_canonical_url }}{{ pagename }}.html" />
 
 {% block extrahead %}
-{% if release == "master" %}
+{% if release == "main" %}
 <!--
-  Search engines should not index the master version of documentation.
-  Stable documentation are built without release == 'master'.
+  Search engines should not index the main version of documentation.
+  Stable documentation are built without release == 'main'.
 -->
 <meta name="robots" content="noindex">
 {% endif %}
@@ -13,7 +13,7 @@
 {% endblock %}
 
 {% block menu %}
-{% if release == "master" %}
+{% if release == "main" %}
 <div>
   <a style="color:#F05732" href="{{ theme_canonical_url }}{{ pagename }}.html">
     You are viewing unstable developer preview docs.

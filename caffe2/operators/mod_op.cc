@@ -41,7 +41,7 @@ of the corresponding element in the input data. The divisor of the modulo is
 provided by the `divisor` argument.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/mod_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/mod_op.cc
 
 <details>
 

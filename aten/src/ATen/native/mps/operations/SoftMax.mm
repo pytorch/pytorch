@@ -1,16 +1,18 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-
-#include <ATen/mps/MPSStream.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <torch/library.h>
 
 #ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_softmax_backward_data_native.h>
+#include <ATen/ops/_softmax_native.h>
 #endif
 
 namespace at::native {
@@ -59,8 +61,6 @@ TORCH_IMPL_FUNC(softmax_mps_out)
   using CachedGraph = MPSUnaryCachedGraph;
   MPSStream* stream = getCurrentMPSStream();
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   @autoreleasepool {
     string mem_format_key = get_mem_format_string(memory_format);
     MPSShape* input_shape_readonly = mps::getMPSShape(input);
@@ -94,42 +94,29 @@ TORCH_IMPL_FUNC(softmax_mps_out)
 
     string key = "softmax_mps_out:" + mem_format_key + ":" + getMPSTypeString(input) + ":" + [ns_shape_key UTF8String] +
         ":" + std::to_string(dim_);
-    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input), input_shape);
 
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
+      // passing selector of softMaxWithTensor on the mpsGraph object
+      MPSGraphTensor* outputTensor = [mpsGraph softMaxWithTensor:inputTensor axis:(NSInteger)dim_ name:nil];
 
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
+      // Output needs to be contiguous format
+      if (memory_format == at::MemoryFormat::ChannelsLast) {
+        auto N = input_shape[0];
+        auto H = input_shape[1];
+        auto W = input_shape[2];
+        auto C = input_shape[3];
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input), input_shape);
+        outputTensor = [mpsGraph reshapeTensor:outputTensor
+                                     withShape:@[ N, ([NSNumber numberWithInt:[H intValue] * [W intValue]]), C ]
+                                          name:nil];
+        outputTensor = [mpsGraph transposeTensor:outputTensor dimension:1 withDimension:2 name:nil];
+        outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:@[ N, C, H, W ] name:nil];
+      }
 
-          // passing selector of softMaxWithTensor on the mpsGraph object
-          MPSGraphTensor* outputTensor = [mpsGraph softMaxWithTensor:inputTensor axis:(NSInteger)dim_ name:nil];
-
-          // Output needs to be contiguous format
-          if (memory_format == at::MemoryFormat::ChannelsLast) {
-            auto N = input_shape[0];
-            auto H = input_shape[1];
-            auto W = input_shape[2];
-            auto C = input_shape[3];
-
-            outputTensor = [mpsGraph reshapeTensor:outputTensor
-                                         withShape:@[ N, ([NSNumber numberWithInt:[H intValue] * [W intValue]]), C ]
-                                              name:nil];
-            outputTensor = [mpsGraph transposeTensor:outputTensor dimension:1 withDimension:2 name:nil];
-            outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:@[ N, C, H, W ] name:nil];
-          }
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
-    }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input, input_shape);
     // This must be the Contiguous shape
@@ -169,46 +156,31 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
   using CachedGraph = MPSUnaryGradCachedGraph;
   MPSStream* stream = getCurrentMPSStream();
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   @autoreleasepool {
     MPSShape* grad_shape = mps::getMPSShape(grad);
     NSString* ns_shape_key = [[grad_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
     string key = "softmax_backward_mps_out:" + getMPSTypeString(output) + ":" + [ns_shape_key UTF8String] + ":" +
         std::to_string(dim_);
-    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* softmaxTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(output), grad_shape);
+      MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad), grad_shape);
 
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
+      MPSGraphTensor* mulTensor = [mpsGraph multiplicationWithPrimaryTensor:softmaxTensor
+                                                            secondaryTensor:gradOutputTensor
+                                                                       name:nil];
+      MPSGraphTensor* mulSumTensor = [mpsGraph reductionSumWithTensor:mulTensor axis:(NSInteger)dim_ name:nil];
+      MPSGraphTensor* gradSubTensor = [mpsGraph subtractionWithPrimaryTensor:gradOutputTensor
+                                                             secondaryTensor:mulSumTensor
+                                                                        name:nil];
+      MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:softmaxTensor
+                                                                  secondaryTensor:gradSubTensor
+                                                                             name:nil];
 
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-
-          MPSGraphTensor* softmaxTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(output), grad_shape);
-          MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad), grad_shape);
-
-          MPSGraphTensor* mulTensor = [mpsGraph multiplicationWithPrimaryTensor:softmaxTensor
-                                                                secondaryTensor:gradOutputTensor
-                                                                           name:nil];
-          MPSGraphTensor* mulSumTensor = [mpsGraph reductionSumWithTensor:mulTensor axis:(NSInteger)dim_ name:nil];
-          MPSGraphTensor* gradSubTensor = [mpsGraph subtractionWithPrimaryTensor:gradOutputTensor
-                                                                 secondaryTensor:mulSumTensor
-                                                                            name:nil];
-          MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:softmaxTensor
-                                                                      secondaryTensor:gradSubTensor
-                                                                                 name:nil];
-
-          newCachedGraph->outputTensor_ = softmaxTensor;
-          newCachedGraph->gradOutputTensor_ = gradOutputTensor;
-          newCachedGraph->gradInputTensor_ = gradInputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
-    }
+      newCachedGraph->outputTensor_ = softmaxTensor;
+      newCachedGraph->gradOutputTensor_ = gradOutputTensor;
+      newCachedGraph->gradInputTensor_ = gradInputTensor;
+    });
 
     Placeholder softmaxPlaceholder = Placeholder(cachedGraph->outputTensor_, output, grad_shape);
     Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad, grad_shape);

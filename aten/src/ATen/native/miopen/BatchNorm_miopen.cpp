@@ -126,8 +126,8 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
       at::maybe_data_ptr(running_mean),
       at::maybe_data_ptr(running_var),
       epsilon,
-      save_mean.data_ptr(),
-      save_var.data_ptr()));
+      save_mean.mutable_data_ptr(),
+      save_var.mutable_data_ptr()));
   } else {
     save_mean = at::empty({0}, weight_t.options());
     save_var = at::empty({0}, weight_t.options());

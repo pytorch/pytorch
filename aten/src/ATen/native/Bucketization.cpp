@@ -10,6 +10,8 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/bucketize_native.h>
+#include <ATen/ops/searchsorted_native.h>
 #endif
 
 /* Implement a numpy like searchsorted and a TF like bucketize function running on cpu

@@ -128,7 +128,7 @@ class DataNormSparsifier(BaseDataSparsifier):
         else:
             data_norm = (data * data).squeeze()  # square every element for L2
 
-        if len(data_norm.shape) > 2:  # only supports 2 dimenstional data at the moment
+        if len(data_norm.shape) > 2:  # only supports 2 dimensional data at the moment
             raise ValueError("only supports 2-D at the moment")
 
         elif len(data_norm.shape) == 1:  # in case the data is bias (or 1D)

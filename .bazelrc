@@ -69,10 +69,6 @@ build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=all
 # The following warnings come from -Wall. We downgrade them from error
 # to warnings here.
 #
-# sign-compare has a tremendous amount of violations in the
-# codebase. It will be a lot of work to fix them, just disable it for
-# now.
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-sign-compare
 # We intentionally use #pragma unroll, which is compiler specific.
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-error=unknown-pragmas
 
@@ -99,6 +95,9 @@ build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-parameter
 # up some of the clear-cut cases that could be risky, but we still
 # likely want to have this disabled for the most part.
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-missing-field-initializers
+
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-function
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-variable
 
 build --per_file_copt='//:aten/src/ATen/RegisterCompositeExplicitAutograd\.cpp$'@-Wno-error=unused-function
 build --per_file_copt='//:aten/src/ATen/RegisterCompositeImplicitAutograd\.cpp$'@-Wno-error=unused-function

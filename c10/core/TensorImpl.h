@@ -1,34 +1,31 @@
 #pragma once
 
-#include <c10/core/Backend.h>
-#include <c10/core/CopyBytes.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
 #include <c10/core/SymBool.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
-#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyObjectSlot.h>
 #include <c10/core/impl/SizesAndStrides.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
-#include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-#include <c10/util/python_stub.h>
 #include <c10/util/safe_numerics.h>
+#include <c10/util/typeid.h>
 
 #include <algorithm>
 #include <atomic>
 #include <limits>
 #include <memory>
-#include <numeric>
+#include <type_traits>
 #include <utility>
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -55,11 +52,6 @@ namespace at {
 class Tensor;
 class TensorBase;
 } // namespace at
-
-namespace c10 {
-class Scalar;
-struct Storage;
-} // namespace c10
 
 namespace c10 {
 
@@ -150,8 +142,6 @@ struct C10_API PlacementDeleteContext {
   }
 };
 
-struct TensorImpl;
-
 struct C10_API AutogradMetaInterface {
   virtual void set_requires_grad(
       bool requires_grad,
@@ -223,7 +213,7 @@ is_non_overlapping_and_dense
  * backend.
  **/
 struct C10_API BackendMeta : intrusive_ptr_target {
-  virtual ~BackendMeta(){};
+  ~BackendMeta() override = default;
   virtual intrusive_ptr<BackendMeta> clone(
       const intrusive_ptr<BackendMeta>& ptr) const {
     return ptr;
@@ -247,6 +237,7 @@ struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
+  c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt;
 
   ExtraMeta() = default;
   ExtraMeta(const ExtraMeta& other) {
@@ -260,15 +251,19 @@ struct C10_API ExtraMeta {
     if (other.backend_meta_) {
       backend_meta_ = other.backend_meta_->clone(other.backend_meta_);
     }
+    if (other.custom_data_ptr_error_msg_) {
+      custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
+    }
   }
 
   ExtraMeta(
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
-      intrusive_ptr<c10::BackendMeta> backend_meta)
+      intrusive_ptr<c10::BackendMeta> backend_meta,
+      c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt)
       : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
         named_tensor_meta_(std::move(named_tensor_meta)),
-        backend_meta_(backend_meta) {}
+        backend_meta_(std::move(backend_meta)) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
     return std::make_unique<ExtraMeta>(*this);
@@ -411,20 +406,6 @@ struct C10_API VariableVersion {
 // Forward declaration of TensorImpl needed for forward declaration of
 // C10_TensorImpl_Size_Check_Dummy_Class
 struct C10_API TensorImpl;
-
-// Forward declaration needed because TensorImpl needs to be friends with
-// C10_TensorImpl_Size_Check_Dummy_Class in order to check the size
-// of its private fields.
-template <
-    size_t cplusplus,
-    size_t clang_ver_major,
-    size_t gcc_ver,
-    size_t gcc_ver_minor,
-    size_t nvcc,
-    size_t cuda_version,
-    size_t cuda_version_major,
-    size_t ptr_size>
-class C10_TensorImpl_Size_Check_Dummy_Class;
 
 /**
  * NOTE: Some TensorImpl methods are small and not overridden in the
@@ -1495,15 +1476,55 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for you; this class is available from 'Tensor'.
    */
   template <typename T>
-  inline T* data() const {
+  const T* data_dtype_initialized() const {
+    return data_dtype_initialized_impl<const T>(
+        [this] { return static_cast<const T*>(storage_.data()); });
+  }
+
+  /**
+   * Return a mutable typed data pointer to the actual data which this
+   * tensor refers to. This checks that the requested type (from the
+   * template parameter) matches the internal type of the tensor.
+   *
+   * It is invalid to call data() on a dtype-uninitialized tensor, even if
+   * the size is 0.
+   *
+   * WARNING: If a tensor is not contiguous, you MUST use strides when
+   * performing index calculations to determine the location of elements in
+   * the tensor.  We recommend using 'TensorAccessor' to handle this computation
+   * for you; this class is available from 'Tensor'.
+   */
+  template <typename T>
+  T* mutable_data_dtype_initialized() {
+    return data_dtype_initialized_impl<T>(
+        [this] { return static_cast<T*>(storage_.mutable_data()); });
+  }
+
+ private:
+  // Shared implementation of data_dtype_initialized() and
+  // mutable_data_dtype_initialized().
+  template <typename T, typename Func>
+  T* data_dtype_initialized_impl(const Func& get_data) const {
     TORCH_CHECK(
-        data_type_.Match<T>(),
+        data_type_.Match<std::remove_const_t<T>>(),
         "Tensor type mismatch, caller expects elements to be ",
-        caffe2::TypeMeta::TypeName<T>(),
+        caffe2::TypeMeta::TypeName<std::remove_const_t<T>>(),
         ", while tensor contains ",
         data_type_.name(),
         ". ");
-    return data_ptr_impl<T>();
+    return data_ptr_impl_impl<T>(get_data);
+  }
+
+ public:
+  /**
+   * More efficient helper for Tensor::data_ptr(). Like data<T>(), but
+   * does not do a type check. Unlike the untemplated data(), does
+   * check has_storage() and storage_initialized().
+   */
+  template <typename T>
+  inline const T* data_ptr_impl() const {
+    return data_ptr_impl_impl<const T>(
+        [this] { return static_cast<const T*>(storage_.data()); });
   }
 
   /**
@@ -1512,21 +1533,32 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * check has_storage() and storage_initialized().
    */
   template <typename T>
-  inline T* data_ptr_impl() const {
-    TORCH_CHECK(
-        has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
+  inline T* mutable_data_ptr_impl() {
+    return data_ptr_impl_impl<T>(
+        [this] { return static_cast<T*>(storage_.mutable_data()); });
+  }
+
+ private:
+  // Shared implementation of mutable_data_ptr_impl() and the future
+  // mutable_data_ptr_impl().
+  template <typename T, typename Func>
+  T* data_ptr_impl_impl(const Func& get_data) const {
+    if (C10_UNLIKELY(!has_storage())) {
+      throw_data_ptr_access_error();
+    }
     TORCH_CHECK(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
-    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
+    return get_data() + storage_offset_;
   }
 
+ public:
   /**
-   * Return a void* data pointer to the actual data which this tensor refers to.
+   * Return a const void* data pointer to the actual data which this
+   * tensor refers to.
    *
    * It is invalid to call data() on a dtype-uninitialized tensor, even if the
    * size is 0.
@@ -1535,33 +1567,53 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * assume that itemsize() * numel() is sufficient to compute the bytes that
    * can be validly read from this tensor.
    */
-  inline void* data() const {
-    TORCH_CHECK(
-        has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
+  inline const void* data() const {
+    return data_impl<const void>(
+        [this] { return static_cast<const char*>(storage_.data()); });
+  }
+
+  /**
+   * Return a void* data pointer to the actual data which this tensor refers to.
+   *
+   * It is invalid to call mutable_data() on a dtype-uninitialized
+   * tensor, even if the size is 0.
+   *
+   * WARNING: The data pointed to by this tensor may not contiguous; do NOT
+   * assume that itemsize() * numel() is sufficient to compute the bytes that
+   * can be validly read from this tensor.
+   */
+  inline void* mutable_data() {
+    return data_impl<void>(
+        [this] { return static_cast<char*>(storage_.mutable_data()); });
+  }
+
+ private:
+  /// Shared implementation of data() and mutable_data().
+  ///
+  /// get_data must return a byte-addressed pointer, e.g. char*,
+  /// std::byte const*, etc.
+  template <typename Void, typename Func>
+  Void* data_impl(const Func& get_data) const {
+    if (C10_UNLIKELY(!has_storage())) {
+      throw_data_ptr_access_error();
+    }
     TORCH_CHECK(
         dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
+    auto* data = get_data();
+    static_assert(
+        sizeof(*data) == 1, "get_data must return a byte-addressed pointer.");
     // Computing an offset into an empty tensor would be UB, since an empty
     // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
     // is UB.  So we skip the offset computation in this case.
-    char* const data = static_cast<char*>(storage_.mutable_data());
-    if (data == nullptr) {
+    if (is_empty()) {
       return nullptr;
     }
-    return static_cast<void*>(data + data_type_.itemsize() * storage_offset_);
+    return data + data_type_.itemsize() * storage_offset_;
   }
 
-  /**
-   * Like data<T>(), but performs no checks.  You are responsible for ensuring
-   * that all invariants required by data() are upheld here.
-   */
-  template <typename T>
-  inline T* unsafe_data() const {
-    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
-  }
-
+ public:
   /**
    * Returns the TypeMeta of a tensor, which describes what data type
    * it is (e.g., int, float, ...)
@@ -1599,6 +1651,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return extra_meta_->backend_meta_;
   }
 
+  void release_storage_and_set_meta_custom_data_ptr_error_msg_(
+      c10::optional<std::string> s) {
+    storage_ = {};
+    get_extra_meta().custom_data_ptr_error_msg_ = std::move(s);
+  }
+
  protected:
   /**
    * Returns the human-readable name of the actual type of this object (e.g.,
@@ -1610,6 +1668,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  private:
   [[noreturn]] void throw_storage_access_error() const;
+  [[noreturn]] void throw_data_ptr_access_error() const;
 
   ExtraMeta& get_extra_meta() {
     if (!extra_meta_) {
@@ -1754,7 +1813,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         new_stride.size(),
         ")");
     const auto new_dim = new_size.size();
-
+    bool overflowed = false;
     sizes_and_strides_.set_sizes(new_size);
 
     if (new_dim > 0) {
@@ -1769,15 +1828,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             sizes_and_strides_.stride_at_unchecked(dim) = 1;
           } else {
             // Keep stride monotonically increasing to match NumPy.
-            sizes_and_strides_.stride_at_unchecked(dim) =
+            overflowed |= c10::mul_overflows(
+                sizes_and_strides_.stride_at_unchecked(dim + 1),
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(dim + 1), 1) *
-                sizes_and_strides_.stride_at_unchecked(dim + 1);
+                    sizes_and_strides_.size_at_unchecked(dim + 1), 1),
+                std::addressof(sizes_and_strides_.stride_at_unchecked(dim)));
           }
         }
         if (dim == 0)
           break;
       }
+      TORCH_CHECK(!overflowed, "Stride calculation overflowed");
     }
 
     refresh_numel();
@@ -2274,14 +2335,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         const auto dim_ = dim();
         sizes_and_strides_.resize(dim_);
         if (dim_ > 0) {
+          bool overflowed = false;
           const auto last_idx = dim_ - 1;
           sizes_and_strides_.stride_at_unchecked(last_idx) = 1;
           for (auto i = last_idx - 1; i >= 0; --i) {
-            sizes_and_strides_.stride_at_unchecked(i) =
-                sizes_and_strides_.stride_at_unchecked(i + 1) *
+            overflowed |= c10::mul_overflows(
+                sizes_and_strides_.stride_at_unchecked(i + 1),
                 std::max<int64_t>(
-                    sizes_and_strides_.size_at_unchecked(i + 1), 1);
+                    sizes_and_strides_.size_at_unchecked(i + 1), 1),
+                std::addressof(sizes_and_strides_.stride_at_unchecked(i)));
           }
+          TORCH_CHECK(!overflowed, "Stride calculation overflowed");
         }
         break;
       }

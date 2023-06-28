@@ -33,39 +33,20 @@ on:
         type: string
         default: ""
         description: If set to any value, upload to GHA. Otherwise upload to S3.
+      dashboard-tag:
+        required: false
+        type: string
+        default: ""
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
-  # This needs to be run right before the test starts so that it can gather the
-  # latest labels from the PR
-  filter:
-    runs-on: [self-hosted, linux.large]
-    outputs:
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
-      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
-      keep-going: ${{ steps.filter.outputs.keep-going }}
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          fetch-depth: 1
-          submodules: false
-
-      - name: Select all requested test configurations
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test-matrix }}
-
   test:
-    needs: filter
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
-      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -80,15 +61,22 @@ jobs:
               docker exec -it $(docker container ps --format '{{.ID}}') bash
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: ./.github/actions/calculate-docker-image
+        with:
+          docker-image-name: ${{ inputs.docker-image }}
+          xla: ${{ contains(inputs.build-environment, 'xla') }}
+
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: ${{ inputs.docker-image }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         id: install-nvidia-driver
@@ -120,6 +108,23 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
+      - name: Check for keep-going label and re-enabled test issues
+        # This uses the filter-test-configs action because it conviniently
+        # checks for labels and re-enabled test issues.  It does not actually do
+        # any filtering.  All filtering is done in the build step.
+        id: keep-going
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
+      - name: Download pytest cache
+        uses: ./.github/actions/pytest-cache-download
+        continue-on-error: true
+        with:
+          cache_dir: .pytest_cache
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
+
       - name: Set Test step time
         id: test-timeout
         shell: bash
@@ -134,6 +139,12 @@ jobs:
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
@@ -142,8 +153,8 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
+          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
+          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
@@ -152,6 +163,7 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
         run: |
           set -x
 
@@ -163,20 +175,6 @@ jobs:
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
 
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
-
-          # sanitize the input commit message and PR body here:
-          #
-          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
-          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          PR_BODY="${PR_BODY//[$'\n\r']}"
-
-          # then trim all special characters like single and double quotes to avoid unescaped inputs to
-          # wreak havoc internally
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
-          export PR_BODY="${PR_BODY//[\'\"]}"
-
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
@@ -186,6 +184,12 @@ jobs:
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
             -e GITHUB_ACTIONS \
+            -e GITHUB_REPOSITORY \
+            -e GITHUB_WORKFLOW \
+            -e GITHUB_JOB \
+            -e GITHUB_RUN_ID \
+            -e GITHUB_RUN_NUMBER \
+            -e GITHUB_RUN_ATTEMPT \
             -e BASE_SHA \
             -e BRANCH \
             -e SHA1 \
@@ -194,8 +198,7 @@ jobs:
             -e SHARD_NUMBER \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
-            -e PR_BODY \
-            -e COMMIT_MESSAGES \
+            -e REENABLED_ISSUES \
             -e CONTINUE_THROUGH_ERROR \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
@@ -208,6 +211,7 @@ jobs:
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
+            -e DASHBOARD_TAG \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
@@ -222,8 +226,19 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
+          # Propagate download.pytorch.org IP to container
+          grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" sudo bash -c "/bin/cat >> /etc/hosts"
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
           docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
+
+      - name: Upload pytest cache if tests failed
+        uses: ./.github/actions/pytest-cache-upload
+        continue-on-error: true
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
+        with:
+          cache_dir: .pytest_cache
+          shard: ${{ matrix.shard }}
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
 
       - name: Print remaining test logs
         shell: bash

@@ -109,6 +109,10 @@ class TestHub(TestCase):
         self.assertTrue(os.path.exists(expected_file_path))
         self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
 
+        # with safe weight_only
+        loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, weights_only=True)
+        self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
+
     @retry(Exception, tries=3)
     def test_load_legacy_zip_checkpoint(self):
         with warnings.catch_warnings(record=True) as ws:

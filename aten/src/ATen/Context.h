@@ -9,6 +9,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
+#include <ATen/detail/MTIAHooksInterface.h>
 #include <ATen/detail/ORTHooksInterface.h>
 #include <ATen/detail/XPUHooksInterface.h>
 #include <c10/core/QEngine.h>
@@ -69,6 +70,9 @@ class TORCH_API Context {
   }
   static bool hasCUDA() {
     return detail::getCUDAHooks().hasCUDA();
+  }
+  static bool hasMTIA() {
+    return detail::getMTIAHooks().hasMTIA();
   }
   static bool hasCUDART() {
     return detail::getCUDAHooks().hasCUDART();
@@ -353,6 +357,10 @@ static inline DeprecatedTypeProperties& MPS(ScalarType s) {
 
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
+}
+
+static inline bool hasMTIA() {
+  return globalContext().hasMTIA();
 }
 
 static inline bool hasHIP() {

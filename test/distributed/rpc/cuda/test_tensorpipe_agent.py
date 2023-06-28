@@ -18,7 +18,10 @@ from torch.testing._internal.distributed.rpc_utils import (
     TENSORPIPE_CUDA_TESTS,
     generate_tests,
 )
+import torch
 
+if torch.cuda.is_available():
+    torch.cuda.memory._set_allocator_settings('expandable_segments:False')
 
 globals().update(
     generate_tests(

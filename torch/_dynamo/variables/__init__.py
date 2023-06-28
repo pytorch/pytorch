@@ -25,9 +25,10 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
+    AutogradFunctionContextVariable,
     AutogradFunctionVariable,
-    BlackHoleVariable,
     ClosureVariable,
+    DeletedVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -41,17 +42,18 @@ from .misc import (
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
     FakeItemVariable,
+    NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchVariable
+from .torch import TorchHigherOrderOperatorVariable, TorchVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
+    "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BaseListVariable",
-    "BlackHoleVariable",
     "BuiltinVariable",
     "ClosureVariable",
     "ConstantVariable",
@@ -59,20 +61,22 @@ __all__ = [
     "ContextWrappingVariable",
     "DataClassVariable",
     "DefaultDictVariable",
+    "DeletedVariable",
+    "DeterministicAlgorithmsVariable",
     "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
     "GradModeVariable",
-    "DeterministicAlgorithmsVariable",
     "InspectSignatureVariable",
     "LambdaVariable",
     "ListIteratorVariable",
     "ListVariable",
+    "NNModuleVariable",
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
     "NewCellVariable",
     "NewGlobalVariable",
-    "NNModuleVariable",
+    "NumpyNdarrayVariable",
     "NumpyVariable",
     "PythonModuleVariable",
     "RangeVariable",

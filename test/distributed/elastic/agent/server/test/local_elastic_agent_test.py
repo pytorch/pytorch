@@ -112,6 +112,14 @@ def _bipolar_function():
         _sad_function()
 
 
+def _bipolar_sleep_function(sleep_sec):
+    rank = int(os.environ["RANK"])
+    if rank % 2 == 0:
+        _sleep(sleep_sec)
+    else:
+        _sad_function()
+
+
 def _dist_sum(wait=0):
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
@@ -324,6 +332,7 @@ class LocalElasticAgentTest(unittest.TestCase):
         master_addr_override: Optional[str] = None,
         master_port_override: Optional[int] = None,
         is_host=True,
+        monitor_interval=0.01,
     ) -> Optional[RunResult]:
         """
         Runs a single agent. This method can be called either on a separate process
@@ -341,6 +350,7 @@ class LocalElasticAgentTest(unittest.TestCase):
             master_addr_override=master_addr_override,
             master_port_override=master_port_override,
             is_host=is_host,
+            monitor_interval=monitor_interval,
         )
         agent = self.get_agent(
             spec=spec,
@@ -961,6 +971,63 @@ class LocalElasticAgentTest(unittest.TestCase):
     def test_double_agent_fault_tolerance_etcd_v2(self):
         self.run_test_with_backend(
             backend="etcd-v2", test_to_run=self.double_agent_fault_tolerance
+        )
+
+    def no_exit_barrier_on_failure(self):
+        """
+        start ``nnodes`` agents, kill and restart odd ones, validate fault-tolerance works
+        """
+        nnodes = 2
+        wait = 20
+        node_conf = Conf(
+            entrypoint=_bipolar_sleep_function, args=(wait,), local_world_size=2
+        )
+        agent_results = mp.Queue()
+        monitor_interval_s = 0.5
+        agent_args = {
+            "conf": node_conf,
+            "agent_results": agent_results,
+            "min_nodes": nnodes,
+            "max_nodes": nnodes,
+            "max_restarts": 0,
+            "exit_barrier_timeout": 300,
+            "monitor_interval": monitor_interval_s,
+        }
+
+        procs = []
+        for _ in range(nnodes):
+            p = mp.Process(
+                target=self.run_agent,
+                kwargs=agent_args,
+            )
+            procs.append(p)
+            p.start()
+
+        # wait for all processes to finish should not take exit barrier time
+        exit_interval_between_agents = 0
+        for i in range(nnodes):
+            p = procs[i]
+            p.join()
+            self.assertNotEqual(0, p.exitcode)
+            exit_interval_between_agents = (
+                time.monotonic() - exit_interval_between_agents
+            )
+
+        # Validate that the processes finish close to each other.
+        # Using a slightly higher timeout than 2 * monitor_interval (0.01) to make it less flaky
+        self.assertGreater(
+            2 * monitor_interval_s,
+            exit_interval_between_agents,
+            "Agents are not cleaned up until 2 * monitor_interval",
+        )
+
+    @unittest.skipIf(
+        TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN,
+        "test incompatible with dev/dbg asan or tsan",
+    )
+    def test_no_exit_barrier_on_failure(self):
+        self.run_test_with_backend(
+            backend="c10d", test_to_run=self.no_exit_barrier_on_failure
         )
 
     def double_agent_elastic(self):

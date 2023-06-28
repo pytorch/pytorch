@@ -14,8 +14,8 @@ int32_t driver_version() {
 }
 
 int device_count_impl(bool fail_if_no_driver) {
-  int count;
-  auto err = C10_CUDA_ERROR_HANDLED(cudaGetDeviceCount(&count));
+  int count = 0;
+  auto err = C10_CUDA_ERROR_HANDLED(c10::cuda::GetDeviceCount(&count));
   if (err == cudaSuccess) {
     return count;
   }
@@ -121,13 +121,13 @@ DeviceIndex device_count_ensure_non_zero() {
 }
 
 DeviceIndex current_device() {
-  int cur_device;
-  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+  int cur_device = 0;
+  C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
   return static_cast<DeviceIndex>(cur_device);
 }
 
 void set_device(DeviceIndex device) {
-  C10_CUDA_CHECK(cudaSetDevice(static_cast<int>(device)));
+  C10_CUDA_CHECK(c10::cuda::SetDevice(static_cast<int>(device)));
 }
 
 void device_synchronize() {
@@ -181,5 +181,131 @@ C10_CUDA_API void setHasPrimaryContext(bool (*func)(int64_t)) {
 bool hasPrimaryContext(int64_t device_index) {
   return _internal::hasPrimaryContext(device_index);
 }
+
+// Wrappers for raw CUDA device management functions
+cudaError_t GetDeviceCount(int* dev_count) {
+  return cudaGetDeviceCount(dev_count);
+}
+
+// This is a codepath for CUDA 12 that comes with a critical change in behavior
+// of `cudaSetDevice`. Unlike to previous CUDA versions that allocate context
+// lazily CUDA 12.x eagerly allocates primary context the moment `cudaSetDevice`
+// is called. This can lead to dramatic consequences and pollute the device
+// memory in distributed runs. To avoid unnecessary context creation a new
+// function called `MaybeSetDevice` was introduced. This function is to be
+// called in device guard destructor and at the exit of torch.cuda.device
+// context manager. The behavior of `MaybeSetDevice` is quite simple, it calls
+// to `cudaSetDevice` if context already exist or if context was not allocated
+// on targeted device it simply saves the device index. This way we can keep
+// PyTorch backward compatible for applications like this:
+//
+// ```
+// import torch
+// x = torch.empty(1, device=“cuda:1”) # no CUDA context on cuda:0 after this
+// call y = torch.empty(1, device=“cuda”) # CUDA context is created on cuda:0
+// ```
+#if CUDA_VERSION >= 12000
+thread_local int targetDeviceIndex = -1;
+
+cudaError_t GetDevice(int* device) {
+  if (targetDeviceIndex >= 0) {
+    *device = targetDeviceIndex;
+    return cudaSuccess;
+  }
+  return cudaGetDevice(device);
+}
+
+cudaError_t SetDevice(int device) {
+  TORCH_CHECK(device >= 0, "device id must be positive!");
+  targetDeviceIndex = -1;
+  int cur_device = -1;
+  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+  if (device == cur_device) {
+    return cudaSuccess;
+  }
+  return cudaSetDevice(device);
+}
+
+cudaError_t MaybeSetDevice(int device) {
+  if (hasPrimaryContext(device)) {
+    return c10::cuda::SetDevice(device);
+  }
+  targetDeviceIndex = device;
+  return cudaSuccess;
+}
+
+// This function always initializes the CUDA context
+// on to_device
+int ExchangeDevice(int to_device) {
+  int cur_device = targetDeviceIndex;
+  targetDeviceIndex = -1;
+  if (cur_device < 0) {
+    C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+    if (to_device == cur_device) {
+      return cur_device;
+    }
+  }
+  C10_CUDA_CHECK(cudaSetDevice(to_device));
+  return cur_device;
+}
+
+// This function does not initialize the CUDA context
+// on to_device if it does not already exist
+int MaybeExchangeDevice(int to_device) {
+  int cur_device = -1;
+  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+  if (to_device == cur_device) {
+    return cur_device;
+  }
+  if (hasPrimaryContext(to_device)) {
+    C10_CUDA_CHECK(cudaSetDevice(to_device));
+  } else {
+    targetDeviceIndex = to_device;
+  }
+  return cur_device;
+}
+
+void SetTargetDevice() {
+  if (targetDeviceIndex >= 0) {
+    C10_CUDA_CHECK(c10::cuda::SetDevice(targetDeviceIndex));
+  }
+}
+#else
+cudaError_t GetDevice(int* device) {
+  return cudaGetDevice(device);
+}
+
+cudaError_t SetDevice(int device) {
+  TORCH_CHECK(device >= 0, "device id must be positive!");
+  int cur_device = -1;
+  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+  if (device == cur_device) {
+    return cudaSuccess;
+  }
+  return cudaSetDevice(device);
+}
+
+cudaError_t MaybeSetDevice(int device) {
+  return c10::cuda::SetDevice(device);
+}
+
+int ExchangeDevice(int to_device) {
+  int cur_device = -1;
+  C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
+  if (to_device == cur_device) {
+    return cur_device;
+  }
+  C10_CUDA_CHECK(cudaSetDevice(to_device));
+  return cur_device;
+}
+
+int MaybeExchangeDevice(int to_device) {
+  return c10::cuda::ExchangeDevice(to_device);
+}
+
+void SetTargetDevice() {
+  // no-op on CUDA version < 12.x
+}
+#endif
 
 } // namespace c10::cuda
