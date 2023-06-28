@@ -34,7 +34,7 @@ class TORCH_API Context {
   Context();
 
   const Generator& defaultGenerator(Device device) {
-    DeviceType device_type = device.type();
+    c10::DeviceType device_type = device.type();
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
     if (device_type == at::kCPU) {
@@ -47,11 +47,11 @@ class TORCH_API Context {
       AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
     }
   }
-  Device getDeviceFromPtr(void* data, DeviceType device_type) {
+  Device getDeviceFromPtr(void* data, c10::DeviceType device_type) {
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
     if (device_type == at::kCPU) {
-      return DeviceType::CPU;
+      return c10::DeviceType::CPU;
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDeviceFromPtr(data);
     } else {
@@ -274,12 +274,12 @@ class TORCH_API Context {
 
  private:
   void initCUDAIfNeeded(DeviceType p) {
-    if (p == DeviceType::CUDA) {
+    if (p == c10::DeviceType::CUDA) {
       lazyInitCUDA();
     }
   }
   void initHIPIfNeeded(DeviceType p) {
-    if (p == DeviceType::HIP) {
+    if (p == c10::DeviceType::HIP) {
       lazyInitHIP();
     }
   }
@@ -428,7 +428,7 @@ static inline bool hasMKLDNN() {
 }
 
 static inline void manual_seed(uint64_t seed) {
-  auto gen = globalContext().defaultGenerator(DeviceType::CPU);
+  auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());

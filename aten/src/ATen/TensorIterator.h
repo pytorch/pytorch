@@ -309,7 +309,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   Device device(int arg = 0) const {
     return operands_[arg].device.value();
   }
-  DeviceType device_type(int arg = 0) const {
+  c10::DeviceType device_type(int arg = 0) const {
     return device(arg).type();
   }
   int64_t element_size(int arg) const {
