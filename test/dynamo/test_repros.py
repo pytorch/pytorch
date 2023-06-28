@@ -1191,6 +1191,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_threading_local(self):
         import threading
+
         foo = threading.local()
         foo.x = torch.rand(1)
 
