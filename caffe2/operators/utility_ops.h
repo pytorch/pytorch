@@ -648,7 +648,7 @@ template <class Context>
 class ScatterAssignOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  virtual ~ScatterAssignOp() {}
+  ~ScatterAssignOp() override {}
 
   template <class... Args>
   explicit ScatterAssignOp(Args&&... args)
