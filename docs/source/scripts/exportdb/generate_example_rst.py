@@ -93,9 +93,6 @@ You can rewrite the example above to something like the following:
 
 """
 
-    # with open(os.path.join(EXPORTDB_SOURCE, f"{example_case.name}.rst"), "w") as f:
-    #     f.write(doc_contents)
-
     return doc_contents
 
 
@@ -103,13 +100,6 @@ def generate_index_rst(example_cases, tag_to_modules, support_level_to_modules):
     """
     Generates the index.rst file
     """
-
-    # support_level_to_modules = {}
-    # for _, example_case in sorted(example_cases.items()):
-    #     support_modules = support_level_to_modules.setdefault(
-    #         example_case.support_level, []
-    #     )
-    #     support_modules.append(example_case.name)
 
     support_contents = ""
     for k, v in support_level_to_modules.items():
@@ -153,7 +143,7 @@ def generate_tag_rst(tag_to_modules):
     """
 
     for tag, modules_rst in tag_to_modules.items():
-        doc_contents = f"{tag} tag\n{'=' * (len(tag) + 4)}\n"
+        doc_contents = f"{tag}\n{'=' * (len(tag) + 4)}\n"
         doc_contents += "\n\n".join(modules_rst).replace("=", "-")
 
         with open(os.path.join(EXPORTDB_SOURCE, f"{tag}.rst"), "w") as f:
