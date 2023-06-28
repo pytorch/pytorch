@@ -694,9 +694,6 @@ def min_cut_rematerialization_partition(
     aten = torch.ops.aten
     prims = torch.ops.prims
 
-    # TODO - check tags
-    random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like, aten.bernoulli, aten.bernoulli_]
-
     # compiler == "nvfuser" is the default set of recomputable ops
     default_recomputable_ops = [aten.add, aten.sub, aten.div, aten.atan2, aten.mul, aten.max, aten.min, aten.pow, aten.remainder, aten.fmod, aten.__and__, aten.__or__, aten.__xor__, aten.__lshift__, aten.__rshift__, aten.eq, aten.ne, aten.ge, aten.gt, aten.le, aten.lt, aten.abs, aten.bitwise_not, aten.ceil, aten.floor, aten.frac, aten.neg, aten.relu, aten.round, aten.silu, aten.trunc, aten.log, aten.log10, aten.log1p, aten.log2, aten.lgamma, aten.exp, aten.expm1, aten.erf, aten.erfc, aten.cos, aten.acos, aten.cosh, aten.sin, aten.asin, aten.sinh, aten.tan, aten.atan, aten.tanh, aten.atanh, aten.sqrt, aten.rsqrt, aten.reciprocal, aten.sigmoid, aten.softplus, aten.threshold, aten.threshold_backward, aten.clamp, aten.where, aten.lerp, aten.addcmul, aten.gelu, aten.gelu_backward, aten.sum, aten.mean, aten._grad_sum_to_size, aten.sum_to_size, aten.amax, aten.to, aten.type_as, operator.getitem, aten.squeeze, aten.unsqueeze, aten.rsub, aten._to_copy]  # noqa: E501,B950
     view_ops = [aten.squeeze, aten.unsqueeze, aten.alias]
@@ -705,12 +702,6 @@ def min_cut_rematerialization_partition(
         view_ops += [aten.view, aten.slice, aten.permute, aten.t, prims.broadcast_in_dim, aten.expand, aten.as_strided]
         # Natalia said that we should allow recomputing indexing :)
         default_recomputable_ops += [aten.index]
-
-        # this takes in a seed, so it's deterministic, and we can recompute it
-        default_recomputable_ops += [prims.inductor_random]
-
-        random_ops += [prims.inductor_seeds, prims.inductor_seed]
-
     default_recomputable_ops += view_ops
 
     default_recomputable_ops += pointwise_ops()
@@ -726,6 +717,7 @@ def min_cut_rematerialization_partition(
 
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
+    random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
     compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d, aten._softmax, aten._softmax_backward_data, aten.native_layer_norm, aten.native_layer_norm_backward, aten.native_batch_norm, aten.native_batch_norm_backward, aten._native_batch_norm_legit]  # noqa: E501,B950
 
     unrecomputable_ops = random_ops + compute_intensive_ops
@@ -741,7 +733,7 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
-    AGGRESSIVE_RECOMPUTATION = config.partitioner_aggressive_fusion
+    AGGRESSIVE_RECOMPUTATION = False
 
     def is_materialized_backwards(node):
         cur_nodes = {node}
@@ -809,6 +801,7 @@ def min_cut_rematerialization_partition(
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
         mem_sz = int(mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1)))
+        # mem_sz = int(mem_sz + node.dist_from_bw)
 
         if is_materialized(node):
             return mem_sz

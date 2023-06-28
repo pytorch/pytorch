@@ -5420,7 +5420,7 @@ class CommonTemplate:
         r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
         if self.device == "cuda":
             self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 1)
+            self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
         check(r2, g2)
 
@@ -5455,46 +5455,14 @@ class CommonTemplate:
         )
         if self.device == "cuda":
             self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 2)
-
-            # seed generation
-            self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
-            self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
-
-            expected_kernel = 6
+            self.assertEqual(bw_code.count("tl.rand"), 0)
+            expected_kernel = 4
         else:
             expected_kernel = 6
 
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
-
-    @config.patch(search_autotune_cache=False)
-    @torch._functorch.config.patch(partitioner_aggressive_fusion=True)
-    def test_dropout4(self):
-        m = torch.nn.Dropout(0.2)
-
-        @torch._dynamo.optimize_assert("inductor")
-        def run(x):
-            return m(x)
-
-        inp = torch.randn([8, 32], device=self.device, requires_grad=True)
-        result, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(inp))
-        zero_out = (result == 0).sum().item()
-        grad_zero = (inp.grad == 0).sum().item()
-        self.assertEqual(zero_out, grad_zero)
-
-        if self.device == "cuda":
-            self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 1)
-
-            # seed generation
-            self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
-            self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
-
-        else:
-            self.assertEqual(fw_code.count("aten.bernoulli"), 1)
-            self.assertEqual(bw_code.count("aten.bernoulli"), 0)
 
     def test_randint_kernel_count(self):
         @torch._dynamo.optimize_assert("inductor")
