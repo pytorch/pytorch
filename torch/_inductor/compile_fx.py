@@ -8,7 +8,7 @@ import unittest
 import warnings
 
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from functorch.compile import min_cut_rematerialization_partition
 
@@ -215,8 +215,10 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                 assert torch._guards.TracingContext.get()
                 real_inputs = [
                     materialize(x)
-                    for x in torch._guards.TracingContext.get().params_flat
-                    + V.real_inputs
+                    for x in [
+                        *torch._guards.TracingContext.get().params_flat,
+                        *V.real_inputs,
+                    ]
                 ]
 
                 with torch.utils._python_dispatch._disable_current_modes():
@@ -401,7 +403,13 @@ def compile_fx_inner(
                         "skipping cudagraphs due to multiple device indexes"
                     )
 
-    result = align_inputs(compiled_graph, example_inputs, range(num_fixed))
+    # cudagraphs does its own aligning of inputs
+    if not cudagraphs:
+        new_callable = align_inputs(
+            compiled_graph.get_current_callable(), example_inputs, range(num_fixed)
+        )
+        if new_callable is not compiled_graph.get_current_callable():
+            compiled_graph.current_callable = new_callable
 
     _step_logger()(
         logging.INFO,
@@ -411,8 +419,8 @@ def compile_fx_inner(
     )
 
     # aot autograd needs to know to pass in inputs as a list
-    result._boxed_call = True
-    return result
+    compiled_graph._boxed_call = True
+    return compiled_graph
 
 
 def fx_codegen_and_compile(
@@ -509,11 +517,17 @@ def clone_preserve_strides(x):
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
-def align_inputs(compiled_graph: CompiledFxGraph, inputs, static_input_idxs=()):
+def copy_misaligned_inputs(new_inputs, check_inputs_idxs: Sequence[int]) -> None:
+    for i in check_inputs_idxs:
+        if new_inputs[i].data_ptr() % ALIGNMENT:
+            new_inputs[i] = clone_preserve_strides(new_inputs[i])
+
+
+def get_input_idxs_to_check(inputs, static_input_idxs) -> Sequence[int]:
     def is_aligned(storage_offset, dtype):
         return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
 
-    check_inputs = [
+    return [
         i
         for i in range(len(inputs))
         if isinstance(inputs[i], torch.Tensor)
@@ -524,20 +538,21 @@ def align_inputs(compiled_graph: CompiledFxGraph, inputs, static_input_idxs=()):
         and inputs[i].device.type == "cuda"
     ]
 
-    if len(check_inputs) == 0:
-        return compiled_graph
 
-    old_compiled_artifact = compiled_graph.get_current_callable()
+def align_inputs_from_check_idxs(model, inputs_to_check: Sequence[int]):
+    if len(inputs_to_check) == 0:
+        return model
 
     def run(new_inputs):
-        for i in check_inputs:
-            if new_inputs[i].data_ptr() % ALIGNMENT:
-                new_inputs[i] = clone_preserve_strides(new_inputs[i])
-        return old_compiled_artifact(new_inputs)
+        copy_misaligned_inputs(new_inputs, inputs_to_check)
+        return model(new_inputs)
 
-    compiled_graph.current_callable = run
+    return run
 
-    return compiled_graph
+
+def align_inputs(model, inputs, static_input_idxs=()):
+    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
+    return align_inputs_from_check_idxs(model, inputs_to_check)
 
 
 @dynamo_utils.dynamo_timed
@@ -619,7 +634,9 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
+    check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
+    copy_misaligned_inputs(inputs, check_input_idxs)
 
     assert isinstance(inputs, (list, tuple))
 
@@ -696,7 +713,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
             graph.replay()
             return static_outputs
 
-    return run
+    return align_inputs_from_check_idxs(run, check_input_idxs)
 
 
 def count_tangents(fx_g: torch.fx.GraphModule):
@@ -769,7 +786,7 @@ def fw_compiler_freezing(
     opt_model, preserved_arg_indices = freeze(
         dynamo_model,
         aot_autograd_model,
-        fw_metadata=torch._guards.TracingContext.get().fw_metadata,
+        aot_example_inputs,
     )
 
     aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
@@ -886,6 +903,10 @@ def compile_fx(
 
     graph_id = next(_graph_counter)
 
+    decompositions = (
+        decompositions if decompositions is not None else select_decomp_table()
+    )
+
     @dynamo_utils.dynamo_timed
     def fw_compiler_base(model: torch.fx.GraphModule, example_inputs, is_inference):
         if is_inference:
@@ -955,7 +976,10 @@ def compile_fx(
 
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
 
-    if config.freezing:
+    if config.freezing and not torch.is_grad_enabled():
+        decompositions = dict(decompositions)
+        del decompositions[torch.ops.aten._native_batch_norm_legit_no_training.default]
+
         inference_compiler = functools.partial(
             fw_compiler_freezing,
             dynamo_model=model_,
@@ -987,8 +1011,6 @@ def compile_fx(
             boxed_forward_device_index=forward_device,
         )
 
-    if decompositions is None:
-        decompositions = select_decomp_table()
     # TODO: can add logging before/after the call to create_aot_dispatcher_function
     # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
     # once torchdynamo is merged into pytorch
