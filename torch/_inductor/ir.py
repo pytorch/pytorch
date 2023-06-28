@@ -3349,7 +3349,7 @@ class MultiOutput(ExternKernel):
         line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
         line += V.graph.wrapper_code.ending
         V.graph.wrapper_code.writeline(line)
-        self.codegen_size_asserts(V.graph.wrapper_code, self)
+        self.codegen_size_asserts(V.graph.wrapper_code)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
