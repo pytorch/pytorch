@@ -181,13 +181,15 @@ void mkldnn_matmul(
   Tensor mat2_ = is_mkldnn_optimized_format(mat2_unsqueezed) ? mat2_unsqueezed : mat2_unsqueezed.contiguous();
   // Make sure mat1 and mat2 have default contiguous strides if they are contiguous tensors for better performance.
   auto mat1_sizes = mat1_.sizes();
-  IntArrayRef mat1_default_contiguous_strides = c10::contiguous_strides(mat1_sizes);
-  if (mat1_.is_contiguous() && mat1_.strides() != mat1_default_contiguous_strides) {
+  auto mat1_default_contiguous_strides = c10::contiguous_strides(mat1_sizes);
+  if (mat1_.is_contiguous() &&
+      mat1_.strides() != c10::IntArrayRef(mat1_default_contiguous_strides)) {
      mat1_ = mat1_.as_strided(mat1_sizes, mat1_default_contiguous_strides);
   }
   auto mat2_sizes = mat2_.sizes();
-  IntArrayRef mat2_default_contiguous_strides = c10::contiguous_strides(mat2_sizes);
-  if (mat2_.is_contiguous() && mat2_.strides() != mat2_default_contiguous_strides) {
+  auto mat2_default_contiguous_strides = c10::contiguous_strides(mat2_sizes);
+  if (mat2_.is_contiguous() &&
+      mat2_.strides() != c10::IntArrayRef(mat2_default_contiguous_strides)) {
     mat2_ = mat2_.as_strided(mat2_sizes, mat2_default_contiguous_strides);
   }
 
