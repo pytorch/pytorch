@@ -80,7 +80,7 @@ inline_nn_modules = False
 # If inline_nn_modules=True and a graph break is encountered while tracing, we
 # normally fallback to inserting a call_module into the graph. Set this to true
 # to reveal the graph break.
-disable_inline_nn_modules_fallback = True
+disable_inline_nn_modules_fallback = False
 
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.

@@ -27,6 +27,8 @@ from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
+from torch.testing._internal.common_utils import decorateForModules
+
 from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 from functorch import (
     grad, vjp, vmap, jacrev,
@@ -47,7 +49,6 @@ from common_utils import (
     xfail,
     skip,
     skipOps,
-    decorateForModules,
 )
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node

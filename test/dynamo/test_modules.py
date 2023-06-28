@@ -1837,90 +1837,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
 
-dynamo_inlining_module_failures = set({
-    # TODO: this just documents the first graph break, there may be more!
-    #       currently "torch._dynamo.explain" doesn't work for some reason
-    #       maybe it makes some assumptions that we are breaking with this hack
+def _inline_module_test_helper(self, device, dtype, training, module_info):
+    module_cls = module_info.module_cls
+    module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                requires_grad=True, training=training)
 
-    # [ Fail even if we don't trace through ]
-    #
-    # Still fail due to data dependent operator
-    torch.nn.GaussianNLLLoss,  # data dependent operator: aten._local_scalar_dense.default
-    torch.nn.TransformerEncoder,  # comparison TensorVariable() <built-in function is_not> TensorVariable()
-                                  # 'data dependent operator: aten.equal.default
-    torch.nn.Transformer,  # torch.* op returned non-Tensor dtype call_function <function _none_or_dtype at 0x10c44b040>
-                           # data dependent operator: aten.equal.default
-    # Purposely graph break when wrapping into VariableTracker
-    torch.nn.GRU,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
-    torch.nn.LSTM,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
-    torch.nn.RNN,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
-
-    # TODO: create an issue to track the ones that used to fail before we fell back
-    #
-    # torch.nn.TransformerDecoderLayer,  # TensorVariable() <built-in function is_not> TensorVariable()
-    # torch.nn.TransformerEncoderLayer,  # TensorVariable() <built-in function is_not> TensorVariable()
-    # torch.nn.MultiheadAttention,  # torch.* op returned non-Tensor dtype call_function <function _none_or_dtype at 0x10ecf5dc0>
-})
-
-# The following only fail if we are train=True
-skip_if_train = set({
-    # The following fail whether we trace or not
-    torch.nn.BatchNorm1d,  # call_function BuiltinVariable(float) [TensorVariable()] {}
-                           # data dependent operator: aten._local_scalar_dense.default
-    torch.nn.BatchNorm2d,  # call_function BuiltinVariable(float) [TensorVariable()] {}
-                           # data dependent operator: aten._local_scalar_dense.default
-    torch.nn.BatchNorm3d,  # call_function BuiltinVariable(float) [TensorVariable()] {}
-                           # data dependent operator: aten._local_scalar_dense.default
-})
-
-# Copy from test/functorch/common_utils.py
-def decorateForModules(decorator, module_classes, device_type=None, dtypes=None):
-    # This decorator doesn't modify fn in any way
-    def wrapped(fn, module_classes=module_classes, decorator=decorator,
-                device_type=device_type, dtypes=dtypes):
-        name_parts = fn.__qualname__.split('.')
-        assert len(name_parts) == 2, "Decorator only applies to a test function of a test class"
-        test_case_name, base_test_name = name_parts
-        for module_cls in module_classes:
-            matching_module_infos = [m for m in module_db if m.module_cls == module_cls]
-            assert len(matching_module_infos) == 1, f"Couldn't find single ModuleInfo for {module_cls}"
-            module_info = matching_module_infos[0]
-            decorators = list(module_info.decorators)
-            new_decorator = DecorateInfo(decorator,
-                                         test_case_name, base_test_name,
-                                         device_type=device_type,
-                                         dtypes=dtypes)
-            decorators.append(new_decorator)
-            module_info.decorators = tuple(decorators)
-        return fn
-    return wrapped
-
-class TestDynamoInlineNNModules(torch._dynamo.test_case.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        torch._dynamo.config.inline_nn_modules = True
-
-    @classmethod
-    def tearDownClass(cls):
-        torch._dynamo.config.inline_nn_modules = False
-        super().tearDownClass()
-
-    @modules(module_db, allowed_dtypes=(torch.float,))
-    @decorateForModules(unittest.expectedFailure, dynamo_inlining_module_failures)
-    def test_dynamo_inline_module(self, device, dtype, training, module_info):
-        module_cls = module_info.module_cls
-        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
-                                                   requires_grad=True, training=training)
-
-        if issubclass(module_info.module_cls, torch.nn.modules.lazy.LazyModuleMixin):
-            # Always inlined I think, but we want to test anyway?
-            return self.skipTest("skipping lazy module")
-
-        if module_info.module_cls in skip_if_train:
-            # Would be cool to make this an xfail and do it in a smarter way
-            return self.skipTest("skipping lazy module")
-
+    def run_test():
         for i, module_input in enumerate(module_inputs):
             if module_input.forward_input is None:
                 continue
@@ -1935,13 +1857,11 @@ class TestDynamoInlineNNModules(torch._dynamo.test_case.TestCase):
             def fn(*args, **kwargs):
                 return m(*args, **kwargs)
 
-            # TODO: this doesn't quite work for some reason
-            # explain_str, _, graphs, _, break_reasons, _ = torch._dynamo.explain(fn, *args, **kwargs)
-            # print(explain_str)
-            # self.assertEqual(len(graphs), 1, f"Expected one graph, but got {len(graphs)}")
-            # break_reasons_str = '\n'.join(break_reasons)
-            # msg = f"Expected no graph breaks, but got: {break_reasons_str}"
-            # self.assertEqual(len(break_reasons), 0,msg)
+            explain_str, _, graphs, _, break_reasons, _ = torch._dynamo.explain(fn, *args, **kwargs)
+            self.assertEqual(len(graphs), 1, f"Expected one graph, but got {len(graphs)}")
+            break_reasons_str = '\n'.join(break_reasons)
+            msg = f"Expected no graph breaks, but got: {break_reasons_str}"
+            self.assertEqual(len(break_reasons), 0, msg)
 
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
             ref = fn(*args, **kwargs)
@@ -1956,7 +1876,96 @@ class TestDynamoInlineNNModules(torch._dynamo.test_case.TestCase):
             res = opt_fn1(*args, **kwargs)
             self.assertEqual(ref, res)
 
+    if issubclass(module_info.module_cls, torch.nn.modules.lazy.LazyModuleMixin):
+        # Always inlined I think, but we want to test anyway?
+        return self.skipTest("skipping lazy module")
+
+    if module_info.module_cls in dynamo_inline_module_xfail_if_train:
+        try:
+            run_test()
+            self.fail("Unexpected success")
+        except Exception as e:
+            return
+
+    run_test()
+
+# Failures in dynamo_inlining_module_failures and dynamo_inline_module_xfail_if_train
+# happen whether or not we fallback.
+
+dynamo_inlining_module_failures = set({
+    # Still fail due to data dependent operator
+    torch.nn.GaussianNLLLoss,  # data dependent operator: aten._local_scalar_dense.default
+    torch.nn.TransformerEncoder,  # comparison TensorVariable() <built-in function is_not> TensorVariable()
+                                  # 'data dependent operator: aten.equal.default
+    torch.nn.Transformer,  # torch.* op returned non-Tensor dtype call_function <function _none_or_dtype at 0x10c44b040>
+                           # data dependent operator: aten.equal.default
+    # Purposely graph break when wrapping into VariableTracker
+    torch.nn.GRU,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
+    torch.nn.LSTM,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
+    torch.nn.RNN,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
+})
+
+# The following only fail if we are train=True
+dynamo_inline_module_xfail_if_train = set({
+    # The following fail whether we trace or not
+    torch.nn.BatchNorm1d,  # call_function BuiltinVariable(float) [TensorVariable()] {}
+                           # data dependent operator: aten._local_scalar_dense.default
+    torch.nn.BatchNorm2d,  # call_function BuiltinVariable(float) [TensorVariable()] {}
+                           # data dependent operator: aten._local_scalar_dense.default
+    torch.nn.BatchNorm3d,  # call_function BuiltinVariable(float) [TensorVariable()] {}
+                           # data dependent operator: aten._local_scalar_dense.default
+})
+
+# NB: We have two test classes, one tests the behavior of inling modules when
+#     our fallback is enabled. We expect to see failures here when AOTAutograd
+#     would've failed anyway, e.g. due to data depent operator.
+#
+#     The other test class, tests the behavior when our fallback is disabled,
+#     revealing graph breaks that would be unobserved if we did not inline through
+#     such modules.
+class TestDynamoInlineNNModules(torch._dynamo.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        torch._dynamo.config.inline_nn_modules = True
+
+    @classmethod
+    def tearDownClass(cls):
+        torch._dynamo.config.inline_nn_modules = False
+        super().tearDownClass()
+
+    @modules(module_db, allowed_dtypes=(torch.float,))
+    @decorateForModules(unittest.expectedFailure, dynamo_inlining_module_failures)
+    def test_dynamo_inline_module(self, device, dtype, training, module_info):
+       _inline_module_test_helper(self, device, dtype, training, module_info)
+
+dynamo_inlining_module_failures_no_fallback = set({
+    torch.nn.TransformerDecoderLayer,  # TensorVariable() <built-in function is_not> TensorVariable()
+    torch.nn.TransformerEncoderLayer,  # TensorVariable() <built-in function is_not> TensorVariable()
+    # torch.nn.MultiheadAttention,  # torch.* op returned non-Tensor dtype call_function <function _none_or_dtype at 0x10ecf5dc0>
+}) | dynamo_inlining_module_failures
+
+class TestDynamoInlineNNModulesNoFallback(torch._dynamo.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        torch._dynamo.config.inline_nn_modules = True
+        torch._dynamo.config.disable_inline_nn_modules_fallback = True
+
+    @classmethod
+    def tearDownClass(cls):
+        torch._dynamo.config.inline_nn_modules = False
+        torch._dynamo.config.disable_inline_nn_modules_fallback = False
+        super().tearDownClass()
+
+    @modules(module_db, allowed_dtypes=(torch.float,))
+    @decorateForModules(unittest.expectedFailure, dynamo_inlining_module_failures_no_fallback)
+    def test_dynamo_inline_module_no_fallback(self, device, dtype, training, module_info):
+       _inline_module_test_helper(self, device, dtype, training, module_info)
+
 instantiate_device_type_tests(TestDynamoInlineNNModules, globals(), only_for=("cpu",))
+instantiate_device_type_tests(TestDynamoInlineNNModulesNoFallback, globals(), only_for=("cpu",))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
