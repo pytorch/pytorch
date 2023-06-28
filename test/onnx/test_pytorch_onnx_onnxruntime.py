@@ -5505,11 +5505,19 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, input):
                 return torch.flatten(input)
 
-        x = torch.randint(10, (1, 2, 3, 4))
-        self.run_test(FlattenModel(), x)
+        model = FlattenModel()
 
+        # flatten with 4d input
+        x = torch.randint(10, (1, 2, 3, 4))
+        self.run_test(model, x)
+
+        # flatten with 0d input
+        x = torch.randn([])
+        self.run_test(model, x)
+
+        # flatten with 1d input
         x = torch.randn(4)
-        self.run_test(FlattenModel(), x)
+        self.run_test(model, x)
 
     def test_flatten2d(self):
         class FlattenModel(torch.nn.Module):
