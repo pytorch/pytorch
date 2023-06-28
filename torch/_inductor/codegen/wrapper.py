@@ -191,6 +191,10 @@ class MemoryPlanningLine:
 class AllocateLine(MemoryPlanningLine):
     node: ir.Buffer
 
+    def add_user_stream(self, stream_id):
+        # is it possible that this buffer is used by multiple streams immediately?
+        self.user_streams = [stream_id, ]
+
     def plan(self, state: MemoryPlanningState):
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
@@ -207,8 +211,26 @@ class AllocateLine(MemoryPlanningLine):
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
         line = self.wrapper.make_buffer_allocation(self.node)
-        code.writeline(line)
-
+        # if self has attribute user_streams, then it is used by multiple streams
+        if hasattr(self, "user_streams"):
+            need_cuda_event = False
+            for user_stream in self.user_streams:
+                if user_stream != 0:
+                    need_cuda_event = True
+                    break
+            if need_cuda_event:
+                event_name = f"event_allocate_{self.node.get_name()}"
+                code.writeline(f"{event_name} = torch.cuda.Event()")
+                code.writeline(line)
+                # TODO(yueming): need to double check
+                code.writeline(f"{event_name}.record(stream0_raw)")
+                for user_stream in self.user_streams:
+                    if user_stream != 0:
+                        code.writeline(f"stream{user_stream}_raw.wait_event({event_name})")
+            else:
+                code.writeline(line)
+        else:
+            code.writeline(line)
 
 @dataclasses.dataclass
 class FreeIfNotReusedLine(MemoryPlanningLine):
@@ -893,8 +915,11 @@ class WrapperCodeGen(CodeGen):
             self.codegen_allocation(layout.view.data)
             self.codegen_deferred_allocation(name, layout)
             return
-
-        self.writeline(AllocateLine(self, buffer))
+        new_allocateline = AllocateLine(self, buffer)
+        if config.multiple_streams:
+            ssnode = V.graph.stream_graph.name_mapping[buffer.get_name()]
+            new_allocateline.add_user_stream(ssnode.stream_id)
+        self.writeline(new_allocateline)
 
     def codegen_free(self, buffer):
         name = buffer.get_name()

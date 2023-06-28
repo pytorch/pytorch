@@ -170,12 +170,13 @@ class SSGraph:
                 finished.add(cur_node)
         if len(tmp_queue) != 0:
             raise RuntimeError("Error when processing the queue. The queue is not empty after the loop.")
-        buf0_level = self.reverse_level[self.name_mapping['buf0']]
-        log.info(f"buf0's level is {buf0_level}")
-        for ssnode, level in self.reverse_level.items():
-            if level > buf0_level:
-                log.info(f"node {ssnode.get_name()} is in level {level}")
-        cur_node = self.name_mapping["buf0"]
+
+        # buf0_level = self.reverse_level[self.name_mapping['buf0']]
+        # log.info(f"buf0's level is {buf0_level}")
+        # for ssnode, level in self.reverse_level.items():
+        #     if level > buf0_level:
+        #         log.info(f"node {ssnode.get_name()} is in level {level}")
+        cur_node = self.ssnodes[0]
         while(cur_node.get_name() != "OUTPUT"):
             self.critical_path.append(cur_node)
             cur_node = self.reverse_level_predecessors[cur_node]
