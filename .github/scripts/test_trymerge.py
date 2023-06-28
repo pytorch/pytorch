@@ -466,9 +466,11 @@ class TestTryMerge(TestCase):
 
     def test_revert_codev_abandonned_diff_succeeds(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 100652)
+
         class GitRepoCoDev(DummyGitRepo):
             def commit_message(self, ref: str) -> str:
                 return pr.get_body()
+
         repo = GitRepoCoDev()
         validate_revert(repo, pr, comment_id=1588195237)
 

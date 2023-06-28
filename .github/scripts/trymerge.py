@@ -445,7 +445,9 @@ ROCKSET_MERGES_COLLECTION = "merges"
 ROCKSET_MERGES_WORKSPACE = "commons"
 REMOTE_MAIN_BRANCH = "origin/main"
 INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
-HAS_NO_CONNECTED_DIFF_TITLE = "There is no internal Diff connected, this can be merged now"
+HAS_NO_CONNECTED_DIFF_TITLE = (
+    "There is no internal Diff connected, this can be merged now"
+)
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -549,9 +551,9 @@ def add_workflow_conclusions(
                             checkrun_name,
                             checkrun_node["detailsUrl"],
                             checkrun_node["conclusion"],
-                            None,
-                            checkrun_node["databaseId"],
-                            checkrun_node["title"],
+                            classification=None,
+                            job_id=checkrun_node["databaseId"],
+                            title=checkrun_node["title"],
                         )
 
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
@@ -579,8 +581,9 @@ def add_workflow_conclusions(
                 workflow.name,
                 workflow.url,
                 workflow.status,
-                None,
-                None,
+                classification=None,
+                job_id=None,
+                title=None,
             )
     for job_name, job in no_workflow_obj.jobs.items():
         res[job_name] = job
@@ -885,9 +888,9 @@ class GitHubPR:
                     name,
                     status["targetUrl"],
                     status["state"],
-                    None,
-                    None,
-                    None,
+                    classification=None,
+                    job_id=None,
+                    title=None,
                 )
 
         return self.conclusions
@@ -1526,7 +1529,12 @@ def get_classifications(
             continue
         if "unstable" in name:
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "UNSTABLE", check.job_id, check.title
+                check.name,
+                check.url,
+                check.status,
+                "UNSTABLE",
+                check.job_id,
+                check.title,
             )
             continue
         head_sha_job = head_sha_jobs.get(name)
@@ -1538,7 +1546,12 @@ def get_classifications(
             and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
         ):
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "BROKEN_TRUNK", check.job_id, check.title
+                check.name,
+                check.url,
+                check.status,
+                "BROKEN_TRUNK",
+                check.job_id,
+                check.title,
             )
         elif any(rule.matches(head_sha_job) for rule in flaky_rules):
             checks_with_classifications[name] = JobCheckState(
