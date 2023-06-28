@@ -699,24 +699,26 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         )
 
     def test_fallback_on_nested_tuple_output(self):
-        # We can likely support this in the future, I just don't want to deal
-        # with it right now
         counters.clear()
-        cnt = CompileCounter()
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
 
         @torch.compile(backend=cnt)
         def f(x):
-            return wrap(lambda x: ((x.sin(), x.cos()),), x)
+            ((a, b),) = wrap(lambda x: ((x.sin(), x.cos()),), x)
+            return a + b
 
         x = torch.randn(2, 3)
         result = f(x)
 
-        self.assertEqual(result, ((x.sin(), x.cos()),))
-        self.assertEqual(cnt.frame_count, 0)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"HigherOrderOperator body's output must consist of tensors only": 1},
-        )
+        self.assertEqual(result, x.sin() + x.cos())
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(backend.graphs), 1)
+        wrap_node = find_first_node(backend.graphs[0], wrap)
+        self.assertTrue(len(wrap_node.args), 1)
+        body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
+        self.assertEqual(op_count(body_function), 2)
 
     def test_fallback_on_output_with_dict(self):
         # We can likely support this in the future, I just don't want to deal
