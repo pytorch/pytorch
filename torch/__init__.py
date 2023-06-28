@@ -1652,7 +1652,6 @@ def compile(model: Optional[Callable] = None, *,
                            disable=disable)
         return fn
 
-    import torch._dynamo
     if mode is not None and options is not None:
         raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
     if mode is None and options is None:

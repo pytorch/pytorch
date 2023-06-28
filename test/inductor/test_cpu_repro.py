@@ -9,7 +9,6 @@ from unittest.mock import patch
 import numpy as np
 import sympy
 import torch
-import torch._dynamo
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same

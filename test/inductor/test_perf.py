@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 import functorch
 
-import torch._dynamo
 import torch._inductor.config as config
 from torch._dynamo.backends.registry import register_backend
 from torch._inductor import metrics

@@ -4,7 +4,6 @@ import sys
 import unittest
 
 import torch
-import torch._dynamo
 import torch._dynamo.config as dynamo_config
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
