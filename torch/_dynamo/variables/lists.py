@@ -1,18 +1,21 @@
 import collections
 import functools
+import inspect
 import operator
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
+from torch.utils import _pytree as pytree
 
-from .. import config, variables
+from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
 from ..utils import check_constant_args, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
+from .functions import UserFunctionVariable, UserMethodVariable
 
 
 class BaseListVariable(VariableTracker):
@@ -160,6 +163,25 @@ class BaseListVariable(VariableTracker):
             lambda a, b: BuiltinVariable(operator.and_).call_function(tx, [a, b], {}),
             comps,
         ).add_options(options)
+
+    # List-like implementations for pytree
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            index = SliceVariable(
+                [
+                    ConstantVariable(index.start),
+                    ConstantVariable(index.stop),
+                    ConstantVariable(index.step),
+                ]
+            )
+        elif isinstance(index, int):
+            index = ConstantVariable(index)
+        else:
+            raise TypeError("Invalid index type. Must be int or slice.")
+        return self.getitem_const(index)
 
 
 class RangeVariable(BaseListVariable):
@@ -502,10 +524,7 @@ class SizeVariable(TupleVariable):
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
-            if config.dynamic_shapes:
-                out = self.get_item_dyn(tx, args[0])
-            else:
-                out = self.getitem_const(args[0])
+            out = self.get_item_dyn(tx, args[0])
             return out
         return super().call_method(tx, name, args, kwargs)
 
@@ -547,9 +566,28 @@ class NamedTupleVariable(TupleVariable):
         ] + create_call_function(1, True)
 
     def var_getattr(self, tx, name):
+        def check_and_create_method():
+            options = VariableTracker.propagate(self)
+            method = inspect.getattr_static(self.tuple_cls, name, None)
+            if isinstance(method, classmethod):
+                # We need the unbounded cls method to avoid the inline __self__
+                return UserMethodVariable(
+                    method.__func__,
+                    variables.UserDefinedClassVariable(self.tuple_cls, **options),
+                )
+            elif isinstance(method, staticmethod):
+                return UserFunctionVariable(method.__func__, **options)
+            elif inspect.isfunction(method):
+                return UserMethodVariable(method, self, **options)
+            else:
+                return None
+
         fields = namedtuple_fields(self.tuple_cls)
         if name not in fields:
-            unimplemented(f"NamedTupleVariable.{name}")
+            method = check_and_create_method()
+            if not method:
+                unimplemented(f"NamedTupleVariable.{name}")
+            return method
         return self.items[fields.index(name)].add_options(self)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
@@ -641,3 +679,47 @@ class ListIteratorVariable(VariableTracker):
 
 class TupleIteratorVariable(ListIteratorVariable):
     pass
+
+
+def _listvariable_flatten(d: ListVariable) -> Tuple[List[Any], pytree.Context]:
+    return d.items, None
+
+
+def _listvariable_unflatten(values: List[Any], context: pytree.Context) -> ListVariable:
+    assert all(isinstance(x, VariableTracker) for x in values)
+
+    # Guard propagation happens in the BaseListVariable constructor
+    return ListVariable(values, mutable_local=MutableLocal())
+
+
+def _register_dynamo_list_to_tree_spec():
+    pytree._register_pytree_node(
+        ListVariable,
+        _listvariable_flatten,
+        _listvariable_unflatten,
+        pytree._list_to_str,
+        pytree._maybe_str_to_list,
+    )
+
+
+def _tuplevariable_flatten(d: TupleVariable) -> Tuple[List[Any], pytree.Context]:
+    return d.items, None
+
+
+def _tuplevariable_unflatten(
+    values: List[Any], context: pytree.Context
+) -> TupleVariable:
+    assert all(isinstance(x, VariableTracker) for x in values)
+
+    # Guard propagation happens in the BaseListVariable constructor
+    return TupleVariable(values)
+
+
+def _register_dynamo_tuple_to_tree_spec():
+    pytree._register_pytree_node(
+        TupleVariable,
+        _tuplevariable_flatten,
+        _tuplevariable_unflatten,
+        pytree._tuple_to_str,
+        pytree._maybe_str_to_tuple,
+    )

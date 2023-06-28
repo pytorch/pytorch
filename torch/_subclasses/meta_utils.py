@@ -239,10 +239,6 @@ class MetaConverter:
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
-                    # TODO: Delete this assert, and just attempt making the
-                    # sparse tensor anyway; even if there is a shape_env, this
-                    # tensor might be all static
-                    assert shape_env is None, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = callback(
                         lambda: torch.ops.aten._sparse_coo_tensor_with_dims(
@@ -410,6 +406,10 @@ class MetaConverter:
                                 # emphasize how important it is to preserve
                                 # format here
                                 r = r.clone(memory_format=torch.preserve_format)
+
+                    # Graph-Break for wrapped tensors
+                    if torch._C._functorch.is_functorch_wrapped_tensor(t):
+                        return NotImplemented
 
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)

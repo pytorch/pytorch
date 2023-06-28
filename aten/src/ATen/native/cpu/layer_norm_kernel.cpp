@@ -269,8 +269,8 @@ void layer_norm_backward_frame(
           N);
     }
     const opmath_t a = rstd_data[i];
-    const opmath_t b = (db * mean_data[i] - ds) * a * a * a * scale;
-    const opmath_t c = -b * mean_data[i] - db * a * scale;
+    const opmath_t b = (db * opmath_t(mean_data[i]) - ds) * a * a * a * scale;
+    const opmath_t c = -b * opmath_t(mean_data[i]) - db * a * scale;
     // Scalar math:
     // for (const auto j : c10::irange(N)) {
     //   const T gamma_v = gamma_null ? T(1) : gamma_data[j];

@@ -1,3 +1,8 @@
+# NOTE: This file is referenced by name at
+#       /opt/pytorch/torch/_dynamo/eval_frame.py::DONT_WRAP_FILES.
+#       introduced by https://github.com/pytorch/pytorch/pull/98894.
+#       If this file is renamed, moved, etc please update the reference there!
+
 from __future__ import annotations
 
 import copy
