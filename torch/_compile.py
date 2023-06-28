@@ -4,6 +4,7 @@ circular dependencies.
 """
 import functools
 
+
 def _disable_dynamo(fn=None, recursive=True):
     """
     This API should be only used inside torch, external users should still use
@@ -15,14 +16,18 @@ def _disable_dynamo(fn=None, recursive=True):
     the invocation of the decorated function.
     """
     if fn is not None:
+
         @functools.wraps(fn)
         def inner(*args, **kwargs):
             import torch._dynamo
+
             return torch._dynamo.disable(fn, recursive)(*args, **kwargs)
+
         return inner
     else:
         # decorator usage like @_disable_dynamo(recursive=False). The resulting
         # object expects the original decorated function as the arg.
         def outer(fn_outer):
             return _disable_dynamo(fn_outer, recursive)
+
         return outer
