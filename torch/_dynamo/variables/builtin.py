@@ -176,11 +176,14 @@ class BuiltinVariable(VariableTracker):
                 ["__lshift__", "__rlshift__", "__ilshift__"],
                 operator.ilshift,
             ),
+            operator.rshift: (
+                ["__rshift__", "__rrshift__", "__irshift__"],
+                operator.irshift,
+            ),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
             # operator.matmul
             # divmod
-            # operator.rshift
             # operator.and_
             # operator.or_
             # operator.xor
