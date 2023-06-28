@@ -26,7 +26,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
     subtest,
-    TEST_WITH_UBSAN,
     skipIfRocm,
 )
 from torch.testing._internal.common_device_type import \
@@ -3596,9 +3595,6 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         # TypeError: expected Tensor as element 0 in argument 0, but got float
         xfail('item'),
-
-        # UBSAN: runtime error: -1e+20 is outside the range of representable values of type 'long'
-        decorate('special.hermite_polynomial_h', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
