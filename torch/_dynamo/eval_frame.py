@@ -1228,6 +1228,12 @@ class TorchPatcher:
             if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
         ]
 
+        # disable dynamo for the wrapper that helps give dynamo hints about entering DDP
+        if hasattr(DistributedDataParallel, "_inside_ddp_forward"):
+            DistributedDataParallel._inside_ddp_forward = disable(
+                DistributedDataParallel._inside_ddp_forward, recursive=False
+            )
+
         # Note: this excludes the optimizers that are unsupported in excluded_opts below
         from ..optim import (
             adadelta,
