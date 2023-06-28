@@ -56,7 +56,7 @@ __all__ = [
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not',
-    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
+    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap', 'disable_dynamo',
 ]
 
 ################################################################################
@@ -1339,6 +1339,14 @@ for name in dir(_C._VariableFunctions):
     globals()[name] = obj
     if not name.startswith("_"):
         __all__.append(name)
+
+
+
+def disable_dynamo(fn=None, recursive=True):
+    def inner(*args, **kwargs):
+        import torch._dynamo
+        return torch._dynamo.disable(fn, recursive)(*args, **kwargs)
+    return inner
 
 ################################################################################
 # Import interface functions defined in Python
