@@ -154,7 +154,6 @@ def lazy_init():
         inference_graph,
         patterns,
         scalar_workaround=workaround,
-        prepend=True,
     )
     register_replacement(
         _dropout_pattern,
@@ -163,7 +162,6 @@ def lazy_init():
         training_graph,
         patterns,
         scalar_workaround=workaround,
-        prepend=True,
     )
 
 
