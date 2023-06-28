@@ -1,6 +1,7 @@
 #ifndef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/core/Tensor.h>
 
 //
@@ -13,9 +14,7 @@
 // trigger an error.
 //
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 namespace internal {
 namespace {
 
@@ -90,9 +89,6 @@ Tensor max_pool2d(
   TORCH_CHECK(false, internal::kError);
 }
 
-} // namespace xnnpack
-
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

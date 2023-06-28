@@ -27,7 +27,7 @@ from torch.utils.weak import TensorWeakRef, WeakIdRef
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
 from ..exc import unimplemented
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
@@ -35,7 +35,6 @@ from ..source import (
     GetItemSource,
     GlobalWeakRefSource,
     is_constant_source,
-    is_from_local_source,
     LocalSource,
     RandomValueSource,
     Source,
@@ -198,7 +197,7 @@ class VariableBuilder:
     def __call__(self, value):
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
-            dup_guard = self._make_dupe_guard(side_effect_result)
+            dup_guard = make_dupe_guard(self.source, side_effect_result.source)
             if dup_guard:
                 side_effect_result = side_effect_result.add_guards(
                     self.make_guards(dup_guard)
@@ -210,34 +209,6 @@ class VariableBuilder:
                 self.source, value, vt
             )
         return vt
-
-    def _make_dupe_guard(self, deduped_object):
-        # Note - we may end up in a situation where we invoke something like
-        # def fn(x, y)
-        # with fn(x, x)
-        # Prior to the addition of tracking to all relevant objects, we would handle this just fine by
-        # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
-        # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
-        # In the the fn(x, x) example call above look like a graph with a single input.
-        # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
-
-        # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
-        # leave unsourced - like a local list created and discharged entirely within a local scope.
-        if deduped_object.source and deduped_object.source != self.source:
-            ser_source_is_local = is_from_local_source(deduped_object.source)
-            source_is_local = is_from_local_source(self.source)
-            # Note - both must be local, or global, or we will run afoul of a lack of merging in how we currently
-            # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
-            # so maybe we should do this refactor before we land this...
-            # TODO(voz): Combine local and global guard builders.
-            if ser_source_is_local == source_is_local:
-                # Note - this is a little agressive - these being duplicate input does not always matter.
-                # However, this should always be a sound guard to add here.
-                dup_guard = functools.partial(
-                    GuardBuilder.DUPLICATE_INPUT, source_b=deduped_object.source
-                )
-                return dup_guard
-        return None
 
     def _can_lift_attrs_to_inputs(self, vt):
         if type(vt) in [TensorVariable, UserDefinedObjectVariable]:
@@ -1472,9 +1443,10 @@ def wrap_to_fake_tensor_and_record(
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
-        tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
+        tx.output.tensor_weakref_to_sizes_strides_offset[WeakIdRef(e)] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
+            "storage_offset": fake_e.storage_offset(),
         }
         return fake_e
     else:
