@@ -258,6 +258,21 @@ def _accepted_compilers_for_platform() -> List[str]:
     # gnu-c++ and gnu-cc are the conda gcc compilers
     return ['clang++', 'clang'] if IS_MACOS else ['g++', 'gcc', 'gnu-c++', 'gnu-cc', 'clang++', 'clang']
 
+def _maybe_write(filename, new_content):
+    r'''
+    Equivalent to writing the content into the file but will not touch the file
+    if it already had the right content (to avoid triggering recompile).
+    '''
+    if os.path.exists(filename):
+        with open(filename, 'r') as f:
+            content = f.read()
+
+        if content == new_content:
+            # The file already contains the right thing!
+            return
+
+    with open(filename, 'w') as source_file:
+        source_file.write(new_content)
 
 def get_default_build_root() -> str:
     r'''
@@ -1417,8 +1432,7 @@ def load_inline(name,
         cpp_sources += module_def
 
     cpp_source_path = os.path.join(build_directory, 'main.cpp')
-    with open(cpp_source_path, 'w') as cpp_source_file:
-        cpp_source_file.write('\n'.join(cpp_sources))
+    _maybe_write(cpp_source_path, "\n".join(cpp_sources))
 
     sources = [cpp_source_path]
 
@@ -1428,8 +1442,7 @@ def load_inline(name,
         cuda_sources.insert(2, '#include <cuda_runtime.h>')
 
         cuda_source_path = os.path.join(build_directory, 'cuda.cu')
-        with open(cuda_source_path, 'w') as cuda_source_file:
-            cuda_source_file.write('\n'.join(cuda_sources))
+        _maybe_write(cuda_source_path, "\n".join(cuda_sources))
 
         sources.append(cuda_source_path)
 
@@ -2221,11 +2234,10 @@ def _write_ninja_file(path,
     if with_cuda:
         blocks.append(cuda_compile_rule)
     blocks += [devlink_rule, link_rule, build, devlink, link, default]
-    with open(path, 'w') as build_file:
-        for block in blocks:
-            lines = '\n'.join(block)
-            build_file.write(f'{lines}\n\n')
-
+    content = "\n\n".join("\n".join(b) for b in blocks)
+    # Ninja requires a new lines at the end of the .ninja file
+    content += "\n"
+    _maybe_write(path, content)
 
 def _join_cuda_home(*paths) -> str:
     r'''
