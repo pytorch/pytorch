@@ -178,6 +178,23 @@ def forward(self, a_1):
         out2 = fx_g(a, b, c)
         self.assertEqual(out1, out2)
 
+    def test_pre_dispatch_no_grad(self):
+        def f(a):
+            b = a.sin()
+            torch.set_grad_enabled(False)
+            c = b.cos()
+            torch.set_grad_enabled(True)
+            return b + c.sin()
+        a1 = torch.randn(4, requires_grad=True)
+        a2 = a1.clone().detach().requires_grad_(True)
+        a_tmp = a1.clone().detach().requires_grad_(True)
+        fx_g = make_fx(f, pre_dispatch=True)(a_tmp)
+        out1 = f(a1)
+        out2 = fx_g(a2)
+        self.assertEqual(out1, out2)
+        out1.sum().backward()
+        out2.sum().backward()
+        self.assertEqual(a1.grad, a2.grad)
 
     def test_make_fx_simple(self):
         def f(x):
