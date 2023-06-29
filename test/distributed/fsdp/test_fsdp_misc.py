@@ -300,105 +300,110 @@ class TestFSDPMiscMultiProcess(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_optimizer_overlap(self):
+        torch.manual_seed(0)
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.a = nn.Linear(10, 10)
-                self.b = nn.Linear(10, 10)
+                self.a = nn.Linear(2, 2)
+                self.b = nn.Linear(2, 2)
 
             def forward(self, x, y):
                 return self.b(self.a(x + y))
 
         from copy import deepcopy
-        cpu_offload = CPUOffload(offload_params=False)
-        model = MyModel().cuda()
-        model_overlap = deepcopy(model)
-        fsdp = FSDP(
-            model.cuda(),
-            auto_wrap_policy=always_wrap_policy,
-            use_orig_params=True,
-            cpu_offload=cpu_offload,
-        )
-        fsdp_overlap = FSDP(
-            model_overlap.cuda(),
-            auto_wrap_policy=always_wrap_policy,
-            use_orig_params=True,
-            cpu_offload=cpu_offload,
-        )
-        optim_cls = torch.optim.SGD
-        optim_kwargs = {"lr": 0.03}
-        _apply_optimizer_in_backward(
-            optimizer_class=optim_cls,
-            params=fsdp_overlap.parameters(),
-            optimizer_kwargs=optim_kwargs,
-        )
-        for p in fsdp_overlap.parameters():
-            assert hasattr(p, "_in_backward_optimizers")
-        optim = optim_cls(fsdp.parameters(), **optim_kwargs)
+        for cpu_offload in [True, False]:
+            offload = CPUOffload(offload_params=cpu_offload)
+            model = MyModel().cuda()
+            model_overlap = deepcopy(model)
+            fsdp = FSDP(
+                model.cuda(),
+                auto_wrap_policy=always_wrap_policy,
+                use_orig_params=True,
+                cpu_offload=offload,
+            )
+            fsdp_overlap = FSDP(
+                model_overlap.cuda(),
+                auto_wrap_policy=always_wrap_policy,
+                use_orig_params=True,
+                cpu_offload=offload,
+            )
+            optim_cls = torch.optim.SGD
+            optim_kwargs = {"lr": 0.03}
+            _apply_optimizer_in_backward(
+                optimizer_class=optim_cls,
+                params=fsdp_overlap.parameters(),
+                optimizer_kwargs=optim_kwargs,
+            )
+            for p in fsdp_overlap.parameters():
+                assert hasattr(p, "_in_backward_optimizers")
+            optim = optim_cls(fsdp.parameters(), **optim_kwargs)
+            # optim2 = optim_cls(fsdp_overlap.parameters(), **optim_kwargs)
 
-        # Verify params initially equal
-        for p1, p2 in zip(fsdp.parameters(), fsdp_overlap.parameters()):
-            self.assertEqual(p1, p2)
+            # Verify params initially equal
+            for p1, p2 in zip(fsdp.parameters(), fsdp_overlap.parameters()):
+                self.assertEqual(p1, p2)
 
-        with FSDP.summon_full_params(fsdp_overlap):
-            fsdp_overlap_prev_params = [
-                (n, p.clone()) for n, p in fsdp_overlap.named_parameters()
-            ]
-
-        for i in range(6):
-            inp = torch.randn(10, 10, device="cuda")
-            fsdp(inp, inp).sum().backward()
-
-            with torch.no_grad():
-                inp_clone = inp.clone()
-            fsdp_overlap(inp_clone, inp_clone).sum().backward()
-            optim.step()
-            optim.zero_grad(set_to_none=True)
-
-            # Both FSDP units should have sharded_grad as None.
-            for fsdp_unit in FSDP.fsdp_modules(fsdp_overlap):
-                handles = fsdp_unit._handles
-                for handle in handles:
-                    handle_grad = handle.sharded_grad
-                    self.assertEqual(None, handle_grad, f"Overlapped FSDP sharded_grad is not None!")
-
-            # Note: FSDP without optimizer overlap won't set sharded_grad to None until the next
-            # pre-forward since it needs to run FSDP specific logic that picks up that set_to_none=True
-            # has been called (or that the gradients have been otherwise set to None)
-
-
-            # Verify parameters are different than prev iteration
-            with FSDP.summon_full_params(fsdp_overlap, with_grads=True):
-                for (n, p), (n_prev, p_prev) in zip(
-                    fsdp_overlap.named_parameters(), fsdp_overlap_prev_params
-                ):
-                    self.assertNotEqual(
-                        p, p_prev, f"{n_prev} Params at iter {i} same as previous iter!"
-                    )
-
-            # Verify overlap and non overlapped are the same
             with FSDP.summon_full_params(fsdp_overlap):
-                with FSDP.summon_full_params(fsdp):
-                    for (n_overlap, p_overlap), (n, p) in zip(
-                        fsdp_overlap.named_parameters(), fsdp.named_parameters()
-                    ):
-                        self.assertEqual(
-                            p,
-                            p_overlap,
-                            f"Params not equal at iteration {i}: {n_overlap}",
-                        )
-                        self.assertEqual(
-                            None, p.grad, f"Expected param {n} grad to be None"
-                        )
-                        self.assertEqual(
-                            None,
-                            p_overlap.grad,
-                            f"Expected param {n_overlap} grad to be None",
-                        )
-
                 fsdp_overlap_prev_params = [
                     (n, p.clone()) for n, p in fsdp_overlap.named_parameters()
                 ]
+
+            for i in range(6):
+                inp = torch.randn(2, 2, device="cuda")
+                with torch.no_grad():
+                    inp_clone = inp.clone()
+                fsdp(inp, inp).sum().backward()
+                fsdp_overlap(inp_clone, inp_clone).sum().backward()
+
+                optim.step()
+                optim.zero_grad()
+
+
+                # Both FSDP units should have sharded_grad as None.
+                for fsdp_unit in FSDP.fsdp_modules(fsdp_overlap):
+                    handles = fsdp_unit._handles
+                    for handle in handles:
+                        handle_grad = handle.sharded_grad
+                        self.assertEqual(None, handle_grad, f"Overlapped FSDP sharded_grad is not None!")
+
+                # Note: FSDP without optimizer overlap won't set sharded_grad to None until the next
+                # pre-forward since it needs to run FSDP specific logic that picks up that set_to_none=True
+                # has been called (or that the gradients have been otherwise set to None)
+
+
+                # Verify parameters are different than prev iteration
+                with FSDP.summon_full_params(fsdp_overlap, with_grads=True):
+                    for (n, p), (n_prev, p_prev) in zip(
+                        fsdp_overlap.named_parameters(), fsdp_overlap_prev_params
+                    ):
+                        self.assertNotEqual(
+                            p, p_prev, f"{n_prev} Params at iter {i} same as previous iter!"
+                        )
+
+                # Verify overlap and non overlapped are the same
+                with FSDP.summon_full_params(fsdp_overlap):
+                    with FSDP.summon_full_params(fsdp):
+                        for (n_overlap, p_overlap), (n, p) in zip(
+                            fsdp_overlap.named_parameters(), fsdp.named_parameters()
+                        ):
+                            self.assertEqual(n_overlap, n)
+                            self.assertEqual(
+                                p,
+                                p_overlap,
+                                f"Rank {self.rank}: Params not equal at iteration {i}: {n_overlap} - {p} vs {p_overlap}",
+                            )
+                            self.assertEqual(
+                                None, p.grad, f"Expected param {n} grad to be None"
+                            )
+                            self.assertEqual(
+                                None,
+                                p_overlap.grad,
+                                f"Expected param {n_overlap} grad to be None",
+                            )
+
+                    fsdp_overlap_prev_params = [
+                        (n, p.clone()) for n, p in fsdp_overlap.named_parameters()
+                    ]
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_cpu_init_stays_on_cpu(self):

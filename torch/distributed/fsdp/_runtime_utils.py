@@ -254,7 +254,7 @@ def _share_state_and_init_handle_attrs(
     # Update _has_optim_in_backward for each handle.
     for handle in root_state._all_handles:
         flat_param = handle.flat_param
-        print(f"RV: checking flat_param")
+        # print(f"RV: checking flat_param")
         if hasattr(flat_param, "_in_backward_optimizers"):
             raise RuntimeError(
                 f"FSDP optimizer in backward only supported with use_orig_params=True!"
@@ -466,9 +466,11 @@ def _pre_forward(
         # the `grad_fn` is mutated.
         _register_post_backward_hooks(state, handles)
         # We may have to reallocate the _cpu_grad if optimizer overlap set the grad to None in the backward pass.
-        # flat_param._cpu_grad = torch.zeros_like(
-        #         flat_param._local_shard, device=cpu_device
-        #     ).pin_memory()
+        for handle in handles:
+            if handle._offload_params and handle.flat_param._cpu_grad is None:
+                handle.flat_param._cpu_grad = torch.zeros_like(
+                    handle.flat_param._local_shard, device=torch.device("cpu")
+                ).pin_memory()
 
         should_cast_forward_inputs = len(state._handles) > 0 and all(
             not handle._force_full_precision for handle in state._handles
@@ -874,7 +876,12 @@ def _post_backward_hook(
                 # gradients are on the same device as required by the optimizer
                 # TODO: Investigate why `NO_SHARD` breaks correctness when
                 # using `non_blocking=True` here.
-                non_blocking = handle.uses_sharded_strategy
+                # TODO (rohan-varma): When CPU offload and optimizer overlap,
+                # non_blocking=True won't work since the copy may have not finished
+                # before the optimizer step executes on CPU.
+                non_blocking = (
+                    handle.uses_sharded_strategy and not handle._has_optim_in_backward
+                )
                 flat_param._cpu_grad.copy_(  # type: ignore[attr-defined]
                     grad_to_offload.detach(), non_blocking=non_blocking
                 )  # synchronized in the post-backward callback
@@ -907,7 +914,14 @@ def _post_backward_hook(
                         if orig_param.grad is not None and hasattr(
                             orig_param, "_in_backward_optimizers"
                         ):
+                            # TODO (rohan-varma): For CPU offload, this unfortunately
+                            # operates on CPU, because the parameters and gradients
+                            # have already been offloaded.
                             for optim in orig_param._in_backward_optimizers:
+                                # _p_assert(orig_param.grad is not None, "Expected orig param grad to not be None")
+                                # print(f"RV: calling step! {orig_param.grad.device} {orig_param.device}")
+                                # if dist.get_rank() == 0:
+                                # print(f"RV: calling step with param {orig_param} and grad {orig_param.grad} ")
                                 optim.step()
                             # Set orig param gradient to None to maintain the
                             # invariant that if flat_param.grad is None, then
@@ -915,10 +929,14 @@ def _post_backward_hook(
                             orig_param.grad = None
                     # flat_param.grad is set to None for sharded strategies, set it here
                     # for no_shard.
+                    # TODO (rohan-varma): see if this can be absorbed into a sharded_grad setter,
+                    # similar to sharded_grad property.
                     handle.flat_param.grad = None
                     handle.flat_param._saved_grad_shard = None
+                    if handle._offload_params:
+                        handle.flat_param._cpu_grad = None
                     # TODO: remove this
-                    _p_assert(handle.sharded_grad is None, f"Expected handles grad to be None with optim overlap.")
+                    # _p_assert(handle.sharded_grad is None, f"Expected handles grad to be None with optim overlap.")
 
 
 def _post_backward_reshard(
@@ -1124,8 +1142,8 @@ def _finalize_params(
                 # `no_sync()` iterations, and `_saved_grad_shard` remains the
                 # sharded gradient from the last synchronized iteration
                 continue
-            # TODO (rohan-varma): check if this needs to be called when running
-            # optimizer in backward.
+            # When optim runs in backward, this is basically a noop, since handle's
+            # grad is set to None.
             handle.prepare_gradient_for_optim()
             _p_assert(
                 hasattr(flat_param, "_post_backward_called"),

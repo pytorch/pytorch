@@ -501,7 +501,7 @@ class FlatParamHandle:
         # NB: this is updated during lazy initialization because optimizers can be applied after
         # wrapping with FSDP.
         self._has_optim_in_backward = any(
-            hasattr(param, '_in_backward_optimizers') for param in params
+            hasattr(param, "_in_backward_optimizers") for param in params
         )
         if self._has_optim_in_backward:
             if not use_orig_params:
