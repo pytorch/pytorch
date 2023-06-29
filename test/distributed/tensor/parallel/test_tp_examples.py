@@ -4,32 +4,30 @@
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._tensor import DTensor, DeviceMesh, Replicate
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
 from torch.distributed.tensor.parallel import (
     PairwiseParallel,
     parallelize_module,
     SequenceParallel,
     TensorParallelMultiheadAttention,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.distributed.tensor.parallel.input_reshard import input_reshard
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    MLPModule,
     NUM_DEVICES,
     skip_unless_torch_gpu,
     with_comms,
 )
-
-
-class MLPModule(torch.nn.Module):
-    def __init__(self, device):
-        super().__init__()
-        torch.manual_seed(5)
-        self.net1 = torch.nn.Linear(10, 16, device=device)
-        self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(16, 12, device=device)
-
-    def forward(self, x):
-        return self.net2(self.relu(self.net1(x)))
 
 
 class MultiheadAttnWrap(nn.Module):
@@ -62,8 +60,8 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                 ).to_local()
             self.assertEqual(param_m2, param_m1)
 
-    def _test_mlp_magatron_e2e(self, is_seq_parallel=False):
-        inp_size = [5, 10]
+    def _test_mlp_magatron_e2e(self, is_seq_parallel=False, recompute_activation=False):
+        inp_size = [8, 10]
         # Ensure all tp ranks have same input.
         rng_seed = self.rank if is_seq_parallel else 0
         torch.manual_seed(rng_seed)
@@ -82,6 +80,14 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         )
         parallel_style = SequenceParallel() if is_seq_parallel else PairwiseParallel()
         model_tp = parallelize_module(model_tp, device_mesh, parallel_style)
+        if recompute_activation:
+            model_tp = input_reshard(
+                checkpoint_wrapper(
+                    model_tp, checkpoint_impl=CheckpointImpl.NO_REENTRANT
+                ),
+                device_mesh,
+                None if is_seq_parallel else 0,
+            )
         optim = torch.optim.SGD(model.parameters(), lr=LR)
         optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
 
@@ -116,12 +122,10 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         self.assertEqual(output, output_tp)
 
     @with_comms
-    def test_mlp_megatron_e2e_w_tensor_parallel(self):
-        self._test_mlp_magatron_e2e()
-
-    @with_comms
-    def test_mlp_megatron_e2e_w_sequence_parallel(self):
-        self._test_mlp_magatron_e2e(is_seq_parallel=True)
+    @parametrize("is_seq_parallel", [True, False])
+    @parametrize("recompute_activation", [True, False])
+    def test_mlp_megatron_e2e(self, is_seq_parallel, recompute_activation):
+        self._test_mlp_magatron_e2e(is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation)
 
     # TensorParallelMultiheadAttention == dist_module(TensorParallelMultiheadAttention)
     # baddbmm introduces nan occasionally on CPU: https://github.com/pytorch/pytorch/issues/80588
@@ -406,6 +410,8 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output_tp = model_tp(inp, inp, inp)
         self.assertEqual(output, output_tp)
 
+
+instantiate_parametrized_tests(DistTensorParallelExampleTest)
 
 if __name__ == "__main__":
     run_tests()

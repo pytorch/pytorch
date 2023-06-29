@@ -232,6 +232,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
         return out
 
     aten_fns = get_overloads(aten_fn)
+    foreach_ops.update(aten_fns)
     lowerings.update({fn: wrapped for fn in aten_fns})
     return wrapped
 
@@ -429,16 +430,14 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             if len(args) < 2:
                 return False
             else:
-                dtype = args[0].data.get_dtype()
-                return any(
-                    isinstance(t, TensorBox) and t.data.get_dtype() != dtype
-                    for t in args
-                )
-
-        def realize_inputs(*args):
-            for arg in args:
-                if isinstance(arg, TensorBox):
-                    arg.data.realize()
+                dtype = None
+                for t in args:
+                    if isinstance(t, TensorBox):
+                        if dtype is None:
+                            dtype = t.data.get_dtype()
+                        elif dtype != t.data.get_dtype():
+                            return True
+                return False
 
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
@@ -449,24 +448,49 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             out = defaultdict(list)
             for i, args in enumerate(arg_pairs):
                 use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
-                out[(args[0].get_device(), use_foreach)].append((i, args))
+                device = None
+                for t in args:
+                    if isinstance(t, TensorBox):
+                        device = t.data.get_device()
+                        break
+                assert (
+                    device is not None
+                ), "foreach op should have at least one tensor arg"
+                out[(device, use_foreach)].append((i, args))
             return out
 
-        # replicate scalar input to match lenghth of list input
-        if len(inputs) > 1 and not isinstance(inputs[1], (list, tuple)):
-            inputs = (inputs[0], [inputs[1] for _ in inputs[0]])
+        realize_outputs = False
+        for node in V.graph.current_node.users:
+            for user in node.users:
+                if not (user.op == "call_function" and user.target in foreach_ops):
+                    realize_outputs = True
 
-        groups = group_args(zip(*inputs))
-        outputs = [None] * len(inputs[0])
+        a_list_input = None
+        for input in inputs:
+            if isinstance(input, (list, tuple)):
+                a_list_input = input
+                break
+        assert (
+            a_list_input is not None
+        ), "at least one input must be a list to a foreach op"
+
+        # broadcast scalar inputs to match length of list inputs
+        broadcast_inputs = []
+        for input in inputs:
+            if not isinstance(input, (list, tuple)):
+                broadcast_inputs.append([input] * len(a_list_input))
+            else:
+                broadcast_inputs.append(input)
+
+        groups = group_args(zip(*broadcast_inputs))
+
+        outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
             buffer_list = []
             for (
                 output_ind,
                 args,
             ) in group:
-                if device.type == "cuda" and use_foreach:
-                    realize_inputs(*args)
-
                 if allow_alpha:
                     output = pw_fn(*args, alpha=alpha)
                 else:
@@ -474,7 +498,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if device.type == "cuda" and use_foreach:
+                if device.type == "cuda" and use_foreach and realize_outputs:
                     buffer_list.append(output.realize())
 
             if buffer_list:
@@ -3170,12 +3194,17 @@ def max_pool2d_with_indices_backward(
             x_stride = x.get_stride()
         except AttributeError:
             x_stride = None
-    if (
-        (x_stride is not None and x_stride[1] == 1)
-        or (gO_stride is not None and gO_stride[1] == 1)
-        or any(d != 1 for d in dilation)
-    ):
-        # don't codegen channels-last, it's very slow
+
+    is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
+        gO_stride is not None and gO_stride[1] == 1
+    )
+    autotune = (
+        config.coordinate_descent_tuning
+        or config.max_autotune
+        or config.max_autotune_pointwise
+    )
+    if any(d != 1 for d in dilation) or (is_channels_last and not autotune):
+        # don't codegen channels-last when autotune is not enabled, it's very slow
         return fallback_max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
@@ -4225,6 +4254,7 @@ register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
+register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
 register_foreach_pointwise(aten._foreach_div.List, div)
 register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
@@ -4337,6 +4367,13 @@ try:
     @register_lowering(c10d_functional.all_gather_into_tensor_coalesced)
     def all_gather_into_tensor_coalesced(self, tag, ranks, group_size):
         result = ir.AllGatherIntoTensorCoalesced.create(self, tag, ranks, group_size)
+        return list(map(TensorBox.create, result))
+
+    @register_lowering(c10d_functional.reduce_scatter_tensor_coalesced)
+    def reduce_scatter_tensor_coalesced(self, reduceOp, tag, ranks, group_size):
+        result = ir.ReduceScatterTensorCoalesced.create(
+            self, reduceOp, tag, ranks, group_size
+        )
         return list(map(TensorBox.create, result))
 
 except ImportError:

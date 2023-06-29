@@ -197,6 +197,7 @@ class CompileCounterWithBackend:
         self.frame_count = 0
         self.op_count = 0
         self.backend = backend
+        self.graphs = []
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         from .backends.registry import lookup_backend
@@ -205,6 +206,7 @@ class CompileCounterWithBackend:
         for node in gm.graph.nodes:
             if "call" in node.op:
                 self.op_count += 1
+        self.graphs.append(gm)
         return lookup_backend(self.backend)(gm, example_inputs)
 
 

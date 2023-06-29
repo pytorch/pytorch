@@ -32,6 +32,7 @@ import weakref
 
 import torch
 import torch._inductor.test_operators
+import torch.distributed
 import torch.utils._content_store
 
 from . import comptime, config, external_utils
@@ -114,6 +115,14 @@ FILENAME_ALLOWLIST = {
     external_utils.__file__,
     comptime.__file__,  # Want to inline these helpers
 }
+
+if torch.distributed.is_available():
+    # Inline the checkpoint code from distributed
+    import torch.distributed.algorithms._checkpoint.checkpoint_wrapper
+
+    FILENAME_ALLOWLIST |= {
+        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__
+    }
 
 # Include optimizer code for tracing
 FILENAME_ALLOWLIST |= {

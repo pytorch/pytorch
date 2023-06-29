@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import time
+from contextlib import contextmanager
 from typing import Dict, List, Optional, Set, Tuple
 
 import sympy
@@ -178,6 +179,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
+        self.current_node: Optional[torch.fx.Node] = None
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
@@ -635,7 +637,7 @@ class GraphLowering(torch.fx.Interpreter):
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins):
+        with ir.IRNode.current_origins(origins), self.set_current_node(n):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
@@ -786,6 +788,15 @@ class GraphLowering(torch.fx.Interpreter):
 
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
+
+    @contextmanager
+    def set_current_node(self, node: torch.fx.Node):
+        old = self.current_node
+        try:
+            self.current_node = node
+            yield
+        finally:
+            self.current_node = old
 
     def check_cpp_wrapper(self):
         self.check_cpp_codegen_disabled()
