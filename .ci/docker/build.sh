@@ -236,7 +236,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.5
+    ROCM_VERSION=5.6
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
