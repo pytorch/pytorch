@@ -446,8 +446,7 @@ def meta_multilabel_margin_loss_backward(
             f" (while checking arguments for multilabel_margin_loss_backward)"
         ),
     )
-    grad_input = input.new_empty(input.shape)
-    return grad_input
+    return input.new_empty(input.shape)
 
 
 @register_meta([aten.max.default, aten.max.unary_out])
