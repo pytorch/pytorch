@@ -450,8 +450,13 @@ class WrapperCodeGen(CodeGen):
         def update_event_dependency(tmp_ssnode):
             for name in tmp_ssnode.predecessors:
                 predecessor = tmp_ssnode.predecessors[name]
-                if predecessor.stream_id != tmp_ssnode.stream_id and not predecessor.is_nop_node:
-                    kernel_IndentedBuffer.writeline(f"stream{tmp_ssnode.stream_id}_raw.wait_event(event_{predecessor.get_name()})")
+                if predecessor.is_nop_node:
+                    for prepredecessor in predecessor.predecessors.values():
+                        if prepredecessor.stream_id != tmp_ssnode.stream_id and not prepredecessor.is_nop_node:
+                            kernel_IndentedBuffer.writeline(f"stream{tmp_ssnode.stream_id}_raw.wait_event(event_{prepredecessor.get_name()})")
+                else:
+                    if predecessor.stream_id != tmp_ssnode.stream_id and not predecessor.is_nop_node:
+                        kernel_IndentedBuffer.writeline(f"stream{tmp_ssnode.stream_id}_raw.wait_event(event_{predecessor.get_name()})")
         update_event_dependency(ssnode)
         for predecessor in ssnode.predecessors.values():
             if predecessor.is_nop_node:
