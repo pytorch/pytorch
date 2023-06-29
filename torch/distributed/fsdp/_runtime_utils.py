@@ -228,7 +228,6 @@ def _init_device_mesh(
         return None
     from torch.distributed.distributed_c10d import _get_group_tag
 
-
     device_type = root_state.compute_device.type
     mesh_tensor = torch.arange(get_world_size(root_state.process_group))
     device_mesh = DeviceMesh(device_type, mesh_tensor, _init_process_groups=False)
