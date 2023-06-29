@@ -68,7 +68,7 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
     index_t *offset2bag, int64_t numIndices, int64_t numBags,
     int64_t featureSize, int64_t weight_stride0, int64_t weight_stride1,
     index_t *bag_size, index_t *max_indices,
-    index_t padding_idx, int64_t numRows, TORCH_DSA_KERNEL_ARGS) {
+    index_t padding_idx, int64_t numRows, bool include_last_offset, TORCH_DSA_KERNEL_ARGS) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
@@ -83,7 +83,8 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
       int64_t bag = chunk / chunksPerBag;
       const scalar_t *weightFeat = weight + featureDim * weight_stride1;
       int64_t begin = bag == 0 ? 0 : offsets[bag]; // forces first offset to be 0 instead of asserting on it
-      int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
+      int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) :
+                                          (include_last_offset ? (offsets[bag + 1]) : numIndices);
       CUDA_KERNEL_ASSERT2(end >= begin);
       scalar_t weightFeatMax = 0;
       int64_t bag_size_ = 0;
@@ -119,7 +120,7 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
     int64_t featureSize, int64_t weight_stride0, int64_t weight_stride1,
     int mode, index_t *bag_size,
     const scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
-    index_t padding_idx, int64_t numRows, TORCH_DSA_KERNEL_ARGS) {
+    index_t padding_idx, int64_t numRows, bool include_last_offset, TORCH_DSA_KERNEL_ARGS) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
@@ -135,7 +136,8 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
       int64_t bag = chunk / chunksPerBag;
       const scalar_t *weightFeat = weight + featureDim * weight_stride1;
       int64_t begin = bag == 0 ? 0 : offsets[bag]; // forces first offset to be 0 instead of asserting on it
-      int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
+      int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) :
+                                          (include_last_offset ? (offsets[bag + 1]) : numIndices);
       CUDA_KERNEL_ASSERT2(end >= begin);
       accscalar_t weightFeatSum = 0;
       int64_t bag_size_ = 0;
@@ -411,7 +413,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             offset2bag.mutable_data_ptr<index_t>(), numIndices, numBags, featureSize,
             weight.stride(0), weight.stride(1), bag_size.mutable_data_ptr<index_t>(),
             max_indices.mutable_data_ptr<index_t>(),
-            padding_idx, weight.size(0));
+            padding_idx, include_last_offset, weight.size(0));
       } else {
         TORCH_DSA_KERNEL_LAUNCH(
             (EmbeddingBag_updateOutputKernel_sum_mean<scalar_t, index_t>),
@@ -422,7 +424,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
             weight.stride(0), weight.stride(1), mode, bag_size.mutable_data_ptr<index_t>(),
             per_sample_weights.defined() ? per_sample_weights.const_data_ptr<scalar_t>() : NULL,
             per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
-            padding_idx, weight.size(0));
+            padding_idx, include_last_offset, weight.size(0));
       }
     });
   });
