@@ -1122,15 +1122,21 @@ class CppKernel(Kernel):
         var = self.args.output(name)
         index = self.rename_indexing(index)
         if mode is None:
-            line = f"{var}[{cexpr_index(index)}] = {value};"
+            lines = [f"{var}[{cexpr_index(index)}] = {value};"]
         elif mode == "atomic_add":
             if not config.cpp.dynamic_threads and self.num_threads == 1:
-                line = f"{var}[{cexpr_index(index)}] += {value};"
+                lines = [f"{var}[{cexpr_index(index)}] += {value};"]
             else:
-                line = f"atomic_add(&{var}[{cexpr_index(index)}], {value});"
+                lines = [
+                            "#if defined(OMP_IN_PARALLEL) && OMP_IN_PARALLEL",
+                            f"    atomic_add(&{var}[{cexpr_index(index)}], {value});",
+                            "#else",
+                            f"    {var}[{cexpr_index(index)}] += {value};",
+                            "#endif",
+                        ]
         else:
             raise NotImplementedError(f"store mode={mode}")
-        self.stores.writeline(DeferredLine(name, line))
+        self.stores.writelines([DeferredLine(name, line) for line in lines])
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
@@ -2698,6 +2704,7 @@ class WorkSharing:
             else:
                 self.code.writeline(f"#pragma omp parallel num_threads({threads})")
             self.stack.enter_context(self.code.indent())
+            self.code.writeline("#define OMP_IN_PARALLEL 1")
 
     def single(self):
         if self.in_parallel:
@@ -2705,6 +2712,8 @@ class WorkSharing:
         return self.in_parallel
 
     def close(self):
+        if self.in_parallel:
+            self.code.writeline("#undef OMP_IN_PARALLEL")
         self.stack.close()
         self.in_parallel = False
 
@@ -2713,6 +2722,7 @@ class WorkSharing:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
         self.stack.__exit__(exc_type, exc_val, exc_tb)
 
 
