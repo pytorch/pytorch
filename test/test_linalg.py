@@ -4039,7 +4039,7 @@ class TestLinalg(TestCase):
         self.assertEqual(X, out)
 
     @dtypes(*floating_and_complex_types())
-    @precisionOverride({torch.float32: 2e-1 if TEST_WITH_ROCM else 1e-1, torch.complex64: 1e-1,
+    @precisionOverride({torch.float32: 1e-1, torch.complex64: 1e-1,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_linalg_solve_triangular(self, device, dtype):
         # This exercises the API + BLAS CPU + batched cuBLAS
@@ -4049,7 +4049,7 @@ class TestLinalg(TestCase):
 
         gen_inputs = self._gen_shape_inputs_linalg_triangular_solve
         for b, n, k in product(bs, ns, ks):
-            for A, B, left, upper, uni in gen_inputs((b, n, k), dtype, device):
+            for A, B, left, upper, uni in gen_inputs((b, n, k), dtype, device, well_conditioned=True):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
