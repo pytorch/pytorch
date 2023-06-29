@@ -70,7 +70,7 @@ Some of the most commonly used backends include:
    * - ``torch.compile(m, backend="onnxrt")``
      - Uses ONNXRT for inference on CPU/GPU. `Read more <https://onnxruntime.ai/>`__
    * - ``torch.compile(m, backend="tensorrt")``
-     - Uses ONNXRT to run TensorRT for inference optimizations. `Read more <https://github.com/onnx/onnx-tensorrt>`__
+     - Uses Torch-TensorRT for inference optimizations. `Read more <https://github.com/pytorch/TensorRT>`__
    * - ``torch.compile(m, backend="ipex")``
      - Uses IPEX for inference on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
    * - ``torch.compile(m, backend="tvm")``
