@@ -9,6 +9,7 @@
 #include <ATen/native/cpu/ReduceUtils.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+#include <ATen/OpMathType.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -27,7 +28,7 @@ inline void _update(scalar_t* out_ptr, int64_t row_start, int64_t row_end, const
   constexpr int64_t kVLEN = kVecSize * 4;
   constexpr int64_t CHUNK_SIZE = 16;
 
-  using acc_t = vec_scalar_t<scalar_t>;
+  using opmath_t = at::opmath_type<scalar_t>;
   for (int64_t e0 = row_start; e0 < row_end; e0 += CHUNK_SIZE) {
     int64_t e1 = std::min(e0 + CHUNK_SIZE, row_end);
 
@@ -39,7 +40,7 @@ inline void _update(scalar_t* out_ptr, int64_t row_start, int64_t row_end, const
       VecType<scalar_t> out_vec3 = VecType<scalar_t>::loadu(out_ptr + k + kVecSize * 3);
       for (const auto e : c10::irange(e0, e1)) {
         c = col_data[e];
-        acc_t val = acc_t(val_data[e]);
+        opmath_t val = opmath_t(val_data[e]);
         scalar_t* other_ptr = other_data + c * K + k;
 
         out_vec0 = update<VecType<scalar_t>, reduce>(out_vec0, VecType<scalar_t>::loadu(other_ptr) * VecType<scalar_t>(val));
@@ -56,19 +57,19 @@ inline void _update(scalar_t* out_ptr, int64_t row_start, int64_t row_end, const
       VecType<scalar_t> out_vec = VecType<scalar_t>::loadu(out_ptr + k);
       for (const auto e : c10::irange(e0, e1)) {
         c = col_data[e];
-        acc_t val = acc_t(val_data[e]);
+        opmath_t val = opmath_t(val_data[e]);
         scalar_t* other_ptr = other_data + c * K;
         out_vec = update<VecType<scalar_t>, reduce>(out_vec, VecType<scalar_t>::loadu(other_ptr + k) * VecType<scalar_t>(val));
       }
       out_vec.store(out_ptr + k);
     }
     for (; k < K; k++) {
-      acc_t out_val = acc_t(out_ptr[k]);
+      opmath_t out_val = opmath_t(out_ptr[k]);
       for (const auto e : c10::irange(e0, e1)) {
         c = col_data[e];
-        acc_t val = acc_t(val_data[e]);
+        opmath_t val = opmath_t(val_data[e]);
         scalar_t* other_ptr = other_data + c * K;
-        out_val = update<acc_t, reduce>(out_val, acc_t(other_ptr[k]) * val);
+        out_val = update<opmath_t, reduce>(out_val, opmath_t(other_ptr[k]) * val);
       }
       out_ptr[k] = scalar_t(out_val);
     }

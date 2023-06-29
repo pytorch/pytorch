@@ -116,9 +116,9 @@ inline Vectorized<scalar_t> _max(const Vectorized<scalar_t>& x, const Vectorized
   return vec::maximum(x, y);
 }
 
-template <typename scalar_t>
-inline typename std::enable_if<std::is_same<scalar_t, Vec2>::value, Vec2>::type
-_max(const scalar_t& x, const scalar_t& y) {
+template <typename vec_t>
+inline typename std::enable_if<std::is_same<vec_t, Vec2>::value, Vec2>::type
+_max(const vec_t& x, const vec_t& y) {
   // vec::maximum propagates NaN
   return maximum(x, y);
 }
@@ -135,9 +135,9 @@ inline Vectorized<scalar_t> _min(const Vectorized<scalar_t>& x, const Vectorized
   return vec::minimum(x, y);
 }
 
-template <typename scalar_t>
-inline typename std::enable_if<std::is_same<scalar_t, Vec2>::value, Vec2>::type
-_min(const scalar_t& x, const scalar_t& y) {
+template <typename vec_t>
+inline typename std::enable_if<std::is_same<vec_t, Vec2>::value, Vec2>::type
+_min(const vec_t& x, const vec_t& y) {
   // vec::minimum propagates NaN
   return minimum(x, y);
 }
