@@ -13,7 +13,7 @@ architectures:
 from typing import Dict, List, Optional, Tuple
 
 
-CUDA_ARCHES = ["11.7", "11.8", "12.1"]
+CUDA_ARCHES = ["11.8", "12.1"]
 
 
 ROCM_ARCHES = ["5.4.2", "5.5"]

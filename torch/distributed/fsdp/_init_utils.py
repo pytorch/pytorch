@@ -109,15 +109,6 @@ def _init_process_group_state(
             )
         else:
             state = _init_process_group_state_for_hybrid_shard(state, process_group)
-            assert (
-                state.process_group is not None
-            ), "Expected to populate state.process_group for hybrid shard"
-            assert (
-                state._inter_node_pg is not None
-            ), "Expected to populate state._inter_node_pg for hybrid shard"
-            assert (
-                state._inter_node_state is not None
-            ), "Expected to populate state._inter_node_state for hybrid shad."
     else:
         state.process_group = (
             process_group if process_group is not None else _get_default_group()
@@ -191,7 +182,7 @@ def _init_inter_node_process_group(
 ) -> dist.ProcessGroup:
     """
     Returns an inter-node process group where each contained rank has
-    the same local rank. For example, given each column is a distinct node:
+    the same local rank. For example, given each row is a distinct node:
     0 1 2 3 4 5 6 7 8
     9 10 11 12 13 14 15
     This API would return inter-node process group {0, 8}, {1, 9}, {2, 10}, and so forth
@@ -248,14 +239,23 @@ def _init_ignored_module_states(
         Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
     ] = None,
 ) -> _FSDPState:
-    assert (
-        ignored_modules is None or ignored_states is None
-    ), "Can not pass `ignored_modules` and `ignored_states` at the same time. \
-        Please either pass `ignored_modules` or `ignored_states`."
+    if ignored_modules is not None and ignored_states is not None:
+        raise ValueError(
+            "Cannot pass both ignored_modules and ignored_states at the "
+            "same time. Please just pass ignored_states."
+        )
     ignored_parameters = None
-    ignored_states_list = list(ignored_states) if ignored_states is not None else []
-    if ignored_states_list and len(ignored_states_list) > 0:
-        if isinstance(ignored_states_list[0], torch.nn.Parameter):
+    passed_as_ignored_states = ignored_states is not None
+    if passed_as_ignored_states:
+        ignored_states_list = list(ignored_states)
+        _check_ignored_states(ignored_states_list, True)
+    else:
+        ignored_states_list = []
+        _check_ignored_states(
+            list(ignored_modules) if ignored_modules is not None else [], False
+        )
+    if len(ignored_states_list) > 0:
+        if isinstance(ignored_states_list[0], nn.Parameter):
             ignored_parameters = ignored_states_list
         else:
             ignored_modules = ignored_states_list
@@ -271,6 +271,38 @@ def _init_ignored_module_states(
     # precision). We should formalize this contract and decide if we need to
     # compute and store `_ignored_buffers`.
     return state
+
+
+def _check_ignored_states(
+    ignored_states: List[Any], passed_as_ignored_states: bool
+) -> None:
+    """
+    Checks that the ignored states are uniformly parameters or uniformly
+    modules. We may remove this check in the future if we permit mixing.
+    """
+    if len(ignored_states) == 0:
+        return
+    if passed_as_ignored_states:
+        all_params = all(isinstance(state, nn.Parameter) for state in ignored_states)
+        all_modules = all(isinstance(state, nn.Module) for state in ignored_states)
+        if not all_params and not all_modules:
+            # Sort for consistent ordering for unit test regex matching
+            sorted_types = sorted(
+                {type(state) for state in ignored_states}, key=lambda x: repr(x)
+            )
+            raise ValueError(
+                "ignored_states expects all nn.Parameter or all nn.Module list "
+                f"elements but got types {sorted_types}"
+            )
+    else:
+        if not all(isinstance(state, nn.Module) for state in ignored_states):
+            sorted_types = sorted(
+                {type(state) for state in ignored_states}, key=lambda x: repr(x)
+            )
+            raise ValueError(
+                "ignored_modules expects nn.Module list elements but got "
+                f"types {sorted_types}"
+            )
 
 
 @no_type_check

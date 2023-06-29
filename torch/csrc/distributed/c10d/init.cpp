@@ -519,6 +519,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           [](::c10d::Reducer& reducer) { reducer.set_optimizer_in_backward(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_set_sparse_metadata",
+          &::c10d::Reducer::setSparseMetadata,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "_set_mixed_precision_param_dtype",
           [](::c10d::Reducer& reducer, py::object data_type_obj) {
             auto scalar_type =
@@ -1569,13 +1573,6 @@ Arguments:
               &::c10d::ProcessGroup::_reduce_scatter_base,
               py::arg("outputTensor"),
               py::arg("inputTensor"),
-              py::arg("opts") = ::c10d::ReduceScatterOptions(),
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "reduce_scatter_tensor_coalesced",
-              &::c10d::ProcessGroup::reduce_scatter_tensor_coalesced,
-              py::arg("outputs"),
-              py::arg("inputs"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
