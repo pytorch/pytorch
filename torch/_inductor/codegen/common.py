@@ -783,12 +783,7 @@ class Kernel(CodeGen):
         raise NotImplementedError()
 
     def bucketize(
-        self,
-        values,
-        offsets_name: str,
-        offsets_size,
-        indexing_dtype: str,
-        right: bool
+        self, values, offsets_name: str, offsets_size, indexing_dtype: str, right: bool
     ):
         """
         See [Note: Inductor bucketize op]
@@ -871,7 +866,9 @@ class Kernel(CodeGen):
                 Note: semantics of this op differ slightly from torch.bucketize:
                 "right" has the opposite meaning.
                 """
-                return self.bucketize(values, offsets_name, offsets_size, indexing_dtype, right)
+                return self.bucketize(
+                    values, offsets_name, offsets_size, indexing_dtype, right
+                )
 
         super().__enter__()
         parent_handler = self.overrides(V.get_ops_handler())

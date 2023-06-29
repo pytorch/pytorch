@@ -78,7 +78,11 @@ def _inductor_bucketize_impl(input, boundaries, *, out_int32=False, right=False)
 
 
 def _inductor_bucketize_meta(input, boundaries, *, out_int32=False, right=False):
-    return torch.empty_like(input, memory_format=torch.preserve_format, dtype=(torch.int32 if out_int32 else torch.int64))
+    return torch.empty_like(
+        input,
+        memory_format=torch.preserve_format,
+        dtype=(torch.int32 if out_int32 else torch.int64),
+    )
 
 
 _bucketize = _prims._make_prim(
