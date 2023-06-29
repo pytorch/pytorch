@@ -814,7 +814,7 @@ class WrapperCodeGen(CodeGen):
             writer.writeline(self.wrap_kernel_call(name, call_args))
 
     def writeline(self, line, caller=None):
-        if caller is not None:
+        if caller is not None and config.multiple_streams:
             from ..ir import ExternKernel
             assert(isinstance(caller, ExternKernel))
             node_name = caller.name
@@ -822,7 +822,7 @@ class WrapperCodeGen(CodeGen):
         else:
             if isinstance(line, list):
                 for l in line:
-                    self.lines.append(line)
+                    self.lines.append(l)
             else:
                 self.lines.append(line)
 
