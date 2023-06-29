@@ -305,6 +305,30 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                 for tensor in xs:
                     self.assertEqual(tensor, expected_tensor)
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_sparse_allreduce_ops(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+
+        indices = torch.tensor([[0, 1]])
+        values = torch.tensor([[1, 2, 0], [4, 0, 6]])
+        sparse_tensor = torch.sparse_coo_tensor(indices, values, size=(2, 3)).to(self.rank)
+
+        # sparse allreduce call is wrapped in a try catch since the c10d API is only available in the nccl experimental branch
+        try:
+            work = pg.allreduce([sparse_tensor])
+            work.wait()
+
+            # work.result() returns a list of size 1, with the allreduce output as a dense tensor
+            a = torch.tensor([[2, 4, 0], [8, 0, 12]]).to(self.rank)
+            self.assertEqual(work.result()[0], a)
+        except RuntimeError as e:
+            if "allreduce_sparse is only available in the NCCL experimental branch." in str(e):
+                pass
+            else:
+                # Rethrow the exception if it's a different error
+                raise
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -3048,6 +3072,75 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     def test_new_group_local_sync_duplicated_pg(self):
         self._test_new_group_local_sync_duplicate_pg(backend="nccl")
 
+
+class SparseCollective(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 1
+
+    def setUp(self):
+        super().setUp()
+        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # self.num_gpus = torch.cuda.device_count()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    class ToyModel(nn.Module):
+        def __init__(self, rank, vocab_size, embedding_dim):
+            super().__init__()
+            self.embedding = nn.Embedding(vocab_size, embedding_dim, sparse=True).to(rank)
+            self.linear = nn.Linear(embedding_dim, 1).to(rank)
+
+        def forward(self, inputs):
+            embedded = self.embedding(inputs)
+            # embedded shape: (batch_size, sequence_length, embedding_dim)
+            flattened = torch.mean(embedded, dim=1)
+            # flattened shape: (batch_size, embedding_dim)
+            output = self.linear(flattened)
+            # output shape: (batch_size, 1)
+            return output
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_ddp_set_sparse_metadata(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+        vocab_size = 5
+
+        model = SparseCollective.ToyModel(self.rank, vocab_size=vocab_size, embedding_dim=10)
+        ddp_model = DistributedDataParallel(model)
+        inputs = torch.tensor([[1, 0, 0], [0, 0, 0], [0, 0, 0]]).to(self.rank)
+        # set sparse metadata on the DDP model
+        indices = torch.Tensor(list(range(vocab_size)))
+        ddp_model._set_sparse_metadata({"embedding.weight" : indices})
+        # forward pass
+        try:
+            output = ddp_model(inputs)
+            loss = output.sum()
+
+            # backward pass
+            loss.backward()
+            self.assertTrue(ddp_model.module.embedding.weight.grad.indices, indices)
+        except RuntimeError as e:
+            if "allreduce_sparse is only available in the NCCL experimental branch." in str(e):
+                pass
+            else:
+                # Rethrow the exception if it's a different error
+                raise
 
 
 if __name__ == "__main__":
