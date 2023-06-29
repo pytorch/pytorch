@@ -15,11 +15,11 @@ __all__ = [
 ]
 
 _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
-    "_SEMI_STRUCTURED_SPARSE_CONFIG", "compression_factor min_size"
+    "_SEMI_STRUCTURED_SPARSE_CONFIG", "compression_factor min_rows min_cols"
 )
 _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG = {
-    torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 64),
-    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(10, 128),
+    torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32, 64),
+    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(10, 32, 128),
     # FIXME: suport for torch.bfloat should be enabled here.
 }
 
@@ -157,13 +157,14 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
             # check shape
             m, n = original_tensor.shape
-            min_size = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG[original_tensor.dtype].min_size
-            if m < min_size or m % min_size or n < min_size or n % min_size:
+            min_rows = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG[original_tensor.dtype].min_rows
+            min_cols = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG[original_tensor.dtype].min_cols
+            if m < min_rows or m % min_rows or n < min_cols or n % min_cols:
                 # TODO in the future we can add in padding to support dimensions that aren't perfect multiples
                 raise RuntimeError(
                     (
                         f"Error original_tensor.shape {original_tensor.shape} is not supported! "
-                        "Both dimensions must be larger than and a multiple of {min_size}"
+                        "Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
                     )
                 )
 
@@ -319,6 +320,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
         raise NotImplementedError(error_string)
 
     def to_dense(self):
-        sparse = self.values()
-        meta = self.indices()
+        sparse = self.values().clone()
+        meta = self.indices().clone()
         return sparse_semi_structured_to_dense(sparse, meta)

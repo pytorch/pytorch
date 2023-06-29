@@ -2,21 +2,17 @@ import torch
 
 
 def _torch_compile_supported(device):
-    # FIXME: reused from torch/utils/_content_store.py, should be
-    # factored out into a common helper.
-
     import torch._dynamo
 
     compile_supported = torch._dynamo.is_dynamo_supported()
-    if device == "cpu":
+    if device.type == "cpu":
         pass
-    elif device == "cuda" and compile_supported:
+    elif device.type == "cuda" and compile_supported:
         from torch._inductor.utils import has_triton
 
         compile_supported = has_triton()
     else:
         compile_supported = False
-
     return compile_supported
 
 

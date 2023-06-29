@@ -253,10 +253,6 @@ class TestSparseSemiStructured(TestCase):
             output1, _ = torch._structured_sparse_linear(input, weight_sparse, meta, bias=bias, activation=activation)
             torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=rtol, atol=atol)
 
-        is_sm8x = torch.cuda.get_device_capability(0)[0] == 8
-        if not is_sm8x:
-            return
-
         batch_shapes = [[], [3], [3, 1]]
         dtype_out = {torch.int8: torch.int32, torch.half: torch.half, torch.bfloat16: torch.bfloat16}
         activations = [None, "relu", "silu"]
