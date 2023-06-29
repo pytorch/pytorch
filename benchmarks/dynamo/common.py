@@ -1409,19 +1409,6 @@ def optimize_onnx_ctx(
     return run_n_iterations_onnx
 
 
-def optimize_export_ctx(
-    export_fn,
-    export_config,
-    run_n_iterations: Callable,
-) -> Callable:
-    def run_one_iteration_export(model, inputs):
-        with torch._dynamo.config.patch(dataclasses.asdict(export_config)):
-            exported_model, _ = export_fn(model, *inputs)
-            return exported_model(*inputs)
-
-    return run_one_iteration_export
-
-
 def read_batch_size_from_file(args, filename, model_name):
     batch_size = None
     if os.path.exists("benchmarks"):
@@ -1969,7 +1956,15 @@ class BenchmarkRunner:
             try:
                 model_copy = deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
-                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+                if self.args.export:
+                    with torch._dynamo.config.patch(
+                        dataclasses.asdict(ExportDynamoConfig())
+                    ):
+                        optimized_model_iter_fn, _ = optimize_ctx(
+                            self.model_iter_fn, model_copy, example_inputs
+                        )
+                else:
+                    optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                 new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception(e)
@@ -2992,8 +2987,7 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.export:
-        export_config = ExportDynamoConfig()
-        export_fn = functools.partial(
+        optimize_ctx = functools.partial(
             torch._dynamo.export,
             aten_graph=True,
             tracing_mode="symbolic",
@@ -3001,7 +2995,6 @@ def run(runner, args, original_dir=None):
             constraints=None,
             assume_static_by_default=True,
         )
-        optimize_ctx = functools.partial(optimize_export_ctx, export_fn, export_config)
         experiment = speedup_experiment
         output_filename = "export.csv"
     elif args.xla:
