@@ -2,9 +2,8 @@ import functools
 import inspect
 import warnings
 from functools import partial
-from typing import Any, Callable, Dict, List, NamedTuple, Set, Type, Union
+from typing import Any, Callable, Dict, Set, Type, Union
 
-import torch
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _get_module_fsdp_state
 from torch.distributed.fsdp._utils import _override_module_mixed_precision
