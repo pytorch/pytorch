@@ -155,7 +155,7 @@ class TestFSDPWrap(FSDPTest):
         with self.assertRaisesRegex(
             ValueError,
             "FSDP auto wrapping requires modules to not already have FSDP "
-            f"applied but found {wrapped_module_name} in"
+            f"applied but found {wrapped_module_name} in",
         ):
             FSDP(wrapped_fsdp, auto_wrap_policy=size_based_auto_wrap_policy)
 
