@@ -516,6 +516,23 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
                 training=torch.onnx.TrainingMode.EVAL,
             )
 
+    def test_flatten(self):
+        class MyModule(Module):
+            def forward(self, x):
+                return torch.flatten(x)
+
+        module = MyModule()
+
+        ops_0d = [{"op_name": "Constant"}, {"op_name": "Reshape"}]
+        ops_1d = [{"op_name": "Identity"}]
+        for shape in ([], [3]):
+            x = torch.randn(shape)
+            for opset_version in [9, 10]:
+                ops = {opset_version: (ops_0d if len(shape) == 0 else ops_1d)}
+                check_onnx_opsets_operator(
+                    module, x, ops, opset_versions=[opset_version]
+                )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
