@@ -2140,7 +2140,12 @@ class TritonScheduling:
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
         if config.multiple_streams:
-            node_name = node_schedule[0].get_name()
+            for node in node_schedule:
+                if isinstance(node, scheduler.SchedulerNode):
+                    node_name = node.get_name()
+                    break
+            else:
+                raise RuntimeError(f"Cannot find node name in {node_schedule}")
             ssnode = V.graph.stream_graph.name_mapping[node_name]
             stream_id = ssnode.stream_id
             # print(f"findhao-> kernel_name: {kernel_name}, stream_id: {stream_id}")
