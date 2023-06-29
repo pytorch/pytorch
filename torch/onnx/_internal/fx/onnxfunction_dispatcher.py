@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import operator
+
+import warnings
 from typing import (
     Any,
     Callable,
@@ -175,6 +177,11 @@ class OnnxFunctionDispatcher:
 
         # If the perfect match is not found, find the nearest match
         symbolic_function = max(overload_match_ranking, key=overload_match_ranking.get)  # type: ignore[arg-type]
+
+        warnings.warn(
+            f"A perfect matched Opchema is not found in torchlib for {aten_name}, but \n"
+            f"a nearest match is found. Please check the ONNX output carefully. \n",
+        )
 
         diagnostic = diagnostic_context.inflight_diagnostic()
         diagnostic.with_additional_message(
