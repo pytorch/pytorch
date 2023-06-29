@@ -17,21 +17,10 @@ from .post_grad import register_lowering_pattern
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
     mkldnn = torch.ops.mkldnn
-    _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
-    _linear_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
-    _conv_transpose_args = (
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-        Arg(),
-    )
+    _conv_args = [Arg() for i in range(10)]
+    _linear_args = [Arg() for i in range(6)]
+    _conv_transpose_args = [Arg() for i in range(11)]
+
     _computation_user_1 = [
         CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=1),
         CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=1),
@@ -41,132 +30,9 @@ if torch._C._has_mkldnn:
             _users=1,
         ),
     ]
-    _computation_user_2 = [
-        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=2),
-        CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=2),
-        CallFunction(
-            mkldnn._convolution_transpose_pointwise.default,
-            *_conv_transpose_args,
-            _users=2,
-        ),
-    ]
-    _computation_user_3 = [
-        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=3),
-        CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=3),
-        CallFunction(
-            mkldnn._convolution_transpose_pointwise.default,
-            *_conv_transpose_args,
-            _users=3,
-        ),
-    ]
-    _computation_user_4 = [
-        CallFunction(mkldnn._convolution_pointwise.default, *_conv_args, _users=4),
-        CallFunction(mkldnn._linear_pointwise.default, *_linear_args, _users=4),
-        CallFunction(
-            mkldnn._convolution_transpose_pointwise.default,
-            *_conv_transpose_args,
-            _users=4,
-        ),
-    ]
 
-    def _gelu_fusion_1(computation_call):
-        return CallFunction(
-            aten.mul,
-            CallFunction(aten.mul, computation_call, 0.5),
-            CallFunction(
-                aten.add,
-                CallFunction(
-                    aten.erf,
-                    CallFunction(aten.mul, computation_call, 0.7071067811865476),
-                ),
-                1,
-            ),
-        )
-
-    def _gelu_fusion_2(computation_call):
-        return CallFunction(
-            aten.mul,
-            CallFunction(aten.mul, computation_call, 0.5),
-            CallFunction(
-                aten.add,
-                CallFunction(
-                    aten.tanh,
-                    CallFunction(
-                        aten.mul,
-                        CallFunction(
-                            aten.add,
-                            computation_call,
-                            CallFunction(
-                                aten.mul,
-                                CallFunction(
-                                    aten.mul,
-                                    CallFunction(
-                                        aten.mul, computation_call, computation_call
-                                    ),
-                                    computation_call,
-                                ),
-                                0.044715,
-                            ),
-                        ),
-                        0.7978845608028654,
-                    ),
-                ),
-                1,
-            ),
-        )
-
-    def _hardswish_fusion(computation_call):
-        return CallFunction(
-            aten.div,
-            CallFunction(
-                aten.mul,
-                computation_call,
-                CallFunction(
-                    aten.clamp_max,
-                    CallFunction(
-                        aten.clamp_min, CallFunction(aten.add, computation_call, 3), 0
-                    ),
-                    6,
-                ),
-            ),
-            6,
-        )
-
-    def _silu_fusion(computation_call):
-        return CallFunction(
-            aten.mul, computation_call, CallFunction(aten.sigmoid, computation_call)
-        )
-
-    def _hardsigmoid_fusion(computation_call):
-        return CallFunction(
-            aten.div,
-            CallFunction(
-                aten.clamp_max,
-                CallFunction(
-                    aten.clamp_min, CallFunction(aten.add, computation_call, 3), 0
-                ),
-                6,
-            ),
-            6,
-        )
-
-    def _leaky_relu_fusion(computation_call):
-        return CallFunction(
-            aten.where,
-            CallFunction(aten.gt, computation_call, 0),
-            computation_call,
-            CallFunction(aten.mul, computation_call, KeywordArg("negative_slope")),
-        )
-
-    def _hardtanh_fusion(computation_call):
-        return CallFunction(
-            aten.clamp_max,
-            CallFunction(aten.clamp_min, computation_call, KeywordArg("min_value")),
-            KeywordArg("max_value"),
-        )
-
-    def _combined_fusion(computation_call, elementwise_op):
-        return CallFunction(elementwise_op, computation_call)
+    def _combined_fusion(computation_call, elementwise_op, *args, **kwargs):
+        return CallFunction(elementwise_op, computation_call, *args, **kwargs)
 
     # binary_op(other, computation_op)
     def _binary_fusion_v1(computation_call, binary_fn):
@@ -187,75 +53,57 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _register_unary_fusion_lowering(pattern, unary_attr, computation_op):
-        @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op)
+    def _register_unary_fusion_pattern(pattern, unary_op_name, computation_op):
+        @register_freezing_graph_pattern(
+            pattern,
+            extra_check=_is_single_computation_op(computation_op),
+            pass_number=2,
         )
         def fn(match, *args):
-            computation_args = list(args)[:-3] + [
-                unary_attr.op_name,
-                unary_attr.scalars_attr,
-                unary_attr.algorithm_attr,
-            ]
-            return L[computation_op](*computation_args)
+            graph = match.graph
+            computation_node = filter_nodes(match.nodes, computation_op)[0]
+            unary_node = match.output_node()
+            conv_args = list(computation_node.args)
+            conv_args[-3] = unary_op_name
+            if unary_op_name == "gelu":
+                assert len(unary_node.args) == 1 and len(unary_node.kwargs) == 0
+                conv_args[-1] = "none"
+            computation_node.args = tuple(conv_args)
+            unary_node.replace_all_uses_with(computation_node)
+            graph.erase_node(unary_node)
 
         return fn
 
-    def _register_leaky_relu_fusion_lowering(pattern, computation_op):
-        @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op)
+    def _register_unary_fusion_with_parameters_pattern(
+        pattern, unary_op_name, computation_op
+    ):
+        @register_freezing_graph_pattern(
+            pattern,
+            extra_check=_is_single_computation_op(computation_op),
+            pass_number=2,
         )
         def fn(match, *args, **kwargs):
-            negative_slope = kwargs.get("negative_slope")
-            if isinstance(negative_slope, ir.TensorBox):
-                matched = False
-            else:  # inp is a Number
-                matched = True
-            computation_args = list(args)
-            if matched:
-                computation_args = computation_args[:-3] + [
-                    "leaky_relu",
-                    [negative_slope],
-                    "",
-                ]
-                return L[computation_op](*computation_args)
+            assert unary_op_name in ["leaky_relu", "gelu", "hardtanh"]
+            graph = match.graph
+            computation_node = filter_nodes(match.nodes, computation_op)[0]
+            unary_node = match.output_node()
+            if unary_op_name == "leaky_relu":
+                scalar_attr = [args[-1]]
+            elif unary_op_name == "hardtanh":
+                scalar_attr = [args[-2], args[-1]]
             else:
-                # computation_args += ["none", [], ""]
-                computation_out = L[computation_op](*computation_args)
-                return L[aten.where](
-                    L[aten.gt](computation_out, 0),
-                    computation_out,
-                    L[aten.mul](computation_out, negative_slope),
-                )
-
-        return fn
-
-    def _register_hardtanh_fusion_lowering(pattern, computation_op):
-        @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op)
-        )
-        def fn(match, *args, **kwargs):
-            min_value = kwargs.get("min_value")
-            max_value = kwargs.get("max_value")
-            if isinstance(min_value, ir.TensorBox) or isinstance(
-                max_value, ir.TensorBox
-            ):
-                matched = False
-            else:  # inp is a Number
-                matched = min_value <= max_value
-            computation_args = list(args)
-            if matched:
-                computation_args = computation_args[:-3] + [
-                    "hardtanh",
-                    [min_value, max_value],
-                    "",
-                ]
-                return L[computation_op](*computation_args)
-            else:
-                conv_out = L[computation_op](*computation_args)
-                return L[aten.clamp_max](
-                    L[aten.clamp_min](conv_out, min_value), max_value
-                )
+                scalar_attr = []
+            algorithm_attr = ""
+            if unary_op_name == "gelu":
+                algorithm_attr = unary_node.kwargs.get("approximate")
+                assert algorithm_attr is not None
+            conv_args = list(computation_node.args)
+            conv_args[-3] = unary_op_name
+            conv_args[-2] = scalar_attr
+            conv_args[-1] = algorithm_attr
+            computation_node.args = tuple(conv_args)
+            unary_node.replace_all_uses_with(computation_node)
+            graph.erase_node(unary_node)
 
         return fn
 
@@ -413,41 +261,65 @@ if torch._C._has_mkldnn:
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
     def _register_unary_fusion():
-        replacement_unary_fusion_patterns = {
-            UnaryAttr("gelu", algorithm_attr="tanh"): [
-                _gelu_fusion_2(u) for u in _computation_user_4
+        unary_fusion_patterns = {
+            "hardswish": [
+                _combined_fusion(u, aten.hardswish.default) for u in _computation_user_1
             ],
-            UnaryAttr("gelu", algorithm_attr="none"): [
-                _gelu_fusion_1(u) for u in _computation_user_2
+            "hardsigmoid": [
+                _combined_fusion(u, aten.hardsigmoid.default)
+                for u in _computation_user_1
             ],
-            UnaryAttr("hardswish"): [_hardswish_fusion(u) for u in _computation_user_2],
-            UnaryAttr("hardsigmoid"): [
-                _hardsigmoid_fusion(u) for u in _computation_user_1
+            "swish": [
+                _combined_fusion(u, aten.silu.default) for u in _computation_user_1
             ],
-            UnaryAttr("swish"): [_silu_fusion(u) for u in _computation_user_2],
-            UnaryAttr("relu"): [
-                _combined_fusion(u, aten.relu) for u in _computation_user_1
+            "relu": [
+                _combined_fusion(u, aten.relu.default) for u in _computation_user_1
             ],
-            UnaryAttr("sigmoid"): [
-                _combined_fusion(u, aten.sigmoid) for u in _computation_user_1
+            "sigmoid": [
+                _combined_fusion(u, aten.sigmoid.default) for u in _computation_user_1
             ],
-            UnaryAttr("tanh"): [
-                _combined_fusion(u, aten.tanh) for u in _computation_user_1
+            "tanh": [
+                _combined_fusion(u, aten.tanh.default) for u in _computation_user_1
+            ],
+            "gelu": [
+                _combined_fusion(u, aten.gelu.default) for u in _computation_user_1
             ],
         }
-        for unary_attr, patterns in replacement_unary_fusion_patterns.items():
-            _register_unary_fusion_lowering(patterns[0], unary_attr, computation_ops[0])
-            _register_unary_fusion_lowering(patterns[1], unary_attr, computation_ops[1])
-            _register_unary_fusion_lowering(patterns[2], unary_attr, computation_ops[2])
+        for unary_op_name, patterns in unary_fusion_patterns.items():
+            _register_unary_fusion_pattern(
+                patterns[0], unary_op_name, computation_ops[0]
+            )
+            _register_unary_fusion_pattern(
+                patterns[1], unary_op_name, computation_ops[1]
+            )
+            _register_unary_fusion_pattern(
+                patterns[2], unary_op_name, computation_ops[2]
+            )
 
-        _leaky_relu_patterns = [
-            _leaky_relu_fusion(user) for user in _computation_user_3
-        ]
-        _hardtanh_patterns = [_hardtanh_fusion(user) for user in _computation_user_1]
-        for pattern, computation_op in zip(_leaky_relu_patterns, computation_ops):
-            _register_leaky_relu_fusion_lowering(pattern, computation_op)
-        for pattern, computation_op in zip(_hardtanh_patterns, computation_ops):
-            _register_hardtanh_fusion_lowering(pattern, computation_op)
+        unary_fusion_with_parameters_patterns = {
+            "leaky_relu": [
+                _combined_fusion(u, aten.leaky_relu.default, Arg())
+                for u in _computation_user_1
+            ],
+            "hardtanh": [
+                _combined_fusion(u, aten.hardtanh.default, Arg(), Arg())
+                for u in _computation_user_1
+            ],
+            "gelu": [
+                _combined_fusion(u, aten.gelu.default, approximate="tanh")
+                for u in _computation_user_1
+            ],
+        }
+        for unary_op_name, patterns in unary_fusion_with_parameters_patterns.items():
+            _register_unary_fusion_with_parameters_pattern(
+                patterns[0], unary_op_name, computation_ops[0]
+            )
+            _register_unary_fusion_with_parameters_pattern(
+                patterns[1], unary_op_name, computation_ops[1]
+            )
+            _register_unary_fusion_with_parameters_pattern(
+                patterns[2], unary_op_name, computation_ops[2]
+            )
 
     def _register_inplace_fusion():
         binary_ops = [aten.add, ops.add]
@@ -840,7 +712,6 @@ if torch._C._has_mkldnn:
     @functools.lru_cache(None)
     def _mkldnn_fusion_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
-            _register_unary_fusion()
             _register_inplace_fusion()
             _register_binary_unary_fusion()
             _register_binary_fusion()
@@ -850,3 +721,4 @@ if torch._C._has_mkldnn:
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_weight_pack_pass()
             _recover_linear()
+            _register_unary_fusion()

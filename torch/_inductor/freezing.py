@@ -160,11 +160,19 @@ def fuse_conv_bn(gm):
     return _fuse_conv_bn_(gm)
 
 
-def decompose_unfused_batchnorms(gm, example_inputs, preserved_arg_indices):
-    if not any(
-        node.target is aten._native_batch_norm_legit_no_training.default
-        for node in gm.graph.nodes
-    ):
+fused_ops = [
+    torch.ops.aten._native_batch_norm_legit_no_training.default,
+    torch.ops.aten.hardswish.default,
+    torch.ops.aten.leaky_relu.default,
+    torch.ops.aten.hardtanh.default,
+    torch.ops.aten.gelu.default,
+    torch.ops.aten.silu.default,
+    torch.ops.aten.hardsigmoid.default,
+]
+
+
+def decompose_unfused_fusion_ops(gm, example_inputs, preserved_arg_indices):
+    if not any(node.target in fused_ops for node in gm.graph.nodes):
         return gm
 
     fake_mode = detect_fake_mode(example_inputs)
@@ -212,20 +220,20 @@ def freeze(
     constant_fold(aot_autograd_gm)
 
     fuse_conv_bn(aot_autograd_gm)
-    # now, decomp batch norm if we were unable to fuse it
-    aot_autograd_gm = decompose_unfused_batchnorms(
-        aot_autograd_gm, example_inputs, preserved_arg_indices
-    )
 
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)
     aot_autograd_gm.graph = cse_graph
     aot_autograd_gm.recompile()
     freezing_passes(aot_autograd_gm)
-
     # TODO - apply legalization in pattern matcher
     torch.fx.passes.tools_common.legalize_graph(aot_autograd_gm)
     constant_fold(aot_autograd_gm)
+    # now, decompose fusible ops if we were unable to fuse it.
+    aot_autograd_gm = decompose_unfused_fusion_ops(
+        aot_autograd_gm, example_inputs, preserved_arg_indices
+    )
+
     # invalidate nn Modules
     if config.freezing_discard_parameters:
         invalidate_eager_modules()
