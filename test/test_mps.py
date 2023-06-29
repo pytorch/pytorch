@@ -4612,7 +4612,7 @@ class TestNLLLoss(TestCaseMPS):
 
     def test_argmax(self):
         # https://github.com/pytorch/pytorch/issues/98191
-        cpu_tensor = torch.tensor([[0, 1], [2,1], [1, 0]])
+        cpu_tensor = torch.tensor([[0, 1], [2, 1], [1, 0]])
         res_cpu = torch.argmax(cpu_tensor, dim=1)
 
         mps_tensor = cpu_tensor.to(torch.device('mps'))
@@ -4620,7 +4620,7 @@ class TestNLLLoss(TestCaseMPS):
         self.assertEqual(res_cpu, res_mps)
 
         # https://github.com/pytorch/pytorch/issues/92311
-        mps_tensor = torch.randn(10,2, device='mps', dtype=torch.float32)
+        mps_tensor = torch.randn(10, 2, device='mps', dtype=torch.float32)
         cpu_tensor = mps_tensor.detach().clone().cpu()
 
         res_mps = torch.argmax(mps_tensor, dim=1)
