@@ -594,7 +594,7 @@ void unpackQuantizedWeightsHelper(
       qlinear_node->insertInput(2, bias->output());
     }
 
-    // add conv arguments: stride, padding, dilation, groups
+    // add conv arguments: stride, padding, dilation, groups, output_padding
     if (stride.has_value() && padding.has_value() && dilation.has_value() &&
         groups.has_value() &&
         (!expect_output_padding || output_padding.has_value())) {
