@@ -177,6 +177,8 @@ def _module_handles(state: _FSDPState, module: nn.Module) -> List:
     the handles that contain some parameter in ``module``.
     """
     if _is_composable(state):
+        # A valid FSDP state may have no managed parameters and hence no
+        # handles, meaning no entry in `_fully_sharded_module_to_handles`
         if len(state._handles) == 0:
             return []
         assert (
