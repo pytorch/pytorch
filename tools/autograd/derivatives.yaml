@@ -57,8 +57,8 @@
 # differentiable.
 #
 # Gradient expressions are standard C++ expressions operating on ATen
-# variables.  In a gradient expression, the following variables are in
-# scope:
+# variables.  In a gradient expression, the following variables/functions
+# are in scope:
 #
 #   - 'grad', the gradient of the output (often spelled grad_output
 #     in Python) which we are going to left-multiply.
@@ -109,6 +109,23 @@
 #     run again later.  This allows an optimization where we can
 #     destroy saved buffers if we know variables are not going to be retained,
 #     e.g., it is used by _cudnn_rnn
+#
+#   - `wrap_opt_if`, is a 2-argument function that accepts a tensor
+#     variable and a boolean condition that dictates whether to save that
+#     variable in a graph. The result of this function is `c10::optional<Tensor>`,
+#     and it is `c10::nullopt` when the condition evalutes to `false`,
+#     otherwise it is the variable wrapped in `c10::optional<Tensor>`.
+#     For example, wrap_opt_if(var_0, grad_input_mask[1] || grad_input_mask[2])
+#     would mean that `var_0` is saved as long as the second (grad_input_mask[1])
+#     or the third (grad_input_mask[2]) argument requires gradients.
+#     Another interpretation of this expression would read as `var_0` is needed
+#     in the backward computation of the second or the third argument.
+#     NOTE: the usage of `var_i.requires_grad()` in the conditional expression
+#     is not supported, use `grad_input_mask[i]` instead.
+#     NOTE: `wrap_opt_if` could be used to prevent saving redundant variables
+#     with multi-output backward formulas.
+#     See https://github.com/pytorch/pytorch/issues/97575 for more details
+#     on the issue.
 #
 # If you need a complex expression, e.g., with local variables,
 # write a _backward function in torch/csrc/autograd/FunctionsManual.cpp
@@ -1870,7 +1887,11 @@
 
 # NN
 - name: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
-  i1, i2, i3: _trilinear_backward(grad, i1, i2, i3, expand1, expand2, expand3, sumdim, grad_input_mask)
+  i1, i2, i3: "_trilinear_backward(grad,
+               wrap_opt_if(i1, grad_input_mask[1] || grad_input_mask[2]),
+               wrap_opt_if(i2, grad_input_mask[0] || grad_input_mask[2]),
+               wrap_opt_if(i3, grad_input_mask[0] || grad_input_mask[1]),
+               expand1, expand2, expand3, sumdim, grad_input_mask)"
   result: "_trilinear(i1_t, i2_p, i3_p, expand1, expand2, expand3, sumdim, unroll_dim) +
            _trilinear(i1_p, i2_t, i3_p, expand1, expand2, expand3, sumdim, unroll_dim) +
            _trilinear(i1_p, i2_p, i3_t, expand1, expand2, expand3, sumdim, unroll_dim)"
