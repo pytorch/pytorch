@@ -130,9 +130,7 @@ def parse_et_yaml(
     et_kernel = extract_kernel_fields(es)
 
     # Remove ET specific fields from entries for BC compatibility
-    for entry in es:
-        for field in ET_FIELDS:
-            entry.pop(field, None)
+    strip_et_fields(es)
 
     native_yaml = parse_native_yaml(
         path,
@@ -142,3 +140,12 @@ def parse_et_yaml(
         loaded_yaml=es,
     )
     return native_yaml.native_functions, et_kernel
+
+
+def strip_et_fields(es: object) -> None:
+    """Given a loaded yaml representing a list of operators,
+    remove ET specific fields from every entries for BC compatibility
+    """
+    for entry in es:  # type: ignore[attr-defined]
+        for field in ET_FIELDS:
+            entry.pop(field, None)
