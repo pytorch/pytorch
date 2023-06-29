@@ -1189,6 +1189,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         except torch._dynamo.exc.Unsupported:
             pass
 
+    def test_threading_local(self):
+        import threading
+
+        foo = threading.local()
+        foo.x = torch.rand(1)
+
+        def f(x):
+            return torch.cat([x, foo.x])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch._dynamo.optimize(cnt, nopython=True)(f)
+
+        inp = torch.ones(1)
+        out = f(inp)
+        opt_out = opt_f(inp)
+        self.assertEqual(opt_out, out)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_seq_append_list(self):
         x = torch.randn(4, 10)
         model = SequentialAppendList(
