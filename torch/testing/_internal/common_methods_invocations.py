@@ -4117,7 +4117,7 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
             device=device,
             dtype=dtype,
             requires_grad=requires_grad,
-            low=0 if dtype == torch.uint8 else None,
+            # we pick more realistic upper bound 256 instead of default 10 for uint8 dtype
             high=256 if dtype == torch.uint8 else None,
         )
         # provide a single sample for more typical image processing usage
@@ -4181,7 +4181,7 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
             device=device,
             dtype=dtype,
             requires_grad=requires_grad,
-            low=0 if dtype == torch.uint8 else None,
+            # we pick more realistic upper bound 256 instead of default 10 for uint8 dtype
             high=256 if dtype == torch.uint8 else None,
         )
         # provide a single sample for more typical image processing usage
