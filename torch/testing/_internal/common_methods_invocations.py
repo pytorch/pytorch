@@ -27,8 +27,7 @@ from torch.testing._internal.common_device_type import \
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
     SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN,
-    _get_torch_cuda_version, _get_torch_rocm_version, PLATFORM_SUPPORTS_FUSED_SDPA,
-    SM80OrLater
+    _get_torch_cuda_version, _get_torch_rocm_version, PLATFORM_SUPPORTS_FUSED_SDPA
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
@@ -10720,8 +10719,6 @@ op_db: List[OpInfo] = [
                        # 76047
                        DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                                     dtypes=(torch.bfloat16, torch.float32, torch.float64)),
-                       DecorateInfo(unittest.skip("unexpected success on ASAN"), 'TestNNCOpInfo',
-                                    'test_nnc_correctness', dtypes=(torch.bfloat16,), active_if=TEST_WITH_ASAN),
                    )),
     OpInfo('stft',
            decorators=[
@@ -12896,10 +12893,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
-           sample_inputs_func=sample_inputs_max_pool,
-           decorators=(
-               DecorateInfo(slowTest, 'TestJit', 'test_variant_consistency_jit', active_if=TEST_WITH_ASAN),
-           )),
+           sample_inputs_func=sample_inputs_max_pool),
     OpInfo('max_pool2d_with_indices_backward',
            op=max_pool2d_backward,
            # We've defined a custom op, so there's no corresponding aten op
@@ -13261,9 +13255,11 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
             # OpInfo was implemented with a lambda
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            # See [Note] SDPA_flash's meta function returns incorrect Philox seed and offset
+            # See [Note] SDPA returns Philox Offset and Seed as tensors that will live on CPU when not in cuda graph capture
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_amp',
-                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_SDPA and SM80OrLater),
+                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_SDPA),
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
+                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_SDPA),
             # TODO Need to understand what this is testing and why it doesn't work
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),
@@ -14990,8 +14986,7 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
                                     'TestCommon', 'test_noncontiguous_samples',
-                                    device_type='cuda'),
-                       DecorateInfo(slowTest, 'TestCompositeCompliance', 'test_backward', active_if=TEST_WITH_ASAN)],
+                                    device_type='cuda')],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),

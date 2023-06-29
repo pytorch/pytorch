@@ -9,7 +9,8 @@ from torch.ao.quantization.fx.prepare import (
     _is_activation_post_process_node,
 )
 import operator
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Callable, Any
+import copy
 
 
 def _get_tensor_constant_from_node(node, m):
@@ -172,3 +173,42 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
             current_scope = (bt[0].split(".")[-1], bt[1])
         node_name_to_scope[n.name] = current_scope
     return node_name_to_scope
+
+def _get_aten_graph_module(
+    pattern: Callable,
+    example_inputs: Tuple[Any, ...],
+    **kwargs,
+) -> GraphModule:
+    """
+    Convert the pattern to an FX graph with decomposed aten ops.
+    """
+    # Avoid circular imports
+    import torch._dynamo
+    aten_pattern, _ = torch._dynamo.export(
+        pattern,
+        *copy.deepcopy(example_inputs),
+        aten_graph=True,
+        tracing_mode="real",
+        **kwargs,
+    )
+    aten_pattern.graph.eliminate_dead_code()
+    aten_pattern.recompile()
+    return aten_pattern
+
+def _remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
+    """ Remove .tensor overload for quantize/dequantize ops so that we can
+    use the match_pattern that we get from torchdynamo export to match the output of convert_pt2e
+    """
+    _MAP = {
+        torch.ops.quantized_decomposed.quantize_per_tensor.default: torch.ops.quantized_decomposed.quantize_per_tensor,
+        torch.ops.quantized_decomposed.dequantize_per_tensor.default: torch.ops.quantized_decomposed.dequantize_per_tensor,
+        torch.ops.quantized_decomposed.quantize_per_tensor.tensor: torch.ops.quantized_decomposed.quantize_per_tensor,
+        torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: torch.ops.quantized_decomposed.dequantize_per_tensor,
+        torch.ops.quantized_decomposed.quantize_per_channel.default: torch.ops.quantized_decomposed.quantize_per_channel,
+        torch.ops.quantized_decomposed.dequantize_per_channel.default: torch.ops.quantized_decomposed.dequantize_per_channel
+    }
+    for n in match_pattern.graph.nodes:
+        if n.op != "call_function":
+            continue
+        if n.target in _MAP:
+            n.target = _MAP[n.target]
