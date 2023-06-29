@@ -346,8 +346,9 @@ class TensorParallelRNGTracker(CudaRNGStateTracker):
         assert coordinate is not None
         tensor_parallel_rank = coordinate[tp_dim]
         # this magic number 2718 comes from Megatron's code
-        # (https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/tensor_parallel/random.py)
-        tensor_parallel_seed = base_seed + 2718 + tensor_parallel_rank
+        # (https://github.com/NVIDIA/Megatron-LM/blob/060415572f4365a2e895f8036c4e37dad0efbdf5/megatron/core/tensor_parallel/random.py#L162-L163)
+        MegatronMagicNum = 2718
+        tensor_parallel_seed = base_seed + MegatronMagicNum + tensor_parallel_rank
         self.set_seed("tensor-parallel-rng", tensor_parallel_seed)
 
     @contextlib.contextmanager
