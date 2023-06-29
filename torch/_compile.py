@@ -27,7 +27,4 @@ def _disable_dynamo(fn=None, recursive=True):
     else:
         # decorator usage like @_disable_dynamo(recursive=False). The resulting
         # object expects the original decorated function as the arg.
-        def outer(fn_outer):
-            return _disable_dynamo(fn_outer, recursive)
-
-        return outer
+        return functools.partial(_disable_dynamo, recursive=recursive)
