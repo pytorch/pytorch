@@ -229,7 +229,6 @@ aten::fmod.Tensor
 aten::fmod.Tensor_out
 aten::fmod_.Scalar
 aten::fmod_.Tensor
-aten::frac_
 aten::full
 aten::full.names
 aten::full.names_out
@@ -335,7 +334,6 @@ aten::mul.Tensor
 aten::mul.out
 aten::mul_.Scalar
 aten::mul_.Tensor
-aten::mvlgamma_
 aten::narrow_copy
 aten::narrow_copy.out
 aten::native_dropout
@@ -477,12 +475,8 @@ aten::tan_
 aten::tanh
 aten::tanh.out
 aten::tanh_
-aten::tril.out
-aten::tril_
 aten::tril_indices
 aten::tril_indices.out
-aten::triu.out
-aten::triu_
 aten::triu_indices
 aten::triu_indices.out
 aten::trunc
@@ -507,5 +501,3 @@ aten::var_mean.correction_out
 aten::view
 aten::where.self
 aten::where.self_out
-aten::xlogy_.Scalar_Other
-aten::xlogy_.Tensor
