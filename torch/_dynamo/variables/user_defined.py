@@ -439,6 +439,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return variables.TorchHigherOrderOperatorVariable(
                         get_higher_order_op(func), **options
                     )
+                elif is_allowed(func):
+                    return variables.TorchVariable(func, source=source, **options)
                 return variables.UserFunctionVariable(func, source=source, **options)
 
         if (

@@ -1470,6 +1470,12 @@ def randn(*args, **kwargs):
     raise AssertionError("should have been handled in replace_random.py")
 
 
+@register_lowering(inductor_prims.force_stride_order, type_promotion_kind=None)
+def inductor_force_stride_order(input_tensor, stride):
+    stride_order = ir.get_stride_order(stride)
+    return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
+
+
 @register_lowering(inductor_prims.seed, type_promotion_kind=None)
 def inductor_seed(device: torch.device):
     raise AssertionError("should be handled in fuse_seed_creation_pass()")
@@ -1754,10 +1760,6 @@ make_fallback(aten.exponential.default, warn=False)
 
 # ROCm specific fallback, perf issues are observed when registered
 make_fallback(aten.miopen_batch_norm, warn=False)
-
-if torch.version.hip is not None and torch.cuda.is_available():
-    # tl.reduce not available yet in ROCm's version of triton
-    make_fallback(aten.prod, warn=False)
 
 
 @register_lowering(aten.clone)
