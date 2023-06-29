@@ -1267,6 +1267,7 @@ def wrap_fx_proxy_cls(
     elif isinstance(example_value, int) and proxy.node.target in [
         getattr,
         operator.getitem,
+        torch.initial_seed
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)

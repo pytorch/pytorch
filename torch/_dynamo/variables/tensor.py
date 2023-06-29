@@ -248,7 +248,7 @@ class TensorVariable(VariableTracker):
             return TorchVariable(self.python_type(), **options)
         if name == "_typed_storage":
             return variables.LambdaVariable(
-                lambda *args, **kwargs: TypedStorageVariable(self._typed_storage())
+                lambda *args, **kwargs: TypedStorageVariable(self._typed_storage(), self.as_proxy()._typed_storage())
             ).add_options(self)
 
         # Add a guard for type matching, these guards are checked before tensor guards
@@ -498,7 +498,7 @@ class TensorVariable(VariableTracker):
                 **options,
             )
         elif name == "_typed_storage":
-            return TypedStorageVariable(self._typed_storage)
+            return TypedStorageVariable(self._typed_storage(), self.as_proxy()._typed_storage())
         else:
             constant_result = None
 
@@ -980,12 +980,17 @@ class FakeItemVariable(TensorVariable):
 
 
 class TypedStorageVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, proxy, **kwargs):
         self.value = value
+        self.proxy = proxy
+        self.proxy.node.meta["example_value"] = self.value
         super().__init__(**kwargs)
 
     def reconstruct(self, codegen):
         return super().reconstruct(codegen)
+
+    def as_proxy(self):
+        return self.proxy
 
     def call_method(
         self,
@@ -997,6 +1002,14 @@ class TypedStorageVariable(VariableTracker):
         if name == "_data_ptr":
             return ConstantVariable(self.value._data_ptr())
         if name == "_size":
+            if free_symbols(self.value._size()):
+                size_proxy = tx.output.create_proxy(
+                    "call_method",
+                    "_size",
+                    *proxy_args_kwargs([self], {}),
+                )
+                size_proxy.node.meta['example_value'] = self.value._size()
+                return SymNodeVariable(size_proxy, self.value._size())
             if isinstance(self.value._size(), int):
                 return ConstantVariable(self.value._size())
             sizes = [ConstantVariable(x) for x in self.value._size()]
