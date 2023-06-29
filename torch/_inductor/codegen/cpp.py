@@ -4,6 +4,7 @@ import functools
 import itertools
 import logging
 import math
+import os
 import re
 import sys
 from copy import copy, deepcopy
@@ -214,7 +215,7 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
 
 
 @functools.lru_cache()
-def cpp_prefix():
+def cpp_prefix_path():
     path = Path(__file__).parent / "cpp_prefix.h"
     with path.open() as f:
         content = f.read()
@@ -222,7 +223,17 @@ def cpp_prefix():
             content,
             "h",
         )
-    return f'#include "{filename}"'
+    return filename
+
+
+def cpp_prefix():
+    filename = cpp_prefix_path()
+    if config.is_fbcode():
+        # We need relative paths, since we bundle up
+        # everything that we compile into a folder for remote compilation.
+        return f'#include "{os.path.basename(filename)}"'
+    else:
+        return f'#include "{filename}"'
 
 
 class CppPrinter(ExprPrinter):
