@@ -125,13 +125,12 @@ struct TORCH_API TensorGeometry {
   void recompute() {
     // recalculate numel after a change
     c10::SymInt numel = 1;
-    bool symbolic = false;
     for (const auto& i : sizes_) {
       numel = numel * i;
-      symbolic = symbolic || i.is_heap_allocated();
     }
     numel_ = numel;
-    has_symbolic_sizes_strides_ = symbolic;
+    has_symbolic_sizes_strides_ =
+        !c10::asIntArrayRefSlowOpt(sizes_).has_value();
   }
 
  private:
