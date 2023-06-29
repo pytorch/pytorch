@@ -536,13 +536,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
   auto q_t = query.transpose(1, 2);
   auto k_t = key.transpose(1, 2);
   auto v_t = value.transpose(1, 2);
+  auto o_t = out.transpose(1, 2);
   auto lse_t = logsumexp.transpose(1, 2);
 
   auto grad_q = at::zeros(q_t.sizes(), query.options());
   auto grad_k = at::zeros(k_t.sizes(), key.options());
   auto grad_v = at::zeros(v_t.sizes(), value.options());
 
-  efficient_attention_backward_kernel(kCPU, grad_q, grad_k, grad_v, grad_out_t, q_t, k_t, v_t, lse_t, causal, scale);
+  efficient_attention_backward_kernel(kCPU, grad_q, grad_k, grad_v, grad_out_t, q_t, k_t, v_t, o_t, lse_t, causal, scale);
 
   grad_q = grad_q.transpose(1, 2);
   grad_k = grad_k.transpose(1, 2);

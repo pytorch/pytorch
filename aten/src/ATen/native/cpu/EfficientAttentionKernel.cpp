@@ -268,6 +268,7 @@ void cpu_efficient_attention_backward(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
+    const Tensor& out,
     const Tensor& logsumexp,
     bool is_causal,
     c10::optional<double> scale) {
@@ -297,6 +298,9 @@ void cpu_efficient_attention_backward(
   int64_t v_strideB = value.stride(0);
   int64_t v_strideN = value.stride(1);
   int64_t v_strideH = value.stride(2);
+  int64_t o_strideB = out.stride(0);
+  int64_t o_strideM = out.stride(1);
+  int64_t o_strideH = out.stride(2);
 
   int64_t l_strideB = logsumexp.stride(0);
   int64_t l_strideM = logsumexp.stride(1);
@@ -315,10 +319,10 @@ void cpu_efficient_attention_backward(
   int64_t gO_strideM = grad_out.stride(1);
   int64_t gO_strideH = grad_out.stride(2);
 
-
   scalar_t* q_data = query.data_ptr<scalar_t>();
   scalar_t* k_data = key.data_ptr<scalar_t>();
   scalar_t* v_data = value.data_ptr<scalar_t>();
+  scalar_t* out_data = out.data_ptr<scalar_t>();
   scalar_t* lse_data = logsumexp.data_ptr<scalar_t>();
   scalar_t* grad_q_data = grad_q.data_ptr<scalar_t>();
   scalar_t* grad_k_data = grad_k.data_ptr<scalar_t>();
@@ -328,9 +332,7 @@ void cpu_efficient_attention_backward(
   // allocate per thread temp buffer
   int64_t size_per_thread =
       /* attn_v          */ kQueriesPerBlock * kKeysPerBlock +
-      /* grad_attn_v     */ kQueriesPerBlock * kKeysPerBlock +
-      /* buf for grad_q  */ kQueriesPerBlock * K +
-      /* buf2 for grad_k */ kQueriesPerBlock * N;
+      /* grad_attn_v     */ kQueriesPerBlock * kKeysPerBlock;
 
   auto buffer = at::empty({at::get_num_threads(), size_per_thread}, query.options());
   scalar_t* buf_data = buffer.data_ptr<scalar_t>();
@@ -349,15 +351,6 @@ void cpu_efficient_attention_backward(
     // grad_attn_v: (kQueriesPerBlock, kKeysPerBlock)
     scalar_t* grad_attn_v = attn_v + kQueriesPerBlock * kKeysPerBlock;
 
-    // buf: (kQueriesPerBlock, K)
-    scalar_t* buf = grad_attn_v + kQueriesPerBlock * kKeysPerBlock;
-
-    // buf2: (kQueriesPerBlock, N)
-    scalar_t* buf2 = buf + kQueriesPerBlock * K;
-
-    // holds the per row sum of grad_attn_v
-    scalar_t sum[kQueriesPerBlock];
-
     for (const auto i : c10::irange(begin, end)) {
       (void)i; // Suppress unused variable
 
@@ -366,17 +359,9 @@ void cpu_efficient_attention_backward(
 
         scalar_t* q_ptr = q_data + b * q_strideB + m * q_strideM + h * q_strideH;
         scalar_t* lse_ptr = lse_data + b * l_strideB + m * l_strideM + h * l_strideH;
+        scalar_t* out_ptr = out_data + b * o_strideB + m * o_strideM + h * o_strideH;
         scalar_t* grad_o_ptr = grad_o_data + b * gO_strideB + m * gO_strideM + h * gO_strideH;
         scalar_t* grad_q_ptr = grad_q_data + b * gQ_strideB + m * gQ_strideM + h * gQ_strideH;
-
-        // init buf and sum to zeros before accumulation
-        fill_stub<scalar_t>(buf, 0, kQueriesPerBlock * K);
-        fill_stub<scalar_t>(sum, 0, block_size_m);
-
-        // only need to init buf2 to zero when causal mask
-        if (is_causal) {
-          fill_stub<scalar_t>(buf2, 0, kQueriesPerBlock * N);
-        }
 
         // loop over Q and V sequence with block size of kKeysPerBlock
         int64_t num_keys = is_causal ? std::min(m + block_size_m, N) : N;
@@ -456,26 +441,26 @@ void cpu_efficient_attention_backward(
               grad_attn_v,
               kKeysPerBlock);
 
-          // calculate the gradient of softmax
-          // grad_attn_v <- attn_v * grad_attn_v * scale
-          // sum <- sum(grad_attn_v)
+          // calculat the rowsum of grad_out * out
+          // grad_attn_v <- attn_v * (grad_attn_v - rowsum)
           for (const auto row : c10::irange(block_size_m)) {
+            scalar_t s = vec::map2_reduce_all<scalar_t>(
+                [](Vec x, Vec y) { return x * y; },
+                [](Vec x, Vec y) { return x + y; },
+                grad_o_ptr + row * gO_strideM,
+                out_ptr + row * o_strideM,
+                Kv);
+
             vec::map2<scalar_t>(
-                [=](Vec attn, Vec grad_attn) { return attn * grad_attn * Vec(scaling_factor); },
+                [s](Vec attn, Vec grad_attn) { return attn * (grad_attn - Vec(s)); },
                 grad_attn_v + row * kKeysPerBlock,
                 attn_v + row * kKeysPerBlock,
-                grad_attn_v + row * kKeysPerBlock,
-                block_size_n);
-
-             // accumulate the sum per N dimension
-            sum[row] += vec::reduce_all<scalar_t>(
-                [](Vec& x, Vec& y) { return x + y; },
                 grad_attn_v + row * kKeysPerBlock,
                 block_size_n);
           }
 
           // calculate the gradient of Q
-          // grad_q <- grad_attn_v @ k
+          // grad_q <- grad_q + scale * grad_attn_v @ k
           // buf <- attn_v @ k
           cpublas::gemm(
               TransposeType::NoTranspose,
@@ -483,7 +468,7 @@ void cpu_efficient_attention_backward(
               K,
               block_size_m,
               block_size_n,
-              static_cast<scalar_t>(1),
+              scaling_factor,
               k_ptr,
               k_strideN,
               grad_attn_v,
@@ -492,33 +477,7 @@ void cpu_efficient_attention_backward(
               grad_q_ptr,
               gQ_strideM);
 
-          cpublas::gemm(
-              TransposeType::NoTranspose,
-              TransposeType::NoTranspose,
-              K,
-              block_size_m,
-              block_size_n,
-              static_cast<scalar_t>(1),
-              k_ptr,
-              k_strideN,
-              attn_v,
-              kKeysPerBlock,
-              static_cast<scalar_t>(1),
-              buf,
-              K);
-
-          // calculate the gradient of K
-          // need to keep a copy of attn in buf2
-          for (const auto row : c10::irange(block_size_m)) {
-            vec::map<scalar_t>(
-                [](Vec attn) { return attn; },
-                buf2 + row * N + n,
-                attn_v + row * kKeysPerBlock,
-                block_size_n);
-          }
-
-          // grad_k <- grad_attn_v.T @ q
-          // grad_k_ptr points to each (n) block
+          // grad_k <- grad_k + scale * grad_attn_v.T @ q
           scalar_t* grad_k_ptr = grad_k_data + b * gK_strideB + n * gK_strideN + h * gK_strideH;
           cpublas::gemm(
               TransposeType::NoTranspose,
@@ -526,7 +485,7 @@ void cpu_efficient_attention_backward(
               K,
               block_size_n,
               block_size_m,
-              static_cast<scalar_t>(1),
+              scaling_factor,
               q_ptr,
               q_strideM,
               grad_attn_v,
@@ -535,47 +494,6 @@ void cpu_efficient_attention_backward(
               grad_k_ptr,
               gK_strideN);
         } // N loop
-
-        // final scale with sum on grad_q
-        // grad_q <- grad_q - buf * sum
-        for (const auto row : c10::irange(block_size_m)) {
-          scalar_t s = sum[row];
-          vec::map2<scalar_t>(
-              [s](Vec grad_q, Vec buf) { return grad_q - buf * Vec(s); },
-              grad_q_ptr + row * gQ_strideM,
-              grad_q_ptr + row * gQ_strideM,
-              buf + row * K,
-              K);
-        }
-
-        // final scale with sum on grad_k
-        // buf2 <- buf2 * (-sum)
-        for (const auto row : c10::irange(block_size_m)) {
-          scalar_t s = sum[row];
-          vec::map<scalar_t>(
-              [s](Vec buf2_vec) { return (buf2_vec * Vec(s)).neg(); },
-              buf2 + row * N,
-              buf2 + row * N,
-              N);
-        }
-
-        // grad_k <- buf2.T @ q
-        // grad_k_ptr points to entire N sequence
-        scalar_t* grad_k_ptr = grad_k_data + b * gK_strideB + h * gK_strideH;
-        cpublas::gemm(
-            TransposeType::NoTranspose,
-            TransposeType::Transpose,
-            K,
-            N,
-            block_size_m,
-            static_cast<scalar_t>(1),
-            q_ptr,
-            q_strideM,
-            buf2,
-            N,
-            static_cast<scalar_t>(1),
-            grad_k_ptr,
-            gK_strideN);
       } // M loop
 
       // move to the next index
@@ -608,11 +526,12 @@ void efficient_attention_backward_kernel_impl(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
+    const Tensor& out,
     const Tensor& logsumexp,
     bool is_causal,
     c10::optional<double> scale) {
   AT_DISPATCH_FLOATING_TYPES(query.scalar_type(), "efficient_attention_backward", [&] {
-    cpu_efficient_attention_backward<scalar_t, 128, 256>(grad_q, grad_k, grad_v, grad_out, query, key, value, logsumexp, is_causal, scale);
+    cpu_efficient_attention_backward<scalar_t, 128, 256>(grad_q, grad_k, grad_v, grad_out, query, key, value, out, logsumexp, is_causal, scale);
   });
 }
 
