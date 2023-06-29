@@ -149,9 +149,18 @@ std::string c10_retrieve_device_side_assertion_info();
 // Each kernel launched with TORCH_DSA_KERNEL_LAUNCH
 // requires the same input arguments. We introduce the following macro to
 // standardize these.
+// ROCm 5.5 compiler fails when using the macro in lambda parameters with
+// error: 'maybe_unused' attribute cannot be applied to types
+// For ROCm, define same macro but with [[maybe_unused]] removed.
+#ifndef USE_ROCM
 #define TORCH_DSA_KERNEL_ARGS                                              \
   [[maybe_unused]] c10::cuda::DeviceAssertionsData *const assertions_data, \
       [[maybe_unused]] uint32_t assertion_caller_id
+#else
+#define TORCH_DSA_KERNEL_ARGS                                              \
+                   c10::cuda::DeviceAssertionsData *const assertions_data, \
+                       uint32_t assertion_caller_id
+#endif
 
 // This macro can be used to pass the DSA arguments onward to another
 // function
