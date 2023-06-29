@@ -2,6 +2,7 @@
 import contextlib
 import functools
 import importlib
+import itertools
 import os
 import sys
 import unittest
@@ -10,8 +11,9 @@ import weakref
 import torch
 
 import torch._dynamo
+from torch import nn
 from torch._inductor import config
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
@@ -43,6 +45,7 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
+prims = torch.ops.prims
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
@@ -311,6 +314,129 @@ class OptimizeForInferenceTemplate(TestCase):
 
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
+
+    def test_conv_weight_layout_convert(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(
+                    3, 128, kernel_size=3, padding=1, stride=1, bias=False
+                )
+
+            def forward(self, x):
+                return self.conv(x)
+
+            @staticmethod
+            def get_example_inputs():
+                return (torch.rand(2, 3, 5, 5).to(self.device),)
+
+        from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+        nconv = 0
+
+        def my_inner_compile(gm, example_inputs, *args, **kwargs):
+            out = compile_fx_inner(gm, example_inputs, *args, **kwargs)
+
+            nonlocal nconv
+            convs = [n for n in gm.graph.nodes if n.target == aten.convolution.default]
+            nconv += len(convs)
+            for conv in convs:
+                weight_node = conv.args[1]
+                weight_const_tensor = getattr(gm, weight_node.target)
+                self.assertTrue(
+                    weight_const_tensor.is_contiguous(memory_format=torch.channels_last)
+                )
+                self.assertTrue(
+                    weight_node.meta["val"].is_contiguous(
+                        memory_format=torch.channels_last
+                    )
+                )
+
+            return out
+
+        mod = torch.compile(
+            Model().eval().to(self.device),
+            backend=functools.partial(compile_fx, inner_compile=my_inner_compile),
+        )
+        inp = mod.get_example_inputs()
+        with torch.no_grad():
+            mod(*inp)
+
+        # Only check the assertion for CUDA.
+        # For CPU, we may get torch.ops.mkldnn._convolution_pointwise.default
+        # in the joint graph rather than torch.ops.aten.convolution.default.
+        # Currently we only handle aten.convolution.default in layout
+        # optimization. That's why the count may be 0 here for CPU.
+        if self.device == "cuda":
+            self.assertTrue(nconv == 1)
+
+    def test_redundant_clone_for_layout_convert(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(
+                    3, 128, kernel_size=3, padding=1, stride=1, bias=False
+                )
+
+            def forward(self, x):
+                y = x + 1
+                return self.conv(x), y
+
+            @staticmethod
+            def get_example_inputs():
+                return (torch.rand(2, 3, 5, 5).to(self.device),)
+
+        mod = Model().eval().to(self.device)
+        inp = mod.get_example_inputs()
+        with torch.no_grad():
+            expected_outputs = mod(*inp)
+
+        num_same_stride = 0
+        num_diff_stride = 0
+
+        def debug_inductor_force_stride_order(orig_fn, input_tensor, stride):
+            nonlocal num_same_stride, num_diff_stride
+            input_tensor.realize()
+            if tuple(input_tensor.get_stride()) == tuple(stride):
+                num_same_stride += 1
+            else:
+                num_diff_stride += 1
+            return orig_fn(input_tensor, stride)
+
+        with override_lowering(
+            prims.inductor_force_stride_order.default, debug_inductor_force_stride_order
+        ):
+            opt_mod = torch.compile(mod)
+            with torch.no_grad():
+                actual_outputs = opt_mod(*inp)
+
+        self.assertEqual(len(actual_outputs), len(expected_outputs))
+        self.assertEqual(2, len(actual_outputs))
+        for i, actual, expected in zip(
+            itertools.count(), actual_outputs, expected_outputs
+        ):
+            self.assertTrue(
+                torch.allclose(expected, actual, atol=1e-4, rtol=1e-4),
+                f"{i}th output: expected {expected}, actual {actual}",
+            )
+
+        if self.device == "cpu":
+            # CPU use different convolution implementation, skip the checks below
+            return
+
+        self.assertTrue(
+            actual_outputs[0].is_contiguous(memory_format=torch.contiguous_format)
+        )
+        self.assertTrue(
+            actual_outputs[1].is_contiguous(memory_format=torch.contiguous_format)
+        )
+
+        # we don't change the stride of y returned by forward. So there will
+        # be no extra copy
+        self.assertTrue(num_same_stride == 1, f"num_same_stride is {num_same_stride}")
+        # we changed the stride of self.conv(x) returned by forward. So there
+        # may be an extra copy
+        self.assertTrue(num_diff_stride == 1, f"num_diff_stride is {num_diff_stride}")
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
