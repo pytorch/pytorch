@@ -4039,11 +4039,9 @@ class TestLinalg(TestCase):
         self.assertEqual(X, out)
 
     @dtypes(*floating_and_complex_types())
-    @precisionOverride({torch.float32: 1e-1, torch.complex64: 1e-1,
+    @precisionOverride({torch.float32: 2e-1 if TEST_WITH_ROCM else 1e-1, torch.complex64: 1e-1,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_linalg_solve_triangular(self, device, dtype):
-        if TEST_WITH_ROCM and dtype is torch.float32:
-            raise unittest.SkipTest("Skipping for ROCm for Magma backend; unskip when hipSolver backend is enabled")
         # This exercises the API + BLAS CPU + batched cuBLAS
         ks = (3, 1, 0)
         ns = (5, 0)
