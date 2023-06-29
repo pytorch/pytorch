@@ -1347,6 +1347,20 @@ def forward(self, a_1):
             """["L['a'].size()[0] == 2*L['b'].size()[0]", "2 <= L['b'].size()[0]"]"""  # noqa: B950
         )
 
+    def test_guard_upperbound_range_refinement(self):
+        def f(a):
+            assert a.shape[0] > 5 and a.shape[0] > 12
+            return a.cos()
+        tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
+        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] > 12""")
+
+    def test_guard_lowerbound_range_refinement(self):
+        def f(a):
+            assert a.shape[0] < 20 and a.shape[0] < 30
+            return a.cos()
+        tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
+        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] < 20""")
+
     def test_sym_storage_offset(self):
         def f(x, y):
             return x + y
