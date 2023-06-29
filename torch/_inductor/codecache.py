@@ -925,7 +925,12 @@ class CppWrapperCodeCache:
                     _use_custom_generated_macros = use_custom_generated_macros()
 
                     extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_use_custom_generated_macros}"
-                    extra_ldflags = f"{_shared} {_lpaths} {_libs}"
+                    # For CPP wrapper, add -ffast-math during linking to make CPU flush denormals.
+                    # CPP wrapper leverages cpp_extension which will do the compilation and linking in two stages.
+                    # We need to explicitly add -ffast-math as a linking flag.
+                    # For the default python wrapper, the compilation and linking are done in one command thus -ffast-math
+                    # will take effect in both compilation and linking.
+                    extra_ldflags = f"{_shared} {_lpaths} {_libs} -ffast-math"
                     extra_include_paths = f"{_ipaths}"
 
                     mod = torch.utils.cpp_extension.load_inline(
