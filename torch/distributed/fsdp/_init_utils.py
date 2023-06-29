@@ -485,7 +485,7 @@ def _init_param_handle_from_module(
     Initializes a ``FlatParamHandle`` from a module ``fully_sharded_module``.
     This is the module wrapper code path.
     """
-    _check_single_device_module(fully_sharded_module, state._ignored_params)
+    _check_single_device_module(fully_sharded_module, state._ignored_params, device_id)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
     is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
         fully_sharded_module, state._ignored_params
@@ -540,7 +540,7 @@ def _init_param_handles_from_module(
         state._ignored_modules,
         state._ignored_params,
     )
-    _check_single_device_module(root_module, state._ignored_params)
+    _check_single_device_module(root_module, state._ignored_params, device_id)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
     # Initialize and shard `FlatParamHandle`s one by one following reverse
     # depth-first order (i.e. reverse `.modules()` order), which represents a
@@ -774,6 +774,7 @@ def _get_buffer_names(root_module: nn.Module) -> Set[str]:
 def _check_single_device_module(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
+    device_id: Optional[Union[int, torch.device]],
 ) -> None:
     """
     Raises an error if ``module`` has original parameters on multiple devices,
@@ -781,7 +782,19 @@ def _check_single_device_module(
     module must be either fully on the CPU or fully on a non-CPU device.
     """
     devices = {param.device for param in _get_orig_params(module, ignored_params)}
-    if len(devices) > 1:
+    # We allow module to be partially on CPU and partially on GPU if device_id is not
+    # None, since the device_id arg will result in the CPU portion being moved to
+    # GPU. This is useful in cases where part of the module may be parallelized
+    # by another algorithm and may already be on GPU. We'd like to enforce device_id
+    # to not be None, otherwise we'd flatten parameters in a mixed module which is
+    # not supported.
+    if len(devices) == 2 and torch.device("cpu") in devices:
+        if device_id is None:
+            raise RuntimeError(
+                "To support a module with both CPU and GPU params, "
+                "please pass in device_id argument."
+            )
+    elif len(devices) > 1:
         raise RuntimeError(
             f"FSDP only supports single device modules but got params on {devices}"
         )
