@@ -151,7 +151,15 @@ Tensor upsample_nearest2d(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  return at::upsample_nearest2d(input, output_size, scale_factors, false);
+}
+
+Tensor upsample_nearest2d(
+    const Tensor& input,
+    at::OptionalIntArrayRef output_size,
+    c10::optional<ArrayRef<double>> scale_factors,
+    bool round_with_scale_factor) {
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors, round_with_scale_factor);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
   return at::upsample_nearest2d(input, osize, scale_h, scale_w);
@@ -161,7 +169,15 @@ Tensor _upsample_nearest_exact2d(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  return at::_upsample_nearest_exact2d(input, output_size, scale_factors, false);
+}
+
+Tensor _upsample_nearest_exact2d(
+    const Tensor& input,
+    at::OptionalIntArrayRef output_size,
+    c10::optional<ArrayRef<double>> scale_factors,
+    bool round_with_scale_factor) {
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors, round_with_scale_factor);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
   return at::_upsample_nearest_exact2d(input, osize, scale_h, scale_w);

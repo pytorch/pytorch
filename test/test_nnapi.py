@@ -473,6 +473,7 @@ class TestNNAPI(TestCase):
                 self.check(torch.nn.UpsamplingNearest2d(size=(16, 20)), inp)
                 self.check(torch.nn.UpsamplingNearest2d(size=(24, 32)), inp)
                 self.check(torch.nn.UpsamplingNearest2d(size=(36, 48)), inp)
+                self.check(torch.nn.UpsamplingNearest2d(scale_factor=(0.234, 0.234)), inp)
                 self.check(torch.nn.UpsamplingNearest2d(scale_factor=(1.5, 1.5)), inp)
                 self.check(torch.nn.UpsamplingNearest2d(scale_factor=(2.0, 2.0)), inp)
                 self.check(torch.nn.UpsamplingNearest2d(scale_factor=(3.0, 3.0)), inp)
