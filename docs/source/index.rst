@@ -68,13 +68,6 @@ Features described in this documentation are classified by release status:
    compile/transformations
 
 .. toctree::
-   :glob:
-   :maxdepth: 1
-   :caption: torch._export.export
-
-   generated/exportdb/index
-
-.. toctree::
    :maxdepth: 1
    :caption: Language Bindings
 
@@ -99,6 +92,7 @@ Features described in this documentation are classified by release status:
    cuda
    mps
    torch.backends <backends>
+   export
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
