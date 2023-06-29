@@ -62,7 +62,7 @@ from .utils import (
     istype,
     proxy_args_kwargs,
 )
-from .variables.base import MutableLocal, typestr, VariableTracker
+from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable, EnumVariable
@@ -2296,6 +2296,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             cell = self.closure_cells[inst.argval]
             val = self.pop()
             if isinstance(cell, ClosureVariable):
+                if not self.output.is_root_tracer():
+                    unimplemented(
+                        "HigherOrderOperator: Mutating a variable not in the current scope (ClosureVariable)"
+                    )
                 self.output.root_tx.symbolic_locals[cell.name] = val
             else:
                 self.output.side_effects.store_cell(cell, val)
@@ -2344,7 +2348,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         assert inst.argval in self.cell_and_freevars()
         self.push(self.closure_cells[inst.argval])
 
+    def check_replace_is_safe(self, oldvar):
+        if not is_side_effect_safe(oldvar.mutable_local):
+            unimplemented(
+                "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)"
+            )
+
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
+        self.check_replace_is_safe(oldvar)
         newvar = super().replace_all(oldvar, newvar)
         # recursively check and update parent's locals and stack in case oldvar is from parent
         translator: InstructionTranslatorBase = self
