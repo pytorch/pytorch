@@ -384,7 +384,7 @@ jobs:
   wheel-py3_8-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_8-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+    runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -625,7 +625,7 @@ jobs:
   wheel-py3_8-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_8-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+    runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1104,7 +1104,7 @@ jobs:
   wheel-py3_9-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_9-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+    runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1345,7 +1345,7 @@ jobs:
   wheel-py3_9-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_9-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+    runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -1824,7 +1824,7 @@ jobs:
   wheel-py3_10-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_10-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+    runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2065,7 +2065,7 @@ jobs:
   wheel-py3_10-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_10-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+    runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2544,7 +2544,7 @@ jobs:
   wheel-py3_11-cuda11_8-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_11-cuda11_8-build
-    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+    runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -2785,7 +2785,7 @@ jobs:
   wheel-py3_11-cuda12_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-py3_11-cuda12_1-build
-    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+    runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
