@@ -4,6 +4,7 @@ from __future__ import annotations
 import tempfile
 
 import onnx
+import pytest
 import pytorch_test_common
 import torch
 from torch import nn
@@ -259,7 +260,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             {*model.state_dict().keys()},
         )
 
-    def test_symbolic_tracing_simple(self):
+    def test_fake_tensor_mode_simple(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -278,17 +279,18 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         export_output = torch.onnx.dynamo_export(
             model, x, export_options=export_options
         )
-
+        assert export_output is not None
         assert export_output.model_proto is not None
+        onnx.checker.check_model(export_output.model_proto, full_check=True)
         assert len(export_output.model_proto.graph.initializer) == 0
 
-        # Save ONNX proto using Model's state_dict()
+        # Variant 1: Save ONNX proto using Model's state_dict()
         with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
             model_state_dict = Model().state_dict()  # optional
             export_output.save(tmp_onnx_file.name, model_state_dict=model_state_dict)
-            assert len(onnx.load(tmp_onnx_file.name).graph.initializer) > 0
+            assert len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
 
-        # Save ONNX proto using Model checkpoint file
+        # Variant 2: Save ONNX proto using Model checkpoint file
         with tempfile.NamedTemporaryFile(
             suffix=".onnx"
         ) as tmp_onnx_file, tempfile.NamedTemporaryFile(
@@ -298,10 +300,65 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             export_output.save(
                 tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
             )
-            assert len(onnx.load(tmp_onnx_file.name).graph.initializer) > 0
+            assert len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
 
-        assert export_output is not None
-        onnx.checker.check_model(export_output.model_proto, full_check=True)
+    def test_fake_tensor_mode_simple_invalid_input(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                return out
+
+        real_model = Model()
+        real_x = torch.rand(5, 2, 2)
+        with torch.onnx.enable_fake_mode() as fake_context:
+            fake_model = Model()
+            fake_x = torch.rand(5, 2, 2)
+
+        # Scenario 1: Fake model and fake input WITHOUT fake_context
+        with pytest.raises(torch.onnx.OnnxExporterError):
+            export_options = ExportOptions(fake_context=None)
+            _ = torch.onnx.dynamo_export(
+                fake_model, fake_x, export_options=export_options
+            )
+
+        # Scenario 2: Fake model and real input WITHOUT fake_context
+        with pytest.raises(torch.onnx.OnnxExporterError):
+            export_options = ExportOptions(fake_context=None)
+            _ = torch.onnx.dynamo_export(
+                fake_model, real_x, export_options=export_options
+            )
+
+        # Scenario 3: Real model and fake input WITHOUT fake_context
+        with pytest.raises(torch.onnx.OnnxExporterError):
+            export_options = ExportOptions(fake_context=None)
+            _ = torch.onnx.dynamo_export(
+                real_model, fake_x, export_options=export_options
+            )
+
+        # Scenario 4: Real model and real input WITH fake_context
+        with pytest.raises(torch.onnx.OnnxExporterError):
+            export_options = ExportOptions(fake_context=fake_context)
+            _ = torch.onnx.dynamo_export(
+                real_model, real_x, export_options=export_options
+            )
+
+        # Scenario 5: Fake model and real input WITH fake_context
+        with pytest.raises(torch.onnx.OnnxExporterError):
+            export_options = ExportOptions(fake_context=fake_context)
+            _ = torch.onnx.dynamo_export(
+                fake_model, real_x, export_options=export_options
+            )
+
+        # Scenario 6: Real model and fake input WITH fake_context
+        with pytest.raises(torch.onnx.OnnxExporterError):
+            export_options = ExportOptions(fake_context=fake_context)
+            _ = torch.onnx.dynamo_export(
+                real_model, fake_x, export_options=export_options
+            )
 
 
 if __name__ == "__main__":

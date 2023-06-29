@@ -1,5 +1,6 @@
 import copy
-from typing import List
+import io
+from typing import List, Union
 
 import torch
 
@@ -31,7 +32,7 @@ class ONNXTorchPatcher:
 
     def __init__(self):
         # List of file paths processed by torch.load.
-        self.paths: List[str] = []
+        self.paths: List[Union[str, io.BufferedIOBase]] = []
 
         def torch_load_wrapper(f, *args, **kwargs):
             # Record path.

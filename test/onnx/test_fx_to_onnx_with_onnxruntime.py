@@ -639,7 +639,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @_beartype.beartype
-    def _test_large_scale_exporter(
+    def _test_fx_symbolic_tracer_large_scale_exporter(
         self,
         model_name: str,
         create_model: Callable,
@@ -760,7 +760,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.skip_dynamic_fx_test(
         "FakeTensor exporting is not supported by dynamic axes."
     )
-    def test_large_scale_exporter_with_toy_mlp(self):
+    def test_fx_symbolic_tracer_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -788,7 +788,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_pytorch_only_extra_kwargs():
             return {}
 
-        self._test_large_scale_exporter(
+        self._test_fx_symbolic_tracer_large_scale_exporter(
             "toy_mlp1",
             create_model,
             create_args,

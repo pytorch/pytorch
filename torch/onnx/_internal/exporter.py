@@ -477,7 +477,7 @@ class ExportOutput:
             # Reset the buffer to the beginning before reading it again
             if isinstance(model_state_dict, dict):
                 for file_obj in ctx.paths:
-                    file_obj.seek(0)
+                    file_obj.seek(0)  # type: ignore[union-attr]
 
         if self._model_state_dict_files is not None:
             if not isinstance(destination, str):
@@ -548,6 +548,8 @@ class Exporter:
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
+        self._assert_fake_tensor_mode()
+
     def export(self) -> ExportOutput:
         graph_module = self.options.fx_tracer.generate_fx(
             self.options, self.model, self.model_args, self.model_kwargs
@@ -587,6 +589,55 @@ class Exporter:
             self.options.fx_tracer.output_adapter,
             self.options.diagnostic_context,
         )
+
+    def _assert_fake_tensor_mode(self):
+        has_any_fake_tensor = any(
+            isinstance(arg, torch._subclasses.FakeTensor)
+            for arg in self.model_args
+            if arg is not None
+        )
+        has_any_fake_tensor = has_any_fake_tensor or any(
+            isinstance(val, torch._subclasses.FakeTensor)
+            for val in self.model_kwargs.values()
+            if val is not None
+        )
+        has_any_fake_param = any(
+            isinstance(param, torch._subclasses.FakeTensor)
+            for param in self.model.parameters()  # type: ignore[union-attr]
+            if param is not None
+        )
+        if (
+            has_any_fake_tensor or has_any_fake_param
+        ) and not self.options.fake_context:
+            return OnnxExporterError(
+                self.options.diagnostic_context,
+                "Cannot export a model with fake inputs/weights without enabling fake mode.",
+            )
+        has_any_non_fake_tensors = any(
+            not isinstance(arg, torch._subclasses.FakeTensor)
+            for arg in self.model_args
+            if arg is not None
+        )
+        has_any_non_fake_tensors = has_any_non_fake_tensors and any(
+            not isinstance(val, torch._subclasses.FakeTensor)
+            for val in self.model_kwargs.values()
+            if val is not None
+        )
+        has_any_non_fake_param = any(
+            not isinstance(param, torch._subclasses.FakeTensor)
+            for param in self.model.parameters()  # type: ignore[union-attr]
+            if param is not None
+        )
+        if (
+            has_any_non_fake_tensors or has_any_non_fake_param
+        ) and self.options.fake_context:
+            import pdb
+
+            pdb.set_trace()
+            raise OnnxExporterError(
+                self.options.diagnostic_context,
+                "Cannot export a model with non fake inputs/weights and enabled fake mode.",
+            )
 
     @property
     def logger(self) -> logging.Logger:
@@ -737,7 +788,7 @@ def pre_export_passes(
         fx_module,
         options.decomposition_table,
         enable_dynamic_axes=options.dynamic_shapes,
-        allow_fake_constant=options.fake_context.fake_mode is not None,
+        allow_fake_constant=options.fake_context is not None,
     ).run(*fx_module_args)
 
     # ONNX does not support views and mutations.
@@ -746,7 +797,7 @@ def pre_export_passes(
         diagnostic_context,
         module,
         enable_dynamic_axes=options.dynamic_shapes,
-        allow_fake_constant=options.fake_context.fake_mode is not None,
+        allow_fake_constant=options.fake_context is not None,
     ).run(*fx_module_args)
 
     # Input mutations are detected and distilled after `Functionalize` pass.

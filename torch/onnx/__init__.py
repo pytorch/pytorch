@@ -50,6 +50,7 @@ from ._internal.exporter import (  # usort:skip. needs to be last to avoid circu
     ExportOutput,
     ExportOutputSerializer,
     dynamo_export,
+    OnnxExporterError,
     enable_fake_mode,
 )
 
@@ -94,6 +95,7 @@ __all__ = [
     "ExportOutput",
     "ExportOutputSerializer",
     "dynamo_export",
+    "OnnxExporterError",
     "enable_fake_mode",
 ]
 
