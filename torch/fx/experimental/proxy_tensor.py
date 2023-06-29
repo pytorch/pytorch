@@ -457,6 +457,7 @@ class PythonKeyTracer(Tracer):
         return super().create_arg(a)
 
 
+@torch._disable_dynamo
 def dispatch_trace(
         root: Union[torch.nn.Module, Callable],
         tracer: Tracer,
