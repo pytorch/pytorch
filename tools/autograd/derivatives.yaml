@@ -2486,9 +2486,11 @@
   result: replication_pad3d_backward_symint(grad_output_t, self_p, padding)
 
 - name: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  self: maybe_multiply(grad, beta.conj())
-  mat1: maybe_multiply(grad.sparse_mask(self).mm(mat2.mH()), alpha.conj())
-  mat2: maybe_multiply(mat1.mH().mm(grad.sparse_mask(self)), alpha.conj())
+  self, mat1, mat2: "sparse_sampled_addmm_backward(grad,
+                                                   self,
+                                                   wrap_opt_if(mat1, grad_input_mask[2]),
+                                                   wrap_opt_if(mat2, grad_input_mask[1]),
+                                                   alpha, beta, grad_input_mask)"
 
 - name: _sparse_mm_reduce_impl(Tensor self, Tensor other, str reduce) -> (Tensor, Tensor)
   output_differentiability: [True, False]
