@@ -757,6 +757,35 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         model(inp).sum().backward()
 
     @skip_if_lt_x_gpu(2)
+    def test_eval_root_cast_inputs(self):
+        """
+        In a case where root module does not manage FSDP parameters,
+        ensure that we don't cast forward inputs which could potentially
+        cause a dtype mismatch.
+        """
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(5, 5)
+
+            def forward(self, x):
+                assert x.dtype == torch.float32, f"Expected fp32, got {x.dtype}"
+                return self.a(x)
+
+        mp_config = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float16,
+        )
+        m = MyModel().cuda()
+        m.a = FSDP(m.a, mixed_precision=mp_config)
+        model = FSDP(m, mixed_precision=mp_config)
+        model.eval()
+        inp = torch.randn(5, 5)
+        model(inp).sum().backward()
+
+    @skip_if_lt_x_gpu(2)
     def test_full_precision_in_eval(self):
         for use_composable, cast_forward_inputs in itertools.product(
             [True, False], [True, False]

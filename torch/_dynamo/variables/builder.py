@@ -1041,6 +1041,7 @@ class VariableBuilder:
                         constraint_dim=None,
                     ),
                     hint=value,
+                    source=self.source,
                 )
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
@@ -1465,9 +1466,10 @@ def wrap_to_fake_tensor_and_record(
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
-        tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
+        tx.output.tensor_weakref_to_sizes_strides_offset[WeakIdRef(e)] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
+            "storage_offset": fake_e.storage_offset(),
         }
         return fake_e
     else:
