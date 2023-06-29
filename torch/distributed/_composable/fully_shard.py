@@ -115,6 +115,10 @@ def fully_shard(
     _register_pre_forward_hooks(state, modules)
     _register_post_forward_hooks(state, modules)
     _register_root_pre_forward_hook(state, module)  # prepend last
+    # Always insert the state for the passed-in module even if it has no
+    # managed parameters, in which case it has no handles and does not appear
+    # in `_fully_sharded_module_to_handles`
+    _insert_module_state(module, state)
     for submodule in module.modules():
         if (
             submodule in state._fully_sharded_module_to_handles
