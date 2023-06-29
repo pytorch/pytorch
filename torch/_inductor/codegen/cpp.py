@@ -1358,9 +1358,11 @@ class CppVecKernel(CppKernel):
         )
         loadbuf = "tmpbuf" if non_contiguous else var_expr
         if is_broadcast:
+            # should always be broadcast as float for vectorization since we always use float to compute
             if is_mask:
                 loadbuf = f"flag_to_float_scalar({loadbuf})"
             line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
+            opt_ctx.dtype = torch.float
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
             line = f"at::vec::load_uint8_as_float({var_expr})"
         elif is_mask:
