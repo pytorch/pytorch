@@ -42,7 +42,6 @@ def parallelize_module(  # type: ignore[return]
     device_mesh: DeviceMesh,
     parallelize_plan: Union[ParallelStyle, Dict[str, ParallelStyle]],
     tp_mesh_dim: int = 0,
-    sync_rng_state: bool = False,
 ) -> nn.Module:
     """
     The API to apply Tensor Parallelism (TP) in PyTorch. We parallelize module
@@ -68,12 +67,6 @@ def parallelize_module(  # type: ignore[return]
         tp_mesh_dim (int):
             The dimension of ``device_mesh`` where we perform
             Tensor Parallelism on.
-        sync_rng_state (bool):
-            This option represents whether or not the parallelized module uses the parallel
-            Random Number Generator to perform randomized tensor operators (e.g. dropout).
-            DTensor is responsible for maintaining the parallel RNG in a synchronous state
-            across ranks.
-            Default: False
 
     Return:
         A :class:`nn.Module` object parallelized.
@@ -102,7 +95,10 @@ def parallelize_module(  # type: ignore[return]
         random._rng_tracker = TensorParallelRNGTracker()
         # TODO: we should allow user to pass in the default seed from a config
         random._rng_tracker._manual_seed(device_mesh, base_seed=1234, tp_dim=tp_mesh_dim)
-        random._rng_tracker.distribute_region_enabled = sync_rng_state
+        # By default we execute random ops in non-tensor-parallel region. If users want
+        # to execute in tensor-parallel region, they can manually set this field to True
+        # after parallelizing the model.
+        random._rng_tracker.distribute_region_enabled = False
 
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)

@@ -7,11 +7,7 @@ from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     make_input_replicate_1d,
-    make_input_shard_1d_last_dim,
     make_output_replicate_1d,
-    make_output_tensor,
-    make_sharded_output_tensor,
-    PairwiseParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
