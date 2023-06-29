@@ -794,6 +794,16 @@ def dynamo_enable_grad(tx):
         GradModeVariable.create(tx, org_value)
 
 
+def are_tensors(var):
+    from . import TensorVariable
+
+    if isinstance(var, TensorVariable):
+        return True
+    if isinstance(var, (TupleVariable, ListVariable)):
+        return all(are_tensors(item) for item in var.items)
+    return False
+
+
 # See NOTE [HigherOrderOperator tracing design] for details of the design
 def speculate_subgraph(
     tx,
@@ -858,21 +868,9 @@ def speculate_subgraph(
                 # Nothing left to do here
                 return output, tx.output.graph, tracer.lifted_freevars
             else:
-                if isinstance(output, (ListVariable, TupleVariable)):
-                    if any(
-                        not isinstance(var, TensorVariable)
-                        for var in output.unpack_var_sequence(tx)
-                    ):
-                        unimplemented(
-                            "HigherOrderOperator body's output must consist of tensors only"
-                        )
-
-                if not isinstance(
-                    output,
-                    (ListVariable, TupleVariable),
-                ) and not isinstance(output, TensorVariable):
+                if not are_tensors(output):
                     unimplemented(
-                        "HigherOrderOperator can't return non-tensor scalar output"
+                        "HigherOrderOperator body's output must consist of tensors only"
                     )
 
                 tx.output.guards.update(output.guards)
