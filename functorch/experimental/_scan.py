@@ -42,10 +42,7 @@ dummy_aot_config = AOTConfig(fw_compiler=None,
                              keep_inference_input_mutations=False)
 
 
-def create_fw_bw_graph(f, flat_xs, flat_init):
-    scanned_xs = flat_xs
-    init = flat_init
-
+def create_fw_bw_graph(f, flat_init, flat_xs):
     # Note: We create "clean" environments for make_fx by suspending all dispatch keys
     # between Autograd and Python key. Currently, we only suspend functionalization but more can be
     # added when required. Will encounter two problems if we don't suspend functionalization:
@@ -68,8 +65,8 @@ def create_fw_bw_graph(f, flat_xs, flat_init):
                     return torch.empty_strided(t.size(), t.stride(), requires_grad=t.requires_grad)
                 return t
 
-            example_init = [from_fun(init_element) for init_element in init]
-            example_xs = [from_fun(xs) for xs in _unstack_pytree(scanned_xs)[0]]
+            example_init = [from_fun(init_element) for init_element in flat_init]
+            example_xs = [from_fun(xs) for xs in _unstack_pytree(flat_xs)[0]]
             example_flat_carry_out, example_flat_out = f(example_init, example_xs)
             example_flat_carry_out, example_flat_out = pytree.tree_map(from_fun, example_flat_carry_out), pytree.tree_map(from_fun, example_flat_out)
             if any(not isinstance(out, torch.Tensor) for out in example_flat_out if out is not None):
@@ -83,36 +80,34 @@ def create_fw_bw_graph(f, flat_xs, flat_init):
 
             fw_graph = make_fx(f)(example_init, example_xs)
 
-        def joint_f(example_init, example_xs, example_grad_carry_out, example_grad_out):
-            # scanned_input = example_xs
-            # init = example_init
-            # grad_args = list(example_grad_out) + list(example_grad_carry_out)
-            # all_input_args = list(example_xs) + list(example_init) + grad_args
+        def joint_f(example_grad_carry_out, example_xs, example_init, example_grad_out):
+            scanned_input = example_xs
+            init = example_init
+            grad_args = list(example_grad_carry_out) + list(example_grad_out)
+            all_input_args = list(example_xs) + list(example_init) + grad_args
 
-            # num_carry_args = len(init)
+            num_carry_args = len(init)
 
-            # def fw_with_masks(*args):
-            #     # fw_carry_out, fw_out = f(args[:num_carry_args], args[num_carry_args:])
-            #     fw_carry_out, fw_out = f(*args)
-            #     return list(fw_carry_out) + list(fw_out), [True if isinstance(ret, torch.Tensor) and ret.requires_grad else False for ret in list(fw_carry_out) + list(fw_out)]
+            def fw_with_masks(*args):
+                fw_carry_out, fw_out = f(args[:num_carry_args], args[num_carry_args:])
+                return list(fw_carry_out) + list(fw_out), [True if isinstance(ret, torch.Tensor) and ret.requires_grad else False for ret in list(fw_carry_out) + list(fw_out)]
 
-            # joint = create_joint(fw_with_masks, aot_config=dummy_aot_config)
-            # outputs, grads = joint(list(init) + list(scanned_input),
-            #                  [grad for grad in grad_args if grad is not None and grad.requires_grad])
+            joint = create_joint(fw_with_masks, aot_config=dummy_aot_config)
+            _, grads = joint(list(init) + list(scanned_input),
+                             [grad for grad in grad_args if grad is not None and grad.requires_grad])
 
-            # # In order to keep map functional for backward graph,
-            # # we clone outputs that are aliasing inputs
-            # input_storage = {StorageWeakRef(arg._typed_storage()) for arg in all_input_args if isinstance(arg, torch.Tensor)}
+            # In order to keep map functional for backward graph,
+            # we clone outputs that are aliasing inputs
+            input_storage = {StorageWeakRef(arg._typed_storage()) for arg in all_input_args if isinstance(arg, torch.Tensor)}
 
-            # def maybe_clone(t):
-            #     if isinstance(t, torch.Tensor) and StorageWeakRef(t._typed_storage()) in input_storage:
-            #         return t.clone()
-            #     return t
-            # return pytree.tree_map(maybe_clone, outputs), pytree.tree_map(maybe_clone, grads)
-            return None, None
+            def maybe_clone(t):
+                if isinstance(t, torch.Tensor) and StorageWeakRef(t._typed_storage()) in input_storage:
+                    return t.clone()
+                return t
+            # return (carry grad, output grad)
+            return pytree.tree_map(maybe_clone, grads[:len(example_grad_carry_out)]), pytree.tree_map(maybe_clone, grads[len(example_grad_carry_out):])
 
-        joint_graph = make_fx(joint_f)(example_init, example_xs, example_grad_carry_out, example_grad_out)
-        # print(joint_graph(*example_xs, *example_init, *example_grad_out, *example_grad_carry_out))
+        joint_graph = make_fx(joint_f)(example_grad_carry_out, example_xs, example_init, example_grad_out)
         return fw_graph, joint_graph
 
 
@@ -155,23 +150,35 @@ def scan_wrapper(f, init, xs):
         out_spec = tmp_out_spec
         return flat_carry_out, flat_out
     
-    flat_carry_out, flat_out = scan_impl(flat_fn, flat_init, flat_xs)  # (ys, carry)
+    flat_carry_out, flat_out = scan_impl(flat_fn, flat_init, flat_xs, None, None, return_all_carries=False, reverse=False)  # (ys, carry)
     return pytree.tree_unflatten(flat_carry_out, carry_out_spec), pytree.tree_unflatten(flat_out, out_spec)
 
 class ScanAutogradOp(torch.autograd.Function):
     @staticmethod
     def forward(ctx, fw_graph, joint_graph, num_init_args, *flat_args):
-        ctx.save_for_backward(*flat_args)
         ctx._joint_graph = joint_graph
+        ctx._num_init_args = num_init_args
+        ctx._num_input_args = len(flat_args)
         with torch._C._AutoDispatchBelowAutograd():
-            flat_carry_out, flat_out = scan_impl(fw_graph, flat_args[:num_init_args], flat_args[num_init_args:])
+            flat_carry_out, flat_out, carries = scan_impl(fw_graph, flat_args[:num_init_args], flat_args[num_init_args:], None, None, return_all_carries=True, reverse=False)
+            # needs to flat the carries nested list
+            # second call to save_for_backward will override whatever that is saved earlier
+            # therefore, need to save everything that is needed at once
+            ctx.save_for_backward(*flat_args, *(carry_entry for carry in carries for carry_entry in carry))
             return (*flat_carry_out, *flat_out)
 
     @staticmethod
     def backward(ctx, *flat_grads):
+        flat_carries = ctx.saved_tensors[ctx._num_input_args:]
+        # bring back the nested carries list
+        carries = [flat_carries[i*ctx._num_init_args:(i+1)*ctx._num_init_args] for i in range(len(flat_carries)//ctx._num_init_args)]
+        fwd_args = ctx.saved_tensors[:ctx._num_input_args]
+        flat_xs = fwd_args[ctx._num_init_args:]
+        final_carry_grad = flat_grads[:ctx._num_init_args]
+        ys_grad = flat_grads[ctx._num_init_args:]
         with torch._C._AutoDispatchBelowAutograd():
-            flat_out, flat_carry_out_and_grads  = scan_backward_impl(ctx._joint_graph, fw_init_args, fw_scanned_args, *flat_grads)
-            return None, None, None, *flat_carry_out_and_grads[len(fw_init_args):]
+            flat_carry_out_grads, flat_out_grads = scan_impl(ctx._joint_graph, final_carry_grad, flat_xs, ys_grad, carries, return_all_carries=False, reverse=True)
+            return None, None, None, *flat_carry_out_grads, *flat_out_grads
 
 # def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
 #     xs = list(args[:num_mapped])
@@ -243,16 +250,31 @@ def _stack_pytree(pytrees):
     return pytree.tree_unflatten(stacked_out, out_spec)
 
 @scan_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
-def scan_dense(f, flat_init, flat_xs):
-    pytrees = []
+def scan_dense(f, flat_init, flat_xs, ys_grad=None, carries=None, return_all_carries=False, reverse=False):
     carry = flat_init
-    for inp in _unstack_pytree(flat_xs):
-        carry, flattened_out = f(carry, inp)
-        pytrees.append(flattened_out)
-    return carry, _stack_pytree(pytrees)
+    # each carry output is needed for calculating gradients backwards
+    out_carries = []
+    out_pytrees = []
+    direction = -1 if reverse else 1
+    xs_unstacked = _unstack_pytree(flat_xs)[::direction]
+    iterable_input = zip(xs_unstacked)
+    if carries is not None and ys_grad is not None:
+        # suppose both are not none, that means we are reusing the scan_dense for gradient computation in bwd pass
+        # in this case, the flat_init is actually the gradients on final carry output from fwd pass
+        ys_grad_unstacked = _unstack_pytree(ys_grad)[::direction]
+        iterable_input = zip(xs_unstacked, carries[::direction], ys_grad_unstacked)
+    for inp in iterable_input:
+        # saves the initial carry input for each iteration
+        out_carries.append(carry)
+        carry, flattened_out = f(carry, *inp)
+        out_pytrees.append(flattened_out)
+    ys = _stack_pytree(out_pytrees[::direction])
+    if return_all_carries:
+        return carry, ys, out_carries
+    return carry, ys
 
 @scan_impl.py_impl(DispatchKey.Autograd)
-def scan_autograd(f, flat_init, flat_xs):
+def scan_autograd(f, flat_init, flat_xs, ys_grad=None, carries=None, return_all_carries=False, reverse=False):
     fw_graph, bw_graph = create_fw_bw_graph(f, flat_init, flat_xs)
     flat_all_out = ScanAutogradOp.apply(fw_graph, bw_graph, len(flat_init), *flat_init, *flat_xs)
     num_carry_args = len(flat_xs)
@@ -266,13 +288,13 @@ scan_impl.fallthrough(DispatchKey.BackendSelect)
 scan_impl.fallthrough(DispatchKey.AutocastCPU)
 
 @scan_backward_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
-def scan_backward_dense(f, flat_init, flat_xs):
+def scan_backward_dense(f, flat_init, flat_xs, flat_grads):
     pytrees = []
     carry = flat_init
     for inp in _unstack_pytree(flat_xs):
         carry, flattened_out = f(carry, inp)
         pytrees.append(flattened_out)
-    return _stack_pytree(pytrees), carry
+    return carry, _stack_pytree(pytrees)
 
 scan_backward_impl.fallthrough(DispatchKey.PythonDispatcher)
 scan_backward_impl.fallthrough(DispatchKey.PythonTLSSnapshot)
