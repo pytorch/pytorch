@@ -612,6 +612,109 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x, scale, zero_point))
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_tile2d_load_decomposed_dequant_add_relu_quant(self):
+        def fn(
+            x,
+            scale,
+            zero_point,
+            x2,
+            scale2,
+            zero_point2,
+            output_scale,
+            output_zero_point,
+            use_dequant,
+            use_dequant2,
+            use_quant,
+        ):
+            if use_dequant:
+                x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                    x, scale, zero_point, 0, 255, torch.uint8
+                )
+            if use_dequant2:
+                x2 = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                    x2, scale2, zero_point2, 0, 255, torch.uint8
+                )
+            temp = x + x2
+            y = torch.relu(temp)
+
+            if use_quant:
+                y = torch.ops.quantized_decomposed.quantize_per_tensor(
+                    y, output_scale, output_zero_point, 0, 255, torch.uint8
+                )
+            return y.contiguous()
+
+        use_dequant_list = [False, True]
+        use_dequant_list2 = [False, True]
+        use_quant_list = [False, True]
+        for use_dequant, use_dequant2, use_quant in itertools.product(
+            use_dequant_list, use_dequant_list2, use_quant_list
+        ):
+            x = torch.clamp(
+                torch.randn((1, 1024, 14, 14), dtype=torch.float32) * 100, 0, 255
+            ).contiguous(memory_format=torch.channels_last)
+            x2 = torch.clamp(
+                torch.randn((1, 1024, 14, 14), dtype=torch.float32) * 100, 0, 255
+            ).contiguous(memory_format=torch.channels_last)
+            if use_dequant:
+                x = x.to(torch.uint8).contiguous(memory_format=torch.channels_last)
+            if use_dequant2:
+                x2 = x2.to(torch.uint8).contiguous(memory_format=torch.channels_last)
+            zero_point = 1
+            scale = 0.01
+            zero_point2 = 2
+            scale2 = 0.02
+            output_zero_point = 3
+            output_scale = 0.03
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(
+                    fn,
+                    (
+                        x,
+                        scale,
+                        zero_point,
+                        x2,
+                        scale2,
+                        zero_point2,
+                        output_scale,
+                        output_zero_point,
+                        use_dequant,
+                        use_dequant2,
+                        use_quant,
+                    ),
+                )
+                assert metrics.generated_cpp_vec_kernel_count == 2
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_tile2d_store_channel_shuffle_cl_quant_output(self):
+        def channel_shuffle(x, groups, output_scale, output_zero_point):
+            batchsize, num_channels, height, width = x.size()
+            channels_per_group = num_channels // groups
+            x = x.view(batchsize, groups, channels_per_group, height, width)
+            x = torch.transpose(x, 1, 2).contiguous()
+            x = x.view(batchsize, -1, height, width)
+            x = torch.ops.quantized_decomposed.quantize_per_tensor(
+                x, output_scale, output_zero_point, 0, 255, torch.uint8
+            )
+            return x.contiguous(memory_format=torch.channels_last)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            x = torch.randn(64, 58, 28, 28)
+            output_zero_point = 3
+            output_scale = 0.03
+            self.common(channel_shuffle, (x, 2, output_scale, output_zero_point))
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
     def test_inplace_add_alpha(self):
         def fn(x, y):
             aten.add_.Tensor(x, y, alpha=0.55)
