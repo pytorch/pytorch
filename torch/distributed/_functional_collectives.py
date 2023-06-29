@@ -481,7 +481,7 @@ def _register_ops():
     ]
 
     my_module = sys.modules[__name__]
-    impl_module = _all_reduce.__module__
+    impl_module = sys.modules[_all_reduce.__module__]
     for op_def in ops_defs:
         op_name = op_def[0:op_def.index('(')]
         backend_impl = getattr(impl_module, f"_{op_name}")
