@@ -3,7 +3,6 @@ from functools import reduce
 
 import torch
 
-from torch._meta_registrations import device_hint
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .. import ir
@@ -627,7 +626,7 @@ if torch._C._has_mkldnn:
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
                 meta_value is None
-                or device_hint(meta_value) != "cpu"
+                or meta_value.device.type != "cpu"
                 or meta_value.dim() != 4
             ):
                 return False
@@ -675,7 +674,7 @@ if torch._C._has_mkldnn:
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
                 meta_value is None
-                or device_hint(meta_value) != "cpu"
+                or meta_value.device.type != "cpu"
                 or meta_value.dim() != 2
             ):
                 return False
@@ -683,7 +682,7 @@ if torch._C._has_mkldnn:
             bias_meta_value = linear_node.args[0].meta.get("val")
             if (
                 bias_meta_value is None
-                or device_hint(bias_meta_value) != "cpu"
+                or meta_value.device.type != "cpu"
                 or bias_meta_value.dim() != 1
                 or bias_meta_value.size(0) != weight_meta_value.size(1)
             ):
