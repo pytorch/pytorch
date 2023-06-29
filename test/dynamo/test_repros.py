@@ -3393,6 +3393,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = torch._dynamo.optimize("eager", nopython=True)(mod)(**inputs)
         self.assertEqual(ref, res)
 
+    def test_call_finally_python_3_8(self):
+        # Issue - https://github.com/pytorch/pytorch/issues/97811
+        def make_fn(g):
+            def fn():
+                while True:
+                    try:
+                        print(g)
+                        break
+                    except Exception as _:
+                        break
+
+            return torch.compile(fn, backend="eager")
+
+        make_fn(None)()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
