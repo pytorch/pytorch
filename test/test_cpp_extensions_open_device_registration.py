@@ -401,12 +401,14 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         def test_open_device_faketensor():
             torch.utils.rename_privateuse1_backend('foo')
-            # register foo module, torch.foo
-            torch._register_device_module('foo', DummyModule)
             with torch._subclasses.fake_tensor.FakeTensorMode.push():
                 a = torch.empty(1, device="foo")
                 b = torch.empty(1, device="foo:0")
                 result = a + b
+
+        def test_open_device_named_tensor():
+            torch.utils.rename_privateuse1_backend('foo')
+            a = torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])
 
         test_base_device_registration()
         test_before_common_registration()
@@ -422,6 +424,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_resize()
         test_open_device_storage_type()
         test_open_device_faketensor()
+        test_open_device_named_tensor()
 
 
 if __name__ == "__main__":
