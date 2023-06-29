@@ -4,6 +4,7 @@ import types
 from typing import Dict, List
 
 import sympy
+from torch._dynamo.variables.base import VariableTracker
 
 import torch.fx
 import torch.random
@@ -248,7 +249,7 @@ class TensorVariable(VariableTracker):
             return TorchVariable(self.python_type(), **options)
         if name == "_typed_storage":
             return variables.LambdaVariable(
-                lambda *args, **kwargs: TypedStorageVariable(self._typed_storage(), self.as_proxy()._typed_storage())
+                lambda *args, **kwargs: TypedStorageVariable(self._typed_storage())
             ).add_options(self)
 
         # Add a guard for type matching, these guards are checked before tensor guards
@@ -498,7 +499,7 @@ class TensorVariable(VariableTracker):
                 **options,
             )
         elif name == "_typed_storage":
-            return TypedStorageVariable(self._typed_storage(), self.as_proxy()._typed_storage())
+            return TypedStorageVariable(self._typed_storage())
         else:
             constant_result = None
 
@@ -980,10 +981,8 @@ class FakeItemVariable(TensorVariable):
 
 
 class TypedStorageVariable(VariableTracker):
-    def __init__(self, value, proxy, **kwargs):
+    def __init__(self, value, **kwargs):
         self.value = value
-        self.proxy = proxy
-        self.proxy.node.meta["example_value"] = self.value
         super().__init__(**kwargs)
 
     def reconstruct(self, codegen):
@@ -991,6 +990,13 @@ class TypedStorageVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        if name == "_size":
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: self.call_method(tx, name, [], {})
+            ).add_options(self)
+        return super().var_getattr(tx, name)
 
     def call_method(
         self,
@@ -1003,13 +1009,8 @@ class TypedStorageVariable(VariableTracker):
             return ConstantVariable(self.value._data_ptr())
         if name == "_size":
             if free_symbols(self.value._size()):
-                size_proxy = tx.output.create_proxy(
-                    "call_method",
-                    "_size",
-                    *proxy_args_kwargs([self], {}),
-                )
-                size_proxy.node.meta['example_value'] = self.value._size()
-                return SymNodeVariable(size_proxy, self.value._size())
+                # TODO(voz): should be ez, pass a proxy in, make a symnodevariable
+                unimplemented("Dynamic sizing in typed storage - NYI")
             if isinstance(self.value._size(), int):
                 return ConstantVariable(self.value._size())
             sizes = [ConstantVariable(x) for x in self.value._size()]

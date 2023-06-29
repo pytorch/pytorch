@@ -46,6 +46,7 @@ from .lists import (
 )
 from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
+from torch.fx.experimental.symbolic_shapes import free_symbols
 
 log = logging.getLogger(__name__)
 
@@ -907,6 +908,31 @@ class BuiltinVariable(VariableTracker):
 
     def call_len(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
+
+    def call_format(self, tx, *args, **kwargs):
+        if kwargs:
+            unimplemented("Format with kwargs - NYI")
+        assert len(args) > 0
+        inp_string = args[0].value
+        real_args = []
+        for arg in args[1:]:
+            if isinstance(arg, ConstantVariable):
+                real_args.append(arg.value)
+            elif isinstance(arg, variables.TensorVariable):
+                real_args.append(arg.as_proxy().node.meta['example_value'])
+            elif isinstance(arg, SizeVariable):
+                for item in arg.unpack_var_sequence(tx):
+                    if free_symbols(item.value):
+                        unimplemented("Free symbols in formatted size - NYI")
+                real_args.append(torch.Size(
+                    [item.value for item in arg.unpack_var_sequence(tx)]
+                ))
+            else:
+                unimplemented(f"Format with {type(arg)} - NYI")
+                
+        print("FORMAT", args)
+        return ConstantVariable(inp_string.format(*real_args))
+        
 
     def call_getitem(self, tx, *args, **kwargs):
         if self.unspec_python_args(*args, **kwargs):
