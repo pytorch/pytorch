@@ -179,7 +179,7 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
         MergeRule(
             name="super",
             patterns=["*"],
-            approved_by=["pytorch/metamates"],
+            approved_by=["pytorch/metamates", "ngimel"],
             mandatory_checks_name=[
                 "Lint",
                 "Facebook CLA Check",
@@ -453,13 +453,7 @@ class TestTryMerge(TestCase):
     def test_revert_codev_fails(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 91340)
 
-        class GitRepoCoDev(GitRepo):
-            def __init__(self) -> None:
-                super().__init__(get_git_repo_dir(), get_git_remote_name())
-
-            def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
-                return ["FakeCommitSha"]
-
+        class GitRepoCoDev(DummyGitRepo):
             def commit_message(self, ref: str) -> str:
                 return pr.get_body()
 
@@ -469,6 +463,16 @@ class TestTryMerge(TestCase):
             "landed via phabricator",
             lambda: validate_revert(repo, pr, comment_id=1372496233),
         )
+
+    def test_revert_codev_abandoned_diff_succeeds(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 100652)
+
+        class GitRepoCoDev(DummyGitRepo):
+            def commit_message(self, ref: str) -> str:
+                return pr.get_body()
+
+        repo = GitRepoCoDev()
+        validate_revert(repo, pr, comment_id=1588195237)
 
     def test_pr_changed_submodule_detection(self, *args: Any) -> None:
         # Updates submodule during dev-cycle but reverts it later
@@ -523,16 +527,15 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(failed) == 2)
 
     def test_get_classifications_unstable(self, *args: Any) -> None:
-        pr = GitHubPR("pytorch", "pytorch", 102784)
+        pr = GitHubPR("pytorch", "pytorch", 104312)
         checks = pr.get_checkrun_conclusions()
         checks = get_classifications(
             checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
         )
+        workflow_name = "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test"
+        job_name = "build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)"
         self.assertTrue(
-            checks[
-                "trunk / win-vs2019-cpu-py3 / test (default, 1, 3, windows.4xlarge.nonephemeral, unstable)"
-            ].classification
-            == "UNSTABLE"
+            checks[f"pull / {workflow_name} / {job_name}"].classification == "UNSTABLE"
         )
         pending, failed = categorize_checks(
             checks, list(checks.keys()), ok_failed_checks_threshold=1
