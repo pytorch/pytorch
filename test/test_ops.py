@@ -254,7 +254,6 @@ class TestCommon(TestCase):
     # This test runs in double and complex double precision because
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
@@ -300,7 +299,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -463,7 +461,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namesapce are remapped to the refs namespace (torch.foo becomes refs.foo).
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -476,7 +473,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -587,7 +583,6 @@ class TestCommon(TestCase):
     # TODO: get working with Windows by addressing failing operators
     # TODO: get working with ASAN by addressing failing operators
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
@@ -1270,7 +1265,6 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipMeta
     @onlyNativeDeviceTypes
     @ops(ops_and_refs, dtypes=OpDTypes.none)
