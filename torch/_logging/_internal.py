@@ -514,11 +514,12 @@ def _has_registered_parent(log_qname):
 class TorchLogsFormatter(logging.Formatter):
     def format(self, record):
         artifact_name = getattr(logging.getLogger(record.name), "artifact_name", None)
-        artifact_formatter: Optional[
-            logging.Formatter
-        ] = log_registry.artifact_log_formatters.get(artifact_name, None)
-        if artifact_formatter is not None:
-            return artifact_formatter.format(record)
+        if artifact_name is not None:
+            artifact_formatter = log_registry.artifact_log_formatters.get(
+                artifact_name, None
+            )
+            if artifact_formatter is not None:
+                return artifact_formatter.format(record)
         return super().format(record)
 
 
