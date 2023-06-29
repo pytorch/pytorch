@@ -51,14 +51,11 @@ def lazy_init():
     addmm_patterns_init()
 
 
-def register_freezing_graph_pattern(
-    pattern, extra_check=_return_true, pass_number=0, prepend=False
-):
+def register_freezing_graph_pattern(pattern, extra_check=_return_true, pass_number=0):
     return register_graph_pattern(
         pattern,
         extra_check=extra_check,
         pass_dict=pass_patterns[pass_number],
-        prepend=prepend,
     )
 
 
