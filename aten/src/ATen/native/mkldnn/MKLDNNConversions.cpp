@@ -402,6 +402,14 @@ std::tuple<ideep::tensor, ideep::tensor> get_lstm_packed_weights(
   return std::make_tuple(cached_weight_ih, cached_weight_hh);
 }
 
+bool should_use_plain_format(ideep::tensor w) {
+#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3
+  return w.get_desc().is_opaque() || w.get_desc().is_plain();
+# else
+  return w.get_desc().is_rnn_packed() || w.get_desc().is_plain();
+#endif
+}
+
 std::vector<Tensor> mkldnn_reorder_lstm_weight(
     TensorList weight,
     int64_t input_feature_size,
@@ -474,13 +482,13 @@ std::vector<Tensor> mkldnn_reorder_lstm_weight(
       // format for weight of LSTM, which won't change when the input seq_lens
       // changes.
       // On AVX2, queried weight will be plain format
-      if (w1_.get_desc().is_rnn_packed() || w1_.get_desc().is_plain()) {
+      if (should_use_plain_format(w1_)) {
         packed_w1 = layer_weights[0];
       } else {
         packed_w1 = new_with_itensor_mkldnn(std::move(w1_), optTypeMetaToScalarType(layer_weights[0].options().dtype_opt()), layer_weights[0].options().device_opt());
       }
 
-      if (w2_.get_desc().is_rnn_packed() || w2_.get_desc().is_plain()) {
+      if (should_use_plain_format(w2_)) {
         packed_w2 = layer_weights[1];
       } else {
         packed_w2 = new_with_itensor_mkldnn(std::move(w2_), optTypeMetaToScalarType(layer_weights[1].options().dtype_opt()), layer_weights[1].options().device_opt());
