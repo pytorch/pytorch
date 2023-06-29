@@ -80,9 +80,6 @@ class FakeStore(dist.Store):
     pass
 
 def _create_fake_pg(prefix_store, rank, world_size, timeout):
-    # disable barrier after init for fake pg, as it does not
-    # need to sync with other processes/threads
-    os.environ["TORCH_DIST_INIT_BARRIER"] = "0"
     return FakeProcessGroup(rank, world_size)
 
 dist.Backend.register_backend("fake", _create_fake_pg, devices=['cpu', 'cuda'])
