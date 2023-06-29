@@ -1,4 +1,3 @@
-import copy
 import dataclasses
 import itertools
 import operator
@@ -16,6 +15,7 @@ from .quantizer import (
     QuantizationSpecBase,
 )
 from .utils import _fold_bn_weights_into_conv_node
+from .utils import _get_aten_graph_module
 
 # Example inputs for `_conv2d_bn_pattern`, `_qat_conv2d_bn_pattern`, and `_qat_conv2d_bn_pattern_no_bias`
 _conv2d_bn_pattern_example_inputs = (
@@ -298,27 +298,6 @@ def _get_folded_quantized_qat_conv2d_bn_pattern(
                 x = F.relu(x)
         return x
     return _folded_quantized_qat_conv2d_bn_pattern
-
-def _get_aten_graph_module(
-    pattern: Callable,
-    example_inputs: Tuple[Any, ...],
-    **kwargs,
-) -> GraphModule:
-    """
-    Convert the pattern to an FX graph with decomposed aten ops.
-    """
-    # Avoid circular imports
-    import torch._dynamo
-    aten_pattern, _ = torch._dynamo.export(
-        pattern,
-        *copy.deepcopy(example_inputs),
-        aten_graph=True,
-        tracing_mode="real",
-        **kwargs,
-    )
-    aten_pattern.graph.eliminate_dead_code()
-    aten_pattern.recompile()
-    return aten_pattern
 
 def _has_conv_bias_filter(
     match: "InternalMatch",  # type: ignore[name-defined]
