@@ -326,7 +326,7 @@ threeOutputs _scaled_dot_product_efficient_attention_backward_batch_rule(
   const auto philox_offset_ = philox_offset_bdim.has_value() ? reshape_dim_into(*philox_offset_bdim, 0, philox_offset) : philox_offset;
 
   const auto [res0, res1, res2] = at::_scaled_dot_product_efficient_attention_backward(
-      grad_out__, query_, key_, value_, out_, logsumexp_, philox_seed_, 
+      grad_out__, query_, key_, value_, out_, logsumexp_, philox_seed_,
       philox_offset_, dropout_p, causal, scale);
 
   auto batch_size = query.size(*query_bdim);
