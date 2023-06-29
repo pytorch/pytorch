@@ -168,13 +168,13 @@ void QueryPool::extract_results() {
   results_pending_ = false;
 }
 
-static std::ostream& operator<<(std::ostream& os, const VkExtent3D& extents) {
+std::ostream& operator<<(std::ostream& os, const VkExtent3D& extents) {
   os << "{" << extents.width << ", " << extents.height << ", " << extents.depth
      << "}";
   return os;
 }
 
-static std::string stringize(const VkExtent3D& extents) {
+std::string stringize(const VkExtent3D& extents) {
   std::stringstream ss;
   ss << "{" << extents.width << ", " << extents.height << ", " << extents.depth
      << "}";

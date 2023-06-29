@@ -58,6 +58,19 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   export VALGRIND=OFF
 fi
 
+if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]]; then
+  # When rerunning disable tests, do not generate core dumps as it could consume
+  # the runner disk space when crashed tests are run multiple times. Running out
+  # of space is a nasty issue because there is no space left to even download the
+  # GHA to clean up the disk
+  ulimit -c 0
+
+  # Note that by piping the core dump to a script set in /proc/sys/kernel/core_pattern
+  # as documented in https://man7.org/linux/man-pages/man5/core.5.html, we could
+  # dynamically stop generating more core file when the disk space drops below a
+  # certain threshold. However, this is not supported inside Docker container atm
+fi
+
 # Get fully qualified path using realpath
 if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
