@@ -21,6 +21,7 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
+    SetVariable,
     SliceVariable,
     TupleVariable,
 )
