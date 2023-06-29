@@ -513,6 +513,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def count_calls(self):
         return count_calls(self.graph)
 
+    def is_empty_graph(self):
+        return len(list(self.graph.nodes)) == 0
+
     def get_submodule(self, keys):
         assert keys
         obj = self.nn_modules
