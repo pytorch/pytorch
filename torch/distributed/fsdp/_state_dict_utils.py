@@ -40,9 +40,9 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.distributed.fsdp._runtime_utils import (
     _cast_buffers_to_dtype_and_device,
-    _clear_grads_if_needed,
     _get_orig_buffer_dtypes,
     _lazy_init,
+    _reset_flat_param_grad_info_if_needed,
 )
 from torch.distributed.fsdp.api import (
     FullStateDictConfig,
@@ -142,7 +142,7 @@ def _common_pre_state_dict_hook(
     # TODO: need to check if this is always correct for composable FSDP.
     _lazy_init(fsdp_state, module)
     if fsdp_state._is_root:
-        _clear_grads_if_needed(fsdp_state._all_handles)
+        _reset_flat_param_grad_info_if_needed(fsdp_state._all_handles)
 
 
 def _common_unshard_pre_state_dict_hook(
