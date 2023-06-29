@@ -3,7 +3,7 @@ import functools
 import inspect
 import warnings
 from functools import partial
-from typing import Any, Callable, Dict, Set, Type, Union
+from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
 
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _get_module_fsdp_state
@@ -134,7 +134,7 @@ def _validate_frozen_params(
     """
     visited_modules = {root_module}
     stack = [("", root_module)]
-    topo_sorted_named_modules = []
+    topo_sorted_named_modules: List[Tuple[str, nn.Module]] = []
     while stack:
         module_name, module = stack.pop()
         topo_sorted_named_modules.append((module_name, module))
@@ -153,8 +153,8 @@ def _validate_frozen_params(
             param_to_fqn = _get_param_to_fqn(
                 module, ignored_params, visited_modules, module_name
             )
-            frozen_param_fqns = []
-            nonfrozen_param_fqns = []
+            frozen_param_fqns: List[str] = []
+            nonfrozen_param_fqns: List[str] = []
             for param, fqn in param_to_fqn.items():
                 if param.requires_grad:
                     nonfrozen_param_fqns.append(fqn)
@@ -188,11 +188,11 @@ def _get_param_to_fqn(
     """
     NOTE: This function differs from the ``_get_param_to_fqn()`` used for
     ``rekey_optim_state_dict()``. Here, we rely on the keys in the dict
-    being exactly the parameters that would be managed ``root_module`` given
+    being exactly the parameters that would be managed by ``root_module`` given
     ``visited_modules``, which depends on the target modules to wrap.
     """
     param_to_fqn: Dict[nn.Parameter, str] = {}
-    # Run BFS (or any tree traversal)
+    # Run BFS (or any tree traversal works)
     queue = collections.deque([(root_module, root_prefix)])
     visited_modules.add(root_module)
     while queue:
