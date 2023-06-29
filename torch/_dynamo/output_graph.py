@@ -40,6 +40,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
+from .current_scope_id import enter_new_scope
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
@@ -352,11 +353,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @contextlib.contextmanager
     def new_subtracer(self):
+        new_scope_ctx = enter_new_scope()
         try:
+            new_scope_ctx.__enter__()
             tracer = SubgraphTracer(self, parent=self.current_tracer)
             self.tracers.append(tracer)
             yield tracer
         finally:
+            new_scope_ctx.__exit__(None, None, None)
             self.tracers.pop()
 
     @property
