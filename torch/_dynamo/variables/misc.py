@@ -4,7 +4,7 @@ import inspect
 import itertools
 import sys
 import types
-from typing import Dict, List
+from typing import Dict, List, cast
 
 import torch._C
 from .. import config, variables
@@ -750,6 +750,9 @@ class SkipFilesVariable(VariableTracker):
             return variables.lists.DequeVariable(
                 items, mutable_local=MutableLocal(), **options
             )
+        elif self.value is cast and isinstance(args[0], variables.UserDefinedClassVariable) and isinstance(args[1], variables.UserDefinedObjectVariable):
+            # lol?
+            return args[1]
         else:
             try:
                 path = inspect.getfile(self.value)

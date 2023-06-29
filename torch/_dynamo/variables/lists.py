@@ -416,6 +416,16 @@ class DequeVariable(CommonListMethodsVariable):
                     **options,
                 ),
             )
+        elif name == "appendleft" and self.mutable_local:
+            assert not kwargs
+            return tx.replace_all(
+                self,
+                DequeVariable(
+                    [args[0]] + list(self.items),
+                    regen_guards=False,
+                    **options,
+                ),
+            )
         elif name == "popleft" and self.mutable_local:
             assert not args
             assert not kwargs
@@ -866,6 +876,32 @@ class SetVariable(VariableTracker):
             return result
         elif name == "__len__":
             return ConstantVariable(len(self.items))
+        elif name == "__contains__":
+            assert len(args) == 1
+            assert not kwargs
+
+            search = args[0]
+            if check_constant_args(args, {}) and search.is_python_constant():
+                result = any(
+                    x.as_python_constant() == search.as_python_constant()
+                    for x in self.items
+                )
+                return variables.ConstantVariable(result, **options)
+
+            from .builtin import BuiltinVariable
+
+            result = None
+            for x in self.items:
+                check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+                if result is None:
+                    result = check
+                else:
+                    result = BuiltinVariable(operator.or_).call_function(
+                        tx, [check, result], {}
+                    )
+            if result is None:
+                return ConstantVariable(None)
+            return result
         else:
             return super().call_method(tx, name, args, kwargs)
 
