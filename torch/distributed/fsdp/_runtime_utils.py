@@ -226,9 +226,12 @@ def _init_device_mesh(
         return None
     if get_backend() == "fake" or not root_state.compute_device:
         return None
+    from torch.distributed.distributed_c10d import _get_group_tag
+
     device_type = root_state.compute_device.type
     mesh_tensor = torch.arange(get_world_size(root_state.process_group))
-    device_mesh = DeviceMesh(device_type, mesh_tensor)
+    device_mesh = DeviceMesh(device_type, mesh_tensor, _init_process_groups=False)
+    device_mesh._dim_group_infos = (_get_group_tag(root_state.process_group), mesh_tensor.tolist())
     return device_mesh
 
 
