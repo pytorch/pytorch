@@ -9,6 +9,7 @@ import types
 from typing import Dict, List, Optional
 
 import torch._C
+from torch._dynamo.variables.base import VariableTracker
 import torch.fx
 import torch.nn
 import torch.onnx.operators
@@ -163,6 +164,9 @@ class TorchVariable(VariableTracker):
             and value in tensor_dunder_fns_remap
         ):
             value = tensor_dunder_fns_remap[value]
+
+        if isinstance(value, dict):
+            raise RuntimeError("Nope")
 
         self.value = value
 
@@ -777,6 +781,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         else:
             return handle_ntuple(args[0])
 
+    def call_method(self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]) -> VariableTracker:
+        print("CALLING METHOD ON TORCHVARIABLE", self.value, name, args[0].value, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
 def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
     # Will raise if not sound

@@ -404,7 +404,7 @@ class _CollOp:
 # Use them through the _world object to make sure the _world override mechanism
 _pg_map: Dict[ProcessGroup, Tuple[str, Optional[Store]]] = {}
 _pg_names: Dict[ProcessGroup, str] = {}
-_pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
+_pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = dict()
 # For a pg, it is a map from ProcessGroup to BackendConfig
 _pg_backend_config: Dict[ProcessGroup, str] = {}
 _group_count = 0

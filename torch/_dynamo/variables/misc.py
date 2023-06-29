@@ -107,6 +107,7 @@ class SuperVariable(VariableTracker):
         ):
             from .builder import VariableBuilder
 
+            args[0] = args[0].add_guard(GuardBuilder.CONSTANT_MATCH)
             key = args[0].as_python_constant()
             return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
@@ -492,6 +493,8 @@ class GetAttrVariable(VariableTracker):
         assert isinstance(name, str)
         self.obj = obj
         self.name = name
+        if isinstance(self.obj, variables.nn_module.FSDPManagedNNModuleVariable):
+            raise RuntimeError("Nope!")
 
     def __str__(self):
         return f"{self.__class__.__name__}({self.obj}, {self.name})"

@@ -4,10 +4,10 @@ import types
 from typing import Dict, List
 
 import sympy
-from torch._dynamo.variables.base import VariableTracker
 
 import torch.fx
 import torch.random
+from torch._dynamo.variables.base import VariableTracker
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables

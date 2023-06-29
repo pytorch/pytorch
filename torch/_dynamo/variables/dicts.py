@@ -194,6 +194,31 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable(
                 ConstDictVariable.get_key(args[0]) in self.items, **options
             )
+        elif (
+            name == "__setitem__"
+            and args
+            and ConstDictVariable.is_valid_key(args[0])
+        ):
+            self.mutable_local = MutableLocal()
+            assert not kwargs and len(args) == 2
+            k = ConstDictVariable.get_key(args[0])
+
+            if istensor(k):
+                tx.store_dict_key(global_key_name(k), k)
+            newval = collections.OrderedDict(val)
+            newval[k] = args[1]
+
+            new_rec_contains = self.recursively_contains.union(
+                args[1].recursively_contains
+            )
+            if args[1].mutable_local is not None:
+                new_rec_contains.add(args[1].mutable_local)
+
+            return tx.replace_all(
+                self,
+                self.modifed(newval, new_rec_contains, **options),
+            )
+            
         else:
             return super().call_method(tx, name, args, kwargs)
 

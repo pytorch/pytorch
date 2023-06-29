@@ -297,6 +297,9 @@ def _is_allowed_distributed(obj):
         ]:
             return True
         return False
+    # Hack, because dicts in these files go through
+    if isinstance(obj, dict) and obj in vars(torch.distributed.distributed_c10d).values():
+        return False
     return True
 
 

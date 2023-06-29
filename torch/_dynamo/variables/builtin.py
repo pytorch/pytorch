@@ -9,6 +9,7 @@ from typing import Dict, List
 
 import torch
 from torch import sym_float, sym_int
+from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
@@ -46,7 +47,6 @@ from .lists import (
 )
 from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
-from torch.fx.experimental.symbolic_shapes import free_symbols
 
 log = logging.getLogger(__name__)
 
@@ -919,20 +919,19 @@ class BuiltinVariable(VariableTracker):
             if isinstance(arg, ConstantVariable):
                 real_args.append(arg.value)
             elif isinstance(arg, variables.TensorVariable):
-                real_args.append(arg.as_proxy().node.meta['example_value'])
+                real_args.append(arg.as_proxy().node.meta["example_value"])
             elif isinstance(arg, SizeVariable):
                 for item in arg.unpack_var_sequence(tx):
                     if free_symbols(item.value):
                         unimplemented("Free symbols in formatted size - NYI")
-                real_args.append(torch.Size(
-                    [item.value for item in arg.unpack_var_sequence(tx)]
-                ))
+                real_args.append(
+                    torch.Size([item.value for item in arg.unpack_var_sequence(tx)])
+                )
             else:
                 unimplemented(f"Format with {type(arg)} - NYI")
-                
+
         print("FORMAT", args)
         return ConstantVariable(inp_string.format(*real_args))
-        
 
     def call_getitem(self, tx, *args, **kwargs):
         if self.unspec_python_args(*args, **kwargs):
@@ -1149,9 +1148,6 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
-            if isinstance(obj, variables.TensorVariable):
-                if name_var.value == "data":
-                    unimplemented("Setting data on a tensor is not supported.")
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):

@@ -1257,7 +1257,7 @@ def get_fake_value(node, tx):
         return e
 
     def visit(n: torch.fx.Node):
-        if not 'example_value' in n.meta:
+        if "example_value" not in n.meta:
             print("MISSING META?", n)
         return n.meta["example_value"]
 
