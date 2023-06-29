@@ -284,6 +284,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             optimizer_class=optim_cls,
             params=fsdp_overlap.parameters(),
             optimizer_kwargs=optim_kwargs,
+            register_hook=False,
         )
         for p in fsdp_overlap.parameters():
             print(f"{type(p)} {p._in_backward_optimizers}")
@@ -333,6 +334,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                 optimizer_class=optim_cls,
                 params=fsdp_overlap.parameters(),
                 optimizer_kwargs=optim_kwargs,
+                register_hook=False,
             )
             for p in fsdp_overlap.parameters():
                 assert hasattr(p, "_in_backward_optimizers")
