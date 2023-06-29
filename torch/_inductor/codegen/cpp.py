@@ -1346,19 +1346,21 @@ class CppVecKernel(CppKernel):
             else f"{var} + {cexpr_index(index)}"
         )
         loadbuf = "tmpbuf" if non_contiguous else var_expr
-        if is_broadcast and dtype not in [torch.bfloat16]:
-            if is_mask:
-                loadbuf = f"flag_to_float_scalar({loadbuf})"
-            line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
+        if is_broadcast:
+            if dtype in [torch.bfloat16]:
+                line = f"at::vec::Vectorized<bfloat16>({loadbuf})"
+            else:
+                if is_mask:
+                    loadbuf = f"flag_to_float_scalar({loadbuf})"
+                line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
             line = f"at::vec::load_uint8_as_float({var_expr})"
         elif is_mask:
             line = f"flag_to_float_vec({loadbuf})"
         elif dtype in [torch.bfloat16]:
-            if is_broadcast:
-                line = f"at::vec::Vectorized<bfloat16>({loadbuf})"
-            else:
-                line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+            line = (
+                f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+            )
         else:
             line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
         if non_contiguous:
