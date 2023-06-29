@@ -2167,7 +2167,10 @@ class TestSparse(TestSparseBase):
                     lhs_data.shape
                 ).clone()._coalesced_(rhs_is_coalesced)
 
-                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=True), (lhs,), masked=True)
+                # To test masked semantics we need to make sure that the in-flowing grad has the same shape,
+                # lhs.sparse_mask(lhs_mask) accomplishes that.
+                lhs_mask = lhs.detach().clone()
+                gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs).to_dense(masked_grad=True), (lhs,), masked=True)
                 gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False)
 
     @coalescedonoff
