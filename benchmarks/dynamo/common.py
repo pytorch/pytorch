@@ -6,6 +6,7 @@ import collections
 import contextlib
 import copy
 import csv
+import dataclasses
 import functools
 import importlib
 import itertools
@@ -18,7 +19,6 @@ import signal
 import subprocess
 import sys
 import time
-import dataclasses
 from contextlib import contextmanager
 
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Tuple, Type
@@ -33,15 +33,15 @@ import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
+from torch._decomp import core_aten_decompositions
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
+from torch._export import ExportDynamoConfig
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._decomp import core_aten_decompositions
-from torch._export import ExportDynamoConfig
 
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
@@ -1408,12 +1408,12 @@ def optimize_onnx_ctx(
 
     return run_n_iterations_onnx
 
+
 def optimize_export_ctx(
     export_fn,
     export_config,
     run_n_iterations: Callable,
 ) -> Callable:
-
     def run_one_iteration_export(model, inputs):
         with torch._dynamo.config.patch(dataclasses.asdict(export_config)):
             exported_model, _ = export_fn(model, *inputs)
@@ -3001,9 +3001,7 @@ def run(runner, args, original_dir=None):
             constraints=None,
             assume_static_by_default=True,
         )
-        optimize_ctx = functools.partial(
-            optimize_export_ctx, export_fn, export_config
-        )
+        optimize_ctx = functools.partial(optimize_export_ctx, export_fn, export_config)
         experiment = speedup_experiment
         output_filename = "export.csv"
     elif args.xla:
