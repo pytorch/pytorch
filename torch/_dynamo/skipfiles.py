@@ -33,11 +33,11 @@ import weakref
 import torch
 import torch._inductor.test_operators
 import torch.distributed
+import torch.distributed.fsdp
+import torch.distributed.utils
 import torch.utils._content_store
 
 from . import comptime, config, external_utils
-import torch.distributed.fsdp
-import torch.distributed.utils
 
 """
 A note on skipfiles:
@@ -148,15 +148,22 @@ if torch.distributed.is_available():
     FILENAME_ALLOWLIST |= {inspect.getfile(torch.distributed.fsdp._utils._same_storage)}
 
     FILENAME_ALLOWLIST |= {
-        inspect.getfile(obj)
-        for obj in torch.distributed.fsdp._exec_order_utils.__dict__.values()
-        if inspect.isclass(obj)
+        inspect.getfile(torch.distributed.fsdp._exec_order_utils._ExecOrderData)
+    }
+
+    FILENAME_ALLOWLIST |= {
+        inspect.getfile(
+            torch.distributed._functional_collectives._all_gather_into_tensor
+        )
     }
 
     FILENAME_ALLOWLIST |= {inspect.getfile(torch.nn.parallel.scatter_gather.scatter)}
 
     FILENAME_ALLOWLIST |= {
         inspect.getfile(torch.distributed._composable_state._insert_module_state)
+    }
+    FILENAME_ALLOWLIST |= {
+        inspect.getfile(torch.distributed.fsdp._common_utils._get_module_fsdp_state)
     }
 
     FILENAME_ALLOWLIST |= {
@@ -166,24 +173,18 @@ if torch.distributed.is_available():
     }
 
     FILENAME_ALLOWLIST |= {
-        inspect.getfile(obj)
-        for obj in torch.distributed.fsdp._traversal_utils.__dict__.values()
-        if inspect.isclass(obj) or inspect.isfunction(obj)
+        inspect.getfile(torch.distributed.fsdp._traversal_utils._composable)
     }
 
-    FILENAME_ALLOWLIST |= {
-        inspect.getfile(obj)
-        for obj in torch.distributed._composable.contract.__dict__.values()
-        if inspect.isclass(obj) or inspect.isfunction(obj)
-    }
+    FILENAME_ALLOWLIST |= {inspect.getfile(torch.distributed._composable._get_registry)}
 
     FILENAME_ALLOWLIST |= {
-        inspect.getfile(torch.distributed.fsdp._runtime_utils._get_fsdp_root_states_with_modules)
+        inspect.getfile(
+            torch.distributed.fsdp._runtime_utils._get_fsdp_root_states_with_modules
+        )
     }
 
-    FILENAME_ALLOWLIST |= {
-        inspect.getfile(torch.distributed.utils._alloc_storage)
-    }
+    FILENAME_ALLOWLIST |= {inspect.getfile(torch.distributed.utils._alloc_storage)}
 
     FILENAME_ALLOWLIST |= {
         inspect.getfile(torch.distributed.distributed_c10d.all_gather_into_tensor)

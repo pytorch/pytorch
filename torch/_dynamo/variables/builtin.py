@@ -39,6 +39,7 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    SetVariable,
     SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -70,7 +71,6 @@ class BuiltinVariable(VariableTracker):
             pow,
             repr,
             round,
-            set,
             str,
             str.format,
             sum,
@@ -601,14 +601,9 @@ class BuiltinVariable(VariableTracker):
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             result = self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                )
-            if isinstance(result, dict):
-                vt_items = {}
-                for k, v in result.items():
-                    vt_items[k] = variables.ConstantVariable(v)
-                return ConstDictVariable(vt_items, user_cls=dict)
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
             return variables.ConstantVariable(
                 result,
                 **options,
@@ -769,10 +764,17 @@ class BuiltinVariable(VariableTracker):
             return self._dyn_proxy(tx, *args, **kwargs)
         cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:
-            return cls(
-                [],
-                mutable_local=MutableLocal(),
-            )
+            if cls is SetVariable:
+                return cls(
+                    tx,
+                    [],
+                    mutable_local=MutableLocal(),
+                )
+            else:
+                return cls(
+                    [],
+                    mutable_local=MutableLocal(),
+                )
         elif obj.has_unpack_var_sequence(tx):
             guards = set()
             if obj.source and not is_constant_source(obj.source):
@@ -780,6 +782,14 @@ class BuiltinVariable(VariableTracker):
                     guards.add(obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN))
                 else:
                     guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
+            if cls is SetVariable:
+                return cls(
+                    tx,
+                    list(obj.unpack_var_sequence(tx)),
+                    mutable_local=MutableLocal(),
+                    guards=guards,
+                ).add_options(self, obj)
+
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
@@ -789,6 +799,7 @@ class BuiltinVariable(VariableTracker):
     call_iter = _call_iter_tuple_list
     call_tuple = _call_iter_tuple_list
     call_list = _call_iter_tuple_list
+    call_set = _call_iter_tuple_list
 
     @staticmethod
     def is_supported_call_dict_arg(tx, arg):
@@ -1249,6 +1260,19 @@ class BuiltinVariable(VariableTracker):
         def _unimplemented():
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
+        def _resolve_getattr(get_attr_var):
+            assert isinstance(get_attr_var, variables.GetAttrVariable)
+            try:
+                return get_attr_var.call_function(tx, [], {})
+            except Exception as e:
+                _unimplemented()
+
+        if isinstance(left, variables.GetAttrVariable):
+            left = _resolve_getattr(left)
+
+        if isinstance(right, variables.GetAttrVariable):
+            right = _resolve_getattr(right)
+
         if (
             all(
                 isinstance(x, (NNModuleVariable, ConstantVariable))
@@ -1275,6 +1299,15 @@ class BuiltinVariable(VariableTracker):
                 _unimplemented()
             return ConstantVariable(op(left.fn, right.fn))
 
+        if isinstance(left, variables.user_defined.ProcessGroupVariable):
+            if op not in supported_const_comparison_ops.values():
+                _unimplemented()
+            if not isinstance(
+                right, (variables.user_defined.ProcessGroupVariable, ConstantVariable)
+            ):
+                _unimplemented()
+            return ConstantVariable(op(left.value, right.value))
+
         # Note, we have a rare BaseListVariable subtype mismatch with valid comparison
         # x = torch.randn([3, 3])
         # x.size() == (3, 3) # True
@@ -1288,6 +1321,11 @@ class BuiltinVariable(VariableTracker):
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
                 _unimplemented()
             return BaseListVariable.list_compare(tx, op, left, right)
+
+        if isinstance(left, SetVariable):
+            if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
+                _unimplemented()
+            return ConstantVariable(op(left._underlying_items, right._underlying_items))
 
         if isinstance(left, TensorVariable):
             from .builder import wrap_fx_proxy

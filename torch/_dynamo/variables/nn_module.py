@@ -805,6 +805,3 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
 
     def as_python_constant(self):
         return self.value
-
-    # def as_proxy(self):
-    #     return self.value

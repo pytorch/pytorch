@@ -423,6 +423,11 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             or skipfiles.check(frame.f_code.co_filename)
             or config.disable
         ):
+            print(
+                "AM I IN THE SKIPS?",
+                frame.f_code.co_name,
+                skipfiles.check(frame.f_code.co_filename),
+            )
             log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
@@ -1316,7 +1321,9 @@ class TorchPatcher:
         #     TorchDynamo does not trigger again on the frames created by
         #     utils.checkpoint innards.
         torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
-        torch.distributed.fsdp._runtime_utils._check_flat_params_on_expected_device._dynamo_marked_constant = True
+        torch.distributed.fsdp._runtime_utils._check_flat_params_on_expected_device._dynamo_marked_constant = (
+            True
+        )
 
         torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
         torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()

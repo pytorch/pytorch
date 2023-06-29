@@ -73,6 +73,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             elif ConstantVariable.is_literal(obj):
                 return ConstantVariable(obj, **options)
 
+        if (
+            name == "WORLD"
+            and self.value is torch.distributed.distributed_c10d.GroupMember
+        ):
+            return ProcessGroupVariable(self.value.WORLD)
         return super().var_getattr(tx, name)
 
     def call_method(
