@@ -782,7 +782,17 @@ class Kernel(CodeGen):
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         raise NotImplementedError()
 
-    def bucket_index(self, values, offsets_name, offsets_size):
+    def bucketize(
+        self,
+        values,
+        offsets_name: str,
+        offsets_size,
+        indexing_dtype: str,
+        right: bool
+    ):
+        """
+        See [Note: Inductor bucketize op]
+        """
         raise NotImplementedError()
 
     def __enter__(self):
@@ -837,8 +847,31 @@ class Kernel(CodeGen):
                 )
 
             @staticmethod
-            def bucket_index(values, offsets_name, offsets_size):
-                return self.bucket_index(values, offsets_name, offsets_size)
+            def bucketize(
+                values,
+                offsets_name: str,
+                offsets_size,
+                indexing_dtype: str,
+                right: bool,
+            ):
+                """
+                [Note: Inductor bucketize op]
+
+                Given values (tensor) and offsets_name (reference to the name of a 1D
+                tensor), calculate the bucket that each value belongs to.
+
+                e.g. for values [-1, 0, 1, 2, 3, 4, 5, 9], offsets [0, 4, 8], right=False
+                return =        [ 0, 1, 1, 1, 1, 2, 2, 3].
+
+                When right == False, bucket i refers to range [offsets[i], offsets[i+1]).
+                When right == True,  bucket i refers to range (offsets[i], offsets[i+1]].
+
+                Offsets must be increasing or else return value is undefined.
+
+                Note: semantics of this op differ slightly from torch.bucketize:
+                "right" has the opposite meaning.
+                """
+                return self.bucketize(values, offsets_name, offsets_size, indexing_dtype, right)
 
         super().__enter__()
         parent_handler = self.overrides(V.get_ops_handler())

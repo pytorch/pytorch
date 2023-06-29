@@ -1556,36 +1556,46 @@ def inductor_randint(
     )
 
 
-@register_lowering(inductor_prims.bucket_index, type_promotion_kind=None)
-def inductor_bucket_index(values: TensorBox, offsets: TensorBox):
-    assert len(offsets.get_size()) == 1
-    assert is_integer_type(values)
-    assert is_integer_type(offsets)
+@register_lowering(inductor_prims._bucketize, type_promotion_kind=None)
+def _inductor_bucketize(
+    input: TensorBox,
+    boundaries: TensorBox,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+):
+    assert len(boundaries.get_size()) == 1
 
-    if values.get_device().type != "cuda" or values.get_device().type != "cuda":
-        return pytree.tree_map(
-            TensorBox.create,
-            ir.FallbackKernel.create(inductor_prims.bucket_index, values, offsets),
+    if input.get_device().type != "cuda" or boundaries.get_device().type != "cuda":
+        return fallback_handler(inductor_prims._bucketize, add_to_fallback_set=False)(
+            input, boundaries, out_int32=out_int32, right=right
         )
 
-    offsets_size = offsets.get_size()[0]
-    device = values.get_device()
-    dtype = values.get_dtype()
-    values_loader = values.make_loader()
-    offsets_name = offsets.get_name()
+    boundaries_size = boundaries.get_size()[0]
+    boundaries_loader = boundaries.make_loader()
+    device = input.get_device()
+    input_loader = input.make_loader()
+
+    index_dtype = torch.int32 if out_int32 else torch.int64
+    triton_dtype = "tl.int32" if out_int32 else "tl.int64"
 
     def inner_fn(index):
-        val = values_loader(index)
-        bucket_index = ops.bucket_index(
-            val, offsets_name, ops.index_expr(offsets_size, torch.int32), "tl.int32"
+        val = input_loader(index)
+        indices = ops.bucketize(
+            val,
+            boundaries.get_name(),
+            ops.index_expr(boundaries_size, index_dtype),
+            triton_dtype,
+            not right,  # ops.bucketize and torch.bucketize have opposite semantics for "right"
         )
-        return bucket_index
+
+        return indices
 
     return Pointwise.create(
         device=device,
-        dtype=dtype,
+        dtype=index_dtype,
         inner_fn=inner_fn,
-        ranges=values.get_size(),
+        ranges=input.get_size(),
     )
 
 

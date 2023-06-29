@@ -1292,18 +1292,24 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
-    def bucket_index(self, values, offsets_name: str, offsets_size, indexing_dtype: str):
-        # NOTE: this may not necessarily be true. TODO - check this.
-        assert isinstance(values, (CSEVariable,))
+    def bucketize(
+        self,
+        values: CSEVariable,
+        offsets_name: str,
+        offsets_size,
+        indexing_dtype: str,
+        right: bool,
+    ):
+        """
+        See [Note: Inductor bucketize op]
+        """
 
+        offsets_ptr = self.args.input(offsets_name)
         block_size = self.dense_size_str()
 
-        # TODO (dberard) make these actually work with cse
-        # i.e. don't just cse.newvar(), instead cse.generate()
-        # so that expressions can be generated
-
         result = self.cse.generate(
-            self.compute, f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {indexing_dtype}, {offsets_size}, {block_size})"
+            self.compute,
+            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {indexing_dtype}, {right}, {offsets_size}, {block_size})",
         )
 
         return result

@@ -73,28 +73,18 @@ force_stride_order = make_prim(
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
 
 
-def inductor_bucket_index_impl(values, offsets):
-    assert values.dtype == torch.int32 or values.dtype == torch.int64
-    assert offsets.dim() == 1
-    result = torch.zeros_like(values)
-    for idx in range(len(offsets) - 1, 0, -1):
-        result[(values >= offsets[idx]) & (result == 0)] = idx
-    return result
+def _inductor_bucketize_impl(input, boundaries, *, out_int32=False, right=False):
+    return torch.bucketize(input, boundaries, out_int32=out_int32, right=right)
 
 
-def inductor_bucket_index_meta(values, offsets):
-    return torch.empty_like(values, memory_format=torch.preserve_format)
+def _inductor_bucketize_meta(input, boundaries, *, out_int32=False, right=False):
+    return torch.empty_like(input, memory_format=torch.preserve_format, dtype=(torch.int32 if out_int32 else torch.int64))
 
 
-bucket_index = _prims._make_prim(
-    schema="inductor_bucket_index(Tensor values, Tensor offsets) -> Tensor",
-    meta=inductor_bucket_index_meta,
-    impl_aten=inductor_bucket_index_impl,
+_bucketize = _prims._make_prim(
+    schema="_inductor_bucketize(Tensor input, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor",
+    meta=_inductor_bucketize_meta,
+    impl_aten=_inductor_bucketize_impl,
     return_type=RETURN_TYPE.NEW,
-    doc="""
-    For a tensor `offsets` representing boundaries of different buckets,
-    this will elementwise map each value into the corresponding bucket.
-    For example, if offsets = [0, 2, 5, 9] (representing buckets [0, 2), [2, 5), [5, 9))
-    then values = [0, 1, 2, 3, 4, 5, 6, 7, 8] will map to [0, 0, 1, 1, 1, 2, 2, 2, 2].
-    """,
+    doc="Same as torch.bucketize(), but does not get decomposed.",
 )
