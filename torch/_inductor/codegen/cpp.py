@@ -1347,12 +1347,10 @@ class CppVecKernel(CppKernel):
         )
         loadbuf = "tmpbuf" if non_contiguous else var_expr
         if is_broadcast:
-            if dtype in [torch.bfloat16]:
-                line = f"at::vec::Vectorized<bfloat16>({loadbuf})"
-            else:
-                if is_mask:
-                    loadbuf = f"flag_to_float_scalar({loadbuf})"
-                line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
+            if is_mask:
+                loadbuf = f"flag_to_float_scalar({loadbuf})"
+            loadbuftype = "float" if is_mask else f"{DTYPE_TO_CPP[dtype]}"
+            line = f"at::vec::Vectorized<{loadbuftype}>(static_cast<{loadbuftype}>({loadbuf}))"
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
             line = f"at::vec::load_uint8_as_float({var_expr})"
         elif is_mask:
