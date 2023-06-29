@@ -767,6 +767,21 @@ def is_safe_constant(v):
     )
 
 
+def guard_if_dyn(arg):
+    from .variables import ConstantVariable, SymNodeVariable
+
+    if isinstance(arg, SymNodeVariable):
+        # This is because SymNodeVariable intentionally doesn't define
+        # as_python_constant to avoid shunting down some codepaths
+        # that expect consts.   In this case, we know we definitely
+        # want to specialize though.
+        return arg.evaluate_expr()
+    elif isinstance(arg, ConstantVariable):
+        return arg.as_python_constant()
+
+    return arg
+
+
 def check_constant_args(args, kwargs):
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
 

@@ -41,7 +41,7 @@ class autocast:
             optimizer.zero_grad()
 
             # Enables autocasting for the forward pass (model + loss)
-            with autocast():
+            with torch.autocast(device_type="cuda"):
                 output = model(input)
                 loss = loss_fn(output, target)
 
@@ -56,7 +56,7 @@ class autocast:
 
         class AutocastModel(nn.Module):
             ...
-            @autocast()
+            @torch.autocast(device_type="cuda")
             def forward(self, input):
                 ...
 
@@ -74,7 +74,7 @@ class autocast:
         c_float32 = torch.rand((8, 8), device="cuda")
         d_float32 = torch.rand((8, 8), device="cuda")
 
-        with autocast():
+        with torch.autocast(device_type="cuda"):
             # torch.mm is on autocast's list of ops that should run in float16.
             # Inputs are float32, but the op runs in float16 and produces float16 output.
             # No manual casts are required.
@@ -153,9 +153,9 @@ class autocast:
         c_float32 = torch.rand((8, 8), device="cuda")
         d_float32 = torch.rand((8, 8), device="cuda")
 
-        with autocast():
+        with torch.autocast(device_type="cuda"):
             e_float16 = torch.mm(a_float32, b_float32)
-            with autocast(enabled=False):
+            with torch.autocast(device_type="cuda", enabled=False):
                 # Calls e_float16.float() to ensure float32 execution
                 # (necessary because e_float16 was created in an autocasted region)
                 f_float32 = torch.mm(c_float32, e_float16.float())
