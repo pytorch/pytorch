@@ -9,7 +9,6 @@ import warnings
 
 import torch
 
-import torch._dynamo
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._inductor import config
