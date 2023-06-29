@@ -2168,13 +2168,13 @@ class TestSparse(TestSparseBase):
                     lhs_data._indices()[:, :nnz],
                     lhs_data._values()[:nnz],
                     lhs_data.shape
-                )._coalesced_(lhs_is_coalesced).requires_grad_(True)
+                ).clone()._coalesced_(lhs_is_coalesced).requires_grad_(True)
 
                 rhs = torch.sparse_coo_tensor(
                     lhs_data._indices()[:, -nnz:],
                     lhs_data._values()[-nnz:],
                     lhs_data.shape
-                )._coalesced_(rhs_is_coalesced)
+                ).clone()._coalesced_(rhs_is_coalesced)
 
                 gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=True), (lhs,), masked=True)
                 gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False)
