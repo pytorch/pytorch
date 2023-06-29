@@ -1,26 +1,14 @@
-from functools import partial
-
 import torch
 import torch.utils._pytree as pytree
-from torch._C import DispatchKey, DispatchKeySet, _ExcludeDispatchKeyGuard
-from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
+from torch._C import DispatchKey
 from torch._functorch.aot_autograd import create_joint, AOTConfig
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
-    unwrap_proxy,
-)
-from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode,
-    _pop_mode_temporarily,
 )
 from torch._dispatch.python import suspend_functionalization
-from ._cond import _has_potential_branch_input_alias, _has_potential_branch_input_mutation, UnsupportedAliasMutationException
 
 
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
@@ -31,7 +19,6 @@ class ScanWrapper(HigherOrderOperator):
 
 scan = ScanWrapper("scan")
 scan_impl = HigherOrderOperator("scan_impl")
-scan_backward_impl = HigherOrderOperator("scan_backward_impl")
 
 dummy_aot_config = AOTConfig(fw_compiler=None,
                              bw_compiler=None,
@@ -119,8 +106,7 @@ def scan_wrapper(f, init, xs):
     if not all(isinstance(t, torch.Tensor) for t in flat_xs):
         raise RuntimeError(f"Scanned xs can only consist of tensors. Got xs {flat_xs}.")
     
-    num_init_args = len(flat_init)
-    # Is it necessary to restrict the shape of scanned or mapped elements?
+    # TODO: Is it necessary to restrict the shape of scanned or mapped elements?
     # for scan, the only requirement should be that f spits out a carry that
     # always has the same shape
     shapes = [xs.shape for xs in flat_xs]
@@ -157,63 +143,35 @@ class ScanAutogradOp(torch.autograd.Function):
     @staticmethod
     def forward(ctx, fw_graph, joint_graph, num_init_args, *flat_args):
         ctx._joint_graph = joint_graph
-        ctx._num_init_args = num_init_args
         ctx._num_input_args = len(flat_args)
+        ctx._num_init_args = num_init_args
         with torch._C._AutoDispatchBelowAutograd():
             flat_carry_out, flat_out, carries = scan_impl(fw_graph, flat_args[:num_init_args], flat_args[num_init_args:], None, None, return_all_carries=True, reverse=False)
             # needs to flat the carries nested list
             # second call to save_for_backward will override whatever that is saved earlier
             # therefore, need to save everything that is needed at once
-            ctx.save_for_backward(*flat_args, *(carry_entry for carry in carries for carry_entry in carry))
-            return (*flat_carry_out, *flat_out)
+            flat_carries = [carry_entry for carry in carries for carry_entry in carry]
+            # TODO: we don't need to actually store the init args, just need the xs args
+            ctx.save_for_backward(*flat_args, *flat_carries)
+            ctx._num_out_args = len(flat_out)
+            return (*flat_carry_out, *flat_out, *flat_carries)
 
     @staticmethod
     def backward(ctx, *flat_grads):
         flat_carries = ctx.saved_tensors[ctx._num_input_args:]
-        # bring back the nested carries list
-        carries = [flat_carries[i*ctx._num_init_args:(i+1)*ctx._num_init_args] for i in range(len(flat_carries)//ctx._num_init_args)]
         fwd_args = ctx.saved_tensors[:ctx._num_input_args]
+        # bring back the nested carries list by chunking up the list to equal lengthed nested lists
+        # all carries should have length num_init_args
+        carries = [flat_carries[i*ctx._num_init_args:(i+1)*ctx._num_init_args] for i in range(len(flat_carries)//ctx._num_init_args)]
         flat_xs = fwd_args[ctx._num_init_args:]
+        # carry and init should have the same spec
         final_carry_grad = flat_grads[:ctx._num_init_args]
-        ys_grad = flat_grads[ctx._num_init_args:]
+        # ys should only be up to ctx._num_init_args + ctx._num_out_args, since the remaining should be grads for flat_carries
+        # and should be empty
+        ys_grad = flat_grads[ctx._num_init_args:ctx._num_init_args + ctx._num_out_args]
         with torch._C._AutoDispatchBelowAutograd():
             flat_carry_out_grads, flat_out_grads = scan_impl(ctx._joint_graph, final_carry_grad, flat_xs, ys_grad, carries, return_all_carries=False, reverse=True)
             return None, None, None, *flat_carry_out_grads, *flat_out_grads
-
-# def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
-#     xs = list(args[:num_mapped])
-#     pos_args = list(args[num_mapped:])
-#     leading_dim_size = xs[0].shape[0]
-
-#     example_input = _unstack_pytree(xs)[0]
-#     body_graph = f
-#     if not isinstance(body_graph, torch.fx.GraphModule):
-#         body_graph = make_fx(body_graph)(*example_input, *pos_args)
-
-#     with disable_proxy_modes_tracing():
-#         example_outs = body_graph(*example_input, *pos_args)
-
-#         def expand_tensor(t):
-#             if isinstance(t, torch.Tensor):
-#                 return t.expand(leading_dim_size, *t.shape)
-#             return t
-#         expanded_outs = pytree.tree_map(expand_tensor, example_outs)
-
-#     next_name = None
-#     i = 0
-#     while not next_name:
-#         candidate = f"body_graph_{i}"
-#         if hasattr(proxy_mode.tracer.root, candidate):
-#             i += 1
-#         else:
-#             next_name = candidate
-
-#     proxy_mode.tracer.root.register_module(next_name, body_graph)
-#     node_args = (body_graph, num_mapped, *args)
-#     proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), node_args)
-#     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
-#                                                name="map_impl")
-#     return track_tensor_tree(expanded_outs, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 def _unstack_pytree(xs):
     flat_xs, inspec = pytree.tree_flatten(xs)
@@ -251,6 +209,18 @@ def _stack_pytree(pytrees):
 
 @scan_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
 def scan_dense(f, flat_init, flat_xs, ys_grad=None, carries=None, return_all_carries=False, reverse=False):
+    '''
+        The scan_dense implementation is reused for executing both forward and backward graph.
+        When executing forward graph, f is the fwd_graph, and flat_init, flat_xs are the typical flattened
+        init and xs lists, and ys_grad, carries should be None, reverse should be False (not exposing reverse argument at the top level yet).
+        Note that the return_all_carries argument will control whether we return all the intermediate carries as the third
+        output (except the final output carry, which is returned as the first output)
+
+        When executing backward graph, f is the bwd_graph, and flat_init should be the initial output carry gradient, flat_xs is still
+        the same flattened input xs. ys_grad is the output gradient, and carries is a list of all the intermediate carries generated during
+        forward pass (less the final output carry). This list of carries are needed for computing the backward gradient at each iteration.
+        When running bwd_graph with scan_dense, we should set reverse = True because the gradients are computed bottom up
+    '''
     carry = flat_init
     # each carry output is needed for calculating gradients backwards
     out_carries = []
@@ -277,8 +247,14 @@ def scan_dense(f, flat_init, flat_xs, ys_grad=None, carries=None, return_all_car
 def scan_autograd(f, flat_init, flat_xs, ys_grad=None, carries=None, return_all_carries=False, reverse=False):
     fw_graph, bw_graph = create_fw_bw_graph(f, flat_init, flat_xs)
     flat_all_out = ScanAutogradOp.apply(fw_graph, bw_graph, len(flat_init), *flat_init, *flat_xs)
-    num_carry_args = len(flat_xs)
-    return flat_all_out[:num_carry_args], flat_all_out[num_carry_args:]
+    num_carry_out = len(flat_init)
+    num_carries_out = num_carry_out * flat_xs[0].shape[0]  # flat_xs.shape[0] is the batch dimension size
+    num_flat_ys = len(flat_all_out) - num_carry_out - num_carries_out
+    if return_all_carries:
+        flat_carries = flat_all_out[-num_carries_out:]
+        carries = [flat_carries[i*num_carry_out:(i+1)*num_carry_out] for i in range(len(flat_carries)//num_carry_out)]
+        return flat_all_out[:num_carry_out], flat_all_out[num_carry_out:num_carry_out + num_flat_ys], carries
+    return flat_all_out[:num_carry_out], flat_all_out[num_carry_out:num_carry_out + num_flat_ys]
 
 # TODO(voz) Make this automatic for keys, this is very ugly atm
 scan_impl.fallthrough(DispatchKey.PythonDispatcher)
@@ -286,18 +262,3 @@ scan_impl.fallthrough(DispatchKey.PythonTLSSnapshot)
 scan_impl.fallthrough(DispatchKey.ADInplaceOrView)
 scan_impl.fallthrough(DispatchKey.BackendSelect)
 scan_impl.fallthrough(DispatchKey.AutocastCPU)
-
-@scan_backward_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
-def scan_backward_dense(f, flat_init, flat_xs, flat_grads):
-    pytrees = []
-    carry = flat_init
-    for inp in _unstack_pytree(flat_xs):
-        carry, flattened_out = f(carry, inp)
-        pytrees.append(flattened_out)
-    return carry, _stack_pytree(pytrees)
-
-scan_backward_impl.fallthrough(DispatchKey.PythonDispatcher)
-scan_backward_impl.fallthrough(DispatchKey.PythonTLSSnapshot)
-scan_backward_impl.fallthrough(DispatchKey.ADInplaceOrView)
-scan_backward_impl.fallthrough(DispatchKey.BackendSelect)
-scan_backward_impl.fallthrough(DispatchKey.AutocastCPU)

@@ -20,13 +20,13 @@ def _fake_map(f, x, *args):
         zs.append(f(xp, *args))
     return _stack_pytree(zs)
 
-def _fake_scan(f, init, x, *args):
+def _fake_scan(f, init, x):
     from functorch.experimental._map import _stack_pytree, _unstack_pytree
     x_pytrees = _unstack_pytree(x)
     zs = []
     carry = init
     for xp in x_pytrees:
-        carry, out = f(carry, xp, *args)
+        carry, out = f(carry, xp)
         zs.append(out)
     return carry, _stack_pytree(zs)
 
@@ -137,8 +137,6 @@ class TestControlFlow(TestCase):
         xs = torch.ones(3, 2, 2, requires_grad=True)
         y = torch.ones(2, requires_grad=True)
         res = control_flow.map(f, xs, y)
-        print("************************")
-        print(res)
         expected_res = _fake_map(f, xs, y)
         grad_out = torch.ones_like(res)
         grads = torch.autograd.grad(res, (xs, y), grad_out)
@@ -177,7 +175,6 @@ class TestControlFlow(TestCase):
         self.assertEqual(expected_res, res)
         self.assertEqual(expected_grads, grads)
 
-
     def test_map_autograd_nested_list(self):
         import torch.utils._pytree as pytree
 
@@ -204,32 +201,61 @@ class TestControlFlow(TestCase):
         def f(carry, x):
             return carry+1, x+carry
 
-        init = torch.tensor([1.0, 2.0])
-        x = torch.rand(10, 2)
-        print(x)
-        carry_out, ys = control_flow.scan(f, init, x)
-        print(carry_out)
-        print(ys)
-        self.assertTrue(False)
+        init = torch.rand(1, 2)
+        xs = torch.rand(10, 2)
+        carry_out, ys = control_flow.scan(f, init, xs)
+        expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        self.assertEqual(expected_carry_out, carry_out)
+        self.assertEqual(expected_ys, ys)
 
     def test_scan_autograd_simple(self):
         def f(carry, x):
             return carry+1, x*carry
 
-        init = torch.tensor([1.0, 2.0], requires_grad=True)
+        init = torch.rand(1, 2, requires_grad=True)
         xs = torch.rand(10, 2, requires_grad=True)
-        print(xs)
-        carry_res, res = control_flow.scan(f, init, xs)
-        expected_carry_res, expected_res = _fake_scan(f, init, xs)
-        print(res)
-        self.assertEqual(carry_res, expected_carry_res)
-        self.assertEqual(res, expected_res)
-        grad_out = torch.ones_like(res)
-        grads = torch.autograd.grad(res, (init, xs), grad_out)
-        print(grads)
-        expected_grads = torch.autograd.grad(expected_res, (init, xs), grad_out)
-        print(expected_grads)
-        self.assertEqual(grads, expected_grads)
+        carry_out, ys = control_flow.scan(f, init, xs)
+        expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        self.assertEqual(expected_carry_out, carry_out)
+        self.assertEqual(expected_ys, ys)
+        grad_carry_out = torch.ones_like(carry_out)
+        grad_ys = torch.ones_like(ys)
+        grads = torch.autograd.grad((carry_out, ys), (init, xs), (grad_carry_out, grad_ys))
+        expected_grads = torch.autograd.grad((expected_carry_out, expected_ys), (init, xs), (grad_carry_out, grad_ys))
+        self.assertEqual(expected_grads, grads)
+    
+    def test_scan_autograd_simple_partial_grad(self):
+        def f(carry, x):
+            return carry+1, x*carry
+
+        init = torch.rand(1, 2, requires_grad=True)
+        xs = torch.rand(10, 2, requires_grad=False)
+        carry_out, ys = control_flow.scan(f, init, xs)
+        expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        self.assertEqual(expected_carry_out, carry_out)
+        self.assertEqual(expected_ys, ys)
+        grad_carry_out = torch.ones_like(carry_out)
+        grad_ys = torch.ones_like(ys)
+        grads = torch.autograd.grad((carry_out, ys), (init,), (grad_carry_out, grad_ys))
+        expected_grads = torch.autograd.grad((expected_carry_out, expected_ys), (init,), (grad_carry_out, grad_ys))
+        self.assertEqual(expected_grads, grads)
+
+    def test_scan_autograd_nested_list(self):
+        def f(carry, x):
+            return carry+1, (x[0]*carry, carry)
+
+        init = torch.rand(1, 2, requires_grad=True)
+        xs = [torch.rand(10, 2, requires_grad=True), torch.rand(10, 2, requires_grad=True)]
+        carry_out, ys = control_flow.scan(f, init, xs)
+        expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        self.assertEqual(expected_carry_out, carry_out)
+        self.assertEqual(expected_ys, ys)
+        grad_carry_out = torch.ones_like(carry_out)
+        grad_ys = torch.ones_like(ys[0])
+        grads = torch.autograd.grad((carry_out, ys[0]), (xs[0],), (grad_carry_out, grad_ys))
+        expected_grads = torch.autograd.grad((expected_carry_out, expected_ys[0]), (xs[0],), (grad_carry_out, grad_ys))
+        self.assertEqual(expected_grads, grads)
+
 
 class TestControlFlowTraced(TestCase):
     def test_cond_traced_not_nested(self):
