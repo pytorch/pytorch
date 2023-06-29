@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Dict, Union
+from typing import Dict, Type, Union
 
 import torch
 import torch.nn as nn
@@ -13,6 +13,7 @@ from torch.distributed._tensor import (
     Shard,
 )
 from torch.distributed._tensor.random import (
+    CudaRNGStateTracker,
     is_rng_supported_mesh,
     TensorParallelRNGTracker,
 )
@@ -43,6 +44,7 @@ def parallelize_module(  # type: ignore[return]
     parallelize_plan: Union[ParallelStyle, Dict[str, ParallelStyle]],
     tp_mesh_dim: int = 0,
     sync_rng_state: bool = False,
+    rng_tracker_type: Type[CudaRNGStateTracker] = TensorParallelRNGTracker,
 ) -> nn.Module:
     """
     The API to apply Tensor Parallelism (TP) in PyTorch. We parallelize module
@@ -74,6 +76,10 @@ def parallelize_module(  # type: ignore[return]
             DTensor is responsible for maintaining the parallel RNG in a synchronous state
             across ranks.
             Default: False
+        rng_tracker_type (Type[:class:`CudaRNGStateTracker`]):
+            The type of the parallel RNG tracker to use, such as :class:`OffsetBasedRNGTracker`
+            or :class:`TensorParallelRNGTracker`.
+            Default: :class:`TensorParallelRNGTracker`
 
     Return:
         A :class:`nn.Module` object parallelized.
@@ -97,11 +103,15 @@ def parallelize_module(  # type: ignore[return]
     # instantiate a TP RNG state tracker if it's not there
     if (
         is_rng_supported_mesh(device_mesh) and
-        not isinstance(random._rng_tracker, TensorParallelRNGTracker)
+        not isinstance(random._rng_tracker, rng_tracker_type)
     ):
-        random._rng_tracker = TensorParallelRNGTracker()
+        random._rng_tracker = rng_tracker_type()
         # TODO: we should allow user to pass in the default seed from a config
-        random._rng_tracker._manual_seed(device_mesh, base_seed=1234, tp_dim=tp_mesh_dim)
+        if rng_tracker_type == TensorParallelRNGTracker:
+            random._rng_tracker._manual_seed(device_mesh, base_seed=1234, tp_dim=tp_mesh_dim)
+        # By default we execute random ops in non-tensor-parallel region. If users want
+        # to execute in tensor-parallel region, they can manually set this field to True
+        # after parallelizing the model.
         random._rng_tracker.distribute_region_enabled = sync_rng_state
 
     if device_mesh.ndim > 1:
