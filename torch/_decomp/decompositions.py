@@ -2098,7 +2098,7 @@ def upsample_nearest1d_vec(input, output_size, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale = get_scale_value(scale_factors, 0)
 
-    return upsample_nearest1d(input, osize, scale)
+    return torch.ops.aten.upsample_nearest1d.default(input, osize, scale)
 
 
 @register_decomposition(aten.upsample_nearest2d.vec)
@@ -2109,7 +2109,7 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
 
-    return upsample_nearest2d(input, osize, scale_h, scale_w)
+    return torch.ops.aten.upsample_nearest2d.default(input, osize, scale_h, scale_w)
 
 
 @register_decomposition(aten.upsample_nearest3d.vec)
@@ -2121,7 +2121,7 @@ def upsample_nearest3d_vec(input, output_size, scale_factors):
     scale_h = get_scale_value(scale_factors, 1)
     scale_w = get_scale_value(scale_factors, 2)
 
-    return upsample_nearest3d(input, osize, scale_d, scale_h, scale_w)
+    return torch.ops.aten.upsample_nearest3d.default(input, osize, scale_d, scale_h, scale_w)
 
 
 def _compute_upsample_nearest_indices(input, output_size, scales):
@@ -2147,7 +2147,6 @@ def _compute_upsample_nearest_indices(input, output_size, scales):
 
 
 @register_decomposition(aten.upsample_nearest1d.default)
-@aten.upsample_nearest1d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def upsample_nearest1d(
     input: Tensor,
@@ -2159,7 +2158,6 @@ def upsample_nearest1d(
 
 
 @register_decomposition(aten.upsample_nearest2d.default)
-@aten.upsample_nearest2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def upsample_nearest2d(
     input: Tensor,
@@ -2186,7 +2184,6 @@ def upsample_nearest2d(
 
 
 @register_decomposition(aten.upsample_nearest3d.default)
-@aten.upsample_nearest3d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
 def upsample_nearest3d(
     input: Tensor,
