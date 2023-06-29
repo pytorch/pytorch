@@ -731,7 +731,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         )
         with self.assertWarnsRegex(
             expected_warning=UserWarning,
-            expected_regex="These modules will be wrapped as separate FSDP",
+            expected_regex="batch norm submodules will be wrapped as separate",
         ):
             model = FSDP(
                 net,

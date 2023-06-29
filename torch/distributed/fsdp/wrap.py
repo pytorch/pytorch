@@ -4,7 +4,6 @@
 # LICENSE file in the root directory of this source tree.
 
 import contextlib
-import copy
 import functools
 from abc import ABC, abstractmethod
 from typing import (
@@ -13,7 +12,6 @@ from typing import (
     cast,
     Dict,
     Generator,
-    Iterable,
     Optional,
     Sequence,
     Set,
@@ -32,84 +30,6 @@ __all__ = [
     "wrap",
     "ModuleWrapPolicy",
 ]
-
-
-def _post_order_apply(
-    root_module: nn.Module,
-    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
-    fn_to_apply: Callable[[Any], nn.Module],
-) -> None:
-    """
-    This applies a function ``fn_to_apply`` to some target modules with
-    specified kwargs per target module (via ``target_module_to_kwargs``)
-    following a post-order traversal. This reduces the problem to constructing
-    ``target_module_to_kwargs``.
-
-    NOTE: Since the auto wrap policy is an arg to FSDP, this does not apply the
-    function to the root module, as the caller should be exactly that.
-    """
-    # Track visited modules to avoid visiting shared modules multiple times
-    visited_modules: Set[nn.Module] = {root_module}
-
-    def _post_order_apply_inner(
-        module: nn.Module,
-        module_name: str,
-        parent_module: Optional[nn.Module],
-    ):
-        for child_module_name, child_module in module.named_children():
-            if child_module not in visited_modules:
-                visited_modules.add(child_module)
-                _post_order_apply_inner(child_module, child_module_name, module)
-        if module in target_module_to_kwargs:
-            kwargs = target_module_to_kwargs[module]
-            new_module = fn_to_apply(module, **kwargs)
-            if parent_module is not None:
-                assert module_name != "", (
-                    "Non-root modules should have their module name set but "
-                    f"got an empty module name for {module}"
-                )
-                setattr(parent_module, module_name, new_module)
-
-    _post_order_apply_inner(root_module, "", None)
-
-
-def _run_module_wrap_policy(
-    root_module: nn.Module,
-    module_classes: Iterable[Type[nn.Module]],
-    ignored_modules: Set[nn.Module],
-    fsdp_kwargs: Dict[str, Any],
-) -> Dict[nn.Module, Dict[str, Any]]:
-    """
-    TODO: To match the existing ``ModuleWrapPolicy`` behavior, every wrapped
-    module shares the same FSDP kwargs.
-    """
-    module_classes_tuple = tuple(set(module_classes))
-    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]] = {}
-    for module in root_module.modules():
-        if module in ignored_modules:
-            continue
-        elif isinstance(module, module_classes_tuple):
-            # Shallow copy to avoid coupling changes across modules
-            target_module_to_kwargs[module] = copy.copy(fsdp_kwargs)
-    return target_module_to_kwargs
-
-
-def _run_mixed_precision_override_policy(
-    root_module: nn.Module,
-    module_classes: Iterable[Type[nn.Module]],
-    ignored_modules: Set[nn.Module],
-    fsdp_kwargs: Dict[str, Any],
-    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
-):
-    module_classes_tuple = tuple(set(module_classes))
-    for module in root_module.modules():
-        if module in ignored_modules:
-            continue
-        elif isinstance(module, module_classes_tuple):
-            # This policy overrides any existing policy
-            target_module_to_kwargs[module] = fsdp_kwargs
-            target_module_to_kwargs[module]["mixed_precision"] = None
-    return target_module_to_kwargs
 
 
 def always_wrap_policy(*args, **kwargs) -> bool:
@@ -176,7 +96,6 @@ class ModuleWrapPolicy(_FSDPPolicy):
             _module_wrap_policy,
             module_classes=module_classes,
         )
-        self._module_classes = module_classes
         self._module_classes_str = str(module_classes)
 
     @property
