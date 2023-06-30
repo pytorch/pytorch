@@ -194,6 +194,12 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable(
                 ConstDictVariable.get_key(tx, args[0]) in self.items, **options
             )
+        elif name == "__contains__":
+            content = args[0]
+            if isinstance(args[0], TupleVariable):
+                content = f"tuple({args[0].items})"
+
+            unimplemented(f"NYI - __contains__ with {content}")
         elif name == "__setitem__" and args and ConstDictVariable.is_valid_key(args[0]):
             self.mutable_local = MutableLocal()
             assert not kwargs and len(args) == 2
@@ -265,7 +271,7 @@ def is_valid_global_ref_key(key):
     if istensor(key):
         return True
     else:
-        return isinstance(key, torch.nn.Module)
+        return isinstance(key, torch.nn.Module) or isinstance(key, tuple)
 
 class DefaultDictVariable(ConstDictVariable):
     def __init__(self, items, user_cls, default_factory=None, **kwargs):
