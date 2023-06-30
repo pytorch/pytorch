@@ -141,9 +141,9 @@ def bucketize_binary_search(
         mask = mid < OFFSETS_SIZE
         bucket_upper_bound = tl.load(offsets_ptr + mid, mask=mask)
         if right:
-            is_above = values > bucket_upper_bound
-        else:
             is_above = values >= bucket_upper_bound
+        else:
+            is_above = values > bucket_upper_bound
 
         low = tl.where(is_above & mask, mid + 1, low)
         high = tl.where(is_above, high, mid)

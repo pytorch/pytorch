@@ -34,6 +34,7 @@ from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
     IndexingConstant,
+    is_triton,
     ops_wrapper,
     PermuteView,
     Pointwise,
@@ -1566,7 +1567,7 @@ def _inductor_bucketize(
 ):
     assert len(boundaries.get_size()) == 1
 
-    if input.get_device().type != "cuda" or boundaries.get_device().type != "cuda":
+    if not (is_triton(input) and is_triton(boundaries)):
         return fallback_handler(inductor_prims._bucketize, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
         )
@@ -1577,7 +1578,6 @@ def _inductor_bucketize(
     input_loader = input.make_loader()
 
     index_dtype = torch.int32 if out_int32 else torch.int64
-    triton_dtype = "tl.int32" if out_int32 else "tl.int64"
 
     def inner_fn(index):
         val = input_loader(index)
@@ -1585,8 +1585,8 @@ def _inductor_bucketize(
             val,
             boundaries.get_name(),
             ops.index_expr(boundaries_size, index_dtype),
-            triton_dtype,
-            not right,  # ops.bucketize and torch.bucketize have opposite semantics for "right"
+            index_dtype,
+            right,
         )
 
         return indices

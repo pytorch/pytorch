@@ -1297,7 +1297,7 @@ class TritonKernel(Kernel):
         values: CSEVariable,
         offsets_name: str,
         offsets_size,
-        indexing_dtype: str,
+        indexing_dtype: torch.dtype,
         right: bool,
     ):
         """
@@ -1307,9 +1307,16 @@ class TritonKernel(Kernel):
         offsets_ptr = self.args.input(offsets_name)
         block_size = self.dense_size_str()
 
+        if indexing_dtype == torch.int32:
+            triton_dtype = "tl.int32"
+        elif indexing_dtype == torch.int64:
+            triton_dtype = "tl.int64"
+        else:
+            raise NotImplementedError(f"Bucketize only supports indexing with int32 and int64")
+
         result = self.cse.generate(
             self.compute,
-            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {indexing_dtype}, {right}, {offsets_size}, {block_size})",  # noqa: B950 line too long
+            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size}, {block_size})",  # noqa: B950 line too long
         )
 
         return result
