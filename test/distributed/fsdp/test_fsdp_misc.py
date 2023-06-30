@@ -168,8 +168,8 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             loss.backward()
 
             # self.a receives grad, self.b does not
-            a_grad = fsdp.module.a._handles[0].flat_param.grad
-            b_grad = fsdp.module.b._handles[0].flat_param.grad
+            a_grad = fsdp.module.a._handle[0].flat_param.grad
+            b_grad = fsdp.module.b._handle[0].flat_param.grad
             self.assertIsNotNone(a_grad)
             self.assertIsNone(b_grad)
 
@@ -201,13 +201,13 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                 return (a, b)
 
         def _check_resharded(fsdp_module):
-            for handle in fsdp_module._handles:
-                param = handle.flat_param
-                if handle.uses_sharded_strategy:
-                    full_param = param._full_param_padded
-                    self.assertEqual(full_param.storage().size(), 0)
+            handle = fsdp_module._handle:
+            param = handle.flat_param
+            if handle.uses_sharded_strategy:
+                full_param = param._full_param_padded
+                self.assertEqual(full_param.storage().size(), 0)
 
-                self.assertEqual(param.data_ptr(), param._local_shard.data_ptr())
+            self.assertEqual(param.data_ptr(), param._local_shard.data_ptr())
 
         def _check_equal(local, fsdp):
             with FSDP.summon_full_params(fsdp):
@@ -455,8 +455,8 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             use_orig_params=use_orig_params,
         )
         cpu_device = torch.device("cpu")
-        for handle in traversal_utils._get_fsdp_handles(fsdp_model):
-            self.assertEqual(handle.flat_param.device, cpu_device)
+        handle = traversal_utils._get_fsdp_handle(fsdp_model):
+        self.assertEqual(handle.flat_param.device, cpu_device)
 
     @skip_if_lt_x_gpu(2)
     def test_module_device_mismatches_device_id(self):

@@ -128,7 +128,7 @@ def _get_fully_sharded_module_to_states(
         visited_params.add(ignored_param)
     visited_buffers = set()
     # Construct `wrapped_modules` to follow `.modules()` order to ensure that
-    # downstream data structures (`._handles`) match those of the wrapper path.
+    # downstream data structures (`._handle`) match those of the wrapper path.
     # NOTE: Since `.modules()` follows a depth-first order, which is a
     # topological sort, and we iterate over `wrapped_modules` following that
     # order, parent-child shared parameters are assigned to the parent module.

@@ -29,7 +29,7 @@ from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state_if_fully_sharded_module,
     _get_param_to_fqns,
-    _module_handles,
+    _module_handle,
     _named_parameters_with_duplicates,
     clean_tensor_name,
 )
@@ -1302,7 +1302,7 @@ def _optim_state_dict(
         :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
         then nonzero ranks return an empty :class:`dict`.
     """
-    _clear_grads_if_needed(traversal_utils._get_fsdp_handles(model))
+    _clear_grads_if_needed(traversal_utils._get_fsdp_handle(model))
     to_save = not rank0_only or (dist.get_rank(group) == 0 or shard_state)
     fsdp_osd: Dict[str, Any] = {"state": {}} if to_save else {}
     fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}
@@ -1431,13 +1431,9 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         if fsdp_state is None:
             return
         _lazy_init(fsdp_state, module)
-        handles = _module_handles(fsdp_state, module)
-        assert (
-            len(handles) < 2
-        ), f"Assumes at most 1 FlatParamHandle but got {len(handles)} handles"
-        if not handles:
+        handle = _module_handle(fsdp_state, module)
+        if not handle:
             return
-        handle = handles[0]
         flat_param = handle.flat_param
         fsdp_param_info = FSDPParamInfo(fsdp_state, handle, {})
         # NOTE: `idx` indexes into the data structures *without* padding

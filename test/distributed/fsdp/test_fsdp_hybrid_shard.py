@@ -314,14 +314,14 @@ class TestFSDPHybridShard(FSDPTest):
             loss.backward()
 
         if sharding_strategy_mode == ShardingStrategyMode.ALL_HYBRID_SHARD:
-            num_flat_params = len(list(traversal_utils._get_fsdp_handles(fsdp_model)))
+            num_flat_params = len(list(traversal_utils._get_fsdp_handle(fsdp_model)))
             self.assertEqual(num_flat_params, cntr[orig_ar])
             self.assertEqual(num_flat_params, cntr[orig_rs])
         elif sharding_strategy_mode == ShardingStrategyMode.MIXED_HYBRID_FULL_SHARD:
             num_hsdp_flat_params = len(
-                list(traversal_utils._get_fsdp_handles(fsdp_model.transformer))
+                list(traversal_utils._get_fsdp_handle(fsdp_model.transformer))
             )
-            num_flat_params = len(list(traversal_utils._get_fsdp_handles(fsdp_model)))
+            num_flat_params = len(list(traversal_utils._get_fsdp_handle(fsdp_model)))
             self.assertEqual(num_hsdp_flat_params, cntr[orig_ar])
             self.assertEqual(num_flat_params, cntr[orig_rs])
 

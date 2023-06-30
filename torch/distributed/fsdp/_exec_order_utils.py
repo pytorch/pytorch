@@ -10,8 +10,6 @@ import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _FSDPState, _get_param_to_fqns
 from torch.distributed.fsdp.flat_param import FlatParamHandle
 
-_HandlesKey = Tuple[FlatParamHandle, ...]
-
 
 class _ExecOrderWarnStatus(Enum):
     """Used internally for execution order validation."""
@@ -38,13 +36,13 @@ class _ExecOrderData:
     ) -> None:
         # Tracks the (static) pre-forward order for execution order validation
         # and forward prefetching
-        self.handles_pre_forward_order: List[_HandlesKey] = []
+        self.handles_pre_forward_order: List[FlatParamHandle] = []
         # Maps each handles key to its index in `handles_pre_forward_order`
-        self.handles_to_pre_forward_order_index: Dict[_HandlesKey, int] = {}
+        self.handles_to_pre_forward_order_index: Dict[FlatParamHandle, int] = {}
         # Tracks the post-forward order for pre-backward prefetching
-        self.handles_post_forward_order: List[_HandlesKey] = []
+        self.handles_post_forward_order: List[FlatParamHandle] = []
         # Maps each handles key to its index in `handles_post_forward_order`
-        self.handles_to_post_forward_order_index: Dict[_HandlesKey, int] = {}
+        self.handles_to_post_forward_order_index: Dict[FlatParamHandle, int] = {}
         self._iter = 0
 
         # Gives the max number of backward/forward prefetched all-gathers by a
@@ -59,7 +57,7 @@ class _ExecOrderData:
         ]
         self.process_group: Optional[dist.ProcessGroup] = None
         self.world_size: Optional[int] = None
-        self.all_handles: List[FlatParamHandle] = []
+        self.all_handle: [FlatParamHandle] = []
         # Maps each handle to its index in `all_handles`, which must be the
         # same across ranks for the execution order validation to work
         self.handle_to_handle_index: Dict[FlatParamHandle, int] = {}
@@ -84,10 +82,10 @@ class _ExecOrderData:
         self.rank = process_group.rank()
         self.world_size = process_group.size()
         # Fix an order over the handles, which should be the same across ranks
-        for handle in traversal_utils._get_fsdp_handles(root_module):
-            index = len(self.all_handles)
-            self.all_handles.append(handle)
-            self.handle_to_handle_index[handle] = index
+        handle = traversal_utils._get_fsdp_handle(root_module)
+        index = len(self.all_handles)
+        self.all_handles.append(handle)
+        self.handle_to_handle_index[handle] = index
         self.param_to_fqn = _get_param_to_fqns(root_module)
         # TODO (awgu): We can broadcast the metadata of rank 0's `all_handles`
         # to check that all ranks have the same handles in the same order.
@@ -99,8 +97,8 @@ class _ExecOrderData:
 
     def get_handles_to_backward_prefetch(
         self,
-        current_handles_key: _HandlesKey,
-    ) -> Optional[List[_HandlesKey]]:
+        current_handles_key: FlatParamHandle,
+    ) -> Optional[List[FlatParamHandle]]:
         """
         Returns a :class:`list` of the handles keys of the handles to backward
         prefetch given the current handles key. If there are no valid handles
@@ -112,7 +110,7 @@ class _ExecOrderData:
         if current_index is None:
             return None
         target_index = current_index - 1
-        target_handles_keys: List[_HandlesKey] = []
+        target_handles_keys: List[FlatParamHandle] = []
         for _ in range(self._backward_prefetch_limit):
             if target_index < 0:
                 break
@@ -122,8 +120,8 @@ class _ExecOrderData:
 
     def get_handles_to_forward_prefetch(
         self,
-        current_handles_key: _HandlesKey,
-    ) -> Optional[List[_HandlesKey]]:
+        current_handles_key: FlatParamHandle,
+    ) -> Optional[List[FlatParamHandle]]:
         """
         Returns a :class:`list` of the handles keys of the handles to forward
         prefetch given the current handles key. If there are no valid handles
@@ -135,7 +133,7 @@ class _ExecOrderData:
         if current_index is None:
             return None
         target_index = current_index + 1
-        target_handles_keys: List[_HandlesKey] = []
+        target_handles_keys: List[FlatParamHandle] = []
         for _ in range(self._forward_prefetch_limit):
             if target_index >= len(self.handles_pre_forward_order):
                 break
@@ -143,7 +141,7 @@ class _ExecOrderData:
             target_index += 1
         return target_handles_keys
 
-    def record_post_forward(self, handles: List[FlatParamHandle]) -> None:
+    def record_post_forward(self, handle: FlatParamHandle) -> None:
         """
         Records ``handles`` in the post-forward order, where ``handles`` should
         be a group of handles used in the same module's forward. If ``handles``
@@ -153,9 +151,9 @@ class _ExecOrderData:
         iteration with the expectation that the recorded order is reset in
         :meth:`next_iter`.
         """
-        if not handles:
+        if not handle:
             return
-        handles_key = tuple(handles)
+        handles_key = handle
         # Only record the first usage of a handles key
         if handles_key in self.handles_to_post_forward_order_index:
             return
@@ -164,7 +162,7 @@ class _ExecOrderData:
         self.handles_post_forward_order.append(handles_key)
 
     def record_pre_forward(
-        self, handles: List[FlatParamHandle], is_training: bool
+        self, handle: FlatParamHandle, is_training: bool
     ) -> None:
         """
         Records ``handles`` in the pre-forward order, where ``handles`` should
@@ -176,7 +174,7 @@ class _ExecOrderData:
         """
         if not handles:
             return
-        handles_key = tuple(handles)
+        handles_key = handle
         self._check_order(handles_key, is_training)
         # Fix the order after the first iteration and only record the first
         # usage of a handles key
@@ -189,7 +187,7 @@ class _ExecOrderData:
         self.handles_to_pre_forward_order_index[handles_key] = index
         self.handles_pre_forward_order.append(handles_key)
 
-    def _check_order(self, handles_key: _HandlesKey, is_training: bool) -> None:
+    def _check_order(self, handles_key: FlatParamHandle, is_training: bool) -> None:
         """
         Checks the forward execution order as long as ``is_training`` is
         ``True`` since checking in eval mode is not supported.
@@ -317,7 +315,7 @@ class _ExecOrderData:
 
     def _get_handle_indices(
         self,
-        handles_key: _HandlesKey,
+        handle: FlatParamHandle,
     ) -> Tuple[Optional[int], ...]:
         """
         Returns the handle indices (i.e. indices into ``self.all_handles``)
@@ -325,11 +323,10 @@ class _ExecOrderData:
         returned tuple is ``None`` if the handle is invalid.
         """
         indices: List[Optional[int]] = []
-        for handle in handles_key:
-            if handle not in self.handle_to_handle_index:
-                indices.append(None)
-            else:
-                indices.append(self.handle_to_handle_index[handle])
+        if handle not in self.handle_to_handle_index:
+            indices.append(None)
+        else:
+            indices.append(self.handle_to_handle_index[handle])
         return tuple(indices)
 
     def _get_names_from_handle_indices(
@@ -352,18 +349,17 @@ class _ExecOrderData:
 
     def _get_names_from_handles(
         self,
-        handles_key: _HandlesKey,
+        handle: FlatParamHandle,
     ) -> List[List[str]]:
         """
         Returns a list of FQNs for each handle in ``handles_key``. If a handle
         is invalid, then its FQNs are omitted from the returned list.
         """
         fqns: List[List[str]] = []
-        for handle in handles_key:
-            flat_param = handle.flat_param
-            if flat_param not in self.param_to_fqn:
-                continue
-            fqns.append(self.param_to_fqn[flat_param])
+        flat_param = handle.flat_param
+        if flat_param not in self.param_to_fqn:
+            return
+        fqns.append(self.param_to_fqn[flat_param])
         return fqns
 
     def next_iter(self):

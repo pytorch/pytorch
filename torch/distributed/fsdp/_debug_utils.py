@@ -64,26 +64,25 @@ def _get_sharded_module_tree_with_module_name_to_fqns(
             sharded_tree_info[0] += printed_prefixed_module_name + "\n"
             return
 
-        handles = state._fully_sharded_module_to_handles.get(module, [])
+        handle = state._fully_sharded_module_to_handle.get(module, [])
 
-        if handles:
+        if handle:
             sharded_tree_info[0] += (
                 printed_prefixed_module_name + " FULLY SHARDED" + "\n"
             )
         else:
             sharded_tree_info[0] += printed_prefixed_module_name + "\n"
 
-        for handle in handles:
-            param = handle.flat_param
-            assert isinstance(param, flat_param_file.FlatParameter)
-            global_fqns = [
-                clean_tensor_name(prefix + name) for name in param._fqns
-            ]  # prefixed from the top level `model` (i.e. including `prefix`)
+        param = handle.flat_param
+        assert isinstance(param, flat_param_file.FlatParameter)
+        global_fqns = [
+            clean_tensor_name(prefix + name) for name in param._fqns
+        ]  # prefixed from the top level `model` (i.e. including `prefix`)
 
-            if prefixed_module_name in sharded_module_name_to_fqns:
-                sharded_module_name_to_fqns[prefixed_module_name].extend(global_fqns)
-            else:
-                sharded_module_name_to_fqns[prefixed_module_name] = global_fqns
+        if prefixed_module_name in sharded_module_name_to_fqns:
+            sharded_module_name_to_fqns[prefixed_module_name].extend(global_fqns)
+        else:
+            sharded_module_name_to_fqns[prefixed_module_name] = global_fqns
 
     def return_fn(sharded_tree_info, sharded_module_name_to_fqns):
         return sharded_tree_info[0], sharded_module_name_to_fqns
