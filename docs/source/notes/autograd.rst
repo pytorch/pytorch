@@ -170,6 +170,32 @@ processed by autograd internally: default mode (grad mode), no-grad mode,
 and inference mode, all of which can be togglable via context managers and
 decorators.
 
+
+.. list-table::
+   :widths: 50 50 50 50 50
+   :header-rows: 1
+
+   * - Mode
+     - required-grad takes effect
+     - Recorded in backwards graph
+     - Output tensor can be used in grad-mode later
+     - Examples
+   * - grad (default)
+     - ✓
+     - ✓
+     - ✓
+     - Training models
+   * - no-grad
+     -
+     -
+     - ✓
+     - Optimizer
+   * - inference
+     -
+     -
+     -
+     - Data processing, model evaluation
+
 Default Mode (Grad Mode)
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
