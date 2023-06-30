@@ -767,6 +767,21 @@ def is_safe_constant(v):
     )
 
 
+def guard_if_dyn(arg):
+    from .variables import ConstantVariable, SymNodeVariable
+
+    if isinstance(arg, SymNodeVariable):
+        # This is because SymNodeVariable intentionally doesn't define
+        # as_python_constant to avoid shunting down some codepaths
+        # that expect consts.   In this case, we know we definitely
+        # want to specialize though.
+        return arg.evaluate_expr()
+    elif isinstance(arg, ConstantVariable):
+        return arg.as_python_constant()
+
+    return arg
+
+
 def check_constant_args(args, kwargs):
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
 
@@ -1683,6 +1698,12 @@ def defake(x):
 # NB: The dictionary has to be created lazily after TorchPatcher is called so
 # that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
 # sitting in a separate function.
+# We also need the original untouched/ not disabled torch utils checkpoint
+# becuase distributed checkpointed wrappers import these utils before
+# TorchDynamo TorchPatcher runs.
+untouched_torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
+
+
 def higher_order_op_converter():
     import torch._higher_order_ops.wrap as higher_order_ops
 
@@ -1692,7 +1713,10 @@ def higher_order_op_converter():
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
 
-    return {torch.utils.checkpoint.checkpoint: activation_checkpoint_op}
+    return {
+        torch.utils.checkpoint.checkpoint: activation_checkpoint_op,
+        untouched_torch_utils_checkpoint: activation_checkpoint_op,
+    }
 
 
 def requires_higher_order_op(obj):
