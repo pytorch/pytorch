@@ -551,7 +551,7 @@ class QNNPackQuantizer(Quantizer):
                 # This is not specific to linear, so in future diffs we should streamline
                 # this.
                 act_node_users = list(
-                    filter((lambda x: (_is_sym_size_node(x) == False)), act_node.users)
+                    filter((lambda x: (_is_sym_size_node(x) is False)), act_node.users)
                 )
                 act_use_node_in_p = set(act_node_users).intersection(set(p.nodes))
                 if len(act_use_node_in_p) != 1:
