@@ -2,17 +2,7 @@ import functools
 import logging
 from enum import auto, Enum
 from itertools import chain
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    no_type_check,
-    Optional,
-    Set,
-    Tuple,
-)
+from typing import Any, Callable, Dict, List, no_type_check, Optional, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -1203,62 +1193,52 @@ def _get_training_state(
 @no_type_check
 def _register_pre_forward_hooks(
     state: _FSDPState,
-    modules: Iterable[nn.Module],
+    module: nn.Module,
 ) -> None:
     """
-    Registers pre-forward hooks on all modules in ``modules``. The pre-forward
-    hooks are partially applied based on the current ``FlatParamHandle``
-    construction, meaning that they must be re-registered if the construction
-    changes.
+    Registers a pre-forward hook on ``module``.
     """
     for forward_handle in state._pre_forward_handles:
         forward_handle.remove()
     state._pre_forward_handles.clear()
-    for module in modules:
-        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
-        if module_param_handles:
-            unshard_fn = functools.partial(
-                _pre_forward_unshard,
-                state,
-                module_param_handles,
-            )
-            hook = functools.partial(
-                _pre_forward, state, module_param_handles, unshard_fn
-            )
-            state._pre_forward_handles.append(
-                module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
-            )
+    module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
+    unshard_fn = functools.partial(
+        _pre_forward_unshard,
+        state,
+        module_param_handles,
+    )
+    hook = functools.partial(_pre_forward, state, module_param_handles, unshard_fn)
+    state._pre_forward_handles.append(
+        module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
+    )
 
 
 @no_type_check
 def _register_post_forward_hooks(
     state: _FSDPState,
-    modules: Iterable[nn.Module],
+    module: nn.Module,
 ) -> None:
     """
-    Registers post-forward hooks on all modules in ``modules``. The
-    post-forward hooks are partially applied based on the current
-    ``FlatParamHandle`` construction, meaning that they must be re-registered
-    if the construction changes.
+    Registers a post-forward hook on ``module``. Even if the module has no
+    handles, we should register the hook since it will register the module's
+    pre-backward hook.
     """
     for forward_handle in state._post_forward_handles:
         forward_handle.remove()
     state._post_forward_handles.clear()
-    for module in modules:
-        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
-        if module_param_handles:
-            reshard_fn = functools.partial(
-                _post_forward_reshard,
-                state,
-                module_param_handles,
-            )
-            hook = functools.partial(
-                _post_forward,
-                state,
-                module_param_handles,
-                reshard_fn,
-            )
-            state._post_forward_handles.append(module.register_forward_hook(hook))
+    module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
+    reshard_fn = functools.partial(
+        _post_forward_reshard,
+        state,
+        module_param_handles,
+    )
+    hook = functools.partial(
+        _post_forward,
+        state,
+        module_param_handles,
+        reshard_fn,
+    )
+    state._post_forward_handles.append(module.register_forward_hook(hook))
 
 
 @no_type_check
