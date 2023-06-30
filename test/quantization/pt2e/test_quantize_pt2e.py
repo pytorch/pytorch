@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import operator
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Dict
 
 import torch
 import torch._dynamo as torchdynamo
@@ -473,6 +473,55 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         self.assertTrue("tensor_constant" in bn_running_var_node.target)
         self.assertEqual(eps, 1e-5)
 
+    def _test_representation(
+        self,
+        model: torch.nn.Module,
+        example_inputs: Tuple[Any, ...],
+        quantizer: Quantizer,
+        ref_node_occurrence: Dict[ns, int],
+        non_ref_node_occurrence: Dict[ns, int],
+    ) -> torch.nn.Module:
+        """ TODO: need to implement output checking based on output_scale once
+        torchdynamo issue is resolved
+        """
+        # program capture
+        # model_copy = copy.deepcopy(model)
+        model, guards = torchdynamo.export(
+            model,
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+        )
+
+        model = prepare_pt2e_quantizer(model, quantizer)
+        # Calibrate
+        model(*example_inputs)
+        model = convert_pt2e(model, use_reference_representation=True)
+        self.checkGraphModuleNodes(model, expected_node_occurrence=ref_node_occurrence)
+        # make sure it runs
+        pt2e_quant_output = model(*example_inputs)
+
+        # TODO: torchdynamo times out when we do this, we can enable numerical checking
+        # after that is fixed
+        # model_copy = prepare_pt2e_quantizer(model_copy, quantizer)
+        # # Calibrate
+        # model_copy(*example_inputs)
+        # model_copy = convert_pt2e(model_copy, use_reference_representation=False)
+        # self.checkGraphModuleNodes(model_copy, expected_node_occurrence=non_ref_node_occurrence)
+        # pt2e_quant_output_copy = model_copy(*example_inputs)
+
+        # output_scale = None
+        # idx = 0
+        # for n in m_copy.graph.nodes:
+        #     if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
+        #         idx += 1
+        #         if idx == 3:
+        #             output_scale = n.args[1]
+        # assert output_scale is not None
+
+        # # make sure the result is off by one at most in the quantized integer representation
+        # self.assertTrue(
+        #     torch.max(torch.abs(pt2_quant_output_copy - pt2_quant_output)) <= (2 * output_scale + 1e-5)
+        # )
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(PT2EQuantizationTestCase):
@@ -1702,43 +1751,54 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m_eager = M().eval()
 
         example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
-        # program capture
-        m = m_eager
-        # m_copy = copy.deepcopy(m)
-        m, guards = torchdynamo.export(
-            m,
-            *copy.deepcopy(example_inputs),
-            aten_graph=True,
+
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={}
         )
 
-        m = prepare_pt2e_quantizer(m, quantizer)
-        # Calibrate
-        m(*example_inputs)
-        m = convert_pt2e(m, use_reference_representation=True)
-        # make sure it runs
-        pt2_quant_output = m(*example_inputs)
+    def test_representation_quantize_dequantize(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
 
-        # TODO: torchdynamo timesout when we do this, we can enable numerical checking
-        # after that is fixed
-        # m_copy = prepare_pt2e_quantizer(m_copy, quantizer)
-        # # Calibrate
-        # m_copy(*example_inputs)
-        # m_copy = convert_pt2e(m_copy, use_reference_representation=False)
-        # pt2_quant_output_copy = m_copy(*example_inputs)
+            def forward(self, x, y):
+                return x + y
 
-        # output_scale = None
-        # idx = 0
-        # for n in m_copy.graph.nodes:
-        #     if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
-        #         idx += 1
-        #         if idx == 3:
-        #             output_scale = n.args[1]
-        # assert output_scale is not None
+        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
 
-        # # make sure the result is off by one at most in the quantized integer representation
-        # self.assertTrue(
-        #     torch.max(torch.abs(pt2_quant_output_copy - pt2_quant_output)) <= (2 * output_scale + 1e-5)
-        # )
+        quantizer = QNNPackQuantizer()
+        operator_config = qq.get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m_eager = M().eval()
+
+        example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
+        ref_node_occurrence = {
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor
+            ): 0,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor
+            ): 0,
+        }
+        non_ref_node_occurrence = {
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ): 3,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ): 3,
+        }
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence,
+            non_ref_node_occurrence
+        )
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EOps(QuantizationTestCase):
