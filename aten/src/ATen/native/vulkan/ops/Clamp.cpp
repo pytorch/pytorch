@@ -267,7 +267,7 @@ Tensor& hardsigmoid_(Tensor& self) {
 
 Tensor activation_scalar(
     const Tensor& self_arg,
-    const Scalar& scalar_arg,
+    const std::vector<Scalar>& scalar_arg,
     const api::ShaderInfo& shader_descriptor) {
   api::Context* const context = api::context();
 
@@ -280,17 +280,34 @@ Tensor activation_scalar(
       self_arg.scalar_type(),
   };
 
-  const struct Block final {
-    uvec3 extents;
-    uint32_t _;
-    float scalar_value;
-  } block{
-      v_output.extents(),
-      0u,
-      scalar_arg.to<float>(),
-  };
+  api::UniformParamsBuffer params;
 
-  api::UniformParamsBuffer params(context, block);
+  if (scalar_arg.size() == 1) {
+    const struct Block final {
+      uvec3 extents;
+      uint32_t _;
+      float scalar_value;
+    } block{
+        v_output.extents(),
+        0u,
+        scalar_arg[0].to<float>(),
+    };
+    params = api::UniformParamsBuffer(context, block);
+  } else {
+    const struct Block final {
+      uvec3 extents;
+      uint32_t _;
+      float scalar_value1;
+      float scalar_value2;
+    } block{
+        v_output.extents(),
+        0u,
+        scalar_arg[0].to<float>(),
+        scalar_arg[1].to<float>(),
+    };
+    params = api::UniformParamsBuffer(context, block);
+  }
+
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
@@ -318,7 +335,7 @@ Tensor activation_scalar(
 
 Tensor& activation_scalar_(
     Tensor& self_arg,
-    const Scalar& scalar_arg,
+    const std::vector<Scalar>& scalar_arg,
     const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(
       self_arg.is_vulkan(),
@@ -328,17 +345,34 @@ Tensor& activation_scalar_(
 
   vTensor& v_self = convert(self_arg);
 
-  const struct Block final {
-    uvec3 extents;
-    uint32_t _;
-    float scalar_value;
-  } block{
-      v_self.extents(),
-      0u,
-      scalar_arg.to<float>(),
-  };
+  api::UniformParamsBuffer params;
 
-  api::UniformParamsBuffer params(context, block);
+  if (scalar_arg.size() == 1) {
+    const struct Block final {
+      uvec3 extents;
+      uint32_t _;
+      float scalar_value;
+    } block{
+        v_self.extents(),
+        0u,
+        scalar_arg[0].to<float>(),
+    };
+    params = api::UniformParamsBuffer(context, block);
+  } else {
+    const struct Block final {
+      uvec3 extents;
+      uint32_t _;
+      float scalar_value1;
+      float scalar_value2;
+    } block{
+        v_self.extents(),
+        0u,
+        scalar_arg[0].to<float>(),
+        scalar_arg[1].to<float>(),
+    };
+    params = api::UniformParamsBuffer(context, block);
+  }
+
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
@@ -363,23 +397,48 @@ Tensor& activation_scalar_(
   return self_arg;
 }
 
+Tensor gelu(const Tensor& self_arg, c10::string_view approximate) {
+  TORCH_CHECK(
+      approximate == "tanh", "Vulkan: gelu only supported for tanh type");
+  Scalar kBetaVec = M_SQRT2 * M_2_SQRTPI * 0.5;
+  std::vector<Scalar> scalar;
+  scalar.push_back(kBetaVec);
+  return ops::activation_scalar(self_arg, scalar, VK_KERNEL(gelu_tanh));
+}
+
+Tensor& gelu_(Tensor& self, c10::string_view approximate) {
+  TORCH_CHECK(
+      approximate == "tanh", "Vulkan: gelu only supported for tanh type");
+  Scalar kBetaVec = M_SQRT2 * M_2_SQRTPI * 0.5;
+  std::vector<Scalar> scalar;
+  scalar.push_back(kBetaVec);
+  return ops::activation_scalar_(self, scalar, VK_KERNEL(gelu_tanh_));
+}
+
 Tensor hardshrink(const Tensor& self_arg, const Scalar& lambd) {
   float abs_lambd = std::abs(lambd.to<float>());
-  return ops::activation_scalar(self_arg, abs_lambd, VK_KERNEL(hardshrink));
+  std::vector<Scalar> scalar;
+  scalar.push_back(abs_lambd);
+  return ops::activation_scalar(self_arg, scalar, VK_KERNEL(hardshrink));
 }
 
 Tensor& hardshrink_(Tensor& self, const Scalar& lambd) {
   float abs_lambd = std::abs(lambd.to<float>());
-  return ops::activation_scalar_(self, abs_lambd, VK_KERNEL(hardshrink_));
+  std::vector<Scalar> scalar;
+  scalar.push_back(abs_lambd);
+  return ops::activation_scalar_(self, scalar, VK_KERNEL(hardshrink_));
 }
 
 Tensor leaky_relu(const Tensor& self_arg, const Scalar& negative_slope) {
-  return ops::activation_scalar(
-      self_arg, negative_slope, VK_KERNEL(leaky_relu));
+  std::vector<Scalar> scalar;
+  scalar.push_back(negative_slope);
+  return ops::activation_scalar(self_arg, scalar, VK_KERNEL(leaky_relu));
 }
 
 Tensor& leaky_relu_(Tensor& self, const Scalar& negative_slope) {
-  return ops::activation_scalar_(self, negative_slope, VK_KERNEL(leaky_relu_));
+  std::vector<Scalar> scalar;
+  scalar.push_back(negative_slope);
+  return ops::activation_scalar_(self, scalar, VK_KERNEL(leaky_relu_));
 }
 
 Tensor sigmoid(const Tensor& self) {
@@ -411,6 +470,8 @@ Tensor& abs_(Tensor& self) {
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::clamp"), TORCH_FN(clamp));
   m.impl(TORCH_SELECTIVE_NAME("aten::clamp_"), TORCH_FN(clamp_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::gelu"), gelu);
+  m.impl(TORCH_SELECTIVE_NAME("aten::gelu_"), gelu_);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid"), hardsigmoid);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid_"), hardsigmoid_);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink"), hardshrink);

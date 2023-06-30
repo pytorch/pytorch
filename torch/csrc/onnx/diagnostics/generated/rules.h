@@ -19,14 +19,12 @@ enum class Rule : uint32_t {
   kNodeMissingOnnxShapeInference,
 
   /**
-   * @brief Missing symbolic function for custom PyTorch operator, cannot
-   * translate node to ONNX.
+   * @brief Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.
    */
   kMissingCustomSymbolicFunction,
 
   /**
-   * @brief Missing symbolic function for standard PyTorch operator, cannot
-   * translate node to ONNX.
+   * @brief Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.
    */
   kMissingStandardSymbolicFunction,
 
@@ -61,26 +59,22 @@ enum class Rule : uint32_t {
   kFxIrAddNode,
 
   /**
-   * @brief Op level tracking. ToDo, experimenting diagnostics, placeholder
-   * text.
+   * @brief Op level tracking. ToDo, experimenting diagnostics, placeholder text.
    */
   kAtenlibSymbolicFunction,
 
   /**
-   * @brief Graph level tracking. Each op is a step. ToDo, experimenting
-   * diagnostics, placeholder text.
+   * @brief Graph level tracking. Each op is a step. ToDo, experimenting diagnostics, placeholder text.
    */
   kAtenlibFxToOnnx,
 
   /**
-   * @brief Node level tracking. ToDo, experimenting diagnostics, placeholder
-   * text.
+   * @brief Node level tracking. ToDo, experimenting diagnostics, placeholder text.
    */
   kFxNodeToOnnx,
 
   /**
-   * @brief The make_fx + decomposition pass on fx graph produced from Dynamo,
-   * before ONNX export.
+   * @brief The make_fx + decomposition pass on fx graph produced from Dynamo, before ONNX export.
    */
   kFxFrontendDynamoMakeFx,
 
@@ -90,8 +84,7 @@ enum class Rule : uint32_t {
   kFxPass,
 
   /**
-   * @brief Cannot find symbolic function to convert the "call_function" FX node
-   * to ONNX.
+   * @brief Cannot find symbolic function to convert the "call_function" FX node to ONNX.
    */
   kNoSymbolicFunctionForCallFunction,
 
@@ -101,10 +94,19 @@ enum class Rule : uint32_t {
   kUnsupportedFxNodeAnalysis,
 
   /**
-   * @brief Determine if type promotion is required for the FX node. Explicitly
-   * insert cast nodes if needed.
+   * @brief Report any op level validation failure in warnings.
    */
-  kFxNodeExplicitTypePromotion,
+  kOpLevelDebugging,
+
+  /**
+   * @brief Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas.
+   */
+  kFindOpschemaMatchedSymbolicFunction,
+
+  /**
+   * @brief Determine if type promotion is required for the FX node. Insert cast nodes if needed.
+   */
+  kFxNodeInsertTypePromotion,
 
   /**
    * @brief The formatted str for argument to display is too verbose.
@@ -112,7 +114,7 @@ enum class Rule : uint32_t {
   kArgFormatTooVerbose,
 };
 
-static constexpr const char* const kPyRuleNames[] = {
+static constexpr const char* const kPyRuleNames [] = {
     "node_missing_onnx_shape_inference",
     "missing_custom_symbolic_function",
     "missing_standard_symbolic_function",
@@ -129,7 +131,9 @@ static constexpr const char* const kPyRuleNames[] = {
     "fx_pass",
     "no_symbolic_function_for_call_function",
     "unsupported_fx_node_analysis",
-    "fx_node_explicit_type_promotion",
+    "op_level_debugging",
+    "find_opschema_matched_symbolic_function",
+    "fx_node_insert_type_promotion",
     "arg_format_too_verbose",
 };
 
