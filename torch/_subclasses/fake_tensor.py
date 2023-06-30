@@ -12,6 +12,12 @@ from weakref import ReferenceType
 import torch
 import torch._custom_op
 import torch._logging
+
+from torch._C import (
+    _get_fake_tensor_mode,
+    _set_fake_tensor_mode,
+    _unset_fake_tensor_mode,
+)
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
@@ -28,10 +34,7 @@ from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode_stack,
-    TorchDispatchMode,
-)
+from torch.utils._python_dispatch import supports_mode_tracing, TorchDispatchMode
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
 from torch.utils._stats import count, count_label
@@ -140,6 +143,24 @@ _like_tensor_constructors = (
     aten.new_ones.default,
     aten.new_ones.out,
 )
+
+
+def is_fake_tensor(val):
+    if isinstance(val, FakeTensor):
+        return True
+    if supports_mode_tracing(val):
+        inner_tensors, _ = val.__tensor_flatten__()
+        return all(is_fake_tensor(x) for x in inner_tensors)
+    return False
+
+
+@contextlib.contextmanager
+def unset_fake_temporarily():
+    old = _unset_fake_tensor_mode()
+    try:
+        yield old
+    finally:
+        _set_fake_tensor_mode(old)
 
 
 @functools.lru_cache(None)
@@ -1029,10 +1050,12 @@ class FakeTensor(torch.Tensor):
         # unluckily attempted to hit FakeTensor's dispatch first,
         # NotImplemented lets us keep chaining until we find the actual
         # subclass
-        cur_stack = _get_current_dispatch_mode_stack()
-        if fake_mode in cur_stack:
+        maybe_cur_fake_mode = _get_fake_tensor_mode()
+        if maybe_cur_fake_mode:
             not_implemented_log.debug(
-                "FakeTensor mode already active: %s in %s", fake_mode, cur_stack
+                "FakeTensor mode already active: %s in %s",
+                fake_mode,
+                maybe_cur_fake_mode,
             )
             return NotImplemented
 
@@ -1155,27 +1178,30 @@ class FakeTensorMode(TorchDispatchMode):
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        assert self not in _get_current_dispatch_mode_stack(), func
+        # FakeTensorMode should not be set when we're inside of it.
+        assert _get_fake_tensor_mode() is None, func
         try:
             return self.dispatch(func, types, args, kwargs)
         except TypeError:
             log.exception("fake tensor raised TypeError")
             raise
 
-    # No-op if FakeTensorMode is already on the stack
+    # No-op if FakeTensorMode is already in use
     def __enter__(self):
-        if self not in _get_current_dispatch_mode_stack():
+        if _get_fake_tensor_mode() is None:
             self.enter_stack.append(True)
-            return super().__enter__()
+            _set_fake_tensor_mode(self)
         else:
             # no-op
             self.enter_stack.append(False)
-            return self
+        return self
 
     def __exit__(self, a, b, c):
         live = self.enter_stack.pop()
         if live:
-            return super().__exit__(a, b, c)
+            out = _unset_fake_tensor_mode()
+            # Sanity check
+            assert out is self
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
