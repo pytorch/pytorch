@@ -24,7 +24,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
     onlyNativeDeviceTypes, onlyCUDA, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
-    ReductionOpInfo, reduction_ops, reference_masked_ops)
+    ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -296,8 +296,13 @@ class TestReductions(TestCase):
                 self.assertEqual(result, torch.full_like(result, torch.nan))
             else:
                 # Reducing along empty slice should raise an error
-                with self.assertRaises(IndexError):
-                    op(t, *args, dim=dim, **kwargs)
+                if isinstance(op, ReductionPythonRefInfo):
+                    # ref reductions throw RuntimeError for this
+                    with self.assertRaises(RuntimeError):
+                        op(t, *args, dim=dim, **kwargs)
+                else:
+                    with self.assertRaises(IndexError):
+                        op(t, *args, dim=dim, **kwargs)
 
     @ops(reduction_ops, dtypes=OpDTypes.none)
     def test_empty_tensor_nonempty_slice(self, device, op: ReductionOpInfo):

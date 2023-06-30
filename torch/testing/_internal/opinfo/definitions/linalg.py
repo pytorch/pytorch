@@ -2413,6 +2413,13 @@ python_ref_db: List[OpInfo] = [
         torch_opinfo_name="linalg.vector_norm",
         supports_out=True,
         op_db=op_db,
+        skips=(
+            # FIXME: sum reduces all dimensions when dim=[]
+            DecorateInfo(unittest.expectedFailure, "TestReductions", "test_dim_empty"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestReductions", "test_dim_empty_keepdim"
+            ),
+        ),
     ),
     PythonRefInfo(
         "_refs.linalg.matrix_norm",
