@@ -1309,7 +1309,7 @@ class TritonKernel(Kernel):
 
         result = self.cse.generate(
             self.compute,
-            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {indexing_dtype}, {right}, {offsets_size}, {block_size})",
+            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {indexing_dtype}, {right}, {offsets_size}, {block_size})",  # noqa: B950 line too long
         )
 
         return result
