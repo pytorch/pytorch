@@ -61,6 +61,8 @@ namespace {
     template <typename T>
     class QuantizationTests : public ::testing::Test {};
     template <typename T>
+    class Quantization8BitWithTailTests : public ::testing::Test {};
+    template <typename T>
     class FunctionalTests : public ::testing::Test {};
     template <typename T>
     class FunctionalTestsReducedFloat : public ::testing::Test {};
@@ -68,6 +70,8 @@ namespace {
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
+    using Quantization8BitWithTailTestedTypes =
+        ::testing::Types<vqint8, vquint8>;
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
@@ -100,6 +104,9 @@ namespace {
     TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatTestedTypes);
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
+    TYPED_TEST_SUITE(
+        Quantization8BitWithTailTests,
+        Quantization8BitWithTailTestedTypes);
     TYPED_TEST_SUITE(FunctionalTests, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(FunctionalTestsReducedFloat, ReducedFloatTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
@@ -1134,6 +1141,76 @@ namespace {
             auto actual = vec::quantize(float_ret, scale, zero_point_val, inv_scale);
             if (AssertVectorized<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
         } //trials;
+    }
+    TYPED_TEST(Quantization8BitWithTailTests, QuantizeTile) {
+#if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
+      // This testcase aim to test at::vec::QuantizeAvx512 and
+      // at::vec::QuantizeAVX2 which do not support CPU_CAPABILITY_DEFAULT case
+      return;
+#endif
+      using vec = TypeParam;
+      using underlying = ValueType<vec>;
+      constexpr int trials = 4000;
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+      constexpr int min_val = std::numeric_limits<underlying>::min();
+      constexpr int max_val = std::numeric_limits<underlying>::max();
+      constexpr int el_count = vfloat::size();
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      CACHE_ALIGN float unit_float_vec[el_count];
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      CACHE_ALIGN underlying expected_qint_vals[vec::size()];
+      CACHE_ALIGN underlying actual_qint_vals[vec::size()];
+      constexpr int tile_size = vec::size() - 1;
+      typename vec::float_vec_return_type float_ret;
+      auto seed = TestSeed();
+      // zero point
+      ValueGen<int> generator_zp(min_val, max_val, seed);
+      // scale
+      ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
+      // value
+      float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
+      float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
+      ValueGen<float> gen(minv, maxv, seed.add(2));
+      for (const auto i : c10::irange(trials)) {
+        (void)i; // Suppress unused variable warning
+        float scale = generator_sc.get();
+        float inv_scale = 1.0f / static_cast<float>(scale);
+        auto zero_point_val = generator_zp.get();
+        int index = 0;
+        for (int j = 0; j < vec::float_num_vecs(); j++) {
+          // generate vals
+          for (auto& v : unit_float_vec) {
+            v = gen.get();
+            expected_qint_vals[index] =
+                quantize_val<underlying>(scale, zero_point_val, v);
+            index++;
+          }
+          float_ret[j] = vfloat::loadu(unit_float_vec);
+        }
+#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+        at::vec::QuantizeAvx512(
+            (float*)float_ret.data(),
+            actual_qint_vals,
+            tile_size,
+            inv_scale,
+            zero_point_val);
+#endif
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+        at::vec::QuantizeAvx2(
+            (float*)float_ret.data(),
+            actual_qint_vals,
+            tile_size,
+            inv_scale,
+            zero_point_val);
+#endif
+        expected_qint_vals[tile_size] = 0;
+        actual_qint_vals[tile_size] = 0;
+        auto expected = vec::loadu(expected_qint_vals);
+        auto actual = vec::loadu(actual_qint_vals);
+        if (AssertVectorized<vec>(NAME_INFO(QuantizeTile), expected, actual)
+                .check())
+          return;
+      } // trials;
     }
     TYPED_TEST(QuantizationTests, DeQuantize) {
         using vec = TypeParam;

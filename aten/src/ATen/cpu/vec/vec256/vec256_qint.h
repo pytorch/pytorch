@@ -131,13 +131,16 @@ inline void store_float_as_uint8(at::vec::Vectorized<float> values, uint8_t* dst
 template <typename T>
 inline void __attribute__((always_inline)) QuantizeAvx2(
     const float* src,
-    typename T::underlying* dst,
+    T* dst,
     int len,
     float inverse_scale,
     int64_t zero_point) {
+  static_assert(
+      std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value,
+      "Only int8_t/uint8_t are supported");
   constexpr int VLEN = 8;
-  constexpr auto min_val = std::numeric_limits<typename T::underlying>::min();
-  constexpr auto max_val = std::numeric_limits<typename T::underlying>::max();
+  constexpr auto min_val = std::numeric_limits<T>::min();
+  constexpr auto max_val = std::numeric_limits<T>::max();
   const __m256i min_v = _mm256_set1_epi32(min_val);
   const __m256i max_v = _mm256_set1_epi32(max_val);
   // This is the largest int32 value < int32_max exactly representable in float
@@ -199,8 +202,8 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
 
     __m256i xy_packed_v = _mm256_packs_epi32(x_rounded_v, y_rounded_v);
     __m256i zw_packed_v = _mm256_packs_epi32(z_rounded_v, w_rounded_v);
-    __m256i xyzw_clamped_v = pack_saturate_and_clamp<typename T::underlying>(
-        xy_packed_v, zw_packed_v, min_val, max_val);
+    __m256i xyzw_clamped_v =
+        pack_saturate_and_clamp<T>(xy_packed_v, zw_packed_v, min_val, max_val);
 
     xyzw_clamped_v =
         _mm256_permutevar8x32_epi32(xyzw_clamped_v, permute_mask_v);
@@ -531,7 +534,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
       float inverse_scale) {
     auto* rhs_data = (float*)rhs.data();
     int8_t quantized_values[32];
-    QuantizeAvx2<c10::qint8>(
+    QuantizeAvx2<value_type>(
         rhs_data, quantized_values, 32, inverse_scale, zero_point);
     return Vectorized<c10::qint8>::loadu(quantized_values);
   }
@@ -709,7 +712,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
       float inverse_scale) {
     auto* rhs_data = (float*)rhs.data();
     uint8_t quantized_values[32];
-    QuantizeAvx2<c10::quint8>(
+    QuantizeAvx2<value_type>(
         rhs_data, quantized_values, 32, inverse_scale, zero_point);
     return Vectorized<c10::quint8>::loadu(quantized_values);
   }

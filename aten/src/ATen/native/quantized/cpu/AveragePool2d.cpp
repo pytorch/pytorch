@@ -188,6 +188,7 @@ Tensor q_avg_pool2d(
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  printf("=========================================");
   int kW, kH, dW, dH, padW, padH;
   std::tie(kW, kH) = get_kernel(kernel_size);
   std::tie(dW, dH) = get_stride(stride, kW, kH);
