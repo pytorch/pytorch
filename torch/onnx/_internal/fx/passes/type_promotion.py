@@ -792,14 +792,14 @@ _EXTRA_TYPE_PROMOTION_RULE_SET = {
     # the call is routed to the decorated `aten.clamp` op.
     TypePromotionRule(
         "aten",
-        "clamp_min",
+        "clamp_max",
         promote_args_positions=(0, 1),
         promote_kwargs_names=(),
         promotion_kind=_prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     ),
     TypePromotionRule(
         "aten",
-        "clamp_max",
+        "clamp_min",
         promote_args_positions=(0, 1),
         promote_kwargs_names=(),
         promotion_kind=_prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -810,7 +810,20 @@ _EXTRA_TYPE_PROMOTION_RULE_SET = {
 
 
 class TypePromotionRuleSetGenerator:
-    """Hackly distilling info from reference ops decorated with type promotion rule."""
+    """Hackly distilling info from reference ops decorated with type promotion rule.
+
+    The goal is to retrieve the decorator
+
+    ```python
+        @elementwise_type_promotion_wrapper(
+            type_promoting_args=("a", "b"),
+            type_promotion_kind=type_promotion_kind,
+        )
+    ```
+
+    from the reference ops. It provides info as for which arguments are promoted
+    and what kind of promotion is applied.
+    """
 
     @classmethod
     def generate_from_torch_refs(cls) -> Set[TypePromotionRule]:
