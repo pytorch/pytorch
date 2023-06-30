@@ -16,9 +16,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
+import torch.fx
+import torch.fx.traceback as fx_traceback
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import (  # noqa: F401
@@ -615,7 +617,7 @@ class SymNode:
     This is a type erased SymInt/SymFloat which we use to do actual operations.
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
-    def __init__(self, expr, shape_env, pytype, hint: Optional[Union[int, float]], constant=None):
+    def __init__(self, expr, shape_env, pytype, hint: Optional[Union[int, float]], constant=None, fx_node=None):
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
@@ -647,6 +649,10 @@ class SymNode:
             self._hint_expr = None
             self._hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
+        # Record the FX node of the current node if we are doing translation
+        # validation. They will be used for building the input assertions for
+        # the translation validation problem.
+        self.fx_node = fx_node if _translation_validator_enabled() else None
 
     @property
     def expr(self):
@@ -699,15 +705,15 @@ class SymNode:
 
     def wrap_int(self, num):
         assert type(num) is int
-        return SymNode(sympy.Integer(num), self.shape_env, int, num, constant=num)
+        return SymNode(sympy.Integer(num), self.shape_env, int, num, constant=num, fx_node=num)
 
     def wrap_float(self, num):
         assert type(num) is float
-        return SymNode(sympy.Float(num), self.shape_env, float, num, constant=num)
+        return SymNode(sympy.Float(num), self.shape_env, float, num, constant=num, fx_node=num)
 
     def wrap_bool(self, num):
         assert type(num) is bool
-        return SymNode(sympy.true if num else sympy.false, self.shape_env, bool, num, constant=num)
+        return SymNode(sympy.true if num else sympy.false, self.shape_env, bool, num, constant=num, fx_node=num)
 
     def clone(self):
         return self
@@ -830,7 +836,7 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint)
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         try:
             return int(r)
         except Exception:
@@ -840,7 +846,7 @@ class SymNode:
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint)
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         try:
             return float(r)
         except Exception:
@@ -850,7 +856,7 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint)
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         try:
             return bool(r)
         except Exception:
@@ -1291,7 +1297,10 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        return SymNode(out, self.shape_env, pytype, out_hint)
+        # Create a FX node that corresponds to the operation being applied to
+        # this node.
+        fx_node = self.shape_env.create_fx_call_function(op, (self.fx_node, other.fx_node))
+        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     def unary_magic_impl(self):
         op = method_to_operator(method)
@@ -1320,7 +1329,8 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        return SymNode(out, self.shape_env, pytype, out_hint)
+        fx_node = self.shape_env.create_fx_call_function(op, (self.fx_node,))
+        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
 
     if method in unary_magic_methods:
         setattr(SymNode, f"_{method_attr}", unary_magic_impl)
@@ -1444,6 +1454,12 @@ for method, func in magic_methods.items():
 
 del method
 del func
+
+
+def _translation_validator_enabled() -> bool:
+    from torch.fx.experimental.validator import translation_validator_enabled
+    return translation_validator_enabled()
+
 
 def _lru_cache(fn, maxsize=None):
     """
@@ -2002,8 +2018,134 @@ class ShapeEnv:
         # signpost_event
         self.co_fields = co_fields if co_fields else {}
 
+        # Cache for FX nodes.
+        # Maps an already built node a tuple of:
+        #   1. node's target
+        #   2. list of arguments
+        # This drastically reduces the size of the FX graph, avoiding
+        # duplicated nodes.
+        self.fx_node_cache: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
+        self.source_to_symbol: Dict[str, sympy.Symbol] = {}
+
+        if _translation_validator_enabled():
+            from torch.fx.experimental.validator import TranslationValidator
+
+            self.validator = TranslationValidator()
+            self.graph = torch.fx.Graph()
+            # Create an output graph and start inserting before that.
+            # This is needed when 'deepcopy'-ing this object.
+            self.graph.inserting_before(self.graph.output(None))
+
     def freeze(self):
         self.frozen = True
+
+    def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
+        if not _translation_validator_enabled():
+            return None
+        srcname = source.name()
+        if source not in self.source_to_symbol:
+            self.source_to_symbol[srcname] = sympy.Symbol(srcname, integer=True)
+        return self.source_to_symbol[srcname]
+
+    def _add_z3var(self, symbol: sympy.Symbol, type: Type) -> None:
+        if _translation_validator_enabled():
+            self.validator.add_var(symbol, type)
+
+    def _add_target_expr(self, expr) -> None:
+        if _translation_validator_enabled():
+            self.validator.add_target_expr(expr)
+
+    def _add_assertion(self, expr) -> None:
+        if _translation_validator_enabled():
+            self.validator.add_assertion(expr)
+
+    def _check_translation_validate(self) -> None:
+        if not _translation_validator_enabled():
+            return
+
+        result = self.validator.validate()
+
+        if result.success:
+            return
+
+        if result.model is None:
+            reason = "no answer"
+            source_exprs = self.validator._source_exprs
+            failed = ""
+        else:
+            assert result.failed_source_expr is not None
+            reason = "model: %s" % {sym: result.model[sym] for sym in result.model}
+            source_exprs = result.failed_source_expr
+            failed = "Failed "
+
+        def exprs_to_str(exprs):
+            return "\n".join(f"==> {e}" for e in exprs)
+
+        assertions = self.validator._assertions
+        target_exprs = self.validator._target_exprs
+
+        raise RuntimeError(f"""translation validation failed with {reason}.
+Assertions:
+{exprs_to_str(assertions)}
+
+Target Guards:
+{exprs_to_str(target_exprs)}
+
+{failed}Source Guards:
+{exprs_to_str(source_exprs)}""")
+
+    def create_fx_call_function(
+            self,
+            op: Callable,
+            args: Tuple,
+    ) -> Optional[torch.fx.Node]:
+        # Cache this tuple in order to avoid duplicated nodes.
+        node_key = (op, args)
+
+        if _translation_validator_enabled() and node_key not in self.fx_node_cache:
+            from torch.fx.experimental.validator import z3op
+
+            # Presence of None in the arguments implies that we should ignore this operation.
+            if any(a is None for a in args):
+                # We check if we are not mixing SymNode that should not be ignored
+                # (fx_node is not None) with those that should (fx_node is None).
+                assert all(not isinstance(a, torch.fx.Node) for a in args)
+                return None
+
+            # If translation validation is enabled, all arguments must have its
+            # own FX node.
+            assert all(a is not None for a in args), f"missing arg in FX graph ({op.__name__}): {args}"
+            lifted_op = z3op(op, self.validator)
+            self.fx_node_cache[node_key] = self.graph.call_function(lifted_op, args)
+
+        return self.fx_node_cache.get(node_key, None)
+
+    def create_fx_placeholder_and_z3var(
+            self,
+            symbol: sympy.Symbol,
+            type: Type,
+    ) -> Optional[torch.fx.Node]:
+        if not _translation_validator_enabled():
+            return None
+
+        node_key = (self.graph.placeholder, (symbol,))
+
+        # Check if we haven't added this symbol already.
+        # If so, skip the placeholder creation, as it
+        # generates invalid Python code.
+        if node_key not in self.fx_node_cache:
+            # Add a Z3 variable according to 'type'.
+            self._add_z3var(symbol, type)
+            # Create the FX placeholder out of a mangled name.
+            mangled_name = re.sub(r'[^a-zA-Z0-9]', '_', re.sub(r'[()]', '', symbol.name))
+            node = self.graph.placeholder(mangled_name)
+            # Attach the 'symbol' to the placeholder so that we can retrieve
+            # the Z3 variable later.
+            node.meta["symbol"] = symbol
+            # Put it in the cache.
+            self.fx_node_cache[node_key] = node
+
+        return self.fx_node_cache[node_key]
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -2100,6 +2242,7 @@ class ShapeEnv:
                 if stride[i] is None and ex.stride()[i] in candidates:
                     stride[i] = candidates[ex.stride()[i]]
                     candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
+
             if any(x is None for x in stride):
                 # bind the smallest unbound stride to a new variable
                 val, i = min(
@@ -2117,54 +2260,92 @@ class ShapeEnv:
                 )
         assert all(x is not None for x in stride)
 
-        sym_sizes = [self.create_symintnode(i, hint=hint) for i, hint in zip(size, ex.size())]
+        sym_sizes = [
+            self.create_symintnode(sym, hint=hint, source=TensorPropertySource(source, TensorProperty.SIZE, i))
+            for i, (sym, hint) in enumerate(zip(size, ex.size()))
+        ]
         sym_stride = []
         for i, stride_expr in enumerate(stride):
             # NB: Don't duck size the stride; instead use the expression
             # we computed
             assert stride_expr is not None
-            sym_stride.append(self.create_symintnode(stride_expr, hint=ex.stride(i)))
+            sym_stride.append(self.create_symintnode(
+                stride_expr, hint=ex.stride(i), source=TensorPropertySource(source, TensorProperty.STRIDE, i)
+            ))
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex.storage_offset(),
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
             dynamic_dim=dynamic_strides_offset,
             constraint_dim=None,
-        ), hint=ex.storage_offset())
+        ), hint=ex.storage_offset(), source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
         return sym_sizes, sym_stride, sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
     # is, pass it into hint.  Otherwise, pass None and we will make our best
     # guess
-    def create_symintnode(self, sym: "sympy.Expr", *, hint: Optional[int]):
+    def create_symintnode(
+            self,
+            sym: "sympy.Expr",
+            *,
+            hint: Optional[int],
+            source: Optional[Source] = None,
+    ):
+        if _translation_validator_enabled() and source is not None:
+            # Create a new symbol for this source.
+            symbol = self._create_symbol_for_source(source)
+            assert symbol is not None
+
+            # Create a new FX placeholder and Z3 variable for 'symbol'.
+            fx_node = self.create_fx_placeholder_and_z3var(symbol, int)
+
+            # Add an equality assertion for the newly created symbol and 'sym'.
+            self._add_assertion(sympy.Eq(symbol, sym))
+        else:
+            fx_node = None
+
         if isinstance(sym, sympy.Integer):
             if hint is not None:
                 assert int(sym) == hint
             return int(sym)
-        return SymInt(SymNode(sym, self, int, hint))
+        return SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
 
     def create_symboolnode(self, sym: "sympy.Expr"):
+        # This function is only being used in serialization, so we do not track it
+        # for validation.
         return SymBool(SymNode(sym, self, bool, None))
 
     def create_unbacked_symfloat(self):
-        symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges.unknown()
-        return SymFloat(SymNode(symbol, self, float, None))
+
+        # Create a new FX placeholder and Z3 variable for 'symbol'.
+        fx_node = self.create_fx_placeholder_and_z3var(symbol, float)
+
+        return SymFloat(SymNode(symbol, self, float, None, fx_node=fx_node))
 
     def create_unbacked_symint(self):
-        symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
-        return self.create_symintnode(symbol, hint=None)
+
+        # Create a new FX placeholder and Z3 variable for 'symbol'.
+        fx_node = self.create_fx_placeholder_and_z3var(symbol, int)
+
+        return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
     def create_unbacked_symbool(self):
-        symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(0, 1)
-        return self.create_symboolnode(sympy.Eq(symbol, 1))
+
+        # Create a new FX placeholder and Z3 variable for 'symbol'.
+        fx_node = self.create_fx_placeholder_and_z3var(symbol, bool)
+
+        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None, fx_node=fx_node))
 
     def create_symbol(
         self,
@@ -2209,6 +2390,9 @@ class ShapeEnv:
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
+            # Add assertions for the newly created symbols
+            self._add_z3var(sympy_expr, int)
+            self._add_assertion(sympy.And(sympy.Ne(sympy_expr, 0), sympy.Ne(sympy_expr, 1)))
 
             if duck:
                 # Make sure to reuse this symbol for subsequent duck shaping
@@ -2236,6 +2420,7 @@ class ShapeEnv:
 
         if isinstance(r, sympy.Symbol):
             self.var_to_sources[r].append(source)
+
         return r
 
     # Generates a list of guards strings which, when evaluated in a context that
@@ -2478,6 +2663,12 @@ class ShapeEnv:
 
         if not _simplified:
             for source, expr in input_guards:
+                if _translation_validator_enabled():
+                    # Ignore sources that were not turned into SymInts.
+                    srcname = source.name()
+                    if srcname in self.source_to_symbol:
+                        self._add_target_expr(sympy.Eq(self.source_to_symbol[srcname], expr))
+
                 # Small optimization
                 if (
                     isinstance(expr, sympy.Symbol) and
@@ -2529,6 +2720,7 @@ class ShapeEnv:
                     self.dim_constraints.add(g)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
                 exprs.append(guard_expr)
+                self._add_target_expr(g)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
                 if len(g.free_symbols) == 1:
@@ -2629,6 +2821,24 @@ class ShapeEnv:
             },
         )
 
+        if _translation_validator_enabled():
+            from torch.fx.experimental.validator import PopulateValidator
+
+            # Add value range bound guards for all symbols with no trivial bounds.
+            # Reason: '_maybe_evaluate_static' may eliminate guards based on the
+            # refined value ranges.
+            for sym, vr in self.var_to_range.items():
+                if vr.lower != -sympy.oo:
+                    self._add_target_expr(sympy.Le(vr.lower, sym))
+                if vr.upper != sympy.oo:
+                    self._add_target_expr(sympy.Le(sym, vr.upper))
+
+            # Before validating, populate the input of the validator with the
+            # built FX graph.
+            with fx_traceback.preserve_node_meta():
+                PopulateValidator(self.graph, self.validator).run()
+
+        self._check_translation_validate()
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args, *, ignore_static=True):
@@ -2861,6 +3071,10 @@ class ShapeEnv:
                 self.log.debug("SPECIALIZATION", stack_info=True)
         self.replacements[a] = expr
 
+        # When specializing 'a == expr', the equality should be also conveyed to
+        # Z3, in case an expression uses 'a'.
+        self._add_target_expr(sympy.Eq(a, expr))
+
     @_lru_cache
     def _find(self, a: "sympy.Symbol") -> "sympy.Expr":
         """
@@ -2953,10 +3167,36 @@ class ShapeEnv:
         return self.simplify(expr)
 
     @lru_cache(256)
-    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None):
+    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
+        if hint is None:
+            concrete_val = self.size_hint(orig_expr)
+        else:
+            concrete_val = sympy.sympify(hint)
+
+        # Check if:
+        #   1. 'translation_validation' is set
+        #   2. the corresponding 'fx_node' is not 'None'
+        #   3. the guard should not be suppressed
+        #
+        # If all of the above check, we create an FX node representing the
+        # actual expression to be guarded.
+        if (
+                _translation_validator_enabled()
+                and fx_node is not None
+                and not self._suppress_guards_tls()
+        ):
+            if concrete_val is sympy.true:
+                self.create_fx_call_function(torch._assert, (fx_node,))
+            elif concrete_val is sympy.false:
+                neg = self.create_fx_call_function(operator.not_, (fx_node,))
+                self.create_fx_call_function(torch._assert, (neg,))
+            else:
+                eql = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
+                self.create_fx_call_function(torch._assert, (eql,))
+
         if len(orig_expr.free_symbols) == 0:
             self.log.debug("eval %s [trivial]", orig_expr)
             return orig_expr
@@ -2975,11 +3215,6 @@ class ShapeEnv:
             if not (new_expr.free_symbols <= self.var_to_val.keys()):
                 raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
             expr = new_expr
-
-        if hint is None:
-            concrete_val = self.size_hint(expr)
-        else:
-            concrete_val = sympy.sympify(hint)
 
         if self.frozen:
             self.counter["ignored_backward_guard"] += 1

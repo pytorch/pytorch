@@ -414,6 +414,26 @@ class _UnsupportedFxNodeAnalysis(infra.Rule):
         )
 
 
+class _OpLevelDebugging(infra.Rule):
+    """Report any op level validation failure in warnings."""
+
+    def format_message(self, node, symbolic_fn) -> str:  # type: ignore[override]
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'FX node: {node} and its onnx function: {symbolic_fn} fails on op level validation.'
+        """
+        return self.message_default_template.format(node=node, symbolic_fn=symbolic_fn)
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, node, symbolic_fn
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'FX node: {node} and its onnx function: {symbolic_fn} fails on op level validation.'
+        """
+        return self, level, self.format_message(node=node, symbolic_fn=symbolic_fn)
+
+
 class _ArgFormatTooVerbose(infra.Rule):
     """The formatted str for argument to display is too verbose."""
 
@@ -843,6 +863,31 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """Result from FX graph analysis to reveal unsupported FX nodes."""
+
+    op_level_debugging: _OpLevelDebugging = dataclasses.field(
+        default=_OpLevelDebugging.from_sarif(
+            **{
+                "id": "FXE0013",
+                "name": "op-level-debugging",
+                "short_description": {
+                    "text": "Report any op level validation failure in warnings."
+                },
+                "full_description": {
+                    "text": "Report any op level validation failure in warnings.",
+                    "markdown": "This warning message indicates that during op level debugging, certain symbolic functions\nhave failed to match the results of torch ops when using real tensors generated from fake\ntensors. It is important to note that the symbolic functions may not necessarily be\nincorrect, as the validation process is non-deterministic and should only be used as a\nreference.\n\nThere are two categories of warnings that can be triggered:\n\n1. Non-validated operators:\n  If the warnings are caused by the following errors, they can be disregarded by users,\n  as these errors occur due to the non-deterministic nature of the validation. However,\n  it is important to be aware that the operators have not been validated.\n\n  - IndexError: Unsupported input arguments of randomized dimensions/indices(INT64).\n  - RuntimeError: Unsupported input arguments for torch ops are generated.\n  - ValueError: Arguments/keyword arguments do not match the signature of the symbolic function.\n\n2. Potentially wrong torchlib operators:\n  If the warnings are triggered by the following error, users should be aware that\n  the results from symbolic functions do not match the results of torch ops, suggesting\n  that the symbolic functions may be incorrect in dispatching or implementation. In such cases,\n  it is recommended to report the issue to the PyTorch-ONNX team, or create/register a custom\n  symbolic function to replace the default one.\n\n  - AssertionError: The symbolic function is potentially wrong.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "FX node: {node} and its onnx function: {symbolic_fn} fails on op level validation."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Report any op level validation failure in warnings."""
 
     arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
         default=_ArgFormatTooVerbose.from_sarif(

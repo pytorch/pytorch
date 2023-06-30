@@ -45,8 +45,8 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
-# Optimize away split cat patterns (Experimental)
-split_cat_fx_passes = True
+# enable experimental patterns for match+replace optimizations
+experimental_patterns = False
 
 # enable reordering pass
 reordering = True
@@ -123,6 +123,9 @@ conv_1x1_as_mm = False
 # Enable split reductions for better utilization when the dimension
 # being reduced over is large (by splitting it)
 split_reductions = True
+
+# Only save random seed for backwards rather than full mask
+lowmem_dropout = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 

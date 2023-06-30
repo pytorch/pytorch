@@ -109,15 +109,6 @@ def _init_process_group_state(
             )
         else:
             state = _init_process_group_state_for_hybrid_shard(state, process_group)
-            assert (
-                state.process_group is not None
-            ), "Expected to populate state.process_group for hybrid shard"
-            assert (
-                state._inter_node_pg is not None
-            ), "Expected to populate state._inter_node_pg for hybrid shard"
-            assert (
-                state._inter_node_state is not None
-            ), "Expected to populate state._inter_node_state for hybrid shad."
     else:
         state.process_group = (
             process_group if process_group is not None else _get_default_group()
@@ -248,14 +239,23 @@ def _init_ignored_module_states(
         Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
     ] = None,
 ) -> _FSDPState:
-    assert (
-        ignored_modules is None or ignored_states is None
-    ), "Can not pass `ignored_modules` and `ignored_states` at the same time. \
-        Please either pass `ignored_modules` or `ignored_states`."
+    if ignored_modules is not None and ignored_states is not None:
+        raise ValueError(
+            "Cannot pass both ignored_modules and ignored_states at the "
+            "same time. Please just pass ignored_states."
+        )
     ignored_parameters = None
-    ignored_states_list = list(ignored_states) if ignored_states is not None else []
-    if ignored_states_list and len(ignored_states_list) > 0:
-        if isinstance(ignored_states_list[0], torch.nn.Parameter):
+    passed_as_ignored_states = ignored_states is not None
+    if passed_as_ignored_states:
+        ignored_states_list = list(ignored_states)
+        _check_ignored_states(ignored_states_list, True)
+    else:
+        ignored_states_list = []
+        _check_ignored_states(
+            list(ignored_modules) if ignored_modules is not None else [], False
+        )
+    if len(ignored_states_list) > 0:
+        if isinstance(ignored_states_list[0], nn.Parameter):
             ignored_parameters = ignored_states_list
         else:
             ignored_modules = ignored_states_list
@@ -271,6 +271,38 @@ def _init_ignored_module_states(
     # precision). We should formalize this contract and decide if we need to
     # compute and store `_ignored_buffers`.
     return state
+
+
+def _check_ignored_states(
+    ignored_states: List[Any], passed_as_ignored_states: bool
+) -> None:
+    """
+    Checks that the ignored states are uniformly parameters or uniformly
+    modules. We may remove this check in the future if we permit mixing.
+    """
+    if len(ignored_states) == 0:
+        return
+    if passed_as_ignored_states:
+        all_params = all(isinstance(state, nn.Parameter) for state in ignored_states)
+        all_modules = all(isinstance(state, nn.Module) for state in ignored_states)
+        if not all_params and not all_modules:
+            # Sort for consistent ordering for unit test regex matching
+            sorted_types = sorted(
+                {type(state) for state in ignored_states}, key=lambda x: repr(x)
+            )
+            raise ValueError(
+                "ignored_states expects all nn.Parameter or all nn.Module list "
+                f"elements but got types {sorted_types}"
+            )
+    else:
+        if not all(isinstance(state, nn.Module) for state in ignored_states):
+            sorted_types = sorted(
+                {type(state) for state in ignored_states}, key=lambda x: repr(x)
+            )
+            raise ValueError(
+                "ignored_modules expects nn.Module list elements but got "
+                f"types {sorted_types}"
+            )
 
 
 @no_type_check
@@ -453,7 +485,7 @@ def _init_param_handle_from_module(
     Initializes a ``FlatParamHandle`` from a module ``fully_sharded_module``.
     This is the module wrapper code path.
     """
-    _check_single_device_module(fully_sharded_module, state._ignored_params)
+    _check_single_device_module(fully_sharded_module, state._ignored_params, device_id)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
     is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
         fully_sharded_module, state._ignored_params
@@ -508,7 +540,7 @@ def _init_param_handles_from_module(
         state._ignored_modules,
         state._ignored_params,
     )
-    _check_single_device_module(root_module, state._ignored_params)
+    _check_single_device_module(root_module, state._ignored_params, device_id)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
     # Initialize and shard `FlatParamHandle`s one by one following reverse
     # depth-first order (i.e. reverse `.modules()` order), which represents a
@@ -742,6 +774,7 @@ def _get_buffer_names(root_module: nn.Module) -> Set[str]:
 def _check_single_device_module(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
+    device_id: Optional[Union[int, torch.device]],
 ) -> None:
     """
     Raises an error if ``module`` has original parameters on multiple devices,
@@ -749,7 +782,19 @@ def _check_single_device_module(
     module must be either fully on the CPU or fully on a non-CPU device.
     """
     devices = {param.device for param in _get_orig_params(module, ignored_params)}
-    if len(devices) > 1:
+    # We allow module to be partially on CPU and partially on GPU if device_id is not
+    # None, since the device_id arg will result in the CPU portion being moved to
+    # GPU. This is useful in cases where part of the module may be parallelized
+    # by another algorithm and may already be on GPU. We'd like to enforce device_id
+    # to not be None, otherwise we'd flatten parameters in a mixed module which is
+    # not supported.
+    if len(devices) == 2 and torch.device("cpu") in devices:
+        if device_id is None:
+            raise RuntimeError(
+                "To support a module with both CPU and GPU params, "
+                "please pass in device_id argument."
+            )
+    elif len(devices) > 1:
         raise RuntimeError(
             f"FSDP only supports single device modules but got params on {devices}"
         )

@@ -1626,6 +1626,11 @@ class CppTile2DKernel(CppVecKernel):
             dtype = V.graph.get_dtype(name)
             if dtype in DTYPE_16BIT:
                 line = f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>::loadu({loadbuf}, {self.tiling_factor})"
+            elif (
+                V.graph.get_dtype(name) in [torch.uint8]
+                and opt_ctx.is_load_uint8_as_float
+            ):
+                line = f"at::vec::load_uint8_as_float({loadbuf})"
             else:
                 line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             return self.cse.generate(self.loads, line)
@@ -1653,6 +1658,11 @@ class CppTile2DKernel(CppVecKernel):
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in DTYPE_16BIT:
                 line = f"{value}.store({storebuf}, {self.tiling_factor});"
+            elif (
+                V.graph.get_dtype(name) in [torch.uint8]
+                and opt_ctx.is_store_float_as_uint8
+            ):
+                line = f"at::vec::store_float_as_uint8({value}, {storebuf});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
