@@ -633,9 +633,6 @@ meta_function_expected_failures = {
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
     torch.nn.functional.max_pool3d : {f64, f32},
     torch.nn.functional.max_pool3d_with_indices : {f64, f32},
-    torch.nn.functional.max_unpool1d : {f64, f32},
-    torch.nn.functional.max_unpool2d : {f64, f32},
-    torch.nn.functional.max_unpool3d : {f64, f32},
     torch.nn.functional.multi_margin_loss : {f64, f32},
     torch.nn.functional.multilabel_margin_loss : {f64, f32},
     torch.nn.functional.one_hot : {i64},
@@ -727,9 +724,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.median: {f16},  # aten::median, aten::median.dim_values
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
-    torch.nn.functional.max_unpool1d: {f16},  # aten::max_unpool2d
-    torch.nn.functional.max_unpool2d: {f16},  # aten::max_unpool2d
-    torch.nn.functional.max_unpool3d: {f16},  # aten::max_unpool3d
     torch.nn.functional.multi_margin_loss: {bf16, f16},  # aten::multi_margin_loss
     torch.nn.functional.multilabel_margin_loss: {bf16, f16},  # aten::multilabel_margin_loss_forward
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
@@ -854,8 +848,6 @@ meta_dispatch_expected_failures = {
     aten.histogram.bins_tensor : {f32, f64},
     aten.kthvalue.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.max_pool3d_with_indices.default : {f32, f64},
-    aten.max_unpool2d.default : {f32, f64},
-    aten.max_unpool3d.default : {f32, f64},
     aten.median.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.median.dim : {i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.mode.default : {f16, i8, f64, i64, bf16, f32, i32, b8, i16, u8},
@@ -916,8 +908,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
     aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
     aten.max_pool3d_with_indices.default: {bf16, f16},  # aten::max_pool3d_with_indices
-    aten.max_unpool2d.default: {f16},  # aten::max_unpool2d
-    aten.max_unpool3d.default: {f16},  # aten::max_unpool3d
     aten.median.default: {f16},  # aten::median
     aten.median.dim: {f16},  # aten::median.dim_values
     aten.multi_margin_loss.default: {bf16, f16},  # aten::multi_margin_loss
