@@ -130,8 +130,13 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
             _scale, _zero_point = self.activation_post_process.calculate_qparams()
             _scale = _scale.to(self.scale.device)
             _zero_point = _zero_point.to(self.zero_point.device)
-            self.scale.data.copy_(_scale)
-            self.zero_point.data.copy_(_zero_point)
+            if self.scale.shape != _scale.shape:
+                with torch.no_grad():
+                    self.scale = Parameter(self.scale.detach().resize_(_scale.shape))
+                    self.zero_point = Parameter(self.zero_point.detach().resize_(_zero_point.shape))
+            else:
+                self.scale.data.copy_(_scale)
+                self.zero_point.data.copy_(_zero_point)
         else:
             self.scale.data.clamp_(min=self.eps.item())  # type: ignore[operator]
 
