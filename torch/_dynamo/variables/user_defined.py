@@ -286,11 +286,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # This is for cases when we have sus keys and we cannot make a ConstDictVariable
         if name == "__contains__" and isinstance(self.value, dict):
             if isinstance(args[0], (UserDefinedObjectVariable, ConstantVariable)):
-                return ConstantVariable(
-                    args[0].value in self.value, **options
-                )
-            
-        
+                return ConstantVariable(args[0].value in self.value, **options)
+
         return super().call_method(tx, name, args, kwargs)
 
     def is_supported_random(self):
@@ -543,7 +540,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
         if self._check_for_getattribute() or self._check_for_getattr():
             unimplemented(f"hasattr with custom __getattr__ hasattr({self}, {name})")
-
 
         try:
             self._getattr_static(name)

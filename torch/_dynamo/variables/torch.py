@@ -9,12 +9,12 @@ import types
 from typing import Dict, List, Optional
 
 import torch._C
-from torch._dynamo.variables.base import VariableTracker
 import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value, get_real_value
 from torch._dynamo.variables import SymNodeVariable, UserFunctionVariable
+from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.user_defined import ProcessGroupVariable
 from torch._guards import GuardsCheckpointState, Source
 from torch.utils import _pytree as pytree
@@ -781,9 +781,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         else:
             return handle_ntuple(args[0])
 
-    def call_method(self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]) -> VariableTracker:
-        print("CALLING METHOD ON TORCHVARIABLE", self.value, name, args[0].value, kwargs)
+    def call_method(
+        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        print(
+            "CALLING METHOD ON TORCHVARIABLE", self.value, name, args[0].value, kwargs
+        )
         return super().call_method(tx, name, args, kwargs)
+
 
 def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
     # Will raise if not sound

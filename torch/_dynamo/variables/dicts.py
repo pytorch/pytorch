@@ -194,11 +194,7 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable(
                 ConstDictVariable.get_key(args[0]) in self.items, **options
             )
-        elif (
-            name == "__setitem__"
-            and args
-            and ConstDictVariable.is_valid_key(args[0])
-        ):
+        elif name == "__setitem__" and args and ConstDictVariable.is_valid_key(args[0]):
             self.mutable_local = MutableLocal()
             assert not kwargs and len(args) == 2
             k = ConstDictVariable.get_key(args[0])
@@ -218,7 +214,7 @@ class ConstDictVariable(VariableTracker):
                 self,
                 self.modifed(newval, new_rec_contains, **options),
             )
-            
+
         else:
             return super().call_method(tx, name, args, kwargs)
 

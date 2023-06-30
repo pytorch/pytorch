@@ -2386,10 +2386,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def YIELD_FROM(self, inst):
         print("GOT YIELD FROM?", inst)
         tos = self.stack[-1]
-        if isinstance(tos, ConstantVariable) and tos.value == None:
+        if isinstance(tos, ConstantVariable) and tos.value is None:
             self.pop()
             return
         return self.FOR_ITER(inst)
+
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
