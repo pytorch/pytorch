@@ -254,10 +254,9 @@ def _share_state_and_init_handle_attrs(
     # Update _has_optim_in_backward for each handle.
     for handle in root_state._all_handles:
         flat_param = handle.flat_param
-        # print(f"RV: checking flat_param")
         if hasattr(flat_param, "_in_backward_optimizers"):
             raise RuntimeError(
-                f"FSDP optimizer in backward only supported with use_orig_params=True!"
+                "FSDP optimizer in backward only supported with use_orig_params=True!"
             )
         if flat_param._params is not None:
             handle._has_optim_in_backward = any(
@@ -465,7 +464,8 @@ def _pre_forward(
         # their gradients. They must be re-registered every forward pass in case
         # the `grad_fn` is mutated.
         _register_post_backward_hooks(state, handles)
-        # We may have to reallocate the _cpu_grad if optimizer overlap set the grad to None in the backward pass.
+        # We have to reallocate the _cpu_grad if optimizer overlap
+        # set the grad to None in the backward pass.
         for handle in handles:
             if handle._offload_params and handle.flat_param._cpu_grad is None:
                 handle.flat_param._cpu_grad = torch.zeros_like(
@@ -918,10 +918,6 @@ def _post_backward_hook(
                             # operates on CPU, because the parameters and gradients
                             # have already been offloaded.
                             for optim in orig_param._in_backward_optimizers:
-                                # _p_assert(orig_param.grad is not None, "Expected orig param grad to not be None")
-                                # print(f"RV: calling step! {orig_param.grad.device} {orig_param.device}")
-                                # if dist.get_rank() == 0:
-                                # print(f"RV: calling step with param {orig_param} and grad {orig_param.grad} ")
                                 optim.step()
                             # Set orig param gradient to None to maintain the
                             # invariant that if flat_param.grad is None, then
@@ -931,12 +927,11 @@ def _post_backward_hook(
                     # for no_shard.
                     # TODO (rohan-varma): see if this can be absorbed into a sharded_grad setter,
                     # similar to sharded_grad property.
-                    handle.flat_param.grad = None
+                    if not handle.uses_sharded_strategy:
+                        handle.flat_param.grad = None
                     handle.flat_param._saved_grad_shard = None
                     if handle._offload_params:
                         handle.flat_param._cpu_grad = None
-                    # TODO: remove this
-                    # _p_assert(handle.sharded_grad is None, f"Expected handles grad to be None with optim overlap.")
 
 
 def _post_backward_reshard(
