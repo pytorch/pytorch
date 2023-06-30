@@ -1205,11 +1205,6 @@ def parse_args():
             "doctest to run"
         ),
     )
-    parser.add_argument(
-        "--no-translation-validation",
-        action="store_false",
-        help="Run tests without translation validation.",
-    )
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -1640,9 +1635,6 @@ def main():
         os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
     elif options.inductor:
         os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
-
-    if not options.no_translation_validation:
-        os.environ["PYTORCH_TEST_WITH_TV"] = "1"
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
