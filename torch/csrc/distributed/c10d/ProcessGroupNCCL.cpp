@@ -1646,8 +1646,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   auto& ncclStreams = ncclStreams_[key];
   // TODO(eqy): is this still necessary if avoidRecordStreams_ is set?
   for (const auto i : c10::irange(devices.size())) {
-    cudaStreamCaptureStatus is_capturing;
-    cudaStreamIsCapturing(ncclStreams[i], &is_capturing);
     auto& devEvent = (*work->ncclEndEvents_)[i];
     devEvent.record(ncclStreams[i]);
   }
@@ -1812,8 +1810,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // End event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(devices.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams[i];
-    cudaStreamCaptureStatus is_capturing;
-    cudaStreamIsCapturing(ncclStreams[i], &is_capturing);
     if (!coalescing_state_) {
       (*work->ncclEndEvents_)[i].record(ncclStream);
     }
