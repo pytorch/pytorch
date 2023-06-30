@@ -9,7 +9,6 @@ from unittest.mock import patch
 import numpy as np
 import sympy
 import torch
-import torch._dynamo
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
@@ -1914,6 +1913,14 @@ class CPUReproTests(TestCase):
 
         x = torch.rand(2, 3, 14, 14).bfloat16()
         self.common(f, (x,))
+
+    def test_broadcast_mul_bfloat16(self):
+        def f(a, b):
+            return a * b
+
+        a = torch.randn(2, 16, 16).bfloat16()
+        b = torch.randn(2, 1, 1).bfloat16()
+        self.common(f, (a, b))
 
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
