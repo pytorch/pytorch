@@ -38,6 +38,13 @@ class FakeProcessGroup(dist.ProcessGroup):
         return ret_work(tensor_list)
 
     def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
+        # NOTE: in general it's not good form to try to make FakePG work with 'real data',
+        # but the reasoning here is that we want FakePG to work with DeviceMesh's init
+        # code that have the data validation, which makes it worth the tradeoff.
+        # In general user should use MTPG or normal PG for cases where they may care about
+        # real data from collectives
+        for chunk in output_tensors[0]:
+            chunk.copy_(input_tensor[0])
         return ret_work(output_tensors)
 
     def reduce_scatter(self, output_tensor, scatter_list, opts=ReduceScatterOptions()):
