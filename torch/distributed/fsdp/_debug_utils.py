@@ -64,7 +64,7 @@ def _get_sharded_module_tree_with_module_name_to_fqns(
             sharded_tree_info[0] += printed_prefixed_module_name + "\n"
             return
 
-        handle = state._fully_sharded_module_to_handle.get(module, [])
+        handle = state._fully_sharded_module_to_handle.get(module, None)
 
         if handle:
             sharded_tree_info[0] += (

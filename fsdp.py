@@ -34,25 +34,25 @@ def run(model, optim):
     torch.manual_seed(dist.get_rank() + 1)
     inp = torch.randn((2, 3), device="cuda")
     # torch._dynamo.optimize(printing_eager)(model)(inp)
-    explain = torch._dynamo.explain(model, inp)
-    for g in explain.graphs:
-        g.graph.print_tabular()
-    for i, gb in enumerate(explain.break_reasons):
-        print(f"{i}. {gb}")
-    sorted_dict = dict(sorted(torch._dynamo.exc.unimpl_and_count.items(), key=lambda x: x[1], reverse=True))
+    # explain = torch._dynamo.explain(model, inp)
+    # for g in explain.graphs:
+    #     g.graph.print_tabular()
+    # for i, gb in enumerate(explain.break_reasons):
+    #     print(f"{i}. {gb}")
+    # sorted_dict = dict(sorted(torch._dynamo.exc.unimpl_and_count.items(), key=lambda x: x[1], reverse=True))
 
-    i = 0
-    for k, v in sorted_dict.items():
-        print(f"{i}. {k} - {v}")
-        i += 1
-    # for _ in range(3):
-    #     optim.zero_grad(set_to_none=True)
-    #     inp = torch.randn((2, 3), device="cuda")
-    #     out = model(inp)
-    #     loss = out.sum()
-    #     losses.append(loss)
-    #     loss.backward()
-    #     optim.step()
+    # i = 0
+    # for k, v in sorted_dict.items():
+    #     print(f"{i}. {k} - {v}")
+    #     i += 1
+    for _ in range(3):
+        optim.zero_grad(set_to_none=True)
+        inp = torch.randn((2, 3), device="cuda")
+        out = model(inp)
+        loss = out.sum()
+        losses.append(loss)
+        loss.backward()
+        optim.step()
     return losses
 
 def main():

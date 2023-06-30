@@ -197,22 +197,24 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
     ``state`` are on the expected device for *lazy initialization*.
     """
     cpu_device = torch.device("cpu")
-    handle = traversal_utils._get_fsdp_handle(module)
-    if (
-        not handle._offload_params
-        and handle.flat_param.device != state.compute_device
-    ):
-        raise RuntimeError(
-            "An FSDP-managed module unexpectedly has parameters on "
-            f"{handle.flat_param.device}. Make sure to move the module to "
-            f"{state.compute_device} before training."
-        )
-    elif handle._offload_params and handle.flat_param.device != cpu_device:
-        raise RuntimeError(
-            "An FSDP-managed module with parameter CPU offloading enabled "
-            f"has parameters on {handle.flat_param.device}. Make sure to "
-            f"not move the module from CPU when offloading parameters."
-        )
+    for handle in traversal_utils._get_fsdp_handles(module):
+        if not handle:
+            continue
+        if (
+            not handle._offload_params
+            and handle.flat_param.device != state.compute_device
+        ):
+            raise RuntimeError(
+                "An FSDP-managed module unexpectedly has parameters on "
+                f"{handle.flat_param.device}. Make sure to move the module to "
+                f"{state.compute_device} before training."
+            )
+        elif handle._offload_params and handle.flat_param.device != cpu_device:
+            raise RuntimeError(
+                "An FSDP-managed module with parameter CPU offloading enabled "
+                f"has parameters on {handle.flat_param.device}. Make sure to "
+                f"not move the module from CPU when offloading parameters."
+            )
 
 
 def _init_device_mesh(
@@ -1130,7 +1132,7 @@ def _get_handle_to_prefetch(
         training_state == HandleTrainingState.BACKWARD_POST
         and state.backward_prefetch == BackwardPrefetch.BACKWARD_POST
     ):
-        target_handles_key_candidate = eod.get_handles_to_backward_prefetch(current_handles_key)
+        target_handles_key_candidate = eod.get_handle_to_backward_prefetch(current_handles_key)
         if (
             state._needs_pre_backward_unshard.get(target_handles_key_candidate, False)
             and not state._handles_prefetched.get(target_handles_key_candidate, False)
@@ -1139,7 +1141,7 @@ def _get_handle_to_prefetch(
         else:
             target_handles_key = None
     elif training_state == HandleTrainingState.FORWARD and state.forward_prefetch:
-        target_handles_key_candidate = eod.get_handles_to_forward_prefetch(current_handles_key)
+        target_handles_key_candidate = eod.get_handle_to_forward_prefetch(current_handles_key)
         if (
             state._needs_pre_forward_unshard.get(target_handles_key_candidate, False)
             and not state._handles_prefetched.get(target_handles_key_candidate, False)
@@ -1175,7 +1177,7 @@ def _register_pre_forward_hooks(
         forward_handle.remove()
     state._pre_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._fully_sharded_module_to_handle.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handle.get(module, None)
         if module_param_handles:
             unshard_fn = functools.partial(
                 _pre_forward_unshard,
@@ -1205,7 +1207,7 @@ def _register_post_forward_hooks(
         forward_handle.remove()
     state._post_forward_handles.clear()
     for module in modules:
-        module_param_handles = state._fully_sharded_module_to_handle.get(module, [])
+        module_param_handles = state._fully_sharded_module_to_handle.get(module, None)
         if module_param_handles:
             reshard_fn = functools.partial(
                 _post_forward_reshard,

@@ -24,7 +24,7 @@ There are three common traversal idioms: Given a root module,
 - ``_get_fsdp_states()`` returns all ``_FSDPState`` s in the tree.
 - ``get_fsdp_root_states()`` returns all local root ``_FSDPState`` s in the
 tree (i.e. those with ``_is_root == True``).
-- ``_get_fsdp_handle()``returns all ``FlatParamHandle`` s in the tree.
+- ``_get_fsdp_handles()``returns all ``FlatParamHandle`` s in the tree.
 
 All of these methods must take in the root module (i.e. an ``nn.Module``) and
 not a general ``_FSDPState`` because ``_FSDPState`` does not support a graph
@@ -98,10 +98,12 @@ def _get_fsdp_states(module: nn.Module) -> List[_FSDPState]:
     return fsdp_states
 
 
-def _get_fsdp_handle(module: nn.Module) -> List:
+def _get_fsdp_handles(module: nn.Module) -> List:
     """
     Returns all ``FlatParamHandle`` s in the module tree rooted at ``module``
     following the rules in :func:`_get_fsdp_state`.
     """
-    return _get_fsdp_states(module)._handle
-
+    return [
+        fsdp_state._handle
+        for fsdp_state in _get_fsdp_states(module)
+    ]

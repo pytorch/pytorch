@@ -57,7 +57,7 @@ class _ExecOrderData:
         ]
         self.process_group: Optional[dist.ProcessGroup] = None
         self.world_size: Optional[int] = None
-        self.all_handle: [FlatParamHandle] = []
+        self.all_handles: [FlatParamHandle] = []
         # Maps each handle to its index in `all_handles`, which must be the
         # same across ranks for the execution order validation to work
         self.handle_to_handle_index: Dict[FlatParamHandle, int] = {}
@@ -82,11 +82,11 @@ class _ExecOrderData:
         self.rank = process_group.rank()
         self.world_size = process_group.size()
         # Fix an order over the handles, which should be the same across ranks
-        handle = traversal_utils._get_fsdp_handle(root_module)
-        index = len(self.all_handles)
-        self.all_handles.append(handle)
-        self.handle_to_handle_index[handle] = index
-        self.param_to_fqn = _get_param_to_fqns(root_module)
+        for handle in traversal_utils._get_fsdp_handles(root_module):
+            index = len(self.all_handles)
+            self.all_handles.append(handle)
+            self.handle_to_handle_index[handle] = index
+            self.param_to_fqn = _get_param_to_fqns(root_module)
         # TODO (awgu): We can broadcast the metadata of rank 0's `all_handles`
         # to check that all ranks have the same handles in the same order.
         # https://github.com/pytorch/pytorch/issues/79620
@@ -95,10 +95,10 @@ class _ExecOrderData:
     def is_first_iter(self) -> bool:
         return self._iter == 0
 
-    def get_handles_to_backward_prefetch(
+    def get_handle_to_backward_prefetch(
         self,
         current_handles_key: FlatParamHandle,
-    ) -> Optional[List[FlatParamHandle]]:
+    ) -> Optional[FlatParamHandle]:
         """
         Returns a :class:`list` of the handles keys of the handles to backward
         prefetch given the current handles key. If there are no valid handles
@@ -110,18 +110,18 @@ class _ExecOrderData:
         if current_index is None:
             return None
         target_index = current_index - 1
-        target_handles_keys: List[FlatParamHandle] = []
+        target_handles_key: FlatParamHandle = None
         for _ in range(self._backward_prefetch_limit):
             if target_index < 0:
                 break
-            target_handles_keys.append(self.handles_post_forward_order[target_index])
+            target_handles_key = self.handles_post_forward_order[target_index]
             target_index -= 1
-        return target_handles_keys
+        return target_handles_key
 
-    def get_handles_to_forward_prefetch(
+    def get_handle_to_forward_prefetch(
         self,
         current_handles_key: FlatParamHandle,
-    ) -> Optional[List[FlatParamHandle]]:
+    ) -> Optional[FlatParamHandle]:
         """
         Returns a :class:`list` of the handles keys of the handles to forward
         prefetch given the current handles key. If there are no valid handles
@@ -133,13 +133,13 @@ class _ExecOrderData:
         if current_index is None:
             return None
         target_index = current_index + 1
-        target_handles_keys: List[FlatParamHandle] = []
+        target_handles_key: List[FlatParamHandle] = None
         for _ in range(self._forward_prefetch_limit):
             if target_index >= len(self.handles_pre_forward_order):
                 break
-            target_handles_keys.append(self.handles_pre_forward_order[target_index])
+            target_handles_key = self.handles_pre_forward_order[target_index]
             target_index += 1
-        return target_handles_keys
+        return target_handles_key
 
     def record_post_forward(self, handle: FlatParamHandle) -> None:
         """

@@ -1302,7 +1302,7 @@ def _optim_state_dict(
         :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
         then nonzero ranks return an empty :class:`dict`.
     """
-    _clear_grads_if_needed(traversal_utils._get_fsdp_handle(model))
+    _clear_grads_if_needed(traversal_utils._get_fsdp_handles(model))
     to_save = not rank0_only or (dist.get_rank(group) == 0 or shard_state)
     fsdp_osd: Dict[str, Any] = {"state": {}} if to_save else {}
     fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}

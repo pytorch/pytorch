@@ -377,12 +377,12 @@ def _init_core_state(
     # Mapping from fully sharded module to the handles it is responsible to
     # unshard and reshard (see [Note: Fully Sharded Module])
     _fully_sharded_module_to_handle: Dict[
-        nn.Module, List[FlatParamHandle]
-    ] = collections.defaultdict(list)
+        nn.Module, FlatParamHandle
+    ] = collections.defaultdict(None)
     state._fully_sharded_module_to_handle = _fully_sharded_module_to_handle
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handle`
-    _handle: FlatParamHandle = []
+    _handle: FlatParamHandle = None
     state._handle = _handle
     params: List[FlatParameter] = []
     state.params = params
@@ -592,17 +592,10 @@ def _init_param_handle_from_params(
         state._use_orig_params,
     )
     handle.shard()
-    assert handle not in state._handle
+    assert not state._handle
     state.params.append(handle.flat_param)
-    state._handle.append(handle)
-    state._fully_sharded_module_to_handle[handle._fully_sharded_module].append(handle)
-    num_fully_sharded_module_handles = len(
-        state._fully_sharded_module_to_handle[handle._fully_sharded_module]
-    )
-    assert num_fully_sharded_module_handles == 1, (
-        "The current design assumes a module manages at most one "
-        f"`FlatParamHandle` but got {num_fully_sharded_module_handles}"
-    )
+    state._handle = handle
+    state._fully_sharded_module_to_handle[handle._fully_sharded_module] = handle
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)

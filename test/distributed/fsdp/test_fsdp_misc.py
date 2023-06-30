@@ -455,8 +455,8 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             use_orig_params=use_orig_params,
         )
         cpu_device = torch.device("cpu")
-        handle = traversal_utils._get_fsdp_handle(fsdp_model):
-        self.assertEqual(handle.flat_param.device, cpu_device)
+        for handle in traversal_utils._get_fsdp_handles(fsdp_model):
+            self.assertEqual(handle.flat_param.device, cpu_device)
 
     @skip_if_lt_x_gpu(2)
     def test_module_device_mismatches_device_id(self):

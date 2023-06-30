@@ -123,34 +123,34 @@ class TestPureFP16(FSDPTest):
         out.sum().backward()
 
         # Check handle dtype attributes
-        handle = traversal_utils._get_fsdp_handle(fsdp_model):
-        self.assertEqual(handle.flat_param.dtype, torch.float16)
-        self.assertEqual(handle.flat_param.grad.dtype, torch.float16)
-        self.assertEqual(handle._orig_param_dtype, torch.float16)
-        # Specifying `mixed_precision` takes precedence over the model
-        # dtype for both `param_dtype` and `reduce_dtype`
-        if mixed_precision.param_dtype is not None:
-            self.assertEqual(
-                handle._fwd_bwd_param_dtype, mixed_precision.param_dtype
-            )
-        else:
-            self.assertEqual(handle._fwd_bwd_param_dtype, torch.float16)
-        if mixed_precision.reduce_dtype is not None:
-            self.assertEqual(handle._reduce_dtype, mixed_precision.reduce_dtype)
-        elif (
-            mixed_precision.reduce_dtype is None
-            and mixed_precision.param_dtype is not None
-        ):
-            # Special case: infer reduce dtype from parameter dtype
-            self.assertEqual(handle._reduce_dtype, mixed_precision.param_dtype)
-        else:
-            self.assertEqual(handle._reduce_dtype, torch.float16)
+        for handle in traversal_utils._get_fsdp_handles(fsdp_model):
+            self.assertEqual(handle.flat_param.dtype, torch.float16)
+            self.assertEqual(handle.flat_param.grad.dtype, torch.float16)
+            self.assertEqual(handle._orig_param_dtype, torch.float16)
+            # Specifying `mixed_precision` takes precedence over the model
+            # dtype for both `param_dtype` and `reduce_dtype`
+            if mixed_precision.param_dtype is not None:
+                self.assertEqual(
+                    handle._fwd_bwd_param_dtype, mixed_precision.param_dtype
+                )
+            else:
+                self.assertEqual(handle._fwd_bwd_param_dtype, torch.float16)
+            if mixed_precision.reduce_dtype is not None:
+                self.assertEqual(handle._reduce_dtype, mixed_precision.reduce_dtype)
+            elif (
+                mixed_precision.reduce_dtype is None
+                and mixed_precision.param_dtype is not None
+            ):
+                # Special case: infer reduce dtype from parameter dtype
+                self.assertEqual(handle._reduce_dtype, mixed_precision.param_dtype)
+            else:
+                self.assertEqual(handle._reduce_dtype, torch.float16)
 
-        # Check parameter/gradient dtypes
-        for param in fsdp_model.parameters():
-            self.assertEqual(param.dtype, torch.float16)
-            if param.grad is not None:
-                self.assertEqual(param.grad.dtype, torch.float16)
+            # Check parameter/gradient dtypes
+            for param in fsdp_model.parameters():
+                self.assertEqual(param.dtype, torch.float16)
+                if param.grad is not None:
+                    self.assertEqual(param.grad.dtype, torch.float16)
 
 
 instantiate_parametrized_tests(TestPureFP16)

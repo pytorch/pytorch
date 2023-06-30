@@ -174,16 +174,16 @@ class TestUnshardParamsBase(FSDPTest):
             else:
                 # Check that each `FlatParameter` has the sharded size as a
                 # proxy for it being resharded
-                handle = traversal_utils._get_fsdp_handle(fsdp_model):
-                if handle.uses_sharded_strategy:
-                    self.assertEqual(
-                        handle.flat_param.shape, handle.flat_param._sharded_size
-                    )
-                else:
-                    self.assertEqual(
-                        handle.flat_param.shape,
-                        handle.flat_param._unpadded_unsharded_size,
-                    )
+                for handle in traversal_utils._get_fsdp_handles(fsdp_model):
+                    if handle.uses_sharded_strategy:
+                        self.assertEqual(
+                            handle.flat_param.shape, handle.flat_param._sharded_size
+                        )
+                    else:
+                        self.assertEqual(
+                            handle.flat_param.shape,
+                            handle.flat_param._unpadded_unsharded_size,
+                        )
 
         # Prove the number of FSDP roots after lazy initialization
         num_fsdp_roots = 0
