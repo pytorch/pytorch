@@ -3211,12 +3211,18 @@ def run(runner, args, original_dir=None):
                     args.per_process_memory_fraction
                 )
 
-
             # Set translation validation on by default on CI accuracy runs.
-            ci = CI(args.backend, training=args.training, dynamic=args.dynamic_shapes, device=device)
+            ci = CI(
+                args.backend,
+                training=args.training,
+                dynamic=args.dynamic_shapes,
+                device=device,
+            )
             translation_validation = args.only not in CI_TV_OFF[ci]
 
-            with torch._dynamo.config.patch(translation_validation=translation_validation):
+            with torch._dynamo.config.patch(
+                translation_validation=translation_validation
+            ):
                 model, example_inputs = runner.cast_based_on_args(model, example_inputs)
                 runner.run_one_model(
                     name,
