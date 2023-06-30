@@ -794,8 +794,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   static std::shared_ptr<at::DynamicLibrary> uccLib_;
   c10::intrusive_ptr<Backend> uccPG_;
 #endif
-
-
 };
 
 } // namespace c10d
