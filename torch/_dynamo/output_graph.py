@@ -40,6 +40,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
+from .current_scope_id import enter_new_scope
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
@@ -352,11 +353,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @contextlib.contextmanager
     def new_subtracer(self):
+        new_scope_ctx = enter_new_scope()
         try:
+            new_scope_ctx.__enter__()
             tracer = SubgraphTracer(self, parent=self.current_tracer)
             self.tracers.append(tracer)
             yield tracer
         finally:
+            new_scope_ctx.__exit__(None, None, None)
             self.tracers.pop()
 
     @property
@@ -508,6 +512,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def count_calls(self):
         return count_calls(self.graph)
+
+    def is_empty_graph(self):
+        return len(list(self.graph.nodes)) == 0
 
     def get_submodule(self, keys):
         assert keys
@@ -1216,9 +1223,9 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        assert (
-            self.parent is not None
-        ), "lift_tracked_freevar_to_input on root SubgraphTracer"
+        assert self.parent is not None or not self.is_name_bound(
+            proxy.node.name
+        ), "lift_tracked_freevar_to_input on root SubgraphTracer should only be called with non-free variables."
         new_proxy = self.create_graph_input(proxy.node.name)
         new_proxy.node.meta["example_value"] = proxy.node.meta["example_value"]
         self.lifted_freevars[proxy] = None
