@@ -17,6 +17,12 @@ from . import config
 from .external_utils import is_compiling
 from .utils import HAS_NUMPY, is_safe_constant, np
 
+try:
+    # is_lazy_import is to support Cinder with Lazy Imports
+    from importlib import is_lazy_import
+except ImportError:
+    is_lazy_import = None
+
 """
 A note on allowed functions:
 
@@ -180,7 +186,12 @@ def _allowed_function_ids():
         ):
             return
         torch_object_ids[id(module)] = module.__name__
-        for name, obj in list(module.__dict__.items()):
+        for name in list(module.__dict__):
+            if name not in module.__dict__ or (
+                is_lazy_import and is_lazy_import(module.__dict__, name)
+            ):
+                continue
+            obj = module.__dict__[name]
             if id(obj) not in torch_object_ids:
                 # Dynamo allows all builtins into the graph and does not attempt
                 # to introspect into them. We don't want to allow instances of
