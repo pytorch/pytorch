@@ -4595,8 +4595,19 @@ def meta__scaled_dot_product_efficient_backward(
         dtype=value.dtype,
         device=value.device,
     )
+    grad_bias = torch.empty()
+    if grad_bias.requires_grad:
+        nominal_sizes = attn_bias.size()
+        last_dim_size = nominal_sizes[-1]
+        alignTo = 16
+        nominal_sizes[-1] = alignTo * ((last_dim_size + alignTo - 1) / alignTo)
+        grad_bias = torch.empty(
+            nominal_sizes,
+            dtype=attn_bias.dtype,
+            device=attn_bias.device,
+        )[:, :, :, :last_dim_size]
 
-    return grad_q, grad_k, grad_v
+    return grad_q, grad_k, grad_v, grad_bias
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
