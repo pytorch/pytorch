@@ -513,6 +513,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def count_calls(self):
         return count_calls(self.graph)
 
+    def is_empty_graph(self):
+        return len(list(self.graph.nodes)) == 0
+
     def get_submodule(self, keys):
         assert keys
         obj = self.nn_modules
@@ -1220,9 +1223,9 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        assert (
-            self.parent is not None
-        ), "lift_tracked_freevar_to_input on root SubgraphTracer"
+        assert self.parent is not None or not self.is_name_bound(
+            proxy.node.name
+        ), "lift_tracked_freevar_to_input on root SubgraphTracer should only be called with non-free variables."
         new_proxy = self.create_graph_input(proxy.node.name)
         new_proxy.node.meta["example_value"] = proxy.node.meta["example_value"]
         self.lifted_freevars[proxy] = None
