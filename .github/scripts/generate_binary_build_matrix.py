@@ -22,6 +22,9 @@ ROCM_ARCHES = ["5.4.2", "5.5"]
 CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
 
 
+CPU_AARCH64_ARCH = ["cpu-aarch64"]
+
+
 def arch_type(arch_version: str) -> str:
     if arch_version in CUDA_ARCHES:
         return "cuda"
@@ -29,6 +32,8 @@ def arch_type(arch_version: str) -> str:
         return "rocm"
     elif arch_version in CPU_CXX11_ABI_ARCH:
         return "cpu-cxx11-abi"
+    elif arch_version in CPU_AARCH64_ARCH:
+        return "cpu-aarch64"
     else:  # arch_version should always be "cpu" in this case
         return "cpu"
 
@@ -44,6 +49,7 @@ WHEEL_CONTAINER_IMAGES = {
     },
     "cpu": "pytorch/manylinux-builder:cpu",
     "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi",
+    "cpu-aarch64": "quay.io/pypa/manylinux2014_aarch64",
 }
 
 CONDA_CONTAINER_IMAGES = {
@@ -83,6 +89,7 @@ FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11"]
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
     return {
         "cpu": "cpu",
+        "cpu-aarch64": "cpu",
         "cpu-cxx11-abi": "cpu-cxx11-abi",
         "cuda": f"cu{gpu_arch_version.replace('.', '')}",
         "rocm": f"rocm{gpu_arch_version}",
@@ -186,8 +193,8 @@ def generate_wheels_matrix(
     gen_special_an_non_special_wheel: bool = True,
 ) -> List[Dict[str, str]]:
     package_type = "wheel"
-    if os == "linux":
-        # NOTE: We only build manywheel packages for linux
+    if os == "linux" or os == "linux-aarch64":
+        # NOTE: We only build manywheel packages for x86_64 and aarch64 linux
         package_type = "manywheel"
 
     if python_versions is None:
@@ -200,6 +207,10 @@ def generate_wheels_matrix(
             arches += CPU_CXX11_ABI_ARCH + CUDA_ARCHES + ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
+        elif os == "linux-aarch64":
+            # Only want the one arch as the CPU type is different and
+            # uses different build/test scripts
+            arches = ["cpu-aarch64"]
 
     ret: List[Dict[str, str]] = []
     for python_version in python_versions:
@@ -207,7 +218,9 @@ def generate_wheels_matrix(
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = (
                 ""
-                if arch_version == "cpu" or arch_version == "cpu-cxx11-abi"
+                if arch_version == "cpu"
+                or arch_version == "cpu-cxx11-abi"
+                or arch_version == "cpu-aarch64"
                 else arch_version
             )
 
