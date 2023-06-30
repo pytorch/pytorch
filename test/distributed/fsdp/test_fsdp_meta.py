@@ -61,7 +61,6 @@ class MyLinear(nn.Linear):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.register_buffer("buf", torch.randn((3,)))
 
     def reset_parameters(self, *args, **kwargs):
         torch.manual_seed(42)
@@ -110,14 +109,12 @@ def _init_with_reset_params(module: nn.Module):
     to_empty + reset_parameters() init function example for modules
     initailized with device="meta"
     """
-    from torch.distributed.fsdp._init_utils import _to_empty_non_recurse
-
     has_meta_states = any(p.is_meta for p in module.parameters(recurse=False)) or any(
         b.is_meta for b in module.buffers(recurse=False)
     )
     device = torch.device("cuda", torch.cuda.current_device())
     if has_meta_states:
-        _to_empty_non_recurse(module, device)
+        module.to_empty(device=device, recurse=False)
         module.reset_parameters()
 
 
