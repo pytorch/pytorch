@@ -526,7 +526,7 @@ class QNNPackQuantizer(Quantizer):
                 ]
                 if len(act_nodes) > 1:
                     raise ValueError(
-                        f"Multiple activation nodes found for partition {p}"
+                        f"Multiple activation nodes found for partition {p} {act_nodes}"
                     )
                 if len(act_nodes) == 0:
                     raise ValueError(f"No activation node found for partition {p}")

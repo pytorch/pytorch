@@ -106,6 +106,7 @@ def _node_only_used_for_sym_size(node: Node, partition_nodes: List[Node]):
     if _is_sym_size_node(node):
         return True
 
-    if len(set(node.users).intersection(set(partition_nodes))) == 0:
-        raise ValueError(f"Node {node} is not used by any nodes in partition")
-    return all(_is_sym_size_node(user) for user in node.users)
+    return all(
+        ((user not in partition_nodes) or _is_sym_size_node(user))
+        for user in node.users
+    )
