@@ -227,7 +227,7 @@ class OnnxFunctionDispatcher:
             # https://github.com/pytorch/pytorch/issues/97201
             aten_op_default = node.target.default
             # NOTE: default doesn't have "overload"
-            return split_opname_to_domain_op_overload(aten_op_default.name())  # type: ignore[attr-defined]
+            return _split_opname_to_domain_op_overload(aten_op_default.name())  # type: ignore[attr-defined]
 
         if _symint_symfloat_builtin_to_exporter_key_table(node.target) is not None:
             # Make sure it's symint/symfloat consuming builtin ops.
@@ -251,10 +251,10 @@ class OnnxFunctionDispatcher:
                     raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
             aten_op = _symint_symfloat_builtin_to_exporter_key_table(node.target)
             # overload name is torch.ops.<domain>.<op_name>.<overload>
-            return split_opname_to_domain_op_overload(aten_op.name())  # type: ignore[attr-defined]
+            return _split_opname_to_domain_op_overload(aten_op.name())  # type: ignore[attr-defined]
 
         if isinstance(node.target, torch._ops.OpOverload):
-            return split_opname_to_domain_op_overload(node.target.name())
+            return _split_opname_to_domain_op_overload(node.target.name())
 
         # Unexpected target, raise error.
         diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
@@ -287,11 +287,13 @@ class OnnxFunctionDispatcher:
             diagnostic_context: The diagnostic context to use for reporting errors.
 
         Returns:
-            Set of function overloads.
+            Set of SymbolicFunctions.
         """
 
-        function_group = None
-        custom_function_group = None
+        # NOTE: If the ATen/Custom operators are nt registered, these two groups will be None.
+        # And non-registerd ATen/Custom operators will trigger error in the next step.
+        function_group: Optional[Set[registration.SymbolicFunction]] = None
+        custom_function_group: Optional[Set[registration.SymbolicFunction]] = None
 
         if self.onnx_registry.is_registered_op(
             domain=domain, op_name=op_name, overload=overload
@@ -567,7 +569,7 @@ def _find_onnx_data_type(
 
 
 @_beartype.beartype
-def split_opname_to_domain_op_overload(op_name: str) -> Tuple[str, str, Optional[str]]:
+def _split_opname_to_domain_op_overload(op_name: str) -> Tuple[str, str, Optional[str]]:
     """Split op_name to domain, op, and overload.
 
     Args:

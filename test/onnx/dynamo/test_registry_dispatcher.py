@@ -30,25 +30,25 @@ class TestRegistration(common_utils.TestCase):
     def tearDown(self) -> None:
         self.registry._registry.pop("test::test_op", None)
 
-    def test_onnx_custom_symbolic_registers_function(self):
+    def test_register_custom_op_registers_custom_function(self):
         self.assertFalse(self.registry.is_registered_op("test", "test_op", "default"))
 
         @onnxscript.script(self.custom_domain)
-        def test(x, y):
+        def custom_add(x, y):
             return op.Add(x, y)
 
-        self.registry.register_custom_op(test, "test", "test_op", "default")
+        self.registry.register_custom_op(custom_add, "test", "test_op", "default")
         self.assertTrue(self.registry.is_registered_op("test", "test_op", "default"))
 
         function_group = self.registry.get_functions("test", "test_op", "default")
-        assert function_group is not None
-        self.assertEqual({func.onnx_function for func in function_group}, {test})
+        self.assertIsNotNone(function_group)
+        self.assertEqual({func.onnx_function for func in function_group}, {custom_add})  # type: ignore[arg-type]
 
         function_group = self.registry._get_custom_functions(
             "test", "test_op", "default"
         )
-        assert function_group is not None
-        self.assertEqual({func.onnx_function for func in function_group}, {test})
+        self.assertIsNotNone(function_group)
+        self.assertEqual({func.onnx_function for func in function_group}, {custom_add})  # type: ignore[arg-type]
 
     def test_custom_onnx_symbolic_joins_existing_function(self):
         self.assertFalse(self.registry.is_registered_op("test", "test_op"))
@@ -131,7 +131,9 @@ class TestDispatcher(common_utils.TestCase):
             ),
         ]
     )
-    def test_get_aten_name_on_supported_fx_node(self, node, expected_name):
+    def test_get_aten_name_on_supported_fx_node(
+        self, node: torch.fx.Node, expected_name: str
+    ):
         self.assertEqual(
             self.dispatcher.get_aten_name(node, self.diagnostic_context),
             expected_name,
@@ -218,7 +220,9 @@ class TestDispatcher(common_utils.TestCase):
                 self.diagnostic_context,
             )
 
-    def test_warnings_in_find_the_perfect_or_nearest_match_onnxfunction(self):
+    def test_warnings_in_find_the_perfect_or_nearest_match_onnxfunction_when_nearest_is_found(
+        self,
+    ):
         op_overload = torch.fx.Node(
             graph=torch.fx.Graph(),
             name="aten::add.Tensor",
@@ -273,7 +277,7 @@ class TestDispatcher(common_utils.TestCase):
             ),
         ]
     )
-    def test_respect_custom_ops_in_find_the_perfect_or_nearest_match_onnxfunction(
+    def test_find_the_perfect_or_nearest_match_onnxfunction_gives_custom_ops_precedence(
         self, node
     ):
         custom_domain = onnxscript.values.Opset(domain="custom", version=1)

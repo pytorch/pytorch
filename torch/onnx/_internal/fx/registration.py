@@ -41,22 +41,24 @@ class OnnxRegistry:
     dispatcher to dispatch calls to the appropriate function.
 
     Attributes:
-        _registry: A dictionary mapping qualified names to a set of SymbolicFunctions.
+        _registry: The registry maps <domain>::<op_name>.<overload>(e.g: aten::add.Tensor)
+            to a set of SymbolicFunctions. It is important not to directly modify this variable.
+            Instead, access to it should be done through the public methods: register_custom_op,
+            get_functions, and is_registered_op.
 
     Public Methods:
         register_custom_op: Registers a custom operator.
         get_functions: Returns the set of SymbolicFunctions for the given op.
         is_registered_op: Returns whether the given op is registered.
-
-    Private Methods:
-        _register: Registers a SymbolicFunction to an operator.
-        _initiate_registry_from_torchlib: Populates the registry with ATen functions from torchlib.
-        _get_custom_functions: Returns the set of custom functions for the given name.
-        _all_registered_ops: Returns the set of all registered op names.
-
     """
 
     def __init__(self, opset_version: int = 18) -> None:
+        """Initializes the registry.
+
+        Args:
+            opset_version: The opset version to use for the registry.
+
+        """
         self._registry: Dict[str, Set[SymbolicFunction]] = defaultdict(set)
         # FIXME: Avoid importing onnxscript into torch
         from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
