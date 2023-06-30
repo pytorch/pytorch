@@ -1350,7 +1350,7 @@ class CppVecKernel(CppKernel):
             if is_mask:
                 loadbuf = f"flag_to_float_scalar({loadbuf})"
             if dtype in [torch.bfloat16]:
-                line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf})"
+                line = f"at::vec::Vectorized<bfloat16>({loadbuf})"
             else:
                 line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
