@@ -2082,7 +2082,7 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
       SIMD_UNARY_MATH_CASE(kFloor, "floor", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kCeil, "ceil", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kTrunc, "trunc", DoubleTy_)
-      SIMD_UNARY_MATH_CASE(kRound, "round", DoubleTy_)
+      SIMD_UNARY_MATH_CASE(kRound, "nearbyint", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kErf, "erf", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kErfc, "erfc", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kTan, "tan", DoubleTy_)
