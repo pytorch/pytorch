@@ -4435,6 +4435,25 @@ def make_lazy_class(cls):
 
     return cls
 
+class SetDynamoInlineNNModules:
+    def __init__(self, value):
+        self.value = value
+
+    def __enter__(self):
+        self.orig_value = torch._dynamo.config.inline_nn_modules
+        torch._dynamo.config.inline_nn_modules = self.value
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        torch._dynamo.config.inline_nn_modules = self.orig_value
+
+def set_dynamo_inline_nn_modules(value):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            with SetDynamoInlineNNModules(value):
+                return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
 @make_lazy_class
 class LazyVal:
     pass

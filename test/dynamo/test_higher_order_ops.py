@@ -396,6 +396,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         # leading to four graphs being compiled: clone, sin, sin, clone
         self.assertEqual(cnt.frame_count, 4)
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_fallback_on_modules(self):
         # We can likely support this in the future, I just don't want to deal
         # with it right now

@@ -369,6 +369,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             fx_quant_output = m_fx(*example_inputs)
             self.assertTrue(torch.allclose(fx_quant_output, pt2_quant_output))
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_qnnpack_quantizer_conv_linear_no_permute(self):
         class M(torch.nn.Module):
             def __init__(self):

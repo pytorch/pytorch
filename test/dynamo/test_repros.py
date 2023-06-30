@@ -1312,6 +1312,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 4)
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_issue175(self):
         n_heads = 2
         d_model = 64

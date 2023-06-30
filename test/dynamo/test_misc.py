@@ -2443,6 +2443,7 @@ def fn():
         del x
         self.assertIs(x_ref(), None)
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_release_module_memory(self):
         mod = torch.nn.Linear(10, 10)
         x = torch.rand([10, 10])

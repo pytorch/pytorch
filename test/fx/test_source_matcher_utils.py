@@ -43,6 +43,7 @@ class TestSourceMatcher(JitTestCase):
         self.assertTrue(check_subgraphs_connected(module_partitions[torch.nn.Linear][1], module_partitions[torch.nn.ReLU][0]))
         self.assertFalse(check_subgraphs_connected(module_partitions[torch.nn.Linear][2], module_partitions[torch.nn.ReLU][0]))
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_module_partitioner_conv_relu_maxpool(self):
         class M(torch.nn.Module):
