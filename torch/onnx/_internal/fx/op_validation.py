@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import warnings
 
-from typing import Dict, List, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator  # type: ignore[import]
@@ -22,6 +22,25 @@ from torch.utils import _pytree
 
 
 @_beartype.beartype
+def _op_level_debug_message_formatter(
+    fn: Callable,
+    self,
+    node: torch.fx.Node,
+    symbolic_fn: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
+    *args,
+    **kwargs,
+) -> str:
+    return (
+        f"FX Node: {node.op}:{node.target}[name={node.name}]. \n"
+        f"ONNX Node: {symbolic_fn.name}[opset={symbolic_fn.opset}]."
+    )
+
+
+@_beartype.beartype
+@diagnostics.diagnose_call(
+    diagnostics.rules.op_level_debugging,
+    diagnostic_message_formatter=_op_level_debug_message_formatter,
+)
 def validate_op_between_ort_torch(
     diagnostic_context: diagnostics.DiagnosticContext,
     node: torch.fx.Node,
