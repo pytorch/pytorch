@@ -1312,7 +1312,9 @@ class TritonKernel(Kernel):
         elif indexing_dtype == torch.int64:
             triton_dtype = "tl.int64"
         else:
-            raise NotImplementedError(f"Bucketize only supports indexing with int32 and int64")
+            raise NotImplementedError(
+                "Bucketize only supports indexing with int32 and int64"
+            )
 
         result = self.cse.generate(
             self.compute,

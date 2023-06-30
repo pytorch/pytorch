@@ -783,7 +783,12 @@ class Kernel(CodeGen):
         raise NotImplementedError()
 
     def bucketize(
-        self, values, offsets_name: str, offsets_size, indexing_dtype: torch.dtype, right: bool
+        self,
+        values,
+        offsets_name: str,
+        offsets_size,
+        indexing_dtype: torch.dtype,
+        right: bool,
     ):
         """
         See [Note: Inductor bucketize op]
