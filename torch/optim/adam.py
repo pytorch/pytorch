@@ -279,6 +279,8 @@ def adam(params: List[Tensor],
     if foreach is None:
         foreach = False
 
+    # this check is slow during compilation, so we skip it
+    # if it's strictly needed we can add this check back in dynamo
     if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
@@ -339,6 +341,8 @@ def _single_tensor_adam(params: List[Tensor],
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
+        # If we are compiling, the compiler will determine if cudagraphs
+        # is applicable
         if not torch._utils.is_compiling() and capturable:
             assert param.is_cuda and step_t.is_cuda, "If capturable=True, params and state_steps must be CUDA tensors."
 

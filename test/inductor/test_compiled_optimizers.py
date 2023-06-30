@@ -88,4 +88,5 @@ class CompiledOptimizerTests(TestCase):
         super().tearDown()
         torch._inductor.metrics.reset()
 
-    test_adam = make_test(torch.optim.Adam, lr=0.01, foreach=True)
+    test_adam = make_test(torch.optim.Adam, lr=0.01)
+    test_adam_weight_decay = make_test(torch.optim.Adam, lr=0.01, weight_decay=0.01)
