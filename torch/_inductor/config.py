@@ -206,7 +206,8 @@ _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
-disable_cpp_codegen = is_fbcode()
+# TODO: remove later
+disable_cpp_codegen = False
 
 
 # Freezing will attempt to inline weights as constants in optimization

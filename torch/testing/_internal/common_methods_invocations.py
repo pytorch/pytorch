@@ -8653,6 +8653,15 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        skips=(
+            # note(crcrpar): excluding cdouble from dtypes above might be better.
+            # Guard for `error: "In-place abs is not supported for complex tensors."`
+            DecorateInfo(
+                unittest.skip("_foreach_zero is not implemented"),
+                'TestForeach',
+                'test_outplace_forward_mode_AD',
+            ),
+        ),
     ),
 ]
 
@@ -12009,8 +12018,8 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_adaptive_avg_pool1d,
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
     OpInfo('nn.functional.adaptive_avg_pool2d',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            decorators=(
                # RuntimeError:
                # adaptive_avg_pool2d(Tensor input, int[2] output_size) -> (Tensor):
