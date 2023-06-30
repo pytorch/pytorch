@@ -2112,7 +2112,7 @@ void qavg_pool2d_nhwc_kernel(
     int padH,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
-  AT_DISPATCH_QINT_BYTE_TYPES(qx.scalar_type(), "avg_pool2d_nhwc", [&]() {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool2d_nhwc", [&]() {
     _qavg_pool_nhwc_kernel<scalar_t>(
       qx,
       qy,
@@ -2160,7 +2160,7 @@ void qavg_pool3d_nhwc_kernel(
     int padD,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
-  AT_DISPATCH_QINT_BYTE_TYPES(qx.scalar_type(), "avg_pool3d_nhwc", [&]() {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool3d_nhwc", [&]() {
     _qavg_pool_nhwc_kernel<scalar_t>(
       qx,
       qy,

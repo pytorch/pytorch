@@ -135,9 +135,6 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
     int len,
     float inverse_scale,
     int64_t zero_point) {
-  static_assert(
-      std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value,
-      "Only int8_t/uint8_t are supported");
   constexpr int VLEN = 8;
   constexpr auto min_val = std::numeric_limits<T>::min();
   constexpr auto max_val = std::numeric_limits<T>::max();
