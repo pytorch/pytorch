@@ -135,7 +135,7 @@ Tensor& pad_out_template(Tensor& output,
                     ") at dimension ",
                     dim_w,
                     " of input ",
-                    ndims);
+                    input_.sizes());
 
         if (padding_dim > 1) {
           TORCH_CHECK(pad_t < input_h && pad_b < input_h,
@@ -147,7 +147,7 @@ Tensor& pad_out_template(Tensor& output,
                       ") at dimension ",
                       dim_h,
                       " of input ",
-                      ndims);
+                      input_.sizes());
         }
         if (padding_dim > 2) {
           TORCH_CHECK(pad_front < input_d && pad_back < input_d,
@@ -159,7 +159,7 @@ Tensor& pad_out_template(Tensor& output,
                       ") at dimension ",
                       dim_d,
                       " of input ",
-                      ndims);
+                      input_.sizes());
         }
       }
       outputSizes.insert(outputSizes.begin(), output_w);

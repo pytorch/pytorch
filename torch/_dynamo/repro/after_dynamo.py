@@ -358,7 +358,7 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def repro_common(options, mod, load_args):
+def run_load_args(options, mod, load_args):
     if not hasattr(load_args, "_version"):
         log.warning(
             "load_args does not have a _version attribute, please file a bug to PyTorch "
@@ -385,7 +385,7 @@ def repro_common(options, mod, load_args):
 
 
 def repro_minify(options, mod, load_args):
-    args = repro_common(options, mod, load_args)
+    args = run_load_args(options, mod, load_args)
 
     # Setup debug minifier compiler
     if not options.accuracy:
@@ -412,8 +412,6 @@ def repro_minify(options, mod, load_args):
 
 
 def repro_run(options, mod, load_args):
-    args = repro_common(options, mod, load_args)
-
     opt_mod = torch._dynamo.optimize(options.backend)(mod)
 
     if options.accuracy != "":
@@ -421,13 +419,23 @@ def repro_run(options, mod, load_args):
         opt_mod.eval()
 
         with torch.cuda.amp.autocast(enabled=options.autocast):
+            # TODO: disable clone
+            args = run_load_args(options, mod, load_args)
             assert same_two_models(mod, mod, args), "Eager itself failed"
             if not same_two_models(mod, opt_mod, args):
                 raise AccuracyError("Dynamo failed")
     else:
         with torch.cuda.amp.autocast(enabled=options.autocast):
-            ref = run_fwd_maybe_bwd(mod, args)
-            res = run_fwd_maybe_bwd(opt_mod, args)
+            args = run_load_args(options, mod, load_args)
+            ref = run_fwd_maybe_bwd(
+                mod, args, only_fwd=options.only_fwd, disable_clone=True
+            )
+            del args
+
+            args = run_load_args(options, mod, load_args)
+            res = run_fwd_maybe_bwd(
+                opt_mod, args, only_fwd=options.only_fwd, disable_clone=True
+            )
 
 
 def run_repro(
@@ -533,6 +541,11 @@ default settings on this script:
         help="just run the repro",
     )
     common_flags(parser_run)
+    parser_run.add_argument(
+        "--only-fwd",
+        action="store_true",
+        help="don't run backwards compilation for testing",
+    )
 
     parser_minify = subparsers.add_parser(
         "minify", help="run the minifier on the repro"

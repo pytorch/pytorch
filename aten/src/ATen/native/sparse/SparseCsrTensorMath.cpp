@@ -4,6 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
@@ -30,7 +31,7 @@
 #include <ATen/ops/_sparse_csr_sum_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_mm_reduce_impl_backward_native.h>
-#include <ATen/ops/_sparse_mm_reduce_impl_backward_native.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
@@ -119,6 +120,7 @@
 #include <ATen/ops/trunc_native.h>
 #include <ATen/ops/zero_native.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 #include <algorithm>
@@ -407,7 +409,7 @@ Tensor& zero_sparse_csr_(Tensor& self) {
     `result = csr.clone(); result.values.zero_();`
   */
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "zero_sparse_csr_", [](){});
-  get_sparse_csr_impl(self)->resize_and_clear_(self.sparse_dim(), self.sizes());
+  get_sparse_csr_impl(self)->resize_and_clear_(self.sparse_dim(), self.dense_dim(), self.sizes());
   return self;
 }
 
@@ -463,7 +465,7 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
-CREATE_UNARY_UFUNC(relu);
+static CREATE_UNARY_UFUNC(relu);
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
@@ -733,7 +735,7 @@ Tensor& _sparse_csr_mm_out(
     const Tensor& mat1,
     const Tensor& mat2,
     Tensor& result) {
-  auto zero = at::zeros({mat1.size(0), mat2.size(1)}, mat2.options());
+  auto zero = at::zeros_like(result);
   return at::addmm_out(result, zero, mat1, mat2, 0.0, 1.0);
 }
 
@@ -773,18 +775,6 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
       mat2,
       0.0,
       1.0);
-}
-
-Tensor _sparse_csr_addmm(
-    const Tensor& t,
-    const SparseCsrTensor& sparse,
-    const Tensor& dense,
-    const Scalar& beta,
-    const Scalar& alpha) {
-  // _sparse_addmm forward is functionally equivalent to addmm; it's
-  // just the backward that is different.  This technically does an
-  // unnecessary redispatch, I was too lazy to make it not do that
-  return at::addmm(t, sparse, dense, beta, alpha);
 }
 
 // Functions for element-wise addition.

@@ -96,8 +96,9 @@ The function we have installed is ``convert_frame`` or
 over that nuance for now, let’s take a look at ``convert_frame_assert``,
 as ``convert_frame`` proxies to it.
 
-We can find it on `line 20 of convert_frame.py
-<https://github.com/pytorch/torchdynamo/blob/main/torchdynamo/convert_frame.py#L200>`__,
+We can find it on `line 222 of convert_frame.py
+<https://github.com/pytorch/pytorch/blob/0833f475ce7e42b1dd11af577f276b804fc2b158/torch/_dynamo/convert_frame.py#L222>`__,
+
 with a signature as follows:
 
 .. code-block:: python

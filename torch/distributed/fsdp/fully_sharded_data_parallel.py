@@ -359,14 +359,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             use ``torch.compile()``. Setting this to ``False`` exposes FSDP's
             internal :class:`FlatParameter` s to the user via
             :meth:`nn.Module.named_parameters`. (Default: ``False``)
-        ignored_parameters (Optional[Iterable[torch.nn.Parameter]]): Ignored
-            parameters will not be managed by this FSDP instance, which means
-            that they will not be flattened and sharded and that their
-            gradients will not be reduced across ranks. With this newly added
-            argument, ``ignored_modules`` could be deprecated soon. For
-            backward compatibility, we keep both ``ignored_modules`` and
-            ``ignored_parameters``, but FSDP only allows one of them to be
-            specified as not ``None``.
+        ignored_states (Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]):
+            Ignored parameters or modules that will not be managed by this FSDP
+            instance, meaning that the parameters are not sharded and their
+            gradients are not reduced across ranks. This argument unifies with
+            the existing ``ignored_modules`` argument, and we may deprecate
+            ``ignored_modules`` soon. For backward compatibility, we keep both
+            ``ignored_states`` and `ignored_modules``, but FSDP only allows one
+            of them to be specified as not ``None``.
     """
 
     def __init__(
@@ -385,11 +385,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         forward_prefetch: bool = False,
         limit_all_gathers: bool = False,
         use_orig_params: bool = False,
-        ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
+        ignored_states: Union[
+            Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
+        ] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        _init_ignored_module_states(self, module, ignored_modules, ignored_parameters)
+        _init_ignored_module_states(self, module, ignored_modules, ignored_states)
         _init_device_handle(self, module, self._ignored_params, device_id)
 
         # Add module annotations for Dynamo support (see function for details)
@@ -700,6 +702,19 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     @staticmethod
     def get_state_dict_type(module: nn.Module) -> StateDictSettings:
+        """
+        Get the state_dict_type and the corresponding configurations
+        for the FSDP modules rooted at ``module``. The target module
+        does not have to be an FSDP module.
+
+        Returns:
+            A ``StateDictSettings`` containing the state_dict_type and
+            state_dict / optim_state_dict configs that are currently set.
+
+        Raises:
+            ``AssertionError`` if the ``StateDictSettings`` for different
+            FSDP submodules differ.
+        """
         state_dict_settings: Optional[StateDictSettings] = None
         for submodule in FullyShardedDataParallel.fsdp_modules(module):
             if state_dict_settings is None:
@@ -747,19 +762,18 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Args:
             module (torch.nn.Module): Root module.
             state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
-            state_dict_config (Optional[StateDictConfig]): the configuration for the
-                target ``state_dict_type``.
+            state_dict_config (Optional[StateDictConfig]): the model ``state_dict``
+                configuration for the target ``state_dict_type``.
+            optim_state_dict_config (Optional[OptimStateDictConfig]): the optimizer
+               ``state_dict`` configuration for the target ``state_dict_type``.
         """
-        try:
-            prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
-                module,
-                state_dict_type,
-                state_dict_config,
-                optim_state_dict_config,
-            )
-            yield
-        except Exception as e:
-            raise e
+        prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
+            module,
+            state_dict_type,
+            state_dict_config,
+            optim_state_dict_config,
+        )
+        yield
         FullyShardedDataParallel.set_state_dict_type(
             module,
             prev_state_dict_settings.state_dict_type,
@@ -1779,49 +1793,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         )
 
     @staticmethod
-    def optim_state_dict_post_hook(
-        model: torch.nn.Module,
-        optim: torch.optim.Optimizer,
-        optim_state_dict: Dict[str, Any],
-        group: Optional[dist.ProcessGroup] = None,
-    ) -> Dict[str, Any]:
-        """
-        This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionality is identical to :meth:`optim_state_dict` except
-        for the different arguments.
-
-        Args:
-            model (torch.nn.Module): Root module (which may or may not be a
-                :class:`FullyShardedDataParallel` instance) whose parameters
-                were passed into the optimizer ``optim``.
-            optim (torch.optim.Optimizer): Optimizer for ``model`` 's
-                parameters.
-            optim (Dict[str, Any]: the optim_state_dict to be converted. The value
-               is typically returned by ``NamedOptimizer.state_dict()``.
-            group (dist.ProcessGroup): Model's process group across which parameters
-                are sharded or ``None`` if using the default process group. (
-                Default: ``None``)
-
-        Returns:
-            Dict[str, Any]: A :class:`dict` containing the optimizer state for
-            ``model``. The sharding of the optimizer state is based on
-            ``state_dict_type``.
-        """
-        state_dict_settings = FullyShardedDataParallel.get_state_dict_type(model)
-        return FullyShardedDataParallel._optim_state_dict_impl(
-            model=model,
-            optim=optim,
-            optim_state_dict=optim_state_dict,
-            optim_input=None,
-            rank0_only=getattr(
-                state_dict_settings.optim_state_dict_config, "rank0_only", False
-            ),
-            full_state_dict=state_dict_settings.state_dict_type
-            == StateDictType.FULL_STATE_DICT,
-            group=None,
-        )
-
-    @staticmethod
     def optim_state_dict_to_load(
         model: torch.nn.Module,
         optim: torch.optim.Optimizer,
@@ -1908,41 +1879,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         if load_directly:
             optim.load_state_dict(result)
         return result
-
-    @staticmethod
-    def load_optim_state_dict_pre_hook(
-        model: torch.nn.Module,
-        optim: torch.optim.Optimizer,
-        optim_state_dict: Dict[str, Any],
-        group: Optional[dist.ProcessGroup] = None,
-    ) -> Dict[str, Any]:
-        """
-        This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionality is identical to :meth:`optim_state_dict_to_load`
-        except for the different arguments.
-
-        Args:
-            model (torch.nn.Module): Root module (which may or may not be a
-                :class:`FullyShardedDataParallel` instance) whose parameters
-                were passed into the optimizer ``optim``.
-            optim (torch.optim.Optimizer): Optimizer for ``model`` 's
-                parameters.
-            optim_state_dict (Dict[str, Any]): The optimizer states to be loaded.
-            group (dist.ProcessGroup): Model's process group across which parameters
-                are sharded or ``None`` if using the default process group. (
-                Default: ``None``)
-        """
-        state_dict_settings = FullyShardedDataParallel.get_state_dict_type(model)
-        return FullyShardedDataParallel._optim_state_dict_to_load_impl(
-            optim_state_dict=optim_state_dict,
-            model=model,
-            optim_input=None,
-            optim=optim,
-            full_state_dict=state_dict_settings.state_dict_type
-            == StateDictType.FULL_STATE_DICT,
-            is_named_optimizer=True,
-            group=group,
-        )
 
     def register_comm_hook(self, state: object, hook: callable):
         """

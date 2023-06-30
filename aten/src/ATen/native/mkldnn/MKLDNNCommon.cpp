@@ -47,6 +47,7 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
     case ScalarType::QInt32:
       return ideep::tensor::data_type::s32;
     case ScalarType::QInt8:
+    case ScalarType::Char:
       return ideep::tensor::data_type::s8;
     case ScalarType::QUInt8:
     case ScalarType::Byte:
