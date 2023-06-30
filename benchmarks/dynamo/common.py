@@ -2854,9 +2854,6 @@ def run(runner, args, original_dir=None):
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
 
-        # Set translation validation on by default on accuracy runs.
-        torch._dynamo.config.translation_validation = True
-
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
 
