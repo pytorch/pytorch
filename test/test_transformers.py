@@ -2188,6 +2188,7 @@ class TestSDPA(NNTestCase):
         kwargs = {"dropout_p": dropout_p, "is_causal": is_causal, "scale": scale}
         if fused_kernel == SDPBackend.EFFICIENT_ATTENTION:
             kwargs["compute_log_sumexp"] = True
+            kwargs["attn_bias"] = None
         if fused_kernel == SDPBackend.FLASH_ATTENTION:
             kwargs['return_debug_mask'] = True
         with torch.cuda.stream(s):
