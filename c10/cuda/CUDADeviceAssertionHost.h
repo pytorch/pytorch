@@ -157,9 +157,9 @@ std::string c10_retrieve_device_side_assertion_info();
   [[maybe_unused]] c10::cuda::DeviceAssertionsData *const assertions_data, \
       [[maybe_unused]] uint32_t assertion_caller_id
 #else
-#define TORCH_DSA_KERNEL_ARGS                                              \
-                   c10::cuda::DeviceAssertionsData *const assertions_data, \
-                       uint32_t assertion_caller_id
+#define TORCH_DSA_KERNEL_ARGS                             \
+  c10::cuda::DeviceAssertionsData *const assertions_data, \
+      uint32_t assertion_caller_id
 #endif
 
 // This macro can be used to pass the DSA arguments onward to another
