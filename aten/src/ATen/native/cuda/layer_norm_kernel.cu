@@ -504,7 +504,7 @@ __global__ void GammaBetaBackwardCUDAKernel_32x32(
 
   if (j < N) {
     constexpr int unroll_factor = 8;
-    int laneId = threadIdx.x % C10_WARP_SIZE;
+    int laneId = threadIdx.x & (C10_WARP_SIZE - 1);
 
     T_ACC mean_reg, mean_reg_tmp;
     T_ACC rstd_reg, rstd_reg_tmp;
@@ -568,7 +568,7 @@ __global__ void GammaBetaBackwardCUDAKernel_32x32(
     // Load transposed so that a warp holds an entire column
     T_ACC reg_dg = s_dg[threadIdx.x * padded_bx + threadIdx.y];
     T_ACC reg_db = s_db[threadIdx.x * padded_bx + threadIdx.y];
-    for (int delta = C10_WARP_SIZE / 2; delta >= 1; delta /= 2) {
+    for (unsigned delta = C10_WARP_SIZE >> 1; delta >= 1; delta >>= 1) {
       reg_dg += WARP_SHFL_XOR(reg_dg, delta, kWarpSize);
       reg_db += WARP_SHFL_XOR(reg_db, delta, kWarpSize);
     }
