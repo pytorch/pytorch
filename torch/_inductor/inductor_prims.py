@@ -71,6 +71,7 @@ force_stride_order = make_prim(
     "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
     lambda input_tensor, stride: eager_force_stride(input_tensor, stride),
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
+)
 
 
 def _inductor_bucketize_impl(input, boundaries, *, out_int32=False, right=False):
