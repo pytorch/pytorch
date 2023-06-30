@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import torch
 
-import torch._dynamo
 from torch._dynamo.test_case import run_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
