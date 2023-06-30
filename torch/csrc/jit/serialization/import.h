@@ -101,6 +101,12 @@ TORCH_API Module load(
 
 TORCH_API Module load(
     const std::string& filename,
+    bool restore_shapes,
+    c10::optional<c10::Device> device = c10::nullopt,
+    bool load_debug_files = true);
+
+TORCH_API Module load(
+    const std::string& filename,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files,
     bool load_debug_files = true);

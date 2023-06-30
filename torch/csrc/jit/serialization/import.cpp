@@ -505,6 +505,22 @@ Module load(
 
 Module load(
     const std::string& filename,
+    bool restore_shapes,
+    c10::optional<c10::Device> device,
+    bool load_debug_files) {
+  auto cu = std::make_shared<CompilationUnit>();
+  ExtraFilesMap extra_files;
+  return import_ir_module(
+      std::move(cu),
+      filename,
+      device,
+      extra_files,
+      restore_shapes,
+      load_debug_files);
+}
+
+Module load(
+    const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     bool load_debug_files) {
