@@ -8,6 +8,39 @@
 #include <iostream>
 #include <vector>
 
+/*
+[Note: Compiled Autograd]
+
+Compiled autograd replaces the standard autograd engine by converting
+the autograd graph to an FX graph that can be torch.compiled. It caches
+this conversion using a shadow graph. We compare the new graph to the
+shadow graph by walking the two graphs simultaneously and computing a
+CacheKey for each original node to find the next edge in the shadow graph.
+Two different graphs might have a shared common prefix in the shadow
+graph, but then diverge at the first difference. Tensors, SavedVariables,
+and SymInt found stored on the nodes in the autograd graph are lifted to
+become inputs to the graph. All other properties (ints, floats, types,
+etc.) are specialized using the CacheKey and will result in landing on
+a different cache node in the shadow graph if some property differs.
+
+To interact with the (hundreds) of different autograd::Node types,
+we use a visitor pattern that walks each Node structure recursively.
+
+- The first pass, compiled_args/collect, extracts all the inputs to the
+graph and builds a CacheKey for us to specialize on.  On a cache hit,
+we stop here and this is the only pass.
+
+- On a cache miss, a second pass kicks in to extract the FX grap using
+apply_with_saved, which uses another visitor pattern.  The before()
+visitor swaps out all the Tensors, SavedVariables, and SymInt for
+fake/symbolic versions to allow tracing.  We then run the standard apply()
+method, and after() restores things to how we found them.
+
+When we see tensor hooks, we record them directly in the output graph
+without tracing into them.  We do this to avoid executing unsafe code
+at trace time.
+*/
+
 namespace torch {
 namespace dynamo {
 using namespace torch::autograd;
@@ -122,10 +155,12 @@ struct CacheNode {
       if (expected.dyn_type == SizeInput::DYNAMIC ||
           expected.value != data[i].value) {
         cache_hit = cache_hit && expected.dyn_type == SizeInput::DYNAMIC;
-        if (expected.value != data[i].value)
-          expected = SizeInput{SizeInput::DYNAMIC, data[i].value};
-        if (call.dyn_size_inputs.empty())
+        if (expected.value != data[i].value) {
+          expected = SizeInput(SizeInput::DYNAMIC, data[i].value);
+        }
+        if (call.dyn_size_inputs.empty()) {
           call.dyn_size_inputs.reserve(len);
+        }
         call.dyn_size_inputs.emplace_back(data[i].value);
       }
     }

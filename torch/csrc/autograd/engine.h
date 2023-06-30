@@ -136,7 +136,7 @@ struct TORCH_API Engine {
   static Engine& get_base_engine();
 
   // compiled_autograd needs to live in a different .so file so that it
-  // has python symbols, so we add a layer of indirection
+  // can have python symbols, so we add a layer of indirection
   typedef variable_list (*compiled_autograd_fn)(
       const std::shared_ptr<Node>& graph_root,
       GraphTask& graph_task,

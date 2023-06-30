@@ -1163,8 +1163,9 @@ auto Engine::execute(
   // initialize a new thread local ready queue on CPU or reuse the existing one
   // (if there is one allocated already, i.e. consecutive backward calls,
   // re-entrant backward calls), then memoize the local_ready_queue in GraphTask
-  if (the_compiled_autograd == nullptr)
+  if (the_compiled_autograd == nullptr) {
     init_local_ready_queue();
+  }
   bool not_reentrant_backward_call = worker_device == NO_DEVICE;
 
   // Store root nodes so we can traverse through the graph later

@@ -7,6 +7,8 @@
 #include <typeindex>
 #include <vector>
 
+// see [Note: Compiled Autograd]
+
 namespace torch {
 namespace autograd {
 namespace generated {
@@ -15,14 +17,15 @@ struct TypeAndSize;
 
 struct SizeInput {
   enum DynType : uint8_t { STATIC = 0, DYNAMIC = 1 };
+  SizeInput(DynType dt, int64_t v) : dyn_type(dt), value(v) {}
   DynType dyn_type;
   int64_t value;
 };
 
 struct CacheKeyBuffer {
   CacheKeyBuffer() : data(nullptr) {}
-  CacheKeyBuffer(const char* key, uint16_t len) : data(new char[len]) {
-    memcpy(data, key, len);
+  CacheKeyBuffer(const uint8_t* key, uint16_t len) : data(new uint8_t[len]) {
+    std::memcpy(data, key, len);
   }
   CacheKeyBuffer(CacheKeyBuffer&& other)
       : data(std::exchange(other.data, nullptr)) {}
@@ -34,24 +37,26 @@ struct CacheKeyBuffer {
   CacheKeyBuffer(const CacheKeyBuffer& other) = delete;
   CacheKeyBuffer& operator=(const CacheKeyBuffer&) = delete;
 
-  char* data;
+  uint8_t* data;
 };
 
 struct CacheKey {
-  CacheKey(const std::type_index& ntype, const char* key, uint16_t len)
+  CacheKey(const std::type_index& ntype, const uint8_t* key, uint16_t len)
       : node_type(ntype), key_size(len), key(key) {}
 
   bool operator<(const CacheKey& other) const {
-    if (node_type != other.node_type)
+    if (node_type != other.node_type) {
       return node_type < other.node_type;
-    if (key_size != other.key_size)
+    }
+    if (key_size != other.key_size) {
       return key_size < other.key_size;
-    return memcmp(key, other.key, key_size) < 0;
+    }
+    return std::memcmp(key, other.key, key_size) < 0;
   }
 
   bool operator==(const CacheKey& other) const {
     return node_type == other.node_type && key_size == other.key_size &&
-        memcmp(key, other.key, key_size) == 0;
+        std::memcmp(key, other.key, key_size) == 0;
   }
 
   size_t hash() const {
@@ -61,7 +66,7 @@ struct CacheKey {
 
   std::type_index node_type;
   uint16_t key_size;
-  const char* key;
+  const uint8_t* key;
 };
 
 struct OutputRef {
@@ -120,7 +125,7 @@ struct AutogradCompilerCall {
   }
 
   void add_size_input(const c10::SymInt& s) {
-    all_size_inputs.emplace_back(SizeInput{default_dyn_type, s.expect_int()});
+    all_size_inputs.emplace_back(SizeInput(default_dyn_type, s.expect_int()));
   }
 
   int emplace_hook(c10::SafePyObject&& fn) {
@@ -381,7 +386,7 @@ class CompiledNodeArgs {
   AutogradCompilerCall& _compiler;
   NodeCall& _node_call;
   uint16_t _specialization_key_size;
-  char _specialization_key[512];
+  uint8_t _specialization_key[512];
 };
 
 struct TraceState {
