@@ -286,6 +286,7 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
+std::unordered_set<c10d::ProcessGroupNCCL*> ProcessGroupNCCL::all_nccl_process_groups;
 
 std::ostream& operator<<(
     std::ostream& output,
@@ -728,6 +729,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 #endif
+  all_nccl_process_groups.insert(this);
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -897,6 +899,8 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   // Abort all NCCL Communicators on Process Group Destruction
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
   abort(abortReason);
+
+  all_nccl_process_groups.erase(this);
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
@@ -1087,6 +1091,16 @@ void ProcessGroupNCCL::runHookLoop() {
     // Lock is still acquired at this point
     done = completedWorkList_.empty();
   }
+}
+
+bool ProcessGroupNCCL::watchDogsDone() {
+  for (auto it = ProcessGroupNCCL::all_nccl_process_groups.begin(); it != ProcessGroupNCCL::all_nccl_process_groups.end(); it++) {
+    std::unique_lock<std::mutex> lock((*it)->workMetaListMutex_);
+    if (!(*it)->workMetaList_.empty()) {
+      return false;
+    }
+  }
+  return true;
 }
 
 std::exception_ptr ProcessGroupNCCL::WorkNCCL::checkForNCCLErrors(
@@ -1632,6 +1646,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   auto& ncclStreams = ncclStreams_[key];
   // TODO(eqy): is this still necessary if avoidRecordStreams_ is set?
   for (const auto i : c10::irange(devices.size())) {
+    cudaStreamCaptureStatus is_capturing;
+    cudaStreamIsCapturing(ncclStreams[i], &is_capturing);
     auto& devEvent = (*work->ncclEndEvents_)[i];
     devEvent.record(ncclStreams[i]);
   }
@@ -1648,6 +1664,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   }
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
+
+  if (capture_status != c10::cuda::CaptureStatus::None) {
+    std::lock_guard<std::mutex> lock(workMetaListMutex_);
+    TORCH_INTERNAL_ASSERT(workMetaList_.empty(), "In the middle of a CUDA Graph capture but the enqueued work is not empty. The watchdog will crash the capture when it polls the work.");
+  }
 
   if ((coalescing_state_ & CoalColl) &&
       capture_status == c10::cuda::CaptureStatus::None) {
@@ -1791,6 +1812,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // End event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(devices.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams[i];
+    cudaStreamCaptureStatus is_capturing;
+    cudaStreamIsCapturing(ncclStreams[i], &is_capturing);
     if (!coalescing_state_) {
       (*work->ncclEndEvents_)[i].record(ncclStream);
     }
@@ -1822,6 +1845,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // multi-device per process is deprecated
   work->numelIn_ = inputs[0].numel();
   work->numelOut_ = outputs[0].numel();
+
+  if (capture_status != c10::cuda::CaptureStatus::None) {
+    std::lock_guard<std::mutex> lock(workMetaListMutex_);
+    TORCH_INTERNAL_ASSERT(workMetaList_.empty(), "In the middle of a CUDA Graph capture but the enqueued work is not empty. The watchdog will crash the capture when it polls the work.");
+  }
 
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);

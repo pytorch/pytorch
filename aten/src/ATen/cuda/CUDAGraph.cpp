@@ -4,6 +4,7 @@
 #include <ATen/Functions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 
 namespace at::cuda {
 
@@ -65,6 +66,11 @@ CUDAGraph::CUDAGraph()
 
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
+  // If the watchdog has remaining work enqueued, an event query on the remaining work will crash
+  // the graph capture.
+  while (!c10d::ProcessGroupNCCL::watchDogsDone()) {
+    TORCH_WARN("Attempting to start graph capture but NCCL ProcessGroup(s) have remaining enqueued work. Waiting for enqueued work to finish...");
+  }
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
