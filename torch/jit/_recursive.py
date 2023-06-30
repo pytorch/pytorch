@@ -149,12 +149,16 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         # But also, in 3.10 annotations from base class are not inherited
         # by unannotated derived one, so they must be manually extracted
         annotations = inspect.get_annotations(obj)
-        if len(annotations) > 0:
-            return annotations
+
+        def get_cls_annotations(cls):
+            cls_annotations = inspect.get_annotations(cls)
+            for base in cls.__bases__:
+                # x = y | x: x takes priority in this union operation if x and y share a key
+                cls_annotations = get_cls_annotations(base) | cls_annotations
+            return cls_annotations
+
         cls = obj if isinstance(obj, type) else type(obj)
-        if len(cls.__bases__) == 0:
-            return {}
-        return inspect.get_annotations(cls.__bases__[0])
+        return get_cls_annotations(cls) | annotations
 
     class_annotations = get_annotations(nn_module)
     if isinstance(nn_module, (torch.ao.quantization.QuantWrapper)):
