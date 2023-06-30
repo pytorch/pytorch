@@ -124,7 +124,7 @@ def bucketize_binary_search(
     values,  # 1D tensor
     offsets_ptr,
     indexing_dtype,
-    right,  # bool: if true, use intervals closed on the right
+    right,  # bool: if true, use intervals closed on the left; see [Note: Inductor bucketize op]
     OFFSETS_SIZE: int,
     BLOCK_SHAPE,  # tuple/list of block shape
 ):
