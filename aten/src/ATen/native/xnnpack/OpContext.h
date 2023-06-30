@@ -6,9 +6,7 @@
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/Tensor.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 
 using SerializationTypeLinearPrePack = std::tuple<
     Tensor,
@@ -245,9 +243,6 @@ class XNNPackTransposeConv2dOpContext final : public TransposeConv2dOpContext {
       const c10::optional<Scalar>& output_max);
 };
 
-} // namespace xnnpack
-
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

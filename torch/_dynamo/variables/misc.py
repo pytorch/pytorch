@@ -193,6 +193,16 @@ class ClosureVariable(UnknownVariable):
         return [codegen.create_load_closure(self.name)]
 
 
+# closure variable created by an inlined function
+class InlinedClosureVariable(UnknownVariable):
+    def __init__(self, name, **kwargs):
+        super().__init__(**kwargs)
+        self.name = name
+
+    def reconstruct(self, codegen):
+        return [codegen.create_load_closure(self.name)]
+
+
 class NewCellVariable(VariableTracker):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -416,7 +426,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, value_type=None, inference=False, **kwargs):
+        saved_tensors = kwargs.pop("_saved_tensors", [])
         super().__init__(value=value, value_type=value_type, **kwargs)
+        self._saved_tensors = saved_tensors
         self.inference = inference
 
     @staticmethod

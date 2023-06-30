@@ -3,17 +3,11 @@
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
-def patch(f):
-    f = torch._inductor.config.patch(split_cat_fx_passes=True)(f)
-    return f
-
-
 class TestSplitCatFxPasses(TestCase):
-    @patch
     def test_split_normalization(self):
         def arg_only(x):
             return [torch.relu(s) for s in torch.split(x, 2, 1)]
@@ -91,7 +85,6 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @patch
     def test_consecutive_split_merge(self):
         def multi_split(x):
             return [torch.split(s, 2, 1) for s in torch.split(x, 2, 1)]
@@ -252,7 +245,6 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @patch
     def test_split_cat_merge(self):
         def simple_split_cat(x):
             return torch.cat(torch.split(x, 4, dim=1), dim=1)
@@ -582,7 +574,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @torch._inductor.config.patch(split_cat_fx_passes=False)
+    @torch._inductor.config.patch(pattern_matcher=False)
     def test_config_flag_is_respected(self):
         def split_with_cat(x):
             fs = torch.split(x, [4, 4, 24], dim=-1)
@@ -612,7 +604,6 @@ class TestSplitCatFxPasses(TestCase):
             0,
         )
 
-    @patch
     def test_split_cat_merge_mutation(self):
         args = [
             torch.randn(2, 32, 32, 16),
@@ -631,7 +622,6 @@ class TestSplitCatFxPasses(TestCase):
         self.assertEqual(counters["inductor"]["scmerge_split_removed"], 0)
         self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 0)
 
-    @patch
     def test_split_squeeze(self):
         def split_squeeze_stack(x):
             items = list(torch.split(x, 1, dim=1))
@@ -687,6 +677,13 @@ class TestSplitCatFxPasses(TestCase):
             split_items = [torch.squeeze(s, 1) for s in items[1:]]
             return torch.stack(split_items), torch.relu(items[0])
 
+        def graph_should_be_topological_sorted(x):
+            output = []
+            for t in x.split(1):
+                output.append(torch.sin(t.squeeze(dim=0)))
+            output = torch.stack(output)
+            return output
+
         args = [
             torch.randn(2, 32),
         ]
@@ -702,6 +699,7 @@ class TestSplitCatFxPasses(TestCase):
             (dim_mismatch, 0),
             (other_users, 0),
             (other_users_2, 0),
+            (graph_should_be_topological_sorted, 1),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
@@ -713,7 +711,6 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @patch
     def test_unbind_stack(self):
         def unbind_stack(x):
             return torch.stack(torch.unbind(x, dim=1), 1)
@@ -868,5 +865,5 @@ class TestSplitCatFxPasses(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
+    if IS_LINUX and HAS_CUDA:
         run_tests()

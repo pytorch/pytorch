@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import torch
 
-import torch._dynamo
 from torch._dynamo.test_case import run_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -486,6 +485,9 @@ inductor_override_kwargs = {
 # Always test with all sample for following ops
 inductor_all_samples = {
     "arange",
+    "diagonal",
+    "diagonal_copy",
+    "diagonal_scatter",
     "softmax.with_dtype",
     "index_add",
     "index_copy",

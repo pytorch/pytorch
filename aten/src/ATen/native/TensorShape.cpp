@@ -3130,7 +3130,6 @@ struct InferUnsqueezeGeometryResult {
       : sizes(tensor_sizes.begin(), tensor_sizes.end())
       , strides(tensor_strides.begin(), tensor_strides.end()) {}
 };
-}
 InferUnsqueezeGeometryResult
 inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
   InferUnsqueezeGeometryResult result(tensor.sizes(), tensor.strides());
@@ -3142,7 +3141,7 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 }
 
 // dim is present if squeezing a single dimension and absent if squeezing all dimensions
-static Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
+Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   SymDimVector sizes;
   SymDimVector strides;
@@ -3175,6 +3174,7 @@ static Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims)
   auto maybe_outnames = namedinference::compute_squeeze_outnames(self, mask);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
+}
 }
 
 Tensor squeeze(const Tensor& self) {
