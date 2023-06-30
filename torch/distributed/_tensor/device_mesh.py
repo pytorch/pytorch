@@ -170,10 +170,10 @@ class DeviceMesh(object):
             )
         # validate that all calling ranks pass in the same `mesh` argument.
         self_mesh = self.mesh.to(self.device_type)
-        mesh_tensor = funcol.all_gather_tensor(self_mesh, gather_dim=0, group=_get_default_group())
-        mesh_tensor_chunked = torch.chunk(
-            mesh_tensor, get_world_size()
+        mesh_tensor = funcol.all_gather_tensor(
+            self_mesh, gather_dim=0, group=_get_default_group()
         )
+        mesh_tensor_chunked = torch.chunk(mesh_tensor, get_world_size())
         for other_rank, other_mesh in enumerate(mesh_tensor_chunked):
             if not torch.equal(self_mesh, other_mesh):
                 raise RuntimeError(
