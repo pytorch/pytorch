@@ -1,0 +1,646 @@
+name: test-s390x-normal-1
+on: [pull_request]
+
+jobs:
+  test:
+    runs-on: [linux.s390x]
+    timeout-minutes: 600
+    strategy:
+      fail-fast: false
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - name: Prepare environment
+      run: |
+        virtualenv -p python3 --system-site-packages venv
+        source venv/bin/activate
+        pip install --upgrade setuptools
+        pip install --upgrade pytest
+        pip install --upgrade expecttest
+        pip install --upgrade typing_extensions
+        pip install --upgrade sympy
+        pip install --upgrade hypothesis
+        pip install --upgrade parameterized
+    - name: Build project
+      run: |
+        source venv/bin/activate
+        VERBOSE=1 BUILD_CAFFE2=1 BUILD_LIBTORCH_CPU_WITH_DEBUG=y USE_SYSTEM_GLOO=ON CMAKE_BUILD_TYPE=Debug python3 setup.py develop --user --cmake
+    - name: Run C++ tests
+      run: |
+        source venv/bin/activate
+
+        set +e
+
+        failedlist=""
+
+        for i in $(ls ./build/bin/* | egrep -v "/IListRef_test|/example_allreduce|/test_edge_op_registration|/test_jit|/test_lazy|/TCPStoreTest|/parallel_net_test|/vec_test_all_types_ZVECTOR"); do
+            echo RUNNING $i
+            $i
+            testresult=$?
+            if [ $testresult -ne 0 ] ; then
+                failedlist="$failedlist\n$i"
+            fi
+        done
+
+        echo RUNNING ./build/bin/test_jit
+        ./build/bin/test_jit --gtest_filter=-ConstantPropagation.CustomClassesCanBePropagated
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/test_jit"
+        fi
+
+        echo RUNNING ./build/bin/test_lazy
+        ./build/bin/test_lazy --gtest_filter=-HashTest.Scalar
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/test_lazy"
+        fi
+
+        echo RUNNING ./build/bin/TCPStoreTest
+        ./build/bin/TCPStoreTest --gtest_filter=-TCPStoreTest.testHelperPrefix:TCPStoreTest.testHelper
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/TCPStoreTest"
+        fi
+
+        echo RUNNING ./build/bin/parallel_net_test
+        ./build/bin/parallel_net_test --gtest_filter=-DAGNetTest.TestDAGNetTiming
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/parallel_net_test"
+        fi
+
+        echo RUNNING ./build/bin/vec_test_all_types_ZVECTOR
+        ./build/bin/vec_test_all_types_ZVECTOR '--gtest_filter=-Arithmetics/*Division'
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/vec_test_all_types_ZVECTOR"
+        fi
+
+        set -e
+
+        if [ -n "$failedlist" ] ; then
+            echo -e "Following tests failed:$failedlist"
+            exit 1
+        fi
+    - name: Run python tests
+      run: |
+        source venv/bin/activate
+
+        # Skipped tests list:
+        #
+        # failing tests:
+        #       # these tests fail due to various reasons
+        #   test/ao/sparsity/test_composability.py
+        #   test/ao/sparsity/test_qlinear_packed_params.py
+        #   test/cpp/aot_inductor/test.py
+        #   test/cpp_api_parity/functional_impl_check.py
+        #   test/cpp_api_parity/module_impl_check.py
+        #   test/cpp_extensions/no_python_abi_suffix_test/setup.py
+        #   test/cpp_extensions/setup.py
+        #   test/custom_backend/test_custom_backend.py
+        #   test/custom_operator/test_custom_ops.py
+        #   test/distributed/_spmd/test_tracing.py
+        #   test/distributed/_tensor/test_device_mesh.py
+        #   test/distributed/algorithms/quantization/test_quantization.py
+        #   test/distributed/checkpoint/test_file_system_checkpoint_cpu.py
+        #   test/distributed/elastic/agent/server/test/local_elastic_agent_test.py
+        #   test/distributed/elastic/multiprocessing/api_test.py
+        #   test/distributed/elastic/multiprocessing/redirects_test.py
+        #   test/distributed/elastic/rendezvous/c10d_rendezvous_backend_test.py
+        #   test/distributed/elastic/rendezvous/etcd_rendezvous_backend_test.py
+        #   test/distributed/elastic/rendezvous/etcd_rendezvous_test.py
+        #   test/distributed/elastic/rendezvous/etcd_server_test.py
+        #   test/distributed/launcher/api_test.py
+        #   test/distributed/launcher/run_test.py
+        #   test/distributed/test_c10d_nccl.py
+        #   test/distributed/test_c10d_ucc.py
+        #   test/distributed/test_distributed_spawn.py
+        #   test/distributed/test_multi_threaded_pg.py
+        #   test/distributed/test_store.py
+        #   test/distributions/test_distributions.py
+        #   test/dynamo/test_exc.py
+        #   test/dynamo/test_functions.py
+        #   test/error_messages/storage.py
+        #   test/functorch/discover_coverage.py
+        #   test/functorch/xfail_suggester.py
+        #   test/fx/test_source_matcher_utils.py
+        #   test/fx/test_z3_gradual_types.py
+        #   test/inductor/minifier_smoke.py
+        #   test/inductor/test_aot_inductor.py
+        #   test/inductor/test_fused_attention.py
+        #   test/inductor/test_kernel_benchmark.py
+        #   test/inductor/test_layout_optim.py
+        #   test/inductor/test_max_autotune.py
+        #   test/inductor/test_mkldnn_pattern_matcher.py
+        #   test/inductor/test_pattern_matcher.py
+        #   test/inductor/test_perf.py
+        #   test/inductor/test_select_algorithm.py
+        #   test/inductor/test_triton_wrapper.py
+        #   test/jit/fixtures_srcs/generate_models.py
+        #   test/jit/fixtures_srcs/test_upgrader_models_generation.py
+        #   test/jit/test_autodiff.py
+        #   test/jit/test_backends.py
+        #   test/jit/test_complexity.py
+        #   test/jit/test_exception.py
+        #   test/jit/test_ivalue.py
+        #   test/jit/test_list_dict.py
+        #   test/jit/test_peephole.py
+        #   test/jit/test_script_profile.py
+        #   test/jit/test_tracer.py
+        #   test/jit/test_type_sharing.py
+        #   test/jit/test_types.py
+        #   test/jit/test_with.py
+        #   test/jit/xnnpack/test_xnnpack_delegate.py
+        #   test/lazy/test_meta_kernel.py
+        #   test/mobile/custom_build/prepare_model.py
+        #   test/mobile/model_test/gen_test_model.py
+        #   test/mobile/model_test/torchvision_models.py
+        #   test/mobile/model_test/update_production_ops.py
+        #   test/mobile/test_lite_script_module.py
+        #   test/mobile/test_lite_script_type.py
+        #   test/mobile/test_quantize_fx_lite_script_module.py
+        #   test/onnx/debug_embed_params.py
+        #   test/onnx/dynamo/test_dynamo_with_onnxruntime_backend.py
+        #   test/onnx/dynamo/test_exporter_api.py
+        #   test/onnx/dynamo/test_registry_dispatcher.py
+        #   test/onnx/internal/test_diagnostics.py
+        #   test/onnx/onnx_test_common.py
+        #   test/onnx/pytorch_helper.py
+        #   test/onnx/test_autograd_funs.py
+        #   test/onnx/test_custom_ops.py
+        #   test/onnx/test_export_modes.py
+        #   test/onnx/test_fx_op_consistency.py
+        #   test/onnx/test_fx_passes.py
+        #   test/onnx/test_fx_to_onnx.py
+        #   test/onnx/test_fx_to_onnx_with_onnxruntime.py
+        #   test/onnx/test_fx_type_promotion.py
+        #   test/onnx/test_models.py
+        #   test/onnx/test_models_onnxruntime.py
+        #   test/onnx/test_models_quantized_onnxruntime.py
+        #   test/onnx/test_onnx_opset.py
+        #   test/onnx/test_onnxscript_no_runtime.py
+        #   test/onnx/test_onnxscript_runtime.py
+        #   test/onnx/test_op_consistency.py
+        #   test/onnx/test_operators.py
+        #   test/onnx/test_pytorch_jit_onnx.py
+        #   test/onnx/test_pytorch_onnx_no_runtime.py
+        #   test/onnx/test_pytorch_onnx_onnxruntime.py
+        #   test/onnx/test_pytorch_onnx_onnxruntime_cuda.py
+        #   test/onnx/test_pytorch_onnx_shape_inference.py
+        #   test/onnx/test_utility_funs.py
+        #   test/onnx/test_verification.py
+        #   test/onnx/verify.py
+        #   test/onnx_caffe2/export_onnx_tests_filter.py
+        #   test/onnx_caffe2/export_onnx_tests_generator.py
+        #   test/onnx_caffe2/test_caffe2_common.py
+        #   test/onnx_caffe2/test_custom_ops.py
+        #   test/onnx_caffe2/test_pytorch_helper.py
+        #   test/onnx_caffe2/test_pytorch_onnx_caffe2.py
+        #   test/onnx_caffe2/test_pytorch_onnx_caffe2_quantized.py
+        #   test/onnx_caffe2/test_verify.py
+        #   test/profiler/test_profiler.py
+        #   test/quantization/core/experimental/apot_fx_graph_mode_ptq.py
+        #   test/quantization/core/experimental/apot_fx_graph_mode_qat.py
+        #   test/quantization/core/experimental/quantization_util.py
+        #   test/quantization/core/experimental/test_fake_quantize.py
+        #   test/quantization/core/experimental/test_linear.py
+        #   test/quantization/core/experimental/test_nonuniform_observer.py
+        #   test/quantization/core/experimental/test_quantized_tensor.py
+        #   test/quantization/core/experimental/test_quantizer.py
+        #   test/quantization/core/test_docs.py
+        #   test/quantization/core/test_workflow_module.py
+        #   test/quantization/eager/test_fuse_eager.py
+        #   test/quantization/eager/test_numeric_suite_eager.py
+        #   test/quantization/eager/test_quantize_eager_ptq.py
+        #   test/quantization/eager/test_quantize_eager_qat.py
+        #   test/quantization/fx/test_quantize_fx.py
+        #   test/quantization/jit/test_ondevice_quantization.py
+        #   test/quantization/jit/test_quantize_jit.py
+        #   test/run_test.py
+        #   test/scripts/run_cuda_memcheck.py
+        #   test/test_ao_sparsity.py
+        #   test/test_bundled_images.py
+        #   test/test_cpp_extensions_open_device_registration.py
+        #   test/test_determination.py
+        #   test/test_functional_autograd_benchmark.py
+        #   test/test_fx.py
+        #   test/test_jit.py
+        #   test/test_jit_fuser.py
+        #   test/test_jit_legacy.py
+        #   test/test_jit_profiling.py
+        #   test/test_jit_simple.py
+        #   test/test_license.py
+        #   test/test_metal.py
+        #   test/test_mps.py
+        #   test/test_multiprocessing_spawn.py
+        #   test/test_namedtensor.py
+        #   test/test_native_functions.py
+        #   test/test_testing.py
+        #   test/test_throughput_benchmark.py
+        #   test/torch_np/numpy_tests/lib/index_tricks.py
+        #   test/typing/fail/bitwise_ops.py
+        #   test/typing/fail/creation_ops.py
+        #   test/typing/fail/random.py
+        #   test/typing/pass/creation_ops.py
+        #   test/typing/pass/math_ops.py
+        #   test/typing/reveal/module_list.py
+        #   test/typing/reveal/namedtuple.py
+        #   test/typing/reveal/opt_size.py
+        #   test/typing/reveal/size.py
+        #   test/typing/reveal/tensor_constructors.py
+        #   test/typing/reveal/tensor_copy.py
+        #   test/typing/reveal/tensor_sampling.py
+        #   test/typing/reveal/torch_optim.py
+        #
+        # long tests (group 1):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   test/distributed/fsdp/test_fsdp_core.py
+        #   test/distributed/fsdp/test_fsdp_mixed_precision.py
+        #   test/distributed/fsdp/test_fsdp_optim_state.py
+        #   test/distributed/fsdp/test_fsdp_state_dict.py
+        #   test/distributed/rpc/cuda/test_tensorpipe_agent.py
+        #   test/distributed/rpc/test_faulty_agent.py
+        #   test/inductor/test_torchinductor_codegen_dynamic_shapes.py
+        #   test/optim/test_optim.py
+        #   test/test_foreach.py
+        #   test/test_jit_autocast.py
+        #   test/test_meta.py
+        #   test/test_optim.py
+        #   test/test_reductions.py
+        #   test/test_schema_check.py
+        #   test/test_sparse_csr.py
+        #
+        # long tests (group 2):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   test/functorch/test_ops.py
+        #
+        # long tests (group 3):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   test/test_decomp.py
+        #
+        # long tests (group 4):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   test/test_ops.py
+        #
+        # long tests (group 5):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   test/functorch/test_aotdispatch.py
+        #   test/test_modules.py
+        #   test/test_ops_jit.py
+        #
+        # long tests (group 6):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   test/functorch/test_vmap.py
+        #
+        # long tests (group 7):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   test/test_jit_fuser_te.py
+        #   test/test_sparse.py
+        #
+        # failing long tests:
+        #       # these tests run long and fail in addition to that
+        #   test/distributed/_tensor/test_dtensor_ops.py
+        #   test/distributed/rpc/test_tensorpipe_agent.py
+        #   test/dynamo/test_dynamic_shapes.py
+        #   test/test_dataloader.py
+        #   test/test_linalg.py
+        #   test/test_nn.py
+        #   test/test_ops_fwd_gradients.py
+        #   test/test_ops_gradients.py
+        #   test/test_proxy_tensor.py
+        #   test/test_quantization.py
+        #   test/inductor/test_torchinductor.py
+        #   test/inductor/test_torchinductor_dynamic_shapes.py
+        #   test/inductor/test_torchinductor_opinfo.py
+        #   test/test_binary_ufuncs.py
+        #   test/test_unary_ufuncs.py
+        #
+        # occasionally hanging tests:
+        #       # these tests hang from time to time
+        #   test/distributed/_tensor/test_common_rules.py
+        #   test/distributed/_tensor/test_dtensor.py
+        #   test/distributed/_tensor/test_tensor_ops.py
+        #   test/distributed/_tensor/test_view_ops.py
+        #   test/test_static_runtime.py
+        #
+        # medium length tests:
+        #       # these tests last up from a minute and not in a long tests list.
+        #       # they should still be executed, but in different workflow
+        #   test/distributed/_composable/test_compose.py
+        #   test/distributed/_composable/test_replicate.py
+        #   test/distributed/_tensor/test_redistribute.py
+        #   test/distributed/fsdp/test_fsdp_checkpoint.py
+        #   test/distributed/fsdp/test_fsdp_comm_hooks.py
+        #   test/distributed/fsdp/test_fsdp_flatten_params.py
+        #   test/distributed/fsdp/test_fsdp_ignored_modules.py
+        #   test/distributed/fsdp/test_fsdp_sharded_grad_scaler.py
+        #   test/distributed/fsdp/test_fsdp_unshard_params.py
+        #   test/distributed/fsdp/test_fsdp_use_orig_params.py
+        #   test/distributed/fsdp/test_wrap.py
+        #   test/distributed/optim/test_zero_redundancy_optimizer.py
+        #   test/distributed/tensor/parallel/test_tp_style.py
+        #   test/distributed/test_c10d_common.py
+        #   test/distributed/test_c10d_gloo.py
+        #   test/distributed/test_c10d_pypg.py
+        #   test/distributed/test_pg_wrapper.py
+        #   test/functorch/test_eager_transforms.py
+        #   test/inductor/test_cpp_wrapper.py   # currently fails, should be fixed by remaining PRs
+        #   test/inductor/test_minifier_isolate.py
+        #   test/jit/test_freezing.py
+        #   test/nn/test_convolution.py
+        #   test/nn/test_pooling.py
+        #   test/test_autograd.py
+        #   test/test_cpp_api_parity.py
+        #   test/test_cpp_extensions_jit.py
+        #   test/test_dispatch.py
+        #   test/test_expanded_weights.py
+        #   test/test_functionalization.py
+        #   test/test_fx_experimental.py
+        #   test/test_masked.py
+        #   test/test_multiprocessing.py
+        #   test/test_serialization.py
+        #   test/test_spectral_ops.py
+        #   test/test_tensor_creation_ops.py
+        #   test/test_tensorexpr.py
+        #   test/test_torch.py
+        #   test/test_transformers.py
+        #   test/test_utils.py
+        #   test/test_view_ops.py
+        #
+
+        set +e
+
+        failedlist=""
+
+        find test -name '*.py' | sort | while read file ; do
+            if [ "$(basename $file)" != "__init.py__" ] && \
+                [ "$file" != "test/ao/sparsity/test_composability.py" ] && \
+                [ "$file" != "test/ao/sparsity/test_qlinear_packed_params.py" ] && \
+                [ "$file" != "test/cpp/aot_inductor/test.py" ] && \
+                [ "$file" != "test/cpp_api_parity/functional_impl_check.py" ] && \
+                [ "$file" != "test/cpp_api_parity/module_impl_check.py" ] && \
+                [ "$file" != "test/cpp_extensions/no_python_abi_suffix_test/setup.py" ] && \
+                [ "$file" != "test/cpp_extensions/setup.py" ] && \
+                [ "$file" != "test/custom_backend/test_custom_backend.py" ] && \
+                [ "$file" != "test/custom_operator/test_custom_ops.py" ] && \
+                [ "$file" != "test/distributed/_spmd/test_tracing.py" ] && \
+                [ "$file" != "test/distributed/_tensor/test_device_mesh.py" ] && \
+                [ "$file" != "test/distributed/algorithms/quantization/test_quantization.py" ] && \
+                [ "$file" != "test/distributed/checkpoint/test_file_system_checkpoint_cpu.py" ] && \
+                [ "$file" != "test/distributed/elastic/agent/server/test/local_elastic_agent_test.py" ] && \
+                [ "$file" != "test/distributed/elastic/multiprocessing/api_test.py" ] && \
+                [ "$file" != "test/distributed/elastic/multiprocessing/redirects_test.py" ] && \
+                [ "$file" != "test/distributed/elastic/rendezvous/c10d_rendezvous_backend_test.py" ] && \
+                [ "$file" != "test/distributed/elastic/rendezvous/etcd_rendezvous_backend_test.py" ] && \
+                [ "$file" != "test/distributed/elastic/rendezvous/etcd_rendezvous_test.py" ] && \
+                [ "$file" != "test/distributed/elastic/rendezvous/etcd_server_test.py" ] && \
+                [ "$file" != "test/distributed/launcher/api_test.py" ] && \
+                [ "$file" != "test/distributed/launcher/run_test.py" ] && \
+                [ "$file" != "test/distributed/test_c10d_nccl.py" ] && \
+                [ "$file" != "test/distributed/test_c10d_ucc.py" ] && \
+                [ "$file" != "test/distributed/test_distributed_spawn.py" ] && \
+                [ "$file" != "test/distributed/test_multi_threaded_pg.py" ] && \
+                [ "$file" != "test/distributed/test_store.py" ] && \
+                [ "$file" != "test/distributions/test_distributions.py" ] && \
+                [ "$file" != "test/dynamo/test_exc.py" ] && \
+                [ "$file" != "test/dynamo/test_functions.py" ] && \
+                [ "$file" != "test/error_messages/storage.py" ] && \
+                [ "$file" != "test/functorch/discover_coverage.py" ] && \
+                [ "$file" != "test/functorch/xfail_suggester.py" ] && \
+                [ "$file" != "test/fx/test_source_matcher_utils.py" ] && \
+                [ "$file" != "test/fx/test_z3_gradual_types.py" ] && \
+                [ "$file" != "test/inductor/minifier_smoke.py" ] && \
+                [ "$file" != "test/inductor/test_aot_inductor.py" ] && \
+                [ "$file" != "test/inductor/test_fused_attention.py" ] && \
+                [ "$file" != "test/inductor/test_kernel_benchmark.py" ] && \
+                [ "$file" != "test/inductor/test_layout_optim.py" ] && \
+                [ "$file" != "test/inductor/test_max_autotune.py" ] && \
+                [ "$file" != "test/inductor/test_mkldnn_pattern_matcher.py" ] && \
+                [ "$file" != "test/inductor/test_pattern_matcher.py" ] && \
+                [ "$file" != "test/inductor/test_perf.py" ] && \
+                [ "$file" != "test/inductor/test_select_algorithm.py" ] && \
+                [ "$file" != "test/inductor/test_triton_wrapper.py" ] && \
+                [ "$file" != "test/jit/fixtures_srcs/generate_models.py" ] && \
+                [ "$file" != "test/jit/fixtures_srcs/test_upgrader_models_generation.py" ] && \
+                [ "$file" != "test/jit/test_autodiff.py" ] && \
+                [ "$file" != "test/jit/test_backends.py" ] && \
+                [ "$file" != "test/jit/test_complexity.py" ] && \
+                [ "$file" != "test/jit/test_exception.py" ] && \
+                [ "$file" != "test/jit/test_ivalue.py" ] && \
+                [ "$file" != "test/jit/test_list_dict.py" ] && \
+                [ "$file" != "test/jit/test_peephole.py" ] && \
+                [ "$file" != "test/jit/test_script_profile.py" ] && \
+                [ "$file" != "test/jit/test_tracer.py" ] && \
+                [ "$file" != "test/jit/test_type_sharing.py" ] && \
+                [ "$file" != "test/jit/test_types.py" ] && \
+                [ "$file" != "test/jit/test_with.py" ] && \
+                [ "$file" != "test/jit/xnnpack/test_xnnpack_delegate.py" ] && \
+                [ "$file" != "test/lazy/test_meta_kernel.py" ] && \
+                [ "$file" != "test/mobile/custom_build/prepare_model.py" ] && \
+                [ "$file" != "test/mobile/model_test/gen_test_model.py" ] && \
+                [ "$file" != "test/mobile/model_test/torchvision_models.py" ] && \
+                [ "$file" != "test/mobile/model_test/update_production_ops.py" ] && \
+                [ "$file" != "test/mobile/test_lite_script_module.py" ] && \
+                [ "$file" != "test/mobile/test_lite_script_type.py" ] && \
+                [ "$file" != "test/mobile/test_quantize_fx_lite_script_module.py" ] && \
+                [ "$file" != "test/onnx/debug_embed_params.py" ] && \
+                [ "$file" != "test/onnx/dynamo/test_dynamo_with_onnxruntime_backend.py" ] && \
+                [ "$file" != "test/onnx/dynamo/test_exporter_api.py" ] && \
+                [ "$file" != "test/onnx/dynamo/test_registry_dispatcher.py" ] && \
+                [ "$file" != "test/onnx/internal/test_diagnostics.py" ] && \
+                [ "$file" != "test/onnx/onnx_test_common.py" ] && \
+                [ "$file" != "test/onnx/pytorch_helper.py" ] && \
+                [ "$file" != "test/onnx/test_autograd_funs.py" ] && \
+                [ "$file" != "test/onnx/test_custom_ops.py" ] && \
+                [ "$file" != "test/onnx/test_export_modes.py" ] && \
+                [ "$file" != "test/onnx/test_fx_op_consistency.py" ] && \
+                [ "$file" != "test/onnx/test_fx_passes.py" ] && \
+                [ "$file" != "test/onnx/test_fx_to_onnx.py" ] && \
+                [ "$file" != "test/onnx/test_fx_to_onnx_with_onnxruntime.py" ] && \
+                [ "$file" != "test/onnx/test_fx_type_promotion.py" ] && \
+                [ "$file" != "test/onnx/test_models.py" ] && \
+                [ "$file" != "test/onnx/test_models_onnxruntime.py" ] && \
+                [ "$file" != "test/onnx/test_models_quantized_onnxruntime.py" ] && \
+                [ "$file" != "test/onnx/test_onnx_opset.py" ] && \
+                [ "$file" != "test/onnx/test_onnxscript_no_runtime.py" ] && \
+                [ "$file" != "test/onnx/test_onnxscript_runtime.py" ] && \
+                [ "$file" != "test/onnx/test_op_consistency.py" ] && \
+                [ "$file" != "test/onnx/test_operators.py" ] && \
+                [ "$file" != "test/onnx/test_pytorch_jit_onnx.py" ] && \
+                [ "$file" != "test/onnx/test_pytorch_onnx_no_runtime.py" ] && \
+                [ "$file" != "test/onnx/test_pytorch_onnx_onnxruntime.py" ] && \
+                [ "$file" != "test/onnx/test_pytorch_onnx_onnxruntime_cuda.py" ] && \
+                [ "$file" != "test/onnx/test_pytorch_onnx_shape_inference.py" ] && \
+                [ "$file" != "test/onnx/test_utility_funs.py" ] && \
+                [ "$file" != "test/onnx/test_verification.py" ] && \
+                [ "$file" != "test/onnx/verify.py" ] && \
+                [ "$file" != "test/onnx_caffe2/export_onnx_tests_filter.py" ] && \
+                [ "$file" != "test/onnx_caffe2/export_onnx_tests_generator.py" ] && \
+                [ "$file" != "test/onnx_caffe2/test_caffe2_common.py" ] && \
+                [ "$file" != "test/onnx_caffe2/test_custom_ops.py" ] && \
+                [ "$file" != "test/onnx_caffe2/test_pytorch_helper.py" ] && \
+                [ "$file" != "test/onnx_caffe2/test_pytorch_onnx_caffe2.py" ] && \
+                [ "$file" != "test/onnx_caffe2/test_pytorch_onnx_caffe2_quantized.py" ] && \
+                [ "$file" != "test/onnx_caffe2/test_verify.py" ] && \
+                [ "$file" != "test/profiler/test_profiler.py" ] && \
+                [ "$file" != "test/quantization/core/experimental/apot_fx_graph_mode_ptq.py" ] && \
+                [ "$file" != "test/quantization/core/experimental/apot_fx_graph_mode_qat.py" ] && \
+                [ "$file" != "test/quantization/core/experimental/quantization_util.py" ] && \
+                [ "$file" != "test/quantization/core/experimental/test_fake_quantize.py" ] && \
+                [ "$file" != "test/quantization/core/experimental/test_linear.py" ] && \
+                [ "$file" != "test/quantization/core/experimental/test_nonuniform_observer.py" ] && \
+                [ "$file" != "test/quantization/core/experimental/test_quantized_tensor.py" ] && \
+                [ "$file" != "test/quantization/core/experimental/test_quantizer.py" ] && \
+                [ "$file" != "test/quantization/core/test_docs.py" ] && \
+                [ "$file" != "test/quantization/core/test_workflow_module.py" ] && \
+                [ "$file" != "test/quantization/eager/test_fuse_eager.py" ] && \
+                [ "$file" != "test/quantization/eager/test_numeric_suite_eager.py" ] && \
+                [ "$file" != "test/quantization/eager/test_quantize_eager_ptq.py" ] && \
+                [ "$file" != "test/quantization/eager/test_quantize_eager_qat.py" ] && \
+                [ "$file" != "test/quantization/fx/test_quantize_fx.py" ] && \
+                [ "$file" != "test/quantization/jit/test_ondevice_quantization.py" ] && \
+                [ "$file" != "test/quantization/jit/test_quantize_jit.py" ] && \
+                [ "$file" != "test/run_test.py" ] && \
+                [ "$file" != "test/scripts/run_cuda_memcheck.py" ] && \
+                [ "$file" != "test/test_ao_sparsity.py" ] && \
+                [ "$file" != "test/test_bundled_images.py" ] && \
+                [ "$file" != "test/test_cpp_extensions_open_device_registration.py" ] && \
+                [ "$file" != "test/test_determination.py" ] && \
+                [ "$file" != "test/test_functional_autograd_benchmark.py" ] && \
+                [ "$file" != "test/test_fx.py" ] && \
+                [ "$file" != "test/test_jit.py" ] && \
+                [ "$file" != "test/test_jit_fuser.py" ] && \
+                [ "$file" != "test/test_jit_legacy.py" ] && \
+                [ "$file" != "test/test_jit_profiling.py" ] && \
+                [ "$file" != "test/test_jit_simple.py" ] && \
+                [ "$file" != "test/test_license.py" ] && \
+                [ "$file" != "test/test_metal.py" ] && \
+                [ "$file" != "test/test_mps.py" ] && \
+                [ "$file" != "test/test_multiprocessing_spawn.py" ] && \
+                [ "$file" != "test/test_namedtensor.py" ] && \
+                [ "$file" != "test/test_native_functions.py" ] && \
+                [ "$file" != "test/test_testing.py" ] && \
+                [ "$file" != "test/test_throughput_benchmark.py" ] && \
+                [ "$file" != "test/torch_np/numpy_tests/lib/index_tricks.py" ] && \
+                [ "$file" != "test/typing/fail/bitwise_ops.py" ] && \
+                [ "$file" != "test/typing/fail/creation_ops.py" ] && \
+                [ "$file" != "test/typing/fail/random.py" ] && \
+                [ "$file" != "test/typing/pass/creation_ops.py" ] && \
+                [ "$file" != "test/typing/pass/math_ops.py" ] && \
+                [ "$file" != "test/typing/reveal/module_list.py" ] && \
+                [ "$file" != "test/typing/reveal/namedtuple.py" ] && \
+                [ "$file" != "test/typing/reveal/opt_size.py" ] && \
+                [ "$file" != "test/typing/reveal/size.py" ] && \
+                [ "$file" != "test/typing/reveal/tensor_constructors.py" ] && \
+                [ "$file" != "test/typing/reveal/tensor_copy.py" ] && \
+                [ "$file" != "test/typing/reveal/tensor_sampling.py" ] && \
+                [ "$file" != "test/typing/reveal/torch_optim.py" ] && \
+                [ "$file" != "test/distributed/fsdp/test_fsdp_core.py" ] && \
+                [ "$file" != "test/distributed/fsdp/test_fsdp_mixed_precision.py" ] && \
+                [ "$file" != "test/distributed/fsdp/test_fsdp_optim_state.py" ] && \
+                [ "$file" != "test/distributed/fsdp/test_fsdp_state_dict.py" ] && \
+                [ "$file" != "test/distributed/rpc/cuda/test_tensorpipe_agent.py" ] && \
+                [ "$file" != "test/distributed/rpc/test_faulty_agent.py" ] && \
+                [ "$file" != "test/functorch/test_aotdispatch.py" ] && \
+                [ "$file" != "test/functorch/test_ops.py" ] && \
+                [ "$file" != "test/functorch/test_vmap.py" ] && \
+                [ "$file" != "test/inductor/test_torchinductor.py" ] && \
+                [ "$file" != "test/inductor/test_torchinductor_codegen_dynamic_shapes.py" ] && \
+                [ "$file" != "test/inductor/test_torchinductor_dynamic_shapes.py" ] && \
+                [ "$file" != "test/inductor/test_torchinductor_opinfo.py" ] && \
+                [ "$file" != "test/optim/test_optim.py" ] && \
+                [ "$file" != "test/test_binary_ufuncs.py" ] && \
+                [ "$file" != "test/test_decomp.py" ] && \
+                [ "$file" != "test/test_foreach.py" ] && \
+                [ "$file" != "test/test_jit_autocast.py" ] && \
+                [ "$file" != "test/test_jit_fuser_te.py" ] && \
+                [ "$file" != "test/test_meta.py" ] && \
+                [ "$file" != "test/test_modules.py" ] && \
+                [ "$file" != "test/test_ops.py" ] && \
+                [ "$file" != "test/test_ops_jit.py" ] && \
+                [ "$file" != "test/test_optim.py" ] && \
+                [ "$file" != "test/test_reductions.py" ] && \
+                [ "$file" != "test/test_schema_check.py" ] && \
+                [ "$file" != "test/test_sparse.py" ] && \
+                [ "$file" != "test/test_sparse_csr.py" ] && \
+                [ "$file" != "test/test_unary_ufuncs.py" ] && \
+                [ "$file" != "test/distributed/_tensor/test_dtensor_ops.py" ] && \
+                [ "$file" != "test/distributed/rpc/test_tensorpipe_agent.py" ] && \
+                [ "$file" != "test/dynamo/test_dynamic_shapes.py" ] && \
+                [ "$file" != "test/test_dataloader.py" ] && \
+                [ "$file" != "test/test_linalg.py" ] && \
+                [ "$file" != "test/test_nn.py" ] && \
+                [ "$file" != "test/test_ops_fwd_gradients.py" ] && \
+                [ "$file" != "test/test_ops_gradients.py" ] && \
+                [ "$file" != "test/test_proxy_tensor.py" ] && \
+                [ "$file" != "test/test_quantization.py" ] && \
+                [ "$file" != "test/distributed/_tensor/test_common_rules.py" ] && \
+                [ "$file" != "test/distributed/_tensor/test_tensor_ops.py" ] && \
+                [ "$file" != "test/distributed/_tensor/test_view_ops.py" ] && \
+                [ "$file" != "test/test_static_runtime.py" ] && \
+                [ "$file" != "test/distributed/_composable/test_compose.py" ] && \
+                [ "$file" != "test/distributed/_composable/test_replicate.py" ] && \
+                [ "$file" != "test/distributed/_tensor/test_dtensor.py" ] && \
+                [ "$file" != "test/distributed/_tensor/test_redistribute.py" ] && \
+                [ "$file" != "test/distributed/fsdp/test_fsdp_checkpoint.py" ] && \
+                [ "$file" != "test/distributed/fsdp/test_fsdp_comm_hooks.py" ] && \
+                [ "$file" != "test/distributed/fsdp/test_fsdp_flatten_params.py" ] && \
+                [ "$file" != "test/distributed/fsdp/test_fsdp_ignored_modules.py" ] && \
+                [ "$file" != "test/distributed/fsdp/test_fsdp_sharded_grad_scaler.py" ] && \
+                [ "$file" != "test/distributed/fsdp/test_fsdp_unshard_params.py" ] && \
+                [ "$file" != "test/distributed/fsdp/test_fsdp_use_orig_params.py" ] && \
+                [ "$file" != "test/distributed/fsdp/test_wrap.py" ] && \
+                [ "$file" != "test/distributed/optim/test_zero_redundancy_optimizer.py" ] && \
+                [ "$file" != "test/distributed/tensor/parallel/test_tp_style.py" ] && \
+                [ "$file" != "test/distributed/test_c10d_common.py" ] && \
+                [ "$file" != "test/distributed/test_c10d_gloo.py" ] && \
+                [ "$file" != "test/distributed/test_c10d_pypg.py" ] && \
+                [ "$file" != "test/distributed/test_pg_wrapper.py" ] && \
+                [ "$file" != "test/functorch/test_eager_transforms.py" ] && \
+                [ "$file" != "test/inductor/test_cpp_wrapper.py" ] && \
+                [ "$file" != "test/inductor/test_minifier_isolate.py" ] && \
+                [ "$file" != "test/jit/test_freezing.py" ] && \
+                [ "$file" != "test/nn/test_convolution.py" ] && \
+                [ "$file" != "test/nn/test_pooling.py" ] && \
+                [ "$file" != "test/test_autograd.py" ] && \
+                [ "$file" != "test/test_cpp_api_parity.py" ] && \
+                [ "$file" != "test/test_cpp_extensions_jit.py" ] && \
+                [ "$file" != "test/test_dispatch.py" ] && \
+                [ "$file" != "test/test_expanded_weights.py" ] && \
+                [ "$file" != "test/test_functionalization.py" ] && \
+                [ "$file" != "test/test_fx_experimental.py" ] && \
+                [ "$file" != "test/test_masked.py" ] && \
+                [ "$file" != "test/test_multiprocessing.py" ] && \
+                [ "$file" != "test/test_serialization.py" ] && \
+                [ "$file" != "test/test_spectral_ops.py" ] && \
+                [ "$file" != "test/test_tensor_creation_ops.py" ] && \
+                [ "$file" != "test/test_tensorexpr.py" ] && \
+                [ "$file" != "test/test_torch.py" ] && \
+                [ "$file" != "test/test_transformers.py" ] && \
+                [ "$file" != "test/test_utils.py" ] && \
+                [ "$file" != "test/test_view_ops.py" ] ; \
+            then
+                PYTHONPATH=$(pwd) pytest -v $file
+                testresult=$?
+                if [ $testresult -ne 0 ] ; then
+                    failedlist="$failedlist\n$file"
+                fi
+            fi
+        done
+
+        set -e
+
+        if [ -n "$failedlist" ] ; then
+            echo -e "Following tests failed:$failedlist"
+            exit 1
+        fi
