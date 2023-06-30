@@ -1191,7 +1191,7 @@ def _get_training_state(
 
 
 @no_type_check
-def _register_pre_forward_hooks(
+def _register_pre_forward_hook(
     state: _FSDPState,
     module: nn.Module,
 ) -> None:
@@ -1214,7 +1214,7 @@ def _register_pre_forward_hooks(
 
 
 @no_type_check
-def _register_post_forward_hooks(
+def _register_post_forward_hook(
     state: _FSDPState,
     module: nn.Module,
 ) -> None:
