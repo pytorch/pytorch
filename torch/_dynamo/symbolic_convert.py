@@ -2135,6 +2135,11 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
+    def DELETE_SUBSCR(self, inst):
+        obj, key = self.popn(2)
+        self.call_function(BuiltinVariable(delattr), [obj, key], {})
+
+
 
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
@@ -2384,7 +2389,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return self.GET_ITER(inst)
 
     def YIELD_FROM(self, inst):
-        print("GOT YIELD FROM?", inst)
         tos = self.stack[-1]
         if isinstance(tos, ConstantVariable) and tos.value is None:
             self.pop()

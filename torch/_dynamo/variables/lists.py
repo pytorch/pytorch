@@ -817,6 +817,8 @@ class SetVariable(VariableTracker):
             return SetVariable.SetElement(vt, vt.value)
         if isinstance(vt, variables.UserDefinedObjectVariable):
             return SetVariable.SetElement(vt, vt.value)
+        if isinstance(vt, variables.NNModuleVariable):
+            return SetVariable.SetElement(vt, tx.output.get_submodule(vt.module_key))
 
         unimplemented(f"Sets with {type(vt)} NYI")
 

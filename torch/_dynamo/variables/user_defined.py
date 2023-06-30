@@ -408,7 +408,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         getattr_fn = self._check_for_getattr()
 
         try:
-            print("CHECKING FOR ATTR?", self, name)
+            # print("CHECKING FOR ATTR?", self, name)
             subobj = self._getattr_static(name)
         except AttributeError:
             subobj = None

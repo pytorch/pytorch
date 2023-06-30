@@ -492,7 +492,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
+        except:
             return getattr(self._fsdp_wrapped_module, name)
 
     def __getitem__(self, key: int) -> Any:
@@ -927,8 +927,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     def named_buffers(
         self,
-        *args,
-        **kwargs,
+        prefix: str = '', recurse: bool = True, remove_duplicate: bool = True,
     ) -> Iterator[Tuple[str, torch.Tensor]]:
         """
         Overrides :meth:`named_buffers()` to intercept buffer names and
@@ -936,7 +935,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         when inside the :meth:`summon_full_params` context manager.
         """
         should_clean_name = self.training_state == TrainingState.SUMMON_FULL_PARAMS
-        for buffer_name, buffer in super().named_buffers(*args, **kwargs):
+        for buffer_name, buffer in super().named_buffers(prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate):
             if should_clean_name:
                 # Remove any instances of the FSDP-specific prefix; there can
                 # be multiple in the case of nested FSDP modules

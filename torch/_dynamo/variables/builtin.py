@@ -1276,6 +1276,7 @@ class BuiltinVariable(VariableTracker):
             supported_const_comparison_ops,
             supported_tensor_comparison_ops,
         )
+        from .nn_module import FSDPManagedNNModuleVariable
 
         op = self.fn
 
@@ -1297,21 +1298,22 @@ class BuiltinVariable(VariableTracker):
 
         if (
             all(
-                isinstance(x, (NNModuleVariable, ConstantVariable))
+                isinstance(x, (NNModuleVariable, ConstantVariable, FSDPManagedNNModuleVariable))
                 for x in [left, right]
             )
             and op in supported_const_comparison_ops.values()
         ):
-            left = (
-                tx.output.get_submodule(left.module_key)
-                if isinstance(left, NNModuleVariable)
-                else left.as_python_constant()
-            )
-            right = (
-                tx.output.get_submodule(right.module_key)
-                if isinstance(right, NNModuleVariable)
-                else right.as_python_constant()
-            )
+            def _get(element):
+                if isinstance(element, NNModuleVariable):
+                    return tx.output.get_submodule(element.module_key)    
+                if isinstance(element, FSDPManagedNNModuleVariable):
+                    return element.value
+                else:
+                    return element.as_python_constant()
+
+            
+            left = _get(left)
+            right = _get(right)
             return ConstantVariable(op(left, right))
 
         if isinstance(left, UserFunctionVariable):
@@ -1370,6 +1372,11 @@ class BuiltinVariable(VariableTracker):
             )
 
         if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
+            return ConstantVariable(op(left.value, right.value))
+
+
+        # Would this invoke user code?        
+        if isinstance(left, variables.UserDefinedObjectVariable) and isinstance(right, variables.UserDefinedObjectVariable):
             return ConstantVariable(op(left.value, right.value))
 
         _unimplemented()

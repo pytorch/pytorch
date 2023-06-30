@@ -579,9 +579,11 @@ def _root_pre_forward(
         # We cast buffers back to full precision if we're forcing full precision. Disjointly, we check if buffers
         # are in full precision and if we should cast them back to lower precision, which happens when
         # exiting eval() mode.
-        should_cast_buffers_to_full_prec = any(
-            handle._force_full_precision for handle in state._handles
-        )
+        should_cast_buffers_to_full_prec = False
+        for handle in state._handles:
+            if handle._force_full_precision:
+                should_cast_buffers_to_full_prec = True
+                break
 
         if should_cast_buffers_to_full_prec:
             _cast_buffers_to_dtype_and_device(

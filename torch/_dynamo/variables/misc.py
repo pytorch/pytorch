@@ -755,8 +755,21 @@ class SkipFilesVariable(VariableTracker):
             and isinstance(args[0], variables.UserDefinedClassVariable)
             and isinstance(args[1], variables.UserDefinedObjectVariable)
         ):
-            # lol?
-            return args[1]
+            new_obj = cast(args[0].value, args[1].value)
+            args[1].mutable_local = MutableLocal()
+            return tx.replace_all(args[1], variables.UserDefinedObjectVariable(new_obj))
+        elif (
+            self.value is cast
+            and isinstance(args[0], variables.UserDefinedClassVariable)
+            and isinstance(args[1], variables.NNModuleVariable)
+        ):
+            new_obj = cast(args[0].value, tx.output.nn_modules[args[1].module_key])
+            args[1].mutable_local = MutableLocal()
+            return tx.replace_all(args[1], variables.UserDefinedObjectVariable(new_obj))
+        elif (
+            self.value is cast
+        ):
+            unimplemented(f"Cast with {args}",)
         else:
             try:
                 path = inspect.getfile(self.value)
