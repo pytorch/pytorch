@@ -88,7 +88,7 @@ RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, "dist._tensor.
 User facing APIs for functional collectives
 -------------------------------------------
 
-These apis are called by usercode and expected to work both in eager execution and compilation,
+These apis are called by user code and expected to work both in eager execution and compilation,
 but there are significant differences to how the two modes are implemented underneath.
 
 Eager execution is 'optimized' using a tensor subclass that schedules the synchronization (via wait_tensor() op)
