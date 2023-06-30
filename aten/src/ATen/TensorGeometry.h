@@ -128,7 +128,7 @@ struct TORCH_API TensorGeometry {
     for (const auto& i : sizes_) {
       numel = numel * i;
     }
-    numel_ = numel;
+    numel_ = std::move(numel);
     has_symbolic_sizes_strides_ =
         !c10::asIntArrayRefSlowOpt(sizes_).has_value();
   }
