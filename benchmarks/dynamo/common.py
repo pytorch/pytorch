@@ -1960,6 +1960,8 @@ class BenchmarkRunner:
                     with torch._dynamo.config.patch(
                         dataclasses.asdict(ExportDynamoConfig())
                     ):
+                        # torch._dynamo.export only need 1 forward
+                        # no need for n iterations
                         optimized_model_iter_fn, _ = optimize_ctx(
                             self.model_iter_fn, model_copy, example_inputs
                         )
