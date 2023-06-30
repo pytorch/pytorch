@@ -21,8 +21,8 @@ from torch.distributed.fsdp._init_utils import (
     HYBRID_SHARDING_STRATEGIES,
 )
 from torch.distributed.fsdp._runtime_utils import (
-    _register_post_forward_hooks,
-    _register_pre_forward_hooks,
+    _register_post_forward_hook,
+    _register_pre_forward_hook,
     _register_root_pre_forward_hook,
 )
 from torch.distributed.fsdp._state_dict_utils import _register_all_state_dict_hooks
@@ -111,8 +111,8 @@ def fully_shard(
     )
     state = _init_state_dict_state(state)
     _register_all_state_dict_hooks(state)
-    _register_pre_forward_hooks(state, module)
-    _register_post_forward_hooks(state, module)
+    _register_pre_forward_hook(state, module)
+    _register_post_forward_hook(state, module)
     _register_root_pre_forward_hook(state, module)  # prepend last
     # Always insert the state for the passed-in module even if it has no
     # managed parameters, in which case it has no handles and does not appear
