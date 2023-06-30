@@ -937,16 +937,104 @@ def as_strided_copy(x, size, stride, storage_offset=None):
     return clone(result)
 
 
+def _fused_cat_kernel(inputs, dim, dtype):
+    loaders = [t.make_loader() for t in inputs]
+    dim_sizes = [t.get_size()[dim] for t in inputs]
+
+    def inner_fn(idx):
+        dim_idx = ops.index_expr(idx[dim], torch.int64)
+
+        cur_start_idx = 0
+        result = None
+        for i, size in enumerate(dim_sizes):
+            end = ops.index_expr(cur_start_idx + size, torch.int64)
+            if i == 0:
+                mask = dim_idx < end
+            else:
+                start = ops.index_expr(cur_start_idx, torch.int64)
+                mask = ops.logical_and(dim_idx >= start, dim_idx < end)
+
+            cur_idx = list(idx)
+            cur_idx[dim] = idx[dim] - cur_start_idx
+            cur_load = ops.masked(mask, lambda: loaders[i](idx), 0)
+
+            cur_start_idx += size
+
+            if result is None:
+                result = cur_load
+            else:
+                result = ops.where(mask, cur_load, result)
+
+        return result
+
+    output_size = list(inputs[0].get_size())
+    output_size[dim] = sum(dim_sizes)
+
+    for t in inputs:
+        size = t.get_size()
+        size[dim] = output_size[dim]  # Ignore this dimension
+
+
+    return Pointwise.create(
+        device=inputs[0].get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=output_size
+    )
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     if len(inputs) == 1:
         return clone(inputs[0])
 
     dim = _validate_dim(inputs[0], dim, 0)
-    dtype = get_promoted_dtype(
-        *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-    inputs = [to_dtype(inp, dtype) for inp in inputs]
+    dim_sizes = [t.get_size()[dim] for t in inputs]
+
+    output_size = list(inputs[0].get_size())
+    output_size[dim] = sum(dim_sizes)
+
+    for t in inputs:
+        size = list(t.get_size())
+        size[dim] = output_size[dim]  # Ignore the cat dimension
+
+        assert size == output_size, "Cat size mismatch"
+
+    # Drop inputs with no values
+    orignal_inputs = inputs
+    inputs = [
+        t for t in inputs
+        if not V.graph.sizevars.statically_known_equals(t.get_size()[dim], 0)
+    ]
+    if len(inputs) == 0:
+        return zeros_like(original_inputs[0])
+
+    # Optionally fuse into a single kernel, which does redundant computations
+    def get_read_writes(t):
+        if hasattr(t, 'get_read_writes'):
+            return t.get_read_writes()
+        if isinstance(t, ir.BaseView):
+            return get_read_writes(t.unwrap_view())
+        raise NotImplementedError(f"NYI: num_reads({type(t)})")
+
+
+    max_concat_fusion_reads = 5
+    max_concat_fusion_ops = 64
+
+    num_reads = 0
+    ops_count = 0
+
+    for t in inputs:
+        rw = get_read_writes(t.data)
+        num_reads += len(rw.reads)
+        ops_count += len(rw.op_counts)
+
+    if (
+        num_reads <= max_concat_fusion_reads
+        and ops_count <= max_concat_fusion_ops
+    ):
+        return _fused_cat_kernel(inputs, dim, inputs[0].get_dtype())
+
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
 

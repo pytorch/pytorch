@@ -212,6 +212,24 @@ class OpsValue:
     def __pow__(self, other):
         return ops.pow(self, other)
 
+    def __lt__(self, other):
+        return ops.lt(self, other)
+
+    def __gt__(self, other):
+        return ops.gt(self, other)
+
+    def __le__(self, other):
+        return ops.le(self, other)
+
+    def __ge__(self, other):
+        return ops.ge(self, other)
+
+    def __eq__(self, other):
+        return ops.eq(self, other)
+
+    def __ne__(self, other):
+        return ops.ne(self, other)
+
 
 class OpsWrapper:
     """This wraps any returned IR values into an `OpsValue` instance, so that we
