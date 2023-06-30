@@ -23,7 +23,7 @@ from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI, NoTest,
-     TEST_WITH_UBSAN, skipIfSlowGradcheckEnv, TEST_WITH_ASAN, suppress_warnings)
+     TEST_WITH_UBSAN, skipIfSlowGradcheckEnv, suppress_warnings)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -4609,6 +4609,23 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(result_cpu, result_mps.to('cpu'))
 
         helper((2, 3, 4, 5))
+
+    def test_argmax(self):
+        # https://github.com/pytorch/pytorch/issues/98191
+        cpu_tensor = torch.tensor([[0, 1], [2, 1], [1, 0]])
+        res_cpu = torch.argmax(cpu_tensor, dim=1)
+
+        mps_tensor = cpu_tensor.to(torch.device('mps'))
+        res_mps = torch.argmax(mps_tensor, dim=1)
+        self.assertEqual(res_cpu, res_mps)
+
+        # https://github.com/pytorch/pytorch/issues/92311
+        mps_tensor = torch.randn(10, 2, device='mps', dtype=torch.float32)
+        cpu_tensor = mps_tensor.detach().clone().cpu()
+
+        res_mps = torch.argmax(mps_tensor, dim=1)
+        res_cpu = torch.argmax(cpu_tensor, dim=1)
+        self.assertEqual(res_cpu, res_mps)
 
     # Test forward argmin argmax
     def test_argmin_argmax(self):
@@ -10647,7 +10664,6 @@ class TestCommon(TestCase):
     # MPS still requires some fairly heavy special casing in the test framework.
     # When MPS becomes more consistent, this can probably be merged with that test using
     # `@dtypesIfMPS(torch.float32)`, but for now, the assertions themselves need to be loosened
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     # MPS only supports float32
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))

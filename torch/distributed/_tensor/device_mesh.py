@@ -9,7 +9,6 @@ from torch.distributed.distributed_c10d import (
     _find_pg_by_ranks_and_tag,
     _get_default_group,
     _get_group_tag,
-    all_gather,
     all_to_all,
     broadcast,
     get_global_rank,
@@ -148,11 +147,6 @@ class DeviceMesh(object):
                     f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
                 )
             device_handle.set_device(get_rank() % num_devices_per_host)
-        # TODO (xilunwu): to perform DTensor random ops, we need to ensure all ranks in mesh is initialized
-        # with the same random seed. The seed to use will be the current seed on rank 0. We store this seed
-        # as an attribute of device mesh for future use. However, the detail is still TBD how we gonna use
-        # this attribute, so we will implement this logic once we figure out the answer.
-        self._seed = torch.initial_seed()
 
         # calculate the coordinates of the current global rank on the mesh
         rank_coords = (self.mesh == get_rank()).nonzero()
@@ -171,9 +165,11 @@ class DeviceMesh(object):
             )
         # validate that all calling ranks pass in the same `mesh` argument.
         self_mesh = self.mesh.to(self.device_type)
-        mesh_list = [self_mesh.clone() for _ in range(get_world_size())]
-        all_gather(mesh_list, self_mesh)
-        for other_rank, other_mesh in enumerate(mesh_list):
+        mesh_tensor = funcol.all_gather_tensor(
+            self_mesh, gather_dim=0, group=_get_default_group()
+        )
+        mesh_tensor_chunked = torch.chunk(mesh_tensor, get_world_size())
+        for other_rank, other_mesh in enumerate(mesh_tensor_chunked):
             if not torch.equal(self_mesh, other_mesh):
                 raise RuntimeError(
                     f"DeviceMesh initialization does not allow different mesh argument:"

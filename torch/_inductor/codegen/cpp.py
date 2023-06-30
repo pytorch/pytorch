@@ -4,6 +4,7 @@ import functools
 import itertools
 import logging
 import math
+import os
 import re
 import sys
 from copy import copy, deepcopy
@@ -214,7 +215,7 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
 
 
 @functools.lru_cache()
-def cpp_prefix():
+def cpp_prefix_path():
     path = Path(__file__).parent / "cpp_prefix.h"
     with path.open() as f:
         content = f.read()
@@ -222,7 +223,17 @@ def cpp_prefix():
             content,
             "h",
         )
-    return f'#include "{filename}"'
+    return filename
+
+
+def cpp_prefix():
+    filename = cpp_prefix_path()
+    if config.is_fbcode():
+        # We need relative paths, since we bundle up
+        # everything that we compile into a folder for remote compilation.
+        return f'#include "{os.path.basename(filename)}"'
+    else:
+        return f'#include "{filename}"'
 
 
 class CppPrinter(ExprPrinter):
@@ -1349,7 +1360,10 @@ class CppVecKernel(CppKernel):
         if is_broadcast:
             if is_mask:
                 loadbuf = f"flag_to_float_scalar({loadbuf})"
-            line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
+            if dtype in [torch.bfloat16]:
+                line = f"at::vec::Vectorized<bfloat16>({loadbuf})"
+            else:
+                line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
             line = f"at::vec::load_uint8_as_float({var_expr})"
         elif is_mask:
@@ -1614,6 +1628,11 @@ class CppTile2DKernel(CppVecKernel):
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
                 line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+            elif (
+                V.graph.get_dtype(name) in [torch.uint8]
+                and opt_ctx.is_load_uint8_as_float
+            ):
+                line = f"at::vec::load_uint8_as_float({loadbuf})"
             else:
                 line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             return self.cse.generate(self.loads, line)
@@ -1641,6 +1660,11 @@ class CppTile2DKernel(CppVecKernel):
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
                 line = f"{value}.store({storebuf}, {self.tiling_factor});"
+            elif (
+                V.graph.get_dtype(name) in [torch.uint8]
+                and opt_ctx.is_store_float_as_uint8
+            ):
+                line = f"at::vec::store_float_as_uint8({value}, {storebuf});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
