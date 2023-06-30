@@ -1177,6 +1177,11 @@ class FakeTensorMode(TorchDispatchMode):
         if live:
             return super().__exit__(a, b, c)
 
+    # FakeTensorMode is meant to be a singleton, so deepcopying
+    # should not introduce a fresh mode.
+    def __deepcopy__(self, _):
+        return self
+
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
