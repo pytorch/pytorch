@@ -310,7 +310,7 @@ CI_TV_OFF[CI("inductor", training=False, dynamic=False, device="cuda")] = [
     "hf_T5_generate",
 ]
 
-CI_TV_OFF[CI("inductor", training=False, dynamic=True, device="cuda")] = [
+CI_TV_OFF[CI("inductor", training=True, dynamic=True, device="cuda")] = [
     # TIMM
     "eca_halonext26ts",
     "swin_base_patch4_window7_224",
