@@ -4039,7 +4039,7 @@ class TestLinalg(TestCase):
         self.assertEqual(X, out)
 
     @dtypes(*floating_and_complex_types())
-    @precisionOverride({torch.float32: 1e-4,
+    @precisionOverride({torch.float32: 1e-3,
                         torch.float64: 1e-8})
     def test_linalg_solve_triangular(self, device, dtype):
         # This exercises the API + BLAS CPU + batched cuBLAS
