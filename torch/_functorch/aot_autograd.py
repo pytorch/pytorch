@@ -31,6 +31,7 @@ from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int, fx_placeholder_vals
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
+from torch.utils._python_dispatch import supports_mode_tracing
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from . import config
 from .partitioners import default_partition
@@ -422,6 +423,19 @@ class InputAliasInfo:
     mutates_metadata: bool
 
 
+@dataclasses.dataclass
+class SubclassCreationMeta:
+    """
+    Used for AOTDispatch: The graph that we'd like to trace out contains flat tensor inputs,
+    And this dataclass gives us the information we need to reconstruct a tensor subclass
+    from our flat inputs.
+    """
+
+    creation_lambda: Callable[List[torch.Tensor], torch.Tensor]
+    flat_tensor_start_idx: int
+    arg_count: int
+    subclass_meta: Any
+
 # This class encapsulates all aliasing + mutation info we need about the forward graph
 # See a more detailed overview of the edge case handling at
 # https://docs.google.com/document/d/19UoIh_SVrMy_b2Sx5ZaeOJttm6P0Qmyss2rdBuyfoic/edit
@@ -458,6 +472,10 @@ class ViewAndMutationMeta:
     # Stashing them as part of our "metadata" makes it simpler if we want to run our analysis
     # pass once, and re-use the output throughout AOTAutograd
     traced_tangents: List[Any]
+
+    subclass_inp_meta: List[Union[int, SubclassCreationMeta]]
+
+    subclass_out_meta: List[Union[int, SubclassCreationMeta]]
 
     def __post_init__(self):
         mutated_inp_indices = [
@@ -659,6 +677,12 @@ def _get_hints(exprs):
         return exprs.node.shape_env.size_hint(exprs.node.expr)
     else:
         return exprs
+
+def requires_subclass_dispatch(fw_metadata: ViewAndMutationMeta, inps: List[Any]) -> bool:
+    any_subclass_inputs = any(supports_mode_tracing(x) for x in inps if isinstance(x, Tensor))
+    any_subclass_outputs = any(supports_mode_tracing(x) for x in fw_metadata.traced_tangents if isinstance(x, Tensor))
+    # This tells us whether or not we need to perform any unwrapping/wrapping of tensor subclasses at runtime.
+    return any_subclass_inputs or any_subclass_outputs
 
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.
@@ -907,6 +931,30 @@ def run_functionalized_fw_and_collect_metadata(
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
         traced_tangents = pytree.tree_map(from_fun, f_tangents)
+        user_outs = pytree.tree_map(from_fun, f_output_tangents)
+
+        def create_subclass_meta(curr_args: List[Any]) -> List[Union[int, SubclassCreationMeta]]:
+            idx = 0
+            infos = []
+            for a in curr_args:
+                if isinstance(a, torch.Tensor) and supports_mode_tracing(a):
+                    inner_tensors, meta = a.__tensor_flatten__()
+                    subclass_type = type(a)
+                    start_idx = idx
+                    cnt = len(inner_tensors)
+                    curr_cnt = cnt
+                    infos.append(SubclassCreationMeta(
+                        creation_lambda=lambda all_args: subclass_type.__tensor_unflatten__(all_args[start_idx:start_idx + curr_cnt], meta),
+                        flat_tensor_start_idx=start_idx,
+                        arg_count=curr_cnt,
+                        subclass_meta=meta,
+                    ))
+                else:
+                    infos.append(idx)
+                    cnt = 1
+                idx += cnt
+            return infos
+
 
         metadata = ViewAndMutationMeta(
             input_info=input_info,
@@ -915,6 +963,8 @@ def run_functionalized_fw_and_collect_metadata(
             num_intermediate_bases=len(intermediate_bases),
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
+            subclass_inp_meta=create_subclass_meta(flat_args),
+            subclass_out_meta=create_subclass_meta(user_outs),
         )
         return metadata
 
@@ -1296,14 +1346,15 @@ def create_joint(
 # The function returned has signature that is either:
 # (1) "traced_fn(primals: List[Any])" if trace_joint is False
 # (2) "traced_fn(primals: List[Any], tangents: List[Any])" if trace_joint is True
-def create_functionalized_graph(
+# Returns a new (functionalized) function, and updated arguments to call it with.
+def create_functionalized_fn(
     fn,
     args,
     *,
     meta: ViewAndMutationMeta,
     aot_config: AOTConfig,
     trace_joint: bool,
-):
+) -> Tuple[Callable, List[Any]]:
     def functionalized_f_helper(*args):
         # Wrap inputs into functional wrappers
         f_args = pytree.tree_map(to_fun, args)
@@ -1367,8 +1418,11 @@ def create_functionalized_graph(
         # Setup the wrapper for functionalization of rng ops
         helper, args = create_functionalized_rng_ops_wrapper(helper, args, trace_joint)
 
+    return helper, args
+
+def trace_fn(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
     with enable_python_dispatcher():
-        fx_g = make_fx(helper, decomposition_table=aot_config.decompositions)(*args)
+        fx_g = make_fx(f, decomposition_table=aot_config.decompositions)(*args)
 
     return fx_g
 
@@ -1481,12 +1535,12 @@ def aot_dispatch_base_graph(flat_fn, flat_args: List[Tensor], aot_config: AOTCon
         keep_data_input_mutations=aot_config.keep_inference_input_mutations,
     )
 
-    fw_module = create_functionalized_graph(
+    fn_to_trace, updated_flat_args = create_functionalized_fn(fn_to_trace, flat_args, meta=fw_metadata, aot_config=aot_config, trace_joint=False)
+
+    fw_module = trace_fn(
         fn_to_trace,
-        flat_args,
-        meta=fw_metadata,
+        updated_flat_args,
         aot_config=aot_config,
-        trace_joint=False,
     )
 
     # As long as we opted to remove input mutations, then
@@ -1848,6 +1902,8 @@ def remove_dupe_metadata(
         num_intermediate_bases=m.num_intermediate_bases,
         keep_input_mutations=m.keep_input_mutations,
         traced_tangents=traced_tangents,
+        subclass_inp_meta=[],
+        subclass_out_meta=[],
     )
 
 # Given our ViewAndMutation metadata, this fn constructs a new set of metadata,
@@ -1954,6 +2010,8 @@ def create_synthetic_base_metadata(
         num_intermediate_bases=m.num_intermediate_bases,
         keep_input_mutations=m.keep_input_mutations,
         traced_tangents=traced_tangents,
+        subclass_inp_meta=[],
+        subclass_out_meta=[],
     ), outer_aliased_arg_idx_with_metadata_mutations
 
 # MOTIVATION:
@@ -2610,6 +2668,81 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
         return traced_forward, (*args, fwd_seed, fwd_base_offset)
 
+
+# This function takes in a pytree of arguments and unwraps any tensor subclasses.
+# Annoyingly, we can't use pytrees to perform the unwrapping, because unwrapping returns
+# a list of tensors that we would then need to concat together.
+# Instead, we specialize the logic for the inference vs. joint graph case.
+def unwrap_tensor_subclasses(wrapped_args, *, trace_joint: bool):
+    if trace_joint:
+        assert isinstance(wrapped_args, tuple) and len(wrapped_args) == 2
+        assert isinstance(wrapped_args[0], (tuple, list)) and isinstance(wrapped_args[1], (tuple, list))
+        unwrapped_args_fw = []
+        for a in wrapped_args[0]:
+            if isinstance(a, torch.Tensor) and supports_mode_tracing(a):
+                a_unwrapped, _ = a.__tensor_flatten__()
+                unwrapped_args_fw += a_unwrapped
+        unwrapped_args_tangents = []
+        for a in wrapped_args[1]:
+            if isinstance(a, torch.Tensor) and supports_mode_tracing(a):
+                a_unwrapped, _ = a.__tensor_flatten__()
+                unwrapped_args_tangents += a_unwrapped
+        unwrapped_args = (unwrapped_args_fw, unwrapped_args_tangents)
+    else:
+        unwrapped_args_fw = []
+        assert isinstance(wrapped_args, list)
+        for a in wrapped_args:
+            if isinstance(a, torch.Tensor) and supports_mode_tracing(a):
+                a_unwrapped, _ = a.__tensor_flatten__()
+                unwrapped_args_fw += a_unwrapped
+        unwrapped_args = unwrapped_args_fw
+    return unwrapped_args
+
+# Given a function operating on Subclass -> Subclass, returns an function that operates on Tensor -> Tensor
+# Also returns the new set of arguments to pass into this function.
+def aot_dispatch_subclass(flat_fn, args: List[Any], *, trace_joint: bool, meta: ViewAndMutationMeta) -> Tuple[Callable, List[Any]]:
+    def inner_fn(*args):
+        # Step 1: wrap tensor inputs into subclasses if necessary
+        flattened_args, _ = pytree.tree_flatten(args)
+        wrapped_args = []
+        remaining_args = []
+        end_idx = -1
+        for i, subclass_meta in enumerate(meta.subclass_inp_meta):
+            if isinstance(subclass_meta, int):
+                wrapped_args.append(flattened_args[subclass_meta])
+                end_idx = subclass_meta + 1
+            else:
+                assert isinstance(subclass_meta, SubclassCreationMeta)
+                wrapped_args.append(subclass_meta.creation_lambda(flattened_args))
+                end_idx = subclass_meta.flat_tensor_start_idx + subclass_meta.arg_count
+
+        remaining_args = flattened_args[end_idx:]
+        if trace_joint:
+            assert len(remaining_args) == len(meta.traced_tangents)
+            all_args = (wrapped_args, remaining_args)
+        else:
+            assert len(remaining_args) == 0
+            all_args = wrapped_args
+
+        # Step 2: call the inner function, with our (maybe subclass) inputs
+        wrapped_outs = flat_fn(*all_args)
+
+        # Step 3: Unwrap any subclass outputs back into dense tensors
+        # Ugh, need to make sure this supports both inference and joint cases.
+        unwrapped_outs = unwrap_tensor_subclasses(wrapped_outs, trace_joint=trace_joint)
+        return unwrapped_outs
+
+    def joint_fn(primals, tangents):
+        return inner_fn(primals, tangents)
+
+    def fw_fn(primals):
+        return inner_fn(*primals)
+
+    args_unwrapped = unwrap_tensor_subclasses(args, trace_joint=trace_joint)
+    fn_to_trace = joint_fn if trace_joint else fw_fn
+    return fn_to_trace, args_unwrapped
+
+
 # Has the precondition that there
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
@@ -2632,13 +2765,22 @@ def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTCo
     )
     joint_fn_to_trace = create_joint(fn_prepared_for_autograd, aot_config=aot_config)
 
-    fx_g = create_functionalized_graph(
+    joint_fn_to_trace, updated_joint_inputs = create_functionalized_fn(
         joint_fn_to_trace,
         joint_inputs,
         meta=fw_metadata,
         aot_config=aot_config,
         trace_joint=True,
     )
+
+    joint_fn_to_trace, updated_joint_inputs = aot_dispatch_subclass(joint_fn_to_trace, joint_inputs, trace_joint=True, meta=fw_metadata)
+
+
+    fx_g = trace_fn(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
+    # WHAT TO DO NEXT: I just finished trying to add aot_dispatch_subclass in the line above here.
+    # It runs successfully, but the partitioner fails.
+    # When I print(fx_g.code) here, one suspicious bit is that there are only 2 primals, but there should be 3
+    import pdb; pdb.set_trace()
 
     # There should be *NO* mutating ops in the graph at this point.
     assert_functional_graph(fx_g.graph)
@@ -2652,17 +2794,16 @@ def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTCo
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
     # when we need to manually detach() some inputs in the forward.
     # Higher order ops might eventually need to do the same.
-    return fx_g
+    return fx_g, updated_joint_inputs
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
-    fx_g = aot_dispatch_autograd_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
+    fx_g, joint_inputs = aot_dispatch_autograd_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
     # Copied from aot_dispatch_autograd_graph.
     traced_tangents = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
         fw_metadata.traced_tangents,
     )
-    joint_inputs = (flat_args, traced_tangents)
     disable_amp = torch._C._is_any_autocast_enabled()
 
     if aot_config.enable_log:
@@ -3212,6 +3353,8 @@ def create_aot_dispatcher_function(
                     keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
                 )(*fake_flat_args)
 
+        req_subclass_dispatch = requires_subclass_dispatch(fw_metadata, fake_flat_args)
+
         if aot_config.is_export:
             # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
             # Keeping .resize_() in the graph will require some work
@@ -3232,6 +3375,10 @@ Found a graph input that requires gradients, and received a mutation.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
 
 fw_metadata={str(fw_metadata)}""")
+            if req_subclass_dispatch:
+                raise RuntimeError("""\
+aot_export is not currently supported with traceable tensor subclass.
+If you need this feature, please comment on <CREATE_ISSUE_LINK>""")
 
             # Need to decide on a strategy for functionalized RNG: toggling via global config seems bad,
             # and turning it on will require a non-trivial calling convention change for any export runtime.

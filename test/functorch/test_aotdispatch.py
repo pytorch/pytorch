@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     outs_and_grads,
     skipIfRocm,
 )
+from torch.testing._internal.double_tensor import DoubleTensor
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -2581,6 +2582,135 @@ class TestPartitioning(AOTTestCase):
             res = aot_mod(x)
         res.sum().backward()
 
+
+class TestAOTDispatch(AOTTestCase):
+
+    def test_aot_dispatch(self):
+        # a is a subclass, b is not
+        def f(a, b):
+            aa = torch.mul(a, 2)
+            bb = torch.add(b, 3)
+            out_subclass = torch.div(aa, bb)
+            return out_subclass
+
+        a1_ref = torch.ones(3, 3, requires_grad=True)
+        a2_ref = torch.ones(3, 3, requires_grad=True)
+        a_ref = DoubleTensor(a1_ref, a2_ref)
+        b_ref = torch.ones(3, 3, requires_grad=True)
+
+        a1_test = a1_ref.clone().detach().requires_grad_(True)
+        a2_test = a2_ref.clone().detach().requires_grad_(True)
+        a_test = DoubleTensor(a1_test, a2_test)
+        b_test = b_ref.clone().detach().requires_grad_(True)
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            # The default partitioner seems to have some issues where
+            # the order that it returns saved_for_bw tensors as outputs
+            # can change, breaking my expecttests.
+            # We should probably just remove the default partitioner
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+        # First out is a DoubleTensor, second is an ordinary tensor
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+        self.assertEqual(a_ref.grad.a, a_test.grad.a)
+        self.assertEqual(a_ref.grad.b, a_test.grad.b)
+        self.assertEqual(b_ref.grad, b_test.grad)
+
+        # Important pieces of the graph:
+        # - mul() and div() show up twice, because we called them on a DoubleTensor
+        # - add() shows up once, because we called it on a plain Tensor
+        # - add() shows up once, because we called it on a plain Tensor
+        # - The user forward() fn returns 1 output (the result of div)
+        # - div, div_1 correspond to the two inner dense tensors that will be wrapped
+        # - into a single DoubleTensor output.
+        self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3):
+    mul = torch.ops.aten.mul.Tensor(primals_1, 2)
+    mul_1 = torch.ops.aten.mul.Tensor(primals_2, 2)
+    add = torch.ops.aten.add.Tensor(primals_3, 3)
+    div = torch.ops.aten.div.Tensor(mul, add);  mul = None
+    div_1 = torch.ops.aten.div.Tensor(mul_1, add);  mul_1 = add = None
+    return [div, div_1, primals_1, primals_2, primals_3, div, div_1]""")
+
+        # Important pieces of the graph:
+        # - 4 total dense outputs.
+        #   This corresponds to the fact that each user fwd inpt (a, b)
+        #   will get a gradient that is a DoubleTensor subclass,
+        #   so (mul_4, mul_5) will be wrapped into a.grad
+        #   and (mul_2, mul_3) will be wrapped into b.grad
+        # - 4 total dense outputs,
+        self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
+def forward(self, primals_1, primals_2, primals_3, div, div_1, tangents_1, tangents_2):
+    add = torch.ops.aten.add.Tensor(primals_3, 3);  primals_3 = None
+    neg = torch.ops.aten.neg.default(primals_1)
+    neg_1 = torch.ops.aten.neg.default(primals_2)
+    div_4 = torch.ops.aten.div.Tensor(div, add);  div = None
+    div_5 = torch.ops.aten.div.Tensor(div_1, add);  div_1 = None
+    mul_2 = torch.ops.aten.mul.Tensor(neg, div_4);  neg = div_4 = None
+    mul_3 = torch.ops.aten.mul.Tensor(neg_1, div_5);  neg_1 = div_5 = None
+    div_6 = torch.ops.aten.div.Tensor(primals_1, add);  primals_1 = None
+    div_7 = torch.ops.aten.div.Tensor(primals_2, add);  primals_2 = add = None
+    mul_4 = torch.ops.aten.mul.Tensor(div_6, 2);  div_6 = None
+    mul_5 = torch.ops.aten.mul.Tensor(div_7, 2);  div_7 = None
+    return [mul_4, mul_5, mul_2, mul_3]""")
+
+
+    def test_aot_dispatch_incorrect_backward(self):
+        # a is a subclass, b is not
+        def f(a, b):
+            aa = torch.mul(a, 2)
+            bb = torch.add(b, 3)
+            out_subclass = torch.div(aa, bb)
+            out_reg = torch.add(b, b)
+            # When creating the joint, we assume that the second grad_out
+            # is not a subclass.
+            # In the below test case though, we end up being wrong.
+            # This would require recompiling (and maybe repartitioning).
+            return out_subclass, out_reg
+
+        a1_ref = torch.ones(3, 3, requires_grad=True)
+        a2_ref = torch.ones(3, 3, requires_grad=True)
+        a_ref = DoubleTensor(a1_ref, a2_ref)
+        b_ref = torch.ones(3, 3, requires_grad=True)
+
+        a1_test = a1_ref.clone().detach().requires_grad_(True)
+        a2_test = a2_ref.clone().detach().requires_grad_(True)
+        a_test = DoubleTensor(a1_test, a2_test)
+        b_test = b_ref.clone().detach().requires_grad_(True)
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+        # First out is a DoubleTensor, second is an ordinary tensor
+        self.assertEqual(out_ref[0].a, out_test[0].a)
+        self.assertEqual(out_ref[0].b, out_test[0].b)
+        self.assertEqual(out_ref[1], out_test[1])
+
+        # We compiled our graph assuming type(grad_out[1]) == torch.Tensor,
+        # but we were wrong: in the below tests, it is a subclass.
+        # This will eventually require a repartition + recompile
+        with self.assertRaisesRegex(
+            AssertionError,
+            "incorrectly attempted to compile the backward with incorrect subclass metadata"
+        ):
+            (out_test[0] + out_test[1]).sum().backward()
 
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):

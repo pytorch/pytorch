@@ -264,6 +264,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     # TODO: we could use types to test this
     if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
         not_implemented_log.debug("ProxyTensorMode tensors without proxy had unrecognized subclasses: %s", unrecognized_types)
+        import pdb; pdb.set_trace()
         return NotImplemented
 
     if func in CURRENT_DECOMPOSITION_TABLE:

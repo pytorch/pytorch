@@ -154,3 +154,6 @@ def transform_subclass(t, callback):
     flattened_tensors, ctx = type(t).__tensor_flatten__(t)
     transformed_tensors = tree_map_only(torch.Tensor, callback, flattened_tensors)
     return type(t).__tensor_unflatten__(transformed_tensors, ctx)
+
+# TODO: this.
+#def set_subclass_output_aliasing(func, outputs

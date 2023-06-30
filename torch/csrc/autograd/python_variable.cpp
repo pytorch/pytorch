@@ -694,7 +694,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
     AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
     tracer::impl::NoTracerDispatchMode tracer_guard{};
 
-    // We shouldn't need storage
+    // We use storages **only** to track aliasing of subclasses during tracing.
+    // The actual data pointers are not valid.
     Storage storage{Storage::use_byte_size_t{}, 0, at::DataPtr{}};
 
     tensor = at::detail::make_tensor<TensorImpl>(
