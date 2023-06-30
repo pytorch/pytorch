@@ -9,7 +9,9 @@ import torch._dynamo.test_case
 import torch._functorch.config
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.utils.checkpoint import checkpoint
 
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -46,6 +48,25 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
         def fn(x, y):
             return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(
+            count_ops, freq=3, op=torch.ops.aten.mm.default
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(fn, backend, x, y)
+
+    @requires_cuda()
+    def test_tags_function_via_global_checkpoint(self):
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            # This goes through VariableBuilder
+            return checkpoint(gn, torch.sin(x), y)
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
         y = torch.randn(4, 4, device="cuda", requires_grad=True)
@@ -231,6 +252,34 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = "inductor"
         # rand decomps do not have have numerical results as eager
         self._validate(fn, backend, x, skip_check=True)
+
+    @requires_cuda()
+    def test_fallback(self):
+        def gn(x, y):
+            torch._dynamo.graph_break()
+            a = torch.sigmoid(torch.matmul(x, y))
+            torch._dynamo.graph_break()
+            return torch.cos(a)
+
+        def fn(x, y):
+            return torch.cos(checkpoint(gn, torch.sin(x), y, use_reentrant=False))
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        args = (x, y)
+
+        backend = "aot_eager"
+        cnt = CompileCounterWithBackend(backend)
+
+        expected = fn(*args)
+        result = torch.compile(fn, backend=cnt)(*args)
+
+        self.assertEqual(result, expected)
+
+        # One graph for torch.sin on the input, and other for torch.cos.
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 2)
+        self.assertEqual(len(cnt.graphs), 2)
 
 
 if __name__ == "__main__":
