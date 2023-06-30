@@ -940,6 +940,10 @@ def as_strided_copy(x, size, stride, storage_offset=None):
 def _fused_cat_kernel(inputs, dim, dtype):
     loaders = [t.make_loader() for t in inputs]
     dim_sizes = [t.get_size()[dim] for t in inputs]
+    dtype = inputs[0].get_dtype()
+    device = inputs[0].get_device()
+    assert all(t.get_dtype() == dtype for t in inputs)
+    assert all(t.get_device() == device for t in inputs)
 
     def inner_fn(idx):
         dim_idx = ops.index_expr(idx[dim], torch.int64)
@@ -947,16 +951,20 @@ def _fused_cat_kernel(inputs, dim, dtype):
         cur_start_idx = 0
         result = None
         for i, size in enumerate(dim_sizes):
+            start = ops.index_expr(cur_start_idx, torch.int64)
             end = ops.index_expr(cur_start_idx + size, torch.int64)
             if i == 0:
                 mask = dim_idx < end
+            elif i == len(dim_sizes) - 1:
+                start = ops.index_expr(cur_start_idx, torch.int64)
+                mask = dim_idx >= start
             else:
                 start = ops.index_expr(cur_start_idx, torch.int64)
                 mask = ops.logical_and(dim_idx >= start, dim_idx < end)
 
             cur_idx = list(idx)
             cur_idx[dim] = idx[dim] - cur_start_idx
-            cur_load = ops.masked(mask, lambda: loaders[i](idx), 0)
+            cur_load = ops.masked(mask, lambda: loaders[i](cur_idx), 0)
 
             cur_start_idx += size
 
@@ -970,11 +978,6 @@ def _fused_cat_kernel(inputs, dim, dtype):
     output_size = list(inputs[0].get_size())
     output_size[dim] = sum(dim_sizes)
 
-    for t in inputs:
-        size = t.get_size()
-        size[dim] = output_size[dim]  # Ignore this dimension
-
-
     return Pointwise.create(
         device=inputs[0].get_device(),
         dtype=dtype,
@@ -985,8 +988,11 @@ def _fused_cat_kernel(inputs, dim, dtype):
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
-    if len(inputs) == 1:
-        return clone(inputs[0])
+
+    dtype = get_promoted_dtype(
+        *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    inputs = [to_dtype(inp, dtype) for inp in inputs]
 
     dim = _validate_dim(inputs[0], dim, 0)
     dim_sizes = [t.get_size()[dim] for t in inputs]
@@ -998,7 +1004,9 @@ def cat(inputs, dim=0):
         size = list(t.get_size())
         size[dim] = output_size[dim]  # Ignore the cat dimension
 
-        assert size == output_size, "Cat size mismatch"
+        assert len(size) == len(output_size)
+        for in_size, out_size in zip(size, output_size):
+            V.graph.sizevars.guard_equals(in_size, out_size)
 
     # Drop inputs with no values
     orignal_inputs = inputs
@@ -1006,6 +1014,8 @@ def cat(inputs, dim=0):
         t for t in inputs
         if not V.graph.sizevars.statically_known_equals(t.get_size()[dim], 0)
     ]
+    if len(inputs) == 1:
+        return clone(inputs[0])
     if len(inputs) == 0:
         return zeros_like(original_inputs[0])
 
