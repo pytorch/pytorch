@@ -1,22 +1,13 @@
 import torch
 
+import torch._inductor.config as cfg
 
-def _torch_compile_supported(device):
-    import torch._dynamo
-
-    compile_supported = torch._dynamo.is_dynamo_supported()
-    if device.type == "cpu":
-        pass
-    elif device.type == "cuda" and compile_supported:
-        from torch._inductor.utils import has_triton
-
-        compile_supported = has_triton()
-    else:
-        compile_supported = False
-    return compile_supported
+cfg.aggressive_fusion = True
 
 
-def _sparse_semi_structured_from_dense_kernel(dense):
+# Assumes that dense argument is a matrix in 2:4 sparsity pattern.
+@torch.compile
+def sparse_semi_structured_from_dense(dense):
     if dense.dim() != 2:
         raise RuntimeError(
             f"Expected 2-dimensional dense tensor, got {dense.dim()}-dimensional tensor"
@@ -198,7 +189,8 @@ def _sparse_semi_structured_from_dense_kernel(dense):
     return (sparse, meta_reordered)
 
 
-def _sparse_semi_structured_to_dense_kernel(sparse, meta_reordered):
+@torch.compile
+def sparse_semi_structured_to_dense(sparse, meta_reordered):
     if sparse.dim() != 2:
         raise RuntimeError(
             f"Expected 2-dimensional sparse tensor, got {sparse.dim()}-dimensional tensor"
@@ -310,30 +302,3 @@ def _sparse_semi_structured_to_dense_kernel(sparse, meta_reordered):
     dense.scatter_(0, dense_offsets, sparse.view(-1))
 
     return dense.view(m, 2 * k)
-
-
-# Assumes that dense argument is a matrix in 2:4 sparsity pattern.
-def sparse_semi_structured_from_dense(dense):
-    if not _torch_compile_supported(dense.device):
-        return _sparse_semi_structured_from_dense_kernel(dense)
-
-    import torch._inductor.config as cfg
-
-    cfg.aggressive_fusion = True
-
-    kernel = torch.compile(_sparse_semi_structured_from_dense_kernel)
-
-    return kernel(dense)
-
-
-def sparse_semi_structured_to_dense(sparse, meta):
-    if not _torch_compile_supported(sparse.device):
-        return _sparse_semi_structured_to_dense_kernel(sparse, meta)
-
-    import torch._inductor.config as cfg
-
-    cfg.aggressive_fusion = True
-
-    kernel = torch.compile(_sparse_semi_structured_to_dense_kernel)
-
-    return kernel(sparse, meta)

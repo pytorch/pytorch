@@ -4,12 +4,6 @@ from typing import Any, Optional
 
 import torch
 
-from torch.sparse._semi_structured_conversions import (
-    sparse_semi_structured_from_dense,
-    sparse_semi_structured_to_dense,
-)
-
-
 __all__ = [
     "SparseSemiStructuredTensor",
 ]
@@ -19,8 +13,8 @@ _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
 )
 _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG = {
     torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32, 64),
+    torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32, 64),
     torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(10, 32, 128),
-    # FIXME: suport for torch.bfloat should be enabled here.
 }
 
 _WARNING_SHOWN = False
@@ -33,7 +27,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     depending on the datatype. It is also referred to as 2:4 sparsity or fine-grained
     structured sparsity.
 
-    Currently, this class supports 2:4 sparsity for int8 and float16 dtypes.
+    Currently, this class supports 2:4 sparsity for int8, float16 and bfloat16 dtypes.
 
     This subclass stores the dense tensor in a compressed form by only storing the specified elements and corresponding metadata.
     These two are stored next to each other in one contiguous tensor.
@@ -183,6 +177,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 device=original_tensor.device,
             )
 
+            from torch.sparse._semi_structured_conversions import sparse_semi_structured_from_dense
+
             sparse, meta = sparse_semi_structured_from_dense(original_tensor)
             compressed_tensor[: m * n // 2] = sparse.view(-1)
             compressed_tensor[m * n // 2 :] = meta.view(original_tensor.dtype).view(-1)
@@ -310,7 +306,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             # the metadata is expected to be in different datatypes for fp16/int8 respectively for CUTLASS.
             if args[0].dtype is torch.int8:
                 return metadata.view(torch.int32)
-            elif args[0].dtype is torch.float16:
+            elif args[0].dtype in (torch.float16, torch.bfloat16):
                 return metadata.view(torch.int16)
 
         error_string = "\n".join(
@@ -322,4 +318,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     def to_dense(self):
         sparse = self.values().clone()
         meta = self.indices().clone()
+
+        from torch.sparse._semi_structured_conversions import sparse_semi_structured_to_dense
+
         return sparse_semi_structured_to_dense(sparse, meta)

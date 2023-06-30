@@ -264,8 +264,8 @@ class TestSparseSemiStructured(TestCase):
             if activation == "silu" and dtype == torch.int8:
                 continue  # SiLU not supported for integer inputs
 
-            m = 2 ** m * 128
-            n = 2 ** n * 128
+            m = 2 ** m * 32
+            n = 2 ** n * 32
             k = 2 ** k * 128
             run_test(batch_shape, m, n, k, device, dtype, dtype_out[dtype], add_bias, activation, rtol, atol)
 
@@ -282,7 +282,7 @@ class TestSparseSemiStructured(TestCase):
             torch.testing.assert_close(dense, dense_ref, rtol=0, atol=0)
 
         for (r, c) in itertools.product(range(4), range(4)):
-            r = (r + 1) * 128
+            r = (r + 1) * 32
             c = (c + 1) * 128
             run_test(r, c, device, dtype)
 
