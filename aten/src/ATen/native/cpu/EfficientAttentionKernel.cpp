@@ -276,10 +276,6 @@ void cpu_efficient_attention_backward(
   using Vec = vec::Vectorized<scalar_t>;
   scalar_t scaling_factor = sdp::calculate_scale(query, scale).as_float_unchecked();
 
-  // make sure grad_out has no zero strides (broadcasted dimensions)
-  // since we are going to call gemm next
-  auto grad_out_ = grad_out.contiguous();
-
   // sizes
   int64_t B = query.size(0);
   int64_t M = query.size(1);
@@ -327,7 +323,7 @@ void cpu_efficient_attention_backward(
   scalar_t* grad_q_data = grad_q.data_ptr<scalar_t>();
   scalar_t* grad_k_data = grad_k.data_ptr<scalar_t>();
   scalar_t* grad_v_data = grad_v.data_ptr<scalar_t>();
-  scalar_t* grad_o_data = grad_out_.data_ptr<scalar_t>();
+  scalar_t* grad_o_data = grad_out.data_ptr<scalar_t>();
 
   // allocate per thread temp buffer
   int64_t size_per_thread =
@@ -351,6 +347,9 @@ void cpu_efficient_attention_backward(
     // grad_attn_v: (kQueriesPerBlock, kKeysPerBlock)
     scalar_t* grad_attn_v = attn_v + kQueriesPerBlock * kKeysPerBlock;
 
+    // rowsum of grad_out * out
+    scalar_t sum[kQueriesPerBlock];
+
     for (const auto i : c10::irange(begin, end)) {
       (void)i; // Suppress unused variable
 
@@ -362,6 +361,16 @@ void cpu_efficient_attention_backward(
         scalar_t* out_ptr = out_data + b * o_strideB + m * o_strideM + h * o_strideH;
         scalar_t* grad_o_ptr = grad_o_data + b * gO_strideB + m * gO_strideM + h * gO_strideH;
         scalar_t* grad_q_ptr = grad_q_data + b * gQ_strideB + m * gQ_strideM + h * gQ_strideH;
+
+        // sum <- rowsum(grad_out * out)
+        for (const auto row : c10::irange(block_size_m)) {
+          sum[row] = vec::map2_reduce_all<scalar_t>(
+              [](Vec x, Vec y) { return x * y; },
+              [](Vec x, Vec y) { return x + y; },
+              grad_o_ptr + row * gO_strideM,
+              out_ptr + row * o_strideM,
+              Kv);
+        }
 
         // loop over Q and V sequence with block size of kKeysPerBlock
         int64_t num_keys = is_causal ? std::min(m + block_size_m, N) : N;
@@ -441,16 +450,9 @@ void cpu_efficient_attention_backward(
               grad_attn_v,
               kKeysPerBlock);
 
-          // calculat the rowsum of grad_out * out
           // grad_attn_v <- attn_v * (grad_attn_v - rowsum)
           for (const auto row : c10::irange(block_size_m)) {
-            scalar_t s = vec::map2_reduce_all<scalar_t>(
-                [](Vec x, Vec y) { return x * y; },
-                [](Vec x, Vec y) { return x + y; },
-                grad_o_ptr + row * gO_strideM,
-                out_ptr + row * o_strideM,
-                Kv);
-
+            scalar_t s = sum[row];
             vec::map2<scalar_t>(
                 [s](Vec attn, Vec grad_attn) { return attn * (grad_attn - Vec(s)); },
                 grad_attn_v + row * kKeysPerBlock,
@@ -530,8 +532,13 @@ void efficient_attention_backward_kernel_impl(
     const Tensor& logsumexp,
     bool is_causal,
     c10::optional<double> scale) {
+  // make sure grad_out has no zero strides (broadcasted dimensions)
+  // since we are going to call gemm next
+  // zero stride in leading dimension would lead to slow impl for gemm
+  auto grad_out_contig = grad_out.contiguous();
+
   AT_DISPATCH_FLOATING_TYPES(query.scalar_type(), "efficient_attention_backward", [&] {
-    cpu_efficient_attention_backward<scalar_t, 128, 256>(grad_q, grad_k, grad_v, grad_out, query, key, value, out, logsumexp, is_causal, scale);
+    cpu_efficient_attention_backward<scalar_t, 128, 256>(grad_q, grad_k, grad_v, grad_out_contig, query, key, value, out, logsumexp, is_causal, scale);
   });
 }
 
