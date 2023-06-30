@@ -70,8 +70,10 @@ namespace {
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
+#if !defined(CPU_CAPABILITY_DEFAULT) && !defined(_MSC_VER)
     using Quantization8BitWithTailTestedTypes =
         ::testing::Types<vqint8, vquint8>;
+#endif
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
@@ -104,9 +106,11 @@ namespace {
     TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatTestedTypes);
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
+#if !defined(CPU_CAPABILITY_DEFAULT) && !defined(_MSC_VER)
     TYPED_TEST_SUITE(
         Quantization8BitWithTailTests,
         Quantization8BitWithTailTestedTypes);
+#endif
     TYPED_TEST_SUITE(FunctionalTests, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(FunctionalTestsReducedFloat, ReducedFloatTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
@@ -1142,12 +1146,10 @@ namespace {
             if (AssertVectorized<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
         } //trials;
     }
+#if !defined(CPU_CAPABILITY_DEFAULT) && !defined(_MSC_VER)
+    // This testcase aim to test at::vec::QuantizeAvx512 and
+    // at::vec::QuantizeAVX2 which do not support CPU_CAPABILITY_DEFAULT case
     TYPED_TEST(Quantization8BitWithTailTests, QuantizeTile) {
-#if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
-      // This testcase aim to test at::vec::QuantizeAvx512 and
-      // at::vec::QuantizeAVX2 which do not support CPU_CAPABILITY_DEFAULT case
-      return;
-#endif
       using vec = TypeParam;
       using underlying = ValueType<vec>;
       constexpr int trials = 4000;
@@ -1187,7 +1189,7 @@ namespace {
           }
           float_ret[j] = vfloat::loadu(unit_float_vec);
         }
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
         at::vec::QuantizeAvx512(
             (float*)float_ret.data(),
             actual_qint_vals,
@@ -1195,7 +1197,7 @@ namespace {
             inv_scale,
             zero_point_val);
 #endif
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
         at::vec::QuantizeAvx2(
             (float*)float_ret.data(),
             actual_qint_vals,
@@ -1212,6 +1214,7 @@ namespace {
           return;
       } // trials;
     }
+#endif
     TYPED_TEST(QuantizationTests, DeQuantize) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
