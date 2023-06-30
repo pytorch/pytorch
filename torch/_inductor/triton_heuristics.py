@@ -723,6 +723,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
                 [
                     triton_config(size_hints, bs, num_elements_per_warp=256),
                     triton_config(size_hints, bs // 2, num_elements_per_warp=64),
+                    triton_config(size_hints, bs // 4, num_elements_per_warp=32),
                 ],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
