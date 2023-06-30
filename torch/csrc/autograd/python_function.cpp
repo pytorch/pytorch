@@ -1159,7 +1159,7 @@ int THPFunction_set_materialize_non_diff_grads(
   HANDLE_TH_ERRORS
   if (!PyBool_Check(value)) {
     THPUtils_invalidArguments(
-        value, nullptr, "set_materialize_grads", 1, "(bool)");
+        value, nullptr, "set_materialize_non_diff_grads", 1, "(bool)");
     return -1;
   }
   self->materialize_non_diff_grads = (value == Py_True);
