@@ -3477,7 +3477,7 @@ def grid_sampler_2d_backward_meta(
 
 @register_meta([aten.full.default])
 def full(size, fill_value, *args, **kwargs):
-    return torch.empty(size, *args, **kwargs)
+    return torch.empty(size, *args, dtype=utils.get_dtype(fill_value), **kwargs)
 
 
 # zeros_like is special cased to work for sparse

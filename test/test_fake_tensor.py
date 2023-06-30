@@ -205,6 +205,14 @@ class FakeTensorTest(TestCase):
 
         self.assertTrue(isinstance(out, FakeTensor))
 
+    def test_full(self):
+        # Test torch.full returns tensor with correct dtype
+        with FakeTensorMode():
+            y = torch.full((4, 4), 1)
+
+        self.assertTrue(isinstance(y, FakeTensor))
+        self.assertTrue(y.dtype == torch.int64)
+
     def check_function_with_fake(self, fn):
         out = fn()
         with torch._subclasses.FakeTensorMode():
