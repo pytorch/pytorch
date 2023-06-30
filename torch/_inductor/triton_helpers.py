@@ -126,42 +126,28 @@ def bucketize_binary_search(
     indexing_dtype,
     right,  # bool: if true, use intervals closed on the right
     OFFSETS_SIZE: int,
-    BLOCK_SHAPE,
+    BLOCK_SHAPE,  # tuple/list of block shape
 ):
     """
     See [Note: Inductor bucketize op]
     """
+
     low = tl.zeros(BLOCK_SHAPE, dtype=indexing_dtype)
-    high = tl.full(BLOCK_SHAPE, OFFSETS_SIZE - 1, dtype=indexing_dtype)
+    high = tl.full(BLOCK_SHAPE, OFFSETS_SIZE, dtype=indexing_dtype)
 
-    max_val = tl.load(offsets_ptr + OFFSETS_SIZE - 1)
-    min_val = tl.load(offsets_ptr)
-
-    full_range = OFFSETS_SIZE
-
+    full_range = OFFSETS_SIZE + 1
     while full_range > 1:
-        mid = (high + low + 1) // 2
-        bucket_lower_bound = tl.load(offsets_ptr + mid)
+        mid = (high + low) // 2
+        mask = mid < OFFSETS_SIZE
+        bucket_upper_bound = tl.load(offsets_ptr + mid, mask=mask)
         if right:
-            is_possible = values > bucket_lower_bound
+            is_above = (values > bucket_upper_bound)
         else:
-            is_possible = values >= bucket_lower_bound
+            is_above = (values >= bucket_upper_bound)
 
-        low = tl.where(is_possible, mid, low)
-        high = tl.where(is_possible, high, mid - 1)
+        low = tl.where(is_above & mask, mid + 1, low)
+        high = tl.where(is_above, high, mid)
 
         full_range = (full_range + 1) // 2
 
-    result = low + 1
-
-    if right:
-        below_min = values <= min_val
-        above_max = values > max_val
-    else:
-        below_min = values < min_val
-        above_max = values >= max_val
-
-    result = tl.where(below_min, 0, result)
-    result = tl.where(above_max, OFFSETS_SIZE, result)
-
-    return result
+    return low

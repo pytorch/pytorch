@@ -1323,14 +1323,6 @@ class TritonKernel(Kernel):
         sizes[-1] = "None"
         return f"{value}[{', '.join(sizes)}]"
 
-    def reduction_size_str(self):
-        if self.no_x_dim:
-            return ""
-        else:
-            sizes = [":" for _ in self.range_trees]
-            sizes[-1] = "None"
-            return f"[{', '.join(sizes)}]"
-
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))

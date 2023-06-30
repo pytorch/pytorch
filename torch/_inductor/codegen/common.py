@@ -855,13 +855,13 @@ class Kernel(CodeGen):
                 Given values (tensor) and offsets_name (reference to the name of a 1D
                 tensor), calculate the bucket that each value belongs to.
 
-                e.g. for values [-1, 0, 1, 2, 3, 4, 5, 9], offsets [0, 4, 8], right=False
-                return =        [ 0, 1, 1, 1, 1, 2, 2, 3].
+                e.g. for values [-1, 0, 1, 2, 3, 4, 5, 9], offsets [0, 4, 4, 8], right=False
+                return =        [ 0, 1, 1, 1, 1, 3, 3, 4].
 
                 When right == False, bucket i refers to range [offsets[i], offsets[i+1]).
                 When right == True,  bucket i refers to range (offsets[i], offsets[i+1]].
 
-                Offsets must be increasing or else return value is undefined.
+                Offsets must be non-decreasing or the result is undefined.
 
                 Note: semantics of this op differ slightly from torch.bucketize:
                 "right" has the opposite meaning.
