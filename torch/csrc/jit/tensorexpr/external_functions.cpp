@@ -894,7 +894,7 @@ void nnc_aten_quantized_sigmoid(
   memcpy(buf_data[0], r.const_data_ptr(), r.element_size() * r.numel());
 }
 
-static void nnc_aten_quantized_sigmoid_out(
+void nnc_aten_quantized_sigmoid_out(
     int64_t bufs_in_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1375,7 +1375,7 @@ void nnc_aten_addmm(
 
 // Only provides first output, the second output is just a copy of one of the
 // inputs
-static void nnc_aten_triangular_solve(
+void nnc_aten_triangular_solve(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1423,7 +1423,7 @@ void nnc_mkldnn_prepacked_conv_run(
 
 #ifdef USE_XNNPACK
 
-static void nnc_prepacked_linear_clamp_run(
+void nnc_prepacked_linear_clamp_run(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1446,7 +1446,7 @@ static void nnc_prepacked_linear_clamp_run(
       output.element_size() * output.numel());
 }
 
-static void nnc_prepacked_conv2d_clamp_run(
+void nnc_prepacked_conv2d_clamp_run(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -1471,7 +1471,7 @@ static void nnc_prepacked_conv2d_clamp_run(
 
 #endif // USE_XNNPACK
 
-static void nnc_aten_embedding(
+void nnc_aten_embedding(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,

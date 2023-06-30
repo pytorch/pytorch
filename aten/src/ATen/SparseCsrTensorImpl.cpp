@@ -101,20 +101,16 @@ void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
   refresh_numel();
 }
 
-void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size) {
+void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
       "resize_and_clear_ called on tensor with symbolic shape");
-  TORCH_CHECK(sparse_dim >= 2, "resize_and_clear_ sparse dimensionality must be at least 2, got ", sparse_dim);
-  TORCH_CHECK(static_cast<int64_t>(size.size()) >= sparse_dim, "resize_and_clear_ size length must be at least sparse dimensionality (=",
-              sparse_dim, "), got ", size.size());
-  auto batch_dim = sparse_dim - 2;
+  TORCH_CHECK(sparse_dim == 2, "resize_and_clear_ sparse dimensionality must be 2, got ", sparse_dim);
+  TORCH_CHECK(static_cast<int64_t>(size.size()) >= sparse_dim + dense_dim, "resize_and_clear_ size length must be at least sparse dimensionality (=",
+              sparse_dim, ") plus dense dimensionality (=", dense_dim, "), got ", size.size());
+  auto batch_dim = size.size() - sparse_dim - dense_dim;
   auto batchsize = size.slice(0, batch_dim);
-  auto densesize = size.slice(batch_dim + 2, size.size() - batch_dim - 2);
-
-  auto values_size = DimVector(batchsize);
-  values_size.push_back(0); // nse
-  values_size.append(densesize.begin(), densesize.end());
+  auto densesize = size.slice(batch_dim + sparse_dim, dense_dim);
 
   auto col_indices_size = DimVector(batchsize);
   col_indices_size.push_back(0); // nse
@@ -123,14 +119,26 @@ void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size
                                                                         [&] () -> int64_t { return size[batch_dim]; },
                                                                         [&] () -> int64_t { return size[batch_dim + 1]; }
                                                                         );
+  auto values_size = DimVector(batchsize);
+  values_size.push_back(0); // nse
+  // WARNING: in the case of block tensors, the block size is defined
+  // by the existing values shape.
+  int64_t block_factor = 1;
   AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout_,
                                               "resize_and_clear_",
                                               [] () {},
                                               [&] () {
                                                 auto blocksize = this->values_.sizes().slice(this->batch_dim() + 1, 2);
                                                 values_size.append(blocksize.begin(), blocksize.end());
-                                                n_compressed_indices /= blocksize[(the_layout == kSparseBsr ? 0 : 1)];
+                                                block_factor = blocksize[(the_layout == kSparseBsr ? 0 : 1)];
+
                                               });
+  TORCH_CHECK(n_compressed_indices % block_factor == 0,
+              "The size of the compressed dimension (=", n_compressed_indices,
+              ") must be divisible with the corresponding block size (=", block_factor,")");
+  n_compressed_indices /= block_factor;
+  values_size.append(densesize.begin(), densesize.end());
+
   auto crow_indices_size = DimVector(batchsize);
   crow_indices_size.push_back(n_compressed_indices + 1);
 

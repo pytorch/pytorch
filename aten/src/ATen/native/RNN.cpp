@@ -9,6 +9,8 @@
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <c10/core/GradMode.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -1313,7 +1315,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
         std::move(packed_output.data), std::move(std::get<1>(result)));     \
   }
 #define ONE_HIDDEN_QRNN(NAME, CELL)                                         \
-  std::tuple<Tensor, Tensor> NAME##_input(                                  \
+  static std::tuple<Tensor, Tensor> NAME##_input(                           \
       const Tensor& _input,                                                 \
       const Tensor& hx,                                                     \
       c10::List<c10::intrusive_ptr<CellParamsBase>> _params,                \
@@ -1343,7 +1345,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
     return results;                                                         \
   }                                                                         \
                                                                             \
-  std::tuple<Tensor, Tensor> NAME##_data(                                   \
+  static std::tuple<Tensor, Tensor> NAME##_data(                            \
       const Tensor& data,                                                   \
       const Tensor& batch_sizes,                                            \
       const Tensor& hx,                                                     \
@@ -1688,7 +1690,7 @@ Tensor rnn_relu_cell(
 // an int8 or float16 quantized weight. This is advantageous in small-batch-size
 // scenarios where runtime is dominated by memory fetches of the weight matrix.
 
-std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
+static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
     const Tensor& _input,
     c10::List<at::Tensor> hx_,
     c10::List<c10::intrusive_ptr<CellParamsBase>> _params_,
@@ -1761,7 +1763,7 @@ static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
       "using the newer definitions in torch.jit.quantized");
 }
 
-std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
+static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
     const Tensor& data,
     const Tensor& batch_sizes,
     c10::List<at::Tensor> hx_,

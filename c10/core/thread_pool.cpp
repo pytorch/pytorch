@@ -1,4 +1,5 @@
 #include <c10/core/thread_pool.h>
+#include <c10/util/Logging.h>
 
 namespace c10 {
 

@@ -188,7 +188,12 @@ COALESCED_UNARY_UFUNC(sqrt);
 COALESCED_UNARY_UFUNC(tan);
 COALESCED_UNARY_UFUNC(tanh);
 COALESCED_UNARY_UFUNC(trunc);
+// relu function has no declaration, it may be unused in Pytorch.
+// But we keep it and ignore the warning here until verified in the future.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
 COALESCED_UNARY_UFUNC(relu);
+#pragma clang diagnostic pop
 
 COALESCED_UNARY_UFUNC_NO_INPLACE(signbit);
 COALESCED_UNARY_UFUNC_NO_INPLACE(isneginf);
