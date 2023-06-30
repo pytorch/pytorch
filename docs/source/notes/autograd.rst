@@ -184,7 +184,7 @@ decorators.
      - ✓
      - ✓
      - ✓
-     - Training models
+     - Forward pass
    * - no-grad
      -
      -
