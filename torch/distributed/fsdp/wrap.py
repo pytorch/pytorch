@@ -60,15 +60,14 @@ def _post_order_apply(
             if child_module not in visited_modules:
                 visited_modules.add(child_module)
                 _post_order_apply_inner(child_module, child_module_name, module)
-        if module in target_module_to_kwargs:
+        if module in target_module_to_kwargs and module is not root_module:
+            assert module_name != "", (
+                "Non-root modules should have their module name set but got "
+                f"an empty module name for {module}"
+            )
             kwargs = target_module_to_kwargs[module]
             new_module = fn_to_apply(module, **kwargs)
-            if parent_module is not None:
-                assert module_name != "", (
-                    "Non-root modules should have their module name set but "
-                    f"got an empty module name for {module}"
-                )
-                setattr(parent_module, module_name, new_module)
+            setattr(parent_module, module_name, new_module)
 
     _post_order_apply_inner(root_module, "", None)
 
