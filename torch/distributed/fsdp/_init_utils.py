@@ -1,4 +1,5 @@
 import collections
+import itertools
 import warnings
 from typing import (
     Any,
@@ -884,10 +885,10 @@ def _materialize_meta_module(
             for module in modules_to_materialize:
                 # As a contract to the user, only call `reset_parameters()` if
                 # the module has directly managed parameters/buffers
-                has_module_states = (
-                    len(list(module.parameters(recurse=False))) > 0
-                    or len(list(module.buffers(recurse=False))) > 0
+                module_state_iter = itertools.chain(
+                    module.parameters(recurse=False), module.buffers(recurse=False)
                 )
+                has_module_states = len(list(module_state_iter)) > 0
                 if has_module_states:
                     module.to_empty(device=materialization_device, recurse=False)
                     module.reset_parameters()  # type: ignore[operator]

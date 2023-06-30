@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import itertools
 import sys
 
 from typing import Union
@@ -109,11 +110,14 @@ def _init_with_reset_params(module: nn.Module):
     to_empty + reset_parameters() init function example for modules
     initailized with device="meta"
     """
-    has_meta_states = any(p.is_meta for p in module.parameters(recurse=False)) or any(
-        b.is_meta for b in module.buffers(recurse=False)
+    has_meta_states = any(
+        t.is_meta
+        for t in itertools.chain(
+            module.parameters(recurse=False), module.buffers(recurse=False)
+        )
     )
-    device = torch.device("cuda", torch.cuda.current_device())
     if has_meta_states:
+        device = torch.device("cuda", torch.cuda.current_device())
         module.to_empty(device=device, recurse=False)
         module.reset_parameters()
 
