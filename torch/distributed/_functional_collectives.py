@@ -5,7 +5,8 @@ import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from typing import Tuple, Union, List, cast, TYPE_CHECKING
 from torch.utils._pytree import tree_map_only
-from ._functional_collectives_impl import _all_reduce, _register_wrapper_tensor
+from . import _functional_collectives_impl as fun_col_impl
+from ._functional_collectives_impl import _register_wrapper_tensor
 from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
@@ -481,10 +482,9 @@ def _register_ops():
     ]
 
     my_module = sys.modules[__name__]
-    impl_module = sys.modules[_all_reduce.__module__]
     for op_def in ops_defs:
         op_name = op_def[0:op_def.index('(')]
-        backend_impl = getattr(impl_module, f"_{op_name}")
+        backend_impl = getattr(fun_col_impl, f"_{op_name}")
         meta_impl = getattr(my_module, f"_{op_name}_meta")
         c10_lib.define(op_def)
         c10_lib_impl.impl(op_name, backend_impl, "CompositeExplicitAutograd")
