@@ -16,8 +16,8 @@ from torch.ao.quantization._pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization._pt2e.quantizer.utils import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
-    _node_used_for_sym_size,
-    _filter_sym_size_nodes,
+    _is_sym_size_node,
+    _node_only_used_for_sym_size,
     get_bias_qspec,
     get_input_act_qspec,
     get_output_act_qspec,
@@ -520,7 +520,9 @@ class QNNPackQuantizer(Quantizer):
         for module_or_fn_type, partitions in module_partitions.items():
             for p in partitions:
                 act_nodes = [
-                    n for n in p.input_nodes if not _node_used_for_sym_size(n, p.nodes)
+                    n
+                    for n in p.input_nodes
+                    if not _node_only_used_for_sym_size(n, p.nodes)
                 ]
                 if len(act_nodes) > 1:
                     raise ValueError(
@@ -548,17 +550,15 @@ class QNNPackQuantizer(Quantizer):
                 # are annotated.
                 # This is not specific to linear, so in future diffs we should streamline
                 # this.
-                act_node_users = _filter_sym_size_nodes(act_node.users)
+                act_node_users = list(
+                    filter((lambda x: (_is_sym_size_node(x) == False)), act_node.users)
+                )
                 act_use_node_in_p = set(act_node_users).intersection(set(p.nodes))
-                if len(act_use_node_in_p) > 1:
+                if len(act_use_node_in_p) != 1:
                     raise ValueError(
-                        f"Found more than one use of act node. All uses {act_use_node_in_p}"
+                        f"Could not find a valid use of act node. All uses {act_use_node_in_p}"
                     )
                 act_use_node = act_use_node_in_p.pop()
-                if act_use_node is None:
-                    raise ValueError(
-                        "Could not find an user of act node within matched pattern."
-                    )
                 if _is_annotated([act_use_node]) is False:  # type: ignore[list-item]
                     _annotate_input_qspec_map(
                         act_use_node,

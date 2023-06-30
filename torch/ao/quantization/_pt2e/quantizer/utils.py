@@ -83,15 +83,11 @@ def _annotate_output_qspec(node: Node, qspec):
     node.meta["quantization_annotation"] = quantization_annotation
 
 
-def _filter_sym_size_nodes(nodes: List[Node]):
-    return [
-        n
-        for n in nodes
-        if not (n.op == "call_function" and n.target == torch.ops.aten.sym_size)
-    ]
+def _is_sym_size_node(node: Node):
+    return node.op == "call_function" and node.target == torch.ops.aten.sym_size
 
 
-def _node_used_for_sym_size(node: Node, partition_nodes: List[Node]):
+def _node_only_used_for_sym_size(node: Node, partition_nodes: List[Node]):
     """
     This utility is used to handle cases when dynami_shape=True tracing leads
     to symint nodes in the pattern of linear module. In those cases, we need to
@@ -107,16 +103,9 @@ def _node_used_for_sym_size(node: Node, partition_nodes: List[Node]):
        return mm(view_out, weight)
     In the example above y node is not actual input. It exist only to extract size_1
     """
-    if node.op == "call_function" and node.target == torch.ops.aten.sym_size:
+    if _is_sym_size_node(node):
         return True
 
     if len(set(node.users).intersection(set(partition_nodes))) == 0:
         raise ValueError(f"Node {node} is not used by any nodes in partition")
-    used_by_symnode = True
-    for user in node.users:
-        if user in partition_nodes:
-            if user.op != "call_function" or user.target != torch.ops.aten.sym_size:
-                # Only if the user is inside the partition
-                # and is used by nodes other than symint nodes
-                used_by_symnode = False
-    return used_by_symnode
+    return all(_is_sym_size_node(user) for user in node.users)
