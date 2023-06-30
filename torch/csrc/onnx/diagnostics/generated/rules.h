@@ -106,10 +106,10 @@ enum class Rule : uint32_t {
   kOpLevelDebugging,
 
   /**
-   * @brief Can not find the perfect match symbolic function with op schema, but
-   * find the nearest match one.
+   * @brief Find the OnnxFunction that matches the input dtypes by comparing
+   * them with their opschemas.
    */
-  kNearestMatchSymbolicFunction,
+  kFindOpschemaMatchedSymbolicFunction,
 
   /**
    * @brief The formatted str for argument to display is too verbose.
@@ -135,7 +135,7 @@ static constexpr const char* const kPyRuleNames[] = {
     "no_symbolic_function_for_call_function",
     "unsupported_fx_node_analysis",
     "op_level_debugging",
-    "nearest_match_symbolic_function",
+    "find_opschema_matched_symbolic_function",
     "arg_format_too_verbose",
 };
 

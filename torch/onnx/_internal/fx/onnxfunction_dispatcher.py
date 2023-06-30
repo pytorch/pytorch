@@ -48,7 +48,7 @@ class _TensorLike(Protocol):
 
 
 @_beartype.beartype
-def _nearest_match_disagnostic_message_formatter(
+def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
     fn: Callable,
     self,
     node: torch.fx.Node,
@@ -148,8 +148,8 @@ class OnnxFunctionDispatcher:
 
     @_beartype.beartype
     @diagnostics.diagnose_call(
-        diagnostics.rules.nearest_match_symbolic_function,
-        diagnostic_message_formatter=_nearest_match_disagnostic_message_formatter,
+        diagnostics.rules.find_opschema_matched_symbolic_function,
+        diagnostic_message_formatter=_find_opschema_matched_symbolic_function_disagnostic_message_formatter,
     )
     def _find_the_perfect_or_nearest_match_onnxfunction(
         self,
