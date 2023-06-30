@@ -311,13 +311,14 @@ class TestAutograd(TestCase):
         x = torch.ones(1, requires_grad=True)
         torch._C._functions.UndefinedGrad()(MyFunction.apply(x)).backward()
 
-    def test_dont_materialize_grads_non_differentiable_output(self):
+    def test_set_materialize_non_diff_grads(self):
         class Func(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
                 out0 = x.clone()
                 out1 = x.clone()
                 ctx.mark_non_differentiable(out1)
+                ctx._materialize_non_diff_grads = False
                 return out0, out1
 
             @staticmethod
@@ -2674,7 +2675,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, grad_a, grad_b):
-                self.assertIsNone(grad_a)
+                self.assertTrue((grad_a == 0).all())
                 self.assertTrue((grad_b == 1).all())
                 return grad_b
 

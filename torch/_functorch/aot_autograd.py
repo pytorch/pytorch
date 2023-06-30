@@ -2981,7 +2981,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             contiguous_args = [
                 t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args
             ]
-            num_contiguous_args = len(contiguous_args)
 
             rng_args = []
             if CompiledFunction.metadata.is_rng_op_functionalized:
@@ -2996,9 +2995,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
             def call_compiled_backward():
                 if CompiledFunction.compiled_bw is None:
-                    # Some grad_outs in contiguous_args can be None if the corresponding output
-                    # has marked non-differentiable
-                    assert all(a is not None for a in all_args[:-num_contiguous_args])
+                    assert all(a is not None for a in all_args)
                     context = disable_autocast_manager if disable_amp else nullcontext
                     with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
