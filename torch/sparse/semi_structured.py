@@ -12,9 +12,9 @@ _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
     "_SEMI_STRUCTURED_SPARSE_CONFIG", "compression_factor min_rows min_cols"
 )
 _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG = {
+    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(10, 32, 128),
     torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32, 64),
     torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32, 64),
-    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(10, 32, 128),
 }
 
 _WARNING_SHOWN = False
@@ -85,6 +85,16 @@ class SparseSemiStructuredTensor(torch.Tensor):
         kwargs["requires_grad"] = False  # type: ignore[assignment]
 
         return torch.Tensor._make_wrapper_subclass(cls, original_shape, **kwargs)  # type: ignore[attr-defined]
+
+    @staticmethod
+    def __get_indices_dtype(values_dtype):
+        if values_dtype == torch.int8:
+            return torch.int32
+        elif values_dtype in (torch.float16, torch.bfloat16):
+            return torch.int16
+        else:
+            raise RuntimeError(f"Datatype {values_dtype}  is not supported!")
+        return None
 
     def __init__(
         self,
@@ -304,10 +314,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
             metadata = args[0].compressed_tensor[num_kept_elements:].view(m, -1)
 
             # the metadata is expected to be in different datatypes for fp16/int8 respectively for CUTLASS.
-            if args[0].dtype is torch.int8:
-                return metadata.view(torch.int32)
-            elif args[0].dtype in (torch.float16, torch.bfloat16):
-                return metadata.view(torch.int16)
+            indices_dtype = SparseSemiStructuredTensor.__get_indices_dtype(args[0].dtype)
+            return metadata.view(indices_dtype)
 
         error_string = "\n".join(
             [f"func {func} with args: "]
@@ -316,9 +324,15 @@ class SparseSemiStructuredTensor(torch.Tensor):
         raise NotImplementedError(error_string)
 
     def to_dense(self):
-        sparse = self.values().clone()
-        meta = self.indices().clone()
+        if self.compressed_tensor is None:
+            raise RuntimeError("Compressed tensor is not set, cannot convert to dense!")
+
+        m, n = self.shape
+        indices_dtype = SparseSemiStructuredTensor.__get_indices_dtype(self.dtype)
 
         from torch.sparse._semi_structured_conversions import sparse_semi_structured_to_dense
 
-        return sparse_semi_structured_to_dense(sparse, meta)
+        return sparse_semi_structured_to_dense(
+            self.compressed_tensor[: m * n // 2].view(m, -1),
+            self.compressed_tensor[m * n // 2 :].view(indices_dtype).view(m, -1)
+        )
