@@ -614,33 +614,31 @@ class TestTyping(JitTestCase):
         # Sometimes it will show all annotations; other times it will show only annotations
         # that show in that class, not classes it inherits fro.
         class BaseModule(torch.nn.Module):
-	    state: List[int]
+            state: List[int]
 
-	    @abc.abstractmethod
-	    def forward(self, x):
-		"""
-		docstring
-		"""
+            @abc.abstractmethod
+            def forward(self, x):
+                pass
 
-	def do_something_with_list(x: List[int]):
-	    if x:
-		return x[-1]
-	    return 5
+        def do_something_with_list(x: List[int]):
+            if x:
+                return x[-1]
+            return 5
 
-	class Submodule(BaseModule):
-	    def __init__(self, self_x_value):
-		super().__init__()
-		self.x = self_x_value
-		self.state = []
+        class Submodule(BaseModule):
+            def __init__(self, self_x_value):
+                super().__init__()
+                self.x = self_x_value
+                self.state = []
 
-	    def forward(self, x):
-		return self.x + x + do_something_with_list(self.state)
+            def forward(self, x):
+                return self.x + x + do_something_with_list(self.state)
 
-	class LowestModule(Submodule):
-	    def __init__(self):
-		super().__init__(123)
+        class LowestModule(Submodule):
+            def __init__(self):
+                super().__init__(123)
 
-	mod = LowestModule()
-	mod2 = LowestModule()
-	mod_s = torch.jit.script(mod)
+        mod = LowestModule()
+        mod2 = LowestModule()
+        mod_s = torch.jit.script(mod)
         mod2_s = torch.jit.script(mod2)
