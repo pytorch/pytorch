@@ -11,7 +11,6 @@ from typing import (
     cast,
     Dict,
     Generator,
-    Iterable,
     List,
     no_type_check,
     Optional,

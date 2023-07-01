@@ -105,7 +105,7 @@ def _get_fsdp_handles(module: nn.Module) -> List:
     """
     handles = [
         fsdp_state._handle
-        for fsdp_state in _get_fsdp_states(module) if fsdp_state._handle is not None
+        for fsdp_state in _get_fsdp_states(module)
+        if fsdp_state._handle is not None
     ]
-    print("got handles:", handles)
     return handles

@@ -161,9 +161,7 @@ class _ExecOrderData:
         self.handles_to_post_forward_order_index[handles_key] = index
         self.handles_post_forward_order.append(handles_key)
 
-    def record_pre_forward(
-        self, handle: FlatParamHandle, is_training: bool
-    ) -> None:
+    def record_pre_forward(self, handle: FlatParamHandle, is_training: bool) -> None:
         """
         Records ``handles`` in the pre-forward order, where ``handles`` should
         be a group of handles used in the same module's forward. If ``handles``
@@ -177,10 +175,7 @@ class _ExecOrderData:
         self._check_order(handle, is_training)
         # Fix the order after the first iteration and only record the first
         # usage of a handles key
-        if (
-            not self.is_first_iter
-            or handle in self.handles_to_pre_forward_order_index
-        ):
+        if not self.is_first_iter or handle in self.handles_to_pre_forward_order_index:
             return
         index = len(self.handles_pre_forward_order)
         self.handles_to_pre_forward_order_index[handle] = index

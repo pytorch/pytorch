@@ -36,8 +36,8 @@ from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
 from torch.distributed.fsdp._utils import _no_dispatch_record_stream
 from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.fsdp.flat_param import (
-    FlatParamHandle,
     FlatParameter,
+    FlatParamHandle,
     FlatParamHandle,
     HandleShardingStrategy,
     HandleTrainingState,
@@ -383,7 +383,7 @@ def _reshard(
     the corresponding handle should free its padded unsharded flat parameter.
     """
     if not handle:
-        return    
+        return
     handle.reshard(free_unsharded_flat_param)
     if state.limit_all_gathers and free_unsharded_flat_param:
         free_event = state._device_handle.Event()
@@ -447,8 +447,10 @@ def _pre_forward(
         # the `grad_fn` is mutated.
         _register_post_backward_hooks(state, handle)
 
-        should_cast_forward_inputs = state._handle and not state._handle._force_full_precision
-        
+        should_cast_forward_inputs = (
+            state._handle and not state._handle._force_full_precision
+        )
+
         if should_cast_forward_inputs and state.mixed_precision.cast_forward_inputs:
             # Recursively convert args and kwargs to specified precision.
             input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
@@ -529,8 +531,8 @@ def _post_forward_reshard(
     # with the intention that they are immediately used for backward
     # computation (though this may not be true)
     free_unsharded_flat_param = (
-        handle and
-        not state._is_root
+        handle
+        and not state._is_root
         and handle._sharding_strategy in RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
     )
     _reshard(state, handle, free_unsharded_flat_param)
@@ -574,7 +576,6 @@ def _root_pre_forward(
         handle = state._handle
         if handle and handle._force_full_precision:
             should_cast_buffers_to_full_prec = True
-            
 
         if should_cast_buffers_to_full_prec:
             _cast_buffers_to_dtype_and_device(
@@ -640,8 +641,8 @@ def _root_pre_forward(
 @no_type_check
 def _root_cast_forward_input(state: _FSDPState, args, kwargs) -> Tuple[Any, Any]:
     should_cast_forward_inputs = (
-        state._handle and 
-        not state._handle._force_full_precision
+        state._handle
+        and not state._handle._force_full_precision
         and state.mixed_precision.cast_root_forward_inputs
     )
 
@@ -1030,7 +1031,7 @@ def _catch_all_reshard(
     # Wrap with a try-except to provide a more informative traceback if an
     # error is raised
     try:
-        if state._handle:            
+        if state._handle:
             # TODO: This already-resharded check is brittle:
             # https://github.com/pytorch/pytorch/issues/83956
             already_resharded = (
@@ -1063,8 +1064,7 @@ def _finalize_params(
         if hasattr(flat_param, "_post_backward_hook_state"):
             post_backward_hook_state_len = len(flat_param._post_backward_hook_state)
             _p_assert(
-                post_backward_hook_state_len == 1
-                or post_backward_hook_state_len == 2,
+                post_backward_hook_state_len == 1 or post_backward_hook_state_len == 2,
                 f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
             )
             flat_param._post_backward_hook_state[-1].remove()
@@ -1106,9 +1106,7 @@ def _prefetch_handle(
     elif prefetch_mode == _PrefetchMode.FORWARD:
         handle._training_state = HandleTrainingState.FORWARD
     else:
-        raise ValueError(
-            f"Invalid prefetch mode on rank {state.rank}: {prefetch_mode}"
-        )
+        raise ValueError(f"Invalid prefetch mode on rank {state.rank}: {prefetch_mode}")
     # Prefetch the next set of handles without synchronizing to allow
     # the sync to happen as late as possible to maximize overlap
     _unshard(state, handle, state._streams_unshard, state._streams_pre_unshard)
@@ -1149,20 +1147,22 @@ def _get_handle_to_prefetch(
         training_state == HandleTrainingState.BACKWARD_POST
         and state.backward_prefetch == BackwardPrefetch.BACKWARD_POST
     ):
-        target_handles_key_candidate = eod.get_handle_to_backward_prefetch(current_handles_key)
-        if (
-            state._needs_pre_backward_unshard.get(target_handles_key_candidate, False)
-            and not state._handles_prefetched.get(target_handles_key_candidate, False)
-        ):
+        target_handles_key_candidate = eod.get_handle_to_backward_prefetch(
+            current_handles_key
+        )
+        if state._needs_pre_backward_unshard.get(
+            target_handles_key_candidate, False
+        ) and not state._handles_prefetched.get(target_handles_key_candidate, False):
             target_handles_key = target_handles_key_candidate
         else:
             target_handles_key = None
     elif training_state == HandleTrainingState.FORWARD and state.forward_prefetch:
-        target_handles_key_candidate = eod.get_handle_to_forward_prefetch(current_handles_key)
-        if (
-            state._needs_pre_forward_unshard.get(target_handles_key_candidate, False)
-            and not state._handles_prefetched.get(target_handles_key_candidate, False)
-        ):
+        target_handles_key_candidate = eod.get_handle_to_forward_prefetch(
+            current_handles_key
+        )
+        if state._needs_pre_forward_unshard.get(
+            target_handles_key_candidate, False
+        ) and not state._handles_prefetched.get(target_handles_key_candidate, False):
             target_handles_key = target_handles_key_candidate
         else:
             target_handles_key = None

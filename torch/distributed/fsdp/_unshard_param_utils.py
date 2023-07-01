@@ -1,6 +1,6 @@
 import contextlib
 import warnings
-from typing import cast, Generator, List
+from typing import cast, Generator
 
 import torch
 import torch.distributed.fsdp._traversal_utils as traversal_utils
@@ -43,6 +43,7 @@ def _writeback_to_local_shard(
     """
     if not handle:
         return
+
     def _get_shard(flat_param_or_grad: torch.Tensor) -> torch.Tensor:
         if handle.uses_sharded_strategy:
             # For sharded strategies, get the *unpadded* shard instead of
@@ -134,9 +135,7 @@ def _validate_unshard_params_args(
             f"offload_to_cpu={offload_to_cpu} "
             f"is not supported yet"
         )
-    if offload_to_cpu and state._handle and (
-        not state._handle.uses_sharded_strategy
-    ):
+    if offload_to_cpu and state._handle and (not state._handle.uses_sharded_strategy):
         raise NotImplementedError(
             "offload_to_cpu=True and NO_SHARD is not supported yet"
         )
@@ -173,7 +172,9 @@ def _unshard_fsdp_state_params(
     )
     state._device_handle.synchronize()
     # If handles are shared by other module(s), the handle may be already unsharded.
-    handle = _module_handle(state, module) if handle._training_state != HandleTrainingState.SUMMON_FULL_PARAMS else None
+    handle = _module_handle(state, module)
+    if handle._training_state == HandleTrainingState.SUMMON_FULL_PARAMS:
+        handle = None
     if not handle:
         yield
         return

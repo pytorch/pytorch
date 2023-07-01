@@ -5,7 +5,7 @@ import copy
 import functools
 import sys
 from enum import auto, Enum
-from typing import Callable, Iterable, List, Tuple
+from typing import Callable, List, Tuple
 
 import torch
 import torch.distributed as dist
