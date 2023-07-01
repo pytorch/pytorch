@@ -492,7 +492,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
-        except:
+        except AttributeError:
             return getattr(self._fsdp_wrapped_module, name)
 
     def __getitem__(self, key: int) -> Any:
@@ -791,13 +791,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         ):
             args, kwargs = _root_pre_forward(self, self, args, kwargs)
             unused = None
+            unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
+            reshard_fn = functools.partial(_post_forward_reshard, self, self._handles)
             args, kwargs = _pre_forward(
-                self,
-                self._handles,
-                _pre_forward_unshard,
-                self._fsdp_wrapped_module,
-                args,
-                kwargs,
+                self, self._handles, unshard_fn, self._fsdp_wrapped_module, args, kwargs
             )
             for handle in self._handles:
                 _p_assert(
@@ -806,9 +803,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     f"{self.compute_device} but got {handle.flat_param.device}",
                 )
             output = self._fsdp_wrapped_module(*args, **kwargs)
-            return _post_forward(
-                self, self._handles, _post_forward_reshard, self, unused, output
-            )
+            return _post_forward(self, self._handles, reshard_fn, self, unused, output)
 
     @staticmethod
     @contextlib.contextmanager
@@ -927,7 +922,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     def named_buffers(
         self,
-        prefix: str = '', recurse: bool = True, remove_duplicate: bool = True,
+        *args,
+        **kwargs,
     ) -> Iterator[Tuple[str, torch.Tensor]]:
         """
         Overrides :meth:`named_buffers()` to intercept buffer names and
@@ -935,7 +931,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         when inside the :meth:`summon_full_params` context manager.
         """
         should_clean_name = self.training_state == TrainingState.SUMMON_FULL_PARAMS
-        for buffer_name, buffer in super().named_buffers(prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate):
+        for buffer_name, buffer in super().named_buffers(*args, **kwargs):
             if should_clean_name:
                 # Remove any instances of the FSDP-specific prefix; there can
                 # be multiple in the case of nested FSDP modules

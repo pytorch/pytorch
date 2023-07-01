@@ -2418,7 +2418,10 @@ class FlatParamHandle:
         msg_prefix = "Expects tensor to be unsharded "
         _p_assert(tensor is not None, msg_prefix + "but got `None`")
         unsharded_size = self.flat_param._unpadded_unsharded_size
-        _p_assert(tensor.size() == unsharded_size, "its fucked")
+        _p_assert(
+            tensor.size() == unsharded_size,
+            msg_prefix + f"with size {unsharded_size} but got {tensor.size()}",
+        )
 
     def _check_sharded(self, tensor: Tensor):
         msg_prefix = "Expects tensor to be sharded "

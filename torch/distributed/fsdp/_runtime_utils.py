@@ -447,7 +447,7 @@ def _pre_forward(
         for handle in handles:
             handle._training_state = HandleTrainingState.FORWARD
         if unshard_fn is not None:
-            unshard_fn(state, handles)
+            unshard_fn()
         # Register post-backward hooks to reshard the parameters and reduce-scatter
         # their gradients. They must be re-registered every forward pass in case
         # the `grad_fn` is mutated.
@@ -516,7 +516,7 @@ def _post_forward(
     with torch.profiler.record_function("FullyShardedDataParallel._post_forward"):
         state._exec_order_data.record_post_forward(handles)
         if reshard_fn is not None:
-            reshard_fn(state, handles)
+            reshard_fn()
         # Register pre-backward hooks to unshard the flat parameters for the
         # gradient computation (if needed)
         output = _register_pre_backward_hooks(state, module, output, handles)
@@ -579,11 +579,9 @@ def _root_pre_forward(
         # We cast buffers back to full precision if we're forcing full precision. Disjointly, we check if buffers
         # are in full precision and if we should cast them back to lower precision, which happens when
         # exiting eval() mode.
-        should_cast_buffers_to_full_prec = False
-        for handle in state._handles:
-            if handle._force_full_precision:
-                should_cast_buffers_to_full_prec = True
-                break
+        should_cast_buffers_to_full_prec = any(
+            handle._force_full_precision for handle in state._handles
+        )
 
         if should_cast_buffers_to_full_prec:
             _cast_buffers_to_dtype_and_device(

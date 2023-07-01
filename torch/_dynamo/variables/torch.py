@@ -14,7 +14,6 @@ import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value, get_real_value
 from torch._dynamo.variables import SymNodeVariable, UserFunctionVariable
-from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.user_defined import ProcessGroupVariable
 from torch._guards import GuardsCheckpointState, Source
 from torch.utils import _pytree as pytree
@@ -94,7 +93,6 @@ if torch.distributed.is_available():
 
     from torch.distributed.distributed_c10d import (
         _get_group_tag,
-        _rank_not_in_group,
         get_process_group_ranks,
     )
 
@@ -102,7 +100,6 @@ if torch.distributed.is_available():
         [
             get_process_group_ranks,
             _get_group_tag,
-            _rank_not_in_group,
         ]
     )
 
@@ -164,9 +161,6 @@ class TorchVariable(VariableTracker):
             and value in tensor_dunder_fns_remap
         ):
             value = tensor_dunder_fns_remap[value]
-
-        if isinstance(value, dict):
-            raise RuntimeError("Nope")
 
         self.value = value
 
@@ -552,9 +546,7 @@ class TorchVariable(VariableTracker):
             # We desugar it at trace-time into ranks by directly calling util
             # bake the result into the trace
             assert len(args) == 1, "Expected one arg (pg)"
-            assert isinstance(
-                args[0], ProcessGroupVariable
-            ), f"Expected PG, got {args[0]}"
+            assert isinstance(args[0], ProcessGroupVariable)
             return ConstantVariable(self.value(args[0].as_python_constant()))
         elif self.value == torch.nn.init._calculate_correct_fan:
             return UserFunctionVariable(
@@ -640,7 +632,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
                 if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
                     unimplemented("torch.tensor call with list of unspec")
-            print("INVOKING ", fn_, self)
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -780,14 +771,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return variables.LambdaVariable(handle_ntuple, **options)
         else:
             return handle_ntuple(args[0])
-
-    def call_method(
-        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
-    ) -> VariableTracker:
-        print(
-            "CALLING METHOD ON TORCHVARIABLE", self.value, name, args[0].value, kwargs
-        )
-        return super().call_method(tx, name, args, kwargs)
 
 
 def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
