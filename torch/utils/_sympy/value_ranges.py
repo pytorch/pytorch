@@ -494,18 +494,6 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         return self.default_handler
 
 
-# Implements Python semantics for 'ValueRangeAnalysis'.
-# Reasoning about guards relies on Python operator semantics.
-class PythonValueRangeAnalysis(ValueRangeAnalysis):
-    def __init__(self):
-        super().__init__()
-        self.name = "PythonValueRangeAnalysis"
-
-    @staticmethod
-    def div(a, b):
-        return PythonValueRangeAnalysis.floordiv(a, b)
-
-
 def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> ValueRanges:
     # CeilDiv does not occur in practice
     return sympy_interp(SymPyValueRangeAnalysis(), ranges, expr)
