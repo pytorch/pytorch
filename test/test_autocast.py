@@ -227,8 +227,8 @@ class TestAutocastGPU(TestCase):
 
 class TestTorchAutocast(TestCase):
     def test_autocast_fast_dtype(self):
-        gpu_fast_dtype = torch.get_autocast_gpu_dtype()
-        cpu_fast_dtype = torch.get_autocast_cpu_dtype()
+        gpu_fast_dtype = torch.get_autocast_dtype(device="cuda")
+        cpu_fast_dtype = torch.get_autocast_dtype(device="cpu")
         self.assertEqual(gpu_fast_dtype, torch.half)
         self.assertEqual(cpu_fast_dtype, torch.bfloat16)
 
@@ -239,6 +239,14 @@ class TestTorchAutocast(TestCase):
             with torch.autocast(device_type=dev):
                 _ = torch.tensor(1)
 
+        msg = "AMP does not supported for"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            meta_fast_dtype = torch.get_autocast_dtype(device="meta")
+
+    def test_deprecated_func(self):
+        msg = "get_autocast_gpu_dtype()` is deprecated as of PyTorch"
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            gpu_fast_dtype = torch.get_autocast_gpu_dtype()
 
 if __name__ == '__main__':
     run_tests()

@@ -238,6 +238,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.set_autocast_gpu_dtype,
         torch.get_autocast_xla_dtype,
         torch.set_autocast_xla_dtype,
+        torch.get_autocast_dtype,
+        torch.set_autocast_dtype,
         torch.autocast_increment_nesting,
         torch.autocast_decrement_nesting,
         torch.is_autocast_cache_enabled,

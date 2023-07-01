@@ -455,19 +455,85 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 namespace torch {
 namespace autograd {
 
-static PyObject* set_autocast_enabled(PyObject* _unused, PyObject* arg) {
+static PyObject* set_autocast_enabled(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  static PythonArgParser parser({
+      "set_autocast_enabled(bool enabled, Device? device=None)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto device = r.isNone(1) ? at::Device(c10::DeviceType::CUDA) : r.device(1);
+  auto enabled = r.toBool(0);
+  switch (device.type()) {
+    case c10::DeviceType::CUDA:
+      at::autocast::set_enabled(enabled);
+      break;
+    case c10::DeviceType::CPU:
+      at::autocast::set_cpu_enabled(enabled);
+      break;
+    case c10::DeviceType::PrivateUse1:
+      at::autocast::set_privateuseone_enabled(enabled);
+      break;
+    case c10::DeviceType::XLA:
+      at::autocast::set_xla_enabled(enabled);
+      break;
+    case c10::DeviceType::XPU:
+      at::autocast::set_xpu_enabled(enabled);
+      break;
+    case c10::DeviceType::IPU:
+      at::autocast::set_ipu_enabled(enabled);
+      break;
+    case c10::DeviceType::HPU:
+      at::autocast::set_hpu_enabled(enabled);
+      break;
+    default:
+      TORCH_CHECK(false, "AMP does not support for ", device.type());
   }
-  at::autocast::set_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* is_autocast_enabled(PyObject* _unused, PyObject* arg) {
+static PyObject* is_autocast_enabled(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_enabled()) {
+  static PythonArgParser parser({
+      "is_autocast_enabled(Device? device=None)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto device = r.isNone(0) ? at::Device(c10::DeviceType::CUDA) : r.device(0);
+  auto is_enabled = false;
+  switch (device.type()) {
+    case c10::DeviceType::CUDA:
+      is_enabled = at::autocast::is_enabled();
+      break;
+    case c10::DeviceType::CPU:
+      is_enabled = at::autocast::is_cpu_enabled();
+      break;
+    case c10::DeviceType::PrivateUse1:
+      is_enabled = at::autocast::is_privateuseone_enabled();
+      break;
+    case c10::DeviceType::XLA:
+      is_enabled = at::autocast::is_xla_enabled();
+      break;
+    case c10::DeviceType::XPU:
+      is_enabled = at::autocast::is_xpu_enabled();
+      break;
+    case c10::DeviceType::IPU:
+      is_enabled = at::autocast::is_ipu_enabled();
+      break;
+    case c10::DeviceType::HPU:
+      is_enabled = at::autocast::is_hpu_enabled();
+      break;
+    default:
+      TORCH_CHECK(false, "AMP does not support for ", device.type());
+  }
+  if (is_enabled) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -479,7 +545,7 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_enabled() || at::autocast::is_cpu_enabled() ||
       at::autocast::is_xpu_enabled() || at::autocast::is_ipu_enabled() ||
-      at::autocast::is_xla_enabled()) {
+      at::autocast::is_xla_enabled() || at::autocast::is_privateuseone_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -489,6 +555,8 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_ONCE("`set_autocast_cpu_enabled(enabled)` is deprecated as of PyTorch 2.1, ",
+      "please use `set_autocast_enabled(enabled, device)` instead.");
   if (!PyBool_Check(arg)) {
     throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
   }
@@ -499,6 +567,8 @@ static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* is_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_ONCE("`is_autocast_cpu_enabled()` is deprecated as of PyTorch 2.1, ",
+      "please use `is_autocast_enabled(device)` instead.");
   if (at::autocast::is_cpu_enabled()) {
     Py_RETURN_TRUE;
   } else {
@@ -507,48 +577,94 @@ static PyObject* is_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
+static PyObject* set_autocast_dtype(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  static PythonArgParser parser({
+      "set_autocast_dtype(ScalarType dtype, Device? device=None)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto target_type = r.scalartype(0);
+  auto device = r.isNone(1) ? at::Device(c10::DeviceType::CUDA) : r.device(1);
+  switch (device.type()) {
+    case c10::DeviceType::CUDA:
+      at::autocast::set_autocast_gpu_dtype(target_type);
+      break;
+    case c10::DeviceType::CPU:
+      at::autocast::set_autocast_cpu_dtype(target_type);
+      break;
+    case c10::DeviceType::PrivateUse1:
+      at::autocast::set_autocast_privateuseone_dtype(target_type);
+      break;
+    case c10::DeviceType::XLA:
+      at::autocast::set_autocast_xla_dtype(target_type);
+      break;
+    case c10::DeviceType::XPU:
+      at::autocast::set_autocast_xpu_dtype(target_type);
+      break;
+    case c10::DeviceType::IPU:
+      at::autocast::set_autocast_ipu_dtype(target_type);
+      break;
+    case c10::DeviceType::HPU:
+      at::autocast::set_autocast_hpu_dtype(target_type);
+      break;
+    default:
+      TORCH_CHECK(false, "AMP does not supported for ", device.type());
   }
-  at::autocast::set_ipu_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* is_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
+static PyObject* get_autocast_dtype(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_ipu_enabled()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
+  static PythonArgParser parser({
+      "get_autocast_dtype(Device? device=None)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto device = r.isNone(0) ? at::Device(c10::DeviceType::CUDA) : r.device(0);
+  auto dtype = at::kHalf;
+  switch (device.type()) {
+    case c10::DeviceType::CUDA:
+      dtype = at::autocast::get_autocast_gpu_dtype();
+      break;
+    case c10::DeviceType::CPU:
+      dtype = at::autocast::get_autocast_cpu_dtype();
+      break;
+    case c10::DeviceType::PrivateUse1:
+      dtype = at::autocast::get_autocast_privateuseone_dtype();
+      break;
+    case c10::DeviceType::XLA:
+      dtype = at::autocast::get_autocast_xla_dtype();
+      break;
+    case c10::DeviceType::XPU:
+      dtype = at::autocast::get_autocast_xpu_dtype();
+      break;
+    case c10::DeviceType::IPU:
+      dtype = at::autocast::get_autocast_ipu_dtype();
+      break;
+    case c10::DeviceType::HPU:
+      dtype = at::autocast::get_autocast_hpu_dtype();
+      break;
+    default:
+      TORCH_CHECK(false, "AMP does not supported for ", device.type());
   }
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* set_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
-  at::autocast::set_xla_enabled(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* is_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (at::autocast::is_xla_enabled()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
+  auto py_dtype = (PyObject*)torch::getTHPDtype(dtype);
+  Py_INCREF(py_dtype);
+  return py_dtype;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* set_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_ONCE("`set_autocast_gpu_dtype(dtype)` is deprecated as of PyTorch 2.1, ",
+      "please use `set_autocast_dtype(dtype, device)` instead.");
   if (!THPDtype_Check(arg)) {
     throw TypeError(
         "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
@@ -561,6 +677,8 @@ static PyObject* set_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_ONCE("`set_autocast_cpu_dtype(dtype)` is deprecated as of PyTorch 2.1, ",
+      "please use `set_autocast_dtype(dtype, device)` instead.");
   if (!THPDtype_Check(arg)) {
     throw TypeError(
         "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
@@ -571,32 +689,10 @@ static PyObject* set_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (!THPDtype_Check(arg)) {
-    throw TypeError(
-        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
-  }
-  at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
-  at::autocast::set_autocast_ipu_dtype(targetType);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* set_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (!THPDtype_Check(arg)) {
-    throw TypeError(
-        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
-  }
-  at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
-  at::autocast::set_autocast_xla_dtype(targetType);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_ONCE("`get_autocast_gpu_dtype()` is deprecated as of PyTorch 2.1, ",
+      "please use `get_autocast_dtype(device)` instead.");
   at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
   Py_INCREF(dtype);
@@ -606,25 +702,9 @@ static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* get_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_ONCE("`get_autocast_cpu_dtype()` is deprecated as of PyTorch 2.1, ",
+      "please use `get_autocast_dtype(device)` instead.");
   at::ScalarType current_dtype = at::autocast::get_autocast_cpu_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* get_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_ipu_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* get_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_xla_dtype();
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
   Py_INCREF(dtype);
   return dtype;
@@ -931,8 +1011,14 @@ static PyMethodDef methods[] = { // NOLINT
      is_inference_mode_enabled,
      METH_NOARGS,
      nullptr},
-    {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
-    {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
+    {"set_autocast_enabled",
+     castPyCFunctionWithKeywords(set_autocast_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"is_autocast_enabled",
+     castPyCFunctionWithKeywords(is_autocast_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_is_any_autocast_enabled", is_any_autocast_enabled, METH_NOARGS, nullptr},
     {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
     {"set_autocast_cpu_enabled", set_autocast_cpu_enabled, METH_O, nullptr},
@@ -941,14 +1027,14 @@ static PyMethodDef methods[] = { // NOLINT
     {"get_autocast_cpu_dtype", get_autocast_cpu_dtype, METH_NOARGS, nullptr},
     {"set_autocast_gpu_dtype", set_autocast_gpu_dtype, METH_O, nullptr},
     {"get_autocast_gpu_dtype", get_autocast_gpu_dtype, METH_NOARGS, nullptr},
-    {"set_autocast_xla_enabled", set_autocast_xla_enabled, METH_O, nullptr},
-    {"is_autocast_xla_enabled", is_autocast_xla_enabled, METH_NOARGS, nullptr},
-    {"set_autocast_xla_dtype", set_autocast_xla_dtype, METH_O, nullptr},
-    {"get_autocast_xla_dtype", get_autocast_xla_dtype, METH_NOARGS, nullptr},
-    {"set_autocast_ipu_enabled", set_autocast_ipu_enabled, METH_O, nullptr},
-    {"is_autocast_ipu_enabled", is_autocast_ipu_enabled, METH_NOARGS, nullptr},
-    {"set_autocast_ipu_dtype", set_autocast_ipu_dtype, METH_O, nullptr},
-    {"get_autocast_ipu_dtype", get_autocast_ipu_dtype, METH_NOARGS, nullptr},
+    {"set_autocast_dtype",
+    castPyCFunctionWithKeywords(set_autocast_dtype),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"get_autocast_dtype",
+    castPyCFunctionWithKeywords(get_autocast_dtype),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"autocast_increment_nesting",
      autocast_increment_nesting,
      METH_NOARGS,

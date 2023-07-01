@@ -157,21 +157,14 @@ def set_device_states(devices, states) -> None:
 
 
 def _get_autocast_kwargs(device="cuda"):
-
-    if device == "cuda":
-        device_autocast_kwargs = {
-            "enabled": torch.is_autocast_enabled(),
-            "dtype": torch.get_autocast_gpu_dtype(),
-            "cache_enabled": torch.is_autocast_cache_enabled(),
-        }
-    else:
-        device_module = _get_device_module(device)
-        device_autocast_kwargs = {
-            "enabled": device_module.is_autocast_enabled(),
-            "dtype": device_module.get_autocast_dtype(),
-            "cache_enabled": torch.is_autocast_cache_enabled(),
-        }
-
+    # for device which does not support autocast, just to get the default cuda state
+    if device not in torch.amp.autocast_mode._get_autocast_support_devices():
+        device = "cuda"
+    device_autocast_kwargs = {
+        "enabled": torch.is_autocast_enabled(device=device),
+        "dtype": torch.get_autocast_dtype(device=device),
+        "cache_enabled": torch.is_autocast_cache_enabled(),
+    }
     cpu_autocast_kwargs = {
         "enabled": torch.is_autocast_cpu_enabled(),
         "dtype": torch.get_autocast_cpu_dtype(),
