@@ -37,7 +37,7 @@ class FbGemmPackOp final : public Operator<Context> {
         axis_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
         no_packing_(
             this->template GetSingleArgument<int32_t>("no_packing", 0)) {}
-  ~FbGemmPackOp() {}
+  ~FbGemmPackOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(0);

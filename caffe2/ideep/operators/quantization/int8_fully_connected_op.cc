@@ -26,8 +26,8 @@ public:
     }
     Y_scales_ = ConvertScales({scale_});
   }
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~IDEEPInt8FullyConnectedOp() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~IDEEPInt8FullyConnectedOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(INPUT);
