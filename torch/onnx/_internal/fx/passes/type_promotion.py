@@ -875,7 +875,7 @@ _EXTRA_TYPE_PROMOTION_RULE_SET = {
         promote_kwargs_names=(),
         promotion_kind=_prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     ),
-    # TODO: torch.ops.aten.div.Tensor_mode applies different type promotion rules
+    # torch.ops.aten.div.Tensor_mode applies different type promotion rules
     # depending on the value of the `mode` argument.
     DivTypePromotionRule(),
 }
