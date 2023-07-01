@@ -33,7 +33,7 @@ def hook3(gI, gO):
 
 
 class TestCompiledAutograd(TestCase):
-    def _common(self, fn, count=1):
+    def check_output_and_recompiles(self, fn, count=1):
         with torch.autograd.set_multithreading_enabled(False):
             torch._dynamo.reset()
             counters["compiled_autograd"].clear()
@@ -62,7 +62,7 @@ class TestCompiledAutograd(TestCase):
             yield model[2].weight.grad
             yield model[2].bias.grad
 
-        self._common(fn)
+        self.check_output_and_recompiles(fn)
 
     def test_cache_hit(self):
         def fn():
@@ -81,7 +81,7 @@ class TestCompiledAutograd(TestCase):
                 yield model[2].weight.grad
                 yield model[2].bias.grad
 
-        self._common(fn)
+        self.check_output_and_recompiles(fn)
 
     def test_tensor_grad_hook1(self):
         def fn():
@@ -99,7 +99,7 @@ class TestCompiledAutograd(TestCase):
                 yield model[0].weight.grad
                 yield model[0].bias.grad
 
-        self._common(fn)
+        self.check_output_and_recompiles(fn)
 
     def test_tensor_grad_hook2(self):
         def fn():
@@ -116,7 +116,7 @@ class TestCompiledAutograd(TestCase):
                 yield model[0].weight.grad
                 yield model[0].bias.grad
 
-        self._common(fn)
+        self.check_output_and_recompiles(fn)
 
     def test_tensor_grad_hook3(self):
         def fn():
@@ -133,7 +133,7 @@ class TestCompiledAutograd(TestCase):
                 yield model[0].weight.grad
                 yield model[0].bias.grad
 
-        self._common(fn)
+        self.check_output_and_recompiles(fn)
 
     def test_torch_compile(self):
         def fn():
@@ -152,7 +152,7 @@ class TestCompiledAutograd(TestCase):
                 yield model[0].bias.grad
                 model.zero_grad()
 
-        self._common(fn)
+        self.check_output_and_recompiles(fn)
 
     def test_implicit_add(self):
         def fn():
@@ -171,7 +171,7 @@ class TestCompiledAutograd(TestCase):
                 yield y.grad
                 y.grad = None
 
-        self._common(fn)
+        self.check_output_and_recompiles(fn)
 
     def test_output_nodes(self):
         def fn():
@@ -191,7 +191,7 @@ class TestCompiledAutograd(TestCase):
                 yield gy
                 yield gz
 
-        self._common(fn)
+        self.check_output_and_recompiles(fn)
 
     def test_dynamic_shapes(self):
         def fn():
@@ -214,7 +214,7 @@ class TestCompiledAutograd(TestCase):
                 model.zero_grad()
 
         # TODO(jansel): we should be able to get this count to 1
-        self._common(fn, count=2)
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_accumulate_without_zero(self):
         def fn():
@@ -236,7 +236,7 @@ class TestCompiledAutograd(TestCase):
                 yield model[2].weight.grad.clone()
                 yield model[2].bias.grad.clone()
 
-        self._common(fn, count=2)
+        self.check_output_and_recompiles(fn, count=2)
 
 
 if __name__ == "__main__":

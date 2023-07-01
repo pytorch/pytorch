@@ -97,6 +97,8 @@ struct TORCH_API Identity : public Node {
   variable_list apply(variable_list&& inputs) override;
 };
 
+// A node that adds its inputs to produce a single output.
+// Used by Compiled Autograd to encodes multiple edges being implicitly added
 struct TORCH_API ImplicitAdd : public Node {
   variable_list apply(variable_list&& inputs) override;
 

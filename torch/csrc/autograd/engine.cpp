@@ -1194,6 +1194,7 @@ auto Engine::execute(
   compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
 
   if (the_compiled_autograd != nullptr) {
+    // see [Note: Compiled Autograd]
     TORCH_CHECK(!keep_graph, "compiled_autograd does not support keep_graph");
     TORCH_CHECK(
         !create_graph, "compiled_autograd does not support create_graph");

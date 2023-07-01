@@ -560,8 +560,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   }
 
 #ifdef COMPILED_AUTOGRAD
+  // see [Note: Compiled Autograd]
   // Used by compiled autograd to
-  //   1) Extract tenstor/symint args
+  //   1) Extract tensors/symint args
   //   2) Collect node information for specialization and caching
   virtual void compiled_args(CompiledNodeArgs& args) {
     throw std::runtime_error(

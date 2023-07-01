@@ -1,6 +1,8 @@
 #include <torch/csrc/autograd/compiled_autograd.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 
+// see [Note: Compiled Autograd]
+
 namespace torch {
 namespace autograd {
 

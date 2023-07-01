@@ -19,7 +19,8 @@ struct TORCH_API FunctionPreHook {
   virtual variable_list operator()(const variable_list& grads) = 0;
   virtual void compiled_args(CompiledNodeArgs& args) {
     throw std::runtime_error(
-        std::string("compiled_args nyi ") + typeid(*this).name());
+        std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
+        typeid(*this).name());
   }
 };
 
@@ -30,7 +31,8 @@ struct TORCH_API FunctionPostHook {
       const variable_list& inputs /* grad_outputs */) = 0;
   virtual void compiled_args(CompiledNodeArgs& args) {
     throw std::runtime_error(
-        std::string("compiled_args nyi ") + typeid(*this).name());
+        std::string("compiled_args nyi, see [Note: Compiled Autograd] ") +
+        typeid(*this).name());
   }
 };
 

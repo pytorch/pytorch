@@ -63,6 +63,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 #ifdef COMPILED_AUTOGRAD
 void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
   at::Tensor& grad = variable.mutable_grad();
+  args.collect(grad.defined());
   if (grad.defined()) {
     args.collect(grad);
   }
