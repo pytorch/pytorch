@@ -426,6 +426,8 @@ def print_summary(filename, print_dataframe=False):
 def print_summary_table(data, print_dataframe=False):
     if print_dataframe:
         pd.options.display.max_rows = 1000
+        pd.options.display.max_columns = 1000
+        pd.options.display.width = 2000
         print(data)
     width = max(map(len, data.columns))
     for col in data.columns:
