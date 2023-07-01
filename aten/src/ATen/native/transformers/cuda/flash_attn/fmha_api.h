@@ -4,7 +4,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
 
-namespace fmha {
+namespace pytorch_fmha {
 
 TORCH_API
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>

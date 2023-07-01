@@ -6,6 +6,7 @@ from typing import Dict, Iterable, Union
 import sympy
 
 import torch
+from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 from .ir import InterpreterShim, LoopBody
 from .virtualized import V
@@ -92,6 +93,8 @@ class OptimizeIndexing:
         ]
 
         for k, v in indices_ranges.items():
+            if free_symbols(v):
+                v = math.inf
             self.replace_indirect(k, ValueRanges(0, v))
 
         # avoid computing these values, pessimistically assume that they are unbounded
