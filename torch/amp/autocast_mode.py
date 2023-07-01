@@ -215,13 +215,13 @@ class autocast:
         if self.custom_backend_name == self.device:
             self.device_supported_fast_dtype_map[self.custom_backend_name] = \
                 getattr(torch, self.device).get_amp_supported_dtype()
-        if self.fast_dtype not in self.device_supported_fast_dtype_map[self.device]:
-            supported_dtyps = self.device_supported_fast_dtype_map[self.device]
+        if self.device == "cuda" and enabled and self.fast_dtype == torch.bfloat16 \
+                and not torch.cuda.is_bf16_supported():
+            raise RuntimeError('Current CUDA Device does not support bfloat16. Please switch dtype to float16.')
+        supported_dtyps = self.device_supported_fast_dtype_map[self.device]
+        if self.device != "cuda" and self.fast_dtype not in supported_dtyps:
             error_message = f"In {self.device} autocast, but the target dtype is not supported. Disabling"
             error_message += f"autocast.\n {self.device} Autocast only supports {supported_dtyps} currently."
-            if self.device == "cuda" and enabled and self.fast_dtype == torch.bfloat16 \
-                    and not torch.cuda.is_bf16_supported():
-                raise RuntimeError('Current CUDA Device does not support bfloat16. Please switch dtype to float16.')
             warnings.warn(error_message)
             enabled = False
         self._enabled = enabled

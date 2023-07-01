@@ -391,16 +391,16 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             torch.is_autocast_enabled(),
         )
         global_state["autocast_cpu_enabled"] = (
-            torch.set_autocast_cpu_enabled,
-            torch.is_autocast_cpu_enabled(),
+            functools.partial(torch.set_autocast_enabled, device="cpu"),
+            torch.is_autocast_enabled(device="cpu"),
         )
         global_state["autocast_gpu_dtype"] = (
-            torch.set_autocast_gpu_dtype,
-            torch.get_autocast_gpu_dtype(),
+            functools.partial(torch.set_autocast_dtype, device="cuda"),
+            torch.get_autocast_dtype(device="cuda"),
         )
         global_state["autocast_cpu_dtype"] = (
-            torch.set_autocast_cpu_dtype,
-            torch.get_autocast_cpu_dtype(),
+            functools.partial(torch.set_autocast_dtype, device="cpu"),
+            torch.get_autocast_dtype(device="cpu"),
         )
         global_state["autocast_cache_enabled"] = (
             torch.set_autocast_cache_enabled,

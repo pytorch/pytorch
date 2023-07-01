@@ -556,7 +556,7 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_WARN_ONCE
+  TORCH_WARN_ONCE(
       "`set_autocast_cpu_enabled(enabled)` is deprecated as of PyTorch 2.1, ",
       "please use `set_autocast_enabled(enabled, device)` instead.");
   if (!PyBool_Check(arg)) {
