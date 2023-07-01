@@ -608,7 +608,7 @@ class TestTyping(JitTestCase):
         with self.assertRaisesRegex(ValueError, "at +File"):
             torch.jit.script(fn)
 
-    class test_inherited_annotations_python_310(self):
+    def test_inherited_annotations_python_310(self):
         # See #104484
         # In python >=3.10, inspect.get_annotations doesn't always return the same values.
         # Sometimes it will show all annotations; other times it will show only annotations
@@ -616,7 +616,6 @@ class TestTyping(JitTestCase):
         class BaseModule(torch.nn.Module):
             state: List[int]
 
-            @abc.abstractmethod
             def forward(self, x):
                 pass
 
