@@ -1,3 +1,4 @@
+import torch
 from torch.distributions import constraints
 from torch.distributions.transforms import PowerTransform
 from torch.distributions.gamma import Gamma
@@ -47,7 +48,8 @@ class InverseGamma(TransformedDistribution):
 
     @property
     def mean(self):
-        return self.rate / (self.concentration - 1)
+        result = self.rate / (self.concentration - 1)
+        return torch.where(self.concentration > 1, result, torch.inf)
 
     @property
     def mode(self):
@@ -55,7 +57,8 @@ class InverseGamma(TransformedDistribution):
 
     @property
     def variance(self):
-        return self.rate.square() / ((self.concentration - 1).square() * (self.concentration - 2))
+        result = self.rate.square() / ((self.concentration - 1).square() * (self.concentration - 2))
+        return torch.where(self.concentration > 2, result, torch.inf)
 
     def entropy(self):
         return self.concentration + self.rate.log() + self.concentration.lgamma() \
