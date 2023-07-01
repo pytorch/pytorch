@@ -577,6 +577,7 @@ def _init_param_handle_from_params(
     params: List[nn.Parameter],
     fully_sharded_module: nn.Module,
 ):
+    print("INIT CALLED!")
     if len(params) == 0:
         return
     handle = FlatParamHandle(
@@ -595,6 +596,7 @@ def _init_param_handle_from_params(
     assert not state._handle
     state.params.append(handle.flat_param)
     state._handle = handle
+    print(f"state {id(state)} handle set {id(handle)}")
     state._fully_sharded_module_to_handle[handle._fully_sharded_module] = handle
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:

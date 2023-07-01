@@ -854,6 +854,7 @@ def _register_state_dict_hooks_base(
         getattr(state, hook_registration_fn_name)(hook, **hook_registration_fn_kwargs)
     else:
         handle = state._handle
-        getattr(handle._fully_sharded_module, hook_registration_fn_name)(
-            hook, **hook_registration_fn_kwargs
-        )
+        if handle:
+            getattr(handle._fully_sharded_module, hook_registration_fn_name)(
+                hook, **hook_registration_fn_kwargs
+            )

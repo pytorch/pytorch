@@ -800,11 +800,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 kwargs,
             )
             handle = self._handle
-            _p_assert(
-                handle.flat_param.device == self.compute_device,
-                "Expected `FlatParameter` to be on the compute device "
-                f"{self.compute_device} but got {handle.flat_param.device}",
-            )
+            if handle:
+                _p_assert(
+                    handle.flat_param.device == self.compute_device,
+                    "Expected `FlatParameter` to be on the compute device "
+                    f"{self.compute_device} but got {handle.flat_param.device}",
+                )
             output = self._fsdp_wrapped_module(*args, **kwargs)
             return _post_forward(
                 self, self._handle, _post_forward_reshard, self, unused, output

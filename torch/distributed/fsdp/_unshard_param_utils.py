@@ -41,6 +41,8 @@ def _writeback_to_local_shard(
     Precondition: The handle's ``FlatParameter`` 's data points to the
     padded unsharded flattened parameter.
     """
+    if not handle:
+        return
     def _get_shard(flat_param_or_grad: torch.Tensor) -> torch.Tensor:
         if handle.uses_sharded_strategy:
             # For sharded strategies, get the *unpadded* shard instead of
@@ -132,7 +134,7 @@ def _validate_unshard_params_args(
             f"offload_to_cpu={offload_to_cpu} "
             f"is not supported yet"
         )
-    if offload_to_cpu and (
+    if offload_to_cpu and state._handle and (
         not state._handle.uses_sharded_strategy
     ):
         raise NotImplementedError(

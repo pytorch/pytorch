@@ -172,20 +172,19 @@ class _ExecOrderData:
         On the first iteration, this checks the execution order across ranks.
         See :meth:`_check_order` for details.
         """
-        if not handles:
+        if not handle:
             return
-        handles_key = handle
-        self._check_order(handles_key, is_training)
+        self._check_order(handle, is_training)
         # Fix the order after the first iteration and only record the first
         # usage of a handles key
         if (
             not self.is_first_iter
-            or handles_key in self.handles_to_pre_forward_order_index
+            or handle in self.handles_to_pre_forward_order_index
         ):
             return
         index = len(self.handles_pre_forward_order)
-        self.handles_to_pre_forward_order_index[handles_key] = index
-        self.handles_pre_forward_order.append(handles_key)
+        self.handles_to_pre_forward_order_index[handle] = index
+        self.handles_pre_forward_order.append(handle)
 
     def _check_order(self, handles_key: FlatParamHandle, is_training: bool) -> None:
         """
@@ -210,7 +209,7 @@ class _ExecOrderData:
             optional_local_indices: Tuple[
                 Optional[int], ...
             ] = self._get_handle_indices(handles_key)
-            device = handles_key[0].device  # guaranteed to be non-CPU
+            device = handles_key.device  # guaranteed to be non-CPU
             num_valid_indices = sum(
                 (index is not None) for index in optional_local_indices
             )
@@ -323,10 +322,11 @@ class _ExecOrderData:
         returned tuple is ``None`` if the handle is invalid.
         """
         indices: List[Optional[int]] = []
-        if handle not in self.handle_to_handle_index:
-            indices.append(None)
-        else:
-            indices.append(self.handle_to_handle_index[handle])
+        if handle:
+            if handle not in self.handle_to_handle_index:
+                indices.append(None)
+            else:
+                indices.append(self.handle_to_handle_index[handle])
         return tuple(indices)
 
     def _get_names_from_handle_indices(
@@ -356,10 +356,11 @@ class _ExecOrderData:
         is invalid, then its FQNs are omitted from the returned list.
         """
         fqns: List[List[str]] = []
-        flat_param = handle.flat_param
-        if flat_param not in self.param_to_fqn:
-            return
-        fqns.append(self.param_to_fqn[flat_param])
+        if handle:
+            flat_param = handle.flat_param
+            if flat_param not in self.param_to_fqn:
+                return
+            fqns.append(self.param_to_fqn[flat_param])
         return fqns
 
     def next_iter(self):
