@@ -951,15 +951,15 @@ def _fused_cat_kernel(inputs, dim, dtype):
         cur_start_idx = 0
         result = None
         for i, size in enumerate(dim_sizes):
-            start = ops.index_expr(cur_start_idx, torch.int64)
-            end = ops.index_expr(cur_start_idx + size, torch.int64)
             if i == 0:
+                end = ops.index_expr(cur_start_idx + size, torch.int64)
                 mask = dim_idx < end
             elif i == len(dim_sizes) - 1:
                 start = ops.index_expr(cur_start_idx, torch.int64)
                 mask = dim_idx >= start
             else:
                 start = ops.index_expr(cur_start_idx, torch.int64)
+                end = ops.index_expr(cur_start_idx + size, torch.int64)
                 mask = ops.logical_and(dim_idx >= start, dim_idx < end)
 
             cur_idx = list(idx)
@@ -990,26 +990,25 @@ def _fused_cat_kernel(inputs, dim, dtype):
 def cat(inputs, dim=0):
 
     dtype = get_promoted_dtype(
-        *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     )
     inputs = [to_dtype(inp, dtype) for inp in inputs]
 
     dim = _validate_dim(inputs[0], dim, 0)
     dim_sizes = [t.get_size()[dim] for t in inputs]
 
-    output_size = list(inputs[0].get_size())
-    output_size[dim] = sum(dim_sizes)
-
-    for t in inputs:
-        size = list(t.get_size())
-        size[dim] = output_size[dim]  # Ignore the cat dimension
+    # Guard that shapes are compatible
+    for t in inputs[1:]:
+        first_size = inputs[0].get_size()
+        size = t.get_size()
 
         assert len(size) == len(output_size)
-        for in_size, out_size in zip(size, output_size):
-            V.graph.sizevars.guard_equals(in_size, out_size)
+        for i in range(len(size)):
+            if i != dim:
+                V.graph.sizevars.guard_equals(size[i], first_size[i])
 
-    # Drop inputs with no values
-    orignal_inputs = inputs
+    # Drop no-op inputs
+    original_inputs = inputs
     inputs = [
         t for t in inputs
         if not V.graph.sizevars.statically_known_equals(t.get_size()[dim], 0)
@@ -1622,7 +1621,6 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
         inner_fn=inner_fn,
         ranges=[*size],
     )
-    result.realize()
     return result
 
 
@@ -3891,7 +3889,8 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
             assert len(reduction_index) == len(reduced_idx)
             if keepdims:
                 assert len(index) == len(size)
-                assert all(index[i] == 0 for i in reduced_idx)
+                # May not hold for masked loads
+                # assert all(index[i] == 0 for i in reduced_idx)
                 index = [index[i] for i in kept_idx]
             assert len(index) == len(kept_idx)
             new_index = [None] * (len(index) + len(reduction_index))

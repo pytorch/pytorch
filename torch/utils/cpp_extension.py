@@ -5,6 +5,7 @@ import importlib.abc
 import os
 import re
 import shlex
+import shutil
 import setuptools
 import subprocess
 import sys
@@ -123,19 +124,18 @@ def _find_rocm_home() -> Optional[str]:
     rocm_home = os.environ.get('ROCM_HOME') or os.environ.get('ROCM_PATH')
     if rocm_home is None:
         # Guess #2
-        try:
-            pipe_hipcc = subprocess.Popen(
-                ["which hipcc | xargs readlink -f"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-            hipcc, _ = pipe_hipcc.communicate()
-            # this will be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
-            rocm_home = os.path.dirname(os.path.dirname(hipcc.decode(*SUBPROCESS_DECODE_ARGS).rstrip('\r\n')))
+        hipcc_path = shutil.which('hipcc')
+        if hipcc_path is not None:
+            rocm_home = os.path.dirname(os.path.dirname(
+                os.path.realpath(hipcc_path)))
+            # can be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
             if os.path.basename(rocm_home) == 'hip':
                 rocm_home = os.path.dirname(rocm_home)
-        except Exception:
+        else:
             # Guess #3
-            rocm_home = '/opt/rocm'
-            if not os.path.exists(rocm_home):
-                rocm_home = None
+            fallback_path = '/opt/rocm'
+            if os.path.exists(fallback_path):
+                rocm_home = fallback_path
     if rocm_home and torch.version.hip is None:
         print(f"No ROCm runtime is found, using ROCM_HOME='{rocm_home}'",
               file=sys.stderr)
