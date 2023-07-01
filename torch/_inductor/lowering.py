@@ -937,7 +937,7 @@ def as_strided_copy(x, size, stride, storage_offset=None):
     return clone(result)
 
 
-def _fused_cat_kernel(inputs, dim, dtype):
+def _fused_cat_kernel(inputs, dim):
     loaders = [t.make_loader() for t in inputs]
     dim_sizes = [t.get_size()[dim] for t in inputs]
     dtype = inputs[0].get_dtype()
@@ -986,6 +986,36 @@ def _fused_cat_kernel(inputs, dim, dtype):
     )
 
 
+def _should_fuse_cat(inputs, dim):
+    if inputs[0].get_device().type != "cuda":
+        return False
+
+    def get_read_writes(t):
+        if hasattr(t, 'get_read_writes'):
+            return t.get_read_writes()
+        if isinstance(t, ir.BaseView):
+            return get_read_writes(t.unwrap_view())
+        raise NotImplementedError(f"NYI: num_reads({type(t)})")
+
+    # In the fused kernel, we compute all inputs for each element so limit the
+    # sum of all reads and op counts between inputs
+    max_concat_fusion_reads = 5
+    max_concat_fusion_ops = 64
+
+    num_reads = 0
+    ops_count = 0
+
+    for t in inputs:
+        rw = get_read_writes(t.data)
+        num_reads += len(rw.reads)
+        ops_count += len(rw.op_counts)
+
+    return (
+        num_reads <= max_concat_fusion_reads
+        and ops_count <= max_concat_fusion_ops
+    )
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
 
@@ -1002,7 +1032,7 @@ def cat(inputs, dim=0):
         first_size = inputs[0].get_size()
         size = t.get_size()
 
-        assert len(size) == len(output_size)
+        assert len(size) == len(first_size)
         for i in range(len(size)):
             if i != dim:
                 V.graph.sizevars.guard_equals(size[i], first_size[i])
@@ -1018,31 +1048,8 @@ def cat(inputs, dim=0):
     if len(inputs) == 0:
         return zeros_like(original_inputs[0])
 
-    # Optionally fuse into a single kernel, which does redundant computations
-    def get_read_writes(t):
-        if hasattr(t, 'get_read_writes'):
-            return t.get_read_writes()
-        if isinstance(t, ir.BaseView):
-            return get_read_writes(t.unwrap_view())
-        raise NotImplementedError(f"NYI: num_reads({type(t)})")
-
-
-    max_concat_fusion_reads = 5
-    max_concat_fusion_ops = 64
-
-    num_reads = 0
-    ops_count = 0
-
-    for t in inputs:
-        rw = get_read_writes(t.data)
-        num_reads += len(rw.reads)
-        ops_count += len(rw.op_counts)
-
-    if (
-        num_reads <= max_concat_fusion_reads
-        and ops_count <= max_concat_fusion_ops
-    ):
-        return _fused_cat_kernel(inputs, dim, inputs[0].get_dtype())
+    if _should_fuse_cat(inputs, dim):
+        return _fused_cat_kernel(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
