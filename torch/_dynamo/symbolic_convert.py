@@ -82,7 +82,6 @@ from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    SetVariable,
     SliceVariable,
     TupleVariable,
 )
@@ -1260,12 +1259,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         self.push(ListVariable(items, mutable_local=MutableLocal(), **options))
 
-    def BUILD_SET(self, inst):
-        items = self.popn(inst.argval)
-        options = VariableTracker.propagate(items)
-        new_set = SetVariable(self, items, mutable_local=MutableLocal(), **options)
-        self.push(new_set)
-
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
         seqs = self.popn(inst.argval)
         options = VariableTracker.propagate(seqs)
@@ -1289,7 +1282,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         for k, v in zip(items[::2], items[1::2]):
             assert isinstance(k, (ConstantVariable, EnumVariable, BuiltinVariable)) or (
                 isinstance(k, TensorVariable) and k.specialized_value is not None
-            ), f"Tried to write key {k}"
+            )
 
             result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
@@ -1349,14 +1342,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 **VariableTracker.propagate([obj, k, v]),
             ),
         )
-
-    def SET_ADD(self, inst):
-        v = self.pop()
-        assert inst.argval > 0
-        obj = self.stack[-inst.arg]
-        assert isinstance(obj, SetVariable)
-        assert obj.mutable_local
-        return obj.call_method(self, "add", [v], {})
 
     def LIST_APPEND(self, inst):
         v = self.pop()
@@ -2135,11 +2120,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
-    def DELETE_SUBSCR(self, inst):
-        obj, key = self.popn(2)
-        self.call_function(BuiltinVariable(delattr), [obj, key], {})
-
-
 
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
@@ -2382,18 +2362,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()
         self.instruction_pointer = None
-
-    def GET_YIELD_FROM_ITER(self, inst):
-        tos = self.stack[-1]
-        if not isinstance(tos, ListIteratorVariable):
-            return self.GET_ITER(inst)
-
-    def YIELD_FROM(self, inst):
-        tos = self.stack[-1]
-        if isinstance(tos, ConstantVariable) and tos.value is None:
-            self.pop()
-            return
-        return self.FOR_ITER(inst)
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):

@@ -474,10 +474,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
-            if not getattr(self.closure.items[idx], name, name) == name:
-                unimplemented(
-                    f"{getattr(self.closure.items[idx], name, name)} MISMATCH {name}"
-                )
+            assert getattr(self.closure.items[idx], name, name) == name
             assert name not in result
             closure_cells[name] = self.closure.items[idx]
 

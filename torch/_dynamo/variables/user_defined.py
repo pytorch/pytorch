@@ -73,12 +73,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             elif ConstantVariable.is_literal(obj):
                 return ConstantVariable(obj, **options)
 
-        if (
-            name == "WORLD"
-            and self.value is torch.distributed.distributed_c10d.GroupMember
-        ):
-            print("world PG")
-            return ProcessGroupVariable(self.value.WORLD).add_options(options)
         return super().var_getattr(tx, name)
 
     def call_method(
@@ -283,11 +277,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     method, self, source=source, **options
                 ).call_function(tx, args, kwargs)
 
-        # This is for cases when we have sus keys and we cannot make a ConstDictVariable
-        if name == "__contains__" and isinstance(self.value, dict):
-            if isinstance(args[0], (UserDefinedObjectVariable, ConstantVariable)):
-                return ConstantVariable(args[0].value in self.value, **options)
-
         return super().call_method(tx, name, args, kwargs)
 
     def is_supported_random(self):
@@ -372,16 +361,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().call_function(tx, args, kwargs)
 
     def _check_for_getattribute(self):
-        # Hack :(
-        if isinstance(self, variables.nn_module.FSDPManagedNNModuleVariable):
-            return
         if object_has_getattribute(self.value):
             unimplemented("UserDefinedObjectVariable with custom __getattribute__")
 
     def _check_for_getattr(self):
-        # Hack :(
-        if isinstance(self, variables.nn_module.FSDPManagedNNModuleVariable):
-            return None
         return get_custom_getattr(self.value)
 
     def _getattr_static(self, name):
@@ -390,9 +373,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             or "__slots__" in self.value.__class__.__dict__
         ):
             # getattr_static doesn't work on these
-            print("Checking module", self.value, name)
             subobj = getattr(self.value, name)
-            print("Got", subobj)
         else:
             subobj = inspect.getattr_static(self.value, name)
         return subobj
@@ -408,7 +389,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         getattr_fn = self._check_for_getattr()
 
         try:
-            # print("CHECKING FOR ATTR?", self, name)
             subobj = self._getattr_static(name)
         except AttributeError:
             subobj = None
@@ -516,11 +496,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if name == "__class__":
             return UserDefinedClassVariable(type(self.value), **options)
 
-        if source:
-            return VariableBuilder(tx, source)(subobj).add_options(options)
-            # elif ConstantVariable.is_literal(subobj):
-            #     return ConstantVariable(subobj, **options)
-        print("GETATTR, but subobj?", subobj, self.source)
         return variables.GetAttrVariable(self, name, **options)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
@@ -539,7 +514,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
         )
         if self._check_for_getattribute() or self._check_for_getattr():
-            unimplemented(f"hasattr with custom __getattr__ hasattr({self}, {name})")
+            unimplemented("hasattr with custom __getattr__")
 
         try:
             self._getattr_static(name)
@@ -553,14 +528,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         index = (
             key.source
             if ConstDictVariable.is_valid_key(key) and key.source is not None
-            else key.value
+            else key.as_python_constant()
         )
 
         return VariableBuilder(
             tx,
             ODictGetItemSource(self.source, index),
         )(
-            collections.OrderedDict.__getitem__(self.value, key.value)
+            collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
         ).add_options(key, self)
 
 
