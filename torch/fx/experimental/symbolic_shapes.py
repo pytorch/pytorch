@@ -34,7 +34,7 @@ from torch import (  # noqa: F401
 )
 from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
 from torch.utils._sympy.interp import sympy_interp
-from torch.utils._sympy.value_ranges import PythonValueRangeAnalysis, ValueRangeAnalysis, ValueRanges, ValueRangeError
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame
 from torch._utils_internal import signpost_event
 
@@ -3434,6 +3434,10 @@ Target Guards:
             ):
                 continue
 
+            # Use only univariate functions.
+            if len(expr.rhs.free_symbols) > 0:
+                continue
+
             # Update the value range of the left-hand side, if the
             # right-hand side provides a better range.
             symbol = expr.lhs
@@ -3441,7 +3445,7 @@ Target Guards:
             vr = self.var_to_range[symbol]
             lower, upper = vr.lower, vr.upper
 
-            rhs_vr = sympy_interp(PythonValueRangeAnalysis, self.var_to_range, expr.rhs)  # type: ignore[arg-type]
+            rhs_vr = sympy_interp(ValueRangeAnalysis, self.var_to_range, expr.rhs)  # type: ignore[arg-type]
             lower_guard, upper_guard = self.var_to_guards.get(symbol, (None, None))
 
             # Let's suppose that we have a preexisting range for x [0, 100].
