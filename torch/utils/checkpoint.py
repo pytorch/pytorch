@@ -62,7 +62,9 @@ def check_backward_validity(inputs: Iterable[Any]) -> None:
 
 
 def _get_device_module(device="cuda"):
-    device_module = getattr(torch, device)
+    device_module = getattr(torch, device, None)
+    if device_module is None:
+        raise RuntimeError(f"invalid devide type of {device}, no module named torch.{device}.")
     return device_module
 
 
@@ -158,14 +160,17 @@ def set_device_states(devices, states) -> None:
 
 def _get_autocast_kwargs(device="cuda"):
 
-    if device == "cuda":
+    device_module = _get_device_module(device)
+    # TODO: for some devices such as mps, it does not support amp,
+    # so use the default api `torch.is_autocast_enabled()`, once
+    # it is ok, this check of `hasattr` should be removed.
+    if device == "cuda" or not hasattr(device_module, "is_autocast_enabled"):
         device_autocast_kwargs = {
             "enabled": torch.is_autocast_enabled(),
             "dtype": torch.get_autocast_gpu_dtype(),
             "cache_enabled": torch.is_autocast_cache_enabled(),
         }
     else:
-        device_module = _get_device_module(device)
         device_autocast_kwargs = {
             "enabled": device_module.is_autocast_enabled(),
             "dtype": device_module.get_autocast_dtype(),
