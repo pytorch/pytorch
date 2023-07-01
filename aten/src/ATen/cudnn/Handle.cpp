@@ -2,6 +2,8 @@
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <ATen/cuda/Exceptions.h>
+
 namespace at { namespace native {
 namespace {
 

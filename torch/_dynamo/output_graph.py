@@ -40,6 +40,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
+from .current_scope_id import enter_new_scope
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
@@ -57,7 +58,6 @@ from .source import (
     TensorPropertySource,
 )
 from .utils import (
-    assert_no_fake_params_or_buffers,
     checkpoint_params,
     CleanupHook,
     clone_inputs,
@@ -75,6 +75,7 @@ from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
+    NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
     UnspecializedPythonVariable,
@@ -94,7 +95,7 @@ class OutputGraphState(NamedTuple):
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
-    tensor_weakref_to_sizes_strides: WeakIdKeyDictionary
+    tensor_weakref_to_sizes_strides_offset: WeakIdKeyDictionary
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
@@ -195,6 +196,9 @@ class WrapperBackend:
             self.restore()
 
 
+Scope = Dict[str, object]
+
+
 class OutputGraph(Checkpointable[OutputGraphState]):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -208,13 +212,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def __init__(
         self,
-        f_globals: Dict[str, Any],
         code_options: Dict[str, Any],
         compiler_fn: CompilerFn,
         root_tx,
         export: bool,
         export_constraints,
         frame_state,
+        local_scope: Scope,
+        global_scope: Scope,
+        f_code,
     ):
         super().__init__()
         self.tracers = [SubgraphTracer(self)]
@@ -224,25 +230,29 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
-        self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
+        self.tensor_weakref_to_sizes_strides_offset: WeakIdKeyDictionary = {}
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
+        fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 frame_id=frame_state["_id"],
-            )
-            if config.dynamic_shapes
-            else None,
+                # TODO: maybe should just pass the entire f_code in here?  Not
+                # sure...
+                co_fields={
+                    "co_name": f_code.co_name,
+                    "co_filename": f_code.co_filename,
+                    "co_firstlineno": f_code.co_firstlineno,
+                },
+            ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        if config.dynamic_shapes:
-            # Register a SHAPE_ENV guard to make sure we setup shape guards
-            # that show up in ShapeEnv
-            self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+        # Register a SHAPE_ENV guard to make sure we setup shape guards
+        # that show up in ShapeEnv
+        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
 
         self.guards.add(
             DeterministicAlgorithmsSource().make_guard(
@@ -279,7 +289,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         # Not checkpointed
         self.compiler_fn: CompilerFn = compiler_fn
-        self.root_globals = f_globals
+        self.global_scope = global_scope
+        self.local_scope = local_scope
         self.root_tx = root_tx
         from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
@@ -342,11 +353,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @contextlib.contextmanager
     def new_subtracer(self):
+        new_scope_ctx = enter_new_scope()
         try:
+            new_scope_ctx.__enter__()
             tracer = SubgraphTracer(self, parent=self.current_tracer)
             self.tracers.append(tracer)
             yield tracer
         finally:
+            new_scope_ctx.__exit__(None, None, None)
             self.tracers.pop()
 
     @property
@@ -418,7 +432,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
-            dict(self.tensor_weakref_to_sizes_strides),
+            dict(self.tensor_weakref_to_sizes_strides_offset),
         )
         self.timestamp += 1
         return state
@@ -434,7 +448,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.param_name_to_source,
             self.side_effects,
             self.timestamp,
-            self.tensor_weakref_to_sizes_strides,
+            self.tensor_weakref_to_sizes_strides_offset,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
         self.tracing_context.module_context.restore_graphstate(module_state)
@@ -498,6 +512,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def count_calls(self):
         return count_calls(self.graph)
+
+    def is_empty_graph(self):
+        return len(list(self.graph.nodes)) == 0
 
     def get_submodule(self, keys):
         assert keys
@@ -612,7 +629,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
             def wrap_name(module_key):
                 self.output.update_co_names(module_key)
-                self.root_globals[module_key] = target
+                self.global_scope[module_key] = target
                 return VariableBuilder(self, ConstantSource(source_name=module_key))(
                     target
                 )
@@ -748,7 +765,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if (
             stack_values
             and all(
-                not isinstance(v, UnspecializedPythonVariable) for v in stack_values
+                not isinstance(v, (UnspecializedPythonVariable, NumpyNdarrayVariable))
+                for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
@@ -853,7 +871,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
 
-        assert_no_fake_params_or_buffers(gm)
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
@@ -985,7 +1002,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.should_exit = True
 
     def install_global(self, name, value) -> None:
-        self.cleanups.append(CleanupHook.create(self.root_globals, name, value))
+        self.cleanups.append(CleanupHook.create(self.global_scope, name, value))
 
     def cleanup(self) -> None:
         # There is a reference cycle between tracer and OutputGraph, causing
@@ -1206,9 +1223,9 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        assert (
-            self.parent is not None
-        ), "lift_tracked_freevar_to_input on root SubgraphTracer"
+        assert self.parent is not None or not self.is_name_bound(
+            proxy.node.name
+        ), "lift_tracked_freevar_to_input on root SubgraphTracer should only be called with non-free variables."
         new_proxy = self.create_graph_input(proxy.node.name)
         new_proxy.node.meta["example_value"] = proxy.node.meta["example_value"]
         self.lifted_freevars[proxy] = None

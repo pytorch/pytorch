@@ -37,7 +37,7 @@ class TestCastOp(hu.HypothesisTestCase):
             'Cast', 'data', 'data_cast', to=core.DataType.STRING)
 
         def ref(data):
-            ret = data.astype(dtype=np.str)
+            ret = data.astype(dtype=str)
             # the string blob will be fetched as object, we feed and re-fetch
             # to mimic this.
             with hu.temp_workspace('tmp_ref_int_to_string'):
