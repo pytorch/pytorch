@@ -408,7 +408,7 @@ def summarize_graph_break(filename):
         df.to_csv(f"{log_file.rstrip('.csv')}_deduped.csv", index=False)
 
 
-def print_summary(filename):
+def print_summary(filename, print_dataframe=False):
     if not (filename and os.path.exists(filename)):
         return
     data = pd.read_csv(filename)
@@ -417,13 +417,16 @@ def print_summary(filename):
             if tag == "0.0000":
                 continue  # This happens for failed runs
             print(f"\nSummary for tag={tag}:")
-            print_summary_table(data[data.tag == tag])
+            print_summary_table(data[data.tag == tag], print_dataframe=print_dataframe)
     else:
-        print_summary_table(data)
+        print_summary_table(data, print_dataframe=print_dataframe)
     summarize_graph_break(filename)
 
 
-def print_summary_table(data):
+def print_summary_table(data, print_dataframe=False):
+    if print_dataframe:
+        pd.options.display.max_rows = 1000
+        print(data)
     width = max(map(len, data.columns))
     for col in data.columns:
         try:
@@ -2531,6 +2534,11 @@ def parse_args(args=None):
         help="print extra memory statistics",
     )
     parser.add_argument(
+        "--print-dataframe-summary",
+        action="store_true",
+        help="print dataframe result used for calculating accuracy"
+    )
+    parser.add_argument(
         "--cold-start-latency",
         "--cold_start_latency",
         action="store_true",
@@ -3288,7 +3296,7 @@ def run(runner, args, original_dir=None):
             except subprocess.SubprocessError:
                 print("ERROR", file=sys.stderr)
                 write_csv("infra_error")
-        print_summary(output_filename)
+        print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
 
 
 def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
