@@ -286,7 +286,8 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
-std::unordered_set<c10d::ProcessGroupNCCL*> ProcessGroupNCCL::all_nccl_process_groups;
+std::unordered_set<c10d::ProcessGroupNCCL*>
+    ProcessGroupNCCL::all_nccl_process_groups;
 
 std::ostream& operator<<(
     std::ostream& output,
@@ -1094,7 +1095,9 @@ void ProcessGroupNCCL::runHookLoop() {
 }
 
 bool ProcessGroupNCCL::watchDogsDone() {
-  for (auto it = ProcessGroupNCCL::all_nccl_process_groups.begin(); it != ProcessGroupNCCL::all_nccl_process_groups.end(); it++) {
+  for (auto it = ProcessGroupNCCL::all_nccl_process_groups.begin();
+       it != ProcessGroupNCCL::all_nccl_process_groups.end();
+       it++) {
     std::unique_lock<std::mutex> lock((*it)->workMetaListMutex_);
     if (!(*it)->workMetaList_.empty()) {
       return false;
@@ -1665,7 +1668,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
 
   if (capture_status != c10::cuda::CaptureStatus::None) {
     std::lock_guard<std::mutex> lock(workMetaListMutex_);
-    TORCH_INTERNAL_ASSERT(workMetaList_.empty(), "In the middle of a CUDA Graph capture but the enqueued work is not empty. The watchdog will crash the capture when it polls the work.");
+    TORCH_INTERNAL_ASSERT(
+        workMetaList_.empty(),
+        "In the middle of a CUDA Graph capture but the enqueued work is not empty. The watchdog will crash the capture when it polls the work.");
   }
 
   if ((coalescing_state_ & CoalColl) &&
@@ -1844,7 +1849,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   if (capture_status != c10::cuda::CaptureStatus::None) {
     std::lock_guard<std::mutex> lock(workMetaListMutex_);
-    TORCH_INTERNAL_ASSERT(workMetaList_.empty(), "In the middle of a CUDA Graph capture but the enqueued work is not empty. The watchdog will crash the capture when it polls the work.");
+    TORCH_INTERNAL_ASSERT(
+        workMetaList_.empty(),
+        "In the middle of a CUDA Graph capture but the enqueued work is not empty. The watchdog will crash the capture when it polls the work.");
   }
 
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
