@@ -91,6 +91,7 @@ from .half_cauchy import HalfCauchy
 from .half_normal import HalfNormal
 from .independent import Independent
 from .kl import _add_kl_info, kl_divergence, register_kl
+from .inverse_gamma import InverseGamma
 from .kumaraswamy import Kumaraswamy
 from .laplace import Laplace
 from .lkj_cholesky import LKJCholesky
