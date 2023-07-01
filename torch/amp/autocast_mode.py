@@ -192,6 +192,8 @@ class autocast:
             assert dtype is not None
             return
         self.device = device_type
+        if self.device not in _get_autocast_support_devices():
+            raise RuntimeError(f'User specified an unsupported autocast device_type \'{self.device}\'')
         self.custom_backend_name = torch._C._get_privateuse1_backend_name()
         self.fast_dtype = torch.get_autocast_dtype(self.device)
         self._cache_enabled = torch.is_autocast_cache_enabled()
@@ -204,7 +206,7 @@ class autocast:
             self._cache_enabled = cache_enabled
         self.device_supported_fast_dtype_map = {
             "cpu": [torch.bfloat16],
-            "cuda": [torch.bfloat16, torch.float16] if torch.cuda.is_bf16_supported() else [torch.float16],
+            "cuda": [torch.bfloat16, torch.float16],
             "xpu": [torch.bfloat16, torch.float16],
             "ipu": [torch.bfloat16, torch.float16],
             "hpu": [torch.bfloat16, torch.float16],
@@ -212,9 +214,7 @@ class autocast:
         }
         if self.custom_backend_name == self.device:
             self.device_supported_fast_dtype_map[self.custom_backend_name] = \
-                self.custom_device_mod.get_amp_supported_dtype()
-        if self.device not in self.device_supported_fast_dtype_map.keys():
-            raise RuntimeError("{self.device} device does not support AMP now.")
+                getattr(torch, self.device).get_amp_supported_dtype()
         if self.fast_dtype not in self.device_supported_fast_dtype_map[self.device]:
             supported_dtyps = self.device_supported_fast_dtype_map[self.device]
             error_message = f"In {self.device} autocast, but the target dtype is not supported. Disabling"
@@ -235,7 +235,7 @@ class autocast:
         self.prev = torch.is_autocast_enabled(self.device)
         self.prev_fastdtype = torch.get_autocast_dtype(self.device)
         torch.set_autocast_enabled(self._enabled, device=self.device)
-        torch.set_autocast_dtype(self.fast_dtype, device=self.device)
+        torch.set_autocast_dtype(self.fast_dtype, device=self.device)  # type: ignore[arg-type]
         torch.autocast_increment_nesting()
         torch.set_autocast_cache_enabled(self._cache_enabled)
 
@@ -246,7 +246,7 @@ class autocast:
         if torch.autocast_decrement_nesting() == 0:
             torch.clear_autocast_cache()
         torch.set_autocast_enabled(self.prev, device=self.device)
-        torch.set_autocast_cpu_dtype(self.prev_fastdtype, device=self.device)
+        torch.set_autocast_dtype(self.prev_fastdtype, device=self.device)
         torch.set_autocast_cache_enabled(self.prev_cache_enabled)
         return False
 

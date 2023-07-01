@@ -545,7 +545,8 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_enabled() || at::autocast::is_cpu_enabled() ||
       at::autocast::is_xpu_enabled() || at::autocast::is_ipu_enabled() ||
-      at::autocast::is_xla_enabled() || at::autocast::is_privateuseone_enabled()) {
+      at::autocast::is_xla_enabled() ||
+      at::autocast::is_privateuseone_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -555,7 +556,8 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_WARN_ONCE("`set_autocast_cpu_enabled(enabled)` is deprecated as of PyTorch 2.1, ",
+  TORCH_WARN_ONCE
+      "`set_autocast_cpu_enabled(enabled)` is deprecated as of PyTorch 2.1, ",
       "please use `set_autocast_enabled(enabled, device)` instead.");
   if (!PyBool_Check(arg)) {
     throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
@@ -567,7 +569,8 @@ static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* is_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_WARN_ONCE("`is_autocast_cpu_enabled()` is deprecated as of PyTorch 2.1, ",
+  TORCH_WARN_ONCE(
+      "`is_autocast_cpu_enabled()` is deprecated as of PyTorch 2.1, ",
       "please use `is_autocast_enabled(device)` instead.");
   if (at::autocast::is_cpu_enabled()) {
     Py_RETURN_TRUE;
@@ -663,7 +666,8 @@ static PyObject* get_autocast_dtype(
 
 static PyObject* set_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_WARN_ONCE("`set_autocast_gpu_dtype(dtype)` is deprecated as of PyTorch 2.1, ",
+  TORCH_WARN_ONCE(
+      "`set_autocast_gpu_dtype(dtype)` is deprecated as of PyTorch 2.1, ",
       "please use `set_autocast_dtype(dtype, device)` instead.");
   if (!THPDtype_Check(arg)) {
     throw TypeError(
@@ -677,7 +681,8 @@ static PyObject* set_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_WARN_ONCE("`set_autocast_cpu_dtype(dtype)` is deprecated as of PyTorch 2.1, ",
+  TORCH_WARN_ONCE(
+      "`set_autocast_cpu_dtype(dtype)` is deprecated as of PyTorch 2.1, ",
       "please use `set_autocast_dtype(dtype, device)` instead.");
   if (!THPDtype_Check(arg)) {
     throw TypeError(
@@ -691,7 +696,8 @@ static PyObject* set_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_WARN_ONCE("`get_autocast_gpu_dtype()` is deprecated as of PyTorch 2.1, ",
+  TORCH_WARN_ONCE(
+      "`get_autocast_gpu_dtype()` is deprecated as of PyTorch 2.1, ",
       "please use `get_autocast_dtype(device)` instead.");
   at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
@@ -702,7 +708,8 @@ static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* get_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_WARN_ONCE("`get_autocast_cpu_dtype()` is deprecated as of PyTorch 2.1, ",
+  TORCH_WARN_ONCE(
+      "`get_autocast_cpu_dtype()` is deprecated as of PyTorch 2.1, ",
       "please use `get_autocast_dtype(device)` instead.");
   at::ScalarType current_dtype = at::autocast::get_autocast_cpu_dtype();
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
@@ -1028,11 +1035,11 @@ static PyMethodDef methods[] = { // NOLINT
     {"set_autocast_gpu_dtype", set_autocast_gpu_dtype, METH_O, nullptr},
     {"get_autocast_gpu_dtype", get_autocast_gpu_dtype, METH_NOARGS, nullptr},
     {"set_autocast_dtype",
-    castPyCFunctionWithKeywords(set_autocast_dtype),
+     castPyCFunctionWithKeywords(set_autocast_dtype),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"get_autocast_dtype",
-    castPyCFunctionWithKeywords(get_autocast_dtype),
+     castPyCFunctionWithKeywords(get_autocast_dtype),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"autocast_increment_nesting",

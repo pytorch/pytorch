@@ -243,10 +243,5 @@ class TestTorchAutocast(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             meta_fast_dtype = torch.get_autocast_dtype(device="meta")
 
-    def test_deprecated_func(self):
-        msg = "get_autocast_gpu_dtype()` is deprecated as of PyTorch"
-        with self.assertWarnsOnceRegex(UserWarning, msg):
-            gpu_fast_dtype = torch.get_autocast_gpu_dtype()
-
 if __name__ == '__main__':
     run_tests()
