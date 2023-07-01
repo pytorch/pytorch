@@ -1,5 +1,6 @@
 import builtins
 import collections
+import inspect
 import math
 import operator
 import warnings
@@ -27,6 +28,7 @@ from torch._prims_common import (
     is_weakly_lesser_type,
     Number,
     NumberType,
+    RealNumberType,
     REDUCTION_OUTPUT_TYPE_KIND,
     ShapeType,
     StrideType,
@@ -64,16 +66,21 @@ __all__ = [
     "conj_physical",
     "cos",
     "cosh",
+    "count_nonzero",
+    "deg2rad",
     "digamma",
     "erf",
     "erfinv",
     "erfc",
     "exp",
     "expm1",
+    "exponential",
     "exp2",
     "fill",
+    "fill_",
     "floor",
     "frac",
+    "geometric",
     "index_add",
     "index_copy",
     "index_copy_",
@@ -93,10 +100,15 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
+    "log_normal",
     "log_softmax",
+    "mvlgamma",
+    "norm",
+    "normal",
     "nan_to_num",
     "neg",
     "positive",
+    "rad2deg",
     "reciprocal",
     "round",  # TODO: model kwargs
     "sigmoid",
@@ -145,10 +157,13 @@ __all__ = [
     "lcm",
     # 'ldexp',
     "le",
+    "logaddexp",
+    "logaddexp2",
     "logical_and",
     "logical_not",
     "logical_or",
     "logical_xor",
+    "logsumexp",
     "lt",
     # 'max', # implement with reductions
     "maximum",
@@ -179,6 +194,7 @@ __all__ = [
     # Conditional references
     #
     "masked_fill",
+    "masked_fill_",
     "where",
     #
     # Data conversion and movement references
@@ -211,10 +227,12 @@ __all__ = [
     #
     # View & Shape Ops
     #
+    "alias",
     "atleast_1d",
     "atleast_2d",
     "atleast_3d",
     "as_strided",
+    "as_strided_scatter",
     "broadcast_shapes",
     "broadcast_tensors",
     "broadcast_to",
@@ -249,6 +267,7 @@ __all__ = [
     "ravel",
     "repeat",
     "reshape",
+    "reshape_as",
     "roll",
     "rot90",
     "rsqrt",
@@ -263,6 +282,7 @@ __all__ = [
     "unfold_copy",
     "unsqueeze",
     "view",
+    "view_as",
     "vsplit",
     "vstack",
     "unflatten",
@@ -275,6 +295,7 @@ __all__ = [
     # Tensor Creation
     #
     "arange",
+    "cauchy",
     "empty",
     "empty_like",
     "empty_permuted",
@@ -284,10 +305,16 @@ __all__ = [
     "full_like",
     "linspace",
     "logspace",
+    "new_empty",
+    "new_empty_strided",
+    "new_full",
+    "new_ones",
+    "new_zeros",
     "ones",
     "ones_like",
     "randn",
     "scalar_tensor",
+    "zero",
     "zeros",
     "zeros_like",
     #
@@ -299,6 +326,10 @@ __all__ = [
     # Statistical operations
     #
     "bucketize",
+    #
+    # Misc
+    #
+    "renorm",
 ]
 
 Tensor = torch.Tensor
@@ -416,14 +447,17 @@ def _make_elementwise_unary_reference(
 
 def _make_alias(fn, name):
     """
-    This function defines an alias of another function and sets its __name__argument
-    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`.
+    This function defines an alias of another function and sets its __name__ argument.
+    It also sets its __module__ argument to the module of the caller.
+    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`, and
+    `alias.__module__ == fn.__module__`.
     """
 
     def _fn(*args, **kwargs):
         return fn(*args, **kwargs)
 
     _fn.__name__ = name
+    _fn.__module__ = inspect.currentframe().f_back.f_globals["__name__"]  # type: ignore[union-attr]
     return _fn
 
 
@@ -1466,6 +1500,26 @@ def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
         return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
 
 
+@_make_elementwise_binary_reference(
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+)
+def logaddexp2(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    torch._check(
+        not (utils.is_complex_dtype(a.dtype) or utils.is_complex_dtype(b.dtype)),
+        lambda: "logaddexp2 doesn't support complex dtypes",
+    )
+    # Nb. this implementation does not distribute the gradients evenly when a == b
+    mask = a >= b
+    max_ = torch.where(mask, a, b)
+    min_ = torch.where(mask, b, a)
+    inf_mask = torch.logical_and(torch.isinf(a), a == b)
+    inv_log_2 = 1.0 / math.log(2)
+    result = max_ + torch.log1p(torch.exp2(min_ - max_)) * inv_log_2
+    return torch.where(inf_mask, a, result)
+
+
 # TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
@@ -1965,7 +2019,7 @@ def _to_other(
 
 
 # remove to_kwargs that is already present in `a`
-def canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
+def _canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
     options_to_check = ["dtype", "device", "layout", "memory_format"]
     # "device" option could be passed a str instead torch.device
     if "device" in to_kwargs and isinstance(to_kwargs["device"], str):
@@ -1997,7 +2051,7 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
     # TODO: is_pinned is not currently supported in refs or fake_tensor
     # https://github.com/pytorch/pytorch/issues/84925
     assert "pin_memory" not in kwargs
-    canonicalize_to_arguments(a, kwargs)
+    _canonicalize_to_arguments(a, kwargs)
 
     if _to_will_alias(a, **kwargs):
         return a
@@ -2169,7 +2223,9 @@ def sum(
     out: Optional[Tensor] = None,
 ) -> TensorLikeType:
     if dtype is None:
-        if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
+        if out is not None:
+            dtype = out.dtype
+        elif utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
             dtype = torch.int64
         else:
             dtype = a.dtype
@@ -2219,7 +2275,9 @@ def prod(
     out: Optional[Tensor] = None,
 ) -> TensorLikeType:
     if dtype is None:
-        if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
+        if out is not None:
+            dtype = out.dtype
+        elif utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
             dtype = torch.int64
         else:
             dtype = a.dtype
@@ -3073,6 +3131,46 @@ def permute(a: TensorLikeType, *dims) -> TensorLikeType:
         a.ndim, utils.extract_dims_from_varargs(dims)
     )
     return prims.transpose(a, _permutation)
+
+
+@register_decomposition(aten.renorm)
+@out_wrapper()
+def renorm(
+    input: TensorLikeType, p: RealNumberType, dim: int, maxnorm: RealNumberType
+) -> TensorLikeType:
+    torch._check(not isinstance(p, complex), lambda: "renorm: p must be real-valued")
+    torch._check(p > 0, lambda: "renorm: non-positive norm not supported")
+    torch._check(
+        not isinstance(maxnorm, complex), lambda: "renorm: maxnorm must be real-valued"
+    )
+    torch._check(
+        maxnorm >= 0, lambda: f"renorm: expected maxnorm to be >= 0 but got {maxnorm}"
+    )
+    ndim = input.ndim
+    torch._check(
+        ndim > 1,
+        lambda: f"renorm: input needs at least 2 dimensions, got {ndim} dimensions",
+    )
+
+    dim = utils.canonicalize_dim(ndim, dim)
+    reduce_dims = list(range(ndim))
+    del reduce_dims[dim]
+
+    # For half and bfloat16, calculate norm in float precision then cast
+    # normalization factor to half
+    acc_type = utils.get_computation_dtype(input.dtype)
+    if acc_type != input.dtype:
+        norm = torch.linalg.vector_norm(
+            input, p, reduce_dims, keepdim=True, dtype=acc_type
+        )
+    else:
+        norm = torch.linalg.vector_norm(input, p, reduce_dims, keepdim=True)
+
+    eps = 1e-7
+    norm_factor = torch.where(norm > maxnorm, maxnorm / (norm + eps), 1.0)
+    if acc_type != input.dtype:
+        norm_factor = prims.convert_element_type(norm_factor, input.dtype)
+    return (input * norm_factor).contiguous()
 
 
 # Get the new shape and stride after applying unfold to an input tensor
@@ -4035,7 +4133,7 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 # Tensor.view(a, b, c) or Tensor.view((a, b, c)) Function call torch.view
 # doesn't support unpacked shapes
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
-@register_decomposition(aten.view)
+@register_decomposition(aten.view.default)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=False)
 
@@ -4955,8 +5053,8 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             value_ndim == 0,
             lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
         )
-        # `masked_fill` allows cpu scalar to be moved to cuda but not otherwise.
-        is_cpu_scalar = a.device.type == "cuda" and value.device.type == "cpu"
+        # `masked_fill` allows cpu scalar to be moved to cuda and xpu but not otherwise.
+        is_cpu_scalar = a.device.type in ["cuda", "xpu"] and value.device.type == "cpu"
         torch._check(
             is_cpu_scalar or value.device == a.device,
             lambda: "Expected `value` to be on same device as `a`",

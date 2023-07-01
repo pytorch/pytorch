@@ -205,6 +205,10 @@
 #      Use system-provided libraries to satisfy the build dependencies.
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
+#
+#   USE_MIMALLOC
+#      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
+#      By default, It is only enabled on Windows.
 
 import sys
 if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
@@ -1052,6 +1056,7 @@ def main():
         'py.typed',
         'bin/*',
         'test/*',
+        '*.pyi',
         '_C/*.pyi',
         'cuda/*.pyi',
         'fx/*.pyi',
@@ -1089,6 +1094,7 @@ def main():
         'include/ATen/hip/detail/*.cuh',
         'include/ATen/hip/detail/*.h',
         'include/ATen/hip/impl/*.h',
+        'include/ATen/mps/*.h',
         'include/ATen/miopen/*.h',
         'include/ATen/detail/*.h',
         'include/ATen/native/*.h',
@@ -1097,6 +1103,7 @@ def main():
         'include/ATen/native/cuda/*.cuh',
         'include/ATen/native/hip/*.h',
         'include/ATen/native/hip/*.cuh',
+        'include/ATen/native/mps/*.h',
         'include/ATen/native/quantized/*.h',
         'include/ATen/native/quantized/cpu/*.h',
         'include/ATen/quantized/*.h',
@@ -1191,6 +1198,8 @@ def main():
         'include/THH/generic/*.h',
         'include/sleef.h',
         "_inductor/codegen/*.h",
+        "_inductor/aot_inductor_include/*.cpp",
+        "_inductor/aot_inductor_include/*.h",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',

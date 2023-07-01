@@ -15,7 +15,7 @@
 // On CUDA, the cast is currently pushed down into the kernel (for performance reasons).
 // On CPU, there is currently an internal assert that a dynamic_cast is not needed.
 
-namespace at { namespace native {
+namespace at::native {
 
 // `needs_dynamic_casting` compares the types expected by iterator
 // (i.e. dtypes of the operands) with the actual type of the arguments
@@ -50,4 +50,4 @@ struct needs_dynamic_casting<func_t, 0> {
   }
 };
 
-}} //namespace at::native
+} //namespace at::native

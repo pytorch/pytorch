@@ -7,6 +7,7 @@ from functools import reduce, cmp_to_key
 import operator
 import sympy
 import weakref
+import warnings
 import torch
 from torch import sym_float, sym_int, sym_max
 
@@ -53,6 +54,7 @@ NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
 # NumberType = Union[bool, int, float, complex, torch.SymInt, torch.SymFloat]
 NumberType = Union[bool, int, float, complex]
+RealNumberType = Union[bool, int, float]
 
 Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat)
 # I don't call it Integral because numbers.Integral includes bool, but IntLike
@@ -1652,6 +1654,27 @@ def check_in_bounds_for_storage(
             )
         )
         raise ValueError(msg)
+
+
+# NOTE: This function should ideally be removed, but some Meta internal models
+# packaged with `torch.package` are using it, so it will have to be removed
+# at some point in the future when those models no longer use this function.
+def check(
+    b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
+) -> None:
+    """
+    Helper function for raising an error_type (default: RuntimeError) if a boolean condition fails.
+    Error message is a callable producing a string (to avoid wasting time
+    string formatting in non-error case, and also to make it easier for torchdynamo
+    to trace.)
+
+    .. note:: This function is planned for removal in the future. Please use
+        `torch._check*` functions instead.
+    """
+    warnings.warn(DeprecationWarning((
+        "'torch._prims_common.check' will be removed in the future. Please use "
+        "'torch._check*' functions instead")))
+    torch._check_with(exc_type, b, s)
 
 
 # This combines is_channels_last_strides_2d and is_channels_last_strides_3d in

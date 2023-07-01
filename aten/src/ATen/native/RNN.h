@@ -3,7 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using lstm_fn = void(*)(Tensor&, Tensor&, Tensor&, const Tensor&, TensorList, TensorList, bool, int64_t, double, bool, bool, bool);
 using rnn_fn = void(*)(Tensor&, Tensor&, const Tensor&, const Tensor&, TensorList, bool, int64_t, double, bool, bool, bool);
@@ -50,4 +50,4 @@ inline void check_attributes(const Tensor& input, const TensorList& params, cons
   for (const auto& p : params) check_tensors("parameter", p);
 }
 
-}} // namespace at::native
+} // namespace at::native

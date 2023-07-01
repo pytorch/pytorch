@@ -6604,6 +6604,13 @@ Is ``True`` if the Tensor is stored on the CPU, ``False`` otherwise.
 )
 
 add_docstr_all(
+    "is_xla",
+    r"""
+Is ``True`` if the Tensor is stored on an XLA device, ``False`` otherwise.
+""",
+)
+
+add_docstr_all(
     "is_ipu",
     r"""
 Is ``True`` if the Tensor is stored on the IPU, ``False`` otherwise.
