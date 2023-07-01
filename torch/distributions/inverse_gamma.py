@@ -7,7 +7,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 class InverseGamma(TransformedDistribution):
     r"""
     Creates an inverse gamma distribution parameterized by :attr:`concentration` and :attr:`rate`
-    where:
+    where::
 
         X ~ Gamma(concentration, rate)
         Y = 1 / X ~ InverseGamma(concentration, rate)

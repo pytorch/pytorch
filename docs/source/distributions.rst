@@ -167,6 +167,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`InverseGamma`
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.inverse_gamma
+.. autoclass:: InverseGamma
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Kumaraswamy`
 ~~~~~~~~~~~~~~~~~~~~~
 
