@@ -2536,7 +2536,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--print-dataframe-summary",
         action="store_true",
-        help="print dataframe result used for calculating accuracy"
+        help="print dataframe result used for calculating accuracy",
     )
     parser.add_argument(
         "--cold-start-latency",
