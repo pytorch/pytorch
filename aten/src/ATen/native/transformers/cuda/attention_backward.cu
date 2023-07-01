@@ -63,7 +63,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
 
-  std::tie(dq, dk, dv, grad_softmax) = fmha::mha_bwd(
+  std::tie(dq, dk, dv, grad_softmax) = pytorch_fmha::mha_bwd(
           contiguous_grad_out,
           query,
           key,

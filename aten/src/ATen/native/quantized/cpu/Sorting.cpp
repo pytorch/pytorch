@@ -23,7 +23,7 @@ namespace native {
 //
 // If we want to support this publicly, we need to add
 // a requantization step to the kernel.
-std::tuple<Tensor&, Tensor&> quantized_topk_out_cpu(
+static std::tuple<Tensor&, Tensor&> quantized_topk_out_cpu(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,

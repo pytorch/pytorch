@@ -850,7 +850,9 @@ std::mutex TCPServer::cache_mutex_{};
 
 std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
   auto startCore = [&opts]() {
-    Socket socket = Socket::listen(opts.port);
+    Socket socket = opts.masterListenFd.has_value()
+        ? Socket::listenFromFd(*opts.masterListenFd, opts.port)
+        : Socket::listen(opts.port);
 
     std::uint16_t port = socket.port();
 
