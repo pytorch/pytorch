@@ -6,7 +6,6 @@ from torch.ao.quantization.fx.prepare import (
     _get_dtype_and_is_dynamic,
     _insert_obs_or_fq,
     _maybe_insert_output_observer_for_node,
-    _maybe_insert_observers_before_graph_output,
     _save_state,
     _is_activation_post_process_node,
 )
@@ -129,17 +128,17 @@ def _maybe_insert_input_and_output_observers_for_node(
     obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ):
-    this_node_dtype_info = node.meta["quantization_annotation"] if "quantization_annotation" in node.meta else None
+    this_node_quantization_annotation = node.meta["quantization_annotation"] if "quantization_annotation" in node.meta else None
     if "val" in node.meta:
         output_is_a_tensor = (
-            this_node_dtype_info is not None and
+            this_node_quantization_annotation is not None and
             isinstance(node.meta["val"], FakeTensor)
         )
     else:
-        output_is_a_tensor = this_node_dtype_info is not None
+        output_is_a_tensor = this_node_quantization_annotation is not None
 
     skip_inserting_input_and_output_observers = (
-        this_node_dtype_info is None
+        this_node_quantization_annotation is None
     )
 
     if skip_inserting_input_and_output_observers:
@@ -200,18 +199,7 @@ def prepare(
     obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize] = {}
 
     for node in nodes_before_observation:
-
-        if node.op in (
-            "placeholder",
-            "call_module",
-            "call_method",
-            "call_function",
-            "get_attr",
-        ):
-            _maybe_insert_input_and_output_observers_for_node(node, model, obs_or_fq_map, is_qat)
-        elif node.op == "output":
-            named_modules = dict(model.named_modules(remove_duplicate=False))
-            _maybe_insert_observers_before_graph_output(node, model, named_modules, model.graph, obs_or_fq_map, is_qat)
+        _maybe_insert_input_and_output_observers_for_node(node, model, obs_or_fq_map, is_qat)
 
     model = GraphModule(model, model.graph)
 

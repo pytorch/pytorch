@@ -101,6 +101,11 @@ enum class Rule : uint32_t {
   kUnsupportedFxNodeAnalysis,
 
   /**
+   * @brief Report any op level validation failure in warnings.
+   */
+  kOpLevelDebugging,
+
+  /**
    * @brief The formatted str for argument to display is too verbose.
    */
   kArgFormatTooVerbose,
@@ -123,6 +128,7 @@ static constexpr const char* const kPyRuleNames[] = {
     "fx_pass",
     "no_symbolic_function_for_call_function",
     "unsupported_fx_node_analysis",
+    "op_level_debugging",
     "arg_format_too_verbose",
 };
 

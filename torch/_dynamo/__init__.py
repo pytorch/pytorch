@@ -1,10 +1,3 @@
-# Class type of config
-# torch._dynamo.config is really an object of this type instead of a module.
-from . import config
-
-DynamoConfig = type(config)
-DynamoConfig.__doc__ = "Dataclass that holds configs related to dynamo."
-
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, register_backend
 from .convert_frame import replay
@@ -33,8 +26,6 @@ from .utils import (
 __all__ = [
     "allow_in_graph",
     "assume_constant_result",
-    "config",
-    "DynamoConfig",
     "disallow_in_graph",
     "forbid_in_graph",
     "graph_break",

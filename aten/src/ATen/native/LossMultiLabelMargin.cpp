@@ -185,7 +185,7 @@ static void multilabel_margin_loss_backward_out_frame(
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       reduction == Reduction::Mean ? 1. / (nframe * dim) : 1. / dim);
 
-  scalar_t* grad_input_row_data = grad_input.data_ptr<scalar_t>();
+  scalar_t* grad_input_row_data = grad_input.mutable_data_ptr<scalar_t>();
   for (const auto t : c10::irange(nframe)) {
     (void)t; //Suppress unused variable warning
     for (const auto dt : c10::irange(dim)) {
@@ -211,7 +211,7 @@ static void multilabel_margin_loss_backward_out_frame(
     grad_input_row_data += dim;
   }
 
-  scalar_t* grad_input_data = grad_input.data_ptr<scalar_t>();
+  scalar_t* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   if (reduction != Reduction::None || grad_output.dim() == 0) {
     assert(
         reduction != Reduction::None || grad_output.dim() > 0 || nframe == 1);

@@ -4,8 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // TODO(Heitor) Template by dimension
 struct PoolingParams1D {
@@ -40,5 +39,4 @@ using pooling_fn = void (*)(Tensor&, const Tensor&, const PoolingParams1D&);
 
 DECLARE_DISPATCH(pooling_fn, max_pool1d_stub);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
