@@ -7,12 +7,13 @@ from .. import _reduction as _Reduction
 
 from torch import Tensor
 from typing import Callable, Optional
+import torch
 
 __all__ = ['L1Loss', 'NLLLoss', 'NLLLoss2d', 'PoissonNLLLoss', 'GaussianNLLLoss', 'KLDivLoss',
            'MSELoss', 'BCELoss', 'BCEWithLogitsLoss', 'HingeEmbeddingLoss', 'MultiLabelMarginLoss',
            'SmoothL1Loss', 'HuberLoss', 'SoftMarginLoss', 'CrossEntropyLoss', 'MultiLabelSoftMarginLoss',
            'CosineEmbeddingLoss', 'MarginRankingLoss', 'MultiMarginLoss', 'TripletMarginLoss',
-           'TripletMarginWithDistanceLoss', 'CTCLoss']
+           'TripletMarginWithDistanceLoss', 'CTCLoss','OBJLoss']
 
 class _Loss(Module):
     reduction: str
@@ -1760,6 +1761,27 @@ class CTCLoss(_Loss):
     def forward(self, log_probs: Tensor, targets: Tensor, input_lengths: Tensor, target_lengths: Tensor) -> Tensor:
         return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction,
                           self.zero_infinity)
+
+
+# This Loss function using for Object Detection Task.
+
+class OBJLoss(_Loss):
+    def __init__(self):
+        super(OBJLoss, self).__init__()
+
+    def forward(self, y_true:Tensor, yhat:Tensor):
+        delta_coord = torch.sum(torch.square(y_true[:, :2] - yhat[:, :2]))
+
+        h_true = y_true[:, 3] - y_true[:, 1]
+        w_true = y_true[:, 2] - y_true[:, 0]
+
+        h_pred = yhat[:, 3] - yhat[:, 1]
+        w_pred = yhat[:, 2] - yhat[:, 0]
+
+        delta_size = torch.sum(torch.square(w_true - w_pred) + torch.square(h_true - h_pred))
+
+        return delta_coord + delta_size
+
 
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight
