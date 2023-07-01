@@ -1629,7 +1629,8 @@ class CTCLoss(_Loss):
         reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output losses will be divided by the target lengths and
-            then the mean over the batch is taken. Default: ``'mean'``
+            then the mean over the batch is taken, ``'sum'``: the output losses will be summed.
+            Default: ``'mean'``
         zero_infinity (bool, optional):
             Whether to zero infinite losses and the associated gradients.
             Default: ``False``
@@ -1668,8 +1669,9 @@ class CTCLoss(_Loss):
           each target in a batch. Lengths must each be :math:`\leq S`
           If the targets are given as a 1d tensor that is the concatenation of individual
           targets, the target_lengths must add up to the total length of the tensor.
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then
-          :math:`(N)` if input is batched or :math:`()` if input is unbatched, where :math:`N = \text{batch size}`.
+        - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
+          ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N)` if input is batched or
+          :math:`()` if input is unbatched, where :math:`N = \text{batch size}`.
 
     Examples::
 

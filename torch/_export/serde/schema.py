@@ -71,14 +71,20 @@ class Device:
 
 
 @dataclass
+class SymExpr:
+    expr_str: str
+    hint: Optional[int]
+
+
+@dataclass
 class SymInt(_Union):
-    as_symbol: str
+    as_expr: SymExpr
     as_int: int
 
 
 @dataclass
 class SymBool(_Union):
-    as_symbol: str
+    as_expr: str
     as_bool: bool
 
 
@@ -110,6 +116,12 @@ class TensorArgument:
     name: str
 
 
+@dataclass
+class GraphArgument:
+    name: str
+    graph: 'Graph'
+
+
 # This is actually a union type
 @dataclass
 class Argument(_Union):
@@ -131,6 +143,7 @@ class Argument(_Union):
     as_bools: List[bool]
     as_sym_bool: SymBoolArgument
     as_sym_bools: List[SymBoolArgument]
+    as_graph: GraphArgument
 
 
 @dataclass
@@ -186,14 +199,21 @@ class CallSpec:
 
 
 @dataclass
+class RangeConstraint:
+    min_val: int
+    max_val: int
+
+
+@dataclass
 class GraphModule:
     graph: Graph
     signature: GraphSignature
     call_spec: CallSpec
 
 
-# TODO(angelayi) to add symbol to hint
 @dataclass
 class ExportedProgram:
     graph_module: GraphModule
     opset_version: Dict[str, int]
+    range_constraints: Dict[str, RangeConstraint]
+    equality_constraints: List[Tuple[Tuple[str, int], Tuple[str, int]]]

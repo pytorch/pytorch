@@ -118,8 +118,6 @@ exclude_patterns = [
     'torch/_functorch/partitioners.py',
     'torch/_functorch/top_operators_github_usage.py',
     'torch/_functorch/vmap.py',
-    'torch/_higher_order_ops/_cond.py',
-    'torch/_higher_order_ops/_map.py',
     'torch/_subclasses/schema_check_mode.py',
     'torch/distributed/elastic/agent/server/api.py',
     'torch/testing/_internal/**',
