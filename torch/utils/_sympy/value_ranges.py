@@ -469,15 +469,3 @@ class ValueRangeAnalysis:
     def __getattr__(self, name):
         log.warning("unhandled ValueRange op %s", name)
         return self.default_handler
-
-
-# Implements Python semantics for 'ValueRangeAnalysis'.
-# Reasoning about guards relies on Python operator semantics.
-class PythonValueRangeAnalysis(ValueRangeAnalysis):
-    def __init__(self):
-        super().__init__()
-        self.name = "PythonValueRangeAnalysis"
-
-    @staticmethod
-    def div(a, b):
-        return PythonValueRangeAnalysis.floordiv(a, b)
