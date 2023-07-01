@@ -41,6 +41,8 @@ struct CacheKeyBuffer {
 };
 
 struct CacheKey {
+  // Key to find the next node in the shadow graph.  We use C++ RTTI for the
+  // type of the node (ntype), then a key generated with a visitor pattern.
   CacheKey(const std::type_index& ntype, const uint8_t* key, uint16_t len)
       : node_type(ntype), key_size(len), key(key) {}
 
@@ -143,6 +145,12 @@ struct AutogradCompilerCall {
 };
 
 class CompiledNodeArgs {
+  // CompiledNodeArgs builds a representation of the constant values found
+  // across all the nodes in the compiled graph, via 'collect' overloads. The
+  // collected constants are specialized on by concatenation into a cache key.
+  // Tensor, symint arguments (which are lifted to become graph inputs rather
+  // than specialized on) are forwarded to the compiler and not included in the
+  // key.
  public:
   CompiledNodeArgs(AutogradCompilerCall& compiler, NodeCall& node_call)
       : _compiler(compiler),
@@ -348,19 +356,22 @@ class CompiledNodeArgs {
   void collect_size(size_t s) {
     // we expect sizes to be small, so try to cram them into a single byte
     // shorter keys, means faster caches
-    constexpr auto max = std::numeric_limits<uint8_t>::max();
-    if (C10_UNLIKELY(s >= max - 2)) {
+    constexpr uint8_t encode_as_u64 = std::numeric_limits<uint8_t>::max();
+    constexpr uint8_t encode_as_u32 = encode_as_u64 - 1;
+    constexpr uint8_t encode_as_u16 = encode_as_u64 - 2;
+    if (C10_UNLIKELY(s >= encode_as_u16)) {
+      // first write a byte indicating the path we followed, then the data
       if (s <= std::numeric_limits<uint16_t>::max()) {
         // 3 bytes
-        specialize_on_bytes(static_cast<uint8_t>(max - 2));
+        specialize_on_bytes(encode_as_u16);
         specialize_on_bytes(static_cast<uint16_t>(s));
       } else if (s <= std::numeric_limits<uint32_t>::max()) {
         // 5 bytes
-        specialize_on_bytes(static_cast<uint8_t>(max - 1));
+        specialize_on_bytes(encode_as_u32);
         specialize_on_bytes(static_cast<uint32_t>(s));
       } else {
         // 9 bytes
-        specialize_on_bytes(static_cast<uint8_t>(max));
+        specialize_on_bytes(encode_as_u64);
         specialize_on_bytes(s);
       }
     } else {
@@ -430,6 +441,9 @@ struct TraceState {
 };
 
 class SwapSavedVariables {
+  // SwapSavedVariables is used during the tracing/compilation phase after a
+  // cache-miss. It swaps any 'lifted' inputs (tensors, symints) to proxy nodes,
+  // allows tracing to happen, then swaps them back afterwards.
  public:
   void before(at::Tensor& t) {
     stashed_tensors.emplace_back(t);
