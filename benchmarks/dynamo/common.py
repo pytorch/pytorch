@@ -305,6 +305,17 @@ CI_SKIP_OPTIMIZER = {
 # Turning translation validation (TV) off for a few benchmarks
 # due to timeout.
 
+CI_TV_OFF[CI("aot_eager", training=True, dynamic=True, device="cuda")] = [
+    # TIMM
+    "eca_halonext26ts",
+    "swin_base_patch4_window7_224",
+    # TorchBench
+    "attention_is_all_you_need_pytorch",
+    "hf_GPT2",
+    "yolov3",
+]
+
+
 CI_TV_OFF[CI("inductor", training=False, dynamic=False, device="cuda")] = [
     # TorchBench
     "hf_T5_generate",
