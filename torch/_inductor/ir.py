@@ -109,6 +109,7 @@ def validate_ir(node_or_nodes):
             assert isinstance(
                 nodes,
                 (
+                    torch._inductor.ir.ExpandView,
                     DynamicScalar,
                     TensorBox,
                     sympy.Symbol,
@@ -1442,9 +1443,8 @@ class View(GenericView):
     def handle_negative_index(idx, size):
         idx = sympy.expand(idx)
         size = sympy.expand(size)
-        sizevars = V.graph.sizevars
-        if sizevars.size_hint(idx) < 0:
-            sizevars.guard_lt(idx, 0)
+        evaluate_expr = V.graph.sizevars.shape_env.evaluate_expr
+        if evaluate_expr(sympy.Lt(idx, 0)):
             idx = idx + size
         return idx
 
@@ -3001,6 +3001,7 @@ class RandomSeeds(ExternKernelOut):
             inputs=[],
             constant_args=[limits.min, limits.max, [count]],
             kernel="aten.randint.low_out",
+            cpp_kernel="at::randint_out",
         )
 
 
@@ -4971,7 +4972,7 @@ class ReduceScatterTensor(OutOfPlaceCollectiveKernel):
         inputs = [cls.realize_input(x)]
 
         def compute_size(new_size):
-            new_size[0] /= group_size
+            new_size[0] //= group_size
 
         outputs = cls.create_output_buffers(inputs, compute_size)
 
@@ -5030,6 +5031,50 @@ class AllGatherIntoTensorCoalesced(OutOfPlaceCollectiveKernel):
             f"{output_name}_work = fun_col._all_gather_into_tensor_coalesced_fallback("
             f"output_tensors={output_name}, "
             f"input_tensors={output_name}_inputs, "
+            f"group={output_name}_pg, "
+            "async_op=True)"
+        )
+
+
+class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
+    def __init__(self, layout, inputs, outputs, constant_args, reduce_op):
+        super().__init__(layout, inputs, outputs, constant_args)
+        self.reduce_op = reduce_op
+
+    @classmethod
+    def create(
+        cls,
+        inputs: List["TensorBox"],
+        reduce_op: str,
+        tag: str,
+        ranks: List[int],
+        group_size: int,
+    ):
+        inputs = [cls.realize_input(x) for x in inputs]
+
+        def compute_size(new_size):
+            new_size[0] //= group_size
+
+        outputs = cls.create_output_buffers(inputs, compute_size)
+
+        layout = MultiOutputLayout(inputs[0].get_device())
+
+        _ = ReduceScatterTensorCoalesced(
+            layout=layout,
+            inputs=inputs,
+            outputs=outputs,
+            constant_args=[tag, ranks, group_size],
+            reduce_op=reduce_op,
+        )
+
+        return outputs
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        wrapper.writeline(
+            f"{output_name}_work = fun_col._reduce_scatter_tensor_coalesced_fallback("
+            f"output_tensors={output_name}, "
+            f"input_tensors={output_name}_inputs, "
+            f"op=fun_col._str_to_reduce_op('{str(self.reduce_op)}'), "
             f"group={output_name}_pg, "
             "async_op=True)"
         )
