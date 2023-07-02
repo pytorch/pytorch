@@ -761,6 +761,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         # aot_export requires a graph mod input of fwd graph
         # returns the full fwd/bwd graph in graph mod format
+        print(f"Calling aot_export")
         with torch.enable_grad(), fx_traceback.preserve_node_meta():
             fx_g, signature = aot_export_module(
                 g_mod,
@@ -769,6 +770,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 output_loss_index=0,
                 skip_flatten_joint=True,
             )
+        print(f"Finished aot_export")
 
         # Testing aot full graph
         seq_id_list = []
@@ -777,6 +779,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         for node in fx_g.graph.nodes:
             if "call_" in node.op:
                 seq_id = node.meta.get("seq_id", -1)
+                print(f"Test: Node {node.op} target {node.target} seq_id {seq_id}")
                 if seq_id >= 0:
                     if not seq_id_list or seq_id_list[-1] < seq_id:
                         seq_id_list.append(seq_id)
