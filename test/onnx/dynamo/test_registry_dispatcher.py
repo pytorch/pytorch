@@ -40,13 +40,8 @@ class TestRegistration(common_utils.TestCase):
         self.registry.register_custom_op(custom_add, "test", "test_op", "default")
         self.assertTrue(self.registry.is_registered_op("test", "test_op", "default"))
 
+        # Test on get_functions
         function_group = self.registry.get_functions("test", "test_op", "default")
-        self.assertIsNotNone(function_group)
-        self.assertEqual({func.onnx_function for func in function_group}, {custom_add})  # type: ignore[arg-type]
-
-        function_group = self.registry._get_custom_functions(
-            "test", "test_op", "default"
-        )
         self.assertIsNotNone(function_group)
         self.assertEqual({func.onnx_function for func in function_group}, {custom_add})  # type: ignore[arg-type]
 
@@ -71,14 +66,11 @@ class TestRegistration(common_utils.TestCase):
 
         function_group = self.registry.get_functions("test", "test_op")
         assert function_group is not None
+        # The order does matter (list)
         self.assertEqual(
-            {func.onnx_function for func in function_group},
-            {test_custom, test_original},
+            [func.onnx_function for func in function_group],
+            [test_original, test_custom],
         )
-
-        function_group = self.registry._get_custom_functions("test", "test_op")
-        assert function_group is not None
-        self.assertEqual({func.onnx_function for func in function_group}, {test_custom})
 
 
 @common_utils.instantiate_parametrized_tests
@@ -97,6 +89,7 @@ class TestDispatcher(common_utils.TestCase):
     @parameterized.expand(
         [
             (
+                "get_Opoverload_name",
                 torch.fx.Node(
                     graph=torch.fx.Graph(),
                     name="aten::add.Tensor",
@@ -108,6 +101,7 @@ class TestDispatcher(common_utils.TestCase):
                 ("aten", "add", "Tensor"),
             ),
             (
+                "get_Opoverloadpacket_name",
                 torch.fx.Node(
                     graph=torch.fx.Graph(),
                     name="aten::sym_size",
@@ -119,6 +113,7 @@ class TestDispatcher(common_utils.TestCase):
                 ("aten", "sym_size", None),
             ),
             (
+                "get_builtin_op_name",
                 torch.fx.Node(
                     graph=torch.fx.Graph(),
                     name="builtin_add",
@@ -132,7 +127,7 @@ class TestDispatcher(common_utils.TestCase):
         ]
     )
     def test_get_aten_name_on_supported_fx_node(
-        self, node: torch.fx.Node, expected_name: str
+        self, _: str, node: torch.fx.Node, expected_name: str
     ):
         self.assertEqual(
             self.dispatcher.get_aten_name(node, self.diagnostic_context),
@@ -142,6 +137,7 @@ class TestDispatcher(common_utils.TestCase):
     @parameterized.expand(
         [
             (
+                "unsupported_Opoverloadpacket_name",
                 torch.fx.Node(
                     graph=torch.fx.Graph(),
                     name="aten::add",
@@ -152,6 +148,7 @@ class TestDispatcher(common_utils.TestCase):
                 ),
             ),
             (
+                "unsupported_input_dtypes_for_builtin_op",
                 torch.fx.Node(
                     graph=torch.fx.Graph(),
                     name="builtin_add",
@@ -162,6 +159,7 @@ class TestDispatcher(common_utils.TestCase):
                 ),
             ),
             (
+                "unsupported_target_function",
                 torch.fx.Node(
                     graph=torch.fx.Graph(),
                     name="aten::made_up_node",
@@ -173,11 +171,11 @@ class TestDispatcher(common_utils.TestCase):
             ),
         ]
     )
-    def test_get_aten_name_on_unsupported_fx_node(self, node):
+    def test_get_aten_name_on_unsupported_fx_node(self, _: str, node: torch.fx.Node):
         with self.assertRaises(RuntimeError):
             self.dispatcher.get_aten_name(node, self.diagnostic_context)
 
-    def test_get_function_overloads(self):
+    def test_get_function_overloads_gives_overload_fall_back(self):
         # Test fall back to default op name
         node_overload = torch.fx.Node(
             graph=torch.fx.Graph(),
@@ -203,6 +201,8 @@ class TestDispatcher(common_utils.TestCase):
                 node_overloadpacket, "aten", "add", None, self.diagnostic_context
             ),
         )
+
+        # Not registered op
         unsupported_op_node = torch.fx.Node(
             graph=torch.fx.Graph(),
             name="aten::made_up_node",
@@ -235,19 +235,14 @@ class TestDispatcher(common_utils.TestCase):
             UserWarning,
             "A perfect matched Opchema is not found in torchlib for aten::add",
         ):
-            (
-                function_overloads,
-                custom_overloads,
-            ) = self.dispatcher.get_function_overloads(
+            function_overloads = self.dispatcher.get_function_overloads(
                 op_overload, "aten", "add", None, self.diagnostic_context
             )
             self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
-                op_overload,
                 "aten",
                 "add",
                 None,
                 function_overloads,
-                custom_overloads,  # custom function overloads
                 op_overload.args,
                 op_overload.kwargs,
                 self.diagnostic_context,
@@ -290,31 +285,20 @@ class TestDispatcher(common_utils.TestCase):
         def test_default_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
             return op.Add(x, y)
 
-        custom_overloads = set(
-            {
-                registration.SymbolicFunction(
-                    test_custom_op, op_name="test::test_op", is_custom=True
-                )
-            }
-        )
-        function_overloads = (
-            set(
-                {
-                    registration.SymbolicFunction(
-                        test_default_op, op_name="test::test_op"
-                    )
-                }
+        custom_overloads = [
+            registration.SymbolicFunction(
+                test_custom_op, op_name="test::test_op", is_custom=True
             )
-            | custom_overloads
-        )
+        ]
+        function_overloads = [
+            registration.SymbolicFunction(test_default_op, op_name="test::test_op")
+        ] + custom_overloads
 
         symbolic_fn = self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
-            node,
             "aten",
             "add",
             None,
             function_overloads,
-            custom_overloads,  # custom function overloads
             node.args,
             node.kwargs,
             self.diagnostic_context,

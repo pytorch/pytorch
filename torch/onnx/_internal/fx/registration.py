@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections import defaultdict
-from typing import Dict, Optional, Set, TYPE_CHECKING, Union
+from typing import Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 from torch.onnx._internal import _beartype
 
@@ -42,13 +42,13 @@ class OnnxRegistry:
 
     Attributes:
         _registry: The registry maps <domain>::<op_name>.<overload>(e.g: aten::add.Tensor)
-            to a set of SymbolicFunctions. It is important not to directly modify this variable.
+            to a list of SymbolicFunctions. It is important not to directly modify this variable.
             Instead, access to it should be done through the public methods: register_custom_op,
             get_functions, and is_registered_op.
 
     Public Methods:
         register_custom_op: Registers a custom operator.
-        get_functions: Returns the set of SymbolicFunctions for the given op.
+        get_functions: Returns the list of SymbolicFunctions for the given op.
         is_registered_op: Returns whether the given op is registered.
     """
 
@@ -59,7 +59,7 @@ class OnnxRegistry:
             opset_version: The opset version to use for the registry.
 
         """
-        self._registry: Dict[str, Set[SymbolicFunction]] = defaultdict(set)
+        self._registry: Dict[str, List[SymbolicFunction]] = defaultdict(list)
         # FIXME: Avoid importing onnxscript into torch
         from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
             ops,  # TODO(titaiwang): get rid of this import
@@ -92,7 +92,7 @@ class OnnxRegistry:
         Args:
             symbolic_function: The SymbolicFunction to register.
         """
-        self._registry[symbolic_function.op_name].add(symbolic_function)
+        self._registry[symbolic_function.op_name].append(symbolic_function)
 
     @_beartype.beartype
     def register_custom_op(
@@ -127,8 +127,11 @@ class OnnxRegistry:
     @_beartype.beartype
     def get_functions(
         self, domain: str, op_name: str, overload: Optional[str] = None
-    ) -> Optional[Set[SymbolicFunction]]:
-        """Returns the set of SymbolicFunctions for the given op: torch.ops.<domain>.<op_name>.<overload>.
+    ) -> Optional[List[SymbolicFunction]]:
+        """Returns a list of SymbolicFunctions for the given op: torch.ops.<domain>.<op_name>.<overload>.
+
+        The list is ordered by the time of registration. The custom operators should be
+        in the second half of the list.
 
         Args:
             domain: The domain of the operator to get.
@@ -136,7 +139,7 @@ class OnnxRegistry:
             overload: The overload of the operator to get. If it's default overload,
                 leave it to None.
         Returns:
-            Thethe set of SymbolicFunctions corresponding to the given name, or None if
+            A list of SymbolicFunctions corresponding to the given name, or None if
             the name is not in the registry.
         """
         if overload is None:
@@ -146,32 +149,6 @@ class OnnxRegistry:
             name = f"{domain}::{op_name}.{overload}"
         if (functions := self._registry.get(name)) is not None:
             return functions
-        return None
-
-    @_beartype.beartype
-    def _get_custom_functions(
-        self, domain: str, op_name: str, overload: Optional[str] = None
-    ) -> Optional[Set[SymbolicFunction]]:
-        """Returns the set of custom functions for the given name: torch.ops.<domain>.<op_name>.<overload>.
-
-        Args:
-            domain: The domain of the operator to get.
-            op_name: The name of the operator to get.
-            overload: The overload of the operator to get. If it's default overload,
-                leave it to None.
-
-        Returns:
-            The set of custom SymbolicFunctions corresponding to the given name, or None
-            if the name is not in the registry.
-        """
-        if (
-            functions := self.get_functions(
-                domain=domain, op_name=op_name, overload=overload
-            )
-        ) is not None:
-            custom_functions = {func for func in functions if func.is_custom}
-            if custom_functions:
-                return custom_functions
         return None
 
     @_beartype.beartype
