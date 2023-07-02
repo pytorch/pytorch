@@ -97,20 +97,16 @@ class TestPaternMatcher(TestCase):
             torch.randn(15, 20, device="cuda"),  # mat2
         ]
 
-        for fn, matcher_nodes, atol in (
-            (fn_addmm_relu, 2, 1e-8),
+        for fn, atol in (
+            (fn_addmm_relu, 1e-8),
             # higher tolerance due to the "tanh" approximation
             # in fused GELU epilogue vs. "none" without fusion
-            (fn_addmm_gelu, 6, 1e-3),
+            (fn_addmm_gelu, 1e-3),
         ):
-            counters.clear()
             expected = fn(*args)
-            actual = torch.compile(fn)(*args)
+            actual, (code,) = run_and_get_code(torch.compile(fn), *args)
             torch.testing.assert_close(actual, expected, atol=atol, rtol=0)
-            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-            self.assertEqual(
-                counters["inductor"]["pattern_matcher_nodes"], matcher_nodes
-            )
+            self.assertTrue("_addmm_activation" in code)
 
         for fn in (fn_addmm_relu, fn_addmm_gelu):
             counters.clear()
