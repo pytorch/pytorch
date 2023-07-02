@@ -11778,25 +11778,25 @@
     CPU: max_pool3d_with_indices_backward_cpu
     CUDA: max_pool3d_with_indices_backward_cuda
 
-- func: max_unpool2d.out(Tensor self, Tensor indices, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
+- func: max_unpool2d.out(Tensor self, Tensor indices, SymInt[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: max_unpooling2d_forward_out_cpu
     CUDA: max_unpooling2d_forward_out_cuda
 
-- func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
+- func: max_unpool2d(Tensor self, Tensor indices, SymInt[2] output_size) -> Tensor
   python_module: nn
   dispatch:
     CPU: max_unpooling2d_forward_cpu
     CUDA: max_unpooling2d_forward_cuda
 
-- func: max_unpool3d.out(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
+- func: max_unpool3d.out(Tensor self, Tensor indices, SymInt[3] output_size, int[3] stride, int[3] padding, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_forward_out_cpu
     CUDA: max_unpooling3d_forward_out_cuda
 
-- func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
+- func: max_unpool3d(Tensor self, Tensor indices, SymInt[3] output_size, int[3] stride, int[3] padding) -> Tensor
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_forward_cpu
