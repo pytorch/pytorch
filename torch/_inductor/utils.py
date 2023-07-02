@@ -707,6 +707,22 @@ def run_and_get_triton_code(fn, *args, **kwargs):
     return source_codes[0]
 
 
+@contextlib.contextmanager
+def override_lowering(aten_op, override_fn):
+    """
+    Override the lowering of aten_op with overide_fn.
+    The first argument of override_fn is the original lowering fn.
+    """
+    from torch._inductor import lowering
+
+    orig_fn = lowering.lowerings[aten_op]
+    try:
+        lowering.lowerings[aten_op] = functools.partial(override_fn, orig_fn)
+        yield
+    finally:
+        lowering.lowerings[aten_op] = orig_fn
+
+
 def developer_warning(msg):
     """
     Warnings that will be actionable for PyTorch developers, but not
