@@ -43,10 +43,7 @@ PyObject* CppFunction_pynew(
        THPCppFunction_register_prehook,                                        \
        METH_O,                                                                 \
        nullptr},                                                               \
-  {                                                                            \
-    (char*)"name", THPCppFunction_name, METH_NOARGS, nullptr                   \
-  },                                                                           \
-  {                                                                            \
+      {(char*)"name", THPCppFunction_name, METH_NOARGS, nullptr}, {            \
     (char*)"sequence_nr", THPCppFunction_sequence_nr, METH_NOARGS, nullptr     \
   }
 

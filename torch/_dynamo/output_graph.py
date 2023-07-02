@@ -1140,7 +1140,6 @@ class SubgraphTracer(fx.Tracer):
                 rv.node.meta["nn_module_stack"][target][1],
             )
 
-
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:
             frame_summaries.append(tx.frame_summary())

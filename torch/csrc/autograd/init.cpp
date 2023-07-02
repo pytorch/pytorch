@@ -2,10 +2,10 @@
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
+#include <ATen/SequenceNumber.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/record_function.h>
-#include <ATen/SequenceNumber.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/ScalarType.h>
