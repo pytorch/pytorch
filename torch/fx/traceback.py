@@ -1,15 +1,16 @@
 import traceback
 from contextlib import contextmanager
+from torch.autograd import get_sequence_nr
 from typing import List, Any, Dict
 from ._compatibility import compatibility
 
 __all__ = ['preserve_node_meta', 'has_preserved_node_meta',
            'set_stack_trace', 'set_bwd_seq_id', 'format_stack',
-           'set_current_meta', 'get_current_meta']
+           'set_current_meta', 'get_current_meta', 'freeze_seq_id']
 
 current_meta: Dict[str, Any] = {}
 should_preserve_node_meta = False
-bwd_seq_id = -1
+freeze_sequence_nr = False
 
 
 @compatibility(is_backward_compatible=False)
@@ -33,18 +34,27 @@ def set_stack_trace(stack : List[str]):
         current_meta["stack_trace"] = "".join(stack)
 
 @compatibility(is_backward_compatible=False)
-def set_bwd_seq_id(max_fwd_seq_id):
-    global current_meta
-    global bwd_seq_id
+def freeze_seq_id():
+    global freeze_sequence_nr
 
     if should_preserve_node_meta:
-        # 1st bwd op is set to seq id of last fwd op
+        freeze_sequence_nr = True
+
+@compatibility(is_backward_compatible=False)
+def should_set_seq_id():
+    global freeze_sequence_nr
+    return not freeze_sequence_nr
+
+@compatibility(is_backward_compatible=False)
+def set_bwd_seq_id(seq_id):
+    global current_meta
+
+    if should_preserve_node_meta:
+        # 1st bwd op is the seq id of last fwd op
         # Then count down to 0
-        if bwd_seq_id == -1:
-            bwd_seq_id = max_fwd_seq_id
-        assert bwd_seq_id >= 0, f"Unexpected bwd seq id {bwd_seq_id}"
-        current_meta["seq_id"] = bwd_seq_id
-        bwd_seq_id = bwd_seq_id - 1
+
+        current_meta["seq_id"] = seq_id
+        print(f"BWD seq_id current_meta {current_meta} seq_id {seq_id} ")
 
 
 @compatibility(is_backward_compatible=False)

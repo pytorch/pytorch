@@ -1129,13 +1129,8 @@ class SubgraphTracer(fx.Tracer):
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
-        # If the kind is call_function and there is no
-        # nn_module_stack - then update the seq_id
-        # First check if the node requires_grad
-        inc_seq_id = False
         if kind in {"call_function", "call_method"}:
             rv.node.meta["source_fn"] = (rv.node.name, target)
-            inc_seq_id = True
         elif kind == "call_module":
             if self.parent is not None:
                 unimplemented("Invoking an nn.Module inside HigherOrderOperator")
@@ -1144,12 +1139,7 @@ class SubgraphTracer(fx.Tracer):
                 rv.node.name,
                 rv.node.meta["nn_module_stack"][target][1],
             )
-            inc_seq_id = True
 
-        if inc_seq_id:
-            tx.seq_id = tx.seq_id + 1
-
-        rv.node.meta["seq_id"] = tx.seq_id
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:

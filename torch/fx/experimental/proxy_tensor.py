@@ -366,6 +366,8 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         else:
             args[0].proxy = proxy_out
 
+    seq_id = torch.autograd.get_sequence_nr()
+    print(f"mk_fx Before seq_id {seq_id} func {str(func)}")
     out = func(*args, **kwargs)
 
     # In some circumstances, we will be tracing in a situation where a tensor
@@ -504,6 +506,12 @@ def set_original_aten_op(func):
     if ORIGINAL_ATEN is None and fx_traceback.has_preserved_node_meta():
         ORIGINAL_ATEN = func
         fx_traceback.current_meta['original_aten'] = func
+        seq_id = torch.autograd.get_sequence_nr()
+        # This sets the seq id of the fwd pass for each node
+        # in the fx graph
+        if fx_traceback.should_set_seq_id():
+            fx_traceback.current_meta['seq_id'] = seq_id
+            print(f"set_orig_aten {str(func)} seq_id {seq_id} current_meta {fx_traceback.current_meta}")
         try:
             yield
         finally:
