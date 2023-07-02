@@ -139,6 +139,7 @@ __all__ = [
     "HalfCauchy",
     "HalfNormal",
     "Independent",
+    "InverseGamma",
     "Kumaraswamy",
     "LKJCholesky",
     "Laplace",

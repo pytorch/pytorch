@@ -5,6 +5,9 @@ from torch.distributions.gamma import Gamma
 from torch.distributions.transformed_distribution import TransformedDistribution
 
 
+__all__ = ['InverseGamma']
+
+
 class InverseGamma(TransformedDistribution):
     r"""
     Creates an inverse gamma distribution parameterized by :attr:`concentration` and :attr:`rate`
