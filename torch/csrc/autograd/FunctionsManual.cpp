@@ -2093,14 +2093,14 @@ Tensor max_pool_double_backward(
   AT_ASSERT(indices.dim() >= dim);
   // handle non-empty inputs
   if (indices.sym_numel() != 0) {
-    auto size = indices.sizes().slice(0, indices.dim() - dim).vec();
+    auto size = indices.sym_sizes().slice(0, indices.dim() - dim).vec();
     size.push_back(-1);
-    auto indices_view = indices.view(size);
+    auto indices_view = indices.view_symint(size);
     const auto memory_format = indices.suggest_memory_format();
     return grad.contiguous(memory_format)
-        .view(size)
+        .view_symint(size)
         .gather(-1, indices_view)
-        .view(indices.sizes());
+        .view_symint(indices.sym_sizes());
   }
   // handle empty inputs
   else {
