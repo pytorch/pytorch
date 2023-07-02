@@ -126,6 +126,11 @@ struct CacheNode {
   }
 
   CacheNode() : compiled_fn(nullptr) {}
+  ~CacheNode() {
+    if (!Py_IsInitialized()) {
+      compiled_fn.release(); // leak on shutdown
+    }
+  }
   CacheNode(CacheNode&&) = delete;
   CacheNode(const CacheNode&) = delete;
   CacheNode& operator=(const CacheNode&) = delete;

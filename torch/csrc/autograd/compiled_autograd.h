@@ -152,26 +152,18 @@ class CompiledNodeArgs {
   // than specialized on) are forwarded to the compiler and not included in the
   // key.
  public:
-  CompiledNodeArgs(AutogradCompilerCall& compiler, NodeCall& node_call)
-      : _compiler(compiler),
-        _node_call(node_call),
-        _specialization_key_size(0) {}
-
   void collect(const at::Tensor& t) {
     collect(t.defined());
     if (t.defined()) {
       _compiler.add_tensor_input(t);
     }
   }
-
   void collect(const SavedVariable& t) {
     collect(t.unpack(_node_call.node));
   }
-
   void collect(const c10::SymInt& t) {
     _compiler.add_size_input(t);
   }
-
   template <typename T>
   void collect(const std::vector<T>& t) {
     collect_size(t.size());
@@ -179,7 +171,6 @@ class CompiledNodeArgs {
       collect(t[i]);
     }
   }
-
   template <typename T>
   void collect(const c10::ArrayRef<T>& t) {
     collect_size(t.size());
@@ -187,12 +178,10 @@ class CompiledNodeArgs {
       collect(t[i]);
     }
   }
-
   template <typename T>
   void collect(const c10::OptionalArray<T>& t) {
     collect(t.list);
   }
-
   template <typename T>
   void collect(const c10::optional<T>& t) {
     specialize_on_bytes(t.has_value());
@@ -200,17 +189,14 @@ class CompiledNodeArgs {
       collect(*t);
     }
   }
-
   template <typename A, typename B>
   void collect(const std::pair<A, B>& t) {
     collect(t.first);
     collect(t.second);
   }
-
   void collect(const c10::ScalarType& t) {
     specialize_on_bytes(t);
   }
-
   void collect(const c10::Scalar& t) {
     auto type = t.type();
     specialize_on_bytes(type);
@@ -228,72 +214,56 @@ class CompiledNodeArgs {
       TORCH_CHECK(false);
     }
   }
-
   void collect(const c10::TensorOptions& t) {
     // TODO(jansel): are there any pointers in this type we shouldn't memcmp
     // I think this one is wrong.... should fix it
     specialize_on_bytes(t);
   }
-
   void collect(const at::TensorGeometry& t) {
     collect(t.sym_sizes());
     collect(t.sym_strides());
     collect(t.sym_storage_offset());
   }
-
   void collect(torch::autograd::generated::TypeAndSize& t);
-
   void collect(const OutputRef& t) {
     // +1 is for undefined encoded as -1
     collect_size(t.node_id + 1);
     collect_size(t.index + 1);
   }
-
   void collect(const NodeCall& t) {
     collect(t.input_refs);
     collect(t.graph_output);
   }
-
   void collect(int8_t t) {
     specialize_on_bytes(t);
   }
-
   void collect(int16_t t) {
     specialize_on_bytes(t);
   }
-
   void collect(int32_t t) {
     specialize_on_bytes(t);
   }
-
   void collect(int64_t t) {
     specialize_on_bytes(t);
   }
-
   void collect(uint8_t t) {
     specialize_on_bytes(t);
   }
-
   void collect(uint16_t t) {
     specialize_on_bytes(t);
   }
-
   void collect(uint32_t t) {
     specialize_on_bytes(t);
   }
-
   void collect(uint64_t t) {
     specialize_on_bytes(t);
   }
-
   void collect(bool t) {
     specialize_on_bytes(t);
   }
-
   void collect(float t) {
     specialize_on_bytes(t);
   }
-
   void collect(double t) {
     specialize_on_bytes(t);
   }
@@ -384,20 +354,36 @@ class CompiledNodeArgs {
     return std::exchange(_compiler.default_dyn_type, default_dyn_type);
   }
 
- protected:
+  CompiledNodeArgs(AutogradCompilerCall& compiler, NodeCall& node_call)
+      : _compiler(compiler),
+        _node_call(node_call),
+        _specialization_key_size(0),
+        _specialization_key_storage(1024),
+        _specialization_key(
+            (uint8_t*)std::malloc(_specialization_key_storage)) {}
+  ~CompiledNodeArgs() {
+    std::free(_specialization_key);
+  }
+  CompiledNodeArgs(const CompiledNodeArgs&) = delete;
+
+ private:
   template <typename T>
   void specialize_on_bytes(const T& t) {
-    TORCH_CHECK(
-        _specialization_key_size + sizeof(T) <= sizeof(_specialization_key));
-    memcpy(_specialization_key + _specialization_key_size, &t, sizeof(T));
+    while (C10_UNLIKELY(
+        _specialization_key_size + sizeof(T) > _specialization_key_storage)) {
+      _specialization_key_storage *= 2;
+      _specialization_key = (uint8_t*)std::realloc(
+          _specialization_key, _specialization_key_storage);
+    }
+    std::memcpy(_specialization_key + _specialization_key_size, &t, sizeof(T));
     _specialization_key_size += sizeof(T);
   }
 
- private:
   AutogradCompilerCall& _compiler;
   NodeCall& _node_call;
-  uint16_t _specialization_key_size;
-  uint8_t _specialization_key[512];
+  size_t _specialization_key_size;
+  size_t _specialization_key_storage;
+  uint8_t* _specialization_key;
 };
 
 struct TraceState {
@@ -451,7 +437,6 @@ class SwapSavedVariables {
       t = state.next_proxy_input();
     }
   }
-
   void after(at::Tensor& t) {
     t = stashed_tensors[stashed_tensors_index++];
   }
@@ -465,7 +450,6 @@ class SwapSavedVariables {
       t = SavedVariable(state.next_proxy_input(), false);
     }
   }
-
   void after(SavedVariable& t) {
     t = std::move(stashed_variables[stashed_variables_index++]);
   }
@@ -502,7 +486,6 @@ class SwapSavedVariables {
       before(t[i]);
     }
   }
-
   template <typename T>
   void after(std::vector<T>& t) {
     for (size_t i = 0; i < t.size(); ++i) {
@@ -516,7 +499,6 @@ class SwapSavedVariables {
       before(t[i]);
     }
   }
-
   template <typename T>
   void after(c10::ArrayRef<T>& t) {
     for (size_t i = 0; i < t.size(); ++i) {
@@ -528,7 +510,6 @@ class SwapSavedVariables {
   void before(c10::OptionalArray<T>& t) {
     before(t.list);
   }
-
   template <typename T>
   void after(c10::OptionalArray<T>& t) {
     after(t.list);
@@ -540,7 +521,6 @@ class SwapSavedVariables {
       before(*t);
     }
   }
-
   template <typename T>
   void after(c10::optional<T>& t) {
     if (t.has_value()) {
@@ -554,7 +534,6 @@ class SwapSavedVariables {
   void before(int64_t t) {}
   void before(bool t) {}
   void before(double t) {}
-
   void after(const c10::ScalarType& t) {}
   void after(const c10::Scalar& t) {}
   void after(const c10::TensorOptions& t) {}
