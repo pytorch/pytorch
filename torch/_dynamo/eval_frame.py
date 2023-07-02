@@ -1284,18 +1284,6 @@ class TorchPatcher:
             # disable future hooking
             opt.step.hooked = True
 
-        # TorchDynamo does not step inside utils.checkpoint function.  The flow
-        # looks likes this
-        #  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
-        #     speculatively checking if the forward function is safe to trace.
-        #  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
-        #     order op. As a result, TorchDynamo does not look inside utils.checkpoint.
-        #  3) If not, then TorchDynamo falls back to eager by performing a graph
-        #     break. And here, the following disable wrapper ensures that
-        #     TorchDynamo does not trigger again on the frames created by
-        #     utils.checkpoint innards.
-        torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
-
         torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
         torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()
         torch._dynamo.variables.dicts._register_dynamo_dict_to_tree_spec()

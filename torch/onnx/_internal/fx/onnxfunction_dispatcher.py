@@ -33,6 +33,30 @@ if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]
 
 
+@_beartype.beartype
+def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
+    fn: Callable,
+    self,
+    domain: str,
+    op_name: str,
+    overload: Optional[str],
+    default_and_custom_functions: List[registration.SymbolicFunction],
+    *args,
+    **kwargs,
+) -> str:
+    """Format the diagnostic message for the nearest match warning."""
+    all_function_overload_names = ""
+    for symbolic_func in default_and_custom_functions:
+        overload_func = symbolic_func.onnx_function
+        all_function_overload_names += (
+            f"ONNX Node: {overload_func.name}[opset={overload_func.opset}]. \n"
+        )
+    return (
+        f"FX Node: {domain}:{op_name}[overload={overload}]. \n"
+        f"{all_function_overload_names}"
+    )
+
+
 class OnnxFunctionDispatcher:
     """A dispatcher that finds the best ONNX Function for ATen operators.
 
@@ -96,30 +120,30 @@ class OnnxFunctionDispatcher:
         aten_name = self.get_aten_name(node, diagnostic_context)
         # If there are no overloaded functions available for the given FX node, raise an
         # unsupported error
-        all_functions, custom_functions = self.get_function_overloads(
+        default_and_custom_functions = self.get_function_overloads(
             node, *aten_name, diagnostic_context
         )
         # If there are overloaded functions available, we will find one that perfect or
         # nearest matches the given arguments and keyword arguments
         return self._find_the_perfect_or_nearest_match_onnxfunction(
-            node,
             *aten_name,
-            all_functions,
-            custom_functions,
+            default_and_custom_functions,
             onnx_args,
             onnx_kwargs,
             diagnostic_context,
         )
 
     @_beartype.beartype
+    @diagnostics.diagnose_call(
+        diagnostics.rules.find_opschema_matched_symbolic_function,
+        diagnostic_message_formatter=_find_opschema_matched_symbolic_function_disagnostic_message_formatter,
+    )
     def _find_the_perfect_or_nearest_match_onnxfunction(
         self,
-        node: torch.fx.Node,
         domain: str,
         op_name: str,
         overload: Optional[str],
-        all_functions: Set[registration.SymbolicFunction],
-        custom_functions: Optional[Set[registration.SymbolicFunction]],
+        default_and_custom_functions: List[registration.SymbolicFunction],
         onnx_args: Sequence[
             Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
         ],
@@ -133,8 +157,8 @@ class OnnxFunctionDispatcher:
             domain: The domain of the ONNX node.
             op_name: The name of the ONNX node.
             overload: The FX overload of the node. It's None if the node is default overload.
-            all_functions: All overloaded functions.
-            custom_functions: Custom overloaded functions.
+            default_and_custom_functions: The list includes overloaded functions, with
+                custom ones appearing after the default ones.
             onnx_args: The arguments of the ONNX function.
             onnx_kwargs: The keyword arguments of the ONNX function.
             diagnostic_context: The diagnostic context to use for reporting errors.
@@ -147,18 +171,9 @@ class OnnxFunctionDispatcher:
         # TODO(justinchuby): Cache the OpSchemaWrapper so we don't need to run the init logic everytime
         overload_match_ranking: Dict[registration.SymbolicFunction, int] = {}
 
-        # If there are custom functions, we will try to find the perfect match first
-        if custom_functions is not None:
-            for custom_symbolic_function in custom_functions:
-                overload_func = custom_symbolic_function.onnx_function
-                function_opschema = _OpSchemaWrapper(overload_func.op_schema)
-                if function_opschema.perfect_match_inputs(onnx_args, onnx_kwargs):
-                    # If the perfect match is found, return the function
-                    return overload_func
-
-        # If there are no custom functions or the perfect match is not found, we will
-        # try to find the nearest match among all functions
-        for symbolic_function in all_functions:
+        # Iterate the overloaded functions in reverse order to prioritize the custom ones
+        # over the default ones, and find the perfect match.
+        for symbolic_function in reversed(default_and_custom_functions):
             overload_func = symbolic_function.onnx_function
             function_opschema = _OpSchemaWrapper(overload_func.op_schema)
             if function_opschema.perfect_match_inputs(onnx_args, onnx_kwargs):
@@ -167,7 +182,7 @@ class OnnxFunctionDispatcher:
             # Record the match score for the nearest match if it's not the perfect match
             overload_match_ranking[symbolic_function] = function_opschema.match_score
 
-        # If the perfect match is not found, find the nearest match
+        # NOTE: If the perfect match is not found, find the nearest match
         if overload is None:
             # NOTE: "default" overload
             aten_name = f"{domain}::{op_name}"
@@ -177,14 +192,13 @@ class OnnxFunctionDispatcher:
             f"A perfect matched Opchema is not found in torchlib for {aten_name}, but \n"
             f"a nearest match is found. Please check the ONNX output carefully. \n",
         )
-        diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
-            diagnostics.rules.no_symbolic_function_for_call_function,
-            diagnostics.levels.WARNING,
-            f"Cannot find a perfect match of symbolic overload for {aten_name}, "
-            f"which should be registered under {node.target}. But a nearest match is found.",
-            unsupported_fx_node=node,
+        diagnostic = diagnostic_context.inflight_diagnostic()
+        diagnostic.with_additional_message(
+            "### Exact match is not found!\n"
+            "Cannot find a perfect match of symbolic overload, "
+            "a nearest match is found. Please check the ONNX output carefully. \n",
         )
-        diagnostic_context.log(diagnostic)
+        diagnostic.level = diagnostics.levels.WARNING
 
         # NOTE: Tie breaker: if there are multiple nearest matches, we will choose the one
         # that is custom first
@@ -274,9 +288,7 @@ class OnnxFunctionDispatcher:
         op_name: str,
         overload: Optional[str],
         diagnostic_context: diagnostics.DiagnosticContext,
-    ) -> Tuple[
-        Set[registration.SymbolicFunction], Optional[Set[registration.SymbolicFunction]]
-    ]:
+    ) -> List[registration.SymbolicFunction]:
         """Get the function overloads from the registry.
 
         Args:
@@ -287,21 +299,18 @@ class OnnxFunctionDispatcher:
             diagnostic_context: The diagnostic context to use for reporting errors.
 
         Returns:
-            Set of SymbolicFunctions.
+            The list contains SymbolicFunctions, starting with the default ones and
+            followed by any custom ones.
         """
 
         # NOTE: If the ATen/Custom operators are nt registered, these two groups will be None.
         # And non-registerd ATen/Custom operators will trigger error in the next step.
-        function_group: Optional[Set[registration.SymbolicFunction]] = None
-        custom_function_group: Optional[Set[registration.SymbolicFunction]] = None
+        function_group: Optional[List[registration.SymbolicFunction]] = None
 
         if self.onnx_registry.is_registered_op(
             domain=domain, op_name=op_name, overload=overload
         ):
             function_group = self.onnx_registry.get_functions(
-                domain=domain, op_name=op_name, overload=overload
-            )
-            custom_function_group = self.onnx_registry._get_custom_functions(
                 domain=domain, op_name=op_name, overload=overload
             )
 
@@ -315,12 +324,9 @@ class OnnxFunctionDispatcher:
             function_group = self.onnx_registry.get_functions(
                 domain=domain, op_name=op_name, overload=None
             )
-            custom_function_group = self.onnx_registry._get_custom_functions(
-                domain=domain, op_name=op_name, overload=None
-            )
 
         if function_group is not None:
-            return function_group, custom_function_group
+            return function_group
 
         # If we can't find the function group, raise error.
         if overload is None:
