@@ -14,6 +14,8 @@ from torch.testing._internal.jit_utils import JitTestCase
 
 class TestSourceMatcher(JitTestCase):
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
+
     def test_module_partitioner_linear_relu_linear(self):
         class M(torch.nn.Module):
             def __init__(self):

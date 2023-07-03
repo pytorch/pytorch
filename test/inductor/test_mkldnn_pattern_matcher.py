@@ -108,6 +108,7 @@ class TestPaternMatcher(TestCase):
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_conv2d_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -145,6 +146,7 @@ class TestPaternMatcher(TestCase):
             )
             self._test_common(mod, (v,), 1, unary_list[unary_fn])
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_linear_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -180,6 +182,7 @@ class TestPaternMatcher(TestCase):
                     mod, (v,), 1, unary_list_bf16[unary_fn], atol=1e-5, rtol=1.6e-2
                 )
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_conv_transpose2d_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -212,6 +215,7 @@ class TestPaternMatcher(TestCase):
             )
             self._test_common(mod, (v,), 1, unary_list[unary_fn])
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_conv2d_binary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -258,6 +262,7 @@ class TestPaternMatcher(TestCase):
             )
             self._test_common(mod, (v,), 1, match_nodes)
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_linear_binary(self):
         class M(torch.nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
@@ -285,6 +290,7 @@ class TestPaternMatcher(TestCase):
                 )
 
     # https://github.com/pytorch/pytorch/issues/99841.
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_hardtanh_pattern_fallback(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -307,6 +313,7 @@ class TestPaternMatcher(TestCase):
         for min_value, max_value in zip(min_values, max_values):
             self._test_common(mod, (v, min_value, max_value), 1, 3)
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_leaky_relu_pattern_fallback(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -327,6 +334,7 @@ class TestPaternMatcher(TestCase):
                 self._test_common(mod, (v, negative_slope), 1, 4)
 
     # https://github.com/pytorch/pytorch/issues/99838.
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_conv2d_add_scalar(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -345,6 +353,7 @@ class TestPaternMatcher(TestCase):
             v = torch.randn(1, 3, 28, 28)
             self._test_common(mod, (v,), 0, 0)
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_conv2d_binary_inplace_fusion_pass(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -366,6 +375,7 @@ class TestPaternMatcher(TestCase):
         exclude_ops = ["mkldnn._convolution_pointwise.binary"]
         self._test_code_common(mod, inputs, include_ops, exclude_ops)
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_conv2d_binary_inplace_fusion_failed(self):
         # Written buffer is graph input, we can't fuse inplace.
         class Model_v1(torch.nn.Module):
@@ -403,6 +413,7 @@ class TestPaternMatcher(TestCase):
         for other, mod in zip(others, [mod_v1, mod_v2]):
             self._test_code_common(mod, (input, other), include_ops, exclude_ops)
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_conv2d_binary_fusion_failed(self):
         # we don't support alpha !=1 case or other has different size with conv's output.
         class Model(torch.nn.Module):
@@ -467,6 +478,7 @@ class TestPaternMatcher(TestCase):
         mod = Model3().to(memory_format=torch.channels_last).eval()
         self._test_code_common(mod, (input,), include_ops, exclude_ops)
 
+    @torch.testing._internal.common_utils.set_dynamo_inline_nn_modules(False)
     def test_reproduce_99842_issue(self):
         class Model(torch.nn.Module):
             def __init__(self):
