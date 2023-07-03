@@ -66,9 +66,9 @@ inline void _mkl_gemm(
       n,
       k,
       alpha,
-      a,
+      (const float*)(a),
       lda,
-      b,
+      (const float*)(b),
       ldb,
       beta,
       c,
@@ -98,9 +98,9 @@ inline void _mkl_gemm(
       n,
       k,
       alpha,
-      (MKL_BF16*)(a),
+      (const MKL_BF16*)(a),
       lda,
-      (MKL_BF16*)(b),
+      (const MKL_BF16*)(b),
       ldb,
       beta,
       c,
@@ -242,7 +242,8 @@ void _mha_mul_softmax_kernel(
     const float& scale,
     const int& qsize,
     const int& kvsize,
-    const int& headsize) {
+    const int& headsize,
+    const int& idx) {
   float tmp_max = 0.f, tmp_sum = 0.f, sum_old = 0.f, exp_tmp = 0.f;
 
   for (int i = 0; i < qsize; ++i) {
@@ -263,13 +264,15 @@ void _mha_mul_softmax_kernel(
     _normalization_kernel<scalar_t>(
         a + i * kvsize, sum[i], kvsize, b + i * kvsize);
 
-    _mha_update_sum_max_kernel(
+    if (idx) {
+      _mha_update_sum_max_kernel(
         dst + i * headsize,
         sum_old,
         sum[i],
         exp_tmp,
         headsize,
         dst + i * headsize);
+    }
   }
 }
 
@@ -355,7 +358,8 @@ void sd_mha_base_kernel(
             scale,
             qBlockSize,
             kvBlockSize,
-            headSize);
+            headSize,
+            l);
         _mkl_gemm(
             CblasRowMajor,
             CblasNoTrans,
@@ -436,9 +440,9 @@ void cpu_flash_attention(
   Tensor v = value.transpose(1, 2).reshape(
       {batchSize, kvSize, hiddenSize});
 
-  int64_t qStride = q.size(-1);
-  int64_t kStride = k.size(-1);
-  int64_t vStride = v.size(-1);
+  int64_t qStride = q.stride(1);
+  int64_t kStride = k.stride(1);
+  int64_t vStride = v.stride(1);
 
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).as_float_unchecked();
