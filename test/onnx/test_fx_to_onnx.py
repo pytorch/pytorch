@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytorch_test_common
 import torch
+from parameterized import parameterized  # type: ignore[import]
 from torch import nn
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
@@ -142,7 +143,25 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_error_node="aten.embedding.default",
         )
 
-    def test_unsupported_function_schema_with_op_level_debug(self):
+    @parameterized.expand(
+        [
+            (
+                "bypass_fail_op_level_debug_raise_diagnostic_warning",
+                True,
+                diagnostics.rules.op_level_debugging,
+                "aten.convolution.default",
+            ),
+            (
+                "nearest_match_raise_diagnostic_warning",
+                False,
+                diagnostics.rules.find_opschema_matched_symbolic_function,
+                "aten::convolution.default",
+            ),
+        ]
+    )
+    def test_unsupported_function_schema_raise_diagnostic_warning(
+        self, _: str, op_level_debug: bool, rule: infra.Rule, expected_error_node: str
+    ):
         class TraceModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -155,13 +174,27 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         x = torch.randn(20, 16, 50, 50)
         export_output = dynamo_export(
-            TraceModel(), x, export_options=ExportOptions(op_level_debug=True)
+            TraceModel(), x, export_options=ExportOptions(op_level_debug=op_level_debug)
         )
         assert_has_diagnostics(
             export_output.diagnostic_context,
-            diagnostics.rules.op_level_debugging,
+            rule,
             diagnostics.levels.WARNING,
-            expected_error_node="aten.convolution.default",
+            expected_error_node=expected_error_node,
+        )
+
+    def test_dispatch_overload_fall_back_default_raise_diagnostic_warning(self):
+        class TraceModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.ops.aten.add(input, input)
+
+        x = torch.tensor(3)
+        export_output = dynamo_export(TraceModel(), x)
+        assert_has_diagnostics(
+            export_output.diagnostic_context,
+            diagnostics.rules.find_operator_overloads_in_onnx_registry,
+            diagnostics.levels.WARNING,
+            expected_error_node="aten::add.Tensor",
         )
 
 
