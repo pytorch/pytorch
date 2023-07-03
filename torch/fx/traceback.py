@@ -38,11 +38,10 @@ def set_bwd_seq_id(seq_id):
     global current_meta
 
     if should_preserve_node_meta:
-        # 1st bwd op is the seq id of last fwd op
-        # Then count down to 0
-
+        # The seq_id of the backward ops are saved
+        # in the autograd::Node data structure at the time
+        # the Node is created
         current_meta["seq_id"] = seq_id
-        print(f"BWD seq_id current_meta {current_meta} seq_id {seq_id} ")
 
 
 @compatibility(is_backward_compatible=False)

@@ -772,22 +772,24 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         # Testing aot full graph
         seq_id_list = []
-        fwd_detected = False
-        bwd_detected = False
+        fwd_seq_id_set = set()
+        bwd_seq_id_set = set()
         for node in fx_g.graph.nodes:
             if "call_" in node.op:
                 seq_id = node.meta.get("seq_id", -1)
-                print(f"Test: Node {node.op} target {node.target} seq_id {seq_id}")
                 if seq_id >= 0:
                     if not seq_id_list or seq_id_list[-1] < seq_id:
                         seq_id_list.append(seq_id)
-                        fwd_detected = True
+                        fwd_seq_id_set.add(seq_id)
                     elif seq_id_list[-1] > seq_id:
-                        seq_id_list.pop()
-                        bwd_detected = True
-        # Last node in list will be 0, just pop it to clear list
-        seq_id_list.pop()
-        self.assertTrue(fwd_detected and bwd_detected and not seq_id_list)
+                        bwd_seq_id_set.add(seq_id)
+
+        # There are 5 common ops in this test:  conv, bn, relu, flatten, fc
+        # This test can't isolate the fwd component of loss from the 
+        # bwd component, so we don't expect to see loss in the common ops
+        common_ops = fwd_seq_id_set.intersection(bwd_seq_id_set)
+        self.assertTrue(len(fwd_seq_id_set) > 0 and len(bwd_seq_id_set) > 0\
+                and len(common_ops) >= 5)
 
 
 if __name__ == "__main__":

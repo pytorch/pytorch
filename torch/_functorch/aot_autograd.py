@@ -167,12 +167,8 @@ def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int = 0):
     for node in iter_graph(roots):
         forward_node_stack = node.metadata.get("traceback_", [])
         forward_node_module_info = str(node.name)
-        seq_id = node.sequence_nr()
-        print(f"Node type BWD {type(node)} seq_id {seq_id}")
-        # OK I think node in this case is a Node() defined in autograd.cpp
-        # I should be able to just query the node's seq_id using the c++
-        # Node::sequence_nr()
-        node.register_prehook(get_prehook(forward_node_stack, seq_id))
+        node.register_prehook(get_prehook(forward_node_stack,
+            node.sequence_nr()))
 
         special_stack = forward_node_stack.copy()
         special_stack.append(
@@ -1226,11 +1222,7 @@ def create_joint(
     fn: Callable, *, aot_config: AOTConfig
 ) -> Any:
     def inner_fn(primals: List[Any], tangents: List[Any]):
-        fwd_seq_id = torch.autograd.get_sequence_nr()
-        print(f"Create_joint Before FWD seq_id {fwd_seq_id}")
         outs, tangent_mask = fn(*primals)
-        fwd_seq_id = torch.autograd.get_sequence_nr()
-        print(f"Create_joint FWD seq_id {fwd_seq_id}")
         assert len(tangent_mask) == len(outs)
         outs_to_grad = [o for needs_tangent, o in zip(tangent_mask, outs) if needs_tangent]
         assert len(outs_to_grad) == len(tangents)
