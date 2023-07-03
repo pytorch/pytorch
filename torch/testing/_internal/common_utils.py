@@ -109,6 +109,8 @@ IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 RETRY_TEST_CASES = os.getenv('PYTORCH_RETRY_TEST_CASES') == '1'
 OVERRIDE_FLAKY_SIGNAL = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') == '1'
 DISABLE_RUNNING_SCRIPT_CHK = os.getenv('PYTORCH_DISABLE_RUNNING_SCRIPT_CHK') == '1'
+# NB: enabled by default!
+PRINT_REPRO_ON_FAILURE = os.getenv('PYTORCH_PRINT_REPRO_ON_FAILURE', '1') == '1'
 
 DEFAULT_DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
@@ -1038,6 +1040,34 @@ TEST_WITH_TORCHINDUCTOR = os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
 TEST_WITH_AOT_EAGER = os.getenv('PYTORCH_TEST_WITH_AOT_EAGER') == '1'
 TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER
 
+
+# Returns a string prefix usable to set environment variables for any test
+# features (set by TEST_WITH_*) that are enabled during this instantiation
+# of the test suite.
+# Example: "PYTORCH_TEST_WITH_ASAN=1 PYTORCH_TEST_WITH_ROCM=1"
+def get_test_feature_env_var_prefix():
+    # To keep the output minimal, track which flags imply other flags.
+    implications = {
+        "TEST_WITH_TORCHINDUCTOR": {"TEST_WITH_TORCHDYNAMO"},
+        "TEST_WITH_AOT_EAGER": {"TEST_WITH_TORCHDYNAMO"},
+    }
+
+    enabled = set({flag for flag, on in globals().items() if flag.startswith("TEST_WITH_") and on})
+    implied = set({})
+    [implied.update(implications[flag]) for flag in enabled if flag in implications]
+    enabled = [flag for flag in enabled if flag not in implied]
+
+    # These don't follow the env var name template of PYTORCH_<var>.
+    non_standard_mappings = {
+        "TEST_WITH_TORCHINDUCTOR": "PYTORCH_TEST_WITH_INDUCTOR",
+        "TEST_WITH_TORCHDYNAMO": "PYTORCH_TEST_WITH_DYNAMO",
+    }
+
+    return " ".join([f"{non_standard_mappings[flag]}=1"
+                     if flag in non_standard_mappings
+                     else f"PYTORCH_{flag}=1" for flag in enabled])
+
+
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
@@ -1732,6 +1762,19 @@ def skip_exception_type(exc_type):
     except exc_type as e:
         raise unittest.SkipTest(f"not implemented: {e}") from e
 
+@contextmanager
+def print_repro_on_failure(repro_str):
+    try:
+        yield
+    except unittest.SkipTest:
+        raise
+    except Exception as e:
+        # NB: Hacking the exception args is the cleanest way I've found to append
+        # failure reproduction info without poisoning the stack trace.
+        if len(e.args) >= 1:
+            e.args = (e.args[0] + f"\n{repro_str}",) + e.args[1:]
+        raise
+
 #  "min_satisfying_examples" setting has been deprecated in hypothesis
 #  3.56.0 and removed in hypothesis 4.x
 try:
@@ -2152,6 +2195,21 @@ class TestCase(expecttest.TestCase):
 
             if self._ignore_not_implemented_error:
                 self.wrap_with_policy(method_name, lambda: skip_exception_type(NotImplementedError))
+
+            if PRINT_REPRO_ON_FAILURE:
+                env_var_prefix = get_test_feature_env_var_prefix()
+                try:
+                    test_filename = os.path.relpath(inspect.getfile(type(self)), start=os.curdir)
+                    repro_str = f"""
+To execute this test, run the following from the base repo dir:
+    {env_var_prefix} python {test_filename} -k {method_name}
+                    """
+                    self.wrap_with_policy(
+                        method_name,
+                        lambda repro_str=repro_str: print_repro_on_failure(repro_str=repro_str))
+                except Exception:
+                    # Don't fail entirely if we can't get the test filename
+                    pass
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
