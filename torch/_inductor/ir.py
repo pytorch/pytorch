@@ -1443,9 +1443,8 @@ class View(GenericView):
     def handle_negative_index(idx, size):
         idx = sympy.expand(idx)
         size = sympy.expand(size)
-        sizevars = V.graph.sizevars
-        if sizevars.size_hint(idx) < 0:
-            sizevars.guard_lt(idx, 0)
+        evaluate_expr = V.graph.sizevars.shape_env.evaluate_expr
+        if evaluate_expr(sympy.Lt(idx, 0)):
             idx = idx + size
         return idx
 
