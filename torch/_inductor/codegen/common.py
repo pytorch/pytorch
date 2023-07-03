@@ -813,13 +813,11 @@ class Kernel(CodeGen):
                 def inner(*args, **kwargs):
                     buf_bounds = ValueRanges.unknown()
                     if self.bounds is not None:
-                        # TODO turn this elif into an else when we support dynamic shapes
-                        # Propagate bounds into the CSE variable
                         fx_node = V.interpreter.current_node
                         buf_bounds = self.bounds._bounds.get(
                             fx_node, ValueRanges.unknown()
                         )
-                        # Sanity check: The variable either it's bounded or it's unbounded
+                        # Sanity check: The variable is either bounded or unbounded
                         assert (
                             buf_bounds is not None
                             or fx_node in self.bounds.unbounded_vars
