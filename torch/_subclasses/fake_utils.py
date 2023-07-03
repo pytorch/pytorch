@@ -88,53 +88,63 @@ class CrossRefFakeMode(TorchDispatchMode):
             except UnsupportedFakeTensorException:
                 pass
 
+        context = (
+            f"When comparing the output of {func} on FakeTensor and concrete Tensors, "
+            f"found"
+        )
         r = func(*args, **kwargs)
         if fake_r is not None:
             r_flat, _ = tree_flatten(r)
             f_flat, _ = tree_flatten(fake_r)
             assert len(r_flat) == len(
                 r_flat
-            ), f"Mismatch {len(r_flat)} != {len(r_flat)} on {func}"
+            ), f"{context} mismatch in number of returns {len(f_flat)} != {len(r_flat)}"
 
             if self.check_aliasing:
                 r_aliasing = outputs_alias_inputs(r, (args, kwargs))
                 f_aliasing = outputs_alias_inputs(fake_r, (fake_args, fake_kwargs))
                 assert (
                     r_aliasing == f_aliasing
-                ), f"Mismatch on {func}: {r_aliasing} != {f_aliasing}"
+                ), f"{context} mismatch in outputs_alias_inputs check {f_aliasing} != {r_aliasing}"
 
                 r_identity_eq = outputs_are_inputs(r, (args, kwargs))
                 f_identity_eq = outputs_are_inputs(fake_r, (fake_args, fake_kwargs))
                 assert (
                     r_identity_eq == f_identity_eq
-                ), f"Mismatch on {func}: {r_identity_eq} != {f_identity_eq}"
+                ), f"{context} mismatch in outputs_are_inputs check {f_identity_eq} != {r_identity_eq}"
 
                 r_output_alias_each_other = output_alias_each_other(r)
                 f_output_alias_each_other = output_alias_each_other(fake_r)
-                assert (
-                    r_output_alias_each_other == f_output_alias_each_other
-                ), f"Mismatch on {func}: {r_output_alias_each_other} != {f_output_alias_each_other}"
+                assert r_output_alias_each_other == f_output_alias_each_other, (
+                    f"{context} mismatch in outputs_alias_each_other check "
+                    f"{f_output_alias_each_other} != {r_output_alias_each_other}"
+                )
 
             for r_out, fake_out in zip(tree_flatten(r)[0], tree_flatten(fake_r)[0]):
                 r_is_ten = isinstance(r_out, torch.Tensor)
                 assert r_is_ten == isinstance(
                     fake_out, torch.Tensor
-                ), f"Mismatched number of tensor outputs on {func}"
+                ), f"{context} mismatched number of tensor outputs"
                 if r_is_ten:
-                    assert (
-                        r_out.requires_grad == fake_out.requires_grad
-                    ), f"Mismatch on {func}"
+                    assert r_out.requires_grad == fake_out.requires_grad, (
+                        f"{context} mismatched requires_grad-ness of outputs. "
+                        f"This usually means that you have added autograd support "
+                        f"for your operator at a dispatch key other than Autograd, "
+                        f"which will lead to problems"
+                    )
                     if torch._C._has_storage(r_out):
                         r_offset = r_out.storage_offset()
                         f_offset = fake_out.storage_offset()
                         assert (
                             r_offset == f_offset
-                        ), f"Mismatch on {func}: {r_offset} != {f_offset}"
+                        ), f"{context} mismatched storage offset"
 
                     try:
                         torch._prims.utils.compare_tensor_meta(
                             r_out, fake_out, check_strides=self.check_strides
                         )
                     except Exception as e:
-                        raise RuntimeError(f"Mismatch on {func}: {e}") from e
+                        raise RuntimeError(
+                            f"{context} mismatched tensor metadata: {e}"
+                        ) from e
         return r

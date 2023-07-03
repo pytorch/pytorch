@@ -45,7 +45,7 @@ class FloatToFusedRandRowwiseQuantizedOp : public Operator<Context> {
     }
   }
 
-  ~FloatToFusedRandRowwiseQuantizedOp() {
+  ~FloatToFusedRandRowwiseQuantizedOp() override {
     if (random_) {
 #ifdef FUSED_ROWWISE_RANDOM_QUANTIZATION_USE_MKL
       int status = vslDeleteStream(&vslStream_);

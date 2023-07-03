@@ -108,6 +108,11 @@ else()
   message(STATUS "don't use NUMA")
 endif()
 
+if(USE_MIMALLOC)
+  target_link_libraries(c10 PRIVATE "mimalloc-static")
+  add_dependencies(c10 mimalloc-static)
+endif()
+
 if(ANDROID)
     target_link_libraries(c10 PRIVATE log)
 endif()
