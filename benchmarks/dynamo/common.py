@@ -309,6 +309,7 @@ CI_TV_OFF[CI("aot_eager", training=True, dynamic=True, device="cuda")] = [
     # TIMM
     "eca_halonext26ts",
     "swin_base_patch4_window7_224",
+    "mobilevit_s",
     # TorchBench
     "attention_is_all_you_need_pytorch",
     "hf_GPT2",
