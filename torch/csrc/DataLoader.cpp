@@ -103,6 +103,8 @@ static void handler_SIGTERM(int sig, siginfo_t* info, void* ctx) {
   }
 }
 
+__attribute__((weak)) void setDataLoaderSignalHandlers() {}
+
 static PyObject* THPModule_setWorkerSignalHandlers(
     PyObject* module,
     PyObject* arg) {
@@ -111,6 +113,7 @@ static PyObject* THPModule_setWorkerSignalHandlers(
   setSignalHandler(SIGSEGV, &handler_SIGSEGV, nullptr);
   setSignalHandler(SIGTERM, &handler_SIGTERM, nullptr);
   setSignalHandler(SIGFPE, &handler_SIGFPE, nullptr);
+  setDataLoaderSignalHandlers();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

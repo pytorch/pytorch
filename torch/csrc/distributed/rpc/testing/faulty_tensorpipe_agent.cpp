@@ -7,7 +7,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-std::string fromVecToString(const std::vector<char>& vec) {
+static std::string fromVecToString(const std::vector<char>& vec) {
   return std::string(vec.begin(), vec.end());
 }
 

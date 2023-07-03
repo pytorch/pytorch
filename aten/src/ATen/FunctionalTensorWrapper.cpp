@@ -42,6 +42,10 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // TODO: metadata copying may not actually be necessary then
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
   set_custom_device(true);
+  // E.g. when running torch.compile under inference mode, we need to make sure that
+  // for any inputs that were created outside of inference mode (so they are not inference tensors),
+  // then the functional wrappers that we wrap them with should also not be inference tensors.
+  version_counter_ = value_.unsafeGetTensorImpl()->version_counter();
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -169,6 +173,8 @@ bool FunctionalTensorWrapper::is_up_to_date() const {
 // See Note [Functionalization Pass - Inplace View Ops]
 void FunctionalTensorWrapper::mutate_view_meta(at::functionalization::ViewMeta meta) {
   view_metas_.push_back(meta);
+  // Manually track the fact that this tensor recieved a metadata mutation!
+  has_metadata_mutation_ = true;
   // Note [Functionalization Pass - Inplace View Ops]
   // So, these ops are special - they're mutation AND view ops. They get special codegen.
   // An example is transpose_, e.g. `a.transpose_()`

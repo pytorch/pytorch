@@ -730,7 +730,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
 }
 
 #ifdef USE_XNNPACK
-bool can_use_xnnp(c10::ScalarType dtype, bool per_channel) {
+static bool can_use_xnnp(c10::ScalarType dtype, bool per_channel) {
   if(!at::native::xnnpack::available()) {
     return false;
   }

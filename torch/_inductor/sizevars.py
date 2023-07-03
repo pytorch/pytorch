@@ -1,7 +1,7 @@
 import functools
 import itertools
 import logging
-from typing import Callable, Dict, List, Union
+from typing import Callable, Dict, List, Tuple, Union
 
 import sympy
 from sympy import Expr
@@ -361,7 +361,7 @@ class SizeVarAllocator:
             log.debug("failed on: %s", out)
             raise
 
-    def size_hints(self, exprs: List[Expr]) -> int:
+    def size_hints(self, exprs: List[Expr]) -> Tuple[int, ...]:
         return tuple(self.size_hint(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):

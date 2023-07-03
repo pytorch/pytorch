@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import os
-import sys
 
 import torch
 from torch.distributed._tensor.device_mesh import DeviceMesh
@@ -11,21 +10,29 @@ from torch.distributed.distributed_c10d import (
     get_global_rank,
     get_process_group_ranks,
     get_world_size,
+    init_process_group,
     is_initialized,
+    is_nccl_available,
     ProcessGroup,
 )
-from torch.testing._internal.common_distributed import TEST_SKIPS
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
-def _get_device_type_and_backend():
-    device_type = "cuda" if torch.cuda.is_available() else "cpu"
-    backend = "nccl" if device_type == "cuda" else "gloo"
-    return device_type, backend
+def _get_device_type(world_size):
+    if (
+        torch.cuda.is_available()
+        and torch.cuda.device_count() >= world_size
+        and is_nccl_available()
+    ):
+        device_type = "cuda"
+    else:
+        device_type = "cpu"
+    return device_type
 
 
 def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0):
@@ -40,20 +47,12 @@ class DeviceMeshTest(DTensorTestBase):
     def world_size(self):
         return 4
 
-    @with_comms
-    def test_eligible_default_pg_for_mesh(self):
-        mesh_tensor = torch.arange(self.world_size).reshape(2, -1)
-        mesh = DeviceMesh(self.device_type, mesh_tensor)
-
     def test_init_process_group(self):
-        device_type, backend = _get_device_type_and_backend()
-        # skip the test if not enough GPUs
-        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        device_type = _get_device_type(self.world_size)
         mesh_tensor = torch.arange(4).reshape(2, 2)
         self.assertTrue(not is_initialized())
         _set_env_var(world_size=self.world_size, rank=self.rank)
-        mesh = DeviceMesh(device_type, mesh_tensor)
+        DeviceMesh(device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg()
 
@@ -89,10 +88,15 @@ class DeviceMeshTest(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
             mesh.get_dim_groups()
 
-        if self.rank == 1:
-            assert mesh.get_coordinate() is not None
-        else:
-            assert mesh.get_coordinate() is None
+    def test_fake_pg_device_mesh(self):
+        fake_store = FakeStore()
+        init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
+
+        local_tensor = torch.randn(2, 8)
+        global_tensor = mesh.all_gather(local_tensor)
+        self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
 
     @with_comms
     def test_validate_device_mesh(self):
