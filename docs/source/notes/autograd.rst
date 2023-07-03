@@ -189,7 +189,7 @@ decorators.
      -
      -
      - ✓
-     - Optimizer
+     - Optimizer updates
    * - inference
      -
      -
