@@ -272,8 +272,8 @@ Tensor empty_names(
   }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
-  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda(),
-      "NYI: named tensors only support CPU and CUDA tensors");
+  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda() || options.device().is_privateuseone(),
+      "NYI: named tensors only support CPU, CUDA or ", c10::get_privateuse1_backend(), " tensors.");
   auto result = at::empty(size, options, optional_memory_format);
   internal_set_names_inplace(result, names);
   return result;
