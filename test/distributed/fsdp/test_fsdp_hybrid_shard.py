@@ -12,7 +12,11 @@ import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 
 from torch.distributed.distributed_c10d import _rank_not_in_group
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, ShardingStrategy
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    ShardingStrategy,
+    StateDictType,
+)
 from torch.distributed.fsdp._init_utils import HYBRID_SHARDING_STRATEGIES
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
@@ -75,6 +79,9 @@ class MyModel(nn.Module):
         self.lin1 = nn.Linear(10, 10)
         self.lin2 = nn.Linear(10, 10)
         self.lin3 = nn.Linear(10, 10)
+
+    def forward(self, x):
+        return self.lin3(self.lin2(self.lin1(x)))
 
 
 class ShardingStrategyMode(Enum):
@@ -143,6 +150,56 @@ class TestFSDPHybridShard(FSDPTest):
             ValueError, "inter-node process groups do not match"
         ):
             model(inp)
+
+    @skip_if_lt_x_gpu(4)
+    def test_hsdp_save_load_state_dict(self):
+        model = MyModel().cuda()
+        num_node_devices = torch.cuda.device_count()
+        shard_rank_lists = list(range(0, num_node_devices // 2)), list(
+            range(num_node_devices // 2, num_node_devices)
+        )
+        shard_groups = (
+            dist.new_group(shard_rank_lists[0]),
+            dist.new_group(shard_rank_lists[1]),
+        )
+        my_shard_group = (
+            shard_groups[0] if self.rank in shard_rank_lists[0] else shard_groups[1]
+        )
+        my_replicate_group = None
+        my_rank = self.rank
+        # Create groups like (0, 4), (1, 5), (2, 6) etc and assign appropriately
+        shard_factor = len(shard_rank_lists[0])
+        for i in range(num_node_devices // 2):
+            replicate_group_ranks = list(range(i, num_node_devices, shard_factor))
+            replicate_group = dist.new_group(replicate_group_ranks)
+            if my_rank in replicate_group_ranks:
+                my_replicate_group = replicate_group
+
+        fsdp_ctor = partial(
+            FSDP,
+            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+            use_orig_params=True,
+            process_group=(my_shard_group, my_replicate_group),
+        )
+        model = fsdp_ctor(model)
+        optim = torch.optim.AdamW(model.parameters())
+        # Initialize optimizer states
+        model(torch.randn(2, 10)).sum().backward()
+        optim.step()
+        shard_g = model.process_group
+        replicate_g = model._inter_node_state.process_group
+        assert shard_g == my_shard_group
+        assert replicate_g == my_replicate_group
+        with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
+            msd = model.state_dict()
+            osd = FSDP.optim_state_dict(model, optim)
+
+        load_model = fsdp_ctor(MyModel().cuda())
+        load_optim = torch.optim.AdamW(load_model.parameters())
+        with FSDP.state_dict_type(load_model, StateDictType.SHARDED_STATE_DICT):
+            load_model.load_state_dict(msd)
+            FSDP.optim_state_dict_to_load(load_model, load_optim, osd)
+        load_optim.load_state_dict(osd)
 
     @skip_if_lt_x_gpu(2)
     def test_invalid_pg_specification_raises(self):

@@ -27,7 +27,11 @@
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_csr_prod_native.h>
+#include <ATen/ops/_sparse_csr_sum_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_backward_native.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
@@ -116,6 +120,7 @@
 #include <ATen/ops/trunc_native.h>
 #include <ATen/ops/zero_native.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 #include <algorithm>
@@ -342,21 +347,11 @@ inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
 }
 } // namespace
 
-static constexpr bool is_mkl_supported() {
-#ifdef _MSC_VER
-  return false;
-#elif __APPLE__ || __MACH__
-  return false;
-#else
-  return true;
-#endif
-}
-
 // Only accept squares sparse matrices or dense input as a vector
 // TODO: Check what happens with MKL, the output error reported with non square
 // matrices tends to be high See:
 // https://github.com/pytorch/pytorch/issues/58770
-bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
+static bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
 
@@ -414,7 +409,7 @@ Tensor& zero_sparse_csr_(Tensor& self) {
     `result = csr.clone(); result.values.zero_();`
   */
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "zero_sparse_csr_", [](){});
-  get_sparse_csr_impl(self)->resize_and_clear_(self.sparse_dim(), self.sizes());
+  get_sparse_csr_impl(self)->resize_and_clear_(self.sparse_dim(), self.dense_dim(), self.sizes());
   return self;
 }
 
@@ -470,7 +465,7 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
-CREATE_UNARY_UFUNC(relu);
+static CREATE_UNARY_UFUNC(relu);
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
@@ -740,7 +735,7 @@ Tensor& _sparse_csr_mm_out(
     const Tensor& mat1,
     const Tensor& mat2,
     Tensor& result) {
-  auto zero = at::zeros({mat1.size(0), mat2.size(1)}, mat2.options());
+  auto zero = at::zeros_like(result);
   return at::addmm_out(result, zero, mat1, mat2, 0.0, 1.0);
 }
 
@@ -782,18 +777,6 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
       1.0);
 }
 
-Tensor _sparse_csr_addmm(
-    const Tensor& t,
-    const SparseCsrTensor& sparse,
-    const Tensor& dense,
-    const Scalar& beta,
-    const Scalar& alpha) {
-  // _sparse_addmm forward is functionally equivalent to addmm; it's
-  // just the backward that is different.  This technically does an
-  // unnecessary redispatch, I was too lazy to make it not do that
-  return at::addmm(t, sparse, dense, beta, alpha);
-}
-
 // Functions for element-wise addition.
 Tensor add_sparse_csr(
     const Tensor& self,
@@ -812,7 +795,7 @@ Tensor& add_sparse_csr_(
   return at::add_out(self, self, other, alpha); // redispatch!
 }
 
-void add_out_dense_sparse_csr_cpu(
+static void add_out_dense_sparse_csr_cpu(
     const Tensor& out,
     const Tensor& dense,
     const SparseCsrTensor& src,

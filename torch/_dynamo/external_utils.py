@@ -3,7 +3,7 @@
 import functools
 
 
-def is_compiling():
+def is_compiling() -> bool:
     return False
 
 

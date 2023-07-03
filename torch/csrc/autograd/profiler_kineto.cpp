@@ -40,6 +40,7 @@ extern "C" {
 // This function is needed to avoid superfluous dependency on GNU OpenMP library
 // when cuPTI is linked statically For more details see
 // https://github.com/pytorch/pytorch/issues/51026
+__attribute__((weak)) int acc_get_device_type();
 __attribute__((weak)) int acc_get_device_type() {
   throw std::runtime_error(
       "Dummy implementation of acc_get_device_type is not supposed to be called!");
@@ -274,12 +275,6 @@ struct AddGenericMetadata : public MetadataBase {
   const torch::profiler::impl::ProfilerConfig* config_;
 };
 
-// Assumption: Total threads number will not exceed 2^16-1, and total ops will
-// not exceed 2^48 -1.
-static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
-  return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
-}
-
 struct KinetoThreadLocalState : public ProfilerStateBase {
   explicit KinetoThreadLocalState(
       const ProfilerConfig& config,
@@ -362,8 +357,6 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
     materializeOpEvents(records_and_trace.first);
 
-    // finalizeCPUTrace(cpu_trace_.get());
-
     // `kineto_events_` does not include Python events. Instead it exposes them
     // via the `stacks` property.
     kineto_events_.erase(
@@ -404,82 +397,6 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
       }
     }
   }
-
-  void finalizeCPUTrace(
-      std::unique_ptr<torch::profiler::impl::kineto::trace_t>& cpu_trace) {
-#ifndef USE_KINETO
-  }
-#else // USE_KINETO
-    TORCH_INTERNAL_ASSERT(
-        cpu_trace->activities.size() == kineto_events_.size());
-    // startThreadId_seqNum to pointer of activity.
-    // Low-16bits of startThreadId and low-48bits seqNum are concatenated into
-    // one uint64_t variable as key.
-
-    // From the time being, we need disable the forward/backward correlation
-    // feature to workaround the crash bug.
-    // TODO: by Mike Guo
-    // reenable the forward/backward correlation when kineto fix the following
-    // raw pointer
-    //    GenericTraceActivity.flow.linkedActivity
-    /*
-    std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>
-        tidSeq2activity;
-
-    for (const auto idx : c10::irange(cpu_trace->activities.size())) {
-      auto& kineto_event = kineto_events_[idx];
-      auto& activity = cpu_trace->activities[idx];
-
-      // add information about an associated forward op, if a sequence number
-      // is available (e.g. during training)
-      if (kineto_event.sequenceNr() >= 0) {
-        generateForwardBackwardLink(
-            kineto_event, fwd_bwd_link_id, activity, tidSeq2activity);
-      }
-    }
-    */
-  }
-
-  void generateForwardBackwardLink(
-      const KinetoEvent& kineto_event,
-      uint64_t& fwd_bwd_link_id,
-      libkineto::GenericTraceActivity& activity,
-      std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>&
-          tidSeq2activity) {
-    if (kineto_event.fwdThreadId() > 0) {
-      // act is backward op.
-      uint64_t key = getForwardThreadKey(
-          kineto_event.fwdThreadId(), kineto_event.sequenceNr());
-      auto iter = tidSeq2activity.find(key);
-      if (iter != tidSeq2activity.end()) {
-        libkineto::GenericTraceActivity* fwd = iter->second;
-        fwd->flow.start = true;
-        activity.flow.id = fwd->flow.id = fwd_bwd_link_id;
-        activity.flow.type = fwd->flow.type = libkineto::kLinkFwdBwd;
-        ++fwd_bwd_link_id;
-      }
-    } else if (kineto_event.startThreadId() != 0) {
-      // act is forward op.
-      uint64_t key = getForwardThreadKey(
-          kineto_event.startThreadId(), kineto_event.sequenceNr());
-      // Assumption: Among all ops with same sequence number,
-      // the one with biggest start time is most likely launching backward op.
-      auto iter = tidSeq2activity.find(key);
-      if (iter == tidSeq2activity.end()) {
-        tidSeq2activity[key] = &activity;
-      } else {
-        // Now the sequence number is only incremented on creating a "Node"
-        // object for backward pass, by calling
-        // "at::sequence_number::get_and_increment()". Among all ops with same
-        // sequence number, the one with biggest startTime is the one launching
-        // backward op.
-        if (activity.startTime >= iter->second->startTime) {
-          tidSeq2activity[key] = &activity;
-        }
-      }
-    }
-  }
-#endif // USE_KINETO
 
   uint64_t start_time_;
   torch::profiler::impl::ApproximateClockToUnixTimeConverter clock_converter_;
@@ -526,10 +443,15 @@ void onFunctionExit(
       auto fallback = kineto_ctx_ptr->fallback_;
       TORCH_INTERNAL_ASSERT(fallback != nullptr);
       torch::profiler::impl::cudaStubs()->record(
-          nullptr, &fallback->cuda_event_end_, nullptr);
+          nullptr, &fallback->device_event_end_, nullptr);
     } catch (const std::exception& e) {
       LOG(WARNING) << "Failed to record CUDA event. " << e.what();
     }
+  } else if (config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK) {
+    auto fallback = kineto_ctx_ptr->fallback_;
+    TORCH_INTERNAL_ASSERT(fallback != nullptr);
+    torch::profiler::impl::privateuse1Stubs()->record(
+        nullptr, &fallback->device_event_end_, nullptr);
   }
 
   if (fn.scope() == at::RecordScope::USER_SCOPE) {
@@ -551,10 +473,13 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           .needsInputs(registration_state_ptr->config().report_input_shapes)
           .scopes(scopes);
 
-  auto handle = c10::guts::if_constexpr<use_global_callback>(
-      [&] { return at::addGlobalCallback(recordFunctionCallback); },
-      [&] { return at::addThreadLocalCallback(recordFunctionCallback); });
-  registration_state_ptr->setCallbackHandle(handle);
+  if constexpr (use_global_callback) {
+    registration_state_ptr->setCallbackHandle(
+        at::addGlobalCallback(recordFunctionCallback));
+  } else {
+    registration_state_ptr->setCallbackHandle(
+        at::addThreadLocalCallback(recordFunctionCallback));
+  }
 }
 
 } // namespace
@@ -600,7 +525,8 @@ void prepareProfiler(
   }
   TORCH_CHECK(
       config.state == ProfilerState::KINETO ||
-          config.state == ProfilerState::KINETO_GPU_FALLBACK,
+          config.state == ProfilerState::KINETO_GPU_FALLBACK ||
+          config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK,
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
       /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
@@ -675,7 +601,9 @@ void enableProfiler(
 
   TORCH_CHECK(
       config.state == ProfilerState::KINETO ||
-      config.state == ProfilerState::KINETO_GPU_FALLBACK || config.global());
+      config.state == ProfilerState::KINETO_GPU_FALLBACK ||
+      config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK ||
+      config.global());
   TORCH_CHECK(!activities.empty(), "No activities specified.");
   TORCH_INTERNAL_ASSERT(
       has_cpu || !config.global(),
@@ -701,6 +629,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
       state_ptr &&
           (config.state == ProfilerState::KINETO ||
            config.state == ProfilerState::KINETO_GPU_FALLBACK ||
+           config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK ||
            config.state == ProfilerState::KINETO_ONDEMAND ||
            config.state == ProfilerState::NVTX ||
            config.state == ProfilerState::ITT),
@@ -715,14 +644,15 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     return std::make_unique<ProfilerResult>();
   }
 
-  // Shared among NVTX, KINETO, KINETO_GPU_FALLBACK
+  // Shared among NVTX, KINETO, KINETO_GPU_FALLBACK, KINETO_PRIVATEUSE1_FALLBACK
   std::unique_ptr<ProfilerResult> result;
   if (state_ptr->config().state == ProfilerState::NVTX) {
     result = std::make_unique<ProfilerResult>();
   }
 
   if (config.state == ProfilerState::KINETO ||
-      config.state == ProfilerState::KINETO_GPU_FALLBACK) {
+      config.state == ProfilerState::KINETO_GPU_FALLBACK ||
+      config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK) {
     auto kineto_state_ptr =
         std::static_pointer_cast<KinetoThreadLocalState>(state_ptr);
     auto trace = kineto_state_ptr->finalizeTrace();
@@ -855,6 +785,17 @@ int64_t KinetoEvent::cudaElapsedUs() const {
   return -1;
 }
 
+int64_t KinetoEvent::privateuse1ElapsedUs() const {
+  auto privateuse1_event_start = fallbackStart();
+  auto privateuse1_event_end = fallbackEnd();
+  if (!privateuse1_event_start || !privateuse1_event_end) {
+    return -1;
+  }
+  return (int64_t)torch::profiler::impl::privateuse1Stubs()->elapsed(
+      &privateuse1_event_start, &privateuse1_event_end);
+  return -1;
+}
+
 void KinetoEvent::getPerfEventCounters(std::vector<uint64_t>& in) const {
   return result_->visit(c10::overloaded(
       [&in](const ExtraFields<EventType::TorchOp>& e) -> void {
@@ -910,8 +851,8 @@ TYPED_ATTR(TorchOp, fwdThreadId, e.sequence_number_ >= 0 ? e.forward_tid_ : 0)
 TYPED_ATTR(TorchOp, scope, static_cast<uint8_t>(e.scope_))
 TYPED_ATTR(TorchOp, hasModuleHierarchy, !e.jit_modules_.empty())
 TYPED_ATTR(TorchOp, isAsync, e.is_async_)
-TYPED_ATTR(TorchOp, fallbackStart, e.gpu_fallback_.cuda_event_start_)
-TYPED_ATTR(TorchOp, fallbackEnd, e.gpu_fallback_.cuda_event_end_)
+TYPED_ATTR(TorchOp, fallbackStart, e.device_fallback_.device_event_start_)
+TYPED_ATTR(TorchOp, fallbackEnd, e.device_fallback_.device_event_end_)
 TYPED_ATTR(
     TorchOp,
     flops,

@@ -9,6 +9,9 @@
 
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
+#include <ATen/native/BinaryOps.h>
+#include <ATen/native/Math.h>
+
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
@@ -77,7 +80,9 @@ inline bfloat16 fetch_value<bfloat16>(volatile bfloat16 *addr) {
   return bfloat16(addr->x);
 }
 
-template <typename T> void atomic_add(volatile T *addr, T offset) {
+template <typename T>
+typename std::enable_if<!std::is_integral<T>::value>::type
+atomic_add(volatile T *addr, T offset) {
   typedef typename AsIntegerType<T>::type alt_type;
 
   static_assert(sizeof(std::atomic<alt_type>) == sizeof(T),
@@ -94,6 +99,18 @@ template <typename T> void atomic_add(volatile T *addr, T offset) {
     reinterpret_cast<T *>(&desired)[0] = val + offset;
   } while (!atomic_addr->compare_exchange_weak(expected, desired,
                                                std::memory_order_relaxed));
+}
+
+// Since C++20 float is supported by fetch_add, but the performance may not
+// better than compare_exchange_weak, which can be checked by microbenchmark
+// inductor_cpu_atomic.py
+template <typename T>
+typename std::enable_if<std::is_integral<T>::value>::type
+atomic_add(volatile T *addr, T offset) {
+  static_assert(sizeof(std::atomic<T>) == sizeof(T),
+                "std::atomic issue");
+  std::atomic<T> *atomic_addr = (std::atomic<T> *)addr;
+  atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
 
 // This function is used to convert bool or uint8 to float mask for
@@ -118,17 +135,18 @@ inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
   return at::vec::Vectorized<float>::loadu(dst_tmp);
 }
 
-inline at::vec::Vectorized<float> load_bf16_as_float(const bfloat16* bf16_buf) {
-  at::vec::Vectorized<float> res_vec(0);
-  at::vec::load_fp32_from_bf16(bf16_buf, res_vec);
-  return res_vec;
+inline at::vec::Vectorized<float> cvt_bf16_to_fp32(
+    at::vec::Vectorized<bfloat16> src) {
+  at::vec::Vectorized<float> res_vec1(0);
+  at::vec::Vectorized<float> res_vec2(0);
+  std::tie(res_vec1, res_vec2) = at::vec::convert_bfloat16_float(src);
+  return res_vec1;
 }
 
-inline void store_float_as_bf16(
-    bfloat16* bf16_buf,
-    at::vec::Vectorized<float> src_buf) {
-  auto res = at::vec::convert_float_bfloat16(src_buf, src_buf);
-  res.store(bf16_buf, at::vec::Vectorized<float>::size());
+inline at::vec::Vectorized<bfloat16> cvt_fp32_to_bf16(
+    at::vec::Vectorized<float> src) {
+  auto res = at::vec::convert_float_bfloat16(src, src);
+  return res;
 }
 
 inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<float> src) {

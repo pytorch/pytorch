@@ -849,6 +849,17 @@ class TestExtensionUtils(TestCase):
         self.assertEqual(torch._utils._get_device_index('foo:1'), 1)
         self.assertEqual(torch._utils._get_device_index(torch.device("foo:2")), 2)
 
+class TestRenderUtils(TestCase):
+    def test_basic(self):
+        self.assertExpectedInline(
+            torch._utils.render_call(torch.sum, [torch.randn(100)], {'dim': 0}),
+            '''torch.sum(tensor([...], size=(100,)), dim=0)'''
+        )
+        self.assertExpectedInline(
+            torch._utils.render_call(torch.sum, [torch.randn(100, 100)], {'dim': 0}),
+            '''torch.sum(tensor([...], size=(100, 100)), dim=0)'''
+        )
+
 class TestDeviceUtils(TestCase):
     def test_basic(self):
         with torch.device('meta') as dev:

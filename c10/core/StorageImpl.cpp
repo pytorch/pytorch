@@ -1,4 +1,5 @@
 #include <c10/core/StorageImpl.h>
+#include <c10/util/flat_hash_map.h>
 
 namespace c10 {
 
