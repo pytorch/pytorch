@@ -70,7 +70,7 @@ static void pool2d_template(const Tensor& input,
               ": stride must either be omitted, a single int, or a tuple of two ints")
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
               op_name,
-              ": padding must be either be a single int, or a tuple of two ints");
+              ": padding must either be a single int, or a tuple of two ints");
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
               op_name,
               ": dilation must be either a single int, or a tuple of two ints");

@@ -4,7 +4,8 @@ import os
 import re
 import sys
 import time
-from typing import Dict, List, Optional, Set
+from contextlib import contextmanager
+from typing import Dict, List, Optional, Set, Tuple
 
 import sympy
 
@@ -21,8 +22,6 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.utils._mode_utils import no_dispatch
-
-from .._dynamo import config as dynamo_config
 
 from . import config, ir, metrics
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
@@ -152,10 +151,13 @@ class GraphLowering(torch.fx.Interpreter):
         cpp_wrapper=False,
         aot_mode=False,
         user_visible_outputs=frozenset(),
+        layout_opt=None,
     ):
         super().__init__(gm)
 
-        self.layout_opt = self.decide_layout_opt()
+        self.layout_opt = (
+            layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
+        )
         self.num_channels_last_conv = 0
 
         self.extra_traceback = False  # we do our own error wrapping
@@ -180,6 +182,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
+        self.current_node: Optional[torch.fx.Node] = None
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
@@ -196,8 +199,16 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self._warned_fallback = {"aten.convolution_backward"}
         self.user_visible_outputs = user_visible_outputs
+        self.cache_key: str = ""  # This is the cache key for the compiled artifact
+        self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
+        self.cache_linemap: List[
+            Tuple[int, str]
+        ] = (
+            []
+        )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
 
-    def decide_layout_opt(self) -> bool:
+    @staticmethod
+    def decide_layout_opt(gm) -> bool:
         """
         Decide if we should enable layout optimization for this graph based on
         heuristics.
@@ -205,7 +216,6 @@ class GraphLowering(torch.fx.Interpreter):
         if not config.layout_optimization:
             return False
 
-        gm = self.module
         conv_nodes = [
             n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
         ]
@@ -493,14 +503,7 @@ class GraphLowering(torch.fx.Interpreter):
         # static shape tensors. That's a hack to workaround Inductor believing
         # the buffer should be static but us passing in a fake tensor with
         # symbolic shapes.
-        if (
-            config.static_weight_shapes
-            and (
-                len(self.graph_inputs) < self.num_static_inputs
-                or not dynamo_config.dynamic_shapes
-            )
-            and not example._has_symbolic_sizes_strides
-        ):
+        if not example._has_symbolic_sizes_strides:
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
         else:
@@ -637,7 +640,7 @@ class GraphLowering(torch.fx.Interpreter):
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins):
+        with ir.IRNode.current_origins(origins), self.set_current_node(n):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
@@ -789,15 +792,19 @@ class GraphLowering(torch.fx.Interpreter):
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
 
-    def check_constant_for_cpp_buffer(self):
-        if self.constants:
-            self.disable_cpp_wrapper("Constants")
+    @contextmanager
+    def set_current_node(self, node: torch.fx.Node):
+        old = self.current_node
+        try:
+            self.current_node = node
+            yield
+        finally:
+            self.current_node = old
 
     def check_cpp_wrapper(self):
         self.check_cpp_codegen_disabled()
         self.check_platform()
         self.check_input_for_cpp_buffer()
-        self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
         self.cuda = "cuda" in self.device_types
@@ -872,7 +879,12 @@ class GraphLowering(torch.fx.Interpreter):
         from .codecache import PyCodeCache
 
         code, linemap = self.codegen()
-        mod = PyCodeCache.load(code, linemap=linemap)
+        linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
+        key, path = PyCodeCache.write(code)
+        mod = PyCodeCache.load_by_key_path(key, path, linemap=linemap)
+        self.cache_key = key
+        self.cache_path = path
+        self.cache_linemap = linemap
 
         for name, value in self.constants.items():
             setattr(mod, name, value)
