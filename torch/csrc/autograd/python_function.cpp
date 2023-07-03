@@ -1152,6 +1152,13 @@ int THPFunction_set_materialize_grads(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+PyObject* THPFunction_get_materialize_non_diff_grads(
+    THPFunction* self, void* _unused) {
+  HANDLE_TH_ERRORS
+  return self->materialize_non_diff_grads ? Py_True : Py_False;
+  END_HANDLE_TH_ERRORS
+}
+
 int THPFunction_set_materialize_non_diff_grads(
     THPFunction* self,
     PyObject* value,
@@ -1403,7 +1410,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr,
      nullptr},
     {"_materialize_non_diff_grads",
-     nullptr,
+     (getter)THPFunction_get_materialize_non_diff_grads,
      (setter)THPFunction_set_materialize_non_diff_grads,
      nullptr,
      nullptr},
