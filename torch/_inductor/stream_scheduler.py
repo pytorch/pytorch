@@ -1,7 +1,7 @@
 import logging
 log = logging.getLogger(__name__)
 from .virtualized import V
-
+from os import environ
 
 def temporary_log_path(temp_log_path):
     # Store original configuration
@@ -96,7 +96,7 @@ class SSGraph:
         self.reverse_level = {}
         self.reverse_level_predecessors = {}
         self.critical_path = []
-        self.stream_pool_size = 20
+        self.stream_pool_size = int(environ.get("STREAM_POOL_SIZE", 20))
         self.stream_pool = []
         self.build_graph(nodes)
         self.stream_scheduling()
