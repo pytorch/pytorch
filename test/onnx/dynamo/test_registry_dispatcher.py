@@ -213,7 +213,7 @@ class TestDispatcher(common_utils.TestCase):
         )
 
         # Non-registered op
-        internal_opname_class_unsupport = registration.OpName.from_string(
+        internal_opname_class_unsupported = registration.OpName.from_string(
             domain="aten", op_name="made_up_node", overload=None
         )
         unsupported_op_node = torch.fx.Node(
@@ -227,7 +227,7 @@ class TestDispatcher(common_utils.TestCase):
         with self.assertRaises(RuntimeError):
             self.dispatcher.get_function_overloads(
                 unsupported_op_node,
-                internal_opname_class_unsupport,
+                internal_opname_class_unsupported,
                 self.diagnostic_context,
             )
 
@@ -253,7 +253,7 @@ class TestDispatcher(common_utils.TestCase):
             self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
                 internal_opname_class_overload,
                 function_overloads,
-                op_overload.args,
+                op_overload.args,  # type: ignore[attr-defined]
                 op_overload.kwargs,
                 self.diagnostic_context,
             )
