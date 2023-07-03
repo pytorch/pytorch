@@ -511,7 +511,9 @@ struct ConvParams {
     if (transposed && groups > 1 && at::symint::size<T>(input, 1) == groups) {
       return false;
     }
-    if (input.device().is_cpu() && input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) {
+    if (input.device().is_cpu() &&
+        ((input.scalar_type() == at::kBFloat16 && mkldnn_bf16_device_check()) ||
+         (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
       return true;
     }
     return (input.is_mkldnn()) || // input is mkldnn Tensor

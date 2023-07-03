@@ -202,7 +202,7 @@ class MkldnnPrelu(torch.jit.ScriptModule):
         return y
 
 def to_mkldnn(module, dtype=torch.float):
-    assert dtype in [torch.float, torch.bfloat16], \
+    assert dtype in [torch.float, torch.bfloat16, torch.half], \
         "MKLDNN only support float or bfloat16 path now"
 
     def m_fn(m, d):
