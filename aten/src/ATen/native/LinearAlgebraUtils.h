@@ -25,7 +25,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
   if (tensor.is_conj()) {
@@ -621,4 +621,4 @@ static inline bool is_blas_compatible_row_major_order(const Tensor& input) {
       batch_stride_compatible;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

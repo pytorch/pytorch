@@ -456,10 +456,6 @@ class TestModule(TestCase):
                 else:
                     other_kwargs[name] = obj
 
-            grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
-
-            flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
-
             def fn_to_gradcheck(*flat_input_and_params):
                 input_and_params = torch.utils._pytree.tree_unflatten(flat_input_and_params, flat_spec)
                 new_input_args = input_and_params[:len(input_args)]
@@ -471,7 +467,34 @@ class TestModule(TestCase):
                     output_flattened, _ = torch.utils._pytree.tree_flatten(output)
                     return output_flattened
 
+            # check total derivative
+            grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
+            flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
+
             self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+
+            # check partial derivatives
+            old_params_requires_grad = [p.requires_grad for p in params]
+            for p in params:
+                p.requires_grad = False
+
+            old_kwargs_requires_grad = [obj.requires_grad for (_, obj) in kwarg_tensors]
+            for (_, obj) in kwarg_tensors:
+                obj.requires_grad = False
+
+            for p, old in zip(params, old_params_requires_grad):
+                p.requires_grad = old
+                grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
+                flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
+                self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+                p.requires_grad = False
+
+            for (_, obj), old in zip(kwarg_tensors, old_kwargs_requires_grad):
+                obj.requires_grad = old
+                grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
+                flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
+                self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+                obj.requires_grad = False
 
     @modules(module_db, allowed_dtypes=[torch.double])
     def test_grad(self, device, dtype, module_info, training):

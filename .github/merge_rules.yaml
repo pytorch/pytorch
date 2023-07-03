@@ -19,6 +19,7 @@
   - torch/onnx/**
   - third_party/onnx
   - caffe2/python/onnx/**
+  - benchmarks/dynamo/_onnx/**
   approved_by:
   - BowenBao
   - abock
