@@ -524,7 +524,11 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     // strides from packed projection for nested tensors when seq_len is 1 will be
     // and will trigger a contiguous call in the kernel, so we prevent this
     bool no_seq_len_1_nested = query.is_nested() ? check_for_seq_len_1_nested_tensor(kernel_params, false) : true;
-    if (no_seq_len_1_nested &&
+    // The API for transfomer_encoder is a mask of shape (Batch_Size, Seq_len_q)
+    // For mem-eff attention this will cause the expand call to
+    // For now I am going to turn of that path not have to deal with all the annoying
+    // Mask type shape grossness
+    if (!mask.has_value() && no_seq_len_1_nested &&
         (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention)) {
       auto x = at::linear(query, qkv_weight, qkv_bias);
       auto chunks = x.chunk(3, -1);
@@ -536,7 +540,6 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
                       .transpose(1, 2);
       chunks[2] = (chunks[2].view({x_size_0, -1, num_head, dim_per_head}))
                       .transpose(1, 2);
-
       auto y = at::scaled_dot_product_attention(
           chunks[0], chunks[1], chunks[2], mask, 0.0, false, c10::nullopt);
 
