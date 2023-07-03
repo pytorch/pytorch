@@ -19,6 +19,7 @@
   - torch/onnx/**
   - third_party/onnx
   - caffe2/python/onnx/**
+  - benchmarks/dynamo/_onnx/**
   approved_by:
   - BowenBao
   - abock
@@ -88,7 +89,7 @@
   - EasyCLA
   - Lint
   - pull / linux-bionic-py3_8-clang8-xla / build
-  - pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.4xlarge)
+  - pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.12xlarge)
 
 - name: Documentation
   patterns:
@@ -296,6 +297,7 @@
   - mingfeima
   - XiaobingSuper
   - jgong5
+  - vfdev-5
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -411,6 +413,7 @@
   - mruberry
   - lezcano
   - Skylion007
+  - ngimel
   mandatory_checks_name:
   - EasyCLA
   - Lint

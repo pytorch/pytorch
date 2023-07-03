@@ -179,7 +179,7 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
         MergeRule(
             name="super",
             patterns=["*"],
-            approved_by=["pytorch/metamates"],
+            approved_by=["pytorch/metamates", "ngimel"],
             mandatory_checks_name=[
                 "Lint",
                 "Facebook CLA Check",
@@ -201,6 +201,23 @@ def empty_flaky_rules() -> List[FlakyRule]:
 def xla_is_flaky_rules() -> List[FlakyRule]:
     return [
         FlakyRule("xla", ["FAILED: Build did NOT complete successfully"]),
+    ]
+
+
+def xla_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
+    return [
+        MergeRule(
+            name=" OSS CI / pytorchbot / XLA",
+            patterns=[".github/ci_commit_pins/xla.txt"],
+            approved_by=["pytorchbot"],
+            mandatory_checks_name=[
+                "Lint",
+                "EasyCLA",
+                "pull / linux-bionic-py3_8-clang8-xla / build",
+                "pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.4xlarge)",
+            ],
+            ignore_flaky_failures=False,
+        ),
     ]
 
 
@@ -436,13 +453,7 @@ class TestTryMerge(TestCase):
     def test_revert_codev_fails(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 91340)
 
-        class GitRepoCoDev(GitRepo):
-            def __init__(self) -> None:
-                super().__init__(get_git_repo_dir(), get_git_remote_name())
-
-            def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
-                return ["FakeCommitSha"]
-
+        class GitRepoCoDev(DummyGitRepo):
             def commit_message(self, ref: str) -> str:
                 return pr.get_body()
 
@@ -452,6 +463,16 @@ class TestTryMerge(TestCase):
             "landed via phabricator",
             lambda: validate_revert(repo, pr, comment_id=1372496233),
         )
+
+    def test_revert_codev_abandoned_diff_succeeds(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 100652)
+
+        class GitRepoCoDev(DummyGitRepo):
+            def commit_message(self, ref: str) -> str:
+                return pr.get_body()
+
+        repo = GitRepoCoDev()
+        validate_revert(repo, pr, comment_id=1588195237)
 
     def test_pr_changed_submodule_detection(self, *args: Any) -> None:
         # Updates submodule during dev-cycle but reverts it later
@@ -504,6 +525,23 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 2)
+
+    def test_get_classifications_unstable(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 104312)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
+        )
+        workflow_name = "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test"
+        job_name = "build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)"
+        self.assertTrue(
+            checks[f"pull / {workflow_name} / {job_name}"].classification == "UNSTABLE"
+        )
+        pending, failed = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
 
     def test_ignore_current(self, *args: Any) -> None:
         # Test various interactions of the failure classifier, mostly that
@@ -559,6 +597,7 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(failed) == 0)
 
     @mock.patch("trymerge.read_flaky_rules", side_effect=xla_is_flaky_rules)
+    @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
     def test_dont_ignore_flaky_failures(self, *args: Any) -> None:
         """Regression test for https://github.com/pytorch/test-infra/issues/4126"""
         pr = GitHubPR("pytorch", "pytorch", 100369)

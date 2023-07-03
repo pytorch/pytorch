@@ -60,9 +60,12 @@ def wrap_bound_arg(tx, val, options, source=None):
         from torch._dynamo.variables.builder import VariableBuilder
 
         return VariableBuilder(tx, source=source, **options)(val)
-    else:
-        assert isinstance(val, VariableTracker), typestr(val)
+    elif isinstance(val, VariableTracker):
         return val
+    else:
+        from torch._dynamo.variables.builder import VariableBuilder
+
+        return VariableBuilder(tx, source=source, **options)(val)
 
 
 def wrap_args_kwargs(tx, result, options):
@@ -76,6 +79,7 @@ def init_cellvars(parent, result, code):
     closure_cells = dict()
     side_effects = parent.output.side_effects
 
+    # for name in itertools.chain(code.co_cellvars, code.co_freevars):
     for name in code.co_cellvars:
         closure_cells[name] = side_effects.track_cell_new()
         if name in result:
@@ -303,43 +307,25 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        # Here, we check if the method that we are calling belongs to the
-        # builtin (or allowed) nn modules.
+        # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
+        # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
+        # since we ensure `forward` of allowed modules can be traced by AOT safely.
+        # Note this is not only for allowed modules, as user customized modules can extend from
+        # allowed modules but using parent's `forward` method, which is also covered by this branch.
 
-        # Context - We have historically avoided Dynamo tracing into the methods of
-        # builtin nn modules. Specifically for `forward` method of builtin
-        # modules, in the past we observed control-flow/hard-to-support python
-        # features, leading to unnecessary and frequent graph breaks. To avoid
-        # this, we just decided to directly put `call_module` for builtin
-        # nn.modules and `call_method` for the `forward` of builtin nn.modules.
-        # With AOT Autograd becoming an integral part of torch.compile stack,
-        # this became even a bigger moot point because AOT Autograd will skip
-        # over all those python features and give a clean aten-level graph.
-        #
-        # It is possible that these original motivations are no longer valid,
-        # and we could simplify the codepath now by removing the special case.
-        # However, it might be too late to do this because downstream users
-        # of Dynamo might have already written Fx Transformations assuming the
-        # presence of these builtin modules.
-
-        # In the following path, we check if the method belongs to the builtin
-        # nn module. If it does, we redirect it to NNModule special handling of
-        # methods. For example, TorchDynamo does not need to trace the
-        # `children` method, we can directly get the children by constructing
-        # the relevant VariableTracker. Again, it is possible to just let Dynamo
-        # trace the methods and construct the VariableTrackers, however there
-        # might be lots of graph breaks today. We can try to fix this in near
-        # future, because this does not impact the downstream users of Dynamo.
-        if isinstance(self.obj, variables.NNModuleVariable):
-            # Extract the module this method belongs to. For example, a
-            # non-overriden `children` method of a user-defined nn module will
-            # still use the builtin nn module `children` impl. And therefore, we
-            # can redirect it to NNModuleVariable call_method.
-
-            module_where_fn_is_defined = inspect.getmodule(self.fn)
+        # If we are tracing the higher order op, we want Dynamo to step inside
+        # the module call so that Dynamo can see the underlying parameters and
+        # buffers and raise them as inputs to the graph. The is_root_tracer
+        # check bypasses the if condition for non-root tracers and directly
+        # calls the super().call_function at the end, which is basically
+        # equivalent of inlining the method.
+        if tx.output.is_root_tracer() and isinstance(
+            self.obj, variables.NNModuleVariable
+        ):
+            module_attr = getattr(self.fn, "__module__", "")
             if (
-                module_where_fn_is_defined
-                and is_allowed(module_where_fn_is_defined)
+                module_attr is not None
+                and module_attr.startswith("torch.nn.")
                 or self.is_constant
             ):
                 return self.obj.call_method(
@@ -472,6 +458,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return self.f_globals
 
     def bind_args(self, parent, args, kwargs):
+        from .misc import InlinedClosureVariable
+
         code = self.get_code()
         func = types.FunctionType(
             code,
@@ -489,9 +477,19 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
-            assert getattr(self.closure.items[idx], name, name) == name
+            cell = self.closure.items[idx]
+            assert getattr(cell, name, name) == name
             assert name not in result
-            closure_cells[name] = self.closure.items[idx]
+            if isinstance(cell, InlinedClosureVariable):
+                # InlinedClosureVariable's are created from LOAD_CLOSURE's from
+                # InliningInstructionTranslators when the variable name is not found in closure_cells.
+                # They should remain outside of closure_cells, so that our callee (the
+                # InliningInstructionTranslator that traces `func`) handles
+                # the cell correctly - that is, the cell's contents are treated as if they
+                # are local variables, like in UserFunctionVariable's bind_args for freevars.
+                result[name] = parent.symbolic_locals[name]
+            else:
+                closure_cells[name] = self.closure.items[idx]
 
         return result, closure_cells
 
@@ -549,3 +547,55 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_call_function(1, True))
 
         return []
+
+
+def _traceable_collective_remaps():
+    # We can't rely on importing from distributed, since its not always built
+    if torch.distributed.is_available():
+        from torch.distributed._functional_collectives import (
+            traceable_collective_remaps,
+        )
+
+        return traceable_collective_remaps
+    return {}
+
+
+class CollectiveFunctionRewriteVariable(UserFunctionVariable):
+    """
+    Some of the torch.distributed.* collective APIs are possible to rewrite to 'traceable' collectives.
+
+    This class provides both a way to check if a function is remappable, and perform the remapping.
+
+    In the case that a function is 'remappable' but only for some combinations of call-time arguments,
+    we check the args at `call_function` time and fall back to graph-breaking if needed.  This is no worse
+    than status-quo as we currently graph-break on all distributed.* collectives.
+    """
+
+    def __init__(self, fn, *, orig_fn, **kwargs):
+        # orig_fn lets us implement any fn-specific args/kwargs restrictions inside call_function
+        self.orig_fn = orig_fn
+
+        # remapped_fn gets stuffed in self.fn and used in super().call_function
+        super().__init__(fn, **kwargs)
+
+    @staticmethod
+    def can_rewrite(variable):
+        return (
+            inspect.isfunction(variable) and variable in _traceable_collective_remaps()
+        )
+
+    @staticmethod
+    def rewrite(fn):
+        return _traceable_collective_remaps()[fn]
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        # call_function must check any unsupported arguments and graph-break.
+        # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
+        # since that's the contract for putting a mapping in `traceable_collective_remaps`
+        if kwargs.get("async_op", False):
+            unimplemented(
+                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.orig_fn}"
+            )
+        return super().call_function(tx, args, kwargs)

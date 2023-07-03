@@ -14,6 +14,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     offload_wrapper,
     OffloadWrapper,
 )
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils.checkpoint import checkpoint
 
@@ -218,11 +219,15 @@ class CheckpointWrapperTest(TestCase):
 
         n_linear = None
 
-        for wrapper in [
-            partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.REENTRANT),
-            partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT),
-            offload_wrapper,
-        ]:
+        for i, wrapper in enumerate(
+            [
+                partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.REENTRANT),
+                partial(
+                    checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT
+                ),
+                offload_wrapper,
+            ]
+        ):
             model = MyModel()
             if n_linear is None:
                 n_linear = sum(
@@ -230,9 +235,16 @@ class CheckpointWrapperTest(TestCase):
                 )
 
             with self.subTest(wrapper=wrapper):
-                apply_activation_checkpointing(
-                    model, checkpoint_wrapper_fn=wrapper, check_fn=check_fn
-                )
+                if i != 0:
+                    apply_activation_checkpointing(
+                        model, checkpoint_wrapper_fn=wrapper, check_fn=check_fn
+                    )
+                else:
+                    apply_activation_checkpointing(
+                        model,
+                        checkpoint_wrapper_fn=wrapper,
+                        auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
+                    )
                 n_linear_wrapped = sum(
                     1 if isinstance(x, nn.Linear) else 0 for x in model.modules()
                 )
