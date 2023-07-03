@@ -310,9 +310,6 @@ class TestProfilerTree(TestCase):
                 with torch.autograd.profiler.record_function("Third Annotation"):
                     y.backward()
 
-        # NB: The `aten::zeros` before the record function annotations are due to
-        # `at::cpp_custom_type_hack`. When we switch to `torch::CustomClassHolder`
-        # they will disappear.
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
