@@ -4,7 +4,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
   static C10_UNUSED void multilabel_margin_loss_shape_check(
     int64_t& nframe,
@@ -69,4 +69,4 @@ namespace {
 
 
 }  // anonymous namespace
-}} // namespace at::native
+} // namespace at::native

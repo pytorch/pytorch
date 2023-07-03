@@ -37,7 +37,7 @@ from torch.testing._internal.common_dtype import integral_types, get_all_math_dt
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMps,\
-    TEST_WITH_UBSAN, IS_PPC, \
+    IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, IS_WINDOWS, gcIfJetson
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
@@ -2581,6 +2581,123 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             m2.load_state_dict(m.state_dict())
             self.assertEqual(m.state_dict(), m2.state_dict())
             self.assertEqual(m.foo, m2.foo)
+
+    def test_load_state_dict_assign_meta(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(3, 5)
+                self.bn = nn.BatchNorm1d(5)
+
+            def forward(self, input):
+                return self.bn(self.fc1(input))
+
+        net = MyModule()
+        state_dict = net.state_dict(keep_vars=True)
+
+        with torch.device('meta'):
+            net_meta = MyModule()
+
+        net_meta.load_state_dict(state_dict, assign=True)
+
+        # Make sure parameters and persistent buffers were assigned
+        net_meta_state_dict = net_meta.state_dict(keep_vars=True)
+        for key in state_dict.keys():
+            if isinstance(state_dict[key], torch.nn.Parameter):
+                self.assertTrue(state_dict[key] is net_meta_state_dict[key])
+
+        # Make sure that ordering of parameters and buffers is preserved
+        net_named_parameters = net.named_parameters()
+        net_named_buffers = net.named_buffers()
+        net_meta_named_parameters = net_meta.named_parameters()
+        net_meta_named_buffers = net_meta.named_buffers()
+
+        for p1, p2 in zip(net_named_parameters, net_meta_named_parameters):
+            n1, _ = p1
+            n2, _ = p2
+            self.assertEqual(n1, n2)
+
+        for p1, p2 in zip(net_named_buffers, net_meta_named_buffers):
+            n1, _ = p1
+            n2, _ = p2
+            self.assertEqual(n1, n2)
+
+        # Make sure outputs are the same
+        t = torch.randn(4, 3)
+        out_net = net(t)
+        out_net_meta = net_meta(t.clone())
+
+        self.assertEqual(out_net, out_net_meta)
+
+    def test_load_state_dict_assign_with_optimizer(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(3, 5)
+                self.bn = nn.BatchNorm1d(5)
+
+            def forward(self, input):
+                return self.bn(self.fc1(input))
+
+        net = MyModule()
+        opt = torch.optim.Adam(net.parameters(), lr=1000)
+        x = torch.randn(4, 3)
+        num_iters = 3
+
+        for i in range(num_iters):
+            opt.zero_grad()
+            out = net(x)
+            out.sum().backward()
+            opt.step()
+
+        opt_state_dict = deepcopy(opt.state_dict())
+        net_state_dict = deepcopy(net.state_dict())
+
+        with torch.device('meta'):
+            net_meta = MyModule()
+
+        net_meta.load_state_dict(net_state_dict, assign=True)
+        # must create optimizer only after loading state_dict when assign=True
+        opt2 = torch.optim.Adam(net_meta.parameters(), lr=1000)
+        opt2.load_state_dict(opt_state_dict)
+
+        y = x.clone()
+        for i in range(num_iters):
+            opt.zero_grad()
+            out = net(x)
+            out.sum().backward()
+            opt.step()
+
+            opt2.zero_grad()
+            out2 = net_meta(y)
+            out2.sum().backward()
+            opt2.step()
+
+        self.assertEqual(opt.state_dict(), opt2.state_dict())
+        self.assertEqual(net.state_dict(), net_meta.state_dict())
+
+    def test_load_state_dict_assign_shape_stride(self):
+        # Assigned tensor is allowed to have different properties than initial
+        # tensor except for shape
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(3, 5)
+                self.bn = nn.BatchNorm1d(5)
+
+            def forward(self, input):
+                return self.bn(self.fc1(input))
+
+        net = MyModule()
+        state_dict = net.state_dict()
+        # loading should be ok if stride is different
+        state_dict['fc1.weight'] = torch.randn(3, 5).transpose(0, 1)
+        net2 = MyModule()
+        net2.load_state_dict(state_dict, strict=False, assign=True)
+
+        state_dict['fc1.weight'] = torch.randn(2, 4)
+        with self.assertRaisesRegex(RuntimeError, "size mismatch for fc1.weight: copying a param with shape"):
+            net2.load_state_dict(state_dict, strict=False, assign=True)
 
     def test_extra_state_missing_set_extra_state(self):
 
@@ -6681,6 +6798,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
 
     def test_interpolate(self):
+        def _test_interpolate_non_integer_size_warning(in_t, out_size, dim, **kwargs):
+            test_sizes = [float(out_size),
+                          torch.tensor(out_size, dtype=torch.float)]
+            for size in test_sizes:
+                self.assertRaisesRegex(TypeError,
+                                       "(expected size to be one of int or).*",
+                                       F.interpolate, in_t, size=(size,) * dim, **kwargs)
+
         def _test_interpolate_helper(in_t, scale_factor, layer):
             out_size = int(math.floor(in_t.shape[-1] * scale_factor))
             dim = len(in_t.shape) - 2
@@ -6694,6 +6819,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 F.interpolate(in_t, scale_factor=scale_factor, **kwargs))
             gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=GRADCHECK_NONDET_TOL)
             gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=GRADCHECK_NONDET_TOL)
+            _test_interpolate_non_integer_size_warning(in_t, out_size, dim, **kwargs)
 
         def _make_input(dim, device):
             size = [1, 1]
@@ -11454,7 +11580,6 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device), device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device), device)
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_nll_loss_empty_tensor_reduction_mean(self, device):
         nan = torch.tensor(float('nan'), device=device)
         self._nll_loss_helper([0, 3], "mean", nan, device)
@@ -11471,7 +11596,6 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "sum", zero, device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "sum", zero, device)
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_nll_loss_total_weight_is_zero(self, device):
 
         def helper(input_size):
@@ -11488,7 +11612,6 @@ class TestNNDeviceType(NNTestCase):
         helper([2, 3, 5, 7])
         helper([2, 3, 5, 7, 9])
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_nll_loss_all_ignored(self, device):
 
         def helper(input_size):
@@ -12188,6 +12311,39 @@ class TestNNDeviceType(NNTestCase):
         m.to_empty(device='meta')
         m(input)
 
+    def test_module_to_empty_non_recursive(self, device):
+        class Layer(nn.Module):
+            def __init__(self, in_features, out_features):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(in_features, out_features))
+                self.register_buffer('buf', torch.randn(out_features))
+
+            def forward(self, x):
+                return x @ self.weight + self.buf
+
+        class MyModule(nn.Module):
+            def __init__(self, in_features, out_features):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(in_features, out_features))
+                self.register_buffer('buf1', torch.randn(out_features))
+                self.layer = Layer(out_features, out_features)
+
+            def forward(self, x):
+                return self.layer(x @ self.weight + self.buf1)
+
+        with torch.device('meta'):
+            m = MyModule(3, 5)
+
+        m.to_empty(device=device, recurse=False)
+
+        # params/buffers of parent should have been materialized on device
+        self.assertTrue(not m.weight.is_meta)
+        self.assertTrue(not m.buf1.is_meta)
+
+        # parameters/buffers of children submodules should still be on meta
+        for p in (*m.layer.parameters(), *m.layer.buffers()):
+            self.assertTrue(p.is_meta)
+
     @skipMeta
     def test_skip_init(self, device):
         torch.manual_seed(1)
@@ -12579,6 +12735,15 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_norm_(p1, max_norm, norm_type=norm_type, foreach=foreach)
         clip_grad_norm_([p2], max_norm, norm_type=norm_type, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
+
+    @onlyCUDA
+    @largeTensorTest("20GB", "cuda")
+    def test_softmax_backward_64bit_indexing(self, device):
+        for numel in (2147483650, 2147483650 + 1):
+            x = torch.empty([1, 1, numel], device=device, dtype=torch.float16)
+            x.fill_(1.0 / numel)
+            out = torch._softmax_backward_data(x, x, 2, x.dtype)
+            self.assertEqual(out[0, 0, 0], 1 / numel)
 
 
 class TestFunctionalPickle(TestCase):
