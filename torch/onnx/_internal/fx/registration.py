@@ -185,8 +185,8 @@ class OpName:
     _op_name: str
     _overload: str
 
-    @_beartype.beartype
     @classmethod
+    @_beartype.beartype
     def from_string(
         cls, domain: str, op_name: str, overload: Optional[str] = None
     ) -> OpName:
@@ -196,8 +196,8 @@ class OpName:
             overload = "default"
         return cls(domain, op_name, overload)
 
-    @_beartype.beartype
     @classmethod
+    @_beartype.beartype
     def from_full_name(cls, full_name: str) -> OpName:
         # overload name is torch.ops.<domain>.<op_name>.<overload>
         domain, opname_overload = full_name.split("::")
@@ -205,8 +205,8 @@ class OpName:
         overload = overload[0] if overload else "default"
         return cls(domain, op_name, overload)
 
-    @_beartype.beartype
     @classmethod
+    @_beartype.beartype
     def from_op_overload(cls, op_overload: torch._ops.OpOverload) -> OpName:
         return cls.from_full_name(op_overload.name())
 
