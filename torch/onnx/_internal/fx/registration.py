@@ -6,6 +6,7 @@ import dataclasses
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, TYPE_CHECKING, Union
 
+import torch._ops
 from torch.onnx._internal import _beartype
 
 # We can only import onnx from this module in a type-checking context to ensure that
@@ -22,14 +23,14 @@ OpsetVersion = int
 class SymbolicFunction:
     """A wrapper of onnx-script function.
 
-    op_name: The qualified name of the function. In the form of 'domain::op'.
+    op_full_name: The qualified name of the function. In the form of '<domain>::<op_name>.<overload>'.
     onnx_function: The symbolic function from torchlib.
     is_custom: Whether the function is a custom function.
 
     """
 
     onnx_function: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]
-    op_name: str
+    op_full_name: str
     is_custom: bool = False
 
 
@@ -79,9 +80,12 @@ class OnnxRegistry:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
         for aten_name, aten_overloads_func in torchlib_registry.items():
+            internal_name = OpName.from_full_name(aten_name).internal_name()
             for overload_func in aten_overloads_func.overloads:
                 symbolic_function = SymbolicFunction(
-                    onnx_function=overload_func, op_name=aten_name, is_custom=False
+                    onnx_function=overload_func,
+                    op_full_name=internal_name,
+                    is_custom=False,
                 )
                 self._register(symbolic_function)
 
@@ -92,7 +96,7 @@ class OnnxRegistry:
         Args:
             symbolic_function: The SymbolicFunction to register.
         """
-        self._registry[symbolic_function.op_name].append(symbolic_function)
+        self._registry[symbolic_function.op_full_name].append(symbolic_function)
 
     @_beartype.beartype
     def register_custom_op(
@@ -114,13 +118,11 @@ class OnnxRegistry:
         Raises:
             ValueError: If the name is not in the form of 'domain::op'.
         """
-        if overload is None:
-            # NOTE: "default" overload
-            name = f"{domain}::{op_name}"
-        else:
-            name = f"{domain}::{op_name}.{overload}"
+        internal_name = OpName.from_string(
+            domain=domain, op_name=op_name, overload=overload
+        ).internal_name()
         symbolic_function = SymbolicFunction(
-            onnx_function=function, op_name=name, is_custom=True
+            onnx_function=function, op_full_name=internal_name, is_custom=True
         )
         self._register(symbolic_function)
 
@@ -142,12 +144,10 @@ class OnnxRegistry:
             A list of SymbolicFunctions corresponding to the given name, or None if
             the name is not in the registry.
         """
-        if overload is None:
-            # NOTE: "default" overload
-            name = f"{domain}::{op_name}"
-        else:
-            name = f"{domain}::{op_name}.{overload}"
-        if (functions := self._registry.get(name)) is not None:
+        internal_name = OpName.from_string(
+            domain=domain, op_name=op_name, overload=overload
+        ).internal_name()
+        if (functions := self._registry.get(internal_name)) is not None:
             return functions
         return None
 
@@ -175,3 +175,53 @@ class OnnxRegistry:
     def _all_registered_ops(self) -> Set[str]:
         """Returns the set of all registered function names."""
         return set(self._registry)
+
+
+@dataclasses.dataclass
+class OpName:
+    """A class representing an operator name in internal ONNX converter."""
+
+    _domain: str
+    _op_name: str
+    _overload: str
+
+    @_beartype.beartype
+    @classmethod
+    def from_string(
+        cls, domain: str, op_name: str, overload: Optional[str] = None
+    ) -> OpName:
+        # NOTE: in PyTorch, the overload could be unprovided to indicate the
+        # default overload
+        if overload is None or overload == "":
+            overload = "default"
+        return cls(domain, op_name, overload)
+
+    @_beartype.beartype
+    @classmethod
+    def from_full_name(cls, full_name: str) -> OpName:
+        # overload name is torch.ops.<domain>.<op_name>.<overload>
+        domain, opname_overload = full_name.split("::")
+        op_name, *overload = opname_overload.split(".", 1)
+        overload = overload[0] if overload else "default"
+        return cls(domain, op_name, overload)
+
+    @_beartype.beartype
+    @classmethod
+    def from_op_overload(cls, op_overload: torch._ops.OpOverload) -> OpName:
+        return cls.from_full_name(op_overload.name())
+
+    @_beartype.beartype
+    def internal_name(self) -> str:
+        return f"{self.domain}::{self.op_name}.{self.overload}"
+
+    @property
+    def domain(self) -> str:
+        return self._domain
+
+    @property
+    def op_name(self) -> str:
+        return self._op_name
+
+    @property
+    def overload(self) -> str:
+        return self._overload

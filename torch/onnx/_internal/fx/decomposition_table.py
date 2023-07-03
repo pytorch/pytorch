@@ -50,21 +50,26 @@ def _create_onnx_supports_op_overload_table(
             if not isinstance(op_overload_packet, torch._ops.OpOverloadPacket):
                 continue
 
-            exporter_look_up_key = op_overload_packet._qualified_op_name
-            # overload name is torch.ops.<domain>.<op_name>.<overload>
-            domain, opname = exporter_look_up_key.split("::")
-            if not registry.is_registered_op(
-                domain=domain, op_name=opname, overload=None
-            ):
-                # This aten op doesn't have ONNX overloads.
-                continue
-
             for overload_name in op_overload_packet.overloads():
                 op_overload = getattr(op_overload_packet, overload_name)
-                # This line maps torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, torch.ops.aten.add.out, etc
-                # to "aten::add". This means the exporter for "aten::add" is used for all overloads of "aten::add".
-                # This is applied to all ops under torch.ops.aten.
-                table.add(op_overload)
+                internal_op_name = registration.OpName.from_full_name(
+                    full_name=op_overload.name()
+                )
+                # NOTE: If the overload is supported in registry or it's default overload is supported in registry,
+                # we add it to the table.
+                if registry.is_registered_op(
+                    domain=internal_op_name.domain,
+                    op_name=internal_op_name.op_name,
+                    overload=internal_op_name.overload,
+                ) or registry.is_registered_op(
+                    domain=internal_op_name.domain,
+                    op_name=internal_op_name.op_name,
+                    overload=None,
+                ):
+                    # This line maps torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, torch.ops.aten.add.out, etc
+                    # to "aten::add". This means the exporter for "aten::add" is used for all overloads of "aten::add".
+                    # This is applied to all ops under torch.ops.aten.
+                    table.add(op_overload)
     return table
 
 

@@ -52,8 +52,9 @@ class TestRegistration(common_utils.TestCase):
         def test_original(x, y):
             return op.Add(x, y)
 
+        # default has to be specified, as we are not using the registration.OpName
         symbolic_fn = registration.SymbolicFunction(
-            test_original, op_name="test::test_op"
+            test_original, op_full_name="test::test_op.default"
         )
         self.registry._register(symbolic_fn)
         self.assertTrue(self.registry.is_registered_op("test", "test_op"))
@@ -129,9 +130,10 @@ class TestDispatcher(common_utils.TestCase):
     def test_get_aten_name_on_supported_fx_node(
         self, _: str, node: torch.fx.Node, expected_name: str
     ):
+        expected_name_class = registration.OpName.from_string(*expected_name)
         self.assertEqual(
             self.dispatcher.get_aten_name(node, self.diagnostic_context),
-            expected_name,
+            expected_name_class,
         )
 
     @parameterized.expand(
@@ -175,7 +177,7 @@ class TestDispatcher(common_utils.TestCase):
         with self.assertRaises(RuntimeError):
             self.dispatcher.get_aten_name(node, self.diagnostic_context)
 
-    def test_get_function_overloads_gives_overload_fall_back(self):
+    def test_get_function_overloads_gives_overload_fall_back_default(self):
         # Test fall back to default op name
         node_overload = torch.fx.Node(
             graph=torch.fx.Graph(),
@@ -193,16 +195,27 @@ class TestDispatcher(common_utils.TestCase):
             args=(),
             kwargs={},
         )
+        internal_opname_class_overload = registration.OpName.from_string(
+            domain="aten", op_name="add", overload="Tensor"
+        )
+        internal_opname_class_overloadpacket = registration.OpName.from_string(
+            domain="aten", op_name="add", overload=None
+        )
         self.assertEqual(
             self.dispatcher.get_function_overloads(
-                node_overload, "aten", "add", "Tensor", self.diagnostic_context
+                node_overload, internal_opname_class_overload, self.diagnostic_context
             ),
             self.dispatcher.get_function_overloads(
-                node_overloadpacket, "aten", "add", None, self.diagnostic_context
+                node_overloadpacket,
+                internal_opname_class_overloadpacket,
+                self.diagnostic_context,
             ),
         )
 
-        # Not registered op
+        # Non-registered op
+        internal_opname_class_unsupport = registration.OpName.from_string(
+            domain="aten", op_name="made_up_node", overload=None
+        )
         unsupported_op_node = torch.fx.Node(
             graph=torch.fx.Graph(),
             name="aten::made_up_node",
@@ -214,9 +227,7 @@ class TestDispatcher(common_utils.TestCase):
         with self.assertRaises(RuntimeError):
             self.dispatcher.get_function_overloads(
                 unsupported_op_node,
-                "aten",
-                "made_up_node",
-                None,
+                internal_opname_class_unsupport,
                 self.diagnostic_context,
             )
 
@@ -231,17 +242,16 @@ class TestDispatcher(common_utils.TestCase):
             args=(torch.tensor(3), torch.tensor(4)),
             kwargs={},
         )
+        internal_opname_class_overload = registration.OpName.from_op_overload(op_overload=op_overload.target)  # type: ignore[attr-defined]
         with self.assertWarnsOnceRegex(
             UserWarning,
             "A perfect matched Opchema is not found in torchlib for aten::add",
         ):
             function_overloads = self.dispatcher.get_function_overloads(
-                op_overload, "aten", "add", None, self.diagnostic_context
+                op_overload, internal_opname_class_overload, self.diagnostic_context
             )
             self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
-                "aten",
-                "add",
-                None,
+                internal_opname_class_overload,
                 function_overloads,
                 op_overload.args,
                 op_overload.kwargs,
@@ -285,19 +295,21 @@ class TestDispatcher(common_utils.TestCase):
         def test_default_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
             return op.Add(x, y)
 
+        op_full_name = "test::test_op"
+
         custom_overloads = [
             registration.SymbolicFunction(
-                test_custom_op, op_name="test::test_op", is_custom=True
+                test_custom_op, op_full_name=op_full_name, is_custom=True
             )
         ]
         function_overloads = [
-            registration.SymbolicFunction(test_default_op, op_name="test::test_op")
+            registration.SymbolicFunction(test_default_op, op_full_name=op_full_name)
         ] + custom_overloads
-
+        internal_opname_class_overload = registration.OpName.from_full_name(
+            full_name=op_full_name
+        )
         symbolic_fn = self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
-            "aten",
-            "add",
-            None,
+            internal_opname_class_overload,
             function_overloads,
             node.args,
             node.kwargs,
