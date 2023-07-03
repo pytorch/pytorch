@@ -31,12 +31,10 @@ def simple_sympify(e):
         if math.isinf(e):
             return sympy.oo if e > 0 else -sympy.oo
         return sympy.Float(e)
+    elif isinstance(e, bool):
+        return sympy.true if e else sympy.false
     elif isinstance(e, sympy.Expr):
-        # TODO: Eventually, we will want to do indexing calculations with
-        # respect to symbols, so we can generate a dynamic kernel which will
-        # use 32-bit indexing so long as the dynamic dim isn't too big.  To do
-        # that, we will need to be able to do ValueRanges
-        assert not e.free_symbols, f"free variables NYI: {e}"
+        assert e.is_constant()
         # NaNs can occur when doing things like 0 * sympy.oo, but it is better
         # if the operator notices this and takes care of it, because sometimes
         # the NaN is inappropriate (for example, for ints, the [-oo, oo] range
@@ -57,14 +55,14 @@ def sympy_generic_le(lower, upper):
     else:
         # only negative condition is True > False
         assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean)
-        return not (lower is sympy.true and upper is sympy.false)
+        return not (lower and not upper)
 
 
 @dataclasses.dataclass(frozen=True)
 class ValueRanges:
     # Although the type signature here suggests you can pass any
     # sympy expression, in practice the analysis here only works
-    # with sympy expressions with no free variables
+    # with constant sympy expressions
     lower: Union[sympy.Expr, SympyBoolean]
     upper: Union[sympy.Expr, SympyBoolean]
     is_bool: bool
@@ -121,19 +119,19 @@ class ValueRanges:
 
     @classmethod
     def increasing_map(cls, x, fn):
-        """map lower and upper bound with fn"""
+        """Increasing: x <= y => f(x) <= f(y)"""
         x = cls.wrap(x)
         return ValueRanges(fn(x.lower), fn(x.upper))
 
     @classmethod
     def decreasing_map(cls, x, fn):
-        """map lower bound to upper bound and upper bound to lower bound"""
+        """Decreasing: x <= y => f(x) >= f(y)"""
         x = cls.wrap(x)
         return ValueRanges(fn(x.upper), fn(x.lower))
 
     @classmethod
     def monotone_map(cls, x, fn):
-        """check the max and min of computed upper and lower bound for the output"""
+        """It's increasing or decreasing"""
         x = cls.wrap(x)
         l = fn(x.lower)
         u = fn(x.upper)
@@ -141,7 +139,7 @@ class ValueRanges:
 
     @classmethod
     def convex_min_zero_map(cls, x, fn):
-        """the max is at one of the ends"""
+        """fn is convex and has a minimum at 0"""
         x = ValueRanges.wrap(x)
         if 0 in x:
             return ValueRanges(0, max(fn(x.lower), fn(x.upper)))
@@ -150,7 +148,11 @@ class ValueRanges:
 
     @classmethod
     def coordinatewise_increasing_map(cls, x, y, fn):
-        """map upper and lower bounds accessing corresponding values of inputs"""
+        """
+        Increasing on each coordinate. Mathematically:
+        For every 1 <= i <= n and x_i <= y_i we have that
+        f(x1, .., xn) <= f(x1, , yi, ..., xn)
+        """
         x, y = cls.wrap(x), cls.wrap(y)
         return ValueRanges(
             fn(x.lower, y.lower),
@@ -159,7 +161,7 @@ class ValueRanges:
 
     @classmethod
     def coordinatewise_monotone_map(cls, x, y, fn):
-        """compute the product of all lower and upper bounds and take min and max"""
+        """It's increasing or decreasing on each coordinate"""
         x, y = cls.wrap(x), cls.wrap(y)
         products = [
             fn(a, b)
@@ -168,14 +170,21 @@ class ValueRanges:
         return ValueRanges(min(products), max(products))
 
 class SymPyValueRangeAnalysis:
+    """
+    It gives bounds on a SymPy operator given bounds on its arguments
+    See the function `bound_sympy` for a function that applies this logic to a full SymPy expression
+    """
+
     @staticmethod
     def constant(value, dtype):
+        # NB: value is NOT a sympy expression, it's a constant!
+        assert isinstance(value, (int, float, bool))
+
         # using nan makes subsequent computation throw, and for the purposes of optimization
         # returning -math.inf - math.inf is equivalent to giving up
         if math.isnan(value):
             return ValueRanges.unknown()
 
-        assert isinstance(value, (int, float, bool))
         type_ = dtype_to_type(dtype)
         value = type_(value)
 
@@ -237,28 +246,23 @@ class SymPyValueRangeAnalysis:
     def add(a, b):
         return ValueRanges.coordinatewise_increasing_map(a, b, operator.add)
 
-    @staticmethod
-    def mul(a, b):
-        def zero(x):
-            if x.is_Boolean:
-                return sympy.false
-            elif x.is_Integer:
-                return sympy.Integer(0)
-            else:
-                return sympy.Float(0.0)
+    @classmethod
+    def mul(cls, a, b):
+        a = ValueRanges.wrap(a)
+        b = ValueRanges.wrap(b)
+
+        assert a.is_bool == b.is_bool
+        if a.is_bool:
+            return cls.and_(a, b)
 
         def safe_mul(a, b):
-            if a == 0 or a == sympy.false:
-                return zero(b)
-            elif b == 0 or b == sympy.false:
-                return zero(a)
-            # TODO this is not the right fix, but let's see if it unblocks
-            elif a == sympy.true:
-                return b
-            elif b == sympy.true:
+            # Make unknown() * wrap(0) == wrap(0)
+            if a == 0:
                 return a
-
-            return a * b
+            elif b == 0:
+                return b
+            else:
+                return a * b
 
         return ValueRanges.coordinatewise_monotone_map(a, b, safe_mul)
 
@@ -310,6 +314,8 @@ class SymPyValueRangeAnalysis:
         # Not implemented yet. It's a bit tricky
         # If you want to implement it, compute the partial derivatives of a ** b
         # and check the ranges where the function is increasing / decreasing
+        # Another non-tight way of doing this is defaulting to doing noting that for a > 0,  a ** b == exp(b * log(a))
+        # If this second option is implemented, by carefult about the types and possible infinities here and there.
         if not b.is_singleton():
             return ValueRanges.unknown()
 
@@ -340,6 +346,7 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def reciprocal(x):
+        """ Needed as it's used in pow, but it won't appear on a SymPy expression """
         x = ValueRanges.wrap(x)
         if 0 in x:
             return ValueRanges.unknown()
@@ -377,7 +384,6 @@ class SymPyValueRangeAnalysis:
         # Performs upcasting first
         def fn_(x, y):
             # Poorman's version of upcasting in Sympy
-            # This won't do for sympy.Expr as the casting does nothing for those
             # Inf is not a float...
             if x.is_Float or not x.is_finite or y.is_Float or not y.is_finite:
                 result_type = sympy.Float
@@ -389,8 +395,8 @@ class SymPyValueRangeAnalysis:
 
         return ValueRanges.coordinatewise_increasing_map(a, b, fn_)
 
+
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
-    """ Extend SymPy Ops with IR ops """
     def __init__(self):
         self.name = "ValueRangeAnalysis"
         boolean_operators = (
@@ -429,21 +435,26 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
         x = ValueRanges.wrap(x)
-        type_ = dtype_to_type(dtype)
-        if type_ is bool:
+
+        if dtype == torch.bool:
             if x.is_singleton():
                 return ValueRanges.wrap(x.lower != 0)
             elif 0 not in x:
                 return ValueRanges.wrap(sympy.true)
             else:
                 return ValueRanges(sympy.false, sympy.true)
-        # If we want to do this properly, we'd need to track the type of the variables
-        return x
 
-    @staticmethod
-    def sub(a, b):
-        b = ValueRanges.wrap(b)
-        return ValueRangeAnalysis.add(a, ValueRanges(-b.upper, -b.lower))
+        sympy_dtype = sympy.Float if dtype.is_floating_point else sympy.Integer
+        if x.is_bool:
+            if x.is_singleton():
+                val = 1 if x.lower else 0
+                return ValueRanges.wrap(sympy_dtype(val))
+            else:
+                return ValueRanges(sympy_dtype(0), sympy_dtype(1))
+        else:
+            # int to float or float to int
+            assert isinstance(x.lower, (sympy.Integer, sympy.Float))
+            return ValueRanges(sympy_dtype(x.lower), sympy_dtype(x.upper))
 
     @staticmethod
     def square(x):
@@ -453,22 +464,20 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def neg(x):
         return ValueRanges.decreasing_map(x, operator.neg)
 
-    @staticmethod
-    def truncdiv(a, b):
-        a = ValueRanges.wrap(a)
-        b = ValueRanges.wrap(b)
-        if 0 in b or ((-sympy.oo in a or sympy.oo in a) and (-sympy.oo in b or sympy.oo in b)):
-            return ValueRanges.unknown()
-        else:
-            # Casting to integer does truncation
-            def f(a, b):
-                result = a / b
-                # This won't work for sympy.Expr, so it'll need a workaround when
-                # dealing with dynamic shapes
-                if result.is_finite:
-                    result = sympy.Integer(result)
-                return result
-            return ValueRanges.coordinatewise_monotone_map(a, b, f)
+    @classmethod
+    def truncdiv(cls, a, b):
+        x = cls.truediv(a, b)
+        if x == ValueRanges.unknown():
+            return x
+
+        def trunc(x):
+            return sympy.Integer(x) if x.is_finite else x
+
+        return ValueRanges.increasing_map(x, trunc)
+
+    @classmethod
+    def sub(cls, a, b):
+        return cls.add(a, cls.neg(b))
 
     @staticmethod
     def sqrt(x):
@@ -486,23 +495,15 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         if b.is_bool:
             return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
         else:
-            return ValueRanges(min(b.lower, c.lower), max(b.upper, c.upper))
+            return ValueRanges(sympy.Min(b.lower, c.lower), sympy.Max(b.upper, c.upper))
 
     @classmethod
     def floor(cls, x):
-        return cls.floor_ceil(
-            x, sympy.functions.elementary.integers.floor
-        )
+        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.floor)
 
     @classmethod
     def ceil(cls, x):
-        return cls.floor_ceil(
-            x, sympy.functions.elementary.integers.ceiling
-        )
-
-    @staticmethod
-    def floor_ceil(x, fn):
-        return ValueRanges.increasing_map(x, fn)
+        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
 
     def __getattr__(self, name):
         log.warning("unhandled ValueRange op %s", name)

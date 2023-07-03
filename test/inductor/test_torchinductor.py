@@ -3152,6 +3152,7 @@ class CommonTemplate:
             check_lowp=False,  # accuracy issues with relatively large matmuls
         )
 
+    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
