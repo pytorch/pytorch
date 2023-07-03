@@ -146,13 +146,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     @parameterized.expand(
         [
             (
-                "bypass_fail_op_level_debug_raise_diagnostic_warning",
+                "bypassing_failed_op_level_debug_raises_diagnostic_warning",
                 True,
                 diagnostics.rules.op_level_debugging,
                 "aten.convolution.default",
             ),
             (
-                "nearest_match_raise_diagnostic_warning",
+                "nearest_match_raises_diagnostic_warning",
                 False,
                 diagnostics.rules.find_opschema_matched_symbolic_function,
                 "aten::convolution.default",
