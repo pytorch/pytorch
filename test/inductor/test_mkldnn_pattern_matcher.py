@@ -14,19 +14,20 @@ from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 # The dict value is match_nodes(computation_op+unary_op)
+
 unary_list = {
     torch.nn.ReLU(): 2,
     torch.nn.Sigmoid(): 2,
     torch.nn.Tanh(): 2,
-    torch.nn.Hardswish(): 2,
-    torch.nn.LeakyReLU(0.1, inplace=False): 2,
-    torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False): 2,
-    torch.nn.Hardtanh(min_val=-0.5, max_val=float("inf"), inplace=False): 2,
-    torch.nn.GELU(approximate="none"): 2,
-    torch.nn.GELU(approximate="tanh"): 2,
-    torch.nn.ReLU6(): 2,
-    torch.nn.SiLU(): 2,
-    torch.nn.Hardsigmoid(): 2,
+    torch.nn.Hardswish(): 6,
+    torch.nn.LeakyReLU(0.1, inplace=False): 4,
+    torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False): 3,
+    torch.nn.Hardtanh(min_val=-0.5, max_val=float("inf"), inplace=False): 3,
+    torch.nn.GELU(approximate="none"): 6,
+    torch.nn.GELU(approximate="tanh"): 10,
+    torch.nn.ReLU6(): 3,
+    torch.nn.SiLU(): 3,
+    torch.nn.Hardsigmoid(): 5,
 }
 
 
@@ -130,6 +131,11 @@ class TestPaternMatcher(TestCase):
                 .to(memory_format=memory_format)
             )
             match_nodes = unary_list[unary_fn] + 1
+            if check_autocast and not any(
+                isinstance(unary_fn, fn)
+                for fn in [torch.nn.ReLU, torch.nn.Sigmoid, torch.nn.Tanh]
+            ):
+                match_nodes += 2
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=check_autocast)
 
     def test_linear_unary(self):
@@ -165,6 +171,11 @@ class TestPaternMatcher(TestCase):
                 v = torch.randn(2, 10).to(dtype)
                 matcher_count = 2
                 matcher_nodes = unary_list[unary_fn] + 1
+                if not any(
+                    isinstance(unary_fn, fn)
+                    for fn in [torch.nn.ReLU, torch.nn.Sigmoid, torch.nn.Tanh]
+                ):
+                    matcher_nodes += 2
                 self._test_common(
                     mod, (v,), matcher_count, matcher_nodes, check_autocast=True
                 )
@@ -200,6 +211,11 @@ class TestPaternMatcher(TestCase):
                 memory_format=memory_format
             )
             match_nodes = unary_list[unary_fn] + 1
+            if check_autocast and not any(
+                isinstance(unary_fn, fn)
+                for fn in [torch.nn.ReLU, torch.nn.Sigmoid, torch.nn.Tanh]
+            ):
+                match_nodes += 2
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=check_autocast)
 
     def test_conv2d_binary(self):
@@ -305,7 +321,7 @@ class TestPaternMatcher(TestCase):
         v = torch.randn(1, 3, 28, 28)
         for min_value, max_value in zip(min_values, max_values):
             mod = Model().eval()
-            self._test_common(mod, (v, min_value, max_value), 1, 1)
+            self._test_common(mod, (v, min_value, max_value), 2, 4)
 
     def test_leaky_relu_pattern_fallback(self):
         class Model(torch.nn.Module):
@@ -324,7 +340,7 @@ class TestPaternMatcher(TestCase):
             v = torch.randn(1, 3, 28, 28)
             for negative_slope in negative_slopes:
                 mod = Model().eval()
-                self._test_common(mod, (v, negative_slope), 1, 1)
+                self._test_common(mod, (v, negative_slope), 2, 5)
 
     # https://github.com/pytorch/pytorch/issues/99838.
     def test_conv2d_add_scalar(self):

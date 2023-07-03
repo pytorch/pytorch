@@ -1786,57 +1786,6 @@ if torch._C._has_mkldnn:
                 (*input_tensor.shape[:-1], orig_weight.shape[0])
             )
 
-    @register_meta(torch.ops.mkldnn._reorder_convolution_transpose_weight.default)
-    def meta_reorder_convolution_transpose_weight(
-        weight,
-        padding,
-        output_padding,
-        stride,
-        dilation,
-        groups,
-        input_size,
-    ):
-        # For OpaqueTensor, the stride is not available.
-        packed_weight_stride = [1] + [0] * (weight.dim() - 1)
-        return torch.empty_strided(
-            size=weight.size(),
-            stride=packed_weight_stride,
-            dtype=weight.dtype,
-            device=weight.device,
-        )
-
-    @register_meta(torch.ops.mkldnn._reorder_convolution_weight.default)
-    def meta_reorder_convolution_weight(
-        weight,
-        padding,
-        stride,
-        dilation,
-        groups,
-        input_size,
-    ):
-        # For OpaqueTensor, the stride is not available.
-        packed_weight_stride = [1] + [0] * (weight.dim() - 1)
-        return torch.empty_strided(
-            size=weight.size(),
-            stride=packed_weight_stride,
-            dtype=weight.dtype,
-            device=weight.device,
-        )
-
-    @register_meta(torch.ops.mkldnn._reorder_linear_weight.default)
-    def meta_reorder_linear_weight(
-        weight,
-        batch_size,
-    ):
-        # For OpaqueTensor, the stride is not available.
-        packed_weight_stride = [1] + [0] * (weight.dim() - 1)
-        return torch.empty_strided(
-            size=weight.size(),
-            stride=packed_weight_stride,
-            dtype=weight.dtype,
-            device=weight.device,
-        )
-
 
 # from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
 def check_dim_size(tensor, dim, dim_size, size):
