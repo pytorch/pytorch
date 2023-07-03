@@ -230,16 +230,20 @@ void sparse_matmul_kernel(
   Tensor output_row_indices = output_indices.select(0, 0);
   Tensor output_col_indices = output_indices.select(0, 1);
 
+  // Get contiguous mat1 and mat2 values, since they will be used via data_ptr.
+  auto mat1_csr_values = mat1_csr.values().contiguous();
+  auto mat2_csr_values = mat2_csr.values().contiguous();
+
   // TODO: replace with a CSR @ CSC kernel for better performance.
   _csr_matmult(
       M,
       N,
       mat1_csr.crow_indices().data_ptr<int64_t>(),
       mat1_csr.col_indices().data_ptr<int64_t>(),
-      mat1_csr.values().data_ptr<scalar_t>(),
+      mat1_csr_values.data_ptr<scalar_t>(),
       mat2_csr.crow_indices().data_ptr<int64_t>(),
       mat2_csr.col_indices().data_ptr<int64_t>(),
-      mat2_csr.values().data_ptr<scalar_t>(),
+      mat2_csr_values.data_ptr<scalar_t>(),
       output_indptr.data_ptr<int64_t>(),
       output_col_indices.data_ptr<int64_t>(),
       output_values.data_ptr<scalar_t>());
