@@ -1617,7 +1617,14 @@ class Module:
         if '_backward_pre_hooks' not in self.__dict__:
             self._backward_pre_hooks = OrderedDict()
 
-    def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
+    # On the return type:
+    # We choose to return `Any` in the `__getattr__` type signature instead of a more strict `Union[Tensor, Module]`.
+    # This is done for better interop with various type checkers for the end users.
+    # Having a stricter return type doesn't play nicely with `register_buffer()` and forces
+    # people to excessively use type-ignores, asserts, casts, etc.
+    # See full discussion on the problems with returning `Union` here
+    # https://github.com/microsoft/pyright/issues/4213
+    def __getattr__(self, name: str) -> Any:
         if '_parameters' in self.__dict__:
             _parameters = self.__dict__['_parameters']
             if name in _parameters:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import operator
+
 import warnings
 from typing import (
     Any,
@@ -44,6 +45,30 @@ class _TensorLike(Protocol):
     @property
     def dtype(self) -> Optional[torch.dtype]:
         ...
+
+
+@_beartype.beartype
+def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
+    fn: Callable,
+    self,
+    node: torch.fx.Node,
+    aten_name: str,
+    function_overloads: Set[
+        Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]
+    ],
+    *args,
+    **kwargs,
+) -> str:
+    """Format the diagnostic message for the nearest match warning."""
+    all_function_overload_names = ""
+    for overload_func in function_overloads:
+        all_function_overload_names += (
+            f"ONNX Node: {overload_func.name}[opset={overload_func.opset}]. \n"
+        )
+    return (
+        f"FX Node: {node.op}:{node.target}[name={node.name}]. \n"
+        f"{all_function_overload_names}"
+    )
 
 
 class OnnxFunctionDispatcher:
@@ -122,6 +147,10 @@ class OnnxFunctionDispatcher:
         )
 
     @_beartype.beartype
+    @diagnostics.diagnose_call(
+        diagnostics.rules.find_opschema_matched_symbolic_function,
+        diagnostic_message_formatter=_find_opschema_matched_symbolic_function_disagnostic_message_formatter,
+    )
     def _find_the_perfect_or_nearest_match_onnxfunction(
         self,
         node: torch.fx.Node,
@@ -146,22 +175,23 @@ class OnnxFunctionDispatcher:
             # Record the match score for the nearest match if it's not the perfect match
             overload_match_ranking[overload_func] = function_opschema.match_score
 
-        # TODO(titaiwang): Change inflight_diagnostic to a new rule. Do we need to handle
-        # the special case where the same scores happended?
         # If the perfect match is not found, find the nearest match
+        symbolic_function = max(overload_match_ranking, key=overload_match_ranking.get)  # type: ignore[arg-type]
+
         warnings.warn(
             f"A perfect matched Opchema is not found in torchlib for {aten_name}, but \n"
             f"a nearest match is found. Please check the ONNX output carefully. \n",
         )
-        diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
-            diagnostics.rules.no_symbolic_function_for_call_function,
-            diagnostics.levels.WARNING,
-            f"Cannot find a perfect match of symbolic overload for {aten_name}, "
-            f"which should be registered under {node.target}. But a nearest match is found.",
-            unsupported_fx_node=node,
+
+        diagnostic = diagnostic_context.inflight_diagnostic()
+        diagnostic.with_additional_message(
+            "### Exact match is not found!\n"
+            "Cannot find a perfect match of symbolic overload, "
+            "a nearest match is found. Please check the ONNX output carefully. \n",
         )
-        diagnostic_context.log(diagnostic)
-        return max(overload_match_ranking, key=overload_match_ranking.get)  # type: ignore[arg-type]
+        diagnostic.level = diagnostics.levels.WARNING
+
+        return symbolic_function
 
     @_beartype.beartype
     def get_aten_name(
