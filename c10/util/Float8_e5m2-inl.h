@@ -11,7 +11,7 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 
 #define EXP_WIDTH_FP8 5
 #define MAN_WIDTH_FP8 2
-#define EXP_BIAS_FP8  15
+#define EXP_BIAS_FP8 15
 
 namespace c10 {
 
@@ -27,22 +27,36 @@ inline C10_HOST_DEVICE Float8_e5m2::operator float() const {
   return detail::fp8e5m2_to_fp32_value(x);
 }
 
+/// Special values helpers
+
+inline C10_HOST_DEVICE bool Float8_e5m2::isnan() const {
+  return (x & 0b01111111) > 0b01111100;
+}
+
+inline C10_HOST_DEVICE bool Float8_e5m2::isinf() const {
+  return (x & 0b01111111) == 0b01111100;
+}
+
 /// Arithmetic
 
-inline C10_HOST_DEVICE Float8_e5m2 operator+(const Float8_e5m2& a, const Float8_e5m2& b) {
+inline C10_HOST_DEVICE Float8_e5m2
+operator+(const Float8_e5m2& a, const Float8_e5m2& b) {
   return static_cast<float>(a) + static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE Float8_e5m2 operator-(const Float8_e5m2& a, const Float8_e5m2& b) {
+inline C10_HOST_DEVICE Float8_e5m2
+operator-(const Float8_e5m2& a, const Float8_e5m2& b) {
   return static_cast<float>(a) - static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE Float8_e5m2 operator*(const Float8_e5m2& a, const Float8_e5m2& b) {
+inline C10_HOST_DEVICE Float8_e5m2
+operator*(const Float8_e5m2& a, const Float8_e5m2& b) {
   return static_cast<float>(a) * static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE Float8_e5m2 operator/(const Float8_e5m2& a, const Float8_e5m2& b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE Float8_e5m2 operator/(
+    const Float8_e5m2& a,
+    const Float8_e5m2& b) __ubsan_ignore_float_divide_by_zero__ {
   return static_cast<float>(a) / static_cast<float>(b);
 }
 
@@ -50,22 +64,30 @@ inline C10_HOST_DEVICE Float8_e5m2 operator-(const Float8_e5m2& a) {
   return -static_cast<float>(a);
 }
 
-inline C10_HOST_DEVICE Float8_e5m2& operator+=(Float8_e5m2& a, const Float8_e5m2& b) {
+inline C10_HOST_DEVICE Float8_e5m2& operator+=(
+    Float8_e5m2& a,
+    const Float8_e5m2& b) {
   a = a + b;
   return a;
 }
 
-inline C10_HOST_DEVICE Float8_e5m2& operator-=(Float8_e5m2& a, const Float8_e5m2& b) {
+inline C10_HOST_DEVICE Float8_e5m2& operator-=(
+    Float8_e5m2& a,
+    const Float8_e5m2& b) {
   a = a - b;
   return a;
 }
 
-inline C10_HOST_DEVICE Float8_e5m2& operator*=(Float8_e5m2& a, const Float8_e5m2& b) {
+inline C10_HOST_DEVICE Float8_e5m2& operator*=(
+    Float8_e5m2& a,
+    const Float8_e5m2& b) {
   a = a * b;
   return a;
 }
 
-inline C10_HOST_DEVICE Float8_e5m2& operator/=(Float8_e5m2& a, const Float8_e5m2& b) {
+inline C10_HOST_DEVICE Float8_e5m2& operator/=(
+    Float8_e5m2& a,
+    const Float8_e5m2& b) {
   a = a / b;
   return a;
 }

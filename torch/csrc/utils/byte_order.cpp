@@ -69,13 +69,6 @@ static inline void swapBytes64(void* ptr) {
   memcpy(ptr, &output, sizeof(uint64_t));
 }
 
-static inline uint8_t decodeUInt8(const uint8_t *data) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint8_t output;
-  memcpy(&output, data, sizeof(uint8_t));
-  return output;
-}
-
 static inline uint16_t decodeUInt16(const uint8_t* data) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint16_t output;
@@ -326,40 +319,6 @@ void THP_decodeBFloat16Buffer(
     THPByteOrder order,
     size_t len) {
   THP_decodeBFloat16Buffer(dst, src, (order != THP_nativeByteOrder()), len);
-}
-
-void THP_decodeFloat8_e5m2Buffer(
-    at::Float8_e5m2* dst,
-    const uint8_t* src,
-    size_t len)
-{
-  for(const auto i : c10::irange(len)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    union {
-      uint8_t x;
-      c10::Float8_e5m2 f;
-    };
-    x = decodeUInt8(src);
-    dst[i] = f;
-    src += sizeof(uint8_t);
-  }
-}
-
-void THP_decodeFloat8_e4m3Buffer(
-    at::Float8_e4m3* dst,
-    const uint8_t* src,
-    size_t len)
-{
-  for(const auto i : c10::irange(len)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    union {
-      uint8_t x;
-      c10::Float8_e4m3 f;
-    };
-    x = decodeUInt8(src);
-    dst[i] = f;
-    src += sizeof(uint8_t);
-  }
 }
 
 void THP_decodeBoolBuffer(

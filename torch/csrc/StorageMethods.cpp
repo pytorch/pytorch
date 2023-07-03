@@ -213,15 +213,18 @@ static PyObject* THPStorage_fromBuffer(
   auto dtype = reinterpret_cast<THPDtype*>(dtype_obj);
   scalar_type = dtype->scalar_type;
 
+  const bool is_endian_independent = (scalar_type == at::kByte) ||
+      (scalar_type == at::kChar) || (scalar_type == at::kFloat8_e5m2) ||
+      (scalar_type == at::kFloat8_e4m3fn);
+
   TORCH_CHECK(
-      (scalar_type == at::kByte) || (scalar_type == at::kChar) ||
-          (byte_order_str != nullptr),
+      is_endian_independent || (byte_order_str != nullptr),
       "function missing required argument 'byte_order' (pos 2)");
   size_t element_size = c10::elementSize(scalar_type);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool do_byte_swap;
-  if (scalar_type != at::kByte && scalar_type != at::kChar) {
+  if (!is_endian_independent) {
     if (strcmp(byte_order_str, "native") == 0) {
       do_byte_swap = false;
     } else if (strcmp(byte_order_str, "big") == 0) {
@@ -292,7 +295,7 @@ static PyObject* THPStorage_fromBuffer(
       c10::GetDefaultCPUAllocator(),
       /*resizable=*/true);
 
-  if (scalar_type == at::kByte || scalar_type == at::kChar) {
+  if (is_endian_independent) {
     memcpy(storage->mutable_data(), src + offset, count);
   } else if (scalar_type == at::kBool) {
     // Because of ASAN checks, that are failing whenever
@@ -332,16 +335,6 @@ static PyObject* THPStorage_fromBuffer(
         static_cast<c10::BFloat16*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
-        count);
-  } else if (scalar_type == at::kFloat8_e5m2) {
-    torch::utils::THP_decodeFloat8_e5m2Buffer(
-        static_cast<c10::Float8_e5m2*>(storage->mutable_data()),
-        src + offset,
-        count);
-  } else if (scalar_type == at::kFloat8_e4m3) {
-    torch::utils::THP_decodeFloat8_e4m3Buffer(
-        static_cast<c10::Float8_e4m3*>(storage->mutable_data()),
-        src + offset,
         count);
   } else if (scalar_type == at::kFloat) {
     torch::utils::THP_decodeFloatBuffer(

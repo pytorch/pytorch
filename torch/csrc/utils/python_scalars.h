@@ -74,9 +74,9 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
       *(at::Float8_e5m2*)data =
           at::convert<at::Float8_e5m2, double>(THPUtils_unpackDouble(obj));
       break;
-    case at::kFloat8_e4m3:
-      *(at::Float8_e4m3*)data =
-          at::convert<at::Float8_e4m3, double>(THPUtils_unpackDouble(obj));
+    case at::kFloat8_e4m3fn:
+      *(at::Float8_e4m3fn*)data =
+          at::convert<at::Float8_e4m3fn, double>(THPUtils_unpackDouble(obj));
       break;
     default:
       throw std::runtime_error("invalid type");
@@ -121,9 +121,9 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
     case at::kFloat8_e5m2:
       return PyFloat_FromDouble(
           at::convert<double, at::Float8_e5m2>(*(at::Float8_e5m2*)data));
-    case at::kFloat8_e4m3:
+    case at::kFloat8_e4m3fn:
       return PyFloat_FromDouble(
-          at::convert<double, at::Float8_e4m3>(*(at::Float8_e4m3*)data));
+          at::convert<double, at::Float8_e4m3fn>(*(at::Float8_e4m3fn*)data));
     default:
       throw std::runtime_error("invalid type");
   }

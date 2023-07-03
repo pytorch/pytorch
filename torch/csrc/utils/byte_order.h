@@ -1,9 +1,9 @@
 #pragma once
 
 #include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
+#include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e5m2.h>
-#include <c10/util/Float8_e4m3.h>
+#include <c10/util/Half.h>
 #include <torch/csrc/Export.h>
 #include <cstddef>
 #include <cstdint>
@@ -160,8 +160,8 @@ TORCH_API void THP_decodeFloat8_e5m2Buffer(
     at::Float8_e5m2* dst,
     const uint8_t* src,
     size_t len);
-TORCH_API void THP_decodeFloat8_e4m3Buffer(
-    at::Float8_e4m3* dst,
+TORCH_API void THP_decodeFloat8_e4m3fnBuffer(
+    at::Float8_e4m3fn* dst,
     const uint8_t* src,
     size_t len);
 TORCH_API void THP_decodeComplexFloatBuffer(

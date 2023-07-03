@@ -1,6 +1,6 @@
 #pragma once
 
-/// Defines the Float8_e4m3 type (8-bit floating-point) including conversions
+/// Defines the Float8_e4m3fn type (8-bit floating-point) including conversions
 /// to standard C types and basic arithmetic operations. Note that arithmetic
 /// operations are implemented by converting to floating point and
 /// performing the operation in float32.
@@ -55,15 +55,15 @@ namespace c10 {
 namespace detail {
 
 /*
- * Convert a 8-bit floating-point number in fp8 E4M3 format, in bit
+ * Convert a 8-bit floating-point number in fp8 E4M3FN format, in bit
  * representation, to a 32-bit floating-point number in IEEE single-precision
  * format, in bit representation.
  *
  * @note The implementation doesn't use any floating-point operations.
  */
-inline float fp8e4m3_to_fp32_value(uint8_t input) {
+inline float fp8e4m3fn_to_fp32_value(uint8_t input) {
   /*
-   * Extend the fp8 E4M3 number to 32 bits and shift to the
+   * Extend the fp8 E4M3FN number to 32 bits and shift to the
    * upper part of the 32-bit word:
    *      +---+----+---+-----------------------------+
    *      | S |EEEE|MMM|0000 0000 0000 0000 0000 0000|
@@ -111,9 +111,9 @@ inline float fp8e4m3_to_fp32_value(uint8_t input) {
 #endif
   renorm_shift = renorm_shift > 4 ? renorm_shift - 4 : 0;
   /*
-   * Iff fp8e4m3 number has all exponent and mantissa bits set to 1,
+   * Iff fp8e4m3fn number has all exponent and mantissa bits set to 1,
    * the addition overflows it into bit 31, and the subsequent shift turns the
-   * high 9 bits into 1. Thus inf_nan_mask == 0x7F800000 if the fp8e4m3 number
+   * high 9 bits into 1. Thus inf_nan_mask == 0x7F800000 if the fp8e4m3fn number
    * is Nan, 0x00000000 otherwise
    */
   const int32_t inf_nan_mask =
@@ -134,7 +134,7 @@ inline float fp8e4m3_to_fp32_value(uint8_t input) {
    * bits of the 23-bit mantissa of IEEE single-precision number.
    * 3. Add 0x78 to the exponent (starting at bit 23) to compensate the
    * different in exponent bias (0x7F for single-precision number less 0x07
-   * for fp8e4m3 number).
+   * for fp8e4m3fn number).
    * 4. Subtract renorm_shift from the exponent (starting at bit 23) to
    * account for renormalization. As renorm_shift is less than 0x78, this
    * can be combined with step 3.
@@ -153,19 +153,19 @@ inline float fp8e4m3_to_fp32_value(uint8_t input) {
 
 /*
  * Convert a 32-bit floating-point number in IEEE single-precision format to a
- * 8-bit floating-point number in fp8 E4M3 format, in bit representation.
+ * 8-bit floating-point number in fp8 E4M3FN format, in bit representation.
  */
-inline uint8_t fp8e4m3_from_fp32_value(float f) {
+inline uint8_t fp8e4m3fn_from_fp32_value(float f) {
   /*
    * Binary representation of 480.0f, which is the first value
-   * not representable in fp8e4m3 range:
-   * 0 1111 111 - fp8e4m3
+   * not representable in fp8e4m3fn range:
+   * 0 1111 111 - fp8e4m3fn
    * 0 10000111 11100000000000000000000 - fp32
    */
   constexpr uint32_t fp8_max = UINT32_C(1087) << 20;
 
   /*
-   * A mask for converting fp32 numbers lower than fp8e4m3 normal range
+   * A mask for converting fp32 numbers lower than fp8e4m3fn normal range
    * into denorm representation
    * magic number: ((127 - 7) + (23 - 3) + 1)
    */
@@ -196,7 +196,7 @@ inline uint8_t fp8e4m3_from_fp32_value(float f) {
   } else {
     if (f_bits < (UINT32_C(121) << 23)) {
       // Input number is smaller than 2^(-6), which is the smallest
-      // fp8e4m3 normal number
+      // fp8e4m3fn normal number
       f_bits =
           fp32_to_bits(fp32_from_bits(f_bits) + fp32_from_bits(denorm_mask));
       result = static_cast<uint8_t>(f_bits - denorm_mask);
@@ -221,7 +221,7 @@ inline uint8_t fp8e4m3_from_fp32_value(float f) {
 
 } // namespace detail
 
-struct alignas(1) Float8_e4m3 {
+struct alignas(1) Float8_e4m3fn {
   uint8_t x;
 
   struct from_bits_t {};
@@ -229,19 +229,21 @@ struct alignas(1) Float8_e4m3 {
     return from_bits_t();
   }
 
-  Float8_e4m3() = default;
+  Float8_e4m3fn() = default;
 
-  constexpr C10_HOST_DEVICE Float8_e4m3(uint8_t bits, from_bits_t) : x(bits){};
-  inline C10_HOST_DEVICE Float8_e4m3(float value);
+  constexpr C10_HOST_DEVICE Float8_e4m3fn(uint8_t bits, from_bits_t)
+      : x(bits){};
+  inline C10_HOST_DEVICE Float8_e4m3fn(float value);
   inline C10_HOST_DEVICE operator float() const;
+  inline C10_HOST_DEVICE bool isnan() const;
 };
 
 #ifdef __clang__
 #pragma GCC diagnostic pop
 #endif
 
-C10_API std::ostream& operator<<(std::ostream& out, const Float8_e4m3& value);
+C10_API std::ostream& operator<<(std::ostream& out, const Float8_e4m3fn& value);
 
 } // namespace c10
 
-#include <c10/util/Float8_e4m3-inl.h> // IWYU pragma: keep
+#include <c10/util/Float8_e4m3fn-inl.h> // IWYU pragma: keep
