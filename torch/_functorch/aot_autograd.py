@@ -155,11 +155,6 @@ def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int = 0):
 
             fx_traceback.set_stack_trace(stack_)
             fx_traceback.set_bwd_seq_id(seq_id)
-            '''
-            if stack_ != prev_stack and max_seq_id >= 0:
-                fx_traceback.set_bwd_seq_id(seq_id)
-                prev_stack = stack_
-            '''
             meta = fx_traceback.get_current_meta()
 
         return prehook
@@ -173,7 +168,7 @@ def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int = 0):
         forward_node_stack = node.metadata.get("traceback_", [])
         forward_node_module_info = str(node.name)
         seq_id = node.sequence_nr()
-        print(f"Node type {type(node)} seq_id {seq_id}")
+        print(f"Node type BWD {type(node)} seq_id {seq_id}")
         # OK I think node in this case is a Node() defined in autograd.cpp
         # I should be able to just query the node's seq_id using the c++
         # Node::sequence_nr()
@@ -1270,8 +1265,6 @@ def create_joint(
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
 
-        # Stop fx from overwriting the bwd seq id
-        fx_traceback.freeze_seq_id()
         backward_out = []
         # Call the backwards pass
         if grad_primals:
