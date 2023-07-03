@@ -1,11 +1,11 @@
 #pragma once
 
 #include <cstring>
+#include <mutex>
 #include <unordered_map>
 
 #include <c10/core/Allocator.h>
-#include <c10/core/alignment.h> // legacy, update dependents to include this directly
-#include <c10/util/Logging.h>
+#include <c10/util/Flags.h>
 
 // TODO: rename to c10
 C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
@@ -21,7 +21,7 @@ C10_API void NoDelete(void*);
 // deallocation status and out-of-memory events to the profiler
 class C10_API ProfiledCPUMemoryReporter {
  public:
-  ProfiledCPUMemoryReporter() {}
+  ProfiledCPUMemoryReporter() = default;
   void New(void* ptr, size_t nbytes);
   void OutOfMemory(size_t nbytes);
   void Delete(void* ptr);

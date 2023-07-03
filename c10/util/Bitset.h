@@ -33,7 +33,7 @@ struct bitset final {
     return 8 * sizeof(bitset_type);
   }
 
-  constexpr bitset() noexcept : bitset_(0) {}
+  constexpr bitset() noexcept = default;
   constexpr bitset(const bitset&) noexcept = default;
   constexpr bitset(bitset&&) noexcept = default;
   // there is an issure for gcc 5.3.0 when define default function as constexpr
@@ -109,7 +109,7 @@ struct bitset final {
     return lhs.bitset_ == rhs.bitset_;
   }
 
-  bitset_type bitset_;
+  bitset_type bitset_{0};
 };
 
 inline bool operator!=(bitset lhs, bitset rhs) noexcept {

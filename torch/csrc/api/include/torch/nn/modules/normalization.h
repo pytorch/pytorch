@@ -28,12 +28,11 @@ namespace nn {
 /// LayerNorm model(LayerNormOptions({2,
 /// 2}).elementwise_affine(false).eps(2e-5));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
  public:
   LayerNormImpl(std::vector<int64_t> normalized_shape)
       : LayerNormImpl(LayerNormOptions(normalized_shape)) {}
-  explicit LayerNormImpl(const LayerNormOptions& options_);
+  explicit LayerNormImpl(LayerNormOptions options_);
 
   void reset() override;
 
@@ -90,7 +89,6 @@ TORCH_MODULE(LayerNorm);
 /// LocalResponseNorm
 /// model(LocalResponseNormOptions(2).alpha(0.0002).beta(0.85).k(2.));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LocalResponseNormImpl
     : public Cloneable<LocalResponseNormImpl> {
  public:
@@ -125,7 +123,6 @@ TORCH_MODULE(LocalResponseNorm);
 /// ```
 /// CrossMapLRN2d model(CrossMapLRN2dOptions(3).alpha(1e-5).beta(0.1).k(10));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API CrossMapLRN2dImpl
     : public torch::nn::Cloneable<CrossMapLRN2dImpl> {
  public:
@@ -165,7 +162,6 @@ TORCH_MODULE(CrossMapLRN2d);
 /// ```
 /// GroupNorm model(GroupNormOptions(2, 2).eps(2e-5).affine(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API GroupNormImpl : public torch::nn::Cloneable<GroupNormImpl> {
  public:
   GroupNormImpl(int64_t num_groups, int64_t num_channels)

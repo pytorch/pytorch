@@ -13,7 +13,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/ivalue_inl.h>
 
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
@@ -71,8 +71,8 @@ struct WorkEntry {
 // MPI_THREAD_SERIALIZED, ProcessGroupMPI will only support a singe process
 // group. In other words, no more than 1 process group can be created globally.
 //
-// If you would like to use multiple ProcessGroupMPI, it requres your MPI
-// implemenation to have a thread support value of MPI_THREAD_MULTIPLE, that is,
+// If you would like to use multiple ProcessGroupMPI, it requires your MPI
+// implementation to have a thread support value of MPI_THREAD_MULTIPLE, that is,
 // multiple threads may call MPI, with no restriction.
 //
 // Also note that ProcessGroupMPI only supports a single Tensor operation. In
@@ -80,7 +80,7 @@ struct WorkEntry {
 //
 // CUDA tensor can be supported if the MPI used is CUDA-aware MPI, and
 // ProcessGroupMPI will automatically detect this support.
-class TORCH_API ProcessGroupMPI : public ProcessGroup {
+class TORCH_API ProcessGroupMPI : public Backend {
  public:
   class WorkMPI : public Work {
    public:
@@ -118,7 +118,7 @@ class TORCH_API ProcessGroupMPI : public ProcessGroup {
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt);
 
-    virtual ~AsyncWork();
+    ~AsyncWork() override;
 
     bool isCompleted() override;
 
@@ -144,7 +144,7 @@ class TORCH_API ProcessGroupMPI : public ProcessGroup {
   // Constructor will spawn up the worker thread loop
   explicit ProcessGroupMPI(int rank, int size, MPI_Comm pgComm);
 
-  virtual ~ProcessGroupMPI();
+  ~ProcessGroupMPI() override;
 
   // Abort the MPI program, needs to be called when exception is detected
   void abort();
@@ -229,7 +229,7 @@ class TORCH_API ProcessGroupMPI : public ProcessGroup {
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
+  // Creating a new ProcessGroupMPI, will initialize MPI if not initialized
   static c10::intrusive_ptr<ProcessGroupMPI> createProcessGroupMPI(
       std::vector<int> ranks = {});
 

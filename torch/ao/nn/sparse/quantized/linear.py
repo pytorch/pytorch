@@ -1,7 +1,7 @@
 from typing import Optional
 
 import torch
-from torch.ao.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
+from torch.ao.nn.quantized.modules.utils import _quantize_weight, _hide_packed_params_repr
 
 __all__ = ['LinearPackedParams', 'Linear']
 
@@ -104,7 +104,7 @@ class Linear(torch.nn.Module):
         )
 
     def __repr__(self):
-        return hide_packed_params_repr(self, LinearPackedParams)
+        return _hide_packed_params_repr(self, LinearPackedParams)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.ops.sparse.qlinear(x, self._packed_params._packed_params, self.scale, self.zero_point)

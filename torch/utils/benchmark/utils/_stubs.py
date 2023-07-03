@@ -1,11 +1,4 @@
-import sys
-from typing import Any, Callable, Dict, TYPE_CHECKING
-
-
-if TYPE_CHECKING or sys.version_info >= (3, 8):
-    from typing import runtime_checkable, Protocol
-else:
-    from typing_extensions import runtime_checkable, Protocol
+from typing import Any, Callable, Dict, Protocol, runtime_checkable
 
 
 class TimerClass(Protocol):

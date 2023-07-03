@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, Set
 
 __all__ = ['TimerRequest', 'TimerClient', 'RequestQueue', 'TimerServer', 'configure', 'expires']
 
+log = logging.getLogger(__name__)
+
 class TimerRequest:
     """
     Data object representing a countdown timer acquisition and release
@@ -168,7 +170,7 @@ class TimerServer(abc.ABC):
         try:
             return self._reap_worker(worker_id)
         except Exception as e:
-            logging.error(
+            log.error(
                 "Uncaught exception thrown from _reap_worker(), "
                 "check that the implementation correctly catches exceptions",
                 exc_info=e,
@@ -180,7 +182,7 @@ class TimerServer(abc.ABC):
             try:
                 self._run_watchdog()
             except Exception as e:
-                logging.error("Error running watchdog", exc_info=e)
+                log.error("Error running watchdog", exc_info=e)
 
     def _run_watchdog(self):
         batch_size = max(1, self._request_queue.size())
@@ -189,16 +191,17 @@ class TimerServer(abc.ABC):
         now = time.time()
         reaped_worker_ids = set()
         for worker_id, expired_timers in self.get_expired_timers(now).items():
-            logging.info(
-                f"Reaping worker_id=[{worker_id}]."
-                f" Expired timers: {self._get_scopes(expired_timers)}"
+            log.info(
+                "Reaping worker_id=[%s]."
+                " Expired timers: %s",
+                worker_id, self._get_scopes(expired_timers)
             )
             if self._reap_worker_no_throw(worker_id):
-                logging.info(f"Successfully reaped worker=[{worker_id}]")
+                log.info("Successfully reaped worker=[%s]", worker_id)
                 reaped_worker_ids.add(worker_id)
             else:
-                logging.error(
-                    f"Error reaping worker=[{worker_id}]. Will retry on next watchdog."
+                log.error(
+                    "Error reaping worker=[%s]. Will retry on next watchdog.", worker_id
                 )
         self.clear_timers(reaped_worker_ids)
 
@@ -206,26 +209,27 @@ class TimerServer(abc.ABC):
         return [r.scope_id for r in timer_requests]
 
     def start(self) -> None:
-        logging.info(
-            f"Starting {type(self).__name__}..."
-            f" max_interval={self._max_interval},"
-            f" daemon={self._daemon}"
+        log.info(
+            "Starting %s..."
+            " max_interval=%s,"
+            " daemon=%s",
+            type(self).__name__, self._max_interval, self._daemon
         )
         self._watchdog_thread = threading.Thread(
             target=self._watchdog_loop, daemon=self._daemon
         )
-        logging.info("Starting watchdog thread...")
+        log.info("Starting watchdog thread...")
         self._watchdog_thread.start()
 
     def stop(self) -> None:
-        logging.info(f"Stopping {type(self).__name__}")
+        log.info("Stopping %s", type(self).__name__)
         self._stop_signaled = True
         if self._watchdog_thread:
-            logging.info("Stopping watchdog thread...")
+            log.info("Stopping watchdog thread...")
             self._watchdog_thread.join(self._max_interval)
             self._watchdog_thread = None
         else:
-            logging.info("No watchdog thread running, doing nothing")
+            log.info("No watchdog thread running, doing nothing")
 
 
 _timer_client = None
@@ -237,7 +241,7 @@ def configure(timer_client: TimerClient):
     """
     global _timer_client
     _timer_client = timer_client
-    logging.info(f"Timer client configured to: {type(_timer_client).__name__}")
+    log.info("Timer client configured to: %s", type(_timer_client).__name__)
 
 
 @contextmanager
@@ -263,7 +267,7 @@ def expires(
     """
     if client is None:
         if _timer_client is None:
-            raise RuntimeError("Configure timer client before using coundown timers.")
+            raise RuntimeError("Configure timer client before using countdown timers.")
         client = _timer_client
     if scope is None:
         # grab the caller file + lineno

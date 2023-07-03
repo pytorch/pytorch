@@ -252,6 +252,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
 
   Value* asValue(const SourceRange& loc, GraphFunction& m) override {
     std::vector<Value*> vec;
+    vec.reserve(tup_.size());
     for (const auto& sv : tup_) {
       vec.push_back(sv->asValue(loc, m));
     }
@@ -270,9 +271,10 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
       TypePtr type_hint = nullptr) override {
     if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
       throw ErrorReport(loc)
-          << "Expected integer literal for index. "
+          << "Expected integer literal for index but got a variable or non-integer. "
           << "ModuleList/Sequential indexing is only supported with integer literals. "
-          << "Enumeration is supported, e.g. 'for index, v in enumerate(self): ...'";
+          << "For example, 'i = 4; self.layers[i](x)' will fail because i is not a literal. "
+          << "Enumeration is supported, e.g. 'for index, v in enumerate(self): out = v(inp)'";
     }
     auto index = toIValue(idx)->toInt();
     int64_t adj_index =
@@ -511,7 +513,7 @@ struct TORCH_API CastValue : public BuiltinFunction {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
-    if (args.size() == 1 && kwargs.size() == 0) {
+    if (args.size() == 1 && kwargs.empty()) {
       auto len_op = std::make_shared<BuiltinFunction>(aten::len, at::nullopt);
       auto gt_op = std::make_shared<BuiltinFunction>(aten::gt, at::nullopt);
       auto zero = m.graph()->insertConstant(0);
@@ -549,7 +551,7 @@ struct TORCH_API TensorCastValue : public SugaredValue {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
-    TORCH_INTERNAL_ASSERT(args.size() == 0 && kwargs.size() == 0);
+    TORCH_INTERNAL_ASSERT(args.empty() && kwargs.empty());
     Value* dtype_const = m.graph()->insertConstant(dtype_, loc);
     std::vector<NamedValue> kwargs_{
         self_, NamedValue(loc, "dtype", dtype_const)};
@@ -657,15 +659,15 @@ struct TORCH_API RangeValue : SugaredValue {
   }
 
  private:
-  Value* start_;
-  Value* end_;
-  Value* step_;
+  Value* start_{};
+  Value* end_{};
+  Value* step_{};
   // a flag to determine if it's a simple range() call with only end_ from
   // arguments If true, we will not insert length calculation and index
   // derivation nodes to simplify the graph and enable more possible
   // optimizations
-  bool has_only_end_;
-  c10::optional<int64_t> static_len_ = c10::nullopt;
+  bool has_only_end_{};
+  c10::optional<int64_t> static_len_;
 };
 
 // Specialized Tree structure to matched against for special handling

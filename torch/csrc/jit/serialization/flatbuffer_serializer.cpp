@@ -20,15 +20,16 @@
 #include <torch/csrc/jit/mobile/train/export_data.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 
-#if defined(FBCODE_CAFFE2) or defined(FB_XPLAT_BUILD)
+#if defined(FB_XPLAT_BUILD) || defined(FBCODE_CAFFE2)
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h> // NOLINT
 namespace flatbuffers = flatbuffers_fbsource;
 #define FLATBUFFERS_MAX_ALIGNMENT FLATBUFFERS_FBSOURCE_MAX_ALIGNMENT
+#else
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using flatbuffers::FlatBufferBuilder;
 using mobile::serialization::CreateArg;
@@ -178,8 +179,29 @@ class FlatbufferSerializer {
     }
   };
 
-  std::unordered_map<IValue, uint32_t, IValueHash> cached_ivalues_;
+  struct IValueEqual {
+    // Copy of this
+    // https://www.internalfb.com/code/aros/[3b875bce7ffa2adacdcea9b3e0cb6d304737a193]/xros/third-party/caffe2/caffe2/aten/src/ATen/core/ivalue.cpp?lines=266
+    // but without relying on aten::nonzero operator being present in the
+    // binary.
+    bool operator()(const IValue& lhs, const IValue& rhs) const {
+      // The only case we don't return bool is for tensor comparison. Lets do
+      // pointer comparison here.
+      if (lhs.isTensor() || rhs.isTensor()) {
+        if (lhs.isTensor() && rhs.isTensor()) {
+          return (&lhs.toTensor()) == (&rhs.toTensor());
+        }
+        return false;
+      }
+      IValue eq = lhs.equals(rhs);
+      if (eq.isBool()) {
+        return eq.toBool();
+      }
+      return false;
+    }
+  };
 
+  std::unordered_map<IValue, uint32_t, IValueHash, IValueEqual> cached_ivalues_;
   const mobile::CompilationUnit* mcu_ = nullptr;
 };
 
@@ -225,6 +247,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
 
   // instructions
   std::vector<mobile::serialization::Instruction> instruction_vector;
+  instruction_vector.reserve(code.instructions_.size());
   for (const auto& inst : code.instructions_) {
     instruction_vector.emplace_back(inst.op, inst.N, inst.X);
   }
@@ -233,7 +256,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
   std::vector<flatbuffers::Offset<mobile::serialization::Operator>>
       operator_vector;
   operator_vector.reserve(code.op_names_.size());
-  for (int i = 0; i < code.op_names_.size(); ++i) {
+  for (const auto i : c10::irange(code.op_names_.size())) {
     const auto& opname = code.op_names_[i];
     const int op_size = code.operator_input_sizes_[i];
     operator_vector.push_back(CreateOperator(
@@ -660,18 +683,20 @@ uint32_t FlatbufferSerializer::storeIValueAndGetIndex(
     if (iter != cached_ivalues_.end()) {
       return iter->second;
     }
-  } catch (const std::runtime_error&) {
-    // Threw if ivalue is not hashable
-  } catch (const c10::Error&) {
-    // Threw if ivalue is don't have proper operator==
+  } catch (...) {
+    // Threw if ivalue is not hashable or
+    // if ivalue is don't have proper operator==
+    // we don't care catchall because either case we want to skip hashing
   }
 
   auto offset = iValueToFB(fbb, ivalue);
   uint32_t index = insertIValue(offset);
   try {
     cached_ivalues_[ivalue] = index;
-  } catch (const std::runtime_error&) {
-  } catch (const c10::Error&) {
+  } catch (...) {
+    // Threw if ivalue is not hashable or
+    // if ivalue is don't have proper operator==
+    // we don't care catchall because either case we want to skip hashing
   }
 
   return index;
@@ -817,7 +842,7 @@ DetachedBuffer::UniqueDetachedBuffer save_mobile_module_to_bytes(
   return DetachedBufferFriend::make_unique_detached_buffer(ret);
 }
 
-static void save_mobile_module_to_func(
+void save_mobile_module_to_func(
     const mobile::Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func) {
   auto buffer = save_mobile_module_to_bytes(module);
@@ -825,15 +850,7 @@ static void save_mobile_module_to_func(
 }
 
 bool register_flatbuffer_serializer() {
-  _save_mobile_module_to = save_mobile_module_to_func;
   return true;
 }
 
-// iOS builds are often build with -Wglobal-constructor to minimize
-// startup time. So let them call register manually if needed.
-#if !defined(__APPLE__)
-const bool kFlatbufferSerializerRegistered = register_flatbuffer_serializer();
-#endif
-
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -41,6 +41,12 @@ IF (WIN32)
 ELSE (WIN32)
   SET(DEFAULT_INTEL_COMPILER_DIR "/opt/intel")
   SET(DEFAULT_INTEL_MKL_DIR "/opt/intel/mkl")
+  if (EXISTS "/opt/intel/oneapi")
+    SET(DEFAULT_INTEL_COMPILER_DIR "/opt/intel/oneapi")
+    if (EXISTS "/opt/intel/oneapi/mkl/latest")
+      SET(DEFAULT_INTEL_MKL_DIR "/opt/intel/oneapi/mkl/latest")
+    endif()
+  endif()
 ENDIF (WIN32)
 
 # Intel Compiler Suite

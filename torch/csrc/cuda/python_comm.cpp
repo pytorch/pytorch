@@ -10,6 +10,8 @@
 #include <cstddef>
 #include <vector>
 
+#include <torch/csrc/profiler/unwind/unwind.h>
+
 namespace torch {
 namespace cuda {
 namespace python {

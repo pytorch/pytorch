@@ -23,8 +23,7 @@
 #include <sstream>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Controls whether graph source ranges are printed by default
 bool global_print_source_ranges = true;
@@ -382,7 +381,11 @@ void initPythonIRBindings(PyObject* module_) {
           "Find all nodes",
           py::arg("kind"),
           py::arg("recurse") = true)
-      .def("addInput", [](Graph& g) { return g.addInput(); })
+      .def(
+          "addInput",
+          [](Graph& g, const std::string& name) { return g.addInput(name); },
+          "Add input to graph with optional name seed",
+          py::arg("name") = "")
       .def("copy", [](Graph& g) { return g.copy(); })
       .GS(eraseInput)
       .GS(eraseOutput)
@@ -991,6 +994,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &IntType::get);
   py::class_<SymIntType, Type, SymIntTypePtr>(m, "SymIntType")
       .def_static("get", &SymIntType::get);
+  py::class_<SymBoolType, Type, SymBoolTypePtr>(m, "SymBoolType")
+      .def_static("get", &SymBoolType::get);
   py::class_<FloatType, Type, FloatTypePtr>(m, "FloatType")
       .def_static("get", &FloatType::get);
   py::class_<ComplexType, Type, ComplexTypePtr>(m, "ComplexType")
@@ -1035,6 +1040,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("ofFloats", &ListType::ofFloats)
       .def_static("ofComplexDoubles", &ListType::ofComplexDoubles)
       .def_static("ofBools", &ListType::ofBools)
+      .def_static("ofStrings", &ListType::ofStrings)
       .def("getElementType", &ListType::getElementType);
   py::class_<DictType, Type, DictTypePtr>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {
@@ -1055,6 +1061,10 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](TypePtr a) { return FutureType::create(std::move(a)); }))
       .def("getElementType", &FutureType::getElementType);
 
+  py::class_<AwaitType, Type, AwaitTypePtr>(m, "AwaitType")
+      .def(py::init([](TypePtr a) { return AwaitType::create(std::move(a)); }))
+      .def("getElementType", &AwaitType::getElementType);
+
   py::class_<ClassType, Type, ClassTypePtr>(m, "ClassType")
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
@@ -1072,7 +1082,7 @@ void initPythonIRBindings(PyObject* module_) {
         for (const auto& enum_name_value : enum_names_values) {
           auto enum_name = py::cast<std::string>(enum_name_value.attr("name"));
           auto enum_value = toIValue(enum_name_value.attr("value"), value_type);
-          names_values.emplace_back(std::make_pair(enum_name, enum_value));
+          names_values.emplace_back(enum_name, enum_value);
         }
         return EnumType::create(
             c10::QualifiedName(qualified_name),
@@ -1140,5 +1150,4 @@ void initPythonIRBindings(PyObject* module_) {
             return g.graph_output_to_symbolic_shape_dim_;
           });
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

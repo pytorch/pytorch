@@ -2,15 +2,18 @@
 
 import argparse
 import sys
-import yaml
 
 from pathlib import Path
+
+import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
-EXPECTED_GROUP = "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}" \
+EXPECTED_GROUP = (
+    "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}"
     "-${{ github.event_name == 'workflow_dispatch' }}"
+)
 
 
 def should_check(filename: Path) -> bool:
@@ -42,26 +45,26 @@ if __name__ == "__main__":
             print("ERROR: duplicate workflow name:", name, file=sys.stderr)
             errors_found = True
         names.add(name)
-
-        expected = {
-            "group": EXPECTED_GROUP,
-            "cancel-in-progress": True,
-        }
-        actual = data.get("concurrency", None)
-        if actual != expected:
+        actual = data.get("concurrency", {})
+        if not actual.get("group", "").startswith(EXPECTED_GROUP):
             print(
                 f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
                 file=sys.stderr,
             )
             print(
-                f"expected: {expected}",
-                file=sys.stderr,
-            )
-            print(
-                f"actual:   {actual}",
+                f"concurrency group should start with {EXPECTED_GROUP} but found {actual.get('group', None)}",
                 file=sys.stderr,
             )
             errors_found = True
+        if not actual.get("cancel-in-progress", False):
+            print(
+                f"'concurrency' incorrect or not found in '{filename.relative_to(REPO_ROOT)}'",
+                file=sys.stderr,
+            )
+            print(
+                f"concurrency cancel-in-progress should be True but found {actual.get('cancel-in-progress', None)}",
+                file=sys.stderr,
+            )
 
     if errors_found:
         sys.exit(1)

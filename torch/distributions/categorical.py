@@ -1,5 +1,5 @@
 import torch
-from torch._six import nan
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property
@@ -63,7 +63,7 @@ class Categorical(Distribution):
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
         batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
-        super(Categorical, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Categorical, _instance)

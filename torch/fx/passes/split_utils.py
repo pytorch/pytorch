@@ -181,7 +181,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
         # Max order of upperstream components.
         mx = max((c.order for c in upstream_components), default=0)
 
-        # Expect the componet for `node` has higher order then its upstream components.
+        # Expect the component for `node` has higher order then its upstream components.
         assert comp.order >= mx
 
         # Map a input of `node` to nodes in the component's graph.

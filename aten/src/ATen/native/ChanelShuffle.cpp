@@ -47,12 +47,12 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
   if (self.is_contiguous(MemoryFormat::ChannelsLast) &&
       xnnpack::use_channel_shuffle(self, groups)) {
-    auto output = self.numel() == 0 ? self : xnnpack::channel_shuffle(self, groups);
+    auto output = self.numel() == 0 ? self.alias() : xnnpack::channel_shuffle(self, groups);
     return output;
   }
 #endif
 
-  auto output = self.numel() == 0 ? self : at::native_channel_shuffle(self, groups);
+  auto output = self.numel() == 0 ? self.alias() : at::native_channel_shuffle(self, groups);
   return namedinference::propagate_names_if_nonempty(
       output,
       self.has_names() ? self.names() : at::ArrayRef<Dimname>{});

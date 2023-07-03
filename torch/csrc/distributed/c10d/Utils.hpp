@@ -73,6 +73,16 @@ inline void assertSameType(
   }
 }
 
+inline std::vector<std::string> split(char separator, const std::string& string) {
+  std::vector<std::string> pieces;
+  std::stringstream ss(string);
+  std::string item;
+  while (std::getline(ss, item, separator)) {
+    pieces.push_back(std::move(item));
+  }
+  return pieces;
+}
+
 inline int parseEnvVarInt(const char* envVarName) {
   char* stringValue = std::getenv(envVarName);
   if (stringValue != nullptr) {
@@ -86,6 +96,14 @@ inline int parseEnvVarInt(const char* envVarName) {
     return val;
   }
   return C10D_ENV_NOT_SET;
+}
+
+inline const char* parseEnvVarString(const char* envVarName, const char* default_val) {
+  const char* val = std::getenv(envVarName);
+  if (val == nullptr) {
+    val = default_val;
+  }
+  return val;
 }
 
 inline int parseEnvVarIntDefault(const char* envVarName, int defaultVal) {
@@ -122,7 +140,7 @@ inline void assertSameSizes(
 
 inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   // Ensure we have at least one tensor
-  if (tensors.size() == 0) {
+  if (tensors.empty()) {
     throw std::invalid_argument("argument is empty");
   }
 
@@ -204,7 +222,7 @@ inline void assertLayoutMatch(
 inline void assertNonEmpty(
     std::function<void(const std::string&)> fn,
     const at::ArrayRef<at::Tensor> tensors) {
-  if (tensors.size() == 0) {
+  if (tensors.empty()) {
     fn("requires non-empty tensor list");
   }
 }
@@ -339,7 +357,7 @@ inline at::Tensor flattenDenseTensors(at::TensorList tensors) {
 inline at::Tensor newLikeFlat(
     std::vector<std::vector<at::Tensor>>& tensors,
     size_t deviceIdx) {
-  if (tensors.size() == 0 || tensors[0].size() == 0) {
+  if (tensors.empty() || tensors[0].empty()) {
     TORCH_CHECK(false, "Received an empty list");
   }
   if (deviceIdx >= tensors.size()) {
@@ -362,7 +380,7 @@ inline at::Tensor newLikeFlat(
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
-  if (tensors.size() == 0) {
+  if (tensors.empty()) {
     TORCH_CHECK(false, "Received an empty list");
   }
   auto& t = tensors[0];
@@ -416,7 +434,7 @@ inline void checkSplitSizes(
     const std::vector<int64_t>& split_sizes,
     const at::Tensor& tensor,
     int group_size) {
-  if (split_sizes.size() == 0) {
+  if (split_sizes.empty()) {
     TORCH_CHECK(
         tensor.size(0) % group_size == 0,
         "Tensor's dim 0 does not divide equally across group size");
@@ -444,18 +462,15 @@ size_t computeLengthsAndOffsets(
   size_t split_size = 0;
   size_t offset = 0;
 
-  if (split_sizes.size() == 0) {
+  if (split_sizes.empty()) {
     equal_splits = true;
     split_size = tensor.size(0) / group_size;
   }
   for(const auto i : c10::irange(group_size)) {
     size_t length = row_size * (equal_splits ? split_size : split_sizes[i]);
-    TORCH_INTERNAL_ASSERT(
-        length <= std::numeric_limits<int>::max() &&
-            offset <= std::numeric_limits<int>::max(),
-        "Length or offset larger than INT_MAX not supported");
     (*lengths)[i] = length;
     (*offsets)[i] = offset;
+    // TODO: see if we should add overflow protection for offset
     offset += length;
   }
   return offset;
@@ -470,10 +485,6 @@ size_t computeLengthsAndOffsets(
   size_t offset = 0;
   for(const auto i : c10::irange(group_size)) {
     size_t length = tensors[i].numel();
-    TORCH_INTERNAL_ASSERT(
-        length <= std::numeric_limits<int>::max() &&
-            offset <= std::numeric_limits<int>::max(),
-        "Length or offset larger than INT_MAX not supported");
     (*lengths)[i] = length;
     (*offsets)[i] = offset;
     offset += length;

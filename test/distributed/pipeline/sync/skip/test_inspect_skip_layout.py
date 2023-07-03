@@ -10,6 +10,7 @@ from torch import nn
 
 from torch.distributed.pipeline.sync.skip import Namespace, pop, skippable, stash
 from torch.distributed.pipeline.sync.skip.layout import inspect_skip_layout
+from torch.testing._internal.common_utils import run_tests
 
 
 class Pass(nn.Module):
@@ -111,3 +112,7 @@ def test_namespace():
 
     # p3 pops 'bar' before 'foo', but the plan is sorted by source partition index.
     assert policy == [[], [], [(0, ns1, "foo"), (1, ns2, "foo")]]
+
+
+if __name__ == "__main__":
+    run_tests()

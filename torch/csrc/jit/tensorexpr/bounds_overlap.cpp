@@ -3,13 +3,10 @@
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
-namespace analysis {
+namespace torch::jit::tensorexpr::analysis {
 
 // Returns true if the given expression is guaranteed to be positive.
-bool mustBePositive(ExprPtr e) {
+static bool mustBePositive(ExprPtr e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val > 0;
@@ -18,7 +15,7 @@ bool mustBePositive(ExprPtr e) {
 }
 
 // Returns true if the given expression is guaranteed to be negative.
-bool mustBeNegative(ExprPtr e) {
+static bool mustBeNegative(ExprPtr e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val < 0;
@@ -27,7 +24,7 @@ bool mustBeNegative(ExprPtr e) {
 }
 
 // Returns true if the given expression is guaranteed to be zero.
-bool mustBeZero(ExprPtr e) {
+static bool mustBeZero(ExprPtr e) {
   if (e->isConstant()) {
     int e_val = immediateAs<int>(e);
     return e_val == 0;
@@ -326,7 +323,7 @@ std::vector<IndexBounds> subtractIndicesBounds(
 
     Bound remaining = A[i];
 
-    for (auto slice : slices) {
+    for (const auto& slice : slices) {
       IndexBounds newRegion;
       newRegion.reserve(A.size());
       TORCH_INTERNAL_ASSERT(
@@ -368,7 +365,4 @@ subtractIndicesBounds(const IndexBounds& A, const IndexBounds& B) {
   return subtractIndicesBounds(A, B, overlaps(A, B));
 }
 
-} // namespace analysis
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr::analysis

@@ -47,7 +47,7 @@ def _create_test(bench_op_obj, orig_test_attrs, tags, OperatorTestCase, run_back
             bench_op_obj: an object which instantiated from a subclass of
                 Caffe2BenchmarkBase/TorchBenchmarkBase which includes tensor
                 creation and operator execution.
-            test_attrs: a dictionary includes test configs.
+            orig_test_attrs: a dictionary includes test configs.
             tags: a attribute in test config to filter inputs
             OperatorTestCase: a named tuple to save the metadata of an test
             run_backward: a bool parameter indicating backward path
@@ -150,7 +150,7 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
             yield _create_test(new_op, test_attrs, tags, OperatorTestCase, run_backward, input_name)
 
 
-class BenchmarkRunner(object):
+class BenchmarkRunner:
     """BenchmarkRunner is responsible for benchmarking all the registered
     benchmark test groups.
 

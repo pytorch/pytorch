@@ -5,7 +5,7 @@ ModelReport
 
  > ⚠️ *While the example below uses the Fx Workflow, the use of the ModelReport class **does not depend** on the Fx Workflow to work*.
  The requirements are detector dependent.
- Most detectors require a **traceable GraphModule**, but some (ex. `PerChannelDetector`) require just a `nn.Module`.
+ Most detectors require a **traceable GraphModule**, but some (ex. `PerChannelDetector`) require just an `nn.Module`.
 
 #### Typical Fx Workflow
 - Initialize model &rarr; Prepare model &rarr; Callibrate model &rarr; Convert model &rarr; ...
@@ -62,7 +62,7 @@ This is so that we can keep track of where we want to insert observers on a dete
 It then returns the GraphModule with the detectors inserted into both the regular module structure as well as the node structure.
 - `generate_model_report(self, remove_inserted_observers: bool)` &rarr; `Dict[str, Tuple[str, Dict]]` uses callibrated GraphModule to optionally removes inserted observers, and generate, for each detector the ModelReport instance was initialized with:
   - A string-based report that is easily digestable and actionable explaining the data collected by relevant observers for that detector
-  - A dictionary containing statistics collected by the relevant observers and values calculated by the detector for futher analysis or plotting
+  - A dictionary containing statistics collected by the relevant observers and values calculated by the detector for further analysis or plotting
 
 ## ModelReportVisualizer Overview
 

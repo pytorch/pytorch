@@ -12,7 +12,7 @@ number = Union[int, float]
 # After regenerating files, compile PyTorch.
 # Then run: ./build/bin/test_jit --gtest_filter=TestShapeGraphLinting.Basic
 # If you have enabled opinfo testing for the op, also run:
-# python test/test_ops_jit.py TestJitCPU::test_variant_consistency_jit_[FAILING_OP]_cpu_float32
+# python test/test_ops_jit.py TestJitCPU.test_variant_consistency_jit_[FAILING_OP]_cpu_float32
 # to reproduce errors from opinfo tests.
 
 # Example PR: https://github.com/pytorch/pytorch/pull/80860/files
@@ -426,6 +426,20 @@ def squeeze(li: List[int], dim: int):
             out.append(li[i])
     return out
 
+def squeeze_dims(li: List[int], dims: List[int]):
+    if len(dims) == 0:
+        return li
+    wrapped_dims = _copy(dims)
+    for i in range(len(dims)):
+        wrapped_dims[i] = maybe_wrap_dim(wrapped_dims[i], len(li))
+    result: List[int] = []
+    for i in range(len(li)):
+        if li[i] == 1:
+            if i not in wrapped_dims:
+                result.append(li[i])
+        else:
+            result.append(li[i])
+    return result
 
 def index_select(self: List[int], dim: int, index: List[int]):
     dim = maybe_wrap_dim(dim, len(self))
@@ -543,6 +557,14 @@ def cat(tensors: List[List[int]], dim: int):
     result_size = _copy(not_skipped_tensor)
     result_size[dim] = cat_dim_size
     return result_size
+
+
+def stack(tensors: List[List[int]], dim: int):
+    unsqueezed_tensors: List[List[int]] = []
+    for tensor in tensors:
+        unsqueezed = unsqueeze(tensor, dim)
+        unsqueezed_tensors.append(unsqueezed)
+    return cat(unsqueezed_tensors, dim)
 
 
 def select(self: List[int], dim: int, index: int):
@@ -759,32 +781,40 @@ def conv_transpose2d_input(input: List[int], weight: List[int], bias: Optional[L
     input_batch_size_dim = 0
     weight_output_channels_dim = 1
     output_size.append(input[input_batch_size_dim])
-    output_size.append(weight[weight_output_channels_dim])
+    output_size.append(weight[weight_output_channels_dim] * groups)
 
     for d in range(2, dim):
         dilation_ = dilation[d - 2] if has_dilation else 1
         kernel = dilation_ * (weight[d] - 1)
-        output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + 1)
+        output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + output_padding[d - 2] + 1)
     return output_size
 
 def conv_forwards(input: List[int], weight: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], transposed: bool, output_padding: List[int], groups: int) -> List[int]:
     has_dilation = len(dilation) > 0
+    has_output_padding = len(output_padding) > 0
     dim = len(input)
     output_size: List[int] = []
     input_batch_size_dim = 0
     weight_output_channels_dim = 1 if transposed else 0
     output_size.append(input[input_batch_size_dim])
-    output_size.append(weight[weight_output_channels_dim])
+    if transposed:
+        output_size.append(weight[weight_output_channels_dim] * groups)
+    else:
+        output_size.append(weight[weight_output_channels_dim])
 
     for d in range(2, dim):
         dilation_ = dilation[d - 2] if has_dilation else 1
+        output_padding_ = output_padding[d - 2] if has_output_padding else 0
         if transposed:
             kernel = dilation_ * (weight[d] - 1)
-            output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + 1)
+            output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + output_padding_ + 1)
         else:
             kernel = dilation_ * (weight[d] - 1) + 1
             output_size.append((input[d] + (2 * padding[d - 2]) - kernel) // stride[d - 2] + 1)
     return output_size
+
+def _conv_forwards(input: List[int], weight: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], transposed: bool, output_padding: List[int], groups: int, benchmark: bool, deterministic: bool, cudnn_enabled: bool, allow_tf32: bool) -> List[int]:
+    return conv_forwards(input, weight, bias, stride, padding, dilation, transposed, output_padding, groups)
 
 def batch_norm(
     input: List[int],
@@ -879,6 +909,37 @@ def permute(input: List[int], dims: List[int]):
             assert seen_dims[i] != seen_dims[j]
     return newSizes
 
+def movedim(self: List[int], source: List[int], destination: List[int]) -> List[int]:
+    self_dim = len(self)
+    if self_dim <= 1:
+        return self
+    normalized_src : List[int] = []
+    normalized_dst : List[int] = []
+    for i in range(len(source)):
+        normalized_src.append(maybe_wrap_dim(source[i], self_dim))
+        normalized_dst.append(maybe_wrap_dim(destination[i], self_dim))
+    order = [-1 for i in range(self_dim)]
+    src_dims = [i for i in range(self_dim)]
+    dst_dims = [i for i in range(self_dim)]
+
+    for i in range(len(source)):
+        order[normalized_dst[i]] = normalized_src[i]
+        src_dims[normalized_src[i]] = -1
+        dst_dims[normalized_dst[i]] = -1
+
+    source_dims : List[int] = []
+    destination_dims : List[int] = []
+    for ele in src_dims:
+        if ele != -1:
+            source_dims.append(ele)
+    for ele in dst_dims:
+        if ele != -1:
+            destination_dims.append(ele)
+
+    rest_dim = self_dim - len(source)
+    for i in range(rest_dim):
+        order[destination_dims[i]] = source_dims[i]
+    return permute(self, order)
 
 def flatten(input: List[int], start_dim: int, end_dim: int):
     start_dim = maybe_wrap_dim(start_dim, len(input))
@@ -980,6 +1041,10 @@ def native_batch_norm(input: List[int], weight: Optional[List[int]], bias: Optio
         _size = [0]
     return _copy(input), _size, _size
 
+def cross_entropy_loss(self: List[int], target: List[int], weight: Optional[List[int]] = None, reduction: int = 1, ignore_index: int = -100, label_smoothing: float = 0.) -> List[int]:
+    result_shape = nll_loss_forward(self, target, weight, reduction)[0]
+    return result_shape
+
 """
 Currently deferring the enabling of this, as part of the propoasal to suspend
 adding ops.
@@ -1041,6 +1106,7 @@ add_shape_compute_mapping("aten::arange.start(Scalar start, Scalar end, *, Scala
 add_shape_compute_mapping("aten::arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", arange_start_step)
 add_shape_compute_mapping("aten::squeeze(Tensor(a) self) -> Tensor(a)", squeeze_nodim)
 add_shape_compute_mapping("aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)", squeeze)
+add_shape_compute_mapping("aten::squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)", squeeze_dims)
 add_shape_compute_mapping("aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)", unsqueeze)
 add_shape_compute_mapping("aten::slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)", slice)
 add_shape_compute_mapping("aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", select)
@@ -1066,10 +1132,13 @@ add_shape_compute_mapping("aten::batch_norm(Tensor input, Tensor? weight, Tensor
 add_shape_compute_mapping("aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", conv3d)
 add_shape_compute_mapping("aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", conv_backwards)
 add_shape_compute_mapping("aten::convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor", conv_forwards)
+add_shape_compute_mapping("aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor", _conv_forwards)
 add_shape_compute_mapping("aten::conv_transpose2d.input(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int groups=1, int[2] dilation=1) -> Tensor", conv_transpose2d_input)
 add_shape_compute_mapping("aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", flatten)
 add_shape_compute_mapping("aten::cat(Tensor[] tensors, int dim=0) -> Tensor", cat)
+add_shape_compute_mapping("aten::stack(Tensor[] tensors, int dim=0) -> Tensor", stack)
 add_shape_compute_mapping("aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", permute)
+add_shape_compute_mapping("aten::movedim.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)", movedim)
 add_shape_compute_mapping("aten::view(Tensor(a) self, int[] size) -> Tensor(a)", view)
 add_shape_compute_mapping("aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", expand)
 add_shape_compute_mapping("aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", expand_one_unused)
@@ -1091,6 +1160,9 @@ add_shape_compute_mapping("aten::topk(Tensor self, int k, int dim=-1, bool large
 add_shape_compute_mapping("aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", nll_loss_forward)
 add_shape_compute_mapping("aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", native_layer_norm)
 add_shape_compute_mapping("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
+add_shape_compute_mapping("aten::_native_batch_norm_legit(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
+add_shape_compute_mapping("aten::_native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
+add_shape_compute_mapping("aten::cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0) -> Tensor", cross_entropy_loss)
 # add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
 
 # TODO: migrate over all of symbolic_shape_registry_util.cpp

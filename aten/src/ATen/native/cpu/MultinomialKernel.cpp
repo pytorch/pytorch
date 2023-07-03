@@ -15,8 +15,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 template <typename scalar_t>
@@ -241,5 +240,4 @@ static void multinomial_with_replacement_kernel_impl(
 REGISTER_DISPATCH(
     multinomial_with_replacement_stub,
     &multinomial_with_replacement_kernel_impl);
-} // namespace native
-} // namespace at
+} // namespace at::native

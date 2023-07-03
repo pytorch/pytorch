@@ -8,7 +8,7 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+namespace at::native {
 
 
 void lshift_kernel_cuda(TensorIteratorBase& iter) {
@@ -32,4 +32,4 @@ void rshift_kernel_cuda(TensorIteratorBase& iter) {
 REGISTER_DISPATCH(lshift_stub, &lshift_kernel_cuda);
 REGISTER_DISPATCH(rshift_stub, &rshift_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

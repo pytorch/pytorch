@@ -172,6 +172,7 @@ class GenLazyIR(ABC):
     backend_index: BackendIndex
     backend_name: str
     node_base: str
+    use_lazy_shape: bool
 
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
@@ -203,9 +204,7 @@ class GenLazyIR(ABC):
         # as long as all of its arguments can be generated from information available from the schema
         base_ctor_value_args_list = []
         for arg in value_args:
-            if isinstance(arg.lazy_type, BaseCType) or isinstance(
-                arg.lazy_type, VectorCType
-            ):
+            if isinstance(arg.lazy_type, (BaseCType, VectorCType)):
                 base_ctor_value_args_list.append(f"{arg.name}")
             elif isinstance(arg.lazy_type, OptionalCType):
                 base_ctor_value_args_list.append(f"{arg.name}.value_or(kNullValue)")
@@ -252,7 +251,7 @@ class GenLazyIR(ABC):
 
         ctor_args = [f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args]
         reuse_ctor_args = ", ".join(ctor_args)
-        if schema.properties.ShapePrecompute:
+        if self.use_lazy_shape and schema.properties.ShapePrecompute:
             ctor_args.append("std::vector<torch::lazy::Shape>&& shapes")
         node_ctor_args = ", ".join(ctor_args)
 

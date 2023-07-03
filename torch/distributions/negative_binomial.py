@@ -37,7 +37,7 @@ class NegativeBinomial(Distribution):
 
         self._param = self.probs if probs is not None else self.logits
         batch_shape = self._param.size()
-        super(NegativeBinomial, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(NegativeBinomial, _instance)
@@ -101,6 +101,9 @@ class NegativeBinomial(Distribution):
 
         log_normalization = (-torch.lgamma(self.total_count + value) + torch.lgamma(1. + value) +
                              torch.lgamma(self.total_count))
-        log_normalization[self.total_count + value == 0.] = 0.
+        # The case self.total_count == 0 and value == 0 has probability 1 but
+        # lgamma(0) is infinite. Handle this case separately using a function
+        # that does not modify tensors in place to allow Jit compilation.
+        log_normalization = log_normalization.masked_fill(self.total_count + value == 0., 0.)
 
         return log_unnormalized_prob - log_normalization

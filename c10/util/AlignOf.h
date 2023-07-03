@@ -126,6 +126,7 @@ class AlignerImpl {
   T9 t9;
   T10 t10;
 
+ public:
   AlignerImpl() = delete;
 };
 

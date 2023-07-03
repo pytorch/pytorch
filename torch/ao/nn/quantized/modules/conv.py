@@ -48,7 +48,7 @@ class _ConvNd(WeightedQuantizedModule):
               device=None,
               dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(_ConvNd, self).__init__()
+        super().__init__()
 
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
@@ -120,7 +120,7 @@ class _ConvNd(WeightedQuantizedModule):
     #   self
     #   |--- _packed_params : Conv2dPackedParamsBase or Conv3dPackedParamsBase
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(_ConvNd, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         (w, b) = self._weight_bias()
         destination[prefix + 'weight'] = w
         destination[prefix + 'bias'] = b
@@ -161,7 +161,7 @@ class _ConvNd(WeightedQuantizedModule):
         state_dict.pop(prefix + 'scale')
         self.zero_point = int(state_dict[prefix + 'zero_point'])
         state_dict.pop(prefix + 'zero_point')
-        super(_ConvNd, self)._load_from_state_dict(
+        super()._load_from_state_dict(
             state_dict, prefix, local_metadata, False, missing_keys,
             unexpected_keys, error_msgs)
 
@@ -236,7 +236,7 @@ class _ConvNd(WeightedQuantizedModule):
                 "Input float module must have qconfig defined."
             activation_post_process = None if not hasattr(
                 mod, "activation_post_process") else mod.activation_post_process
-            if type(mod) == cls._NNI_CONV_RELU_MODULE:
+            if type(mod) in [cls._NNI_CONV_RELU_MODULE, cls._NNI_CONV_ADD_MODULE, cls._NNI_CONV_ADD_RELU_MODULE]:
                 mod = mod[0]
             weight_post_process = mod.qconfig.weight()
         return cls.get_qconv(mod, activation_post_process, weight_post_process)
@@ -245,8 +245,8 @@ class _ConvNd(WeightedQuantizedModule):
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
         r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
         Args:
-            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
-                          utilities or provided by the user
+            ref_qconv (Module): a reference quantized  module, either produced by torch.ao.quantization
+                                utilities or provided by the user
             output_scale (float): scale for output Tensor
             output_zero_point (int): zero point for output Tensor
         """
@@ -293,6 +293,7 @@ class Conv1d(_ConvNd):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> m = nn.quantized.Conv1d(16, 33, 3, stride=2)
         >>> input = torch.randn(20, 16, 100)
         >>> # quantize input to quint8
@@ -306,6 +307,8 @@ class Conv1d(_ConvNd):
     _FLOAT_MODULE = nn.Conv1d
     _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn1d
     _NNI_CONV_RELU_MODULE = nni.ConvReLU1d
+    _NNI_CONV_ADD_MODULE = None
+    _NNI_CONV_ADD_RELU_MODULE = None
 
     def __init__(self,
                  in_channels: int,
@@ -327,7 +330,7 @@ class Conv1d(_ConvNd):
 
         # Subclasses of _ConvNd needs to call _init rather than __init__. See
         # discussion on PR #49702
-        super(Conv1d, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode, **factory_kwargs)
 
@@ -400,6 +403,7 @@ class Conv2d(_ConvNd):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> # With square kernels and equal stride
         >>> m = nn.quantized.Conv2d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
@@ -416,6 +420,8 @@ class Conv2d(_ConvNd):
     _FLOAT_MODULE = nn.Conv2d
     _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn2d
     _NNI_CONV_RELU_MODULE = nni.ConvReLU2d
+    _NNI_CONV_ADD_MODULE = nni.ConvAdd2d
+    _NNI_CONV_ADD_RELU_MODULE = nni.ConvAddReLU2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -427,7 +433,7 @@ class Conv2d(_ConvNd):
         dilation = _pair(dilation)
         # Subclasses of _ConvNd need to call _init rather than __init__. See
         # discussion on PR #49702
-        super(Conv2d, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _pair(0), groups, bias, padding_mode, **factory_kwargs)
 
@@ -498,6 +504,7 @@ class Conv3d(_ConvNd):
 
     Examples::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> # With square kernels and equal stride
         >>> m = nn.quantized.Conv3d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
@@ -514,6 +521,8 @@ class Conv3d(_ConvNd):
     _FLOAT_MODULE = nn.Conv3d
     _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn3d
     _NNI_CONV_RELU_MODULE = nni.ConvReLU3d
+    _NNI_CONV_ADD_MODULE = None
+    _NNI_CONV_ADD_RELU_MODULE = None
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -526,7 +535,7 @@ class Conv3d(_ConvNd):
         dilation = _triple(dilation)
         # Subclasses of _ConvNd need to call _init rather than __init__. See
         # discussion on PR #49702
-        super(Conv3d, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode, **factory_kwargs)
 
@@ -588,7 +597,7 @@ class _ConvTransposeNd(_ConvNd):
         factory_kwargs = {'device': device, 'dtype': dtype}
         # Subclasses of _ConvNd need to call _init rather than __init__. See
         # discussion on PR #49702
-        super(_ConvTransposeNd, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride,
             padding, dilation, transposed, output_padding,
             groups, bias, padding_mode, **factory_kwargs)
@@ -635,8 +644,8 @@ class _ConvTransposeNd(_ConvNd):
     def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
         r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
         Args:
-            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
-                          utilities or provided by the user
+            ref_qconvt (Module): a reference quantized  module, either produced by torch.ao.quantization
+                                 utilities or provided by the user
             output_scale (float): scale for output Tensor
             output_zero_point (int): zero point for output Tensor
         """
@@ -669,7 +678,7 @@ class ConvTranspose1d(_ConvTransposeNd):
     .. note:: Currently only the QNNPACK engine is implemented.
         Please, set the `torch.backends.quantized.engine = 'qnnpack'`
 
-    For special notes, please, see :class:`~torch.nn.quantized.Conv1d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.Conv1d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -682,7 +691,7 @@ class ConvTranspose1d(_ConvTransposeNd):
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> torch.backends.quantized.engine = 'qnnpack'
-        >>> from torch.nn import quantized as nnq
+        >>> from torch.ao.nn import quantized as nnq
         >>> # With square kernels and equal stride
         >>> m = nnq.ConvTranspose1d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
@@ -716,12 +725,12 @@ class ConvTranspose1d(_ConvTransposeNd):
         dilation = _single(dilation)
         output_padding = _single(output_padding)
 
-        super(ConvTranspose1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedConvTranpose1d'
+        return 'QuantizedConvTranspose1d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose1d_prepack(
@@ -759,7 +768,7 @@ class ConvTranspose2d(_ConvTransposeNd):
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose2d`.
 
-    For special notes, please, see :class:`~torch.nn.quantized.Conv2d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.Conv2d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -774,7 +783,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         >>> # QNNPACK or FBGEMM as backend
         >>> torch.backends.quantized.engine = 'qnnpack'
         >>> # With square kernels and equal stride
-        >>> import torch.nn.quantized as nnq
+        >>> import torch.ao.nn.quantized as nnq
         >>> m = nnq.ConvTranspose2d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nnq.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
@@ -807,12 +816,12 @@ class ConvTranspose2d(_ConvTransposeNd):
         dilation = _pair(dilation)
         output_padding = _pair(output_padding)
 
-        super(ConvTranspose2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedConvTranpose2d'
+        return 'QuantizedConvTranspose2d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose2d_prepack(
@@ -853,7 +862,7 @@ class ConvTranspose3d(_ConvTransposeNd):
     .. note:: Currently only the FBGEMM engine is implemented.
         Please, set the `torch.backends.quantized.engine = 'fbgemm'`
 
-    For special notes, please, see :class:`~torch.nn.quantized.Conv3d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.Conv3d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -866,7 +875,7 @@ class ConvTranspose3d(_ConvTransposeNd):
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_QENGINE)
         >>> torch.backends.quantized.engine = 'fbgemm'
-        >>> from torch.nn import quantized as nnq
+        >>> from torch.ao.nn import quantized as nnq
         >>> # With cubic kernels and equal stride
         >>> m = nnq.ConvTranspose3d(16, 33, 3, stride=2)
         >>> # non-cubic kernels and unequal stride and with padding
@@ -900,12 +909,12 @@ class ConvTranspose3d(_ConvTransposeNd):
         dilation = _triple(dilation)
         output_padding = _triple(output_padding)
 
-        super(ConvTranspose3d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedConvTranpose3d'
+        return 'QuantizedConvTranspose3d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose3d_prepack(

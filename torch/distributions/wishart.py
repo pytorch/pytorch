@@ -4,7 +4,7 @@ from numbers import Number
 from typing import Union
 
 import torch
-from torch._six import nan
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import lazy_property
@@ -34,15 +34,15 @@ class Wishart(ExponentialFamily):
 
     Example:
         >>> # xdoctest: +SKIP("FIXME: scale_tril must be at least two-dimensional")
-        >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
+        >>> m = Wishart(torch.Tensor([2]), covariance_matrix=torch.eye(2))
         >>> m.sample()  # Wishart distributed with mean=`df * I` and
         >>>             # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
 
     Args:
+        df (float or Tensor): real-valued parameter larger than the (dimension of Square matrix) - 1
         covariance_matrix (Tensor): positive-definite covariance matrix
         precision_matrix (Tensor): positive-definite precision matrix
         scale_tril (Tensor): lower-triangular factor of covariance, with positive-valued diagonal
-        df (float or Tensor): real-valued parameter larger than the (dimension of Square matrix) - 1
     Note:
         Only one of :attr:`covariance_matrix` or :attr:`precision_matrix` or
         :attr:`scale_tril` can be specified.
@@ -106,7 +106,7 @@ class Wishart(ExponentialFamily):
         if self.df.lt(event_shape[-1]).any():
             warnings.warn("Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim.")
 
-        super(Wishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
         self._batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
 
         if scale_tril is not None:

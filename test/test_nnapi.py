@@ -393,9 +393,6 @@ class TestNNAPI(TestCase):
 
     def test_detach(self):
         class DetachModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 y = x.detach()
                 return torch.nn.functional.relu(y)

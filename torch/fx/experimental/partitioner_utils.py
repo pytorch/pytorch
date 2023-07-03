@@ -50,7 +50,7 @@ class Partition:
             # the remove this input node
             for input_node in input_nodes:
                 if all(
-                    [n not in self.nodes for n in input_node.users]
+                    n not in self.nodes for n in input_node.users
                 ) and input_node.op in {"placeholder", "get_attr"}:
                     self.nodes.remove(input_node)
             self.recalculate_mem_size()
@@ -128,7 +128,7 @@ def get_extra_size_of(node: Node, nodes: Set[Node]) -> int:
 def get_latency_of_one_partition(
     partition: Partition, node_to_latency_mapping: Dict[Node, NodeLatency]
 ) -> PartitionLatency:
-    """Given a partiton and its nodes' latency, return a PartitionLatency for this partition"""
+    """Given a partition and its nodes' latency, return a PartitionLatency for this partition"""
 
     def get_top_nodes(partition: Partition) -> List[Node]:
         """Given a partition, return a list of nodes on the top bfs level"""
@@ -144,10 +144,8 @@ def get_latency_of_one_partition(
             # or its input nodes in this partition are placeholders and get_attrs
             # this node is on the top bfs level in this partition
             if not any(
-                [
-                    n in partition.nodes and n.op not in {"placeholder", "get_attr"}
+                n in partition.nodes and n.op not in {"placeholder", "get_attr"}
                     for n in input_nodes
-                ]
             ):
                 top_nodes.append(node)
         return top_nodes
@@ -273,7 +271,7 @@ def get_latency_of_partitioned_graph(
     partition_to_latency_mapping: Dict[Partition, PartitionLatency],
     transfer_rate_bytes_per_sec: float,
 ):
-    """Given all paritions in a graph, find the critical path among all partitions
+    """Given all partitions in a graph, find the critical path among all partitions
     and return its latency as the latency of the whole graph
     """
 

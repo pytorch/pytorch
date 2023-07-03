@@ -25,7 +25,7 @@ class TestAsyncNetBarrierOp(hu.HypothesisTestCase):
         )
 
         def reference_func(*args):
-            self.assertEquals(len(args), n)
+            self.assertEqual(len(args), n)
             return args
 
         self.assertReferenceChecks(gc, barrier_op, test_inputs, reference_func)

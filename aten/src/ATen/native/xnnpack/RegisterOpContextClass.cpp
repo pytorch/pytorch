@@ -7,9 +7,7 @@
 #include <ATen/Tensor.h>
 #include <torch/custom_class.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 
 using internal::linear::createLinearClampPrePackOpContext;
 using internal::convolution2d::createConv2dClampPrePackOpContext;
@@ -27,9 +25,7 @@ TORCH_LIBRARY(xnnpack, m) {
           return createLinearClampPrePackOpContext(
               std::move(std::get<0>(state)),
               std::move(std::get<1>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg)
               std::move(std::get<2>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg)
               std::move(std::get<3>(state)));
         });
 
@@ -47,11 +43,8 @@ TORCH_LIBRARY(xnnpack, m) {
               std::move(std::get<2>(state)),
               std::move(std::get<3>(state)),
               std::move(std::get<4>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
               std::move(std::get<5>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
               std::move(std::get<6>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
               std::move(std::get<7>(state)));
         });
 
@@ -70,11 +63,8 @@ TORCH_LIBRARY(xnnpack, m) {
               std::move(std::get<3>(state)),
               std::move(std::get<4>(state)),
               std::move(std::get<5>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
               std::move(std::get<6>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
               std::move(std::get<7>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
               std::move(std::get<8>(state)));
         });
 
@@ -101,8 +91,6 @@ TORCH_LIBRARY_IMPL(prepacked, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("prepacked::conv2d_transpose_clamp_run"), TORCH_FN(internal::convolution2d::conv2d_transpose_clamp_run));
 }
 
-} // namespace xnnpack
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

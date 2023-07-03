@@ -28,8 +28,8 @@ def skip_init(module_cls, *args, **kwargs):
 
     Example::
 
-        >>> import torch
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
+        >>> import torch
         >>> m = torch.nn.utils.skip_init(torch.nn.Linear, 5, 1)
         >>> m.weight
         Parameter containing:

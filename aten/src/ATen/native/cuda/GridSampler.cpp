@@ -14,8 +14,7 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
                             int64_t interpolation_mode, int64_t padding_mode,
@@ -80,4 +79,4 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
   return std::make_tuple(grad_input, grad_grid);
 }
 
-}}  // namespace at::native
+}  // namespace at::native

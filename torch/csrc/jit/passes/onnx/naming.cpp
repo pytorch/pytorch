@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/passes/onnx/naming.h>
 #include <torch/csrc/onnx/onnx.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 namespace onnx {
@@ -79,7 +81,7 @@ namespace {
 
 class NodeNameGenerator {
  public:
-  NodeNameGenerator(std::shared_ptr<Graph> g) : graph_(g){};
+  NodeNameGenerator(std::shared_ptr<Graph> g) : graph_(std::move(g)){};
   virtual ~NodeNameGenerator() = 0;
   void PopulateNodeNames();
 
@@ -99,7 +101,7 @@ class NodeNameGenerator {
   std::shared_ptr<Graph> graph_;
   const std::string layer_separator_ = "/";
 };
-NodeNameGenerator::~NodeNameGenerator(){};
+NodeNameGenerator::~NodeNameGenerator() = default;
 
 class ScopedNodeNameGenerator : public NodeNameGenerator {
  public:

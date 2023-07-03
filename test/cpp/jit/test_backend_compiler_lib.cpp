@@ -59,7 +59,7 @@ std::vector<std::tuple<std::string, int64_t>> parseMethodHandle(
 }
 
 float* float_data_ptr(const at::Tensor& t) {
-  return t.unsafeGetTensorImpl()->data_ptr_impl<float>();
+  return t.data_ptr<float>();
 }
 } // namespace
 
@@ -68,8 +68,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
   // Constructor.
   // NOLINTNEXTLINE(modernize-use-equals-default)
   explicit BackendWithCompiler() {}
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~BackendWithCompiler() = default;
+  virtual ~BackendWithCompiler() override = default;
 
   bool is_available() override {
     return true;

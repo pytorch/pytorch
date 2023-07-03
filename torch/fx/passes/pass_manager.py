@@ -5,6 +5,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "PassManager",
+    "inplace_wrapper",
+    "log_hook",
+    "loop_pass",
+    "this_before_that_pass_constraint",
+    "these_before_those_pass_constraint",
+]
 
 # for callables which modify object inplace and return something other than
 # the object on which they act
@@ -61,7 +69,7 @@ def log_hook(fn: Callable, level=logging.INFO) -> Callable:
     @wraps(fn)
     def wrapped_fn(gm):
         val = fn(gm)
-        logger.log(level, f"Ran pass {fn}\t Return value: {val}",)
+        logger.log(level, "Ran pass %s\t Return value: %s", fn, val)
         return val
 
     return wrapped_fn
@@ -184,8 +192,8 @@ class PassManager:
             `this_before_that_pass_constraint` for example.
     """
 
-    passes: List[Callable] = []
-    constraints: List[Callable] = []
+    passes: List[Callable]
+    constraints: List[Callable]
     _validated: bool = False
 
     def __init__(
@@ -193,10 +201,8 @@ class PassManager:
         passes=None,
         constraints=None,
     ):
-        if passes:
-            self.passes = passes
-        if constraints:
-            self.constraints = constraints
+        self.passes = passes or []
+        self.constraints = constraints or []
 
     @classmethod
     def build_from_passlist(cls, passes):

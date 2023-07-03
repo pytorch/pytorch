@@ -18,8 +18,7 @@ def default_eval_fn(model, calib_data):
     for data, target in calib_data:
         model(data)
 
-# TODO(future PR): fix the typo, should be `__all__`
-_all__ = [
+__all__ = [
     'QuantWrapper', 'QuantStub', 'DeQuantStub',
     # Top level API for eager mode quantization
     'quantize', 'quantize_dynamic', 'quantize_qat',
@@ -30,7 +29,7 @@ _all__ = [
     # Top level API for graph mode quantization on GraphModule(torch.fx)
     # 'fuse_fx', 'quantize_fx',  # TODO: add quantize_dynamic_fx
     # 'prepare_fx', 'prepare_dynamic_fx', 'convert_fx',
-    'QuantType', 'quant_type_to_str',  # quantization type
+    'QuantType',  # quantization type
     # custom module APIs
     'get_default_static_quant_module_mappings', 'get_static_quant_module_class',
     'get_default_dynamic_quant_module_mappings',
@@ -40,9 +39,8 @@ _all__ = [
     'get_quantized_operator',
     'get_fuser_method',
     # Sub functions for `prepare` and `swap_module`
-    'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
-    'default_eval_fn', 'get_observer_dict',
-    'register_activation_post_process_hook',
+    'propagate_qconfig_', 'add_quant_dequant', 'swap_module',
+    'default_eval_fn',
     # Observers
     'ObserverBase', 'WeightObserver', 'HistogramObserver',
     'observer', 'default_observer',

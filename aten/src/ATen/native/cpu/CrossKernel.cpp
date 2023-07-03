@@ -10,9 +10,9 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
-#include <ATen/cpu/vml.h>
 #include <c10/util/irange.h>
-namespace at { namespace native { namespace {
+namespace at::native {
+namespace {
 
 template<typename scalar_t>
 static void apply_cross(const Tensor& result, const Tensor& a, const Tensor& b, const int64_t dim) {
@@ -78,4 +78,4 @@ static void cross_kernel_impl(const Tensor& result, const Tensor& a, const Tenso
 
 REGISTER_DISPATCH(cross_stub, &cross_kernel_impl);
 
-}} // namespace at::native
+} // namespace at::native

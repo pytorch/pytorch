@@ -49,15 +49,16 @@ PYTORCH_TEMPLATE_MAP = {"Dtype": "scalar_t", "T": "scalar_t"}
 __all__ = ['InputError', 'openf', 'bcolors', 'GeneratedFileCleaner', 'match_extensions', 'matched_files_iter',
            'preprocess_file_and_save_result', 'compute_stats', 'add_dim3', 'processKernelLaunches', 'find_closure_group',
            'find_bracket_group', 'find_parentheses_group', 'replace_math_functions', 'hip_header_magic', 'replace_extern_shared',
-           'get_hip_file_path', 'is_out_of_place', 'is_pytorch_file', 'is_cusparse_file', 'is_caffe2_gpu_file',
+           'get_hip_file_path', 'is_out_of_place', 'is_pytorch_file', 'is_cusparse_file', 'is_special_file', 'is_caffe2_gpu_file',
            'is_caffe2_gpu_file', 'Trie', 'preprocessor', 'file_specific_replacement', 'file_add_header',
            'fix_static_global_kernels', 'extract_arguments', 'str2bool', 'hipify']
+
 
 class InputError(Exception):
     # Exception raised for errors in the input.
 
     def __init__(self, message):
-        super(InputError, self).__init__(message)
+        super().__init__(message)
         self.message = message
 
     def __str__(self):
@@ -78,6 +79,7 @@ class bcolors:
     ENDC = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
+
 
 # To the programmer, the output of hipify most likely are intermediates.
 # This class allows users of hipify to ask for a cleanup by running the
@@ -119,12 +121,15 @@ class GeneratedFileCleaner:
             for d in self.dirs_to_clean[::-1]:
                 os.rmdir(d)
 
+
 def match_extensions(filename: str, extensions: Iterable) -> bool:
     """Helper method to see if filename ends with certain extension"""
     return any(filename.endswith(e) for e in extensions)
 
+
 def _fnmatch(filepath, patterns):
     return any(fnmatch.fnmatch(filepath, pattern) for pattern in patterns)
+
 
 def matched_files_iter(
         root_path: str,
@@ -151,6 +156,7 @@ def matched_files_iter(
                 dirs.remove("build")
             if "third_party" in dirs:
                 dirs.remove("third_party")
+                dirs.append("third_party/nvfuser")
         for filename in filenames:
             filepath = os.path.join(abs_dirpath, filename)
             rel_filepath = os.path.join(rel_dirpath, filename)
@@ -272,7 +278,7 @@ def processKernelLaunches(string, stats):
             char = string[i]
 
             # Handle Templating Arguments
-            if status == START or status == AT_TEMPLATE:
+            if status in (START, AT_TEMPLATE):
                 if char == ">":
                     if status == START:
                         status = AT_TEMPLATE
@@ -407,10 +413,8 @@ def find_closure_group(input_string, start, group):
     find_closure_group returns the positions of group[0] and group[1] as a tuple.
 
     Example:
-        find_closure_group("(hi)", 0, ["(", ")"])
-
-    Returns:
-        0, 3
+        >>> find_closure_group("(hi)", 0, ["(", ")"])
+        (0, 3)
     """
 
     inside_parenthesis = False
@@ -522,7 +526,7 @@ def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
     """
     # At the moment, some PyTorch source files are HIPified in place.  The predicate
     # is_out_of_place tells us if this is the case or not.
-    assert(not os.path.isabs(rel_filepath))
+    assert not os.path.isabs(rel_filepath)
     if not is_pytorch_extension and not is_out_of_place(rel_filepath):
         return rel_filepath
 
@@ -589,8 +593,10 @@ def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
 
 
 def is_out_of_place(rel_filepath):
-    assert(not os.path.isabs(rel_filepath))
+    assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("torch/"):
+        return False
+    if rel_filepath.startswith("third_party/nvfuser/"):
         return False
     if rel_filepath.startswith("tools/autograd/templates/"):
         return False
@@ -599,12 +605,14 @@ def is_out_of_place(rel_filepath):
 
 # Keep this synchronized with includes/ignores in build_amd.py
 def is_pytorch_file(rel_filepath):
-    assert(not os.path.isabs(rel_filepath))
+    assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("aten/"):
         if rel_filepath.startswith("aten/src/ATen/core/"):
             return False
         return True
     if rel_filepath.startswith("torch/"):
+        return True
+    if rel_filepath.startswith("third_party/nvfuser/"):
         return True
     if rel_filepath.startswith("tools/autograd/templates/"):
         return True
@@ -616,8 +624,14 @@ def is_cusparse_file(rel_filepath):
         return "sparse" in rel_filepath.lower()
     return False
 
+
+def is_special_file(rel_filepath):
+    if is_pytorch_file(rel_filepath):
+        return ("sparse" in rel_filepath.lower()) or ("linalg" in rel_filepath.lower())
+    return False
+
 def is_caffe2_gpu_file(rel_filepath):
-    assert(not os.path.isabs(rel_filepath))
+    assert not os.path.isabs(rel_filepath)
     if rel_filepath.startswith("c10/cuda"):
         return True
     filename = os.path.basename(rel_filepath)
@@ -699,7 +713,8 @@ PYTORCH_MAP: Dict[str, object] = {}
 # but the pytorch mappings assume roc. Therefore, we create a new SPARSE mapping that has a higher priority.
 # Its mappings will trigger first, and only when a miss occurs will the lower-priority pytorch mapping take place.
 # When a file contains "sparse" in the filename, a mapping marked with API_SPARSE is preferred over other choices.
-PYTORCH_SPARSE_MAP = {}
+# Similarly, "linalg" files require rocBLAS -> hipSOLVER so they also need special handling.
+PYTORCH_SPECIAL_MAP = {}
 
 for mapping in CUDA_TO_HIP_MAPPINGS:
     assert isinstance(mapping, Mapping)
@@ -708,10 +723,10 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
         meta_data = value[1:]
         if constants.API_CAFFE2 not in meta_data:
             PYTORCH_TRIE.add(src)
-            # if src is already in PYTORCH_MAP and dst belongs to API_SPARSE
+            # if src is already in PYTORCH_MAP and dst belongs to API_SPECIAL
             # do not overwrite PYTORCH_MAP, store dst separately
-            if constants.API_SPARSE in meta_data and PYTORCH_MAP.get(src, ""):
-                PYTORCH_SPARSE_MAP[src] = dst
+            if constants.API_SPECIAL in meta_data and PYTORCH_MAP.get(src, ""):
+                PYTORCH_SPECIAL_MAP[src] = dst
             else:
                 PYTORCH_MAP[src] = dst
         if constants.API_PYTORCH not in meta_data:
@@ -732,6 +747,8 @@ Returns a dict with the following keys:
                       "skipped" if an identical hipified file already existed or hipified file couldn't be written out
                       "ignored" if the source file was a hipified file itself or not meant to be hipified
 """
+
+
 def preprocessor(
         output_directory: str,
         filepath: str,
@@ -766,15 +783,16 @@ def preprocessor(
     def pt_repl(m):
         return PYTORCH_MAP[m.group(0)]
 
-    def pt_sparse_repl(m):
-        # checks SPARSE map first, and if a miss occurs, falls back to pytorch mappings
-        return PYTORCH_SPARSE_MAP.get(m.group(0), pt_repl(m))
+    def pt_special_repl(m):
+        # checks SPECIAL map first, and if a miss occurs, falls back to pytorch mappings
+        return PYTORCH_SPECIAL_MAP.get(m.group(0), pt_repl(m))
+
 
     if is_pytorch_extension:
         output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
     else:
-        if is_cusparse_file(rel_filepath):
-            output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_sparse_repl, output_source)
+        if is_special_file(rel_filepath):
+            output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_special_repl, output_source)
         elif is_pytorch_file(rel_filepath):
             output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
         else:
@@ -788,14 +806,14 @@ def preprocessor(
             f = m.group(1)
             dirpath, filename = os.path.split(f)
             if (
-                f.startswith("ATen/cuda")
-                or f.startswith("ATen/native/cuda")
-                or f.startswith("ATen/native/nested/cuda")
-                or f.startswith("ATen/native/quantized/cuda")
-                or f.startswith("ATen/native/sparse/cuda")
-                or f.startswith("ATen/native/transformers/cuda")
-                or f.startswith("THC/")
-                or (f.startswith("THC") and not f.startswith("THCP"))
+                f.startswith(("ATen/cuda",
+                              "ATen/native/cuda",
+                              "ATen/native/nested/cuda",
+                              "ATen/native/quantized/cuda",
+                              "ATen/native/sparse/cuda",
+                              "ATen/native/transformers/cuda",
+                              "THC/")) or
+                (f.startswith("THC") and not f.startswith("THCP"))
             ):
                 return templ.format(get_hip_file_path(m.group(1), is_pytorch_extension))
             # if filename is one of the files being hipified for this extension
@@ -847,7 +865,7 @@ def preprocessor(
         output_source = processKernelLaunches(output_source, stats)
 
     # Replace std:: with non-std:: versions
-    if (filepath.endswith(".cu") or filepath.endswith(".cuh")) and "PowKernel" not in filepath:
+    if (filepath.endswith((".cu", ".cuh"))) and "PowKernel" not in filepath:
         output_source = replace_math_functions(output_source)
 
     # Include header if device code is contained.
@@ -884,6 +902,7 @@ def preprocessor(
             return {"hipified_path": fin_path, "status": "[skipped, no permissions]"}
     else:
         return {"hipified_path": fout_path, "status": "[skipped, already hipified]"}
+
 
 def file_specific_replacement(filepath, search_string, replace_string, strict=False):
     with openf(filepath, "r+") as f:

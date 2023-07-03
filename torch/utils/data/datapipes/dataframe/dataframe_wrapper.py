@@ -43,8 +43,7 @@ class PandasWrapper:
     def iterate(cls, data):
         if not _with_pandas():
             raise Exception("DataFrames prototype requires pandas to function")
-        for d in data.itertuples(index=False):
-            yield d
+        yield from data.itertuples(index=False)
 
     @classmethod
     def concat(cls, buffer):

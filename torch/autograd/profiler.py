@@ -1,9 +1,12 @@
 from typing import Any, Dict, List, Optional
+from collections import defaultdict
 from warnings import warn
 
 import torch
+
 import torch.cuda
 from torch._C._profiler import _ExperimentalConfig
+from torch._C import _get_privateuse1_backend_name
 
 from torch.autograd import (
     _disable_profiler,
@@ -31,7 +34,7 @@ from torch.autograd.profiler_util import (
 from torch.futures import Future
 
 __all__ = ["profile", "record_function", "emit_itt", "emit_nvtx", "load_nvprof", "EnforceUnique",
-           "parse_nvprof_trace", "kineto_step", "EventList", "FunctionEvent", "MemRecordsAcc"]
+           "parse_nvprof_trace", "KinetoStepTracker", "EventList", "FunctionEvent", "MemRecordsAcc"]
 
 try:
     # Available in Python >= 3.2
@@ -39,7 +42,7 @@ try:
 except ImportError:
     import functools
 
-    class _ContextDecorator(object):  # type: ignore[no-redef]
+    class _ContextDecorator:  # type: ignore[no-redef]
 
         def __enter__(self):
             raise NotImplementedError
@@ -55,7 +58,31 @@ except ImportError:
 
             return wrapped
 
-class profile(object):
+def _enable_dynamo_cache_lookup_profiler(enable: bool):
+    from torch._dynamo.eval_frame import (  # type: ignore[attr-defined]
+        clear_profiler_hooks,
+        set_profiler_hooks,
+    )
+    """
+    Registers a hook within dynamo eval_frame.c called before and after
+    the lookup process, which runs guards associated with each cached frame.
+
+    Clear deregisters the hooks, saving overhead.
+    """
+
+    if enable:
+
+        def _profiler_start(name):
+            return torch.ops.profiler._record_function_enter_new(name, None)
+
+        def _profiler_end(record):
+            torch.ops.profiler._record_function_exit._RecordFunction(record)
+        set_profiler_hooks(_profiler_start, _profiler_end)
+    else:
+        clear_profiler_hooks()
+
+
+class profile:
     """Context manager that manages autograd profiler state and holds a summary of results.
     Under the hood it just records events of functions being executed in C++ and
     exposes those events to Python. You can wrap any code into it and it will
@@ -120,6 +147,7 @@ class profile(object):
 
     Example:
         >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
         >>>     for _ in range(100):  # any normal python code, really!
@@ -143,6 +171,7 @@ class profile(object):
             enabled=True,
             *,
             use_cuda=False,
+            use_device=None,
             record_shapes=False,
             with_flops=False,
             profile_memory=False,
@@ -150,11 +179,13 @@ class profile(object):
             with_modules=False,
             use_kineto=False,
             use_cpu=True,
+            use_mtia=False,
             experimental_config=None):
         self.enabled: bool = enabled
         if not self.enabled:
             return
         self.use_cuda = use_cuda
+        self.use_device = use_device
         self.function_events: Optional[EventList] = None
         self.entered = False
         self.record_shapes = record_shapes
@@ -164,6 +195,7 @@ class profile(object):
         self.with_stack = with_stack
         self.with_modules = with_modules
         self.use_cpu = use_cpu
+        self.use_mtia = use_mtia
         if experimental_config is None:
             experimental_config = _ExperimentalConfig()
         self.experimental_config = experimental_config
@@ -180,6 +212,8 @@ class profile(object):
         self.kineto_activities = set()
         if self.use_cpu:
             self.kineto_activities.add(ProfilerActivity.CPU)
+        if self.use_mtia:
+            self.kineto_activities.add(ProfilerActivity.MTIA)
 
         self.profiler_kind = ProfilerState.KINETO
         if self.use_cuda:
@@ -189,6 +223,22 @@ class profile(object):
                 self.profiler_kind = ProfilerState.KINETO_GPU_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.CUDA)
+
+        if self.use_device:
+            if self.use_device == 'cuda':
+                # TODO:using 'use_device' instead of 'use_cuda' facilitates access by other devices
+                # and integrate it in subsequent pr.
+                pass
+            elif self.use_device == _get_privateuse1_backend_name():
+                if not use_kineto:
+                    assert self.use_cpu, "Legacy custombackend profiling requires use_cpu=True"
+                    self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
+                else:
+                    raise AssertionError(
+                        "Now, custombackend events does not support Kineto (use_kineto=False)"
+                    )
+            else:
+                raise AssertionError(f"{self.use_device} doesn't support profile.")
 
         assert len(self.kineto_activities) > 0, \
             "No activities specified for the profiler"
@@ -209,6 +259,7 @@ class profile(object):
             return
         if self.entered:
             raise RuntimeError("Profiler context manager is not reentrant")
+        _enable_dynamo_cache_lookup_profiler(True)
         self._prepare_trace()
         self._start_trace()
         return self
@@ -224,6 +275,7 @@ class profile(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
+        _enable_dynamo_cache_lookup_profiler(False)
         if self.use_cuda:
             torch.cuda.synchronize()
         self.kineto_results = _disable_profiler()
@@ -308,7 +360,7 @@ class profile(object):
         assert self.function_events is not None
         return self.function_events.self_cpu_time_total
 
-    def _parse_kineto_results(self, result):
+    def _parse_kineto_results(self, result: _ProfilerResult):
         # result.events() has most of the events - PyTorch op-level and device-level events
 
         trace_start_us = result.trace_start_us()
@@ -359,6 +411,7 @@ class profile(object):
                 end_us=rel_end_us,
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
+                concrete_inputs=kineto_event.concrete_inputs(),
                 stack=[entry for entry in kineto_event.stack() if _filter_stack_entry(entry)],
                 scope=kineto_event.scope(),
                 cpu_memory_usage=cpu_memory_usage,
@@ -452,6 +505,7 @@ class record_function(_ContextDecorator):
         non-distributed cases.
 
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
         ...     y = x ** 2
@@ -500,7 +554,7 @@ class record_function(_ContextDecorator):
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
         if not torch.jit.is_scripting():
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 torch.ops.profiler._record_function_exit._RecordFunction(record)
         else:
             torch.ops.profiler._record_function_exit(record)
@@ -538,7 +592,7 @@ class record_function(_ContextDecorator):
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
         if not torch.jit.is_scripting():
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut._RecordFunction(
                     record, fut)
         else:
@@ -546,12 +600,12 @@ class record_function(_ContextDecorator):
         return profiled_future
 
 
-class emit_itt(object):
+class emit_itt:
     """Context manager that makes every autograd operation emit an ITT range.
 
     It is useful when running the program under Intel(R) VTune Profiler::
 
-        vtune <--vtune_flags> <regular command here>
+        vtune <--vtune-flags> <regular command here>
 
     The Instrumentation and Tracing Technology (ITT) API enables your application to generate and
     control the collection of trace data during its execution across different Intel tools.
@@ -577,6 +631,7 @@ class emit_itt(object):
 
     Example:
         >>> # xdoctest: +SKIP("Undefined variables")
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> with torch.autograd.profiler.emit_itt():
         ...     model(x)
 
@@ -612,7 +667,7 @@ class emit_itt(object):
         return False
 
 
-class emit_nvtx(object):
+class emit_nvtx:
     """Context manager that makes every autograd operation emit an NVTX range.
 
     It is useful when running the program under nvprof::
@@ -645,8 +700,9 @@ class emit_nvtx(object):
 
     Example:
         >>> # xdoctest: +SKIP("undefined variables")
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> with torch.cuda.profiler.profile():
-        ...     model(x) # Warmup CUDA memory allocator and profiler
+        ...     model(x)  # Warmup CUDA memory allocator and profiler
         ...     with torch.autograd.profiler.emit_nvtx():
         ...         model(x)
 
@@ -737,7 +793,7 @@ def load_nvprof(path):
     return EventList(parse_nvprof_trace(path))
 
 
-class EnforceUnique(object):
+class EnforceUnique:
     """Raises an error if a key is seen more than once."""
     def __init__(self):
         self.seen = set()
@@ -812,8 +868,75 @@ def parse_nvprof_trace(path):
     return functions
 
 
-def kineto_step():
-    """ Notify kineto so it is aware of iteration boundaries for asynchronous
-        trace requests.
+class KinetoStepTracker:
+    """Provides an abstraction for incrementing the step count globally.
+    Previously, we only had one place to mark that a step() has occurred
+    in the program via pytorch profiler step(). We will now add step hooks
+    in the Optimizer class https://github.com/pytorch/pytorch/issues/88446
+
+    - This could mean programs that already call profiler.step() every
+      iteration can end up double incrementing step count.
+    - If a model uses multiple optimizers we can also have double or more
+      counting of the step.
+
+    We fix this by adding a layer of abstraction before calling step()
+    to the kineto library. The idea is to maintain steps per requester in a dict:
+    ```
+    {
+       "ProfilerStep": 100,  # triggered by profiler step() call
+       "Optimizer1Step": 100,   # Optimizer 1 or 2 are just examples, could be SGD, Adam etc
+       "Optimizer2Step": 100,
+    }
+    ```
+    To figure out the global step count just take the max of dict values (100).
+
+    If one of the count increments the max will go up.
+    ```
+    {
+       "ProfilerStep": 100,
+       "Optimizer1Step": 101,   # Optimizer1 got incremented first say
+       "Optimizer2Step": 100,
+    }
+    ```
+    Then global step count is 101
+    We only call the kineto step() function when global count increments.
+
+    NOTE: Please do not use the KinetoStepTracker in modules beside the Optimizer
+    for now. The result could be incorrect increments of the step count.
     """
-    _kineto_step()
+    _current_step = -1
+    _step_dict: Dict[str, int] = defaultdict(int)
+
+    @classmethod
+    def init_step_count(cls, requester: str):
+        cls._step_dict[requester] = cls._current_step
+
+    @classmethod
+    def erase_step_count(cls, requester: str) -> bool:
+        return cls._step_dict.pop(requester, None) is not None
+
+    @classmethod
+    def increment_step(cls, requester: str) -> int:
+        """Increments the step count for the requester.
+        Additionally if the max over all step counts has incremented then
+        trigger the _kineto_step()
+        returns global step count
+        """
+        if requester not in cls._step_dict:
+            cls.init_step_count(requester)
+        cls._step_dict[requester] += 1
+
+        new_step = max(cls._step_dict.values())
+        if new_step > cls._current_step:
+            delta = new_step - cls._current_step
+            if delta > 1:
+                warn("Profiler step count has increased more than 1 - "
+                     f"current_step = {cls._current_step} step dict =  {cls._step_dict}")
+            for _ in range(0, delta):
+                _kineto_step()
+            cls._current_step = new_step
+        return cls._current_step
+
+    @classmethod
+    def current_step(cls) -> int:
+        return cls._current_step

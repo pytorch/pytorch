@@ -18,6 +18,8 @@ import torch
 
 import unittest
 
+from ._utils import assert_allclose
+
 
 def _layer_norm_ref(axis, epsilon, X):
     left = int(np.prod(X.shape[:axis]))
@@ -254,10 +256,9 @@ class TestLayerNormOp(serial.SerializedTestCase):
         actual_mean = self.ws.fetch_blob('mean')
         actual_std = self.ws.fetch_blob('std')
 
-        torch.testing.assert_allclose(
-            expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
-        torch.testing.assert_allclose(expected_mean, actual_mean)
-        torch.testing.assert_allclose(expected_std, actual_std)
+        assert_allclose(expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
+        assert_allclose(expected_mean, actual_mean)
+        assert_allclose(expected_std, actual_std)
 
     @given(X=hu.tensor(min_dim=2),
            eps=st.floats(1e-5, 1e-3),
@@ -280,10 +281,9 @@ class TestLayerNormOp(serial.SerializedTestCase):
             actual_norm, actual_mean, actual_std = torch.ops._caffe2.LayerNorm(
                 torch.tensor(X), None, None, axis, eps)
 
-        torch.testing.assert_allclose(
-            expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
-        torch.testing.assert_allclose(expected_mean, actual_mean)
-        torch.testing.assert_allclose(expected_std, actual_std)
+        assert_allclose(expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
+        assert_allclose(expected_mean, actual_mean)
+        assert_allclose(expected_std, actual_std)
 
     # Test case is using workspace.has_cuda_support and not
     # workspace.has_gpu_support to exclude it from HIP because tensor interop
@@ -313,10 +313,9 @@ class TestLayerNormOp(serial.SerializedTestCase):
             actual_norm, actual_mean, actual_std = torch.ops._caffe2.LayerNorm(
                 torch.tensor(X).cuda(), None, None, axis, eps)
 
-        torch.testing.assert_allclose(
-            expected_norm, actual_norm.cpu(), rtol=1e-4, atol=1e-4)
-        torch.testing.assert_allclose(expected_mean, actual_mean.cpu())
-        torch.testing.assert_allclose(expected_std, actual_std.cpu())
+        assert_allclose(expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
+        assert_allclose(expected_mean, actual_mean)
+        assert_allclose(expected_std, actual_std)
 
     @given(X=hu.tensor(min_dim=2),
            eps=st.floats(1e-5, 1e-3),
@@ -352,10 +351,9 @@ class TestLayerNormOp(serial.SerializedTestCase):
             actual_norm, actual_mean, actual_std = jit_layer_norm(
                 torch.tensor(X), None, None, axis, eps, elementwise_affine)
 
-        torch.testing.assert_allclose(
-            expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
-        torch.testing.assert_allclose(expected_mean, actual_mean)
-        torch.testing.assert_allclose(expected_std, actual_std)
+        assert_allclose(expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
+        assert_allclose(expected_mean, actual_mean)
+        assert_allclose(expected_std, actual_std)
 
     @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_brew_wrapper(self, X, gc, dc):

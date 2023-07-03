@@ -26,12 +26,12 @@ using torch::autograd::ReadyQueue;
 using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
 
-static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
-static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
+static constexpr const char* kNumBackwardPasses = "num_current_backward_passes";
+static constexpr const char* kNumAutogradContexts = "num_autograd_contexts";
 
 // This hook does 3 things:
 //   1. Call pre hooks of the original AccumulateGrad to modify the input grad.
-//   2. Accumuate the gard to RPC context.
+//   2. Accumurate the guard to RPC context.
 //   3. Call post hooks of the original AccumulateGrad.
 class DistAccumulateGradCaptureHook
     : public GraphTask::ExecInfo::Capture::GradCaptureHook {
@@ -46,11 +46,10 @@ class DistAccumulateGradCaptureHook
     ThreadLocalDistAutogradContext contextGuard{ContextPtr(autogradContext_)};
     variable_list inputGrads = {grad};
     // It's intended that pre/post hooks are still called even if the grad is
-    // undenfined here.
+    // undefined here.
     for (const auto& hook : accumulateGrad_->pre_hooks()) {
       inputGrads = (*hook)(inputGrads);
     }
-
     // It is possible that the grad is not defined since a separate
     // invocation of the autograd engine on the same node might actually
     // compute this gradient.
@@ -316,7 +315,10 @@ void DistEngine::computeDependencies(
       // to be captured.
       if (auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(fn)) {
         for (auto& capture : *execInfo.captures_) {
-          capture.hooks_.push_back(
+          // Capture hooks are technically deprecated, but as an exception below
+          // is the single and only instance of capture hooks usage that we
+          // support. See NOTE [Deprecated capture hooks] for more context.
+          capture.DO_NOT_USE_DEPRECATED_register_capture_hook(
               std::make_unique<DistAccumulateGradCaptureHook>(
                   std::dynamic_pointer_cast<AccumulateGrad>(
                       accumulateGradFn->shared_from_this()),

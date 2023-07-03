@@ -850,7 +850,7 @@ struct TORCH_API Node {
     return removeAttribute(Symbol::attr(name));
   }
   bool hasAttributes() const {
-    return values_.size() > 0;
+    return !values_.empty();
   }
   size_t numAttributes() const {
     return values_.size();
@@ -858,6 +858,7 @@ struct TORCH_API Node {
   // The names are returned in order, since name actually is the index.
   std::vector<Symbol> attributeNames() const {
     std::vector<Symbol> names;
+    names.reserve(values_.size());
     for (const AVPtr& a : values_) {
       names.push_back(a->name);
     }
@@ -865,6 +866,7 @@ struct TORCH_API Node {
   }
   std::vector<const char*> attributeNamesS() const {
     std::vector<const char*> names;
+    names.reserve(values_.size());
     for (const AVPtr& a : values_) {
       names.push_back(a->name.toUnqualString());
     }
@@ -1204,6 +1206,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   // when insertNode() is called, the node is inserted before this node
   // by default this is set to append to the top level block
   Node* insert_before_;
+  int64_t predicted_insert_count_ = 0;
 
   c10::optional<size_t> op_version_;
 
@@ -1401,7 +1404,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   // set where nodes are inserted to append to the end of this block
   void setInsertPoint(Block* b) {
     AT_ASSERT(b->owningGraph() == this);
-    insert_before_ = b->return_node();
+    setInsertPoint(b->return_node());
   }
   // set where nodes are inserted to insert _before_ this node
   // for implementation simplicity we only support inserting before a node for
@@ -1409,6 +1412,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   void setInsertPoint(Node* n) {
     AT_ASSERT(n->owningGraph() == this && n->inBlockList());
     insert_before_ = n;
+    predicted_insert_count_ = 0;
   }
   Node* insertPoint() {
     return insert_before_;

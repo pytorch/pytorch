@@ -245,7 +245,7 @@ void ONNXLintGraph(
       GRAPH_DEBUG("Node does not set sourceRange:", *n);
       n_miss_source_range.emplace_back(n->kind());
     }
-    if (n->scopeName() == "") {
+    if (n->scopeName().empty()) {
       GRAPH_DEBUG("Node does not set scope:", *n);
       n_miss_scope.emplace_back(n->kind());
     }

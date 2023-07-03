@@ -83,7 +83,7 @@ def _polynomial_value(poly, x, zero_power, transition):
 
       x (Tensor): the value (possible batched) to evalate the polynomial `poly` at.
 
-      zero_power (Tensor): the represenation of `x^0`. It is application-specific.
+      zero_power (Tensor): the representation of `x^0`. It is application-specific.
 
       transition (Callable): the function that accepts some intermediate result `int_val`,
                              the `x` and a specific polynomial coefficient
@@ -273,7 +273,6 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         ortho_fparams: Optional[Dict[str, float]] = None,
         ortho_bparams: Optional[Dict[str, bool]] = None,
     ) -> Tuple[Tensor, Tensor]:
-
         # makes sure that input is contiguous for efficiency.
         # Note: autograd does not support dense gradients for sparse input yet.
         A = A.contiguous() if (not A.is_sparse) else A
@@ -360,7 +359,6 @@ def lobpcg(
     ortho_fparams: Optional[Dict[str, float]] = None,
     ortho_bparams: Optional[Dict[str, bool]] = None,
 ) -> Tuple[Tensor, Tensor]:
-
     """Find the k largest (or smallest) eigenvalues and the corresponding
     eigenvectors of a symmetric positive definite generalized
     eigenvalue problem using matrix-free LOBPCG methods.
@@ -399,7 +397,7 @@ def lobpcg(
       A (Tensor): the input tensor of size :math:`(*, m, m)`
 
       B (Tensor, optional): the input tensor of size :math:`(*, m,
-                  m)`. When not specified, `B` is interpereted as
+                  m)`. When not specified, `B` is interpreted as
                   identity matrix.
 
       X (tensor, optional): the input tensor of size :math:`(*, m, n)`
@@ -598,7 +596,6 @@ def _lobpcg(
     ortho_fparams: Optional[Dict[str, float]] = None,
     ortho_bparams: Optional[Dict[str, bool]] = None,
 ) -> Tuple[Tensor, Tensor]:
-
     # A must be square:
     assert A.shape[-2] == A.shape[-1], A.shape
     if B is not None:
@@ -692,7 +689,7 @@ def _lobpcg(
     return worker.E[:k], worker.X[:, :k]
 
 
-class LOBPCG(object):
+class LOBPCG:
     """Worker class of LOBPCG methods."""
 
     def __init__(
@@ -707,7 +704,6 @@ class LOBPCG(object):
         method: str,
         tracker: None,
     ) -> None:
-
         # constant parameters
         self.A = A
         self.B = B
@@ -833,7 +829,6 @@ class LOBPCG(object):
             self.call_tracker()
 
         while not self.stop_iteration():
-
             self.update()
 
             if not torch.jit.is_scripting() and self.tracker is not None:

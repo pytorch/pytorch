@@ -5,9 +5,7 @@
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 namespace detail {
 template <typename T>
@@ -81,12 +79,12 @@ void IRVerifier::visit(RampPtr v) {
 
 void IRVerifier::visit(LoadPtr v) {
   auto indices = v->indices();
-  if (indices.size() > 0 && v->buf()->base_handle()->dtype() != kHandle) {
+  if (!indices.empty() && v->buf()->base_handle()->dtype() != kHandle) {
     throw malformed_ir(
         "Load base handle dtype must be Handle", v->buf()->base_handle());
   }
 
-  Dtype index_dtype = indices.size() ? indices.at(0)->dtype() : kInt;
+  Dtype index_dtype = !indices.empty() ? indices.at(0)->dtype() : kInt;
   if (indices.size() > 1) {
     for (size_t i = 1; i < indices.size(); ++i) {
       if (indices.at(i)->dtype() != index_dtype) {
@@ -137,12 +135,12 @@ void IRVerifier::visit(IntrinsicsPtr v) {
 
 void IRVerifier::visit(StorePtr v) {
   auto indices = v->indices();
-  if (indices.size() > 0 && v->buf()->base_handle()->dtype() != kHandle) {
+  if (!indices.empty() && v->buf()->base_handle()->dtype() != kHandle) {
     throw malformed_ir(
         "Store base handle dtype must be Handle", v->buf()->base_handle());
   }
 
-  Dtype index_dtype = indices.size() ? indices.at(0)->dtype() : kInt;
+  Dtype index_dtype = !indices.empty() ? indices.at(0)->dtype() : kInt;
   if (indices.size() > 1) {
     for (size_t i = 1; i < indices.size(); ++i) {
       if (indices.at(i)->dtype() != index_dtype) {
@@ -178,7 +176,7 @@ void IRVerifier::visit(ForPtr v) {
 }
 
 void IRVerifier::visit(BlockPtr v) {
-  for (StmtPtr s : v->stmts()) {
+  for (const StmtPtr& s : v->stmts()) {
     if (s->get_parent() != v) {
       throw malformed_ir("Broken child-parent link inside a Block");
     }
@@ -204,6 +202,4 @@ void verify(ExprHandle e) {
   verify(e.node());
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

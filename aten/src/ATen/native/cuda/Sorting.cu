@@ -15,8 +15,7 @@
 #include <cassert>
 #include <cstdlib>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -278,5 +277,4 @@ void launch_median_kernel(
       });
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

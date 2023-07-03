@@ -21,7 +21,7 @@ Tensor clone(
   TORCH_CHECK(
       (c10::MemoryFormat::Preserve == memory_format) ||
           (c10::MemoryFormat::Contiguous == memory_format),
-      "Vulkan supports Preserve and Contiguous memory foramts");
+      "Vulkan supports Preserve and Contiguous memory formats");
 
   Tensor self;
   if (memory_format == MemoryFormat::Preserve) {

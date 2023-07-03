@@ -84,7 +84,7 @@ class Model(nn.Module):
 
     def forward(self, x):
         if self.with_checkpoint:
-            return self.head(checkpoint(self.blocks, self.stem(x)))
+            return self.head(checkpoint(self.blocks, self.stem(x), use_reentrant=True))
         else:
             return self.head(self.blocks(self.stem(x)))
 

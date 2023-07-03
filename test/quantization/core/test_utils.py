@@ -3,7 +3,7 @@
 import torch
 from torch.testing._internal.common_utils import TestCase
 from torch.ao.quantization.utils import get_fqn_to_example_inputs
-from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.ao.nn.quantized.modules.utils import _quantize_weight
 from torch.ao.quantization import MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver
 
 

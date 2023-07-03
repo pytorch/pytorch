@@ -9,7 +9,7 @@
 #include <ATen/native/Fill.h>
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 
@@ -58,5 +58,4 @@ void fill_kernel(TensorIterator& iter, const Scalar& value_scalar) {
 
 REGISTER_DISPATCH(fill_stub, &fill_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -55,9 +55,9 @@ batch_norm_batch_rule(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
   c10::MaybeOwned<Tensor> running_mean_maybe_owned = at::borrow_from_optional_tensor(running_mean_opt);
-  auto running_mean = *running_mean_maybe_owned;
+  const auto& running_mean = *running_mean_maybe_owned;
   c10::MaybeOwned<Tensor> running_var_maybe_owned = at::borrow_from_optional_tensor(running_var_opt);
-  auto running_var = *running_var_maybe_owned;
+  const auto& running_var = *running_var_maybe_owned;
   TORCH_CHECK(!training || (!input_bdim || ((!running_mean.defined() || running_mean_bdim) && (!running_var.defined() || running_var_bdim))),
       "Batch norm got a batched tensor as input while the running_mean or running_var, which will be updated in place, ",
       "were not batched.\nIf you are using a module and do not need eval mode, please set `track_running_stats` to be False.",
@@ -222,7 +222,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
 
   // plumbing
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "batch_norm_backward_plumbing");
   int64_t cur_level = maybe_layer->layerId();
 
   Tensor grad_out_value;
@@ -293,7 +293,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
+static std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
     const Tensor & input, const c10::optional<Tensor> & weight_opt,
     const c10::optional<Tensor> & bias_opt, int64_t N, int64_t C,
     int64_t HxW, int64_t group, double eps) {
@@ -304,7 +304,7 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
   const Tensor& bias = *bias_maybe_owned;
 
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "native_group_norm_plumbing");
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({input, weight_opt, bias_opt}, cur_level)) {
@@ -349,7 +349,7 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
   return std::make_tuple(result0, mean, rstd);
 }
 
-std::tuple<at::Tensor,optional<int64_t>> group_norm_backward_no_weight_bias_batch_rule(
+static std::tuple<at::Tensor,optional<int64_t>> group_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & grad_out, optional<int64_t> grad_out_bdim,
     const at::Tensor & input, optional<int64_t> input_bdim,
     const at::Tensor & mean, optional<int64_t> mean_bdim,
@@ -382,7 +382,7 @@ std::tuple<at::Tensor,optional<int64_t>> group_norm_backward_no_weight_bias_batc
   return std::make_tuple(result0, 0);
 }
 
-std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
+static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
   const Tensor & grad_out, const Tensor & input, const Tensor & mean,
   const Tensor & rstd, const c10::optional<Tensor> & weight_opt,
   int64_t N, int64_t C, int64_t HxW, int64_t group, std::array<bool,3> output_mask
@@ -393,7 +393,7 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
 
   // plumbing
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "native_group_norm_backward_plumbing");
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({grad_out, input, mean, rstd, weight_opt}, cur_level)) {
@@ -504,7 +504,7 @@ C10_ALWAYS_INLINE void _check_layer_norm_inputs(
   check_same_shape(bias, bias_bdim, normalized_shape, "weight");
 }
 
-std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>>
+static std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>>
 native_layer_norm_batch_rule(
     const Tensor& input, optional<int64_t> input_bdim,
     c10::SymIntArrayRef normalized_shape,
@@ -550,7 +550,7 @@ native_layer_norm_batch_rule(
   return std::make_tuple(result0, 0, mean, stats_bdim, rstd, stats_bdim);
 }
 
-std::tuple<at::Tensor,optional<int64_t>> native_layer_norm_backward_no_weight_bias_batch_rule(
+static std::tuple<at::Tensor,optional<int64_t>> native_layer_norm_backward_no_weight_bias_batch_rule(
     const at::Tensor & grad_out, optional<int64_t> grad_out_bdim,
     const at::Tensor & input, optional<int64_t> input_bdim,
     at::IntArrayRef normalized_shape,
@@ -587,7 +587,7 @@ std::tuple<at::Tensor,optional<int64_t>> native_layer_norm_backward_no_weight_bi
   return std::make_tuple(std::get<0>(result), 0);
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_plumbing(
+static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_plumbing(
     const at::Tensor & grad_out,
     const at::Tensor & input,
     at::IntArrayRef normalized_shape,
@@ -604,7 +604,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_plumbing
 
   // plumbing
   auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  vmap_check_escaped(maybe_layer, "native_layer_norm_backward_plumbing");
   int64_t cur_level = maybe_layer->layerId();
   if (!areAnyBatchedAtLevel({grad_out, input, mean, rstd, weight_opt, bias_opt}, cur_level)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
@@ -756,7 +756,7 @@ struct NativeBatchNormBackwardBatchRuleHelper {
     std::array<bool,3> output_mask) {
 
     auto maybe_layer = maybeCurrentDynamicLayer();
-    TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+    vmap_check_escaped(maybe_layer, "NativeBatchNormBackwardBatchRuleHelper.apply");
     int64_t cur_level = maybe_layer->layerId();
 
     if (!areAnyBatchedAtLevel({grad_out, input, weight_opt, running_mean_opt,
@@ -786,7 +786,7 @@ struct CudnnBatchNormBackwardBatchRuleHelper {
     const at::Tensor & reserve) {
 
     auto maybe_layer = maybeCurrentDynamicLayer();
-    TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+    vmap_check_escaped(maybe_layer, "CudnnBatchNormBackwardBatchRuleHelper.apply");
     int64_t cur_level = maybe_layer->layerId();
 
     if (!areAnyBatchedAtLevel({input, grad_out, weight, running_mean_opt,
@@ -814,7 +814,7 @@ struct MiopenBatchNormBackwardBatchRuleHelper {
     double eps) {
 
     auto maybe_layer = maybeCurrentDynamicLayer();
-    TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+    vmap_check_escaped(maybe_layer, "MiopenBatchNormBackwardBatchRuleHelper.apply");
     int64_t cur_level = maybe_layer->layerId();
 
     if (!areAnyBatchedAtLevel({input, grad_out, weight, running_mean_opt,
@@ -844,7 +844,7 @@ struct MiopenBatchNormBackwardBatchRuleHelper {
       decltype(&fn),\
       &fn>::apply)
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_batch_norm_backward_wrapper(
+static std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_batch_norm_backward_wrapper(
     const at::Tensor & grad_out,
     const at::Tensor & input,
     const at::Tensor& weight_opt,
@@ -860,7 +860,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_batch_norm_backward_wrapper(
     return at::cudnn_batch_norm_backward(input, grad_out, weight_opt, running_mean_opt, running_var_opt, save_mean_opt, save_rstd_opt, eps, reserve);
   }
 
-  std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_batch_norm_backward_wrapper(
+static std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_batch_norm_backward_wrapper(
     const at::Tensor & grad_out,
     const at::Tensor & input,
     const at::Tensor& weight_opt,
@@ -875,10 +875,28 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_batch_norm_backward_wrapper(
     return at::miopen_batch_norm_backward(input, grad_out, weight_opt, running_mean_opt, running_var_opt, save_mean_opt, save_rstd_opt, eps);
   }
 
+// NB: This is NOT good. In the ideal world, we do NOT want to convert the new legit op back into native_batch_norm
+// as native_batch_norm has a problematic schema--it promises it is functional when it is not. However, vmap doesn't
+// work with dynamo anyway so we gain some buffer room to do wrong things here. The (reasonable) hope is that we will
+// make native_batch_norm composite implicit within a few weeks and we can fix this before vmap works with dynamo.
+static std::tuple<at::Tensor,at::Tensor,at::Tensor> _native_batch_norm_legit_batch(
+  const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+  Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps) {
+    return at::native_batch_norm(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
+}
+
+static std::tuple<at::Tensor,at::Tensor,at::Tensor> _native_batch_norm_legit_no_stats_batch(
+  const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+  bool train, double momentum, double eps) {
+    return at::native_batch_norm(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
+}
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(native_batch_norm, NATIVE_BATCH_NORM_BATCH_RULE(native_batch_norm));
   VMAP_SUPPORT(cudnn_batch_norm, CUDNN_BATCH_NORM_BATCH_RULE(cudnn_batch_norm));
   VMAP_SUPPORT(miopen_batch_norm, MIOPEN_BATCH_NORM_BATCH_RULE(miopen_batch_norm));
+  m.impl("_native_batch_norm_legit", _native_batch_norm_legit_batch);
+  m.impl("_native_batch_norm_legit.no_stats", _native_batch_norm_legit_no_stats_batch);
   m.impl("native_batch_norm_backward", NATIVE_BATCH_NORM_BACKWARD_BATCH_RULE(native_batch_norm_backward));
   m.impl("cudnn_batch_norm_backward", CUDNN_BATCH_NORM_BACKWARD_BATCH_RULE(at::functorch::cudnn_batch_norm_backward_wrapper));
   m.impl("miopen_batch_norm_backward", MIOPEN_BATCH_NORM_BACKWARD_BATCH_RULE(at::functorch::miopen_batch_norm_backward_wrapper));

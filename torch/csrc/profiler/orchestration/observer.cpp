@@ -2,6 +2,8 @@
 
 #include <torch/csrc/profiler/util.h>
 
+#include <utility>
+
 namespace torch {
 namespace profiler {
 namespace impl {
@@ -14,10 +16,14 @@ using GlobalManager = GlobalStateManager<ProfilerStateBase>;
 ExperimentalConfig::ExperimentalConfig(
     std::vector<std::string> profiler_metrics,
     bool profiler_measure_per_kernel,
-    bool verbose)
-    : profiler_metrics{profiler_metrics},
+    bool verbose,
+    std::vector<std::string> performance_events,
+    bool adjust_timestamps)
+    : profiler_metrics{std::move(profiler_metrics)},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
-      verbose{verbose} {}
+      verbose{verbose},
+      performance_events(std::move(performance_events)),
+      adjust_timestamps{adjust_timestamps} {}
 
 /*explicit*/ ExperimentalConfig::operator bool() const {
   return !profiler_metrics.empty();

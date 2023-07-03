@@ -6,7 +6,7 @@ import run_test
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
-class DummyOptions(object):
+class DummyOptions:
     verbose = False
 
 
@@ -43,7 +43,7 @@ class DeterminationTest(TestCase):
     def test_config_change_only(self):
         """CI configs trigger all tests"""
         self.assertEqual(
-            self.determined_tests([".jenkins/pytorch/test.sh"]), self.TESTS
+            self.determined_tests([".ci/pytorch/test.sh"]), self.TESTS
         )
 
     def test_run_test(self):

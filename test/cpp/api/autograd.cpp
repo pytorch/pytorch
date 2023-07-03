@@ -254,6 +254,28 @@ TEST(AutogradAPITests, AnomalyMode) {
   double_backward_produce_nan(true);
 }
 
+TEST(CustomAutogradTest, CustomFunctionReturnInputAsIsAndSavesIt) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(
+        AutogradContext* ctx,
+        Variable var1,
+        Variable var2) {
+      ctx->save_for_backward({var1, var2});
+      return var1 * var2, var1;
+    }
+
+    static variable_list backward(
+        AutogradContext* ctx,
+        variable_list grad_output) {
+      return {};
+    }
+  };
+
+  Variable x = torch::randn({5, 5}, torch::requires_grad());
+  Variable y = torch::randn({5, 5}, torch::requires_grad());
+  MyFunction::apply(x, y);
+}
+
 TEST(CustomAutogradTest, CustomFunction) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(
@@ -1317,12 +1339,6 @@ void assertBasicChecks(F op) {
 
 } // namespace
 
-// These tests trigger an MSVC bug in the internal arvr build
-// Reproduce with: buck build @arvr/mode/win/opt
-// //xplat/caffe2:autograd_libtorch_test_ovrsource It is probably caused by the
-// lambda, see https://github.com/pytorch/pytorch/issues/48763
-#if !defined(_MSC_VER)
-
 TEST(TestAutogradNotImplementedFallback, RetSingleNonTensor) {
   REGISTER_TEST_OP(
       "ret_single_non_tensor",
@@ -1638,8 +1654,6 @@ TEST(TestAutogradNotImplementedFallback, TensorlistOp) {
 
   ASSERT_TRUE(at::allclose(op(a, vec), tensorlist_op(a, vec)));
 }
-
-#endif
 
 // TODO add these tests if needed
 // test_once_differentiable

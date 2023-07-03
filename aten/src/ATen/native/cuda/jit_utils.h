@@ -198,4 +198,6 @@ inline std::string typeName(ScalarType t) {
 }
 #undef TYPE_NAME_CASE
 
+TORCH_CUDA_CPP_API void initializeCudaContext();
+
 }}}  // namespace at::cuda::jit

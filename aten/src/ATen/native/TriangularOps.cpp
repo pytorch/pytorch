@@ -23,10 +23,12 @@ namespace at {
 namespace meta {
 
 TORCH_META_FUNC(tril)(const Tensor& self, int64_t k) {
+  TORCH_CHECK(self.dim() >= 2, "tril: input tensor must have at least 2 dimensions")
   set_output_raw_strided(0, self.sizes(), {}, self.options());
 }
 
 TORCH_META_FUNC(triu)(const Tensor& self, int64_t k) {
+  TORCH_CHECK(self.dim() >= 2, "triu: input tensor must have at least 2 dimensions")
   set_output_raw_strided(0, self.sizes(), {}, self.options());
 }
 
@@ -56,7 +58,7 @@ void apply_triu_tril_single(
     parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
       for (int64_t i : c10::irange(start, end)) {
         for (int64_t j = 0; j < std::min(m, i + k); j++) {
-          result[i * res_row_stride + j * res_col_stride] = 0;
+          result[i * res_row_stride + j * res_col_stride] = static_cast<scalar_t>(0);
         }
         if (!inplace) {  // copy the rest of the self if not inplace
           for (int64_t j = std::max(zero, i + k); j < m; j++) {
@@ -69,7 +71,7 @@ void apply_triu_tril_single(
     parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
       for (int64_t i : c10::irange(start, end)) {
         for (int64_t j = std::max(zero, i + k + 1); j < m; j++) {
-          result[i * res_row_stride + j * res_col_stride] = 0;
+          result[i * res_row_stride + j * res_col_stride] = static_cast<scalar_t>(0);
         }
         if (!inplace) {  // copy the rest of the self if not inplace
           for (int64_t j = zero; j < std::min(m, i + k + 1); j++) {
@@ -153,7 +155,8 @@ void compute_triu_tril(const Tensor& self, int64_t k, const Tensor &result) {
     result_c = result;
   }
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      ScalarType::ComplexHalf,
       ScalarType::BFloat16,
       ScalarType::Half,
       ScalarType::Bool,
@@ -178,7 +181,7 @@ TORCH_IMPL_FUNC(triu_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
   compute_triu_tril<UpperTriangle>(self, k, result);
 }
 
-Tensor trace_backward(const Tensor& grad, at::IntArrayRef sizes) {
+static Tensor trace_backward(const Tensor& grad, at::IntArrayRef sizes) {
     return at::native::trace_backward_symint(grad, c10::fromIntArrayRefSlow(sizes));
 }
 

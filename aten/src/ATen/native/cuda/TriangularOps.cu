@@ -19,8 +19,7 @@
 
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triu/tril ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -70,8 +69,12 @@ void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k
   int64_t N = self.numel();
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid((N + dim_block.x - 1) / dim_block.x);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kComplexHalf, at::ScalarType::Half, at::ScalarType::Bool,
-                                         self.scalar_type(), "triu_tril_cuda_template", [&]{
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      at::ScalarType::ComplexHalf,
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      at::ScalarType::Bool,
+      self.scalar_type(), "triu_tril_cuda_template", [&] {
     if (cuda::detail::canUse32BitIndexMath(result) && cuda::detail::canUse32BitIndexMath(self)) {
       auto result_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(result);
       auto self_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(self);
@@ -107,5 +110,4 @@ Tensor trace_cuda(const Tensor& self) {
   return self.diagonal().sum();
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

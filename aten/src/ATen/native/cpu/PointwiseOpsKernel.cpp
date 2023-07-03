@@ -6,8 +6,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/core/Scalar.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 static void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
@@ -33,7 +32,8 @@ static void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
           return convert_float_bfloat16(self_vec0, self_vec1);
         });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcmul_cpu_out", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::ComplexHalf, at::ScalarType::Half,
+                                           dtype, "addcmul_cpu_out", [&] {
       scalar_t scalar_val = value.to<scalar_t>();
       auto scalar_vec = Vectorized<scalar_t>(scalar_val);
       cpu_kernel_vec(
@@ -242,5 +242,4 @@ REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cpu_kernel);
 REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cpu_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cpu_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

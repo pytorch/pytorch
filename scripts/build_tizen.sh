@@ -95,10 +95,6 @@ sudo zypper install \
 # Obtain python hypothesis, which Caffe2 uses for unit testing. Note that
 # the one provided by zypper is quite old so we install it via pip
 sudo pip install hypothesis
-
-# Install the six module, which includes Python 2 and 3 compatibility utilities,
-# and is required for Caffe2
-sudo pip install six
 }
 
 caffe2_full_build(){

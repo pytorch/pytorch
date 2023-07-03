@@ -95,7 +95,7 @@ static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
 //   we repeatedly we slice the input arguments (if they are BatchedTensors),
 //   put the sliced (or a not-sliced) version of the input onto the stack, invoke
 //   the operator, and then pop the results off the stack.
-void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+static void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
   warnFallback(schema, /*in_place*/true);
 
@@ -161,7 +161,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
     batched_tensor_inputs.push_back(tensor);
     batched_tensor_inputs_position.push_back(idx);
   }
-  TORCH_INTERNAL_ASSERT(batched_tensor_inputs.size() > 0);
+  TORCH_INTERNAL_ASSERT(!batched_tensor_inputs.empty());
 
   // MultiBatchVmapTransform the BatchedTensor arguments. This returns
   // VmapPhysicalViews that contain all of the batch dimensions.
@@ -306,7 +306,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
     batched_tensor_inputs.push_back(tensor);
     batched_tensor_inputs_position.push_back(idx);
   }
-  TORCH_INTERNAL_ASSERT(batched_tensor_inputs.size() > 0);
+  TORCH_INTERNAL_ASSERT(!batched_tensor_inputs.empty());
 
   // MultiBatchVmapTransform the BatchedTensor arguments. This returns
   // VmapPhysicalViews that contain all of the batch dimensions.
@@ -394,6 +394,10 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
         stack,
         input_physical_views.front().getPhysicalToLogicalMap().apply(flat_output.view(output_sizes)));
   }
+}
+
+void vmapErrorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  TORCH_CHECK(false, "Error: ", op.operator_name(), " requires special handling, and does not yet have a batching rule. Feel free to file a github issue!");
 }
 
 }

@@ -9,6 +9,8 @@ import torch
 from torch import Tensor
 from torch.masked import as_masked_tensor, is_masked_tensor, MaskedTensor
 from . import _docs
+from torch._prims_common import corresponding_real_dtype
+from torch import sym_float
 
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
@@ -378,11 +380,11 @@ defined as ``prod(x[:i])``.""",
     )
 
     # Apply function name info to docstring templates:
-    templates = dict(
-        (k, v.format_map(template_data))
+    templates = {
+        k: v.format_map(template_data)
         for k, v in docstring_templates.items()
         if k.startswith(op_kind)
-    )
+    }
     templates.update(
         (k, v.format_map(template_data) if isinstance(v, str) else v)
         for k, v in template_data.items()
@@ -783,10 +785,7 @@ def _sparse_csr_segment_reduction_helper(
             )
             new_nnz = new_crow_indices[-1]
             new_col_indices = col_indices.new_zeros(new_nnz)
-            # segment_reduce takes 'max'/'min' rather than 'amax'/'amin', changing this would be BC-breaking
-            if reduce in ["amax", "amin"]:
-                reduce = reduce[1:]
-            new_values = torch.segment_reduce(values, reduce, offsets=crow_indices)
+            new_values = torch._segment_reduce(values, reduce, offsets=crow_indices)  # type: ignore[attr-defined]
             new_shape = [mask_input.size(0), 1]
     else:
         assert len(dims) == 2
@@ -1538,14 +1537,22 @@ reduction, is ``{identity_float32}``, except for ``ord=-inf`` it is
 
 def _std_var(
     input: Union[Tensor, MaskedTensor],
-    dim: DimOrDims = None,
-    unbiased: Optional[bool] = False,
+    dim: DimOrDims,
+    unbiased: Optional[bool],
     *,
-    keepdim: Optional[bool] = False,
-    dtype: Optional[DType] = None,
-    mask: Optional[Tensor] = None,
-    take_sqrt: Optional[bool] = False,
+    correction_opt: Optional[Union[int, float]],
+    keepdim: Optional[bool],
+    dtype: Optional[DType],
+    mask: Optional[Tensor],
+    take_sqrt: Optional[bool],
 ) -> Tensor:
+    assert (unbiased is None or correction_opt is None), "Only one of unbiased and correction may be given"
+    correction = 1.0
+    if unbiased is not None:
+        correction = 1.0 if unbiased else 0.0
+    if correction_opt is not None:
+        correction = sym_float(correction_opt)
+
     if dtype is None:
         dtype = input.dtype
         if not (dtype.is_floating_point or dtype.is_complex):
@@ -1584,8 +1591,11 @@ def _std_var(
             )
         if not keepdim:
             count = count.reshape(total.shape)
-        if unbiased:
-            count = torch.subtract(count, 1)
+        if correction != 0:
+            real_dtype = (corresponding_real_dtype(compute_dtype)
+                          if compute_dtype.is_complex else compute_dtype)
+            count = count.to(real_dtype)
+            count = torch.subtract(count, correction)
             count = torch.maximum(count, count.new_zeros([]))
         output = torch.divide(total, count).to(dtype=dtype)
         if take_sqrt:
@@ -1601,8 +1611,9 @@ def _std_var(
 def var(
     input: Union[Tensor, MaskedTensor],
     dim: DimOrDims = None,
-    unbiased: Optional[bool] = False,
+    unbiased: Optional[bool] = None,
     *,
+    correction: Optional[Union[int, float]] = None,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
     mask: Optional[Tensor] = None,
@@ -1619,6 +1630,7 @@ fully masked-out elements, have ``nan`` values.
         input=input,
         dim=dim,
         unbiased=unbiased,
+        correction_opt=correction,
         keepdim=keepdim,
         dtype=dtype,
         mask=mask,
@@ -1630,8 +1642,9 @@ fully masked-out elements, have ``nan`` values.
 def std(
     input: Union[Tensor, MaskedTensor],
     dim: DimOrDims = None,
-    unbiased: Optional[bool] = False,
+    unbiased: Optional[bool] = None,
     *,
+    correction: Optional[int] = None,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
     mask: Optional[Tensor] = None,
@@ -1648,6 +1661,7 @@ fully masked-out elements, have ``nan`` values.
         input=input,
         dim=dim,
         unbiased=unbiased,
+        correction_opt=correction,
         keepdim=keepdim,
         dtype=dtype,
         mask=mask,

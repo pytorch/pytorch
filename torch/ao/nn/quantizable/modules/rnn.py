@@ -10,6 +10,11 @@ We will recreate all the RNN modules as we require the modules to be decomposed
 into its building blocks to be able to observe.
 """
 
+__all__ = [
+    "LSTMCell",
+    "LSTM"
+]
+
 class LSTMCell(torch.nn.Module):
     r"""A quantizable long short-term memory (LSTM) cell.
 
@@ -17,7 +22,7 @@ class LSTMCell(torch.nn.Module):
 
     Examples::
 
-        >>> import torch.nn.quantizable as nnqa
+        >>> import torch.ao.nn.quantizable as nnqa
         >>> rnn = nnqa.LSTMCell(10, 20)
         >>> input = torch.randn(6, 10)
         >>> hx = torch.randn(3, 20)
@@ -41,11 +46,21 @@ class LSTMCell(torch.nn.Module):
         self.hgates = torch.nn.Linear(hidden_dim, 4 * hidden_dim, bias=bias, **factory_kwargs)
         self.gates = torch.ao.nn.quantized.FloatFunctional()
 
+        self.input_gate = torch.nn.Sigmoid()
+        self.forget_gate = torch.nn.Sigmoid()
+        self.cell_gate = torch.nn.Tanh()
+        self.output_gate = torch.nn.Sigmoid()
+
         self.fgate_cx = torch.ao.nn.quantized.FloatFunctional()
         self.igate_cgate = torch.ao.nn.quantized.FloatFunctional()
         self.fgate_cx_igate_cgate = torch.ao.nn.quantized.FloatFunctional()
 
         self.ogate_cy = torch.ao.nn.quantized.FloatFunctional()
+
+        self.initial_hidden_state_qparams: Tuple[float, int] = (1.0, 0)
+        self.initial_cell_state_qparams: Tuple[float, int] = (1.0, 0)
+        self.hidden_state_dtype: torch.dtype = torch.quint8
+        self.cell_state_dtype: torch.dtype = torch.quint8
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         if hidden is None or hidden[0] is None or hidden[1] is None:
@@ -58,16 +73,17 @@ class LSTMCell(torch.nn.Module):
 
         input_gate, forget_gate, cell_gate, out_gate = gates.chunk(4, 1)
 
-        input_gate = torch.sigmoid(input_gate)
-        forget_gate = torch.sigmoid(forget_gate)
-        cell_gate = torch.tanh(cell_gate)
-        out_gate = torch.sigmoid(out_gate)
+        input_gate = self.input_gate(input_gate)
+        forget_gate = self.forget_gate(forget_gate)
+        cell_gate = self.cell_gate(cell_gate)
+        out_gate = self.output_gate(out_gate)
 
         fgate_cx = self.fgate_cx.mul(forget_gate, cx)
         igate_cgate = self.igate_cgate.mul(input_gate, cell_gate)
         fgate_cx_igate_cgate = self.fgate_cx_igate_cgate.add(fgate_cx, igate_cgate)
         cy = fgate_cx_igate_cgate
 
+        # TODO: make this tanh a member of the module so its qparams can be configured
         tanh_cy = torch.tanh(cy)
         hy = self.ogate_cy.mul(out_gate, tanh_cy)
         return hy, cy
@@ -75,8 +91,10 @@ class LSTMCell(torch.nn.Module):
     def initialize_hidden(self, batch_size: int, is_quantized: bool = False) -> Tuple[Tensor, Tensor]:
         h, c = torch.zeros((batch_size, self.hidden_size)), torch.zeros((batch_size, self.hidden_size))
         if is_quantized:
-            h = torch.quantize_per_tensor(h, scale=1.0, zero_point=0, dtype=torch.quint8)
-            c = torch.quantize_per_tensor(c, scale=1.0, zero_point=0, dtype=torch.quint8)
+            (h_scale, h_zp) = self.initial_hidden_state_qparams
+            (c_scale, c_zp) = self.initial_cell_state_qparams
+            h = torch.quantize_per_tensor(h, scale=h_scale, zero_point=h_zp, dtype=self.hidden_state_dtype)
+            c = torch.quantize_per_tensor(c, scale=c_scale, zero_point=c_zp, dtype=self.cell_state_dtype)
         return h, c
 
     def _get_name(self):
@@ -129,8 +147,9 @@ class _LSTMSingleLayer(torch.nn.Module):
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):
         result = []
-        for xx in x:
-            hidden = self.cell(xx, hidden)
+        seq_len = x.shape[0]
+        for i in range(seq_len):
+            hidden = self.cell(x[i], hidden)
             result.append(hidden[0])  # type: ignore[index]
         result_tensor = torch.stack(result, 0)
         return result_tensor, hidden
@@ -255,7 +274,7 @@ class LSTM(torch.nn.Module):
 
     Examples::
 
-        >>> import torch.nn.quantizable as nnqa
+        >>> import torch.ao.nn.quantizable as nnqa
         >>> rnn = nnqa.LSTM(10, 20, 2)
         >>> input = torch.randn(5, 3, 10)
         >>> h0 = torch.randn(2, 3, 20)
@@ -332,11 +351,11 @@ class LSTM(torch.nn.Module):
             if isinstance(hidden_non_opt[0], Tensor):
                 hx = hidden_non_opt[0].reshape(self.num_layers, num_directions,
                                                max_batch_size,
-                                               self.hidden_size).unbind(0)
+                                               self.hidden_size)
                 cx = hidden_non_opt[1].reshape(self.num_layers, num_directions,
                                                max_batch_size,
-                                               self.hidden_size).unbind(0)
-                hxcx = [(hx[idx].squeeze_(0), cx[idx].squeeze_(0)) for idx in range(self.num_layers)]
+                                               self.hidden_size)
+                hxcx = [(hx[idx].squeeze(0), cx[idx].squeeze(0)) for idx in range(self.num_layers)]
             else:
                 hxcx = hidden_non_opt
 
@@ -373,6 +392,7 @@ class LSTM(torch.nn.Module):
         for idx in range(other.num_layers):
             observed.layers[idx] = _LSTMLayer.from_float(other, idx, qconfig,
                                                          batch_first=False)
+        # TODO: Remove setting observed to eval to enable QAT.
         observed.eval()
         observed = torch.ao.quantization.prepare(observed, inplace=True)
         return observed

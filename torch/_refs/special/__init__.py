@@ -17,6 +17,7 @@ from torch._prims_common import (
 )
 from torch._prims_common.wrappers import elementwise_type_promotion_wrapper, out_wrapper
 from torch._refs import (
+    _make_alias,
     _make_elementwise_binary_reference,
     _make_elementwise_unary_reference,
 )
@@ -42,11 +43,11 @@ __all__ = [
     "xlog1py",
     "zeta",
 ]
+aten = torch._ops.ops.aten
 
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.special_bessel_j0,
 )
 def bessel_j0(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_j0(a)
@@ -54,13 +55,12 @@ def bessel_j0(a: TensorLikeType) -> TensorLikeType:
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.special_bessel_j1,
 )
 def bessel_j1(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_j1(a)
 
 
-@register_decomposition(torch.ops.aten.special_entr)
+@register_decomposition(aten.special_entr)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -74,7 +74,7 @@ def entr(a: TensorLikeType) -> TensorLikeType:
     )
 
 
-@register_decomposition(torch.ops.aten.special_erfcx)
+@register_decomposition(aten.special_erfcx)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -85,31 +85,31 @@ def erfcx(a: TensorLikeType) -> TensorLikeType:
 
 
 # alias for sigmoid
-expit = torch.sigmoid
+expit = _make_alias(torch.sigmoid, "expit")
 
 
 @_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i0e
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def i0e(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i0e(a)
 
 
 @_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i1
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def i1(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i1(a)
 
 
 @_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i1e
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def i1e(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i1e(a)
 
 
-@register_decomposition(torch.ops.aten.special_log_ndtr)
+@register_decomposition(aten.special_log_ndtr)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -122,11 +122,11 @@ def log_ndtr(a: TensorLikeType) -> TensorLikeType:
     return torch.where(
         a < 1.0,
         torch.log(torch.special.erfcx(-t) / 2) - t * t,
-        torch.log1p(-refs.erfc(t) / 2),
+        torch.log1p(-torch.erfc(t) / 2),
     )
 
 
-@register_decomposition(torch.ops.aten.logit)
+@register_decomposition(aten.logit)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self",),
@@ -141,14 +141,14 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
 
 
-@register_decomposition(torch.ops.aten.special_xlog1py)
+@register_decomposition(aten.special_xlog1py)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def xlog1py(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]):
-    utils.check(
+    torch._check(
         isinstance(a, TensorLike) or isinstance(b, TensorLike),
         lambda: 'Expected either argument a or b to be a Tensor"',
     )
@@ -162,11 +162,11 @@ def xlog1py(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, Numbe
     # mypy: expected "Tensor"
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
-    rhs = torch.where(torch.eq(a, 0), 0, torch.mul(a, refs.log1p(b)))
+    rhs = torch.where(torch.eq(a, 0), 0, torch.mul(a, torch.log1p(b)))
     return torch.where(torch.isnan(b), float("nan"), rhs)
 
 
-@register_decomposition(torch.ops.aten.mvlgamma)
+@register_decomposition(aten.mvlgamma)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -178,7 +178,7 @@ def multigammaln(a: TensorLikeType, p: int) -> TensorLikeType:
     return torch.sum(torch.lgamma(a.unsqueeze(-1) + b), dim=-1) + c
 
 
-@register_decomposition(torch.ops.aten.special_ndtr)
+@register_decomposition(aten.special_ndtr)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -191,7 +191,7 @@ def ndtr(a: TensorLikeType) -> TensorLikeType:
     return (1 + torch.erf(a_sqrt_2)) * 0.5
 
 
-@register_decomposition(torch.ops.aten.special_ndtri)
+@register_decomposition(aten.special_ndtri)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -223,14 +223,14 @@ def softmax(
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.special_spherical_bessel_j0,
 )
 def spherical_bessel_j0(a: TensorLikeType) -> TensorLikeType:
     return prims.spherical_bessel_j0(a)
 
 
-zeta = _make_elementwise_binary_reference(
-    prims.zeta,  # type: ignore[has-type]
+# TODO: add docstring
+@_make_elementwise_binary_reference(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.special_zeta,
 )
+def zeta(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    return prims.zeta(a, b)

@@ -9,7 +9,7 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+namespace at::native {
 
 void maximum_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
@@ -95,4 +95,4 @@ REGISTER_DISPATCH(minimum_stub, &minimum_kernel_cuda);
 REGISTER_DISPATCH(fmax_stub, &fmax_kernel_cuda);
 REGISTER_DISPATCH(fmin_stub, &fmin_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

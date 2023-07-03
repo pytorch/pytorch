@@ -9,7 +9,6 @@ import json
 import logging
 from collections import defaultdict
 from caffe2.python import utils
-from future.utils import viewitems
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -379,7 +378,7 @@ def main():
                 caffe2_pb2.NetDef: lambda x: {x.name: x.op},
             }
         )
-    for key, operators in viewitems(graphs):
+    for key, operators in graphs.items():
         if args.minimal:
             graph = GetPydotGraphMinimal(
                 operators,

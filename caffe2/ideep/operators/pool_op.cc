@@ -28,7 +28,7 @@ class IDEEPPoolOp final : public IDEEPConvPoolOpBase {
     if (operator_def.type().substr(0, 7) == "MaxPool") {
       algo_ = ialgo::pooling_max;
     } else if (operator_def.type().substr(0, 11) == "AveragePool") {
-      algo_ = ialgo::pooling_avg;
+      algo_ = ialgo::pooling_avg_exclude_padding;
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
     }
@@ -82,7 +82,7 @@ class IDEEPPoolGradientOp final : public IDEEPConvPoolOpBase {
     if (operator_def.type().substr(0, 15) == "MaxPoolGradient") {
       algo_ = ialgo::pooling_max;
     } else if (operator_def.type().substr(0, 19) == "AveragePoolGradient") {
-      algo_ = ialgo::pooling_avg;
+      algo_ = ialgo::pooling_avg_exclude_padding;
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
     }

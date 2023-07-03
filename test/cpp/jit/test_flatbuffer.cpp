@@ -27,6 +27,14 @@
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <unordered_set>
+
+#if defined(FB_XPLAT_BUILD) || defined(FBCODE_CAFFE2)
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h> // NOLINT
+namespace flatbuffers = flatbuffers_fbsource;
+#define FLATBUFFERS_MAX_ALIGNMENT FLATBUFFERS_FBSOURCE_MAX_ALIGNMENT
+#else
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
+#endif
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
@@ -44,6 +52,23 @@ mobile::Module parse_mobile_module(
       should_copy_tensor_memory);
 }
 } // namespace
+
+TEST(FlatbufferTest, LoadMalformedModule) {
+  // Manually create some data with Flatbuffer header.
+  std::stringstream bad_data;
+  bad_data << "PK\x03\x04PTMF\x00\x00"
+           << "*}NV\xb3\xfa\xdf\x00pa";
+
+  // Loading module from it should throw an exception.
+  // Check guard at parse_and_initialize_mobile_module_for_jit.
+  ASSERT_THROWS_WITH_MESSAGE(
+      torch::jit::load(bad_data), "Malformed Flatbuffer module");
+
+  // Check guard at parse_and_initialize_mobile_module.
+  ASSERT_THROWS_WITH_MESSAGE(
+      parse_mobile_module(bad_data.str().data(), bad_data.str().size()),
+      "Malformed Flatbuffer module");
+}
 
 TEST(FlatbufferTest, UpsampleNearest2d) {
   Module m("m");
@@ -224,6 +249,22 @@ TEST(FlatbufferTest, ExtraFiles) {
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
+
+  // Test if flatbuffer does not require any explicit key entries mapping in the
+  // extra file map.
+  std::unordered_map<std::string, std::string>
+      loaded_extra_files_without_explicit_entries;
+  auto mobile_module3 = _load_for_mobile(
+      ss,
+      c10::nullopt,
+      loaded_extra_files_without_explicit_entries,
+      MobileModuleLoadOptions::PARSE_ALL_EXTRA_FILE_MAPS);
+
+  ASSERT_EQ(
+      loaded_extra_files_without_explicit_entries["metadata.json"], "abc");
+  ASSERT_EQ(
+      loaded_extra_files_without_explicit_entries["mobile_info.json"],
+      "{\"key\": 23}");
 }
 
 TEST(FlatbufferTest, Conv) {
@@ -1796,13 +1837,9 @@ TEST(FlatbufferUpgraderTest, DivScalarInplaceIntV2) {
 
 } // namespace jit
 } // namespace torch
-#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h>
 namespace torch {
 namespace jit {
 
-#if defined(FBCODE_CAFFE2) or defined(FB_XPLAT_BUILD)
-namespace flatbuffers = flatbuffers_fbsource;
-#endif
 /**
  * An Allocator that can only deallocate (using delete []), counting
  * the number of times that it has been asked to deallocate.

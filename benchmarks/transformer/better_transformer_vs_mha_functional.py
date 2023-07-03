@@ -185,8 +185,8 @@ def main(save_path: Optional[Path], error_path: Optional[Path]):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--save_path", type=str, help="Path to save the results")
-    parser.add_argument("--error_save_path", type=str, help="Path to save the errors")
+    parser.add_argument("--save-path", "--save_path", type=str, help="Path to save the results")
+    parser.add_argument("--error-save-path", "--error_save_path", type=str, help="Path to save the errors")
 
     args = parser.parse_args()
     save_path = Path(args.save_path) if args.save_path else None

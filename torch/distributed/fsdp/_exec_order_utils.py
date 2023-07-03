@@ -1,13 +1,14 @@
 import itertools
 import warnings
 from enum import auto, Enum
-from typing import cast, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
-from torch.distributed.fsdp._common_utils import _get_param_to_unflat_param_names
-from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
+from torch.distributed.fsdp._common_utils import _FSDPState, _get_param_to_fqns
+from torch.distributed.fsdp.flat_param import FlatParamHandle
 
 _HandlesKey = Tuple[FlatParamHandle, ...]
 
@@ -44,7 +45,7 @@ class _ExecOrderData:
         self.handles_post_forward_order: List[_HandlesKey] = []
         # Maps each handles key to its index in `handles_post_forward_order`
         self.handles_to_post_forward_order_index: Dict[_HandlesKey, int] = {}
-        self.is_first_iter = True
+        self._iter = 0
 
         # Gives the max number of backward/forward prefetched all-gathers by a
         # single module
@@ -63,14 +64,15 @@ class _ExecOrderData:
         # same across ranks for the execution order validation to work
         self.handle_to_handle_index: Dict[FlatParamHandle, int] = {}
         # Names are prefixed from the root module
-        self.flat_param_to_prefixed_param_names: Dict[FlatParameter, List[str]] = {}
+        self.param_to_fqn: Dict[nn.Parameter, List[str]] = {}
         # Current index in the pre-forward execution order
         self.current_order_index = 0
         self.warn_status = _ExecOrderWarnStatus.NONE
 
     def init(
         self,
-        fsdp_root: nn.Module,  # `FullyShardedDataParallel`
+        state: _FSDPState,
+        root_module: nn.Module,
         process_group: dist.ProcessGroup,
     ) -> None:
         """
@@ -82,18 +84,18 @@ class _ExecOrderData:
         self.rank = process_group.rank()
         self.world_size = process_group.size()
         # Fix an order over the handles, which should be the same across ranks
-        for fsdp_module in fsdp_root.fsdp_modules(fsdp_root):  # type: ignore[operator]
-            for handle in fsdp_module._handles:
-                index = len(self.all_handles)
-                self.all_handles.append(handle)
-                self.handle_to_handle_index[handle] = index
-        self.flat_param_to_prefixed_param_names = cast(
-            Dict[FlatParameter, List[str]],
-            _get_param_to_unflat_param_names(fsdp_root),
-        )
+        for handle in traversal_utils._get_fsdp_handles(root_module):
+            index = len(self.all_handles)
+            self.all_handles.append(handle)
+            self.handle_to_handle_index[handle] = index
+        self.param_to_fqn = _get_param_to_fqns(root_module)
         # TODO (awgu): We can broadcast the metadata of rank 0's `all_handles`
         # to check that all ranks have the same handles in the same order.
         # https://github.com/pytorch/pytorch/issues/79620
+
+    @property
+    def is_first_iter(self) -> bool:
+        return self._iter == 0
 
     def get_handles_to_backward_prefetch(
         self,
@@ -225,6 +227,8 @@ class _ExecOrderData:
                 local_num_valid_indices,
                 group=self.process_group,
             )
+            # Copy entire tensor from D2H once to avoid per element D2H copies
+            world_num_valid_indices = world_num_valid_indices.cpu()
             # Check that all ranks plan to all-gather the same number of
             # parameters
             # TODO (awgu): Since every module has at most one handle in the
@@ -249,6 +253,8 @@ class _ExecOrderData:
             dist.all_gather_into_tensor(
                 world_indices, local_indices, group=self.process_group
             )
+            # Copy entire tensor from D2H once to avoid per element D2H copies
+            world_indices = world_indices.cpu()
             # Check that all ranks plan to all-gather the same index parameters
             for (r1, i1), (r2, i2) in itertools.combinations(
                 (
@@ -331,39 +337,34 @@ class _ExecOrderData:
         handle_indices: Tuple[int, ...],
     ) -> List[List[str]]:
         """
-        Returns a list of prefixed parameter names for each handle in
-        ``handle_indices``. If a handle index is invalid, then its prefixed
-        parameter names are omitted from the returned list.
+        Returns a list of FQNs for each handle in ``handle_indices``. If a
+        handle index is invalid, then its FQNs are omitted from the returned
+        list.
         """
-        prefixed_param_names: List[List[str]] = []
+        fqns: List[List[str]] = []
         for index in handle_indices:
             if index is None or index < 0 or index >= len(self.all_handles):
                 continue
             handle = self.all_handles[index]
             flat_param = handle.flat_param
-            prefixed_param_names.append(
-                self.flat_param_to_prefixed_param_names[flat_param]
-            )
-        return prefixed_param_names
+            fqns.append(self.param_to_fqn[flat_param])
+        return fqns
 
     def _get_names_from_handles(
         self,
         handles_key: _HandlesKey,
     ) -> List[List[str]]:
         """
-        Returns a list of prefixed parameter names for each handle in
-        ``handles_key``. If a handle is invalid, then its prefixed parameter
-        names are omitted from the returned list.
+        Returns a list of FQNs for each handle in ``handles_key``. If a handle
+        is invalid, then its FQNs are omitted from the returned list.
         """
-        prefixed_param_names: List[List[str]] = []
+        fqns: List[List[str]] = []
         for handle in handles_key:
             flat_param = handle.flat_param
-            if flat_param not in self.flat_param_to_prefixed_param_names:
+            if flat_param not in self.param_to_fqn:
                 continue
-            prefixed_param_names.append(
-                self.flat_param_to_prefixed_param_names[flat_param]
-            )
-        return prefixed_param_names
+            fqns.append(self.param_to_fqn[flat_param])
+        return fqns
 
     def next_iter(self):
         """
@@ -371,7 +372,7 @@ class _ExecOrderData:
         called in the post-backward callback since that marks the true end of
         an iteration.
         """
-        self.is_first_iter = False
+        self._iter += 1
         self.handles_to_post_forward_order_index.clear()
         self.handles_post_forward_order.clear()
         if self._checking_order:

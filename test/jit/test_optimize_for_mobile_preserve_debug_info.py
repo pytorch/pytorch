@@ -40,7 +40,7 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
     def test_replace_conv1d_with_conv2d(self):
         class TestConv1d(torch.nn.Module):
             def __init__(self, weight, bias):
-                super(TestConv1d, self).__init__()
+                super().__init__()
                 self.weight = weight
                 self.bias = bias
 
@@ -167,7 +167,7 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
                 conv2d_weight,
                 conv2d_bias,
             ):
-                super(TestFuseActivationLinearConv2d, self).__init__()
+                super().__init__()
                 self.linear_weight = linear_weight
                 self.linear_bias = linear_bias
                 self.conv2d_weight = conv2d_weight

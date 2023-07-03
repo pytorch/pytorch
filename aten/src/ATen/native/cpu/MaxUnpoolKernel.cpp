@@ -9,7 +9,7 @@
 
 #include <c10/util/Optional.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -167,7 +167,7 @@ void cpu_max_unpool_backward(
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   int64_t numel = grad_input.numel();
   int64_t ndim = grad_output.ndimension();
@@ -269,4 +269,4 @@ void max_unpool3d_kernel_impl(
 REGISTER_DISPATCH(max_unpool2d_kernel, &max_unpool2d_kernel_impl);
 REGISTER_DISPATCH(max_unpool3d_kernel, &max_unpool3d_kernel_impl);
 
-}} // at::native
+} // at::native

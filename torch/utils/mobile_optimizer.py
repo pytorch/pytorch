@@ -4,7 +4,7 @@ This module contains utility method for mobile model optimization and lint.
 
 import torch
 from enum import Enum
-from torch._C import MobileOptimizerType
+from torch._C import _MobileOptimizerType as MobileOptimizerType
 from typing import Optional, Set, List, AnyStr
 
 class LintCode(Enum):
@@ -45,7 +45,7 @@ def optimize_for_mobile(
     preserved_methods_str: List[str] = [str(method) for method in preserved_methods]
 
     bundled_inputs_attributes = _get_bundled_inputs_preserved_attributes(script_module, preserved_methods_str)
-    if all([hasattr(script_module, method) for method in bundled_inputs_attributes]):
+    if all(hasattr(script_module, method) for method in bundled_inputs_attributes):
         preserved_methods_str = list(set(preserved_methods_str + bundled_inputs_attributes))
 
     non_exist_methods = []

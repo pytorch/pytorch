@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_init.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
-#include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
+// #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
@@ -40,6 +40,7 @@
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_linear_folding.h>
 #include <torch/csrc/jit/passes/frozen_linear_transpose.h>
 #include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
@@ -84,6 +85,7 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/python_tree_views.h>
 #include <torch/csrc/jit/python/script_init.h>
+#include <torch/csrc/jit/python/utf8_decoding_ignore.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/decomposition_registry.h>
@@ -118,8 +120,7 @@
 #include <tuple>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using c10::AliasInfo;
 using c10::Argument;
@@ -399,6 +400,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_frozen_conv_bn", &FoldFrozenConvBatchnorm)
       .def("_jit_pass_fold_frozen_conv_add_or_sub", &FoldFrozenConvAddOrSub)
       .def("_jit_pass_fold_frozen_conv_mul_or_div", &FoldFrozenConvMulOrDiv)
+      .def("_jit_pass_fold_frozen_linear_bn", &FoldFrozenLinearBatchnorm)
       .def("_jit_pass_convert_frozen_ops_to_mkldnn", &ConvertFrozenOpsToMKLDNN)
       .def("_jit_pass_fuse_frozen_conv_add_relu", &FuseFrozenConvAddRelu)
       .def("_jit_pass_transpose_frozen_linear", &FrozenLinearTranspose)
@@ -642,9 +644,9 @@ void initJITBindings(PyObject* module) {
             std::vector<TypePtr> input_types;
             for (Value* v : g->inputs()) {
               if (auto tt = v->type()->cast<TensorType>()) {
-                input_types.push_back(tt);
+                input_types.emplace_back(tt);
               } else {
-                input_types.push_back(nullptr);
+                input_types.emplace_back(nullptr);
               }
             }
             EraseShapeInformation(g);
@@ -992,7 +994,7 @@ void initJITBindings(PyObject* module) {
 #ifdef TORCH_ENABLE_LLVM
             return true;
 #else
-        return false;
+            return false;
 #endif
           })
       .def(
@@ -1123,63 +1125,127 @@ void initJITBindings(PyObject* module) {
             return retval;
           })
       .def("_jit_pass_batch_mm", BatchMM)
-      .def("_jit_decay_packed_param_input_types", [](Graph& g) {
-        for (Value* i : g.inputs()) {
-          if (i->type() ==
-                  getCustomClass(
-                      "__torch__.torch.classes.quantized.Conv2dPackedParamsBase") ||
-              i->type() ==
-                  getCustomClass(
-                      "__torch__.torch.classes.quantized.Conv3dPackedParamsBase") ||
-              i->type() ==
-                  getCustomClass(
-                      "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
-            // Dummy CompleteTensorType to appease ONNX validator.
-            i->setType(TensorType::create(
-                at::kQInt8,
-                c10::kCPU,
-                std::vector<int64_t>{1},
-                std::vector<int64_t>{1},
-                c10::nullopt));
-          }
-        }
-      });
+      .def(
+          "_jit_decay_packed_param_input_types",
+          [](Graph& g) {
+            for (Value* i : g.inputs()) {
+              if (i->type() ==
+                      getCustomClass(
+                          "__torch__.torch.classes.quantized.Conv2dPackedParamsBase") ||
+                  i->type() ==
+                      getCustomClass(
+                          "__torch__.torch.classes.quantized.Conv3dPackedParamsBase") ||
+                  i->type() ==
+                      getCustomClass(
+                          "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
+                // Dummy CompleteTensorType to appease ONNX validator.
+                i->setType(TensorType::create(
+                    at::kQInt8,
+                    c10::kCPU,
+                    std::vector<int64_t>{1},
+                    std::vector<int64_t>{1},
+                    c10::nullopt));
+              }
+            }
+          })
+      .def("_jit_set_utf8_decoding_ignore", &setUTF8DecodingIgnore);
 
   // NB: This isn't actually used for regular PyTorch symbolic tracing;
   // XLA is what needs this
 #define SYMNODE_UNARY(n) .def(#n, [](c10::SymNode a) { return a->n(); })
-#define SYMNODE_UNARY2(n2, n) .def(#n2, [](c10::SymNode a) { return a->n(); })
 #define SYMNODE_BINARY(n) \
   .def(#n, [](c10::SymNode a, c10::SymNode b) { return a->n(b); })
+#define SYMNODE_SIZES_STRIDES(n)                \
+  .def(                                         \
+      #n,                                       \
+      [](c10::SymNode a,                        \
+         c10::ArrayRef<c10::SymNode> sizes,     \
+         c10::ArrayRef<c10::SymNode> strides) { \
+        return a->n(sizes, strides);            \
+      })
   auto symnode_class =
       py::class_<c10::SymNodeImpl, c10::SymNode>(m, "_SymNode")
+      // clang-format off
       // These DO NOT install magic methods; the SymInt/SymFloat wrapper in
       // Python is responsible for this
       SYMNODE_UNARY(clone)
-      // Named these for consistency with inner python class, but maybe
-      // should change the python side
-      SYMNODE_UNARY2(__bool__, bool_) SYMNODE_UNARY2(__int__, int_)
-          SYMNODE_UNARY2(__sym_int__, sym_int) SYMNODE_UNARY2(
-              __sym_float__, sym_float) SYMNODE_BINARY(add) SYMNODE_BINARY(sub)
-              SYMNODE_BINARY(mul) SYMNODE_BINARY(truediv) SYMNODE_BINARY(pow)
-                  SYMNODE_BINARY(floordiv) SYMNODE_BINARY(mod) SYMNODE_BINARY(
-                      eq) SYMNODE_BINARY(gt) SYMNODE_BINARY(lt)
-                      SYMNODE_BINARY(le) SYMNODE_BINARY(ge) SYMNODE_BINARY(min)
-                          SYMNODE_BINARY(max) SYMNODE_UNARY(ceil)
-                              SYMNODE_UNARY(floor) SYMNODE_UNARY(neg)
-                                  // Intentionally don't set file line, as the
-                                  // Python backtrace matters more here
-                                  .def(
-                                      "guard_int",
-                                      [](c10::SymNode a) {
-                                        return a->guard_int(nullptr, 0);
-                                      })
-                                  .def(
-                                      "__str__",
-                                      [](c10::SymNode a) { return a->str(); })
-                                  .def("__repr__", [](c10::SymNode a) {
-                                    return a->str();
-                                  });
+      SYMNODE_UNARY(is_int)
+      SYMNODE_UNARY(is_float)
+      SYMNODE_UNARY(is_bool)
+      SYMNODE_UNARY(bool_)
+      SYMNODE_UNARY(int_)
+      SYMNODE_UNARY(sym_float)
+      SYMNODE_BINARY(add)
+      SYMNODE_BINARY(sub)
+      SYMNODE_BINARY(mul)
+      SYMNODE_BINARY(truediv)
+      SYMNODE_BINARY(pow)
+      SYMNODE_BINARY(floordiv)
+      SYMNODE_BINARY(mod)
+      SYMNODE_BINARY(eq)
+      SYMNODE_BINARY(ne)
+      SYMNODE_BINARY(gt)
+      SYMNODE_BINARY(lt)
+      SYMNODE_BINARY(le)
+      SYMNODE_BINARY(ge)
+      SYMNODE_BINARY(sym_min)
+      SYMNODE_BINARY(sym_max)
+      SYMNODE_BINARY(sym_and)
+      SYMNODE_BINARY(sym_or)
+      SYMNODE_UNARY(sym_not)
+      SYMNODE_UNARY(ceil)
+      SYMNODE_UNARY(floor)
+      SYMNODE_UNARY(neg)
+      SYMNODE_SIZES_STRIDES(is_contiguous)
+      SYMNODE_SIZES_STRIDES(is_channels_last_contiguous_2d)
+      SYMNODE_SIZES_STRIDES(is_channels_last_contiguous_3d)
+      SYMNODE_SIZES_STRIDES(is_channels_last_strides_2d)
+      SYMNODE_SIZES_STRIDES(is_channels_last_strides_3d)
+      SYMNODE_SIZES_STRIDES(is_non_overlapping_and_dense)
+      // Intentionally don't set file line, as the
+      // Python backtrace matters more here
+      .def(
+          "guard_int",
+          [](c10::SymNode a) {
+            return a->guard_int(nullptr, 0);
+          })
+      .def(
+          "guard_bool",
+          [](c10::SymNode a) {
+            return a->guard_bool(nullptr, 0);
+          })
+      .def(
+          "guard_float",
+          [](c10::SymNode a) {
+            return a->guard_float(nullptr, 0);
+          })
+      .def(
+          "has_hint",
+          [](c10::SymNode a) {
+            return a->has_hint();
+          })
+      .def(
+          "wrap_int",
+          [](c10::SymNode a, int64_t b) {
+            return a->wrap_int(b);
+          })
+      .def(
+          "wrap_float",
+          [](c10::SymNode a, double b) {
+            return a->wrap_float(b);
+          })
+      .def(
+          "wrap_bool",
+          [](c10::SymNode a, bool b) {
+            return a->wrap_bool(b);
+          })
+      .def(
+          "__str__",
+          [](c10::SymNode a) { return a->str(); })
+      .def("__repr__", [](c10::SymNode a) {
+        return a->str();
+      });
+  // clang-format on
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -1283,11 +1349,12 @@ void initJITBindings(PyObject* module) {
                 name, reinterpret_cast<const char*>(data), size);
           })
       .def("archive_name", &PyTorchStreamWriter::archiveName)
+      .def("serialization_id", &PyTorchStreamWriter::serializationId)
       .def(
           "get_all_written_records",
           &PyTorchStreamWriter::getAllWrittenRecords);
 
-  py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
+  py::enum_<MobileOptimizerType>(m, "_MobileOptimizerType")
       .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
       .value(
           "INSERT_FOLD_PREPACK_OPS",
@@ -1299,8 +1366,7 @@ void initJITBindings(PyObject* module) {
           MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)
       .value(
           "VULKAN_AUTOMATIC_GPU_TRANSFER",
-          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER)
-      .export_values();
+          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER);
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
   // that the buffer implement `seek()`, `tell()`, and `read()`.
@@ -1408,9 +1474,15 @@ void initJITBindings(PyObject* module) {
                     at::CPU(scalar_type).typeMeta());
             return at::Tensor(std::move(ptr));
           })
-      .def("get_all_records", [](PyTorchStreamReader& self) {
-        return self.getAllRecords();
-      });
+      .def("serialization_id", &PyTorchStreamReader::serializationId)
+      .def(
+          "get_all_records",
+          [](PyTorchStreamReader& self) { return self.getAllRecords(); })
+      .def(
+          "get_record_offset",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordOffset(key);
+          });
 
   // Used by torch.Package to coordinate deserialization of storages across
   // ScriptModules and eager modules
@@ -1674,6 +1746,11 @@ void initJITBindings(PyObject* module) {
             return self == other;
           })
       .def(
+          "__hash__",
+          [](const FunctionSchema& self) {
+            return std::hash<FunctionSchema>{}(self);
+          })
+      .def(
           "__str__",
           [](FunctionSchema& self) {
             std::stringstream ss;
@@ -1685,6 +1762,8 @@ void initJITBindings(PyObject* module) {
   py::class_<Argument>(m, "Argument")
       .def_property_readonly("name", [](Argument& self) { return self.name(); })
       .def_property_readonly("type", [](Argument& self) { return self.type(); })
+      .def_property_readonly(
+          "real_type", [](Argument& self) { return self.real_type(); })
       .def_property_readonly(
           "N",
           [](Argument& self) -> py::object {
@@ -1812,6 +1891,44 @@ void initJITBindings(PyObject* module) {
                 return nullptr;
               }),
           py::call_guard<py::gil_scoped_release>());
+
+  py::class_<PythonAwaitWrapper, std::shared_ptr<PythonAwaitWrapper>>(
+      m, "_Await")
+      .def(
+          "wait",
+          &PythonAwaitWrapper::wait,
+          py::call_guard<py::gil_scoped_release>())
+      .def("fn", &PythonAwaitWrapper::fn)
+      .def("args", &PythonAwaitWrapper::args)
+      .def("type", &PythonAwaitWrapper::type)
+      .def("is_nowait", &PythonAwaitWrapper::is_nowait)
+      .def(
+          "__getattr__",
+          [](PythonAwaitWrapper& self, const std::string& name) -> py::object {
+            // In eager mode allow Await[W] to be used as W, redirecting getattr
+            // to the result of delayed function.
+            return py::getattr(self.wait(), name.c_str(), py::none());
+          })
+      .def(
+          py::pickle(
+              /* __getstate__ */
+              [](const PythonAwaitWrapper& /* unused */) {
+                TORCH_CHECK(false, "Can not pickle torch.jit._Await");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy Pybind API's
+                // requirement.
+                return py::make_tuple();
+              },
+              /* __setstate__ */
+              [](const py::tuple& /* unused */) { // NOLINT
+                TORCH_CHECK(false, "Can not unpickle torch.jit._Await");
+                // Note that this return has no meaning since we always
+                // throw, it's only here to satisfy PyBind's API
+                // requirement.
+                return nullptr;
+              }),
+          py::call_guard<py::gil_scoped_release>());
+
   m.def("_is_alias_of", [](const py::object& self, const py::object& other) {
     c10::optional<IValue> self_value = toTypeInferredIValueOptional(self);
     c10::optional<IValue> other_value = toTypeInferredIValueOptional(other);
@@ -1832,8 +1949,25 @@ void initJITBindings(PyObject* module) {
     }
     return self_value->overlaps(*other_value);
   });
-  m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
+  m.def("_awaitable", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
+    py::tuple args_tup(args.size() - 1);
+    for (const auto i : c10::irange(1, args.size())) {
+      args_tup[i - 1] = args[i];
+    }
+    return std::make_shared<PythonAwaitWrapper>(
+        py::cast<py::function>(args[0]), std::move(args_tup));
+  });
+  m.def("_awaitable_nowait", [](py::handle input) {
+    return std::make_shared<PythonAwaitWrapper>(std::move(input));
+  });
+  m.def(
+      "_awaitable_wait", [](const std::shared_ptr<PythonAwaitWrapper>& py_aw) {
+        TORCH_CHECK(py_aw, "Await can't be None");
+        return py_aw->wait();
+      });
+  m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
+    AT_ASSERT(!args.empty());
 
     py::function f = py::cast<py::function>(args[0]);
     py::tuple args_tup(args.size() - 1);
@@ -1944,7 +2078,7 @@ void initJITBindings(PyObject* module) {
   initJitBackendBindings(module);
   initStaticModuleBindings(module);
   initTensorExprBindings(module);
-  initNvFuserPythonBindings(module);
+  // initNvFuserPythonBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
@@ -1962,5 +2096,5 @@ void initJITBindings(PyObject* module) {
   atexit.attr("register")(
       py::cpp_function([]() { setPrintHandler(getDefaultPrintHandler()); }));
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit

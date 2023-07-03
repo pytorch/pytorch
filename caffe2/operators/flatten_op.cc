@@ -15,7 +15,7 @@ $\bigl((d_0 * d_1 * ... * d_{(axis-1)}), (d_{axis} * d_{(axis+1)} * ... * d_n)\b
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/flatten_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/flatten_op.cc
 
 <details>
 

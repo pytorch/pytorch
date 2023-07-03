@@ -43,7 +43,7 @@ class LonelyRankProcessGroup(dist.ProcessGroup):
     This PG only supports world_size of 1
     """
     def __init__(self, rank, world, use_wrapper):
-        super(LonelyRankProcessGroup, self).__init__(rank, world)
+        super().__init__(rank, world)
         assert rank == 0
         assert world == 1
 
@@ -91,7 +91,7 @@ class LonelyRankProcessGroup(dist.ProcessGroup):
 # We cannot use parametrize as some tests are defined on the base class and use _get_process_group
 class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
     def setUp(self):
-        super(AbstractDDPSingleRank, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     @property
@@ -99,7 +99,7 @@ class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
         return 1
 
     def tearDown(self):
-        super(AbstractDDPSingleRank, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:

@@ -5,7 +5,7 @@ import os
 import logging
 import pandas as pd
 
-from functorch._src.benchmark_utils import compute_utilization
+from torch._functorch.benchmark_utils import compute_utilization
 
 # process the chrome traces output by the pytorch profiler
 # require the json input file's name to be in format {model_name}_chrome_trace_*.json
@@ -61,7 +61,7 @@ def main():
             utilization, mm_conv_utilization = compute_utilization(filenames, total_length)
             print(f"{modelname}, {utilization}, {mm_conv_utilization}")
         except BaseException:
-            logging.exception(f"{filename}, ERROR")
+            logging.exception("%s, ERROR", filename)
             print(f"{filename}, ERROR")
 
 if __name__ == "__main__":

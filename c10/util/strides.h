@@ -9,7 +9,7 @@ static inline DimVector contiguous_strides(const IntArrayRef sizes) {
   using Int = IntArrayRef::value_type;
   const Int dims = static_cast<Int>(sizes.size());
 
-  // With this intialisation we get the case dim == 0 or 1 right
+  // With this initialisation we get the case dim == 0 or 1 right
   DimVector strides(dims, 1);
 
   for (auto i = dims - 2; i >= 0; --i) {

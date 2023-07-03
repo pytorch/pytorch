@@ -82,15 +82,15 @@ _DTYPE_STR_TO_DTYPE = {
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--pr", type=str, default=_PR_LIST[0], choices=_PR_LIST)
-    parser.add_argument("--num_gpus", type=int, default=None)
-    parser.add_argument("--test_variance", action="store_true")
+    parser.add_argument("--num-gpus", "--num_gpus", type=int, default=None)
+    parser.add_argument("--test-variance", "--test_variance", action="store_true")
 
     # (Implementation details)
-    parser.add_argument("--DETAIL_context", type=str, choices=(_MAIN, _SUBPROCESS), default=_MAIN)
-    parser.add_argument("--DETAIL_device", type=str, choices=(_CPU, _GPU), default=None)
-    parser.add_argument("--DETAIL_env", type=str, default=None)
-    parser.add_argument("--DETAIL_result_file", type=str, default=None)
-    parser.add_argument("--DETAIL_seed", type=int, default=None)
+    parser.add_argument("--DETAIL-context", "--DETAIL_context", type=str, choices=(_MAIN, _SUBPROCESS), default=_MAIN)
+    parser.add_argument("--DETAIL-device", "--DETAIL_device", type=str, choices=(_CPU, _GPU), default=None)
+    parser.add_argument("--DETAIL-env", "--DETAIL_env", type=str, default=None)
+    parser.add_argument("--DETAIL-result-file", "--DETAIL_result_file", type=str, default=None)
+    parser.add_argument("--DETAIL-seed", "--DETAIL_seed", type=int, default=None)
 
     args = parser.parse_args()
     if args.num_gpus is None:
@@ -101,11 +101,11 @@ def parse_args():
 _SUBPROCESS_CMD_TEMPLATE = (
     "source activate {source_env} && python -m examples.end_to_end "
     "--pr {pr} "
-    "--DETAIL_context subprocess "
-    "--DETAIL_device {device} "
-    "--DETAIL_env {env} "
-    "--DETAIL_result_file {result_file} "
-    "--DETAIL_seed {seed}"
+    "--DETAIL-context subprocess "
+    "--DETAIL-device {device} "
+    "--DETAIL-env {env} "
+    "--DETAIL-result-file {result_file} "
+    "--DETAIL-seed {seed}"
 )
 
 

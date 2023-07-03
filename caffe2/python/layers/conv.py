@@ -31,7 +31,7 @@ class Conv(ModelLayer):
                  kernel_optim=None, bias_optim=None,
                  name='conv', **kwargs):
 
-        super(Conv, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Scalar), "Incorrect input type"
         # input num_channels (C) is needed
         input_dims = input_record.field_type().shape

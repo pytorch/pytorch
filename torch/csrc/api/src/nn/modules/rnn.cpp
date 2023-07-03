@@ -28,7 +28,7 @@ namespace nn {
 /// https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t
 enum class CuDNNMode { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
 
-CuDNNMode get_cudnn_mode_for_rnn(
+static CuDNNMode get_cudnn_mode_for_rnn(
     detail::RNNOptionsBase::rnn_options_base_mode_t mode) {
   if (c10::get_if<enumtype::kRNN_RELU>(&mode)) {
     return CuDNNMode::RNN_RELU;
@@ -43,7 +43,7 @@ CuDNNMode get_cudnn_mode_for_rnn(
   }
 }
 
-Tensor apply_permutation(
+static Tensor apply_permutation(
     const Tensor& tensor,
     const Tensor& permutation,
     int64_t dim = 1) {
@@ -167,7 +167,7 @@ void RNNImplBase<Derived>::reset() {
     if (named_parameters.contains(wn)) {
       flat_weights_.emplace_back(named_parameters[wn]);
     } else {
-      flat_weights_.emplace_back(Tensor());
+      flat_weights_.emplace_back();
     }
   }
 
@@ -246,7 +246,7 @@ void RNNImplBase<Derived>::reset_flat_weights() {
     if (named_parameters.contains(wn)) {
       flat_weights_.emplace_back(named_parameters[wn]);
     } else {
-      flat_weights_.emplace_back(Tensor());
+      flat_weights_.emplace_back();
     }
   }
 }
@@ -397,8 +397,8 @@ template class RNNImplBase<RNNImpl>;
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-detail::RNNOptionsBase::rnn_options_base_mode_t compute_rnn_options_base_mode(
-    RNNOptions::nonlinearity_t nonlinearity) {
+static detail::RNNOptionsBase::rnn_options_base_mode_t
+compute_rnn_options_base_mode(RNNOptions::nonlinearity_t nonlinearity) {
   if (c10::get_if<enumtype::kTanh>(&nonlinearity)) {
     return torch::kRNN_TANH;
   } else if (c10::get_if<enumtype::kReLU>(&nonlinearity)) {

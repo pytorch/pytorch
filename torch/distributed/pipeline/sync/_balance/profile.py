@@ -107,7 +107,7 @@ def profile_sizes(
         latent_size = memory_after - memory_before
 
         # Analyze size of parameters.
-        param_size = sum(p.storage().nbytes() for p in layer.parameters())
+        param_size = sum(p._typed_storage()._nbytes() for p in layer.parameters())
 
         # Combine size of parameters and activations with normalize scales.
         size = latent_size * latent_scale + param_size * param_scale

@@ -11,7 +11,7 @@ class QuantizedLinear(torch.jit.ScriptModule):
     __constants__ = ['scale', 'zero_point']
 
     def __init__(self, other):
-        super(QuantizedLinear, self).__init__()
+        super().__init__()
         warnings.warn(
             "torch.jit.QuantizedLinear is deprecated and will be removed in an upcoming "
             "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.Linear instead.")
@@ -56,7 +56,7 @@ class QuantizedLinear(torch.jit.ScriptModule):
 class QuantizedLinearFP16(torch.jit.ScriptModule):
 
     def __init__(self, other):
-        super(QuantizedLinearFP16, self).__init__()
+        super().__init__()
         warnings.warn(
             "torch.jit.QuantizedLinearFP16 is deprecated and will be removed in an upcoming "
             "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.Linear instead.")
@@ -96,7 +96,7 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
                      'zero_point_ih', 'zero_point_hh']
 
     def __init__(self, other):
-        super(QuantizedRNNCellBase, self).__init__()
+        super().__init__()
         warnings.warn(
             "torch.jit.QuantizedRNNCellBase is deprecated and will be removed in an upcoming "
             "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.RNNCell instead.")
@@ -174,7 +174,7 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
                      'zero_point_ih', 'zero_point_hh', 'nonlinearity']
 
     def __init__(self, other):
-        super(QuantizedRNNCell, self).__init__(other)
+        super().__init__(other)
         warnings.warn(
             "torch.jit.QuantizedRNNCell is deprecated and will be removed in an upcoming "
             "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.RNNCell instead.")
@@ -209,7 +209,7 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
 
 class QuantizedLSTMCell(QuantizedRNNCellBase):
     def __init__(self, other):
-        super(QuantizedLSTMCell, self).__init__(other)
+        super().__init__(other)
         warnings.warn(
             "torch.jit.QuantizedLSTMCell is deprecated and will be removed in an upcoming "
             "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.LSTMCell instead.")
@@ -232,7 +232,7 @@ class QuantizedLSTMCell(QuantizedRNNCellBase):
 
 class QuantizedGRUCell(QuantizedRNNCellBase):
     def __init__(self, other):
-        super(QuantizedGRUCell, self).__init__(other)
+        super().__init__(other)
         warnings.warn(
             "torch.jit.QuantizedGRUCell is deprecated and will be removed in an upcoming "
             "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.GRUCell instead.")
@@ -260,7 +260,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                      'batch_first', 'dropout', 'bidirectional', 'dtype']
 
     def __init__(self, other, dtype=torch.int8):
-        super(QuantizedRNNBase, self).__init__()
+        super().__init__()
         warnings.warn(
             "torch.jit.QuantizedRNNBase is deprecated and will be removed in an upcoming "
             "PyTorch release. Please use the torch.ao.nn.quantized.dynamic instead.")
@@ -365,7 +365,7 @@ class QuantizedLSTM(QuantizedRNNBase):
     __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
     def __init__(self, other, dtype):
-        super(QuantizedLSTM, self).__init__(other, dtype)
+        super().__init__(other, dtype)
         warnings.warn(
             "torch.jit.QuantizedLSTM is deprecated and will be removed in an upcoming "
             "PyTorch release. Please use the torch.ao.nn.quantized.dynamic.LSTM instead.")
@@ -406,13 +406,15 @@ class QuantizedLSTM(QuantizedRNNBase):
         return output, self.permute_hidden(hidden, unsorted_indices)
 
     @torch.jit.script_method
-    def forward_packed(self, input: PackedSequence, hx: Optional[Tuple[Tensor, Tensor]] = None
-                       ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:
-        input, batch_sizes, sorted_indices, unsorted_indices = input
-        max_batch_size = batch_sizes[0]
-        max_batch_size = int(max_batch_size)
+    def forward_packed(
+        self, input: PackedSequence, hx: Optional[Tuple[Tensor, Tensor]] = None
+    ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:
+        input_, batch_sizes, sorted_indices, unsorted_indices = input
+        max_batch_size = int(batch_sizes[0])
 
-        output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
+        output, hidden = self.forward_impl(
+            input_, hx, batch_sizes, max_batch_size, sorted_indices
+        )
 
         output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
@@ -490,11 +492,12 @@ class QuantizedGRU(QuantizedRNNBase):
 
     @torch.jit.script_method
     def forward_packed(self, input: PackedSequence, hx: Optional[Tensor] = None) -> Tuple[PackedSequence, Tensor]:
-        input, batch_sizes, sorted_indices, unsorted_indices = input
-        max_batch_size = batch_sizes[0]
-        max_batch_size = int(max_batch_size)
+        input_, batch_sizes, sorted_indices, unsorted_indices = input
+        max_batch_size = int(batch_sizes[0])
 
-        output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
+        output, hidden = self.forward_impl(
+            input_, hx, batch_sizes, max_batch_size, sorted_indices
+        )
 
         output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)

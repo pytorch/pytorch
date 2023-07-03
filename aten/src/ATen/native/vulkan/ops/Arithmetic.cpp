@@ -15,23 +15,24 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
       "Incompatible dimensions for broadcasting for binary elementwise op!";
   if (get_dim<Dim4D::Batch>(input1) != get_dim<Dim4D::Batch>(input2)) {
     TORCH_CHECK(
-        get_dim<Dim4D::Batch>(input1) == 1 || get_dim<Dim4D::Batch>(input2),
+        get_dim<Dim4D::Batch>(input1) == 1 ||
+            get_dim<Dim4D::Batch>(input2) == 1,
         broadcast_error_msg);
     TORCH_CHECK(
-        (get_dim<Dim4D::Channel>(input1) == get_dim<Dim4D::Channel>(input2) &&
-         get_dim<Dim4D::Channel>(input1) % 4 == 0) ||
+        get_dim<Dim4D::Channel>(input1) == get_dim<Dim4D::Channel>(input2) ||
             get_dim<Dim4D::Channel>(input1) * get_dim<Dim4D::Batch>(input1) ==
                 1 ||
             get_dim<Dim4D::Channel>(input2) * get_dim<Dim4D::Batch>(input2) ==
                 1,
         "Invalid broadcasting for Vulkan binary elementwise op! "
         "If batch dimensions aren't equal, then channel dimensions must be "
-        "equal and multiple of 4 or one of the inputs must have "
-        "channel and batch dimensions both equal to 1!");
+        "equal or one of the inputs must have channel and batch dimensions "
+        "both equal to 1!");
   }
   if (get_dim<Dim4D::Channel>(input1) != get_dim<Dim4D::Channel>(input2)) {
     TORCH_CHECK(
-        get_dim<Dim4D::Channel>(input1) == 1 || get_dim<Dim4D::Channel>(input2),
+        get_dim<Dim4D::Channel>(input1) == 1 ||
+            get_dim<Dim4D::Channel>(input2) == 1,
         broadcast_error_msg);
     TORCH_CHECK(
         get_dim<Dim4D::Channel>(input1) * get_dim<Dim4D::Batch>(input1) == 1 ||
@@ -43,12 +44,14 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
   }
   if (get_dim<Dim4D::Height>(input1) != get_dim<Dim4D::Height>(input2)) {
     TORCH_CHECK(
-        get_dim<Dim4D::Height>(input1) == 1 || get_dim<Dim4D::Height>(input2),
+        get_dim<Dim4D::Height>(input1) == 1 ||
+            get_dim<Dim4D::Height>(input2) == 1,
         broadcast_error_msg);
   }
   if (get_dim<Dim4D::Width>(input1) != get_dim<Dim4D::Width>(input2)) {
     TORCH_CHECK(
-        get_dim<Dim4D::Width>(input1) == 1 || get_dim<Dim4D::Width>(input2),
+        get_dim<Dim4D::Width>(input1) == 1 ||
+            get_dim<Dim4D::Width>(input2) == 1,
         broadcast_error_msg);
   }
 }
@@ -68,7 +71,7 @@ std::vector<int64_t> broadcast_size(const Tensor& t1, const Tensor& t2) {
     }
   }
 
-  if (out.size() > 0) {
+  if (!out.empty()) {
     out[out.size() - 1] =
         std::max(get_dim<Dim4D::Width>(t1), get_dim<Dim4D::Width>(t2));
   }
@@ -95,7 +98,7 @@ Tensor arithmetic_scalar(
     const Tensor& self_arg,
     const Scalar& other,
     const c10::optional<Scalar>& alpha_arg,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -104,7 +107,7 @@ Tensor arithmetic_scalar(
   vTensor v_output{
       context,
       v_self.sizes(),
-      v_self.options(),
+      self_arg.scalar_type(),
   };
 
   const float other_val = alpha_arg ? other.to<float>() * alpha_arg->to<float>()
@@ -147,7 +150,7 @@ Tensor& arithmetic_scalar_(
     Tensor& self_arg,
     const Scalar& other,
     const c10::optional<Scalar>& alpha_arg,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(
       self_arg.is_vulkan(),
       "Vulkan: In-place operator is only supported on Vulkan tensors.");
@@ -195,7 +198,7 @@ Tensor arithmetic_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   check_inputs(self_arg, other_arg);
   api::Context* const context = api::context();
 
@@ -208,26 +211,26 @@ Tensor arithmetic_tensor(
   vTensor v_output{
       context,
       broadcast_size(self_arg, other_arg),
-      v_self.options(),
+      self_arg.scalar_type(),
   };
 
-  const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
+  const double alpha = alpha_arg ? alpha_arg->to<double>() : 1.0;
   const struct Block final {
     uvec3 extents;
-    uint32_t fill_0;
-    uvec3 input1_extents;
-    uint32_t channel_batch_size_1;
-    uvec3 input2_extents;
-    uint32_t channel_batch_size_2;
+    uint32_t channelSize;
+    uvec3 input1Extents;
+    uint32_t channelBatchSize1;
+    uvec3 input2Extents;
+    uint32_t channelBatchSize2;
     float alpha;
   } block{
       v_output.extents(),
-      0u,
+      get_dim<Dim4D::Channel>(v_output),
       v_self.extents(),
       get_dim<Dim4D::Channel>(self) * get_dim<Dim4D::Batch>(self),
       v_other.extents(),
       get_dim<Dim4D::Channel>(other) * get_dim<Dim4D::Batch>(other),
-      alpha,
+      safe_downcast<float>(alpha),
   };
 
   api::UniformParamsBuffer params(context, block);
@@ -262,7 +265,7 @@ Tensor quantized_arithmetic_tensor(
     const Tensor& other_arg,
     const double scale,
     const int64_t zero_point,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   check_inputs(self_arg, other_arg);
   api::Context* const context = api::context();
 
@@ -277,9 +280,10 @@ Tensor quantized_arithmetic_tensor(
   vTensor v_output{
       context,
       broadcast_size(self_arg, other_arg),
-      self.options().dtype(c10::kQUInt8),
       scale,
-      zero_point};
+      zero_point,
+      c10::kQUInt8,
+  };
 
   const double scale1 = v_self.get_scale();
   const double scale2 = v_other.get_scale();
@@ -287,26 +291,26 @@ Tensor quantized_arithmetic_tensor(
   const int64_t zero_point2 = v_other.get_zero_point();
   const struct Block final {
     uvec3 extents;
-    uint32_t fill_0;
-    uvec3 input1_extents;
-    uint32_t fill_1;
-    uvec3 input2_extents;
-    uint32_t fill_2;
+    uint32_t channelSize;
+    uvec3 input1Extents;
+    uint32_t channelBatchSize1;
+    uvec3 input2Extents;
+    uint32_t channelBatchSize2;
     float scale1;
     float scale2;
-    int32_t zero_point1;
-    int32_t zero_point2;
+    int32_t zeroPoint1;
+    int32_t zeroPoint2;
     float scale;
-    float _1;
-    int32_t zero_point;
-    int32_t _2;
+    float fill1;
+    int32_t zeroPoint;
+    int32_t fill2;
   } block{
       v_output.extents(),
-      0u,
+      get_dim<Dim4D::Channel>(v_output),
       v_self.extents(),
-      0u,
+      get_dim<Dim4D::Channel>(self) * get_dim<Dim4D::Batch>(self),
       v_other.extents(),
-      0u,
+      get_dim<Dim4D::Channel>(other) * get_dim<Dim4D::Batch>(other),
       safe_downcast<float>(scale1),
       safe_downcast<float>(scale2),
       safe_downcast<int32_t>(zero_point1),
@@ -348,7 +352,7 @@ Tensor& arithmetic_tensor_(
     Tensor& self_arg,
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(
       get_dim<Dim4D::Batch>(self_arg) >= get_dim<Dim4D::Batch>(other_arg) &&
           get_dim<Dim4D::Channel>(self_arg) >=
@@ -372,19 +376,19 @@ Tensor& arithmetic_tensor_(
   const Tensor other = other_arg.is_vulkan() ? other_arg : other_arg.vulkan();
   const vTensor& v_other = convert(other);
 
-  const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
+  const double alpha = alpha_arg ? alpha_arg->to<double>() : 1.0;
   const struct Block final {
     uvec3 extents;
-    uint32_t fill_0;
-    uvec3 input_extents;
-    uint32_t channel_batch_size_other;
+    uint32_t channelSize;
+    uvec3 inputExtents;
+    uint32_t channelBatchSizeOther;
     float alpha;
   } block{
       v_self.extents(),
-      0u,
+      get_dim<Dim4D::Channel>(v_self),
       v_other.extents(),
       get_dim<Dim4D::Channel>(other) * get_dim<Dim4D::Batch>(other),
-      alpha,
+      safe_downcast<float>(alpha),
   };
 
   api::UniformParamsBuffer params(context, block);

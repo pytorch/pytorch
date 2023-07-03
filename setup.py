@@ -95,6 +95,9 @@
 #   USE_FFMPEG
 #     enables use of ffmpeg for additional operators
 #
+#   USE_FLASH_ATTENTION=0
+#     disables building flash attention for scaled dot product attention
+#
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
 #
@@ -172,6 +175,9 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
+#   NVFUSER_SOURCE_DIR
+#     specify nvfuser root directory
+#
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
 #
@@ -199,19 +205,18 @@
 #      Use system-provided libraries to satisfy the build dependencies.
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
+#
+#   USE_MIMALLOC
+#      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
+#      By default, It is only enabled on Windows.
 
-# This future is needed to print Python2 EOL message
-from __future__ import print_function
 import sys
-if sys.version_info < (3,):
-    print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
-    sys.exit(-1)
 if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     print("32-bit Windows Python runtime is not supported. Please switch to 64-bit Python.")
     sys.exit(-1)
 
 import platform
-python_min_version = (3, 7, 0)
+python_min_version = (3, 8, 0)
 python_min_version_str = '.'.join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
@@ -335,7 +340,7 @@ def check_submodules():
     def check_for_files(folder, files):
         if not any(os.path.exists(os.path.join(folder, f)) for f in files):
             report("Could not find any of {} in {}".format(", ".join(files), folder))
-            report("Did you run 'git submodule update --init --recursive --jobs 0'?")
+            report("Did you run 'git submodule update --init --recursive'?")
             sys.exit(1)
 
     def not_exists_or_empty(folder):
@@ -354,7 +359,7 @@ def check_submodules():
             print(' --- Submodule initialization took {:.2f} sec'.format(end - start))
         except Exception:
             print(' --- Submodule initalization failed')
-            print('Please run:\n\tgit submodule update --init --recursive --jobs 0')
+            print('Please run:\n\tgit submodule update --init --recursive')
             sys.exit(1)
     for folder in folders:
         check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE", "LICENSE.md", "LICENSE.txt"])
@@ -446,8 +451,8 @@ Please install it via `conda install {module}` or `pip install {module}`
 def check_pydep(importname, module):
     try:
         importlib.import_module(importname)
-    except ImportError:
-        raise RuntimeError(missing_pydep.format(importname=importname, module=module))
+    except ImportError as e:
+        raise RuntimeError(missing_pydep.format(importname=importname, module=module)) from e
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
@@ -536,11 +541,18 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Using static dispatch with backend {}'.format(cmake_cache_vars['STATIC_DISPATCH_BACKEND']))
         if cmake_cache_vars['USE_LIGHTWEIGHT_DISPATCH']:
             report('-- Using lightweight dispatch')
+        if cmake_cache_vars['BUILD_EXECUTORCH']:
+            report('-- Building Executorch')
 
         if cmake_cache_vars['USE_ITT']:
             report('-- Using ITT')
         else:
             report('-- Not using ITT')
+
+        if cmake_cache_vars['BUILD_NVFUSER']:
+            report('-- Building nvfuser')
+        else:
+            report('-- Not Building nvfuser')
 
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
@@ -623,6 +635,22 @@ class build_ext(setuptools.command.build_ext.build_ext):
             filename = self.get_ext_filename(fullname)
             fileext = os.path.splitext(filename)[1]
             src = os.path.join(os.path.dirname(filename), "functorch" + fileext)
+            dst = os.path.join(os.path.realpath(self.build_lib), filename)
+            if os.path.exists(src):
+                report("Copying {} from {} to {}".format(ext.name, src, dst))
+                dst_dir = os.path.dirname(dst)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+                self.copy_file(src, dst)
+
+        # Copy nvfuser extension
+        for i, ext in enumerate(self.extensions):
+            if ext.name != "nvfuser._C":
+                continue
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+            fileext = os.path.splitext(filename)[1]
+            src = os.path.join(os.path.dirname(filename), "nvfuser" + fileext)
             dst = os.path.join(os.path.realpath(self.build_lib), filename)
             if os.path.exists(src):
                 report("Copying {} from {} to {}".format(ext.name, src, dst))
@@ -749,6 +777,9 @@ class clean(setuptools.Command):
                         break
                     # Ignore lines which begin with '#'.
                 else:
+                    # Don't remove absolute paths from the system
+                    wildcard = wildcard.lstrip('./')
+
                     for filename in glob.glob(wildcard):
                         try:
                             os.remove(filename)
@@ -793,12 +824,7 @@ def configure_extension_build():
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
         # /EHsc is about standard C++ exception handling
-        # /DNOMINMAX removes builtin min/max functions
-        # /wdXXXX disables warning no. XXXX
-        extra_compile_args = ['/MD', '/FS', '/EHsc', '/DNOMINMAX',
-                              '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
-                              '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
-                              '/wd4275']
+        extra_compile_args = ['/MD', '/FS', '/EHsc']
     else:
         extra_link_args = []
         extra_compile_args = [
@@ -807,7 +833,6 @@ def configure_extension_build():
             '-Wno-strict-overflow',
             '-Wno-unused-parameter',
             '-Wno-missing-field-initializers',
-            '-Wno-write-strings',
             '-Wno-unknown-pragmas',
             # This is required for Python 2 declarations that are deprecated in 3.
             '-Wno-deprecated-declarations',
@@ -852,7 +877,7 @@ def configure_extension_build():
     pytorch_extra_install_requirements = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS", "")
     if pytorch_extra_install_requirements:
         report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}")
-        extra_install_requires += pytorch_extra_install_requirements.split(";")
+        extra_install_requires += pytorch_extra_install_requirements.split("|")
 
 
     # Cross-compile for M1
@@ -886,6 +911,8 @@ def configure_extension_build():
         excludes.extend(['caffe2', 'caffe2.*'])
     if not cmake_cache_vars['BUILD_FUNCTORCH']:
         excludes.extend(['functorch', 'functorch.*'])
+    if not cmake_cache_vars['BUILD_NVFUSER']:
+        excludes.extend(['nvfuser', 'nvfuser.*'])
     packages = find_packages(exclude=excludes)
     C = Extension("torch._C",
                   libraries=main_libraries,
@@ -895,16 +922,7 @@ def configure_extension_build():
                   include_dirs=[],
                   library_dirs=library_dirs,
                   extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
-    C_flatbuffer = Extension("torch._C_flatbuffer",
-                             libraries=main_libraries,
-                             sources=["torch/csrc/stub_with_flatbuffer.c"],
-                             language='c',
-                             extra_compile_args=main_compile_args + extra_compile_args,
-                             include_dirs=[],
-                             library_dirs=library_dirs,
-                             extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
-    extensions.append(C_flatbuffer)
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
@@ -930,6 +948,12 @@ def configure_extension_build():
         extensions.append(
             Extension(
                 name=str('functorch._C'),
+                sources=[]),
+        )
+    if cmake_cache_vars['BUILD_NVFUSER']:
+        extensions.append(
+            Extension(
+                name=str('nvfuser._C'),
                 sources=[]),
         )
 
@@ -976,20 +1000,33 @@ def print_box(msg):
 def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
-        'typing_extensions',
+        'filelock',
+        'typing-extensions',
         'sympy',
         'networkx',
+        'jinja2',
+        'fsspec',
     ]
 
     extras_require = {
         'opt-einsum': ['opt-einsum>=3.3']
     }
     if platform.system() == 'Linux':
-        triton_pin_file = os.path.join(cwd, ".github", "ci_commit_pins", "triton.txt")
-        if os.path.exists(triton_pin_file):
+        cmake_cache_vars = get_cmake_cache_vars()
+        if cmake_cache_vars['USE_ROCM']:
+            triton_text_file = "triton-rocm.txt"
+            triton_package_name = "pytorch-triton-rocm"
+        else:
+            triton_text_file = "triton.txt"
+            triton_package_name = "pytorch-triton"
+        triton_pin_file = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", triton_text_file)
+        triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
+        if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
             with open(triton_pin_file) as f:
                 triton_pin = f.read().strip()
-                extras_require['dynamo'] = ['torchtriton==2.0.0+' + triton_pin[:10], 'jinja2']
+            with open(triton_version_file) as f:
+                triton_version = f.read().strip()
+            extras_require['dynamo'] = [triton_package_name + '==' + triton_version + '+' + triton_pin[:10], 'jinja2']
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1019,9 +1056,10 @@ def main():
         'py.typed',
         'bin/*',
         'test/*',
+        '*.pyi',
         '_C/*.pyi',
-        '_C_flatbuffer/*.pyi',
         'cuda/*.pyi',
+        'fx/*.pyi',
         'optim/*.pyi',
         'autograd/*.pyi',
         'nn/*.pyi',
@@ -1036,9 +1074,11 @@ def main():
         'lib/*.pdb',
         'lib/torch_shm_manager',
         'lib/*.h',
+        'include/*.h',
         'include/ATen/*.h',
         'include/ATen/cpu/*.h',
         'include/ATen/cpu/vec/vec256/*.h',
+        'include/ATen/cpu/vec/vec256/vsx/*.h',
         'include/ATen/cpu/vec/vec512/*.h',
         'include/ATen/cpu/vec/*.h',
         'include/ATen/core/*.h',
@@ -1054,6 +1094,8 @@ def main():
         'include/ATen/hip/detail/*.cuh',
         'include/ATen/hip/detail/*.h',
         'include/ATen/hip/impl/*.h',
+        'include/ATen/mps/*.h',
+        'include/ATen/miopen/*.h',
         'include/ATen/detail/*.h',
         'include/ATen/native/*.h',
         'include/ATen/native/cpu/*.h',
@@ -1061,6 +1103,7 @@ def main():
         'include/ATen/native/cuda/*.cuh',
         'include/ATen/native/hip/*.h',
         'include/ATen/native/hip/*.cuh',
+        'include/ATen/native/mps/*.h',
         'include/ATen/native/quantized/*.h',
         'include/ATen/native/quantized/cpu/*.h',
         'include/ATen/quantized/*.h',
@@ -1073,6 +1116,7 @@ def main():
         'include/ATen/core/dispatch/*.h',
         'include/ATen/core/op_registration/*.h',
         'include/c10/core/impl/*.h',
+        'include/c10/core/impl/cow/*.h',
         'include/c10/util/*.h',
         'include/c10/cuda/*.h',
         'include/c10/cuda/impl/*.h',
@@ -1107,6 +1151,10 @@ def main():
         'include/torch/csrc/distributed/c10d/*.h',
         'include/torch/csrc/distributed/c10d/*.hpp',
         'include/torch/csrc/distributed/rpc/*.h',
+        'include/torch/csrc/distributed/autograd/context/*.h',
+        'include/torch/csrc/distributed/autograd/functions/*.h',
+        'include/torch/csrc/distributed/autograd/rpc_messages/*.h',
+        'include/torch/csrc/dynamo/eval_frame.h',
         'include/torch/csrc/jit/*.h',
         'include/torch/csrc/jit/backends/*.h',
         'include/torch/csrc/jit/generated/*.h',
@@ -1136,6 +1184,7 @@ def main():
         'include/torch/csrc/lazy/core/*.h',
         'include/torch/csrc/lazy/core/internal_ops/*.h',
         'include/torch/csrc/lazy/core/ops/*.h',
+        'include/torch/csrc/lazy/python/python_util.h',
         'include/torch/csrc/lazy/ts_backend/*.h',
         'include/pybind11/*.h',
         'include/pybind11/detail/*.h',
@@ -1147,8 +1196,10 @@ def main():
         'include/THH/*.cuh',
         'include/THH/*.h*',
         'include/THH/generic/*.h',
+        'include/sleef.h',
         "_inductor/codegen/*.h",
-        "_inductor/codegen/*.j2",
+        "_inductor/aot_inductor_include/*.cpp",
+        "_inductor/aot_inductor_include/*.h",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',
@@ -1165,6 +1216,16 @@ def main():
         'utils/model_dump/code.js',
         'utils/model_dump/*.mjs',
     ]
+    if get_cmake_cache_vars()['BUILD_NVFUSER']:
+        torch_package_data.extend([
+            'share/cmake/nvfuser/*.cmake',
+            'include/nvfuser/*.h',
+            'include/nvfuser/kernel_db/*.h',
+            'include/nvfuser/multidevice/*.h',
+            'include/nvfuser/ops/*.h',
+            'include/nvfuser/python_frontend/*.h',
+            'include/nvfuser/scheduler/*.h',
+        ])
 
     if get_cmake_cache_vars()['BUILD_CAFFE2']:
         torch_package_data.extend([

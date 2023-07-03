@@ -2,7 +2,6 @@ import enum
 
 __all__ = [
     "QuantType",
-    "quant_type_to_str",
 ]
 
 # Quantization type (dynamic quantization, static quantization).
@@ -21,7 +20,7 @@ _quant_type_to_str = {
 }
 
 # TODO: make this private
-def quant_type_to_str(quant_type: QuantType) -> str:
+def _get_quant_type_to_str(quant_type: QuantType) -> str:
     return _quant_type_to_str[quant_type]
 
 def _quant_type_from_str(name: str) -> QuantType:

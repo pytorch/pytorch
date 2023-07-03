@@ -90,11 +90,8 @@ class TORCH_API Adagrad : public Optimizer {
     }
   }
 
-  explicit Adagrad(
-      std::vector<Tensor> params,
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      AdagradOptions defaults = {})
-      : Adagrad({std::move(OptimizerParamGroup(params))}, defaults) {}
+  explicit Adagrad(std::vector<Tensor> params, AdagradOptions defaults = {})
+      : Adagrad({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;

@@ -19,7 +19,7 @@ _DISTRIBUTIONS = (
 )
 
 
-class FuzzedParameter(object):
+class FuzzedParameter:
     """Specification for a parameter to be generated during fuzzing."""
     def __init__(
         self,
@@ -126,7 +126,7 @@ class FuzzedParameter(object):
         return list(self._distribution.keys())[index]
 
 
-class ParameterAlias(object):
+class ParameterAlias:
     """Indicates that a parameter should alias the value of another parameter.
 
     When used in conjunction with a custom distribution, this allows fuzzed
@@ -176,7 +176,7 @@ def prod(values, base=1):
     return functools.reduce(lambda x, y: int(x) * int(y), values, base)
 
 
-class FuzzedTensor(object):
+class FuzzedTensor:
     def __init__(
         self,
         name: str,
@@ -216,7 +216,7 @@ class FuzzedTensor(object):
             min_elements:
                 The minimum number of parameters that this Tensor must have for a
                 set of parameters to be valid. (Otherwise they are resampled.)
-            max_elemnts:
+            max_elements:
                 Like `min_elements`, but setting an upper bound.
             max_allocation_bytes:
                 Like `max_elements`, but for the size of Tensor that must be
@@ -340,7 +340,7 @@ class FuzzedTensor(object):
         ))
 
 
-class Fuzzer(object):
+class Fuzzer:
     def __init__(
         self,
         parameters: List[Union[FuzzedParameter, List[FuzzedParameter]]],
@@ -369,7 +369,7 @@ class Fuzzer(object):
                 ops will create reproducible Tensors.
         """
         if seed is None:
-            seed = np.random.RandomState().randint(0, 2**63)
+            seed = np.random.RandomState().randint(0, 2 ** 32 - 1, dtype=np.int64)
         self._seed = seed
         self._parameters = Fuzzer._unpack(parameters, FuzzedParameter)
         self._tensors = Fuzzer._unpack(tensors, FuzzedTensor)
@@ -392,7 +392,7 @@ class Fuzzer(object):
 
     def take(self, n):
         state = np.random.RandomState(self._seed)
-        torch.manual_seed(state.randint(low=0, high=2 ** 63))
+        torch.manual_seed(state.randint(low=0, high=2 ** 63, dtype=np.int64))
         for _ in range(n):
             params = self._generate(state)
             tensors = {}

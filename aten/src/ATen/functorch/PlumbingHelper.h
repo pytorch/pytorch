@@ -24,7 +24,9 @@
 // The plumbing is responsible for wrapping a batching rule into a form that may
 // be registered as the kernel for the batched key.
 
-namespace at { namespace functorch {
+namespace at::functorch {
+
+void vmap_check_escaped(const optional<DynamicLayer> &layer, const char* what);
 
 // Create a BatchedTensor given a tensor, bdim, and level
 TORCH_API Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64_t level);
@@ -33,14 +35,14 @@ TORCH_API Tensor makeBatched(const Tensor& tensor, optional<int64_t> bdim, int64
 // If `tensor` is not a BatchedTensor, or is a BatchedTensor but the level
 // doesn't match, then this returns (tensor, nullopt).
 // Otherwise, it returns (unwrap(tensor), bdim).
-TORCH_API std::tuple<Tensor, optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level);
+TORCH_API std::tuple<Tensor, c10::optional<int64_t>> unwrapTensorAtLevel(const Tensor& tensor, int64_t level);
 
 // Creates a vector of BatchedTensor
 TORCH_API std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tensors, optional<int64_t> bdim, int64_t level);
 
 // Returns True if ANY tensor in tensors is batched at level
 TORCH_API bool isBatchedAtLevel(ITensorListRef tensors, int64_t level);
-TORCH_API bool isBatchedAtLevel(const c10::List<c10::optional<Tensor>> maybe_tensors, int64_t level);
+TORCH_API bool isBatchedAtLevel(const c10::List<c10::optional<Tensor>>& maybe_tensors, int64_t level);
 TORCH_API bool isBatchedAtLevel(const Tensor& tensor, int64_t level);
 TORCH_API bool isBatchedAtLevel(const c10::optional<Tensor>& maybe_tensor, int64_t level);
 
@@ -58,4 +60,4 @@ inline bool ivalueParticipatesInCurrentLevel(const IValue& ivalue) {
   return false;
 }
 
-}}
+} // namespace at::functorch

@@ -16,7 +16,7 @@ namespace c10 {
  *
  * This class implements a small subset of the generic functionality
  * implemented by folly:Synchronized<T>. Specifically, only withLock<T>
- * is implemeted here since it's the smallest possible API that is
+ * is implemented here since it's the smallest possible API that is
  * able to cover a large surface area of functionality offered by
  * folly::Synchronized<T>.
  */

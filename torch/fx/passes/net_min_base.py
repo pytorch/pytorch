@@ -450,7 +450,7 @@ class _MinimizerBase:
             report.append(f"Sequential traverse iteration {self.iteration}.")
             report.append(f"Visit node: {node.name}")
 
-            _LOGGER.info(f"Visit node: {node.name}")
+            _LOGGER.info("Visit node: %s", node.name)
             cur_nodes: NodeSet = {node}
 
             if node in self.fusions:
@@ -615,4 +615,4 @@ class _MinimizerBase:
         if self.settings.traverse_method == "accumulate":
             return self._accumulate_traverse(nodes)
 
-        raise RuntimeError(f"Unknow traverse method {self.settings.traverse_method}!")
+        raise RuntimeError(f"Unknown traverse method {self.settings.traverse_method}!")

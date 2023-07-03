@@ -9,14 +9,17 @@ from torch.nn.utils.rnn import PackedSequence
 from torch.ao.nn.quantized.modules.utils import _quantize_weight
 
 __all__ = ['pack_weight_bias', 'PackedParameter', 'RNNBase', 'LSTM', 'GRU', 'RNNCellBase', 'RNNCell', 'LSTMCell',
-           'GRUCell']
+           'GRUCell', "apply_permutation"]
+
 
 def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)
 
+
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead")
     return _apply_permutation(tensor, permutation, dim)
+
 
 def pack_weight_bias(qweight, bias, dtype):
 
@@ -39,20 +42,22 @@ def pack_weight_bias(qweight, bias, dtype):
 
         return packed_weight
 
+
 class PackedParameter(torch.nn.Module):
     def __init__(self, param):
-        super(PackedParameter, self).__init__()
+        super().__init__()
         self.param = param
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(PackedParameter, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'param'] = self.param
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         self.param = state_dict[prefix + 'param']
-        super(PackedParameter, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                           missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
+
 
 class RNNBase(torch.nn.Module):
 
@@ -63,7 +68,7 @@ class RNNBase(torch.nn.Module):
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0., bidirectional=False, dtype=torch.qint8):
-        super(RNNBase, self).__init__()
+        super().__init__()
 
         self.mode = mode
         self.input_size = input_size
@@ -220,8 +225,8 @@ class RNNBase(torch.nn.Module):
                               missing_keys, unexpected_keys, error_msgs):
         version = local_metadata.get('version', None)
         self.version = version
-        super(RNNBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                   missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
 
     def set_weight_bias(self, weight_bias_dict):
 
@@ -262,10 +267,8 @@ class RNNBase(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod):
-        assert type(mod) in set(
-            [torch.nn.LSTM,
-             torch.nn.GRU]
-        ), 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM and nn.GRU'
+        assert type(mod) in {torch.nn.LSTM,
+                             torch.nn.GRU}, 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM and nn.GRU'
         assert hasattr(
             mod,
             'qconfig'
@@ -347,7 +350,6 @@ class RNNBase(torch.nn.Module):
 
         return qRNNBase
 
-
     def _weight_bias(self):
         # Returns a dict of weights and biases
         weight_bias_dict: Dict[str, Dict] = {'weight' : {}, 'bias' : {}}
@@ -376,6 +378,7 @@ class RNNBase(torch.nn.Module):
     def get_bias(self):
         return self._weight_bias()['bias']
 
+
 class LSTM(RNNBase):
     r"""
     A dynamic quantized LSTM module with floating point tensor as inputs and outputs.
@@ -384,6 +387,7 @@ class LSTM(RNNBase):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> rnn = nn.LSTM(10, 20, 2)
         >>> input = torch.randn(5, 3, 10)
         >>> h0 = torch.randn(2, 3, 20)
@@ -395,7 +399,7 @@ class LSTM(RNNBase):
     __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
     def __init__(self, *args, **kwargs):
-        super(LSTM, self).__init__('LSTM', *args, **kwargs)
+        super().__init__('LSTM', *args, **kwargs)
 
     def _get_name(self):
         return 'DynamicQuantizedLSTM'
@@ -451,11 +455,11 @@ class LSTM(RNNBase):
         self, input: PackedSequence, hx: Optional[Tuple[Tensor, Tensor]] = None
     ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:
         input_, batch_sizes, sorted_indices, unsorted_indices = input
-        max_batch_size = batch_sizes[0]
-        max_batch_size = int(max_batch_size)
+        max_batch_size = int(batch_sizes[0])
 
         output_, hidden = self.forward_impl(
-            input_, hx, batch_sizes, max_batch_size, sorted_indices)
+            input_, hx, batch_sizes, max_batch_size, sorted_indices
+        )
 
         output = PackedSequence(output_, batch_sizes,
                                 sorted_indices, unsorted_indices)
@@ -606,10 +610,31 @@ class GRU(RNNBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
+    .. note::
+        The calculation of new gate :math:`n_t` subtly differs from the original paper and other frameworks.
+        In the original implementation, the Hadamard product :math:`(*)` between :math:`r_t` and the
+        previous hidden state :math:`h_{(t-1)}` is done before the multiplication with the weight matrix
+        `W` and addition of bias:
+
+        .. math::
+            \begin{aligned}
+                n_t = \tanh(W_{in} x_t + b_{in} + W_{hn} ( r_t * h_{(t-1)} ) + b_{hn})
+            \end{aligned}
+
+        This is in contrast to PyTorch implementation, which is done after :math:`W_{hn} h_{(t-1)}`
+
+        .. math::
+            \begin{aligned}
+                n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn}))
+            \end{aligned}
+
+        This implementation differs on purpose for efficiency.
+
     .. include:: ../cudnn_persistent_rnn.rst
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> rnn = nn.GRU(10, 20, 2)
         >>> input = torch.randn(5, 3, 10)
         >>> h0 = torch.randn(2, 3, 20)
@@ -620,7 +645,7 @@ class GRU(RNNBase):
     __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
 
     def __init__(self, *args, **kwargs):
-        super(GRU, self).__init__('GRU', *args, **kwargs)
+        super().__init__('GRU', *args, **kwargs)
 
     def _get_name(self):
         return 'DynamicQuantizedGRU'
@@ -696,10 +721,10 @@ class GRU(RNNBase):
         self, input: PackedSequence, hx: Optional[Tensor] = None
     ) -> Tuple[PackedSequence, Tensor]:
         input_, batch_sizes, sorted_indices, unsorted_indices = input
-        max_batch_size = batch_sizes[0]
-        max_batch_size = int(max_batch_size)
+        max_batch_size = int(batch_sizes[0])
         output_, hidden = self.forward_impl(
-            input_, hx, batch_sizes, max_batch_size, sorted_indices)
+            input_, hx, batch_sizes, max_batch_size, sorted_indices
+        )
 
         output = PackedSequence(output_, batch_sizes,
                                 sorted_indices, unsorted_indices)
@@ -723,13 +748,30 @@ class GRU(RNNBase):
     def from_float(cls, mod):
         return super(GRU, cls).from_float(mod)
 
+    @classmethod
+    def from_reference(cls, ref_mod):
+        assert hasattr(ref_mod, "weight_ih_l0_dtype"), "We are assuming weight_ih_l0 "
+        "exists in LSTM, may need to relax the assumption to support the use case"
+        qmod = cls(
+            ref_mod.input_size,
+            ref_mod.hidden_size,
+            ref_mod.num_layers,
+            ref_mod.bias,
+            ref_mod.batch_first,
+            ref_mod.dropout,
+            ref_mod.bidirectional,
+            # assuming there is layer 0, which should be OK
+            ref_mod.weight_ih_l0_dtype,
+        )
+        qmod.set_weight_bias(ref_mod.get_quantized_weight_bias_dict())
+        return qmod
 
 class RNNCellBase(torch.nn.Module):
     # _FLOAT_MODULE = nn.CellRNNBase
     __constants__ = ['input_size', 'hidden_size', 'bias']
 
     def __init__(self, input_size, hidden_size, bias=True, num_chunks=4, dtype=torch.qint8):
-        super(RNNCellBase, self).__init__()
+        super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
@@ -799,9 +841,9 @@ class RNNCellBase(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod):
-        assert type(mod) in set([torch.nn.LSTMCell,
-                                 torch.nn.GRUCell,
-                                 torch.nn.RNNCell]), 'nn.quantized.dynamic.RNNCellBase.from_float \
+        assert type(mod) in {torch.nn.LSTMCell,
+                             torch.nn.GRUCell,
+                             torch.nn.RNNCell}, 'nn.quantized.dynamic.RNNCellBase.from_float \
                                  only works for nn.LSTMCell, nn.GRUCell and nn.RNNCell'
         assert hasattr(
             mod, 'qconfig'), 'Input float module must have qconfig defined'
@@ -911,7 +953,7 @@ class RNNCellBase(torch.nn.Module):
             self.weight_dtype)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(RNNCellBase, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + '_packed_weight_ih'] = self._packed_weight_ih
         destination[prefix + '_packed_weight_hh'] = self._packed_weight_hh
 
@@ -919,8 +961,9 @@ class RNNCellBase(torch.nn.Module):
                               missing_keys, unexpected_keys, error_msgs):
         self._packed_weight_ih = state_dict.pop(prefix + '_packed_weight_ih')
         self._packed_weight_hh = state_dict.pop(prefix + '_packed_weight_hh')
-        super(RNNCellBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                       missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
+
 
 class RNNCell(RNNCellBase):
     r"""An Elman RNN cell with tanh or ReLU non-linearity.
@@ -930,6 +973,7 @@ class RNNCell(RNNCellBase):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> rnn = nn.RNNCell(10, 20)
         >>> input = torch.randn(6, 3, 10)
         >>> hx = torch.randn(3, 20)
@@ -941,7 +985,7 @@ class RNNCell(RNNCellBase):
     __constants__ = ['input_size', 'hidden_size', 'bias', 'nonlinearity']
 
     def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh", dtype=torch.qint8):
-        super(RNNCell, self).__init__(input_size, hidden_size, bias, num_chunks=1, dtype=dtype)
+        super().__init__(input_size, hidden_size, bias, num_chunks=1, dtype=dtype)
         self.nonlinearity = nonlinearity
 
     def _get_name(self):
@@ -982,6 +1026,7 @@ class LSTMCell(RNNCellBase):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> rnn = nn.LSTMCell(10, 20)
         >>> input = torch.randn(6, 3, 10)
         >>> hx = torch.randn(3, 20)
@@ -993,7 +1038,7 @@ class LSTMCell(RNNCellBase):
     """
 
     def __init__(self, *args, **kwargs):
-        super(LSTMCell, self).__init__(*args, num_chunks=4, **kwargs)  # type: ignore[misc]
+        super().__init__(*args, num_chunks=4, **kwargs)  # type: ignore[misc]
 
     def _get_name(self):
         return 'DynamicQuantizedLSTMCell'
@@ -1014,6 +1059,7 @@ class LSTMCell(RNNCellBase):
     def from_float(cls, mod):
         return super(LSTMCell, cls).from_float(mod)
 
+
 class GRUCell(RNNCellBase):
     r"""A gated recurrent unit (GRU) cell
 
@@ -1023,6 +1069,7 @@ class GRUCell(RNNCellBase):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> rnn = nn.GRUCell(10, 20)
         >>> input = torch.randn(6, 3, 10)
         >>> hx = torch.randn(3, 20)
@@ -1033,7 +1080,7 @@ class GRUCell(RNNCellBase):
     """
 
     def __init__(self, input_size, hidden_size, bias=True, dtype=torch.qint8):
-        super(GRUCell, self).__init__(input_size, hidden_size, bias, num_chunks=3, dtype=dtype)
+        super().__init__(input_size, hidden_size, bias, num_chunks=3, dtype=dtype)
 
     def _get_name(self):
         return 'DynamicQuantizedGRUCell'

@@ -10,7 +10,7 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+namespace at::native {
 
 void smooth_l1_kernel_cuda(TensorIteratorBase& iter, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "smooth_l1_cuda", [&iter, beta]() {
@@ -78,4 +78,4 @@ REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel_cuda);
 // DO NOT ADD ANY NEW KERNELS HERE
 // CUDA compilation times grow quickly.  It's perfectly acceptable to have a file per kernel.
 
-}} // namespace at::native
+} // namespace at::native

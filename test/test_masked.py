@@ -8,6 +8,8 @@ import torch
 from typing import List, Any
 from functools import wraps
 import unittest
+from torch.testing._internal.common_utils import skipIfTorchDynamo
+
 
 from torch.testing._internal.common_utils import \
     (TestCase, parametrize, suppress_warnings, _TestParametrizer, run_tests)
@@ -257,7 +259,7 @@ class mask_layouts(_TestParametrizer):
             test(self, layout, device, dtype, op, sample_inputs_generator())
 
         for layout in (torch.strided, torch.sparse_coo, torch.sparse_csr):
-            yield (wrap, str(layout).lstrip('torch.'), {'layout': layout})
+            yield (wrap, str(layout).lstrip('torch.'), {'layout': layout}, lambda _: [])
 
 
 class TestMasked(TestCase):
@@ -313,6 +315,7 @@ class TestMasked(TestCase):
             expected = op.op(r_inp, *r_args, **r_kwargs)
             self.assertEqualMasked(actual, expected, outmask)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1992")
     @parametrize("sparse_kind,fill_value", [('coo', 0), ('hybrid_coo', 0),
                                             ('coo', 123), ('hybrid_coo', 123),
                                             ('csr', 0), ('csr', 123)],

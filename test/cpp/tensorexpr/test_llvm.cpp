@@ -182,7 +182,6 @@ TEST(LLVM, BitCast) {
   constexpr int16_t ref16 = 1337;
   constexpr int32_t ref32 = 1337;
   constexpr int64_t ref64 = 1337;
-  at::Half reff16 = 1337.0f;
   constexpr float reff32 = 1337.0f;
   constexpr double reff64 = 1337.0f;
 

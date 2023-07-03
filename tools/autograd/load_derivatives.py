@@ -46,11 +46,13 @@ from torchgen.model import (
     Type,
     Variant,
 )
-from torchgen.utils import concatMap, IDENT_REGEX, split_name_params, YamlLoader
+from torchgen.utils import concatMap, IDENT_REGEX, split_name_params
+from torchgen.yaml_utils import YamlLoader
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
 _VALID_AUTOGRAD_KEYS = set(AUTOGRAD_KEYS)
+
 
 # This function directly adds per-dispatchkey derivative entries for {view}_copy variants of each view op.
 # Since every {view} and {view}_copy op shares the same derivative formula,
@@ -96,7 +98,6 @@ def load_derivatives(
     global _GLOBAL_LOAD_DERIVATIVE_CACHE
     key = (derivatives_yaml_path, native_yaml_path)
     if key not in _GLOBAL_LOAD_DERIVATIVE_CACHE:
-
         with open(derivatives_yaml_path, "r") as f:
             definitions = yaml.load(f, Loader=YamlLoader)
 
@@ -619,7 +620,7 @@ def create_differentiability_info(
     output_differentiability = defn_dict.pop("output_differentiability", None)
     output_differentiability_conditions = None
     if output_differentiability and any(
-        [isinstance(diff, str) for diff in output_differentiability]
+        isinstance(diff, str) for diff in output_differentiability
     ):
         if len(output_differentiability) != 1:
             raise RuntimeError(
@@ -772,6 +773,17 @@ def saved_variables(
                     name, OptionalCType(BaseCType(symIntArrayRefT))
                 ),
                 "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
+            },
+        ),
+        # replace self.sym_blocksize() with self_sym_blocksize_opt
+        (
+            r"{}.sym_blocksize\(\)",
+            {
+                "suffix": "_self_sym_blocksize_opt",
+                "nctype": lambda name: NamedCType(
+                    name, OptionalCType(BaseCType(symIntArrayRefT))
+                ),
+                "expr": lambda name: f"at::sparse_csr::getSymIntBlockSize({name})",
             },
         ),
         # replace self.options() with self_options

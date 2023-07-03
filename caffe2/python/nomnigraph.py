@@ -9,7 +9,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 
 
-class NNModule(object):
+class NNModule:
     def __init__(self, net=None, device_map=None):
         if net is not None:
             serialized_proto = None

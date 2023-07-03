@@ -109,7 +109,11 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nni.ConvReLU1d: nniq.ConvReLU1d,
     nni.ConvReLU2d: nniq.ConvReLU2d,
     nni.ConvReLU3d: nniq.ConvReLU3d,
+    nni.ConvAdd2d: nniq.ConvAdd2d,
+    nni.ConvAddReLU2d: nniq.ConvAddReLU2d,
     nni.LinearReLU: nniq.LinearReLU,
+    nni.LinearLeakyReLU: nniq.LinearLeakyReLU,
+    nni.LinearTanh: nniq.LinearTanh,
     nniqat.ConvBn1d: nnq.Conv1d,
     nniqat.ConvBn2d: nnq.Conv2d,
     nniqat.ConvBn3d: nnq.Conv3d,
@@ -204,10 +208,10 @@ DEFAULT_DYNAMIC_SPARSE_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
 
 def no_observer_set() -> Set[Any]:
     r"""These modules cannot have observers inserted by default."""
-    no_observers = set([
+    no_observers = {
         nn.quantizable.LSTM,
         nn.quantizable.MultiheadAttention
-    ])
+    }
     return no_observers
 
 def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:

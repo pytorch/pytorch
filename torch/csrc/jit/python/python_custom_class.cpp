@@ -4,8 +4,7 @@
 
 #include <fmt/format.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct CustomMethodProxy;
 struct CustomObjectProxy;
@@ -98,5 +97,4 @@ void initPythonCustomClassBindings(PyObject* module) {
       });
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

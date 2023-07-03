@@ -42,7 +42,7 @@ class HybridModel(torch.nn.Module):
    """
 
     def __init__(self, emb_rref_list, device):
-        super(HybridModel, self).__init__()
+        super().__init__()
         self.emb_rref_list = emb_rref_list
         fc1 = torch.nn.Linear(512, 256)
         fc2 = torch.nn.Linear(256, 128)
@@ -335,7 +335,7 @@ if __name__ == "__main__":
         "--embedding-dim",
         type=int,
         default=EMBEDDING_DIM,
-        help="Number of embedding dimentions.",
+        help="Number of embedding dimensions.",
     )
     parser.add_argument(
         "--warmup-cycles",

@@ -15,6 +15,7 @@ _TensorOrTensors = Union[torch.Tensor, Sequence[torch.Tensor]]
 _int = builtins.int
 _float = builtins.float
 _bool = builtins.bool
+_complex = builtins.complex
 
 _dtype = torch.dtype
 _device = torch.device
@@ -36,7 +37,7 @@ Device = Union[_device, str, _int, None]
 
 # Storage protocol implemented by ${Type}StorageBase classes
 
-class Storage(object):
+class Storage:
     _cdata: int
     device: torch.device
     dtype: torch.dtype

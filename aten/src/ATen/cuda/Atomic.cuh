@@ -6,6 +6,10 @@
 
 #include <ATen/NumericUtils.h>
 
+#if !(defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
+#include <cuda_bf16.h>
+#endif
+
 template <typename T>
 struct AtomicFPOp;
 
@@ -199,16 +203,13 @@ static inline __device__ void gpuAtomicAdd(int64_t *address, int64_t val) {
 #if defined(USE_ROCM)
   __atomic_fetch_add(address, val, __ATOMIC_RELAXED);
 #else
-  AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address,
-                                                   val,
-                                                   [](int64_t a, int64_t b) {
-                                                      return a + b;
-                                                   });
+  static_assert(sizeof(unsigned long long int) == sizeof(int64_t), "bitwidth change is not allowed");
+  atomicAdd(reinterpret_cast<unsigned long long int *>(address), static_cast<unsigned long long int>(val));
 #endif
 }
 
 static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val) {
-#if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION < 10000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
+#if defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half hsum, at::Half val) {
                                   return hsum + val;
@@ -219,13 +220,18 @@ static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val)
 }
 
 static inline __device__ at::BFloat16 gpuAtomicAdd(at::BFloat16 *address, at::BFloat16 val) {
-  return AtomicFPOp<at::BFloat16>()(address, val,
-                                    [](at::BFloat16 bsum, at::BFloat16 val) {
-                                      return bsum + val;
-                                    });
+#if defined(USE_ROCM) || ((defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)))
+return AtomicFPOp<at::BFloat16>()(address, val,
+                                  [](at::BFloat16 bsum, at::BFloat16 val) {
+                                    return bsum + val;
+                                  });
+#else
+  __nv_bfloat16 r = atomicAdd(reinterpret_cast<__nv_bfloat16*>(address), *reinterpret_cast<__nv_bfloat16*>(&val));
+  return *reinterpret_cast<c10::BFloat16*>(&r);
+#endif
 }
 
-#if defined(CUDA_VERSION) && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600)
 // from CUDA C Programmic Guide
 static inline __device__ double atomicAdd(double* address, double val)
 #if defined(__clang__) && defined(__CUDA__)
@@ -241,7 +247,7 @@ static inline __device__ double atomicAdd(double* address, double val)
                                 return __double_as_longlong(val + __longlong_as_double(assumed));
                               });
 }
-#elif defined(USE_ROCM) || !(defined(__CUDA_ARCH__) && (defined(CUDA_VERSION) && CUDA_VERSION < 8000))
+#elif defined(USE_ROCM) || !(defined(__CUDA_ARCH__))
 
 /* Note [hip-clang differences to hcc]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

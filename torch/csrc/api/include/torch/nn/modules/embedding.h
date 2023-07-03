@@ -27,12 +27,11 @@ namespace nn {
 /// Embedding model(EmbeddingOptions(10,
 /// 2).padding_idx(3).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
  public:
   EmbeddingImpl(int64_t num_embeddings, int64_t embedding_dim)
       : EmbeddingImpl(EmbeddingOptions(num_embeddings, embedding_dim)) {}
-  explicit EmbeddingImpl(const EmbeddingOptions& options_);
+  explicit EmbeddingImpl(EmbeddingOptions options_);
 
   void reset() override;
 
@@ -104,13 +103,12 @@ class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
 /// EmbeddingBag model(EmbeddingBagOptions(10,
 /// 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum).padding_idx(1));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API EmbeddingBagImpl
     : public torch::nn::Cloneable<EmbeddingBagImpl> {
  public:
   EmbeddingBagImpl(int64_t num_embeddings, int64_t embedding_dim)
       : EmbeddingBagImpl(EmbeddingBagOptions(num_embeddings, embedding_dim)) {}
-  explicit EmbeddingBagImpl(const EmbeddingBagOptions& options_);
+  explicit EmbeddingBagImpl(EmbeddingBagOptions options_);
 
   void reset() override;
 

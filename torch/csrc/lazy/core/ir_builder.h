@@ -58,9 +58,6 @@ struct IrBuilder {
       const Value& input0,
       const std::vector<int64_t>& size,
       const bool& is_scalar_expand) const = 0;
-  virtual NodePtr MakeView(
-      const Value& input0,
-      const std::vector<int64_t>& output_size) const = 0;
   virtual NodePtr MakeCast(
       const Value& input0,
       const at::ScalarType& dtype,
@@ -96,11 +93,6 @@ static inline NodePtr MakeExpand(
     const bool& is_scalar_expand) {
   return getIrBuilder()->MakeExpand(input0, size, is_scalar_expand);
 }
-static inline NodePtr MakeView(
-    const Value& input0,
-    const std::vector<int64_t>& output_size) {
-  return getIrBuilder()->MakeView(input0, output_size);
-}
 static inline NodePtr MakeCast(
     const Value& input0,
     const at::ScalarType& dtype,
@@ -135,12 +127,14 @@ static inline NodePtr MakeSizeDiv(const Value& a, const Value& b) {
 }
 
 inline Value GetSymIntValue(c10::SymInt a) {
-  return Value(
-      a.is_symbolic()
-          ? dynamic_cast<torch::lazy::SymNodeImpl*>(a.toSymNodeImpl().get())
-                ->node_
-          : MakeScalar(a.as_int_unchecked(), at::kLong),
-      0);
+  if (auto ma = a.maybe_as_int()) {
+    return Value(MakeScalar(*ma, at::kLong), 0);
+  } else {
+    return Value(
+        dynamic_cast<torch::lazy::SymNodeImpl*>(a.toSymNodeImplUnowned())
+            ->node_,
+        0);
+  }
 }
 
 // TODO: this should return Value

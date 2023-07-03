@@ -3,7 +3,7 @@
 namespace c10 {
 
 namespace {
-// By default, grad mode and mulithreading are enabled, inference mode is
+// By default, grad mode and multithreading are enabled, inference mode is
 // disabled,
 thread_local AutogradState autograd_state_tls = AutogradState(
     /* grad_mode */ true,

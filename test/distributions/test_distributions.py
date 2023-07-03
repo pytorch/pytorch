@@ -42,10 +42,10 @@ import torch
 # Distributions tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-from torch._six import inf, nan
+from torch import inf, nan
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests,
-     gradcheck)
+     gradcheck, skipIfTorchDynamo)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad
 import torch.autograd.forward_ad as fwAD
@@ -797,9 +797,10 @@ class DistributionsTestCase(TestCase):
     def setUp(self):
         """The tests assume that the validation flag is set."""
         torch.distributions.Distribution.set_default_validate_args(True)
-        super(DistributionsTestCase, self).setUp()
+        super().setUp()
 
 
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributions(DistributionsTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -914,6 +915,7 @@ class TestDistributions(DistributionsTestCase):
                                  msg='{} example {}/{}, .sample() is not detached'.format(
                                      Dist.__name__, i + 1, len(params)))
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_rsample_requires_grad(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -941,7 +943,7 @@ class TestDistributions(DistributionsTestCase):
     def test_lazy_property_grad(self):
         x = torch.randn(1, requires_grad=True)
 
-        class Dummy(object):
+        class Dummy:
             @lazy_property
             def y(self):
                 return x + 1
@@ -1421,7 +1423,7 @@ class TestDistributions(DistributionsTestCase):
         # theoretical results.
         dist = Poisson(rate_zero)
         dist.log_prob(torch.ones_like(rate_zero)).backward()
-        torch.testing.assert_allclose(rate_zero.grad, torch.inf)
+        self.assertEqual(rate_zero.grad, torch.inf)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_sample(self):
@@ -1464,7 +1466,7 @@ class TestDistributions(DistributionsTestCase):
     def test_rounded_relaxed_bernoulli(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
 
-        class Rounded(object):
+        class Rounded:
             def __init__(self, dist):
                 self.dist = dist
 
@@ -1511,7 +1513,7 @@ class TestDistributions(DistributionsTestCase):
     def test_argmax_relaxed_categorical(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
 
-        class ArgMax(object):
+        class ArgMax:
             def __init__(self, dist):
                 self.dist = dist
 
@@ -1520,7 +1522,7 @@ class TestDistributions(DistributionsTestCase):
                 _, idx = torch.max(s, -1)
                 return idx
 
-        class ScipyCategorical(object):
+        class ScipyCategorical:
             def __init__(self, dist):
                 self.dist = dist
 
@@ -1880,7 +1882,7 @@ class TestDistributions(DistributionsTestCase):
         loc = torch.randn(5)
         scale = torch.rand(5)
 
-        class ScipyMixtureNormal(object):
+        class ScipyMixtureNormal:
             def __init__(self, probs, mu, std):
                 self.probs = probs
                 self.mu = mu
@@ -2036,7 +2038,7 @@ class TestDistributions(DistributionsTestCase):
         unbatched_prob = torch.stack([dist_unbatched[i].log_prob(x[:, i]) for i in range(5)]).t()
 
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
-        self.assertEqual(0.0, (batched_prob - unbatched_prob).abs().max(), atol=1e-3, rtol=0)
+        self.assertEqual(batched_prob, unbatched_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lowrank_multivariate_normal_sample(self):
@@ -2176,7 +2178,7 @@ class TestDistributions(DistributionsTestCase):
         unbatched_prob = torch.stack([dist_unbatched[i].log_prob(x[:, i]) for i in range(5)]).t()
 
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
-        self.assertEqual(0.0, (batched_prob - unbatched_prob).abs().max(), atol=1e-3, rtol=0)
+        self.assertEqual(batched_prob, unbatched_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_multivariate_normal_sample(self):
@@ -2331,7 +2333,7 @@ class TestDistributions(DistributionsTestCase):
         unbatched_prob = torch.stack([dist_unbatched[i].log_prob(x[:, i]) for i in range(5)]).t()
 
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
-        self.assertEqual(0.0, (batched_prob - unbatched_prob).abs().max(), atol=1e-3, rtol=0)
+        self.assertEqual(batched_prob, unbatched_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_wishart_sample(self):
@@ -2410,6 +2412,18 @@ class TestDistributions(DistributionsTestCase):
 
         self._check_log_prob(Exponential(rate), ref_log_prob)
         self._check_forward_ad(lambda x: x.exponential_())
+
+        def mean_var(lambd, sample):
+            sample.exponential_(lambd)
+            mean = sample.float().mean()
+            var = sample.float().var()
+            self.assertEqual((1. / lambd), mean, atol=2e-2, rtol=2e-2)
+            self.assertEqual((1. / lambd) ** 2, var, atol=2e-2, rtol=2e-2)
+
+        for dtype in [torch.float, torch.double, torch.bfloat16, torch.float16]:
+            for lambd in [0.2, 0.5, 1., 1.5, 2., 5.]:
+                sample_len = 50000
+                mean_var(lambd, torch.rand(sample_len, dtype=dtype))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_exponential_sample(self):
@@ -2575,6 +2589,18 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Gumbel(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Gumbel(1.0, 1.0).sample().size(), ())
         self.assertEqual(Gumbel(1.0, 1.0).sample((1,)).size(), (1,))
+        self.assertEqual(Gumbel(torch.tensor(0.0, dtype=torch.float32),
+                                torch.tensor(1.0, dtype=torch.float32),
+                                validate_args=False).cdf(20.0), 1.0, atol=1e-4, rtol=0)
+        self.assertEqual(Gumbel(torch.tensor(0.0, dtype=torch.float64),
+                                torch.tensor(1.0, dtype=torch.float64),
+                                validate_args=False).cdf(50.0), 1.0, atol=1e-4, rtol=0)
+        self.assertEqual(Gumbel(torch.tensor(0.0, dtype=torch.float32),
+                                torch.tensor(1.0, dtype=torch.float32),
+                                validate_args=False).cdf(-5.0), 0.0, atol=1e-4, rtol=0)
+        self.assertEqual(Gumbel(torch.tensor(0.0, dtype=torch.float64),
+                                torch.tensor(1.0, dtype=torch.float64),
+                                validate_args=False).cdf(-10.0), 0.0, atol=1e-8, rtol=0)
 
         def ref_log_prob(idx, x, log_prob):
             l = loc.view(-1)[idx].detach()
@@ -2746,6 +2772,20 @@ class TestDistributions(DistributionsTestCase):
         for i in range(num_samples):
             expected_log_prob = scipy.stats.dirichlet.logpdf(x[i].numpy(), alpha.numpy())
             self.assertEqual(actual_log_prob[i], expected_log_prob, atol=1e-3, rtol=0)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_dirichlet_log_prob_zero(self):
+        # Specifically test the special case where x=0 and α=1.  The PDF is
+        # proportional to x**(α-1), which in this case works out to 0**0=1.
+        # The log PDF of this term should therefore be 0.  However, it's easy
+        # to accidentally introduce NaNs by calculating log(x) without regard
+        # for the value of α-1.
+        alpha = torch.tensor([1, 2])
+        dist = Dirichlet(alpha)
+        x = torch.tensor([0, 1])
+        actual_log_prob = dist.log_prob(x)
+        expected_log_prob = scipy.stats.dirichlet.logpdf(x.numpy(), alpha.numpy())
+        self.assertEqual(actual_log_prob, expected_log_prob, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_dirichlet_sample(self):
@@ -2975,6 +3015,9 @@ class TestDistributions(DistributionsTestCase):
         # Tests if the differentiation of the CDF gives the PDF at a given value
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
+                # We do not need grads wrt params here, e.g. shape of gamma distribution.
+                param = {key: value.detach() if isinstance(value, torch.Tensor) else value
+                         for key, value in param.items()}
                 dist = Dist(**param)
                 samples = dist.sample()
                 if not dist.support.is_discrete:
@@ -3185,8 +3228,6 @@ class TestDistributions(DistributionsTestCase):
             self.assertTrue((-1e-12 < delta[mask].detach()).all())  # Allow up to 1e-12 rounding error.
 
     def _test_continuous_distribution_mode(self, dist, sanitized_mode, batch_isfinite):
-        if isinstance(dist, Wishart):
-            return
         # We perturb the mode in the unconstrained space and expect the log probability to decrease.
         num_points = 10
         transform = transform_to(dist.support)
@@ -3240,6 +3281,7 @@ class TestDistributions(DistributionsTestCase):
 # These tests are only needed for a few distributions that implement custom
 # reparameterized gradients. Most .rsample() implementations simply rely on
 # the reparameterization trick and do not need to be tested for accuracy.
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestRsample(DistributionsTestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gamma(self):
@@ -3450,13 +3492,10 @@ class TestRsample(DistributionsTestCase):
 
 class TestDistributionShapes(DistributionsTestCase):
     def setUp(self):
-        super(TestDistributionShapes, self).setUp()
+        super().setUp()
         self.scalar_sample = 1
         self.tensor_sample_1 = torch.ones(3, 2)
         self.tensor_sample_2 = torch.ones(3, 2, 3)
-
-    def tearDown(self):
-        super(TestDistributionShapes, self).tearDown()
 
     def test_entropy_shape(self):
         for Dist, params in EXAMPLES:
@@ -3910,14 +3949,15 @@ class TestDistributionShapes(DistributionsTestCase):
         self.assertEqual(continuous_bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
 
 
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestKL(DistributionsTestCase):
 
     def setUp(self):
-        super(TestKL, self).setUp()
+        super().setUp()
 
         class Binomial30(Binomial):
             def __init__(self, probs):
-                super(Binomial30, self).__init__(30, probs)
+                super().__init__(30, probs)
 
         # These are pairs of distributions with 4 x 4 parameters as specified.
         # The first of the pair e.g. bernoulli[0] varies column-wise and the second
@@ -4356,6 +4396,7 @@ class TestConstraints(DistributionsTestCase):
                 self.assertTrue(ok.all(), msg=message)
 
 
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestNumericalStability(DistributionsTestCase):
     def _test_pdf_score(self,
                         dist_class,
@@ -4575,7 +4616,7 @@ class TestNumericalStability(DistributionsTestCase):
 # TODO: make this a pytest parameterized test
 class TestLazyLogitsInitialization(DistributionsTestCase):
     def setUp(self):
-        super(TestLazyLogitsInitialization, self).setUp()
+        super().setUp()
         # ContinuousBernoulli is not tested because log_prob is not computed simply
         # from 'logits', but 'probs' is also needed
         self.examples = [e for e in EXAMPLES if e.Dist in
@@ -4622,7 +4663,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(DistributionsTestCase):
     def setUp(self):
-        super(TestAgainstScipy, self).setUp()
+        super().setUp()
         positive_var = torch.randn(20).exp()
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
@@ -4913,9 +4954,6 @@ class TestFunctors(DistributionsTestCase):
 
 
 class TestValidation(DistributionsTestCase):
-    def setUp(self):
-        super(TestValidation, self).setUp()
-
     def test_valid(self):
         for Dist, params in EXAMPLES:
             for param in params:
@@ -5003,9 +5041,6 @@ class TestValidation(DistributionsTestCase):
         with self.assertWarns(UserWarning):
             d.log_prob(sample)
 
-    def tearDown(self):
-        super(TestValidation, self).tearDown()
-
 
 class TestJit(DistributionsTestCase):
     def _examples(self):
@@ -5021,7 +5056,7 @@ class TestJit(DistributionsTestCase):
     def _perturb_tensor(self, value, constraint):
         if isinstance(constraint, constraints._IntegerGreaterThan):
             return value + 1
-        if isinstance(constraint, constraints._PositiveDefinite) or isinstance(constraint, constraints._PositiveSemidefinite):
+        if isinstance(constraint, (constraints._PositiveDefinite, constraints._PositiveSemidefinite)):
             return value + torch.eye(value.shape[-1])
         if value.dtype in [torch.float, torch.double]:
             transform = transform_to(constraint)

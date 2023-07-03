@@ -5,7 +5,7 @@ import tempfile
 
 import torch
 from torch import distributed as dist
-from torch.distributed._shard.checkpoint import (
+from torch.distributed.checkpoint import (
     FileSystemReader,
     FileSystemWriter,
     load_state_dict,

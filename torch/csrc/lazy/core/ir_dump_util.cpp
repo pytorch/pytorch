@@ -80,7 +80,7 @@ c10::optional<AttrTag> ParseAttrTag(
   return tag;
 }
 
-NodeIdMap GenerateIdMap(c10::ArrayRef<Node*> post_order) {
+NodeIdMap GenerateIdMap(c10::ArrayRef<const Node*> post_order) {
   NodeIdMap id_map;
   for (auto node : post_order) {
     TORCH_CHECK(id_map.emplace(node, id_map.size()).second, node->ToString());
@@ -89,7 +89,7 @@ NodeIdMap GenerateIdMap(c10::ArrayRef<Node*> post_order) {
 }
 
 std::unordered_map<const Node*, size_t> GetRootsIds(
-    c10::ArrayRef<Node*> roots) {
+    c10::ArrayRef<const Node*> roots) {
   std::unordered_map<const Node*, size_t> roots_ids;
   for (const auto i : c10::irange(roots.size())) {
     roots_ids[roots[i]] = i;
@@ -178,14 +178,14 @@ std::string GenerateTextNodeSpec(const Node* node, const NodeIdMap& id_map) {
 
 } // namespace
 
-std::string DumpUtil::ToDot(c10::ArrayRef<Node*> nodes) {
+std::string DumpUtil::ToDot(c10::ArrayRef<const Node*> nodes) {
   auto post_order = Util::ComputePostOrder(nodes);
   return PostOrderToDot(post_order, nodes);
 }
 
 std::string DumpUtil::PostOrderToDot(
-    c10::ArrayRef<Node*> post_order,
-    c10::ArrayRef<Node*> roots) {
+    c10::ArrayRef<const Node*> post_order,
+    c10::ArrayRef<const Node*> roots) {
   std::unordered_map<const Node*, size_t> roots_ids = GetRootsIds(roots);
   NodeIdMap id_map = GenerateIdMap(post_order);
   std::stringstream ss;
@@ -218,14 +218,14 @@ std::string DumpUtil::PostOrderToDot(
   return ss.str();
 }
 
-std::string DumpUtil::ToText(c10::ArrayRef<Node*> nodes) {
+std::string DumpUtil::ToText(c10::ArrayRef<const Node*> nodes) {
   auto post_order = Util::ComputePostOrder(nodes);
   return PostOrderToText(post_order, nodes);
 }
 
 std::string DumpUtil::PostOrderToText(
-    c10::ArrayRef<Node*> post_order,
-    c10::ArrayRef<Node*> roots) {
+    c10::ArrayRef<const Node*> post_order,
+    c10::ArrayRef<const Node*> roots) {
   std::unordered_map<const Node*, size_t> roots_ids = GetRootsIds(roots);
   NodeIdMap id_map = GenerateIdMap(post_order);
   std::stringstream ss;

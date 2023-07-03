@@ -882,7 +882,7 @@ c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
     {
       std::unique_lock<std::mutex> lock(timeoutMapMutex_);
       auto& timeoutFuturesVector = timeoutMap_[expirationTime];
-      messageIdToTimeout_.emplace(std::make_pair(messageId, expirationTime));
+      messageIdToTimeout_.emplace(messageId, expirationTime);
       timeoutFuturesVector.emplace_back(
           messageId, futureResponseMessage, timeout);
     }
@@ -1200,6 +1200,7 @@ const WorkerInfo& TensorPipeAgent::getWorkerInfo(worker_id_t workerId) const {
 
 std::vector<WorkerInfo> TensorPipeAgent::getWorkerInfos() const {
   std::vector<WorkerInfo> workerInfos;
+  workerInfos.reserve(workerNameToInfo_.size());
   for (auto& item : workerNameToInfo_) {
     workerInfos.emplace_back(item.second);
   }

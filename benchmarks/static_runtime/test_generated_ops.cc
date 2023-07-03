@@ -7841,7 +7841,6 @@ TEST(StaticRuntime, autogen_diagonal) {
   auto offset0 = 0;
   auto dim10 = 2;
   auto dim20 = 1;
-  auto dim00 = 1;
   std::vector<IValue> args{self0, offset0, dim10, dim20};
   testStaticRuntime(script, args);
 }
@@ -7859,7 +7858,6 @@ TEST(StaticRuntime, autogen_linalg_diagonal) {
   auto offset0 = 0;
   auto dim10 = 2;
   auto dim20 = 1;
-  auto dim00 = 1;
   std::vector<IValue> args{A0, offset0, dim10, dim20};
   testStaticRuntime(script, args);
 }

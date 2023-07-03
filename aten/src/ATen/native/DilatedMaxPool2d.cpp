@@ -32,7 +32,7 @@ bool ceil_mode) {
 
   // NB: stride default is not expressible as an integer constant, so we accept
   // empty stride for this case
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW :
@@ -105,7 +105,7 @@ const Tensor& indices) {
 
   // NB: stride default is not expressible as an integer constant, so we accept
   // empty stride for this case
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW :

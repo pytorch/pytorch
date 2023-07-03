@@ -7,7 +7,6 @@
 
 from abc import ABCMeta, abstractmethod
 import argparse
-from future.utils import viewitems
 import logging
 import numpy as np
 import sys
@@ -538,7 +537,7 @@ def run_seq2seq_beam_decoder(args, model_params, decoding_params):
         args.target_corpus,
         args.unk_threshold,
     )
-    inversed_target_vocab = {v: k for (k, v) in viewitems(target_vocab)}
+    inversed_target_vocab = {v: k for (k, v) in target_vocab.items()}
     logger.info('Target vocab size {}'.format(len(target_vocab)))
 
     decoder = Seq2SeqModelCaffe2EnsembleDecoder(
