@@ -152,10 +152,13 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
         def get_cls_annotations(cls):
             cls_annotations = inspect.get_annotations(cls)
+            if cls_annotations:
+                return cls_annotations
             for base in cls.__bases__:
-                # x = y | x: x takes priority in this union operation if x and y share a key
-                cls_annotations = get_cls_annotations(base) | cls_annotations
-            return cls_annotations
+                cls_annotations = get_cls_annotations(base)
+                if cls_annotations:
+                    return cls_annotations
+            return {}
 
         cls = obj if isinstance(obj, type) else type(obj)
         return get_cls_annotations(cls) | annotations
