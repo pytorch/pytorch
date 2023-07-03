@@ -889,10 +889,13 @@ std::tuple<Tensor, Tensor> _structured_sparse_linear(
 namespace at {
 namespace native {
 
+#ifndef USE_ROCM
 // Copied from tools/util/include/host_reorder.h, from CUTLASS source
-// tree.  This is for simplicity; namely, this file is not under
+// tree.  This is for simplicity - namely, this file is not under
 // include/cutlass in this tree, as other CUTLASS include files
-// needed, so it would require changing PyTorch CMake configuration.
+// needed, so it would require changing PyTorch CMake configuration;
+// furthermore, including this file produces build errors in PyTorch
+// at the moment.
 template <typename Element, typename LayoutDest, typename LayoutSrc>
 static void reorder_meta(cutlass::TensorRef<Element, LayoutDest> dest,
                          cutlass::TensorRef<Element, LayoutSrc> src,
@@ -919,6 +922,7 @@ static void reorder_meta(cutlass::TensorRef<Element, LayoutDest> dest,
     }
   }
 }
+#endif
 
 std::tuple<Tensor, Tensor>
 _to_sparse_semi_structured(const Tensor& dense) {
