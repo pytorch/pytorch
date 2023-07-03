@@ -176,7 +176,6 @@ class ResolvedExportOptions(ExportOptions):
                 onnxfunction_dispatcher.OnnxFunctionDispatcher(
                     self.onnx_registry,
                     self.diagnostic_context,
-                    self.opset_version,
                 )
             )
 
