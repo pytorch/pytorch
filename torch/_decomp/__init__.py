@@ -172,7 +172,9 @@ import torch._decomp.decompositions
 import torch._refs
 
 
-# This list was copied from torch/_inductor/decomposition.py
+# See NOTE [Core ATen Ops]
+#
+# list was copied from torch/_inductor/decomposition.py
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
 def core_aten_decompositions() -> Dict[OpOverload, Callable]:

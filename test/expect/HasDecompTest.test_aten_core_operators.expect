@@ -105,6 +105,10 @@ aten::bitwise_xor.Scalar_out
 aten::bitwise_xor.Tensor
 aten::bitwise_xor.Tensor_out
 aten::bitwise_xor_.Tensor
+aten::bucketize.Scalar
+aten::bucketize.Scalar_out
+aten::bucketize.Tensor
+aten::bucketize.Tensor_out
 aten::cat
 aten::cat.out
 aten::cauchy

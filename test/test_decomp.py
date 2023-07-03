@@ -785,8 +785,10 @@ class HasDecompTest(TestCase):
         self.assertExpected("".join(sorted(op.name() + "\n" for op in ops_missing_decomp)))
 
     def test_aten_core_operators(self):
-        # If decomposition isn't included in the core decompositions,
+        # If a decomposition isn't included in the core decompositions,
         # then it must decompose a core ATen operator.
+        #
+        # See NOTE [Core ATen Ops]
         #
         # If this test fails then either:
         # - Add the decomposition to torch._decomp.core_aten_decompositions,
