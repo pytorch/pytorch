@@ -11,9 +11,7 @@ from weakref import WeakSet
 log = logging.getLogger(__name__)
 
 DEFAULT_LOG_LEVEL = logging.WARN
-DEFAULT_FORMATTER = logging.Formatter(
-    "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
-)
+DEFAULT_FORMAT = "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
 LOG_ENV_VAR = "TORCH_LOGS"
 
 
@@ -46,6 +44,9 @@ class LogRegistry:
     # log level is set to DEBUG. It must be explicitly named in the settings
     off_by_default_artifact_names: Set[str] = field(default_factory=set)
 
+    # logging format string for artifacts
+    artifact_log_formatters: Dict[str, logging.Formatter] = field(default_factory=dict)
+
     def is_artifact(self, name):
         return name in self.artifact_names
 
@@ -57,13 +58,16 @@ class LogRegistry:
         self.log_alias_to_log_qname[alias] = log_qname
 
     # register an artifact name
-    def register_artifact_name(self, name, off_by_default):
+    def register_artifact_name(self, name, off_by_default, log_format):
         self.artifact_names.add(name)
 
         # if off by default, don't enable it
         # when log_name's log_level is set to DEBUG
         if off_by_default:
             self.off_by_default_artifact_names.add(name)
+
+        if log_format is not None:
+            self.artifact_log_formatters[name] = logging.Formatter(log_format)
 
     # register the qualified name of an artifact log
     # this is needed to know which logs need to be reset
@@ -352,7 +356,7 @@ def register_log(setting_name, log_name):
     log_registry.register_log(setting_name, log_name)
 
 
-def register_artifact(setting_name, off_by_default=False):
+def register_artifact(setting_name, off_by_default=False, log_format=None):
     """
     Enables an artifact to be controlled by the env var and user API with name
     Args:
@@ -360,7 +364,7 @@ def register_artifact(setting_name, off_by_default=False):
         off_by_default: whether this artifact should be logged when the ancestor loggers
             are enabled at level DEBUG
     """
-    log_registry.register_artifact_name(setting_name, off_by_default)
+    log_registry.register_artifact_name(setting_name, off_by_default, log_format)
 
 
 def getArtifactLogger(module_qname, artifact_name):
@@ -504,6 +508,22 @@ def _has_registered_parent(log_qname):
         cur_log = cur_log.parent
 
     return False
+
+
+# apply custom formats to artifacts when necessary
+class TorchLogsFormatter(logging.Formatter):
+    def format(self, record):
+        artifact_name = getattr(logging.getLogger(record.name), "artifact_name", None)
+        if artifact_name is not None:
+            artifact_formatter = log_registry.artifact_log_formatters.get(
+                artifact_name, None
+            )
+            if artifact_formatter is not None:
+                return artifact_formatter.format(record)
+        return super().format(record)
+
+
+DEFAULT_FORMATTER = TorchLogsFormatter(DEFAULT_FORMAT)
 
 
 def _setup_handlers(create_handler_fn, log):
