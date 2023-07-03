@@ -71,6 +71,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   void set_level(int64_t level) {
     level_ = level;
   }
+  bool has_metadata_mutation() const {
+    return has_metadata_mutation_;
+  };
 
   // Sync's the underlying tensor with its alias, if it's out of date. This
   // involves two steps: 1) Apply any pending updates/mutations to the alias 2)
@@ -169,6 +172,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // change the value tensor that it points to over time.
   Tensor value_;
   int64_t level_;
+  bool has_metadata_mutation_ = false;
 
   size_t generation_ = 0;
   std::vector<at::functionalization::ViewMeta> view_metas_;
