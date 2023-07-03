@@ -87,7 +87,11 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
-  AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, cudaStreamCaptureModeGlobal));
+  // This mode was previously set to Global but we observed a bad interaction with NCCL
+  // watchdogs cleaning up straggling work during a graph capure (via cudaEventQuery)
+  // causing a crash despite the work being enqueued before the start of the capture.
+  // See also: #104487
+  AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, cudaStreamCaptureModeThreadLocal));
 
   // Stashes the current capture's uuid.
   cudaStreamCaptureStatus status;
