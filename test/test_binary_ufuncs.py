@@ -9,7 +9,6 @@ from itertools import product
 import math
 import random
 from numbers import Number
-import unittest
 import warnings
 import operator
 from functools import partial
@@ -20,7 +19,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     slowTest,
     iter_indices,
-    TEST_WITH_ASAN,
     run_tests,
     gradcheck,
     torch_to_numpy_dtype_dict,
@@ -196,8 +194,6 @@ class TestBinaryUfuncs(TestCase):
         gen = generate_elementwise_binary_tensors(op, device=device, dtype=dtype)
         self._test_reference_numerics(dtype, op, gen, equal_nan=True)
 
-    # runtime error: 128 is outside the range of representable values of type 'signed char'
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @ops(binary_ufuncs_with_references)
     def test_reference_numerics_small_values(self, device, dtype, op):
         if dtype is torch.bool:
@@ -208,8 +204,6 @@ class TestBinaryUfuncs(TestCase):
         )
         self._test_reference_numerics(dtype, op, gen, equal_nan=True)
 
-    # TODO: review if this skip is necessary
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @ops(
         binary_ufuncs_with_references,
         allowed_dtypes=(
@@ -230,8 +224,6 @@ class TestBinaryUfuncs(TestCase):
         )
         self._test_reference_numerics(dtype, op, gen, equal_nan=True)
 
-    # TODO: review if this skip is necessary
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @ops(
         binary_ufuncs_with_references,
         allowed_dtypes=(
@@ -3017,7 +3009,6 @@ class TestBinaryUfuncs(TestCase):
             with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
                 a // b
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Integer overflows are not allowed under ASAN")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_muldiv_scalar(self, device, dtype):
         x = make_tensor((10, 3), dtype=dtype, device=device, low=None, high=None)

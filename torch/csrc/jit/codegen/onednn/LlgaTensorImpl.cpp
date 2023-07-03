@@ -12,14 +12,14 @@ namespace onednn {
 // Non-default dnnl::graph::allocator needs an allocator.
 // We would let it use c10::GetCPUAllocator's allocator,
 // which uses posix_memalign with 64 byte alignment-size.
-void* pytorch_default_allocator(size_t size, size_t alignment) {
+static void* pytorch_default_allocator(size_t size, size_t alignment) {
   static c10::Allocator* c10_allocator = c10::GetCPUAllocator();
   return c10_allocator->raw_allocate(size);
 }
 
 // Non-default dnnl::graph::allocator needs a deallocator.
 // We would let it use c10::GetCPUAllocator's deallocator.
-void pytorch_default_deallocator(void* buf) {
+static void pytorch_default_deallocator(void* buf) {
   static c10::Allocator* c10_allocator = c10::GetCPUAllocator();
   c10_allocator->raw_deallocate(buf);
 }
