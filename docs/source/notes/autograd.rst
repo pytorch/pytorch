@@ -176,9 +176,9 @@ decorators.
    :header-rows: 1
 
    * - Mode
-     - ``required-grad`` takes effect
-     - Recorded in backwards graph
-     - Output tensor can be used in grad-mode later
+     - autograd respects the ``requires_grad`` of operator inputs
+     - Operations are recorded in backwards graph
+     - Tensors created while the mode is enabled can be used in grad-mode later
      - Examples
    * - grad (default)
      - ✓
