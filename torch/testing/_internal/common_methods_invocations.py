@@ -9617,7 +9617,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            decorators=[
                DecorateInfo(
-                   toleranceOverride({torch.half: tol(atol=5e-3, rtol=5e-3)}),
+                   toleranceOverride({torch.half: tol(atol=1e-5, rtol=3e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
            ],
            sample_inputs_func=sample_inputs_addmv),
@@ -9652,7 +9652,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1.5e-05, rtol=1e-05)}),
                    'TestCommon', 'test_out'),
                DecorateInfo(
-                   toleranceOverride({torch.half: tol(atol=1e-2, rtol=1e-2)}),
+                   toleranceOverride({torch.half: tol(atol=1e-3, rtol=1e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
            ],
            skips=(
@@ -9683,7 +9683,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestMathBits', 'test_conj_view', device_type='cuda'),
                DecorateInfo(
-                   toleranceOverride({torch.float16: tol(atol=5e-03, rtol=5e-03)}),
+                   toleranceOverride({torch.float16: tol(atol=5e-03, rtol=1e-03)}),
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
            sample_inputs_func=sample_inputs_baddbmm,
            skips=(
@@ -11319,7 +11319,8 @@ op_db: List[OpInfo] = [
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('matrix_exp',
-           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            aliases=('linalg.matrix_exp',),
            sample_inputs_func=sample_inputs_matrix_exp,
            # Needs to construct a 2nx2n matrix by copy_ ing into it
@@ -11329,20 +11330,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           decorators=[
-               DecorateInfo(
-                   toleranceOverride({
-                       torch.float32: tol(atol=1e-5, rtol=1e-5),
-                       torch.complex64: tol(atol=1e-5, rtol=1e-5),
-                   }),
-                   "TestInductorOpInfo", "test_comprehensive", device_type="cpu",
-               ),
-           ],
            skips=(
                # times out
                DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
-               # Does not support bf16 and fp16
-               DecorateInfo(unittest.skip('Skipped!'), 'TestInductorOpInfo', 'test_comprehensive', device_type="cpu"),
            ),
            supports_out=False,
            ),

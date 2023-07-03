@@ -692,7 +692,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                         rtol = None
                         atol = None
                     # Run the test
-                    print(rtol, atol)
                     self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
                         model, inputs, rtol=rtol, atol=atol
                     )

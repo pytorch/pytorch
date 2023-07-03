@@ -1270,14 +1270,18 @@ class TestMkldnn(TestCase):
             for bias in [True, False]:
                 linear = torch.nn.Linear(in_features, out_features, bias=bias).float()
                 mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
-                mkldnn_linear_lowp = mkldnn_utils.to_mkldnn(copy.deepcopy(linear), dtype)
+                mkldnn_linear_lowp = mkldnn_utils.to_mkldnn(
+                    copy.deepcopy(linear), dtype
+                )
                 lowp_support = {
                     torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
-                    torch.half: torch.ops.mkldnn._is_mkldnn_fp16_supported
+                    torch.half: torch.ops.mkldnn._is_mkldnn_fp16_supported,
                 }
                 if lowp_support[dtype]():
                     y = mkldnn_linear(x.to_mkldnn()).to_dense()
-                    y_lowp = mkldnn_linear_lowp(x_lowp.to_mkldnn()).to_dense(torch.float32)
+                    y_lowp = mkldnn_linear_lowp(x_lowp.to_mkldnn()).to_dense(
+                        torch.float32
+                    )
                     if dtype == torch.bfloat16:
                         self.assertEqual(y, y_lowp, atol=1e-1, rtol=1e-3)
                     else:
@@ -1287,9 +1291,12 @@ class TestMkldnn(TestCase):
                         torch.bfloat16: r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq",
                         torch.half: r"fp16 path needs the cpu support avx512_fp16",
                     }
-                    self.assertRaisesRegex(RuntimeError,
-                                        msg[dtype],
-                                        lambda: mkldnn_linear_lowp(x_lowp.to_mkldnn()))
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        msg[dtype],
+                        lambda: mkldnn_linear_lowp(x_lowp.to_mkldnn()),
+                    )
+
         helper(torch.bfloat16)
         helper(torch.float16)
 
