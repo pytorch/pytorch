@@ -176,7 +176,7 @@ decorators.
    :header-rows: 1
 
    * - Mode
-     - required-grad takes effect
+     - ``required-grad`` takes effect
      - Recorded in backwards graph
      - Output tensor can be used in grad-mode later
      - Examples
