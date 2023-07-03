@@ -326,7 +326,6 @@ class TestTorchDeviceType(TestCase):
         s = t.storage()
         self._check_storage_meta(s, s_check)
 
-    @onlyCPU
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_storage_meta_errors(self, device, dtype):
         s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
@@ -347,7 +346,7 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'only available on CUDA'):
                 s0._share_cuda_()
 
-            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+            with self.assertRaisesRegex(TypeError, r"cannot pin 'torch.storage.UntypedStorage' only CPU memory can be pinned"):
                 s0.pin_memory()
 
         with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):

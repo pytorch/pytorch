@@ -217,6 +217,8 @@ class ExprPrinter(Printer):
         # into Tensor expressions earlier and do that instead.
         if exp == 0.5:
             return self._helper_sqrt(base)
+        elif exp == -0.5:
+            return "1/" + self._helper_sqrt(base)
         base = self._print(base)
         assert exp == int(exp), exp
         exp = int(exp)
@@ -226,6 +228,9 @@ class ExprPrinter(Printer):
             return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
         else:  # exp == 0
             return "1"
+
+    def _print_Unequality(self, expr):
+        return " != ".join(map(self.paren, map(self._print, expr.args)))
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
@@ -870,5 +875,3 @@ class OptimizationContext:
 
     # Load uint8 value as float32
     is_load_uint8_as_float: bool = False
-    # Store float32 value as uint8
-    is_store_float_as_uint8: bool = False

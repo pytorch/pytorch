@@ -69,6 +69,9 @@ TESTED_OPS: frozenset[str] = frozenset(
         "asinh",
         "atan",
         "atanh",
+        "atleast_1d",
+        "atleast_2d",
+        "atleast_3d",
         "baddbmm",
         "bmm",
         "broadcast_to",
@@ -106,6 +109,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "fmod",
         "full",
         "full_like",
+        "hstack",  # aten::cat is invoked instead
         "index_put",
         "logit",
         # "new_empty",  non-deterministic
@@ -133,6 +137,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "scatter_add",
         "scatter_reduce",
         "unflatten",
+        "vstack",  # aten::cat is invoked instead
     ]
 )
 
