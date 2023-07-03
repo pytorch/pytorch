@@ -1823,7 +1823,6 @@ if torch._C._has_mkldnn:
             device=weight.device,
         )
 
-    # mkldnn::_reorder_linear_weight(Tensor self, int? batch_size=None) -> Tensor Y")
     @register_meta(torch.ops.mkldnn._reorder_linear_weight.default)
     def meta_reorder_linear_weight(
         weight,
