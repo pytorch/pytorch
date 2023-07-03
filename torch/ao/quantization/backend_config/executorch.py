@@ -350,10 +350,13 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         F.max_pool2d,
         F.relu,
         F.relu6,
+        F.leaky_relu,
+        F.leaky_relu_,
         torch.nn.AdaptiveAvgPool2d,
         torch.nn.MaxPool2d,
         torch.nn.ReLU6,
         torch.nn.Hardtanh,
+        torch.nn.LeakyReLU,
         torch.flatten,
         torch.mean,
         torch.squeeze,
@@ -364,6 +367,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         "relu_",
         "squeeze",
         "squeeze_",
+        "leaky_relu",
     ]
     share_qparams_op_configs: List[BackendPatternConfig] = []
     for op in share_qparams_ops:

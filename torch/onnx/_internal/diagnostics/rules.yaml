@@ -354,6 +354,42 @@
     deprecated: false
     tags: []
 
+- id: FXE0014
+  name: find-opschema-matched-symbolic-function
+  short_description:
+    text: Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas.
+  full_description:
+    text: "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas.
+      A warning will be issued if the matched OnnxFunction is not an exact match."
+    markdown: |
+      When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input
+      dtypes of the ATen/Custom operator are compared with the input dtypes of the OnnxFunction opschemas
+      to find a match. However, if a perfect/exact match is not found, the dispatcher will attempt to find
+      the nearest match with the highest number of input dtypes matching the OnnxFunction opschemas, while
+      issuing a warning.
+
+      There are two types of level that can be triggered in this rule:
+
+      1. NOTE: A perfect match is found, and no warning is issued.
+      2. WARNING: The matched OnnxFunction is not a perfect/exact match.
+
+      Here are some suggestions based on the WARNING situation:
+
+      1. If there are NO errors or mismatches in the results, it is safe to disregard this warning,
+        as the definition of OnnxFunction schema is usually more stringent.
+      2. If there are errors or mismatches in the results, it is recommended to:
+        (a) Enable op_level_debugging to determine if the OnnxFunction might be incorrect.
+        (b) Report the issue to the PyTorch-ONNX team.
+        (c) Create/register a custom symbolic function to replace the default one.
+
+  message_strings:
+    default:
+      text: "The OnnxFunction: {symbolic_fn} is the nearest match of the node {node}."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
 - id: DIAGSYS0001
   name: arg-format-too-verbose
   short_description:
