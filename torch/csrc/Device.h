@@ -5,7 +5,6 @@
 
 #include <ATen/Device.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API THPDevice {
   PyObject_HEAD at::Device device;
 };

@@ -13,7 +13,7 @@ is different from the C++ equivalent.
 
 class SampleModule(torch.nn.Module):
     def __init__(self, has_parity, has_submodule):
-        super(SampleModule, self).__init__()
+        super().__init__()
         self.has_parity = has_parity
         if has_submodule:
             self.submodule = SampleModule(self.has_parity, False)

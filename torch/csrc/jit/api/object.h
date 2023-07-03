@@ -5,6 +5,8 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/api/method.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -130,7 +132,8 @@ struct TORCH_API Object {
         if (prop.setter) {
           setter = Method(_ivalue(), prop.setter);
         }
-        return Property{prop.name, Method(_ivalue(), prop.getter), setter};
+        return Property{
+            prop.name, Method(_ivalue(), prop.getter), std::move(setter)};
       }
     }
     AT_ERROR("Property '", name, "' is not defined.");
@@ -142,7 +145,8 @@ struct TORCH_API Object {
       if (prop.setter) {
         setter = Method(_ivalue(), prop.setter);
       }
-      return Property{prop.name, Method(_ivalue(), prop.getter), setter};
+      return Property{
+          prop.name, Method(_ivalue(), prop.getter), std::move(setter)};
     });
   }
 

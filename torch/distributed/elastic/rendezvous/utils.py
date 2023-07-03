@@ -127,6 +127,18 @@ def _matches_machine_hostname(host: str) -> bool:
     if addr and addr.is_loopback:
         return True
 
+    try:
+        host_addr_list = socket.getaddrinfo(
+            host, None, proto=socket.IPPROTO_TCP, flags=socket.AI_CANONNAME
+        )
+    except (ValueError, socket.gaierror) as _:
+        host_addr_list = []
+
+    host_ip_list = [
+        host_addr_info[4][0]
+        for host_addr_info in host_addr_list
+    ]
+
     this_host = socket.gethostname()
     if host == this_host:
         return True
@@ -138,9 +150,14 @@ def _matches_machine_hostname(host: str) -> bool:
         # If we have an FQDN in the addr_info, compare it to `host`.
         if addr_info[3] and addr_info[3] == host:
             return True
+
         # Otherwise if `host` represents an IP address, compare it to our IP
         # address.
         if addr and addr_info[4][0] == str(addr):
+            return True
+
+        # If the IP address matches one of the provided host's IP addresses
+        if addr_info[4][0] in host_ip_list:
             return True
 
     return False

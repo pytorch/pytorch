@@ -2,7 +2,6 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
 
-#include <torch/csrc/distributed/c10d/Ops.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/torch.h>
@@ -14,7 +13,7 @@ c10::intrusive_ptr<c10::ivalue::Future> AllReduceCommHook::runHook(
   std::vector<at::Tensor> tensors = {bucket.getBufferRef()};
   // Apply the division first to avoid overflow, especially for FP16.
   tensors[0] /= state_->getSize();
-  return ops::allreduce(state_, tensors)->getFuture();
+  return state_->allreduce(tensors)->getFuture();
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
@@ -24,7 +23,7 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
   compressed_tensor /= state_->getSize();
   std::vector<at::Tensor> tensors = {compressed_tensor};
 
-  auto allreduce_fut = ops::allreduce(state_, tensors)->getFuture();
+  auto allreduce_fut = state_->allreduce(tensors)->getFuture();
   auto decompressed_tensor = bucket.getBufferRef();
   auto decompress = [decompressed_tensor](c10::ivalue::Future& allreduce_fut) {
     auto result = allreduce_fut.value();
@@ -47,7 +46,16 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
 c10::intrusive_ptr<c10::ivalue::Future> _AllReduceBySumCommHook::runHook(
     GradBucket& bucket) {
   std::vector<at::Tensor> tensors = {bucket.getBufferRef()};
-  return ops::allreduce(state_, tensors)->getFuture();
+#ifdef IS_NCCL_EXP
+  // case with sparse_metadata_ set and using indices from there
+  if (bucket.getSparseGradIndices().has_value()) {
+    AllreduceOptions opts = AllreduceOptions();
+    opts.sparseIndices = bucket.getSparseGradIndices().value();
+    return state_->allreduce(tensors, opts)->getFuture();
+  }
+#else
+  return state_->allreduce(tensors)->getFuture();
+#endif
 }
 
 } // namespace c10d

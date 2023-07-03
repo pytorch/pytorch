@@ -11,8 +11,6 @@
 #include <utility>
 #include <vector>
 
-namespace F = torch::nn::functional;
-
 namespace torch {
 namespace nn {
 

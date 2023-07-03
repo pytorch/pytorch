@@ -26,6 +26,11 @@
 {%- if not is_windows %}
       DOCKER_IMAGE: !{{ config["container_image"] }}
 {%- endif %}
+{%- if config["package_type"] == "manywheel" %}
+  {%- if config["devtoolset"] %}
+      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
+  {%- endif %}
+{%- endif %}
 {%- if config["package_type"] == "libtorch" %}
   {%- if config["libtorch_config"] %}
       LIBTORCH_CONFIG: !{{ config["libtorch_config"] }}
@@ -37,7 +42,7 @@
   {%- if is_windows %}
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.7"
+      DESIRED_PYTHON: "3.8"
   {%- endif %}
 {%- else %}
       DESIRED_PYTHON: "!{{ config["python_version"] }}"

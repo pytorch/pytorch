@@ -13,6 +13,7 @@
 #include <c10/util/quint8.h>
 
 #include <array>
+#include <cmath>
 #include <iostream>
 
 // This file defines Vectorized<> for the quantized types.
@@ -95,6 +96,36 @@ inline __m256i pack_saturate_and_clamp<uint8_t>(
   return _mm256_max_epu8(
       _mm256_set1_epi8(min_val),
       _mm256_min_epu8(packed_and_sat, _mm256_set1_epi8(max_val)));
+}
+
+inline Vectorized<float> load_uint8_as_float(const uint8_t* src_data) {
+  // Load 8*uint8
+  __m128i input_128 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(src_data));
+  // Convert from 8*uint8 to 8*int32
+  __m256i input_256_int32 = _mm256_cvtepu8_epi32(input_128);
+  // Convert from 8*int32 to 8*float
+  return _mm256_cvtepi32_ps(input_256_int32);
+}
+
+inline void store_float_as_uint8(at::vec::Vectorized<float> values, uint8_t* dst_data) {
+  // Convert from float32 to int32
+  __m256i x_values_int32 = _mm256_cvtps_epi32(values);
+
+  // Convert from int32 to int16 using signed saturation
+  __m256i xy_packed_v = _mm256_packs_epi32(x_values_int32, x_values_int32);
+
+  constexpr auto min_val = std::numeric_limits<uint8_t>::min();
+  constexpr auto max_val = std::numeric_limits<uint8_t>::max();
+
+  // Convert from int16 to uint8 using unsigned saturation
+  __m256i xyzw_clamped_v = pack_saturate_and_clamp<uint8_t>(
+      xy_packed_v, xy_packed_v, min_val, max_val);
+  __m256i permute_mask_v =
+    _mm256_set_epi32(0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
+  xyzw_clamped_v = _mm256_permutevar8x32_epi32(xyzw_clamped_v, permute_mask_v);
+
+  // Store to dst
+  _mm_storel_epi64(reinterpret_cast<__m128i*>(dst_data), _mm256_castsi256_si128(xyzw_clamped_v));
 }
 
 template <typename T>
@@ -207,7 +238,7 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
     // Note that we cannot implement the same behavior as the vectorized code
     // using std::round because it does rounding away from zero in halfway
     // cases.
-    transformed = zero_point + nearbyint(transformed);
+    transformed = zero_point + std::nearbyint(transformed);
     float clipped =
         std::min(std::max(transformed, float(min_val)), float(max_val));
     dst[i] = clipped;
@@ -941,7 +972,7 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
     Vectorized<c10::qint32> retval;
     for (const auto i : c10::irange(size())) {
       retval.vals[i] =
-          nearbyint(static_cast<float>(inp[0].vals[i]) * multiplier) +
+          std::nearbyint(static_cast<float>(inp[0].vals[i]) * multiplier) +
           zero_point;
     }
     return retval;
@@ -1093,7 +1124,7 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
     for (const auto i : c10::irange(int_num_vecs())) {
       for (const auto j : c10::irange(elem_per_int_vec)) {
         int32_t rounded =
-            nearbyint(static_cast<float>(inp[i].vals[j]) * multiplier) +
+            std::nearbyint(static_cast<float>(inp[i].vals[j]) * multiplier) +
             zero_point;
         retval.vals[i * elem_per_int_vec + j] =
             std::min<int32_t>(std::max<int32_t>(rounded, min_val), max_val);
@@ -1227,7 +1258,7 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     for (const auto i : c10::irange(int_num_vecs())) {
       for (const auto j : c10::irange(elem_per_int_vec)) {
         int32_t rounded =
-            nearbyint(static_cast<float>(inp[i].vals[j]) * multiplier) +
+            std::nearbyint(static_cast<float>(inp[i].vals[j]) * multiplier) +
             zero_point;
         retval.vals[i * elem_per_int_vec + j] =
             std::min<int32_t>(std::max<int32_t>(rounded, min_val), max_val);

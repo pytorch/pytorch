@@ -4,10 +4,7 @@
 
 #include <fstream>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
-namespace analysis {
+namespace torch::jit::tensorexpr::analysis {
 
 const char* AccessToString(AccessType a) {
   switch (a) {
@@ -33,7 +30,7 @@ const char* AccessToString(AccessType a) {
   return "Unknown";
 }
 
-void getDependencyChain(
+static void getDependencyChain(
     const std::shared_ptr<AccessInfo>& info,
     DependencySet& dependencies) {
   if (!dependencies.insert(info).second) {
@@ -45,7 +42,7 @@ void getDependencyChain(
   }
 }
 
-void getDependentsChain(
+static void getDependentsChain(
     const std::shared_ptr<AccessInfo>& info,
     DependencySet& dependents) {
   if (!dependents.insert(info).second) {
@@ -153,7 +150,7 @@ bool AccessInfo::isWrite() const {
 
 void AccessInfo::print() const {
   std::cout << id_ << ". " << AccessToString(type_) << ": " << *var_ << "[";
-  if (bounds_.size() > 0) {
+  if (!bounds_.empty()) {
     for (size_t i = 0; i < bounds_.size() - 1; ++i) {
       bounds_[i].print();
       std::cout << ", ";
@@ -186,7 +183,7 @@ void AccessInfo::dumpDOT(std::ostream& os) const {
       type_ == AccessType::Alloc) {
     os << "n" << id_ << " [\n";
     os << "label = \"" << AccessToString(type_) << "\\n " << *var_ << "[";
-    if (bounds_.size() > 0) {
+    if (!bounds_.empty()) {
       for (size_t i = 0; i < bounds_.size() - 1; ++i) {
         os << *IRSimplifier::simplify(
                   alloc<Add>(bounds_[i].end, immLike(bounds_[i].end, 1)))
@@ -207,8 +204,8 @@ void AccessInfo::dumpDOT(std::ostream& os) const {
     os << "n" << id_ << " [\n";
     os << "label = \"" << AccessToString(type_) << " (#" << id_ << ")\\n";
     os << "buf : " << *var_ << "\\n";
-    os << "bounds : \[";
-    if (bounds_.size() > 0) {
+    os << "bounds : [";
+    if (!bounds_.empty()) {
       for (size_t i = 0; i < bounds_.size() - 1; ++i) {
         os << "(" << *bounds_[i].start << ", " << *bounds_[i].end << "), ";
       }
@@ -263,10 +260,10 @@ MemDependencyChecker::MemDependencyChecker() {
 MemDependencyChecker::MemDependencyChecker(
     const std::unordered_set<BufPtr>& inputs,
     const std::unordered_set<BufPtr>& outputs) {
-  for (auto s : inputs) {
+  for (const auto& s : inputs) {
     inputs_[s] = nullptr;
   }
-  for (auto s : outputs) {
+  for (const auto& s : outputs) {
     outputs_[s] = nullptr;
   }
 
@@ -509,7 +506,7 @@ void MemDependencyChecker::visit(StorePtr v) {
   lastStmt_ = v;
   v->value()->accept(this);
 
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     ind->accept(this);
   }
   lastStmt_ = last;
@@ -543,7 +540,7 @@ void MemDependencyChecker::visit(LoadPtr v) {
       std::make_shared<Scope>(currentScope_->block, currentScope_);
   currentScope_ = indicesScope;
 
-  for (ExprPtr ind : v->indices()) {
+  for (const ExprPtr& ind : v->indices()) {
     ind->accept(this);
   }
 
@@ -585,7 +582,7 @@ void MemDependencyChecker::visit(LoadPtr v) {
 // dependence. This function does not consider overlap in bound range, but
 // rather the stride of the bound relative to the loop variable. This is the
 // section of the code which considers iteration order, if allowed.
-bool executionSafetyCheck(
+static bool executionSafetyCheck(
     const std::shared_ptr<AccessInfo>& info,
     const std::shared_ptr<AccessInfo>& other,
     const std::vector<ExprPtr>& aStrides,
@@ -689,7 +686,7 @@ void MemDependencyChecker::visit(ForPtr v) {
   // They exist in the enclosing scope, but accesses within the loop body may
   // depend on them via usage of the loop variable.
   // The way we handle this is to create a new scope so we have an easily
-  // accessible list of the acceses within the extents.
+  // accessible list of the accesses within the extents.
   auto extentsScope =
       std::make_shared<Scope>(currentScope_->block, currentScope_);
   currentScope_ = extentsScope;
@@ -943,7 +940,7 @@ void MemDependencyChecker::visit(CondPtr v) {
   // present in both the true and false branches then we can close overlapping
   // accesses in the enclosing scope. Without that analysis future accesses
   // may be dependent on a write of a common range in all three of the
-  // enclosing, true and false scope. This is a false positve so not too bad
+  // enclosing, true and false scope. This is a false positive so not too bad
   // in the short term, I think.
 
   // Merge both true and false branches into the parent, but don't close any
@@ -1042,10 +1039,9 @@ void MemDependencyChecker::insertBuffers(
     BufPtr b = pair.first;
     VarPtr var = b->base_handle();
     IndexBounds bounds;
-    for (auto d : b->dims()) {
-      bounds.push_back(
-          {immLike(d, 0),
-           IRSimplifier::simplify(alloc<Sub>(d, immLike(d, 1)))});
+    for (const auto& d : b->dims()) {
+      bounds.emplace_back(
+          immLike(d, 0), IRSimplifier::simplify(alloc<Sub>(d, immLike(d, 1))));
     }
     auto info =
         std::make_shared<AccessInfo>(nextAccess_++, type, nullptr, var, bounds);
@@ -1070,11 +1066,11 @@ void MemDependencyChecker::visit(BlockPtr v) {
     currentScope_ = std::make_shared<Scope>((BlockPtr)v, prev_scope);
   }
 
-  for (auto s : *v) {
+  for (const auto& s : *v) {
     s->accept(this);
   }
 
-  for (auto v : currentScope_->localVars) {
+  for (const auto& v : currentScope_->localVars) {
     knownVarBounds_.erase(v);
   }
   for (auto& pair : currentScope_->shadowedVarBounds) {
@@ -1135,7 +1131,7 @@ void MemDependencyChecker::visit(AllocatePtr v) {
   ExprPtr flat_size = buf_flat_size(v->buf());
   flat_size =
       IRSimplifier::simplify(alloc<Sub>(flat_size, immLike(flat_size, 1)));
-  bounds.push_back({immLike(flat_size, 0), flat_size});
+  bounds.emplace_back(immLike(flat_size, 0), flat_size);
 
   auto info = std::make_shared<AccessInfo>(
       nextAccess_++, AccessType::Alloc, nullptr, var, bounds);
@@ -1216,7 +1212,7 @@ void MemDependencyChecker::updateWriteHistory(
       it = writeHistory.erase(it);
     } else {
       // The new write partially overlaps a previous write. We want to keep
-      // both, but only track the unconvered part of the earlier write.
+      // both, but only track the uncovered part of the earlier write.
 
       // Determine the slices of the earlier bound not covered by info.
       auto newBounds =
@@ -1235,7 +1231,7 @@ void MemDependencyChecker::updateWriteHistory(
   }
 
   if (insert && isWrite) {
-    writeHistory.emplace_back(std::make_pair(info->bounds(), info));
+    writeHistory.emplace_back(info->bounds(), info);
   }
 }
 
@@ -1313,13 +1309,10 @@ std::vector<Bound> MemDependencyChecker::getIndicesBounds(
   std::vector<Bound> bounds;
   bounds.reserve(indices.size());
   VarBoundBinder binder(knownVarBounds_);
-  for (auto s : indices) {
+  for (const auto& s : indices) {
     bounds.push_back(binder.getBounds(s));
   }
   return bounds;
 }
 
-} // namespace analysis
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr::analysis

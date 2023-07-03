@@ -17,11 +17,9 @@ namespace torch {
 namespace autograd {
 
 struct InputBuffer {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit InputBuffer(size_t size) : buffer(size) {}
   InputBuffer(const InputBuffer& other) = delete;
   InputBuffer(InputBuffer&& other) = default;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit InputBuffer(variable_list&& inputs) : buffer(std::move(inputs)){};
   InputBuffer& operator=(InputBuffer&& other) = default;
 
@@ -43,7 +41,6 @@ struct InputBuffer {
   // Returns the inputs as a list of variables. Destroys given InputBuffer.
   static std::vector<Variable> variables(InputBuffer&& g);
 
- private:
   std::vector<Variable> buffer;
 };
 

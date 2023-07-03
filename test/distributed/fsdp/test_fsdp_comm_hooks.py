@@ -14,9 +14,8 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
     skip_if_lt_x_gpu,
-    skip_if_rocm,
 )
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -30,10 +29,9 @@ if not dist.is_available():
     sys.exit(0)
 
 # bfloat16 is only supported by CUDA 11+
-BFLOAT16_AVAILABLE = (
-    torch.cuda.is_available()
-    and torch.version.cuda is not None
-    and int(torch.version.cuda.split(".")[0]) >= 11
+BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
+    (torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 11)
+    or torch.version.hip is not None
 )
 
 
@@ -69,8 +67,7 @@ class Net(nn.Module):
         return self.out(F.relu(self.net(x)))
 
 
-class DummyState(object):
-
+class DummyState:
     __slots__ = ["process_group", "noise"]
 
     def __init__(self, process_group: dist.ProcessGroup, noise: int):
@@ -78,7 +75,7 @@ class DummyState(object):
         self.noise = noise
 
 
-class DummyHook(object):
+class DummyHook:
     def dummy_hook_for_no_shard_fsdp(self, state: DummyState, grad: torch.Tensor):
         """
         This communication hook is for illustration and testing purpose only.
@@ -157,7 +154,6 @@ class TestCommunicationHooks(FSDPTest):
             self.assertEqual(entry._communication_hook, default_hook)
 
         for _ in range(4):
-
             # Clear gradients
             net_default_hook.zero_grad()
             loss = net_default_hook(inpt).sum()
@@ -183,7 +179,6 @@ class TestCommunicationHooks(FSDPTest):
         ]
 
     def _init_model(self, core, sharding_strategy, mixed_precision=None):
-
         device = torch.device("cuda")
         return FSDP(
             core,
@@ -227,8 +222,8 @@ class TestCommunicationHooks(FSDPTest):
             else default_hooks.allreduce_hook
         )
 
-        for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-            self.assertEqual(entry._communication_hook, default_hook)
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
+            self.assertEqual(fsdp_module._communication_hook, default_hook)
 
         dummy_state = DummyState(process_group=None, noise=1234)
         dummy_hook = (
@@ -246,12 +241,12 @@ class TestCommunicationHooks(FSDPTest):
             fsdp_model_with_hook.register_comm_hook(dummy_state, dummy_hook)
 
         # Check dummy hook was registered for the root and all submodules if any
-        for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-            self.assertEqual(entry._communication_hook, dummy_hook)
-            self.assertEqual(entry._communication_hook_state, dummy_state)
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
+            self.assertEqual(fsdp_module._communication_hook, dummy_hook)
+            self.assertEqual(fsdp_module._communication_hook_state, dummy_state)
 
-        for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-            entry._communication_hook = None
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
+            fsdp_module._communication_hook = None
 
         in_data = torch.rand(16, 8).cuda()
         loss = fsdp_model_with_hook(in_data).sum()
@@ -260,9 +255,9 @@ class TestCommunicationHooks(FSDPTest):
         with self.assertRaises(AssertionError):
             loss.backward()
 
-        for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-            entry._communication_hook = dummy_hook
-            entry._communication_hook_state = None
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model_with_hook):
+            fsdp_module._communication_hook = dummy_hook
+            fsdp_module._communication_hook_state = None
         # Same as above
         loss = fsdp_model_with_hook(in_data).sum()
         with self.assertRaises(AssertionError):
@@ -398,7 +393,7 @@ class TestCommunicationHooks(FSDPTest):
         loss_mp = fsdp_with_mp(in_data).sum()
         loss_hook.backward()
         # Make sure grads were cast to the parameter's precision
-        self.assertEqual(fsdp_with_hook.params[0].dtype, state.parameter_type)
+        self.assertEqual(fsdp_with_hook.params[0].grad.dtype, state.parameter_type)
         loss_mp.backward()
         optim_hook.step()
         optim_mp.step()
@@ -424,7 +419,6 @@ class TestCommunicationHooks(FSDPTest):
     def test_fp16_hook(
         self, has_wrapping: bool, sharding_strategy: Optional[ShardingStrategy]
     ):
-
         state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.fp16_compress_hook
 
@@ -434,12 +428,11 @@ class TestCommunicationHooks(FSDPTest):
 
     @requires_nccl()
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         not BFLOAT16_AVAILABLE,
         "BFloat16 is only supported by CUDA 11+",
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     @parametrize("has_wrapping", [True, False])
     @parametrize(
         "sharding_strategy",
@@ -452,7 +445,6 @@ class TestCommunicationHooks(FSDPTest):
     def test_bf16_hook(
         self, has_wrapping: bool, sharding_strategy: Optional[ShardingStrategy]
     ):
-
         state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.bf16_compress_hook
 

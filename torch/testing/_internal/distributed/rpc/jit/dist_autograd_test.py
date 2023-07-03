@@ -97,7 +97,7 @@ class JitDistAutogradTest(RpcAgentTestFixture):
             res1 = res1_fut.wait()  # After this, the script runs in a new JIT thread.
             loss1 = res1.sum()
 
-            # SendRpcBackward is not attched, since DistAutogradContext is lost here.
+            # SendRpcBackward is not attached, since DistAutogradContext is lost here.
             res2_fut = rpc.rpc_async(dst_worker_name, local_add, (t2, t2))
             res2 = res2_fut.wait()
             loss2 = res2.sum()

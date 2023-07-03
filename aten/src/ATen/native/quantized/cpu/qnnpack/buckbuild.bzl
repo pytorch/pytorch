@@ -261,6 +261,7 @@ def define_qnnpack(third_party, labels = []):
             "src/fc-dynamic-run.cc",
             "src/fc-prepack.cc",
             "src/fc-run.cc",
+            "src/fc-unpack.cc",
             "src/fully-connected.c",
             "src/fully-connected-sparse.c",
             "src/global-average-pooling.c",

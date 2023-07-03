@@ -21,8 +21,7 @@
 #include <ATen/ops/max_pool2d_with_indices_backward_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 __device__ inline int min(int a, int b) {
@@ -349,9 +348,9 @@ const Tensor& indices) {
     [&] {
       using accscalar_t = acc_type<scalar_t, true>;
 
-      scalar_t *output_data = output.data_ptr<scalar_t>();
-      scalar_t *input_data = input.data_ptr<scalar_t>();
-      int64_t *indices_data = indices.data_ptr<int64_t>();
+      scalar_t *output_data = output.mutable_data_ptr<scalar_t>();
+      const scalar_t *input_data = input.const_data_ptr<scalar_t>();
+      int64_t *indices_data = indices.mutable_data_ptr<int64_t>();
 
       switch (memory_format) {
         case MemoryFormat::ChannelsLast: {
@@ -485,9 +484,9 @@ const Tensor& gradInput) {
     [&] {
       using accscalar_t = acc_type<scalar_t, true>;
 
-      scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-      scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-      int64_t *indices_data = indices.data_ptr<int64_t>();
+      const scalar_t *gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
+      scalar_t *gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
+      const int64_t *indices_data = indices.const_data_ptr<int64_t>();
 
       switch (memory_format) {
         case MemoryFormat::ChannelsLast: {
@@ -566,4 +565,3 @@ const Tensor& gradInput) {
 }
 
 } // at::native
-} // at

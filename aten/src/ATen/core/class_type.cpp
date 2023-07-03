@@ -55,7 +55,7 @@ torch::jit::Function* ClassType::findForwardHook(const std::string& name) const 
   return nullptr;
 }
 
-std::string getSchemaInputTypesString(const FunctionSchema& schema) {
+static std::string getSchemaInputTypesString(const FunctionSchema& schema) {
   std::stringstream input_types;
   const std::vector<Argument>& forward_args = schema.arguments();
   for (const auto i : c10::irange(1, forward_args.size())) {
@@ -86,7 +86,7 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
   std::string pre_hook_schema =
       pre_hook_name + "(self, input: Tuple[" + input_types + "])";
   std::string return_string =
-      "This error occured while scripting the forward pre-hook '" +
+      "This error occurred while scripting the forward pre-hook '" +
       pre_hook_name + "' on module '" + name()->name() +
       "'. If you did not want to script this pre-hook remove it from the "
       "original NN module before scripting. Pre-hooks for module '" +
@@ -111,7 +111,7 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
   std::string hook_schema = hook_name + "(self, input: Tuple[" +
                             input_types + "], output: " + output_types + ")";
   std::string return_string =
-      "This error occured while scripting the forward hook '"
+      "This error occurred while scripting the forward hook '"
       + hook_name + "' on module " + name()->name() +
       ". If you did not want to script this hook remove it from" +
       " the original NN module before scripting. This hook was" +
@@ -131,7 +131,7 @@ bool ClassType::isUnresolvedClassAttribute(const std::string& name) const {
       name) != unresolved_class_attributes_.end();
 }
 
-void checkForwardHookInputArguments(
+static void checkForwardHookInputArguments(
     const FunctionSchema& forward_schema,
     const FunctionSchema& hook_schema,
     const std::string& hook_id,
@@ -152,7 +152,7 @@ void checkForwardHookInputArguments(
   if (forward_args.size() == 1) {
     // check for empty forward case
     TORCH_CHECK(
-        input_tuple_types.size() == 0,
+        input_tuple_types.empty(),
         hook_id,
         "was expecting Tuple[()] as the input type. Received type: '",
         input_arg.type()->annotation_str(),
@@ -213,7 +213,7 @@ void ClassType::checkForwardPreHookSchema(
   // or the contained single type if the input was a tuple containing a single
   // type.
   TORCH_CHECK(
-            pre_hook_schema.returns().size() != 0,
+            !pre_hook_schema.returns().empty(),
             hook_id,
             "is missing a return annotation. Return annotations are required, please add one.\n",
             pre_hook_err_msg
@@ -254,7 +254,7 @@ void ClassType::checkForwardPreHookSchema(
   // check for edge case of Tuple[()] for when forward has no arguments
   if (forward_args.size() == 1) {
     TORCH_CHECK(
-        return_tuple_types.size() == 0,
+        return_tuple_types.empty(),
         wrong_type_returned_err_msg,
         " Was expecting either 'None' or 'Tuple[()]' since forward had ",
         "no arguments.\n",
@@ -524,9 +524,9 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
 }
 
 void ClassType::addAttribute(ClassAttribute classAttribute) {
-    attributes_.push_back(classAttribute);
-    attributeTypes_.push_back(classAttribute.getType());
     AT_ASSERT(attributes_.size() == attributeTypes_.size());
+    attributeTypes_.emplace_back(classAttribute.getType());
+    attributes_.emplace_back(std::move(classAttribute));
 }
 
 size_t ClassType::addAttribute(

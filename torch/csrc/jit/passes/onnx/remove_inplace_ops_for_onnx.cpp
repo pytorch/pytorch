@@ -70,7 +70,7 @@ struct InplaceConverter {
     // Map from aliases to root value.
     // A single value can have multiple aliases throughout the graph,
     // created by inplace operators, and preserved through loop carried
-    // input/output. For each such value, its first occurance will be set as
+    // input/output. For each such value, its first occurrence will be set as
     // root value.
     std::unordered_map<Value*, Value*> alias_to_value_;
 
@@ -294,7 +294,7 @@ static std::pair<Value*, Value*> PrepareListDeleteForONNX(Node* n) {
 
 static std::pair<Value*, Value*> PrepareListAppendAndInsertForONNX(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == aten::insert || n->kind() == aten::append);
-  if (n->outputs().size() == 0) {
+  if (n->outputs().empty()) {
     n->addOutput();
     n->output()->setType(n->inputs().at(0)->type());
   }
@@ -306,7 +306,7 @@ static std::pair<Value*, Value*> PrepareSetItemForONNX(Node* n) {
   // It seems the JIT does not always produce an output for _set_item.
   // In particular it seems to for list but not for dict.
   // So we add one if needed.
-  if (n->outputs().size() == 0) {
+  if (n->outputs().empty()) {
     n->addOutput();
     n->output()->setType(n->inputs().at(0)->type());
   }
@@ -515,7 +515,7 @@ void InplaceConverter::ValueTracker::recordSetValue(
   // then the update must be reflected back to outside.
   // Thus it needs to be registered as a subblock output.
   // This step can be skipped if other alias of this value has already been
-  // registered as sublock output.
+  // registered as subblock output.
   if (!registered && from_outer_alias) {
     if (owning_block_nkind == prim::Loop) {
       owning_block->registerOutput(new_v);

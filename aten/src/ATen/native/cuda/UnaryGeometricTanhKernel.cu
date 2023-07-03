@@ -5,20 +5,24 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <limits>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-const char tanh_name[] = "tanh";
+#if 0 && AT_USE_JITERATOR()
+CONSTEXPR_EXCEPT_WIN_CUDA char tanh_name[] = "tanh_impl";
+#endif
+
 void tanh_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
-#if AT_USE_JITERATOR
+    // Disabled due to accuracy issues
+#if 0 && AT_USE_JITERATOR()
     static const auto tanh_string = jiterator_stringify(
-        template <typename T> T tanh(T a) { return std::tanh(a); });
+        template <typename T> T tanh_impl(T a) { return std::tanh(a); });
     AT_DISPATCH_COMPLEX_TYPES_AND(
         kComplexHalf, common_dtype, "tanh_name", [&]() {
           jitted_gpu_kernel<
@@ -52,5 +56,4 @@ void tanh_kernel_cuda(TensorIteratorBase& iter) {
 
 REGISTER_DISPATCH(tanh_stub, &tanh_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

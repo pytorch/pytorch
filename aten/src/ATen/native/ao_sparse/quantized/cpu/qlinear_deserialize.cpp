@@ -209,7 +209,7 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
       std::get<serialization_version_index>(serialized);
   TORCH_CHECK(
       serialization_version <= SPARSE_LINEAR_PACKED_PARAM_SERIALIZATION_VERSION,
-      "Attemped to deserialize sparse qlinear packed params with an ",
+      "Attempted to deserialize sparse qlinear packed params with an ",
       "incompatible serialization version (",
       serialization_version,
       " > ",
@@ -243,7 +243,7 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
 
   w_scales_ = at::empty(
       {output_channels_padded}, at::device(at::kCPU).dtype(at::kFloat));
-  float* w_scales_data_ptr = w_scales_.data_ptr<float>();
+  float* w_scales_data_ptr = w_scales_.mutable_data_ptr<float>();
   std::fill_n(
       w_scales_data_ptr + output_channels_,
       output_channels_padded - output_channels_,

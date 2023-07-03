@@ -89,7 +89,7 @@ TORCH_API Tensor flash_attention_helper(
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
-    bool need_atten_weights,
+    bool need_attn_weights,
     bool is_causal);
 
 TORCH_API std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
@@ -97,7 +97,7 @@ TORCH_API std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
-    bool need_atten_weights,
+    bool need_attn_weights,
     bool is_causal);
 } // namespace native
 } // namespace at

@@ -76,8 +76,8 @@ struct sha1 {
     get_digest(digest);
 
     std::ostringstream buf;
-    for (int i = 0; i < 5; ++i) {
-      buf << std::hex << std::setfill('0') << std::setw(8) << digest[i];
+    for (unsigned int i : digest) {
+      buf << std::hex << std::setfill('0') << std::setw(8) << i;
     }
 
     return buf.str();

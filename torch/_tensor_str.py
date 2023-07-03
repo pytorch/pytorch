@@ -1,12 +1,15 @@
+import contextlib
+import dataclasses
 import math
 import textwrap
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import torch
-from torch._six import inf
+from torch import inf
 
 
-class __PrinterOptions(object):
+@dataclasses.dataclass
+class __PrinterOptions:
     precision: int = 4
     threshold: float = 1000
     edgeitems: int = 3
@@ -91,12 +94,31 @@ def set_printoptions(
     PRINT_OPTS.sci_mode = sci_mode
 
 
+def get_printoptions() -> Dict[str, Any]:
+    r"""Gets the current options for printing, as a dictionary that
+    can be passed as ``**kwargs`` to set_printoptions().
+    """
+    return dataclasses.asdict(PRINT_OPTS)
+
+
+@contextlib.contextmanager
+def printoptions(**kwargs):
+    r"""Context manager that temporarily changes the print options.  Accepted
+    arguments are same as :func:`set_printoptions`."""
+    old_kwargs = get_printoptions()
+    set_printoptions(**kwargs)
+    try:
+        yield
+    finally:
+        set_printoptions(**old_kwargs)
+
+
 def tensor_totype(t):
     dtype = torch.float if t.is_mps else torch.double
     return t.to(dtype=dtype)
 
 
-class _Formatter(object):
+class _Formatter:
     def __init__(self, tensor):
         self.floating_dtype = tensor.dtype.is_floating_point
         self.int_mode = True
@@ -215,7 +237,6 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
     elements_per_line = max(
         1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
     )
-    # char_per_line = element_length * elements_per_line  # unused
 
     def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
         if formatter2 is not None:
@@ -229,7 +250,10 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
         else:
             return formatter1.format(val)
 
-    if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
+    if summarize and not PRINT_OPTS.edgeitems:
+        # Deal with edge case that negative zero is zero
+        data = ["..."]
+    elif summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
         data = (
             [_val_formatter(val) for val in self[: PRINT_OPTS.edgeitems].tolist()]
             + [" ..."]
@@ -356,7 +380,9 @@ def get_summarized_data(self):
             )
         else:
             return self
-    if self.size(0) > 2 * PRINT_OPTS.edgeitems:
+    if not PRINT_OPTS.edgeitems:
+        return self.new_empty([0] * self.dim())
+    elif self.size(0) > 2 * PRINT_OPTS.edgeitems:
         start = [self[i] for i in range(0, PRINT_OPTS.edgeitems)]
         end = [self[i] for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))]
         return torch.stack([get_summarized_data(x) for x in (start + end)])
@@ -403,9 +429,9 @@ def _str_intern(inp, *, tensor_contents=None):
         suffixes.append("device='" + str(self.device) + "'")
 
     # Tensor printing performs tensor operations like slice, indexing, etc to make it in a
-    # representable format. These operations on ipu/xla/lazy tensor results in compilations. Hence,
+    # representable format. These operations on ipu/xla/lazy/mtia tensor results in compilations. Hence,
     # to avoid compilations, copying the tensor to cpu before printing.
-    if self.device.type in ["xla", "lazy", "ipu"]:
+    if self.device.type in ["xla", "lazy", "ipu", "mtia"]:
         self = self.to("cpu")
 
     # TODO: add an API to map real -> complex dtypes
@@ -537,12 +563,15 @@ def _str_intern(inp, *, tensor_contents=None):
         prefix = "_to_functional_tensor("
         tensor_str = repr(torch._from_functional_tensor(self))
     else:
-        if self.is_meta:
+        # Circular import problem, so we import it here
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        if self.is_meta or isinstance(self, FakeTensor):
             suffixes.append("size=" + str(tuple(self.shape)))
             if self.dtype != torch.get_default_dtype():
                 suffixes.append("dtype=" + str(self.dtype))
             # TODO: This implies that ellipses is valid syntax for allocating
-            # a meta tensor, which it could be, but it isn't right now
+            # a meta tensor or FakeTensor, which it could be, but it isn't right now
             if not custom_contents_provided:
                 tensor_str = "..."
         else:
@@ -558,6 +587,9 @@ def _str_intern(inp, *, tensor_contents=None):
                 if not custom_contents_provided:
                     tensor_str = "[]"
             else:
+                if not PRINT_OPTS.edgeitems:
+                    suffixes.append("size=" + str(tuple(self.shape)))
+
                 if not has_default_dtype:
                     suffixes.append("dtype=" + str(self.dtype))
 
@@ -632,6 +664,6 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
 
 
 def _str(self, *, tensor_contents=None):
-    with torch.no_grad():
+    with torch.no_grad(), torch.utils._python_dispatch._disable_current_modes():
         guard = torch._C._DisableFuncTorch()
         return _str_intern(self, tensor_contents=tensor_contents)

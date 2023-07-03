@@ -30,15 +30,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Profiler benchmark')
 
-    parser.add_argument('--with_cuda', action='store_true')
-    parser.add_argument('--with_stack', action='store_true')
-    parser.add_argument('--use_script', action='store_true')
-    parser.add_argument('--use_kineto', action='store_true')
-    parser.add_argument('--profiling_tensor_size', default=1, type=int)
-    parser.add_argument('--workload', default='loop', type=str)
-    parser.add_argument('--internal_iter', default=256, type=int)
-    parser.add_argument('--timer_min_run_time', default=10, type=int)
-    parser.add_argument('--cuda_only', action='store_true')
+    parser.add_argument('--with-cuda', '--with_cuda', action='store_true')
+    parser.add_argument('--with-stack', '--with_stack', action='store_true')
+    parser.add_argument('--use-script', '--use_script', action='store_true')
+    parser.add_argument('--use-kineto', '--use_kineto', action='store_true')
+    parser.add_argument('--profiling-tensor-size', '--profiling_tensor_size', default=1, type=int)
+    parser.add_argument('--workload', '--workload', default='loop', type=str)
+    parser.add_argument('--internal-iter', '--internal_iter', default=256, type=int)
+    parser.add_argument('--timer-min-run-time', '--timer_min_run_time', default=10, type=int)
+    parser.add_argument('--cuda-only', '--cuda_only', action='store_true')
 
     args = parser.parse_args()
 

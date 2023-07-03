@@ -21,8 +21,7 @@
 // Forward declared
 namespace c10 { struct AutogradMetaInterface; }
 
-namespace at {
-namespace functorch {
+namespace at::functorch  {
 
 // This file contains the implementation of functorch's interpreter stack.
 // See NOTE: [functorch interpreter stack] first before reading on.
@@ -47,7 +46,7 @@ struct TORCH_API DynamicLayer {
   explicit DynamicLayer(
       TransformType transform_type,
       int64_t layerId,
-      optional<int64_t> batchSize = nullopt,
+      optional<c10::SymInt> batchSize = nullopt,
       optional<RandomnessType> randomness = nullopt,
       optional<bool> prev_grad_mode = nullopt,
       optional<bool> pre_fwd_grad_mode = nullopt,
@@ -60,7 +59,7 @@ struct TORCH_API DynamicLayer {
   Interpreter& interpreter() { return interpreter_; }
 
   // Only valid for vmap
-  int64_t batchSize() const;
+  c10::SymInt batchSize() const;
   RandomnessType randomness() const;
 
  private:
@@ -69,7 +68,7 @@ struct TORCH_API DynamicLayer {
 
 TORCH_API int64_t initAndPushDynamicLayer(
     TransformType transform_type,
-    optional<int64_t> batch_size = nullopt,
+    optional<c10::SymInt> batch_size = nullopt,
     optional<RandomnessType> randomness = nullopt,
     optional<bool> prev_grad_mode = nullopt,
     optional<bool> prev_fwd_grad_mode = nullopt,
@@ -80,10 +79,6 @@ TORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();
 TORCH_API void setDynamicLayerStack(const std::vector<DynamicLayer>& stack);
 TORCH_API void setDynamicLayerFrontBackKeysIncluded(bool included);
 
-// NB: Not lock safe, you should only call this from Python where the GIL will
-// prevent race conditions.
-TORCH_API bool areTransformsActive();
-
 // NOTE: [Life handles and lexically scoped transforms]
 // functorch transforms are lexically scoped.
 // Given a level, we store a "life handle" that is a boolean that tells us if the
@@ -92,9 +87,7 @@ TORCH_API bool areTransformsActive();
 // functorch's TensorWrapper (for grad transforms) stores a life handle.
 // If a TensorWrapper escapes from the scope of the transform, then somehow
 // it must know it escaped; it can tell by querying the life handle.
-//
-// NB: not lock safe. TODO: does it need a lock?
-TORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
+TORCH_API const std::shared_ptr<bool>& getLifeHandleForLevel(int64_t level);
 
 // Returns if an operator is in-place. An operator is inplace if:
 // 1. The first argument is a Tensor and it is being written to
@@ -108,15 +101,27 @@ TORCH_API bool isInplaceOp(const c10::FunctionSchema& schema);
 TORCH_API c10::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input);
 
 TORCH_API Tensor unwrapIfDead(const Tensor& tensor);
+TORCH_API bool isDeadTensorWrapper(const Tensor& tensor);
 
 // Pretty printers
 TORCH_API std::ostream& operator<<(std::ostream& os, const DynamicLayer& layer);
 TORCH_API std::ostream& operator<<(std::ostream& os, const std::vector<DynamicLayer>& dynamicLayerStack);
+
+// While a functorch transform is active, torch.autograd.function._SingleLevelFunction
+// is disabled by default. The following two APIs are APIs for enabling
+// it. These are not user-facing APIs. We can delete this in the future, but
+// it is useful for debugging when something goes wrong with the
+// autograd.Function <> functorch interaction, which uses _SingleLevelFunction,
+// because it leads to loud errors if something is incorrect.
+TORCH_API void setSingleLevelAutogradFunctionAllowed(bool allowed);
+TORCH_API bool getSingleLevelAutogradFunctionAllowed();
 
 // While a functorch grad transform is active, Tensor.requires_grad_() gets
 // disabled. These two functions are the mechanism to controlling that.
 TORCH_API void setInplaceRequiresGradAllowed(bool allowed);
 TORCH_API bool getInplaceRequiresGradAllowed();
 
-}
-} // namespace at
+TORCH_API DynamicLayer popDynamicLayer();
+TORCH_API int64_t pushDynamicLayer(DynamicLayer&& layer);
+
+} // namespace at::functorch

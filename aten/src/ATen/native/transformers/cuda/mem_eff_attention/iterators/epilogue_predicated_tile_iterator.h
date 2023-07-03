@@ -1,5 +1,5 @@
 /***************************************************************************************************
- * Copyright (c) 2017 - 2022 NVIDIA CORPORATION & AFFILIATES. All rights
+ * Copyright (c) 2017 - 2023 NVIDIA CORPORATION & AFFILIATES. All rights
  *reserved. SPDX-License-Identifier: BSD-3-Clause
  *
  * Redistribution and use in source and binary forms, with or without
@@ -308,10 +308,12 @@ class PredicatedTileIteratorPrefetch {
           CUTLASS_PRAGMA_UNROLL
           for (int column = 0; column < ThreadMap::Iterations::kColumn;
                ++column) {
-            unsigned long addr =
-                (unsigned long)((void*)&memory_pointer
-                                    [column * ThreadMap::Delta::kColumn /
-                                     kElementsPerAccess]);
+            // on windows using unsigned long here gives the error
+            // error: asm operand type size(4) does not match
+            // type/size implied by constraint 'l'
+            uint64_t addr = (uint64_t)((void*)&memory_pointer
+                                           [column * ThreadMap::Delta::kColumn /
+                                            kElementsPerAccess]);
             asm volatile("prefetch.global.L1 [ %1 ];" : "=l"(addr) : "l"(addr));
           }
 

@@ -24,8 +24,7 @@
 #include <ATen/ops/_upsample_nearest_exact3d_backward_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 #define MAX_THREADS 512
@@ -185,11 +184,11 @@ static void upsample_nearest3d_out_cuda_template(
   TORCH_CHECK(output.numel() <= std::numeric_limits<int32_t>::max());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte,input.scalar_type(), "upsample_nearest3d_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte,input.scalar_type(), "upsample_nearest3d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.data_ptr<scalar_t>();
-        auto odata = output_c.data_ptr<scalar_t>();
+        auto idata = input.const_data_ptr<scalar_t>();
+        auto odata = output_c.mutable_data_ptr<scalar_t>();
 
         const float depth_scale = compute_scales_value<float>(scales_d, input_depth, output_depth);
         const float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
@@ -258,11 +257,11 @@ static void upsample_nearest3d_backward_out_cuda_template(
   TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest3d_backward_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest3d_backward_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = grad_input.data_ptr<scalar_t>();
-        auto odata = grad_output.data_ptr<scalar_t>();
+        auto idata = grad_input.mutable_data_ptr<scalar_t>();
+        auto odata = grad_output.const_data_ptr<scalar_t>();
 
         float depth_scale = compute_scales_value_backwards<float>(scales_d, output_depth, input_depth);
         float height_scale = compute_scales_value_backwards<float>(scales_h, output_height, input_height);
@@ -337,52 +336,4 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact3d_backward_out_cuda) (
 using at::native::upsample::compute_output_size;
 using at::native::upsample_cuda::get_scale_value;
 
-Tensor upsample_nearest3d_cuda(
-    const Tensor& input,
-    at::OptionalIntArrayRef output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return at::upsample_nearest3d(input, osize, scale_d, scale_h, scale_w);
-}
-
-Tensor _upsample_nearest_exact3d_cuda(
-    const Tensor& input,
-    at::OptionalIntArrayRef output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return at::_upsample_nearest_exact3d(input, osize, scale_d, scale_h, scale_w);
-}
-
-// when structured kernels can handle QuantizedCPU, update these overloads to be CompositeExplicitAutograd
-Tensor upsample_nearest3d_backward_cuda(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return at::upsample_nearest3d_backward(grad_output, osize, input_size, scale_d, scale_h, scale_w);
-}
-
-Tensor _upsample_nearest_exact3d_backward_cuda(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return at::_upsample_nearest_exact3d_backward(grad_output, osize, input_size, scale_d, scale_h, scale_w);
-}
-
-} // namespace native
-} // namespace at
+} // namespace at::native

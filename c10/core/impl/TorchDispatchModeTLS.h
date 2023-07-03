@@ -1,9 +1,7 @@
 #pragma once
 
 #include <c10/core/SafePyObject.h>
-#include <c10/macros/Macros.h>
-#include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
+#include <c10/macros/Export.h>
 
 namespace c10 {
 namespace impl {
@@ -15,7 +13,7 @@ struct C10_API TorchDispatchModeTLS {
   static int64_t stack_len();
 
   static const TorchDispatchModeTLS& get_state();
-  static void set_state(const TorchDispatchModeTLS& state);
+  static void set_state(TorchDispatchModeTLS state);
 
  private:
   std::vector<std::shared_ptr<c10::SafePyObject>> stack_;

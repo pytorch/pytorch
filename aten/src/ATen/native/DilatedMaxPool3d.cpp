@@ -164,7 +164,7 @@ void max_pool3d_with_indices_out_cpu_template(
   const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
   const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
 
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 3,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
     "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints")
   const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
   const int dH = stride.empty() ? kH :
@@ -372,7 +372,7 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
   const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
   const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
 
-  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 3,
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
     "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints")
   const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
   const int dH = stride.empty() ? kH :

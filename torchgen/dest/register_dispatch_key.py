@@ -1,9 +1,7 @@
 import itertools
 import textwrap
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
-
-from typing_extensions import Literal
+from typing import List, Literal, Optional, Tuple, Union
 
 import torchgen.api.cpp as cpp
 import torchgen.api.meta as meta
@@ -294,7 +292,9 @@ class RegisterDispatchKey:
     ) -> Union[NativeSignature, DispatcherSignature]:
         # The prefix is just to ensure uniqueness. The Dispatcher API doesn't guarantee unique kernel names.
         return DispatcherSignature.from_schema(
-            f.func, prefix=f"wrapper_{f.func.name.overload_name}_", symint=self.symint
+            f.func,
+            prefix=f"wrapper_{self.backend_index.dispatch_key}_{f.func.name.overload_name}_",
+            symint=self.symint,
         )
 
     def gen_out_inplace_wrapper(
@@ -321,10 +321,21 @@ class RegisterDispatchKey:
                 for i, ret_name in enumerate(return_names)
             )
             returns = f'{sig.returns_type().cpp_type()}({", ".join(return_names)})'
-        else:
+        elif len(return_names) == 1:
             ret_name = return_names[0]
             updates = f"{copy_op}({func_res}, {ret_name});"
             returns = ret_name
+        else:
+            assert len(f.func.arguments.out) == 1
+            returns = ""
+            out_arg = f.func.arguments.out[0]
+            if out_arg.type.is_list_like():
+                updates = f"""\
+    for (int64_t i = 0; i < {func_res}.size(); ++i) {{
+        {copy_op}({func_res}[i], {out_arg.name}[i]);
+    }}"""
+            else:
+                updates = f"{copy_op}({func_res}, {out_arg.name});"
 
         functional_sig = self.wrapper_kernel_sig(g.functional)
         wrapper_name = sig.name()
@@ -760,7 +771,7 @@ resize_out(out, sizes, strides, options);
         kern = self.backend_index.get_kernel(f)
         sig = NativeSignature(
             f.func,
-            prefix="wrapper_",
+            prefix=f"wrapper_{self.backend_index.dispatch_key}_",
             symint=kern is not None and kern.supports_symint(),
         )
 
@@ -785,7 +796,6 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             return result
 
         elif self.target is Target.ANONYMOUS_DEFINITION:
-
             k = f.func.kind()
 
             # Construct the body of the wrapper function with signature sig

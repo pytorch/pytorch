@@ -531,7 +531,7 @@ struct CalcIgamma{
 
 // end of regularized lower & upper incomplete gamma
 
-namespace at { namespace native {
+namespace at::native {
 
 void igamma_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "igamma_cuda", [&]() {
@@ -551,4 +551,4 @@ REGISTER_DISPATCH(igammac_stub, &igammac_kernel_cuda);
 // DO NOT ADD ANY NEW KERNELS HERE
 // CUDA compilation times grow quickly.  It's perfectly acceptable to have a file per kernel.
 
-}} // namespace at::native
+} // namespace at::native

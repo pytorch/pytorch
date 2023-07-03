@@ -198,8 +198,8 @@ class Skippable(nn.Module):
         for ns, name in self.poppable():
             try:
                 poppable_tensors[name] = skip_tracker.load(batch, ns, name)
-            except KeyError:
-                raise RuntimeError(f"'{name}' has not been stashed")
+            except KeyError as e:
+                raise RuntimeError(f"'{name}' has not been stashed") from e
         input = batch.values
 
         # Handle skip commands.

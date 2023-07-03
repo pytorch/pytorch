@@ -208,7 +208,7 @@ class InlineMultiStreamGuard {
       impl_.emplace(getDeviceTypeOfStreams(streams));
       original_streams_.reserve(streams.size());
       for (const Stream& s : streams) {
-        original_streams_.push_back(this->impl_->exchangeStream(s));
+        original_streams_.emplace_back(this->impl_->exchangeStream(s));
       }
     }
   }

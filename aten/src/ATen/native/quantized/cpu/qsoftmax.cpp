@@ -6,6 +6,8 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <pytorch_qnnpack.h>
+
+#include <utility>
 #endif // USE_PYTORCH_QNNPACK
 
 namespace at {
@@ -81,8 +83,6 @@ Tensor qsoftmax_qnnpack(const Tensor& qx, const int64_t dim) {
 
   initQNNPACK();
   pytorch_qnnp_operator_t softargmax = nullptr;
-  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter> softmax_op(
-      softargmax);
 
   pytorch_qnnp_status status = pytorch_qnnp_create_softargmax_nc_q8(
       channels,
@@ -96,6 +96,9 @@ Tensor qsoftmax_qnnpack(const Tensor& qx, const int64_t dim) {
       "failed to create QNNPACK Softmax operator");
   TORCH_CHECK_NOTNULL(softargmax);
 
+  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter> softmax_op(
+    softargmax);
+
   status = pytorch_qnnp_setup_softargmax_nc_q8(
       softargmax, batch_size, input, input_stride, output, output_stride);
   TORCH_CHECK(
@@ -108,7 +111,7 @@ Tensor qsoftmax_qnnpack(const Tensor& qx, const int64_t dim) {
       status == pytorch_qnnp_status_success,
       "failed to run QNNPACK Softmax operator");
 
-  return permuted_dims.has_value() ? qy.permute(permuted_dims.value()) : qy;
+  return permuted_dims.has_value() ? qy.permute(permuted_dims.value()) : std::move(qy);
 }
 
 #endif // USE_PYTORCH_QNNPACK

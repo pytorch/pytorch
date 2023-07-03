@@ -4,12 +4,12 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 #include <torch/csrc/onnx/onnx.h>
-
 #include <ostream>
 
 namespace ONNX_NAMESPACE {
@@ -64,9 +64,7 @@ export_onnx(
 TORCH_API std::string serialize_model_proto_to_string(
     const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto);
 
-TORCH_API void check_onnx_proto(
-    const std::string& proto_string,
-    bool full_check = false);
+TORCH_API void check_onnx_proto(const std::string& proto_string);
 
 // Serializer for both oldsyle and unified format TorchScript serialization
 class TORCH_API ScriptModuleSerializer {
@@ -96,7 +94,8 @@ class TORCH_API ScriptModuleSerializer {
       const std::string& archive_name,
       const std::string& archive_dir,
       const std::string& tensor_dir,
-      bool use_storage_context = false);
+      bool use_storage_context = false,
+      bool skip_tensor_data = false);
   void updateSourceRangeTags(const SourceRangeRecords& ranges);
 
   caffe2::serialize::PyTorchStreamWriter& writer_;
@@ -260,9 +259,18 @@ Table(const std::vector<std::pair<std::string, IValue>>& entries);
 TORCH_API void enableMobileInterfaceCallExport();
 bool getMobileInterfaceCallExport();
 
-CompilationOptions getOptionsFromGlobal();
+TORCH_API CompilationOptions getOptionsFromGlobal();
 
-extern void (*_save_jit_module_to)(
+TORCH_API void save_jit_module(
+    const Module& module,
+    const std::string& filename,
+    const ExtraFilesMap& extra_files = ExtraFilesMap());
+
+TORCH_API DetachedBuffer::UniqueDetachedBuffer save_jit_module_to_bytes(
+    const Module& module,
+    const ExtraFilesMap& extra_files = ExtraFilesMap());
+
+TORCH_API void save_jit_module_to_write_func(
     const Module& module,
     const ExtraFilesMap& extra_files,
     bool save_mobile_debug_info,

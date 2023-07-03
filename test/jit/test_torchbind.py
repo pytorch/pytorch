@@ -31,9 +31,11 @@ if __name__ == "__main__":
 
 class TestTorchbind(JitTestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
+        if IS_SANDCASTLE or IS_MACOS or IS_FBCODE:
             raise unittest.SkipTest("non-portable load_library call used in test")
         lib_file_path = find_library_location('libtorchbind_test.so')
+        if IS_WINDOWS:
+            lib_file_path = find_library_location('torchbind_test.dll')
         torch.ops.load_library(str(lib_file_path))
 
     def test_torchbind(self):
@@ -65,7 +67,7 @@ class TestTorchbind(JitTestCase):
         test_equality(f, lambda x: x)
 
         # test nn module with prepare_scriptable function
-        class NonJitableClass(object):
+        class NonJitableClass:
             def __init__(self, int1, int2):
                 self.int1 = int1
                 self.int2 = int2
@@ -75,7 +77,7 @@ class TestTorchbind(JitTestCase):
 
         class CustomWrapper(torch.nn.Module):
             def __init__(self, foo):
-                super(CustomWrapper, self).__init__()
+                super().__init__()
                 self.foo = foo
 
             def forward(self) -> None:
@@ -239,7 +241,7 @@ class TestTorchbind(JitTestCase):
     def test_torchbind_class_attr_recursive(self):
         class FooBar(torch.nn.Module):
             def __init__(self, foo_model):
-                super(FooBar, self).__init__()
+                super().__init__()
                 self.foo_mod = foo_model
 
             def forward(self) -> int:
@@ -256,7 +258,7 @@ class TestTorchbind(JitTestCase):
     def test_torchbind_class_attribute(self):
         class FooBar1234(torch.nn.Module):
             def __init__(self):
-                super(FooBar1234, self).__init__()
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._StackString(["3", "4"])
 
             def forward(self):
@@ -272,7 +274,7 @@ class TestTorchbind(JitTestCase):
     def test_torchbind_getstate(self):
         class FooBar4321(torch.nn.Module):
             def __init__(self):
-                super(FooBar4321, self).__init__()
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
@@ -293,7 +295,7 @@ class TestTorchbind(JitTestCase):
     def test_torchbind_deepcopy(self):
         class FooBar4321(torch.nn.Module):
             def __init__(self):
-                super(FooBar4321, self).__init__()
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
@@ -309,7 +311,7 @@ class TestTorchbind(JitTestCase):
     def test_torchbind_python_deepcopy(self):
         class FooBar4321(torch.nn.Module):
             def __init__(self):
-                super(FooBar4321, self).__init__()
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
@@ -324,7 +326,7 @@ class TestTorchbind(JitTestCase):
     def test_torchbind_tracing(self):
         class TryTracing(torch.nn.Module):
             def __init__(self):
-                super(TryTracing, self).__init__()
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
             def forward(self):
@@ -340,12 +342,12 @@ class TestTorchbind(JitTestCase):
     def test_torchbind_tracing_nested(self):
         class TryTracingNest(torch.nn.Module):
             def __init__(self):
-                super(TryTracingNest, self).__init__()
+                super().__init__()
                 self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 
         class TryTracing123(torch.nn.Module):
             def __init__(self):
-                super(TryTracing123, self).__init__()
+                super().__init__()
                 self.nest = TryTracingNest()
 
             def forward(self):

@@ -34,7 +34,7 @@ class Event:
     Args:
         name: event name.
         source: the event producer, e.g. agent or worker
-        timestamp: timestamp in milliseconds when event occured.
+        timestamp: timestamp in milliseconds when event occurred.
         metadata: additional data that is associated with the event.
     """
 

@@ -186,7 +186,7 @@ void CommUCC::free_request(ucc_coll_req_h request) {
 CommUCC::~CommUCC() {
   if (context != nullptr) {
     TORCH_UCC_CHECK(
-        ucc_context_destroy(context), "failed to destory UCC context");
+        ucc_context_destroy(context), "failed to destroy UCC context");
   }
   if (lib != nullptr) {
     TORCH_UCC_CHECK(ucc_finalize(lib), "failed to finalize UCC library");

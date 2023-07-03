@@ -9,7 +9,6 @@ from caffe2.python import schema
 from caffe2.python.layers.layers import (
     ModelLayer,
 )
-from future.utils import viewitems
 import numpy as np
 from collections import defaultdict
 
@@ -66,7 +65,7 @@ class Concat(ModelLayer):
 
     def __init__(self, model, input_record, axis=1, add_axis=0,
                  name='concat', **kwargs):
-        super(Concat, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
         self.axis = axis
         self.add_axis = add_axis
         assert not (axis == 0 and add_axis == 1), \
@@ -76,7 +75,7 @@ class Concat(ModelLayer):
             format(input_record)
 
         shapes = []
-        for field_name, field_type in viewitems(input_record.fields):
+        for field_name, field_type in input_record.fields.items():
             assert isinstance(field_type, schema.Scalar),\
                 "Incorrect input type for {}. Expected Scalar, but got: {}".\
                 format(field_name, field_type)

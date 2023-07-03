@@ -8,4 +8,4 @@ here.
 """
 
 from torch.ao.quantization.quant_type import QuantType
-from torch.ao.quantization.quant_type import quant_type_to_str
+from torch.ao.quantization.quant_type import _get_quant_type_to_str

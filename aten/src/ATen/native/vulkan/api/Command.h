@@ -18,8 +18,7 @@ class CommandBuffer final {
  public:
   explicit CommandBuffer(
       const VkCommandBuffer,
-      const VkCommandBufferUsageFlags =
-          VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+      const VkCommandBufferUsageFlags);
 
   CommandBuffer(const CommandBuffer&) = delete;
   CommandBuffer& operator=(const CommandBuffer&) = delete;
@@ -69,6 +68,15 @@ class CommandBuffer final {
   Bound bound_;
 
  public:
+  inline bool is_reusable() {
+    return !(flags_ & VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+  }
+
+  inline void invalidate() {
+    handle_ = VK_NULL_HANDLE;
+    bound_.reset();
+  }
+
   void begin();
   void end();
 
@@ -112,7 +120,7 @@ class CommandBuffer final {
   void write_timestamp(const VkQueryPool, const uint32_t) const;
   void reset_querypool(const VkQueryPool, const uint32_t, const uint32_t) const;
 
-  VkCommandBuffer get_submit_handle();
+  VkCommandBuffer get_submit_handle(const bool final_use = false);
 
   inline operator bool() const {
     return VK_NULL_HANDLE != handle_;
@@ -150,7 +158,7 @@ class CommandPool final {
   size_t in_use_;
 
  public:
-  CommandBuffer get_new_cmd();
+  CommandBuffer get_new_cmd(bool reusable = false);
 
   void flush();
 

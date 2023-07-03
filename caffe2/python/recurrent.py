@@ -6,7 +6,6 @@
 
 
 from caffe2.python import core, workspace
-from future.utils import viewitems, viewkeys
 
 def recurrent_net(
         net, cell_net, inputs, initial_cell_inputs,
@@ -76,7 +75,7 @@ def recurrent_net(
     if not forward_only:
         backward_ops, backward_mapping = core.GradientRegistry.GetBackwardPass(
             cell_net.Proto().op, inner_outputs_map)
-        backward_mapping = {str(k): v for k, v in viewitems(backward_mapping)}
+        backward_mapping = {str(k): v for k, v in backward_mapping.items()}
 
         backward_cell_net = core.Net("RecurrentBackwardStep")
         del backward_cell_net.Proto().op[:]
@@ -106,7 +105,7 @@ def recurrent_net(
         ssa, blob_versions = core.get_ssa(cell_net.Proto())
         scratches = [
             blob
-            for blob, ver in viewitems(blob_versions)
+            for blob, ver in blob_versions.items()
             if (ver > 0 and
                 blob in undefined and
                 blob not in cell_net.Proto().external_output)
@@ -233,7 +232,7 @@ def recurrent_net(
 
     backward_args = {}
     if backward_cell_net is not None:
-        backward_mapping_keys = set(viewkeys(backward_mapping))
+        backward_mapping_keys = set(backward_mapping.keys())
         backward_link_internal, backward_link_external, backward_link_offset = \
             unpack_triple(backward_links)
         params = [x for x in references if x in backward_mapping_keys]

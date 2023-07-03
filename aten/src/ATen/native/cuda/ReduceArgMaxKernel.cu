@@ -15,8 +15,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/cuda/NumericLimits.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <typename scalar_t, typename acc_t = scalar_t>
 void argmax_kernel_cuda_impl(TensorIterator& iter) {
@@ -44,5 +43,4 @@ void argmax_kernel_cuda(TensorIterator& iter) {
 
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -63,7 +63,6 @@ const Tensor& resize_(
 
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    // NOLINTNEXTLINE(performance-move-const-arg)
     self.resize_(size, std::move(optional_memory_format));
   }
   return self;
@@ -80,7 +79,6 @@ const Tensor& resize_as_(
 
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    // NOLINTNEXTLINE(performance-move-const-arg)
     self.resize_as_(the_template, std::move(optional_memory_format));
   }
   return self;
@@ -160,7 +158,9 @@ TORCH_LIBRARY_IMPL(aten, Tracer, m) {
 
 namespace torch {
 namespace jit {
-void general_trace_function(const c10::OperatorHandle& op, Stack* stack) {
+static void general_trace_function(
+    const c10::OperatorHandle& op,
+    Stack* stack) {
   const auto input_size = op.schema().arguments().size();
   const auto output_size = op.schema().returns().size();
 

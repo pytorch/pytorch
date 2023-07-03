@@ -25,13 +25,12 @@ def get_sha(pytorch_root: Union[str, Path]) -> str:
 
 def get_tag(pytorch_root: Union[str, Path]) -> str:
     try:
-        tag = (
-            subprocess.check_output(
-                ["git", "describe", "--tags", "--exact"], cwd=pytorch_root
-            )
-            .decode("ascii")
-            .strip()
-        )
+        tag = subprocess.run(
+            ["git", "describe", "--tags", "--exact"],
+            cwd=pytorch_root,
+            encoding="ascii",
+            capture_output=True,
+        ).stdout.strip()
         if RELEASE_PATTERN.match(tag):
             return tag
         else:
@@ -62,12 +61,13 @@ if __name__ == "__main__":
         description="Generate torch/version.py from build and environment metadata."
     )
     parser.add_argument(
+        "--is-debug",
         "--is_debug",
         type=distutils.util.strtobool,
         help="Whether this build is debug mode or not.",
     )
-    parser.add_argument("--cuda_version", type=str)
-    parser.add_argument("--hip_version", type=str)
+    parser.add_argument("--cuda-version", "--cuda_version", type=str)
+    parser.add_argument("--hip-version", "--hip_version", type=str)
 
     args = parser.parse_args()
 

@@ -15,7 +15,7 @@
 // unfold_backward, the algorithm is described in
 // /native/cpu/UnfoldBackwardKernel.cpp
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -159,4 +159,4 @@ void unfold_backward_cuda_kernel(
 
 REGISTER_DISPATCH(unfold_backward_stub, &unfold_backward_cuda_kernel);
 
-}} // namespace at::native
+} // namespace at::native

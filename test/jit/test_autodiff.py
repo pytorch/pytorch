@@ -2,9 +2,12 @@
 
 import torch
 
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase
 from typing import List
 
+
+@skipIfTorchDynamo()
 class TestAutodiffJit(JitTestCase):
     def test_undefined_tensor_lists(self):
         def fn(tensor_list: List[torch.Tensor], add_tensor):

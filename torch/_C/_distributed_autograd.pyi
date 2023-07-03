@@ -1,5 +1,6 @@
+from typing import Any, Dict, List, Set
+
 import torch
-from typing import Dict, List, Set, Any
 
 # This module is defined in torch/csrc/distributed/autograd/init.cpp
 
@@ -20,6 +21,6 @@ def _get_debug_info() -> Dict[str, str]: ...
 def backward(
     context_id: int,
     roots: List[torch.Tensor],
-    retain_graph = False
+    retain_graph=False,
 ) -> None: ...
 def get_gradients(context_id: int) -> Dict[torch.Tensor, torch.Tensor]: ...

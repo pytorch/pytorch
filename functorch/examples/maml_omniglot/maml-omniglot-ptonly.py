@@ -46,15 +46,15 @@ plt.style.use('bmh')
 
 def main():
     argparser = argparse.ArgumentParser()
-    argparser.add_argument('--n_way', type=int, help='n way', default=5)
+    argparser.add_argument('--n-way', '--n_way', type=int, help='n way', default=5)
     argparser.add_argument(
-        '--k_spt', type=int, help='k shot for support set', default=5)
+        '--k-spt', '--k_spt', type=int, help='k shot for support set', default=5)
     argparser.add_argument(
-        '--k_qry', type=int, help='k shot for query set', default=15)
+        '--k-qry', '--k_qry', type=int, help='k shot for query set', default=15)
     argparser.add_argument(
         '--device', type=str, help='device', default='cuda')
     argparser.add_argument(
-        '--task_num',
+        '--task-num', '--task_num',
         type=int,
         help='meta batch size, namely task num',
         default=32)

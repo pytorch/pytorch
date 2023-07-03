@@ -1,10 +1,11 @@
 #pragma once
+#include <array>
 #include <type_traits>
 
 /** Helper class for allocating temporary fixed size arrays with SBO.
  *
- * This is intentionally much simpler than SmallVector, to improve performace at
- * the expense of many features:
+ * This is intentionally much simpler than SmallVector, to improve performance
+ * at the expense of many features:
  * - No zero-initialization for numeric types
  * - No resizing after construction
  * - No copy/move
@@ -15,11 +16,13 @@ namespace c10 {
 
 template <typename T, size_t N>
 class SmallBuffer {
-  static_assert(std::is_pod<T>::value, "SmallBuffer is intended for POD types");
+  static_assert(
+      std::is_trivial<T>::value,
+      "SmallBuffer is intended for POD types");
 
-  T storage_[N];
-  size_t size_;
-  T* data_;
+  std::array<T, N> storage_;
+  size_t size_{};
+  T* data_{};
 
  public:
   SmallBuffer(size_t size) : size_(size) {
@@ -29,6 +32,23 @@ class SmallBuffer {
       data_ = &storage_[0];
     }
   }
+
+  SmallBuffer(const SmallBuffer&) = delete;
+  SmallBuffer& operator=(const SmallBuffer&) = delete;
+
+  // move constructor is needed in function return
+  SmallBuffer(SmallBuffer&& rhs) noexcept : size_{rhs.size_} {
+    rhs.size_ = 0;
+    if (size_ > N) {
+      data_ = rhs.data_;
+      rhs.data_ = nullptr;
+    } else {
+      storage_ = std::move(rhs.storage_);
+      data_ = &storage_[0];
+    }
+  }
+
+  SmallBuffer& operator=(SmallBuffer&&) = delete;
 
   ~SmallBuffer() {
     if (size_ > N) {

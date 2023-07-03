@@ -46,6 +46,7 @@
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_permuted_native.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/eye.h>
@@ -93,10 +94,11 @@
 #include <ATen/ops/zeros_native.h>
 #endif
 
+#include <c10/core/SymIntArrayRef.h>
 #include <algorithm>
 #include <cstddef>
 #include <string>
-#include <c10/core/SymIntArrayRef.h>
+#include <utility>
 
 namespace at {
 namespace native {
@@ -169,7 +171,7 @@ Tensor arange(
   return at::arange_out(result, start, end, step);
 }
 
-Tensor& arange_start_out(const Scalar& start, const Scalar& end, Tensor& result) {
+static Tensor& arange_start_out(const Scalar& start, const Scalar& end, Tensor& result) {
     return at::arange_out(result, start, end, /*step=*/1);
 }
 
@@ -177,7 +179,7 @@ Tensor& arange_out(const Scalar& end, Tensor& result) {
   return at::arange_out(result, /*start=*/0, end, /*step=*/1);
 }
 
-Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
+static Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
   return at::arange_out(result, start, end, /*step=*/1);
 }
 
@@ -187,14 +189,14 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-void complex_check_floating(const Tensor& a, const Tensor& b) {
+static void complex_check_floating(const Tensor& a, const Tensor& b) {
   TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble || a.scalar_type() == kHalf) &&
               (b.scalar_type() == kFloat || b.scalar_type() == kDouble || b.scalar_type() == kHalf),
               "Expected both inputs to be Half, Float or Double tensors but got ",
               a.scalar_type(), " and ", b.scalar_type());
 }
 
-void complex_check_dtype(
+static void complex_check_dtype(
     const Tensor& result,
     const Tensor& a,
     const Tensor& b) {
@@ -270,11 +272,50 @@ Tensor empty_names(
   }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
-  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda(),
-      "NYI: named tensors only support CPU and CUDA tensors");
+  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda() || options.device().is_privateuseone(),
+      "NYI: named tensors only support CPU, CUDA or ", c10::get_privateuse1_backend(), " tensors.");
   auto result = at::empty(size, options, optional_memory_format);
   internal_set_names_inplace(result, names);
   return result;
+}
+
+Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef physical_layout, c10::optional<ScalarType> dtype_opt,
+  c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt
+) {
+  // size is logical; aka, the output size you'll get from the operation overall
+  //
+  // physical_layout follows NCHW/NHWC convention:
+  // contiguous is [0,1,2,3], channels last is [0,2,3,1]
+  //
+  // this means if i is physical index, physical_layout[i] is logical index;
+  // e.g., to find what is innermost physical dim (3), query NHWC[3] == 1
+  // (aka it is channels)
+  int64_t dim = static_cast<int64_t>(size.size());
+  SymDimVector phys_size(dim);
+  TORCH_CHECK(static_cast<int64_t>(physical_layout.size()) == dim,
+    "Number of dimensions in size does not match the "
+    "length of the physical_layout; i.e. len(size) = ", dim,
+    " is not equal to len(physical_layout) = ", physical_layout.size());
+  std::vector<bool> seen_dims(dim);
+  for (const auto i : c10::irange(dim)) {
+    TORCH_CHECK(physical_layout[i] >= 0 && physical_layout[i] < dim,
+      "Dimension out of range (expected to be between 0 and ", dim - 1, ", but got ",
+      physical_layout[i], " at index ", i, ").  NB: negative dims "
+      "not currently supported; file an issue if you want it.");
+    TORCH_CHECK(!seen_dims[physical_layout[i]], "Duplicate dim not allowed");
+    phys_size[i] = size[physical_layout[i]];
+    seen_dims[physical_layout[i]] = true;
+  }
+  // do a contiguous allocation
+  Tensor phys_tensor = at::empty_symint(phys_size, dtype_opt, layout_opt, device_opt, pin_memory_opt, c10::nullopt);
+  SymIntArrayRef phys_strides = phys_tensor.sym_strides();
+  // permute the strides (inverse permutation!  This is why this is
+  // empty_permute*d*, not empty_permute; it's not an empty + permute)
+  SymDimVector strides(dim);
+  for (const auto i : c10::irange(dim)) {
+    strides[physical_layout[i]] = phys_strides[i];
+  }
+  return phys_tensor.as_strided_symint(size, strides);
 }
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt,
@@ -311,7 +352,12 @@ Tensor& empty_out(IntArrayRef size,
     return self.to(ScalarType::n, non_blocking);                 \
   }
 
+// Some scalar types in CAST_OP have no declarations, they may be unused in Pytorch.
+// But we keep them and ignore the warning here until verified in the future.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
+#pragma clang diagnostic pop
 
 #undef DEFINE_CAST_OP
 
@@ -324,12 +370,6 @@ Tensor empty_like(
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-
-  TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
 
   TensorOptions options =
       self.options()
@@ -347,7 +387,7 @@ Tensor empty_like(
 
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
-      result = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
+      result = at::empty_strided_symint(self.sym_sizes(), self.sym_strides(), options.memory_format(c10::nullopt));
     } else if (self.unsafeGetTensorImpl()->support_as_strided() && self.layout() == kStrided) {
       // If input tensor is not dense and non-overlapping but strided, we will infer an output strides
       // which keeps the layout permutation of the input tensor.
@@ -356,11 +396,11 @@ Tensor empty_like(
       result = at::empty_strided(self.sizes(), strides, options.memory_format(c10::nullopt));
     } else {
       // See Note [Explicit nullopt MemoryFormat argument]
-      result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
+      result = at::empty_symint(self.sym_sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
     }
   } else {
     // See Note [Explicit nullopt MemoryFormat argument]
-    result = at::empty(self.sizes(), options.memory_format(memory_format), c10::nullopt);
+    result = at::empty_symint(self.sym_sizes(), options.memory_format(memory_format), c10::nullopt);
   }
 
   if (self.opt_names()) {
@@ -755,7 +795,7 @@ Tensor rand(IntArrayRef size, c10::optional<Generator> generator,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, options);
-  return result.uniform_(0, 1, generator);
+  return result.uniform_(0, 1, std::move(generator));
 }
 
 Tensor& rand_out(IntArrayRef size, Tensor& result) {
@@ -764,7 +804,7 @@ Tensor& rand_out(IntArrayRef size, Tensor& result) {
 
 Tensor& rand_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
-  return result.uniform_(0, 1, generator);
+  return result.uniform_(0, 1, std::move(generator));
 }
 
 Tensor rand_like(
@@ -799,7 +839,7 @@ Tensor randint(
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  return native::randint(0, high, size, generator, dtype, layout, device, pin_memory);
+  return native::randint(0, high, size, std::move(generator), dtype, layout, device, pin_memory);
 }
 
 Tensor randint(
@@ -826,7 +866,7 @@ Tensor randint(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, options);
-  return result.random_(low, high, generator);
+  return result.random_(low, high, std::move(generator));
 }
 
 Tensor& randint_out(int64_t high, IntArrayRef size, Tensor& result) {
@@ -838,7 +878,7 @@ Tensor& randint_out(int64_t high,
     c10::optional<Generator> generator,
     Tensor& result) {
   result.resize_(size);
-  return result.random_(0, high, generator);
+  return result.random_(0, high, std::move(generator));
 }
 
 Tensor& randint_out(int64_t low, int64_t high, IntArrayRef size, Tensor& result) {
@@ -851,7 +891,7 @@ Tensor& randint_out(int64_t low,
     c10::optional<Generator> generator,
     Tensor& result) {
   result.resize_(size);
-  return result.random_(low, high, generator);
+  return result.random_(low, high, std::move(generator));
 }
 
 Tensor randint_like(
@@ -904,7 +944,7 @@ Tensor randn(IntArrayRef size, c10::optional<Generator> generator,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, options);
-  return result.normal_(0, 1, generator);
+  return result.normal_(0, 1, std::move(generator));
 }
 
 Tensor& randn_out(IntArrayRef size, Tensor& result) {
@@ -913,7 +953,7 @@ Tensor& randn_out(IntArrayRef size, Tensor& result) {
 
 Tensor& randn_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
-  return result.normal_(0, 1, generator);
+  return result.normal_(0, 1, std::move(generator));
 }
 
 Tensor normal(double mean, double std, IntArrayRef size,
@@ -926,13 +966,13 @@ Tensor normal(double mean, double std, IntArrayRef size,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, options);
-  return result.normal_(mean, std, generator);
+  return result.normal_(mean, std, std::move(generator));
 }
 
 Tensor& normal_out(double mean, double std,
                    IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
-  return result.normal_(mean, std, generator);
+  return result.normal_(mean, std, std::move(generator));
 }
 
 Tensor randn_like(
@@ -998,7 +1038,7 @@ Tensor randperm(int64_t n, c10::optional<Generator> generator,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto tensor = at::empty(n, options);
-  return at::randperm_out(tensor, n, generator);
+  return at::randperm_out(tensor, n, std::move(generator));
 }
 
 Tensor& randperm_out(int64_t n, Tensor& result) {
@@ -1167,6 +1207,19 @@ Tensor _efficientzerotensor(IntArrayRef size,
     return out;
 }
 
+Tensor _efficientzerotensor_meta(IntArrayRef size,
+                                 c10::optional<ScalarType> dtype,
+                                 c10::optional<Layout> layout,
+                                 c10::optional<Device> device,
+                                 c10::optional<bool> pin_memory) {
+  auto device_ = device_or_default(device);
+  auto allocator = at::native::ZeroTensorAllocator(device_);
+  auto dtype_ = dtype_or_default(dtype);
+  auto zero_ks = at::DispatchKeySet(c10::DispatchKey::Meta) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
+  auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+  return out;
+}
+
 Tensor& zeros_sparse_out(IntArrayRef size, Tensor& result) {
   result.sparse_resize_and_clear_(size, size.size(), 0.);
   return result;
@@ -1193,7 +1246,9 @@ Tensor zeros_like(
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  auto other_options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  // Prefer values passed in explicitly, but default to value from self.
+  auto options = self.options().merge_in(other_options);
 
   if (options.layout() == kSparse) {
     TORCH_CHECK(
@@ -1264,7 +1319,7 @@ Tensor bartlett_window(
                     .mul_(2. / static_cast<double>(window_length - 1));
   const int64_t first_half_size = ((window_length - 1) >> 1) + 1;
   window.narrow(0, first_half_size, window_length - first_half_size).mul_(-1).add_(2);
-  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+  return periodic ? window.narrow(0, 0, window_length - 1) : std::move(window);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ blackman_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1304,7 +1359,7 @@ Tensor blackman_window(
       native::arange(window_length, dtype, layout, device, pin_memory)
           .mul_(c10::pi<double> / static_cast<double>(window_length - 1));
   window = window.mul(4).cos_().mul_(0.08) - window.mul(2).cos_().mul_(0.5) + 0.42;
-  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+  return periodic ? window.narrow(0, 0, window_length - 1) : std::move(window);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ hamming_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1372,7 +1427,7 @@ Tensor hamming_window(
   }
   auto window = native::arange(window_length, dtype, layout, device, pin_memory);
   window.mul_(c10::pi<double> * 2. / static_cast<double>(window_length - 1)).cos_().mul_(-beta).add_(alpha);
-  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+  return periodic ? window.narrow(0, 0, window_length - 1) : std::move(window);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ hann_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1456,7 +1511,7 @@ Tensor kaiser_window(
   auto window = at::empty(window_length, options);
   auto iter = TensorIterator::unary_op(window, initial);
   kaiser_window_stub(iter.device_type(), iter, window_length, beta);
-  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+  return periodic ? window.narrow(0, 0, window_length - 1) : std::move(window);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~ vandermonde_matrix ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1632,7 +1687,7 @@ Tensor randn(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, names, options);
-  return result.normal_(0, 1, generator);
+  return result.normal_(0, 1, std::move(generator));
 }
 
 Tensor rand(
@@ -1657,7 +1712,7 @@ Tensor rand(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto result = at::empty(size, names, options);
-  return result.uniform_(0, 1, generator);
+  return result.uniform_(0, 1, std::move(generator));
 }
 
 

@@ -3,9 +3,9 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+#include <utility>
+
+namespace torch::jit::tensorexpr {
 
 // Creates a new Expr of the given type with the provided lhs and rhs.
 inline ExprPtr newBinaryOpOfType(
@@ -82,13 +82,13 @@ T gcd(T a, T b) {
 
 // Helper for determining if an Expr is a multi-lane primitive (e.g. Broadcast
 // or Ramp).
-bool isMultilanePrimitive(ExprPtr e) {
+static bool isMultilanePrimitive(ExprPtr e) {
   return to<Broadcast>(e) || to<Ramp>(e);
 }
 
 SimplifierHashType Term::hashVars() const {
   SimplifierHashType hash;
-  for (auto v : variables_) {
+  for (const auto& v : variables_) {
     hash = hasher_.hash_combine(hash, hasher_.hash(v));
   }
 
@@ -114,7 +114,7 @@ void Term::sort() {
 
 SimplifierHashType Polynomial::hashVars() const {
   SimplifierHashType hash;
-  for (auto v : variables_) {
+  for (const auto& v : variables_) {
     hash = hasher_.hash_combine(hash, hasher_.hash(v));
   }
   return hash;
@@ -232,7 +232,7 @@ ExprPtr combineMultilane(ExprPtr lhs, ExprPtr rhs) {
 }
 
 // Handles optimization cases for Broadcast/Ramp * Broadcast/Ramp
-ExprPtr mulMultilane(ExprPtr lhs, ExprPtr rhs) {
+static ExprPtr mulMultilane(ExprPtr lhs, ExprPtr rhs) {
   if (BroadcastPtr bc = to<Broadcast>(lhs)) {
     if (BroadcastPtr bcother = to<Broadcast>(rhs)) {
       if (bc->lanes() != bcother->lanes()) {
@@ -311,10 +311,10 @@ ExprPtr PolynomialTransformer::addPolynomials(
   // to combine terms that have the same vars but different scalar components.
   std::unordered_map<SimplifierHashType, TermPtr> varmap;
 
-  for (auto lt : lhs->variables()) {
+  for (const auto& lt : lhs->variables()) {
     addOrUpdateTerm(varmap, lt);
   }
-  for (auto rt : rhs->variables()) {
+  for (const auto& rt : rhs->variables()) {
     addOrUpdateTerm(varmap, rt);
   }
 
@@ -329,7 +329,7 @@ ExprPtr PolynomialTransformer::insertTerm(PolynomialPtr poly, TermPtr term) {
   std::vector<TermPtr> newVars;
 
   bool found = false;
-  for (auto v : poly->variables()) {
+  for (const auto& v : poly->variables()) {
     if (v->hashVars() == tHash) {
       ExprPtr newScalar = evaluateOp(alloc<Add>(term->scalar(), v->scalar()));
       found = true;
@@ -520,11 +520,11 @@ ExprPtr PolynomialTransformer::subPolynomials(
   // to combine terms that have the same vars but different scalar components.
   std::unordered_map<SimplifierHashType, TermPtr> varmap;
 
-  for (auto lt : lhs->variables()) {
+  for (const auto& lt : lhs->variables()) {
     addOrUpdateTerm(varmap, lt);
   }
 
-  for (auto rt : rhs->variables()) {
+  for (const auto& rt : rhs->variables()) {
     // Polynomials add their terms, so negate the RHS's Terms.
     ExprPtr negated = evaluateOp(alloc<Mul>(immLike(rt, -1), rt->scalar()));
     TermPtr newRHS = alloc<Term>(hasher_, negated, rt->variables());
@@ -614,7 +614,7 @@ ExprPtr PolynomialTransformer::mutate(SubPtr v) {
     ExprPtr negateScalar = evaluateOp(alloc<Mul>(minusOne, rhsPoly->scalar()));
 
     std::vector<TermPtr> variables;
-    for (auto t : rhsPoly->variables()) {
+    for (const auto& t : rhsPoly->variables()) {
       ExprPtr negate = evaluateOp(alloc<Mul>(minusOne, t->scalar()));
       variables.push_back(alloc<Term>(hasher_, negate, t->variables()));
     }
@@ -643,7 +643,7 @@ ExprPtr PolynomialTransformer::mutate(SubPtr v) {
     // Negate each term in the Polynomial RHS.
     ExprPtr minusOne = immLike(rhsPoly, -1);
     std::vector<TermPtr> variables;
-    for (auto t : rhsPoly->variables()) {
+    for (const auto& t : rhsPoly->variables()) {
       ExprPtr negate = evaluateOp(alloc<Mul>(minusOne, t->scalar()));
       variables.push_back(alloc<Term>(hasher_, negate, t->variables()));
     }
@@ -709,7 +709,7 @@ ExprPtr PolynomialTransformer::mutate(SubPtr v) {
 
     // Negate each term in the Polynomial RHS.
     std::vector<TermPtr> variables;
-    for (auto t : rhsPoly->variables()) {
+    for (const auto& t : rhsPoly->variables()) {
       ExprPtr negate = evaluateOp(alloc<Mul>(minusOne, t->scalar()));
       variables.push_back(alloc<Term>(hasher_, negate, t->variables()));
     }
@@ -733,14 +733,14 @@ TermPtr PolynomialTransformer::mulTerms(TermPtr lhs, TermPtr rhs) {
   std::vector<ExprPtr> variables;
   std::vector<ExprPtr> multilaneVariables;
   // For now don't handle exponents.
-  for (auto c : lhs->variables()) {
+  for (const auto& c : lhs->variables()) {
     if (isMultilanePrimitive(c)) {
       multilaneVariables.push_back(c);
     } else {
       variables.push_back(c);
     }
   }
-  for (auto c : rhs->variables()) {
+  for (const auto& c : rhs->variables()) {
     if (isMultilanePrimitive(c)) {
       multilaneVariables.push_back(c);
     } else {
@@ -750,7 +750,7 @@ TermPtr PolynomialTransformer::mulTerms(TermPtr lhs, TermPtr rhs) {
 
   // Merge all the multilane vars:
   ExprPtr lastNode{nullptr};
-  for (auto node : multilaneVariables) {
+  for (const auto& node : multilaneVariables) {
     if (lastNode == nullptr) {
       lastNode = node;
     } else {
@@ -778,7 +778,7 @@ ExprPtr PolynomialTransformer::polyByTerm(PolynomialPtr poly, TermPtr term) {
   // First, multiply all variables (terms) in the polynomial by the input
   // term.
   std::vector<TermPtr> newTerms;
-  for (auto var : poly->variables()) {
+  for (const auto& var : poly->variables()) {
     TermPtr newTerm = mulTerms(var, term);
     if (newTerm) {
       newTerms.push_back(newTerm);
@@ -854,7 +854,7 @@ ExprPtr PolynomialTransformer::insertIntoTerm(TermPtr term, ExprPtr expr) {
 
   // Search for RoundOffs.
   bool merged{false};
-  for (auto component : term->variables()) {
+  for (const auto& component : term->variables()) {
     if (auto roundoff = isRoundOff(component, expr)) {
       vars.push_back(roundoff);
       merged = true;
@@ -1004,7 +1004,7 @@ ExprPtr PolynomialTransformer::mutate(MulPtr v) {
   return alloc<Term>(hasher_, immLike(v, 1), lhs_new, rhs_new);
 }
 
-ExprPtr factorizeDivision(ExprPtr lhs_new, ExprPtr rhs_new) {
+static ExprPtr factorizeDivision(ExprPtr lhs_new, ExprPtr rhs_new) {
   if (!lhs_new || !rhs_new) {
     return nullptr;
   }
@@ -1137,7 +1137,7 @@ ExprPtr PolynomialTransformer::mutate(ModPtr v) {
     }
 
     // (x * y * z) % x => 0.
-    for (auto component : lhsTerm->variables()) {
+    for (const auto& component : lhsTerm->variables()) {
       if (hasher_.hash(component) == hasher_.hash(rhs_new)) {
         return immLike(v, 0);
       }
@@ -1205,10 +1205,10 @@ ExprPtr combineMinMaxTerms(
   auto combine_opterms = [&](NodePtr<OpTerm> m1, NodePtr<OpTerm> m2) {
     ExprPtr scalar = combine_scalars(m1->scalar(), m2->scalar());
     std::vector<ExprPtr> variables;
-    for (auto v : m1->variables()) {
+    for (const auto& v : m1->variables()) {
       variables.push_back(v);
     }
-    for (auto v : m2->variables()) {
+    for (const auto& v : m2->variables()) {
       variables.push_back(v);
     }
     return alloc<OpTerm>(hasher, scalar, propagate_nans, std::move(variables));
@@ -1469,7 +1469,7 @@ ExprPtr PolynomialTransformer::mutate(IntrinsicsPtr v) {
   std::vector<ExprPtr> new_params;
   bool changed = false;
   bool allConstant = true;
-  for (auto p : v->params()) {
+  for (const auto& p : v->params()) {
     ExprPtr new_child = p->accept_mutator(this);
     new_params.push_back(new_child);
 
@@ -1489,7 +1489,7 @@ ExprPtr PolynomialTransformer::mutate(IntrinsicsPtr v) {
   // we're evaluating, but the evaluator only supports float intrinsics.
   std::vector<ExprPtr> const_params;
   changed = false;
-  for (auto p : new_params) {
+  for (const auto& p : new_params) {
     if (p->dtype().scalar_type() == ScalarType::Float) {
       const_params.push_back(p);
     } else {
@@ -1610,13 +1610,13 @@ StmtPtr PolynomialBase::mutate(CondPtr v) {
   return v;
 }
 
-StmtPtr handleForCondReordering(ForPtr loop, CondPtr cond) {
+static StmtPtr handleForCondReordering(ForPtr loop, CondPtr cond) {
   if (cond->false_stmt()) {
     return nullptr;
   }
 
   auto condition_vars = VarFinder::find(cond->condition());
-  for (auto v : condition_vars) {
+  for (const auto& v : condition_vars) {
     // If the condition depends on a Var that is modified in the loop body, it
     // may not be safe to reorder.
     if (ModifiesVarChecker::check(loop, v)) {
@@ -1691,7 +1691,7 @@ StmtPtr PolynomialBase::mutate(BlockPtr v) {
   std::vector<StmtPtr> stmts;
   // Flatten sub-blocks:
   bool stmts_changed = false;
-  for (StmtPtr stmt : *v) {
+  for (const StmtPtr& stmt : *v) {
     StmtPtr stmt_new = stmt->accept_mutator(this);
     stmts_changed |= stmt != stmt_new;
     if (stmt_new == nullptr) {
@@ -1730,7 +1730,7 @@ ExprPtr TermExpander::mutate(TermPtr v) {
 
   // Assume we can reorder here because we wont merge floating terms.
   ExprPtr lastNode{nullptr};
-  for (auto var : v->variables()) {
+  for (const auto& var : v->variables()) {
     ExprPtr node = var->accept_mutator(this);
     if (MulPtr mul = to<Mul>(node)) {
       // If the sub-Expr resolved to a multiplication, lift it into this
@@ -1755,7 +1755,7 @@ ExprPtr TermExpander::mutate(TermPtr v) {
     }
   }
 
-  for (auto node : multilaneVars) {
+  for (const auto& node : multilaneVars) {
     if (lastNode == nullptr) {
       lastNode = node;
     } else {
@@ -1766,7 +1766,7 @@ ExprPtr TermExpander::mutate(TermPtr v) {
     }
   }
 
-  for (auto node : vars) {
+  for (const auto& node : vars) {
     if (lastNode == nullptr) {
       lastNode = node;
     } else {
@@ -1809,7 +1809,7 @@ ExprPtr TermExpander::mutate(TermPtr v) {
 // Returns an immediate containing the greatest common divisor of all terms
 // (inc. the scalar term) in the polynomial. If the GCD is uninteresting
 // (e.g. 1) then returns nullptr.
-ExprPtr polyGCD(PolynomialPtr poly) {
+static ExprPtr polyGCD(PolynomialPtr poly) {
   ExprPtr scalar = poly->scalar();
   const std::vector<TermPtr>& variables = poly->variables();
 
@@ -1817,7 +1817,7 @@ ExprPtr polyGCD(PolynomialPtr poly) {
   // value in factorizing 6x + 4y into 2 * (3x + 2y) since we don't save work.
   int opsSaved = 1; // default to saving the scalar.
   long GCD = std::abs(immediateAs<long>(scalar));
-  for (auto t : variables) {
+  for (const auto& t : variables) {
     long termScalar = std::abs(immediateAs<long>(t->scalar()));
     long newGCD = gcd(std::max(GCD, termScalar), std::min(GCD, termScalar));
     if (newGCD == 1) {
@@ -1857,17 +1857,17 @@ ExprPtr polyGCD(PolynomialPtr poly) {
 class ModRound {
  public:
   ModRound(ExprPtr scalar, ExprPtr denom, ExprPtr divisor, ExprPtr mod_divisor)
-      : scalar(scalar),
-        denom(denom),
-        divisor(divisor),
-        mod_divisor(mod_divisor) {}
+      : scalar(std::move(scalar)),
+        denom(std::move(denom)),
+        divisor(std::move(divisor)),
+        mod_divisor(std::move(mod_divisor)) {}
   ExprPtr scalar;
   ExprPtr denom;
   ExprPtr divisor;
   ExprPtr mod_divisor;
 };
 
-c10::optional<class ModRound> isModRound(TermPtr e) {
+static c10::optional<class ModRound> isModRound(TermPtr e) {
   DivPtr div{nullptr};
   ModPtr mod{nullptr};
   ExprPtr denom{nullptr};
@@ -1877,7 +1877,7 @@ c10::optional<class ModRound> isModRound(TermPtr e) {
   ExprPtr scalar{nullptr};
   ExprPtr other{nullptr};
 
-  for (auto m : e->variables()) {
+  for (const auto& m : e->variables()) {
     if (m->expr_type() == IRNodeType::kMod) {
       // TODO: currently only identify terms with one variable being mod; it is
       // possible to extend this if we have to handle terms like (t/(x%2 * y) %
@@ -1903,7 +1903,7 @@ c10::optional<class ModRound> isModRound(TermPtr e) {
         }
       }
 
-      // All non-mod vairables are considered as part of the multiplier.
+      // All non-mod variables are considered as part of the multiplier.
       multiplier = alloc<Mul>(multiplier, m);
     }
   }
@@ -1976,14 +1976,14 @@ c10::optional<class ModRound> isModRound(TermPtr e) {
 // (1) Round + Mod pattern: (x/y) * y + x % y => RoundOff(x,y) + Mod(x, y) => x
 // (2) Mod round + Mod pattern: (x/y % z)*y + x%y => ModRound(x, y, z) + Mod(x,
 // y) => x % (y*z)
-ExprPtr simplifyRoundModPattern(PolynomialPtr poly) {
+static ExprPtr simplifyRoundModPattern(PolynomialPtr poly) {
   std::vector<TermPtr> rounds;
   std::vector<TermPtr> mods;
   std::vector<TermPtr> mod_rounds;
   std::vector<TermPtr> others;
 
   // Split out the Mod, ModRounds and RoundOffs operations so we can inspect.
-  for (auto c : poly->variables()) {
+  for (const auto& c : poly->variables()) {
     if (c->variables().size() > 1) {
       if (auto a = isModRound(c)) {
         mod_rounds.push_back(c);
@@ -2077,7 +2077,7 @@ ExprPtr simplifyRoundModPattern(PolynomialPtr poly) {
 
         // TODO: for now don't attempt partial factorization of this
         // optimization. E.g. it's possible to do: 2 * (x/y) * y + (x%y) => x +
-        // (x/y) * y but unsure thats actually much better, particulary with
+        // (x/y) * y but unsure thats actually much better, particularly with
         // CSE.
         if (!immediateEquals(
                 evaluateOp(alloc<Sub>(r->scalar(), m->scalar())), 0)) {
@@ -2144,10 +2144,10 @@ TermPtr PolynomialBase::factorizePolynomial(PolynomialPtr poly) {
     return nullptr;
   }
 
-  // Create new struture.
+  // Create new structure.
   std::vector<TermPtr> newPolyTerms;
   newPolyTerms.reserve(variables.size());
-  for (auto t : variables) {
+  for (const auto& t : variables) {
     // New term with the scalar divided by the GCD.
     newPolyTerms.push_back(alloc<Term>(
         poly->hasher(),
@@ -2192,7 +2192,7 @@ ExprPtr TermExpander::mutate(PolynomialPtr v) {
   });
 
   // partition the terms into a list to add and list to subtract.
-  for (auto node : vars) {
+  for (const auto& node : vars) {
     if (immediateIsNegative(node->scalar())) {
       subTerms.push_back(node);
     } else if (!immediateEquals(node->scalar(), 0)) {
@@ -2204,7 +2204,7 @@ ExprPtr TermExpander::mutate(PolynomialPtr v) {
   // The last node constructed.
   ExprPtr lastNode{nullptr};
 
-  for (auto node : addTerms) {
+  for (const auto& node : addTerms) {
     ExprPtr simpleNode = node->accept_mutator(this);
 
     if (lastNode == nullptr) {
@@ -2237,7 +2237,7 @@ ExprPtr TermExpander::mutate(PolynomialPtr v) {
     }
   }
 
-  for (auto node : subTerms) {
+  for (const auto& node : subTerms) {
     // Can still be first node if scalarVal is 0.
     if (lastNode == nullptr) {
       lastNode = node->accept_mutator(this);
@@ -2336,7 +2336,7 @@ ExprPtr TermExpander::mutate(RoundOffPtr v) {
 
 ExprPtr buf_flat_size(BufPtr v) {
   std::vector<ExprPtr> dims = v->dims();
-  if (dims.size() == 0) {
+  if (dims.empty()) {
     return alloc<LongImm>(1);
   }
   ExprPtr flattened = immLike(dims[0], 1);
@@ -2386,13 +2386,13 @@ StmtPtr TermExpander::mutate(FreePtr v) {
   return v;
 }
 
-// Combines adjactent Cond nodes with identical conditions.
+// Combines adjacent Cond nodes with identical conditions.
 BlockPtr TermExpander::fuseConditions(BlockPtr v) {
   std::vector<StmtPtr> stmts;
   bool did_anything = false;
   CondPtr prev_cond = nullptr;
 
-  for (auto s : *v) {
+  for (const auto& s : *v) {
     CondPtr cond = to<Cond>(s);
     if (!cond) {
       prev_cond = nullptr;
@@ -2456,7 +2456,7 @@ BlockPtr TermExpander::fuseConditions(BlockPtr v) {
   }
 
   // clean up parents.
-  for (auto s : stmts) {
+  for (const auto& s : stmts) {
     if (s->get_parent() == v) {
       v->remove_stmt(s);
     }
@@ -2472,7 +2472,7 @@ StmtPtr TermExpander::fuseSyncThreads(BlockPtr block) {
   std::vector<StmtPtr> stmts;
   bool did_anything = false;
 
-  for (auto s : *block) {
+  for (const auto& s : *block) {
     SyncThreadsPtr sync = to<SyncThreads>(s);
     if (!sync) {
       first = false;
@@ -2501,7 +2501,7 @@ StmtPtr TermExpander::fuseSyncThreads(BlockPtr block) {
   }
 
   // clean up parents.
-  for (auto s : stmts) {
+  for (const auto& s : stmts) {
     if (s->get_parent() == block) {
       block->remove_stmt(s);
     }
@@ -2641,7 +2641,7 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
 //   TODO: remove d) from the requirements because the simplification formula
 //   still holds when x is a negative integer. In integer division, the result
 //   of the division is converted to an integer using `floor` function which
-//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns the largest integer that is not greater than X. For example, -1/6
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, x has to be not negative. d) x is not negative
@@ -2654,11 +2654,14 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
 //   TODO: remove d) from the requirements because the simplification formula
 //   still holds when j is a negative integer. In integer division, the result
 //   of the division is converted to an integer using `floor` function which
-//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns the largest integer that is not greater than X. For example, -1/6
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, x has to be not negative. d) j is not negative
-ExprPtr distributeDiv(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
+static ExprPtr distributeDiv(
+    ExprPtr lhs,
+    ExprPtr rhs,
+    VarBoundInfo var_bound_info) {
   if (!lhs || !rhs) {
     return nullptr;
   }
@@ -2759,7 +2762,7 @@ ExprPtr distributeDiv(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
 //   TODO: remove d) from the requirements because the simplification formula
 //   still holds when x is a negative integer. In integer division, the result
 //   of the division is converted to an integer using `floor` function which
-//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns the largest integer that is not greater than X. For example, -1/6
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, x has to be not negative. d) x is not negative
@@ -2772,11 +2775,14 @@ ExprPtr distributeDiv(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
 //   TODO: remove d) from the requirements because the simplification formula
 //   still holds when j is a negative integer. In integer division, the result
 //   of the division is converted to an integer using `floor` function which
-//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns the largest integer that is not greater than X. For example, -1/6
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, j has to be not negative. d) j is not negative
-ExprPtr distributeMod(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
+static ExprPtr distributeMod(
+    ExprPtr lhs,
+    ExprPtr rhs,
+    VarBoundInfo var_bound_info) {
   if (!lhs || !rhs) {
     return nullptr;
   }
@@ -3120,6 +3126,4 @@ StmtPtr IRSimplifier::simplify(StmtPtr s) {
   return s;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

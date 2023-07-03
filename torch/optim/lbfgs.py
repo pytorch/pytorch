@@ -205,7 +205,7 @@ class LBFGS(Optimizer):
         max_eval (int): maximal number of function evaluations per optimization
             step (default: max_iter * 1.25).
         tolerance_grad (float): termination tolerance on first order optimality
-            (default: 1e-5).
+            (default: 1e-7).
         tolerance_change (float): termination tolerance on function
             value/parameter changes (default: 1e-9).
         history_size (int): update history size (default: 100).
@@ -231,7 +231,7 @@ class LBFGS(Optimizer):
             tolerance_change=tolerance_change,
             history_size=history_size,
             line_search_fn=line_search_fn)
-        super(LBFGS, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
         if len(self.param_groups) != 1:
             raise ValueError("LBFGS doesn't support per-parameter options "

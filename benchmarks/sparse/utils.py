@@ -6,7 +6,7 @@ import numpy as np
 import time
 
 # shim for torch.cuda.Event when running on cpu
-class Event(object):
+class Event:
     def __init__(self, enable_timing):
         pass
 

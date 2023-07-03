@@ -32,6 +32,7 @@ torch.fx.graph_module.reduce_deploy_graph_module(importer: Callable, body: Dict[
 torch.fx.graph_module.reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.modules.module.Module
 torch.fx.graph_module.reduce_package_graph_module(importer: Callable, body: Dict[Any, Any], generated_module_name: str) -> torch.nn.modules.module.Module
 torch.fx.interpreter.Interpreter.__init__(self, module: torch.fx.graph_module.GraphModule, garbage_collect_values: bool = True)
+torch.fx.interpreter.Interpreter.boxed_run(self, args_list)
 torch.fx.interpreter.Interpreter.call_function(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx.interpreter.Interpreter.call_method(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx.interpreter.Interpreter.call_module(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any
@@ -53,7 +54,7 @@ torch.fx.node.Node.__init__(self, graph: 'Graph', name: str, op: str, target: 'T
 torch.fx.node.Node.append(self, x: 'Node') -> None
 torch.fx.node.Node.format_node(self, placeholder_names: Optional[List[str]] = None, maybe_return_typename: Optional[List[str]] = None) -> Optional[str]
 torch.fx.node.Node.prepend(self, x: 'Node') -> None
-torch.fx.node.Node.replace_all_uses_with(self, replace_with: 'Node', delete_user_cb: Callable[[Node], bool] = <function <lambda>>) -> List[Node]
+torch.fx.node.Node.replace_all_uses_with(self, replace_with: 'Node', delete_user_cb: Callable[[Node], bool] = <function <lambda>>, propagate_meta = False) -> List[Node]
 torch.fx.node.Node.replace_input_with(self, old_input: 'Node', new_input: 'Node')
 torch.fx.node.Node.update_arg(self, idx: int, arg: torch.fx.node.Argument) -> None
 torch.fx.node.Node.update_kwarg(self, key: str, arg: torch.fx.node.Argument) -> None
@@ -71,4 +72,4 @@ torch.fx.proxy.TracerBase.iter(self, obj: 'Proxy') -> Iterator
 torch.fx.proxy.TracerBase.keys(self, obj: 'Proxy') -> Any
 torch.fx.proxy.TracerBase.proxy(self, node: torch.fx.node.Node) -> 'Proxy'
 torch.fx.proxy.TracerBase.to_bool(self, obj: 'Proxy') -> bool
-torch.fx.subgraph_rewriter.replace_pattern(gm: torch.fx.graph_module.GraphModule, pattern: Callable, replacement: Callable) -> List[torch.fx.subgraph_rewriter.Match]
+torch.fx.subgraph_rewriter.replace_pattern(gm: torch.fx.graph_module.GraphModule, pattern: Union[Callable, torch.fx.graph_module.GraphModule], replacement: Union[Callable, torch.fx.graph_module.GraphModule]) -> List[torch.fx.subgraph_rewriter.Match]

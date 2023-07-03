@@ -54,7 +54,6 @@ def generate_code(
         operator_selector = SelectiveBuilder.get_nop_selector()
 
     if subset == "libtorch" or not subset:
-
         gen_autograd(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             tags_path or TAGS_PATH,
@@ -86,7 +85,7 @@ def get_selector_from_legacy_operator_selection_list(
     # Internal build doesn't use this flag any more. Only used by OSS
     # build now. Every operator should be considered a root operator
     # (hence generating unboxing code for it, which is consistent with
-    # the current behaviour), and also be considered as used for
+    # the current behavior), and also be considered as used for
     # training, since OSS doesn't support training on mobile for now.
     #
     is_root_operator = True
@@ -138,6 +137,7 @@ def main() -> None:
         help="Root directory where to install files. Defaults to the current working directory.",
     )
     parser.add_argument(
+        "--install-dir",
         "--install_dir",
         help=(
             "Deprecated. Use --gen-dir instead. The semantics are different, do not change "
@@ -159,21 +159,25 @@ def main() -> None:
         help="Path to the YAML file that contains the list of operators to include for custom build.",
     )
     parser.add_argument(
+        "--operators-yaml-path",
         "--operators_yaml_path",
         help="Path to the model YAML file that contains the list of operators to include for custom build.",
     )
     parser.add_argument(
+        "--force-schema-registration",
         "--force_schema_registration",
         action="store_true",
         help="force it to generate schema-only registrations for ops that are not"
         "listed on --selected-op-list",
     )
     parser.add_argument(
+        "--gen-lazy-ts-backend",
         "--gen_lazy_ts_backend",
         action="store_true",
         help="Enable generation of the torch::lazy TorchScript backend",
     )
     parser.add_argument(
+        "--per-operator-headers",
         "--per_operator_headers",
         action="store_true",
         help="Build lazy tensor ts backend with per-operator ATen headers, must match how ATen was built",

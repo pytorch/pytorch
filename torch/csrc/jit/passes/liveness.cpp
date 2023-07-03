@@ -68,7 +68,7 @@ struct LivenessAnalyzer {
       const std::unordered_map<Node*, std::vector<Value*>>& liveness_sets) {
     std::cout << "Liveness info:\n";
     for (auto e : liveness_sets) {
-      if (e.first->outputs().size() > 0) {
+      if (!e.first->outputs().empty()) {
         std::cout << e.first->outputs()[0]->debugName();
       }
 

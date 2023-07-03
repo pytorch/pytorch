@@ -14,6 +14,7 @@
 #include <ATen/ATen.h>
 #include <algorithm>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -82,7 +83,7 @@ c10::AliasAnalysisKind aliasAnalysisIsSpecialCase() {
 // Tunable parameter. Set to something larger if it turns out to be better.
 static constexpr size_t min_fusion_size = 4;
 
-bool have_same_shape(at::TensorList inputs) {
+static bool have_same_shape(at::TensorList inputs) {
   auto expected_sizes = inputs[0].sizes();
   return (std::all_of(
       inputs.begin(), inputs.end(), [expected_sizes](const at::Tensor& t) {
@@ -90,17 +91,19 @@ bool have_same_shape(at::TensorList inputs) {
       }));
 }
 
-bool should_be_transposed(at::TensorList inputs) {
+static bool should_be_transposed(at::TensorList inputs) {
   return (std::all_of(inputs.begin(), inputs.end(), [](const at::Tensor& t) {
     return t.stride(0) == 1 && t.stride(1) == t.size(0);
   }));
 }
 
-std::vector<at::Tensor> transpose_inputs(at::TensorList inputs) {
+static std::vector<at::Tensor> transpose_inputs(at::TensorList inputs) {
   return fmap(inputs, [](const at::Tensor& i) { return i.t(); });
 }
 
-bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
+static bool shape_is_fast_for_reduce(
+    const at::Tensor& lhs,
+    const at::Tensor& rhs) {
   size_t l = lhs.size(0);
   size_t m = lhs.size(1);
   size_t r = rhs.size(1);
@@ -119,7 +122,7 @@ RegisterOperators mm_tree_reduction_reg({Operator(
       }
       drop(stack, num_inputs);
 
-      AT_ASSERT(inputs.size() > 0);
+      AT_ASSERT(!inputs.empty());
       AT_ASSERT(inputs.size() % 2 == 0);
       size_t side_num_elems = inputs.size() / 2;
       auto lhs_inputs = at::TensorList(inputs).slice(0, side_num_elems);
@@ -250,7 +253,7 @@ struct TreeToken {
 
 enum class Side { LHS, RHS };
 
-void BatchMMTreeReduce(Block* block, AliasDb& alias_db) {
+static void BatchMMTreeReduce(Block* block, AliasDb& alias_db) {
   auto graph = block->owningGraph();
 
   // Look for trees in the block
@@ -315,7 +318,7 @@ void BatchMMTreeReduce(Block* block, AliasDb& alias_db) {
   }
 }
 
-bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
+static bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
   // Cutoff chosed by benchmarking on a TITAN V
   return other_side_input.numel() <= 1024 * 2048;
 }
@@ -367,11 +370,11 @@ RegisterOperators mm_batch_side_reg({Operator(
     },
     aliasAnalysisIsSpecialCase())});
 
-std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
+static std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
     Value* value,
     AliasDb& alias_db) {
   const auto postprocess = [&](std::vector<Node*> mms) {
-    if (mms.size() == 0) {
+    if (mms.empty()) {
       return mms;
     }
     std::sort(mms.begin(), mms.end(), [](Node* n, Node* m) {
@@ -408,10 +411,11 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
       }
     }
   }
-  return std::make_pair(postprocess(lhses), postprocess(rhses));
+  return std::make_pair(
+      postprocess(std::move(lhses)), postprocess(std::move(rhses)));
 }
 
-void BatchMMSide(Block* block, AliasDb& alias_db) {
+static void BatchMMSide(Block* block, AliasDb& alias_db) {
   // NB: 8 is the current loop unrolling factor
   static constexpr size_t how_many_is_many = 8;
   const auto batch_side = [&](std::vector<Node*>& mms, Side side) {
@@ -460,7 +464,7 @@ void BatchMMSide(Block* block, AliasDb& alias_db) {
   }
 }
 
-bool hasMutableOperators(Block* block) {
+static bool hasMutableOperators(Block* block) {
   for (auto n : block->nodes()) {
     if (n->kind().is_aten() && n->schema().is_mutable())
       return true;
@@ -472,7 +476,7 @@ bool hasMutableOperators(Block* block) {
   return false;
 }
 
-bool hasMMOperators(std::shared_ptr<Graph>& graph) {
+static bool hasMMOperators(std::shared_ptr<Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
   Node* n = nullptr;
   while ((n = it.next()) != nullptr) {

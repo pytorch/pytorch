@@ -4,11 +4,9 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/macros/Export.h>
 
-#ifdef CUDART_VERSION
+#if defined(CUDART_VERSION) || defined(ROCM_VERSION) && ROCM_VERSION >= 50300
 
-namespace at {
-namespace cuda {
-namespace solver {
+namespace at::cuda::solver {
 
 template <>
 void getrf<double>(
@@ -472,6 +470,8 @@ void gesvdjBatched<c10::complex<double>>(
 }
 
 
+// ROCM does not implement gesdva yet
+#ifdef CUDART_VERSION
 template<>
 void gesvdaStridedBatched_buffersize<float>(
     cusolverDnHandle_t handle, cusolverEigMode_t jobz, int rank, int m, int n, float *A, int lda, long long int strideA,
@@ -592,6 +592,7 @@ void gesvdaStridedBatched<c10::complex<double>>(
     lwork, info, h_R_nrmF, batchSize
   ));
 }
+#endif
 
 
 template<>
@@ -1955,8 +1956,6 @@ void xsyevd<c10::complex<double>, double>(
 }
 #endif // USE_CUSOLVER_64_BIT
 
-} // namespace solver
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::solver
 
 #endif // CUDART_VERSION

@@ -27,7 +27,7 @@ class TestRecursiveScript(JitTestCase):
     def test_inferred_nonetype(self):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.x = None
 
             def forward(self):
@@ -47,7 +47,7 @@ class TestRecursiveScript(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self, fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.fn = fn
 
             def forward(self, x):
@@ -62,7 +62,7 @@ class TestRecursiveScript(JitTestCase):
     def test_python_function_attribute(self):
         class M(torch.nn.Module):
             def __init__(self, fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.fn = fn
 
             def forward(self, x):
@@ -78,7 +78,7 @@ class TestRecursiveScript(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self, fn):
-                super(M, self).__init__()
+                super().__init__()
                 self.fn = fn
 
             def forward(self, x):
@@ -128,7 +128,7 @@ class TestRecursiveScript(JitTestCase):
     def test_module_name(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.x = 2
 
             def forward(self, t):
@@ -186,30 +186,26 @@ class TestRecursiveScript(JitTestCase):
 
         self.checkModule(M2(), (torch.randn(2, 2),))
 
-        if sys.version_info[:2] >= (3, 8):
-            class M3(torch.nn.Module):
-                x : typing.Final[int]
+        class M3(torch.nn.Module):
+            x : typing.Final[int]
 
-                def __init__(self):
-                    super().__init__()
-                    self.x = 2
+            def __init__(self):
+                super().__init__()
+                self.x = 2
 
-                def forward(self, t):
-                    return t + self.x
+            def forward(self, t):
+                return t + self.x
 
-            self.checkModule(M3(), (torch.randn(2, 2),))
+        self.checkModule(M3(), (torch.randn(2, 2),))
 
     def test_ignore_class(self):
         @torch.jit.ignore
-        class MyScriptClass(object):
+        class MyScriptClass:
             def unscriptable(self):
                 return "a" + 200
 
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
-                super(TestModule, self).__init__()
-
             def forward(self, x):
                 return MyScriptClass()
 
@@ -234,7 +230,7 @@ class TestRecursiveScript(JitTestCase):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(10, 10, 3)
                 self.lin = nn.Linear(10, 10)
                 self.sub = Submodule()
@@ -271,7 +267,7 @@ class TestRecursiveScript(JitTestCase):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(10, 10, 3)
                 self.lin = nn.Linear(10, 10)
 
@@ -291,7 +287,7 @@ class TestRecursiveScript(JitTestCase):
         def other_fn(a: int, b: Tensor) -> Tensor:
             return a * b
 
-        class B(object):
+        class B:
             def __init__(self, x):
                 self.x = 2
 
@@ -300,9 +296,6 @@ class TestRecursiveScript(JitTestCase):
 
 
         class N(torch.nn.Module):
-            def __init__(self):
-                super(N, self).__init__()
-
             def forward(self, x):
                 b = B(x)
                 return b.helper(x)
@@ -343,15 +336,12 @@ class TestRecursiveScript(JitTestCase):
             return c(x)
 
         class Submodule(torch.nn.Module):
-            def __init__(self):
-                super(Submodule, self).__init__()
-
             def forward(self, x):
                 return b(x)
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.submodule = Submodule()
 
             def some_method(self, y):
@@ -385,7 +375,7 @@ class TestRecursiveScript(JitTestCase):
         self.assertEqual(a_script_fn(t, t, t), t + t + t)
 
     def test_error_stack_class(self):
-        class X(object):
+        class X:
             def bad_fn(self):
                 import pdb  # noqa: F401
 
@@ -401,7 +391,7 @@ class TestRecursiveScript(JitTestCase):
             checker.run(str(e))
 
     def test_error_stack_annotation(self):
-        class X(object):
+        class X:
             def bad_fn(self):
                 import pdb  # noqa: F401
 
@@ -422,7 +412,7 @@ class TestRecursiveScript(JitTestCase):
             __constants__ = ['x']
 
             def __init__(self, x):
-                super(Other, self).__init__()
+                super().__init__()
                 self.x = x
                 self.param = torch.nn.Parameter(torch.ones(2, 2))
 
@@ -437,7 +427,7 @@ class TestRecursiveScript(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.other = Other(200)
 
             def forward(self, t):
@@ -450,7 +440,7 @@ class TestRecursiveScript(JitTestCase):
             __constants__ = ['x']
 
             def __init__(self, x):
-                super(Other, self).__init__()
+                super().__init__()
                 self.x = x
                 self.param = torch.nn.Parameter(torch.ones(2, 2))
 
@@ -464,7 +454,7 @@ class TestRecursiveScript(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.other = Other(200)
 
             def forward(self, t):
@@ -479,7 +469,7 @@ class TestRecursiveScript(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.sequential = nn.Sequential(
                     Inner(),
                     Inner(),
@@ -514,7 +504,7 @@ class TestRecursiveScript(JitTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 shared = SeluButReluWhenScripted()
                 self.sequential = nn.Sequential(
                     SeluButReluWhenScripted(),
@@ -550,18 +540,18 @@ class TestRecursiveScript(JitTestCase):
 
     def test_attributes(self):
         @torch.jit.script
-        class Inner2(object):
+        class Inner2:
             def __init__(self):
                 self.b = "a string"
 
         @torch.jit.script
-        class Foo(object):
+        class Foo:
             def __init__(self):
                 self.a = 4
                 self.inner = Inner2()
 
         @torch.jit.script
-        class SFoo(object):
+        class SFoo:
             def __init__(self):
                 self.a = 4
                 self.inner = Inner2()
@@ -603,9 +593,6 @@ class TestRecursiveScript(JitTestCase):
             # my_empty_list : List[int]
             # my_empty_dict : Dict[str, int]
             # my_none : Optional[int]
-
-            def __init__(self):
-                super(M, self).__init__()
 
             def forward(self, x):
                 return (
@@ -654,7 +641,7 @@ class TestRecursiveScript(JitTestCase):
     def test_function_attribute_in_submodule(self):
         class N(nn.Module):
             def __init__(self, norm):
-                super(N, self).__init__()
+                super().__init__()
                 self.activation = torch.nn.functional.relu
                 self.norm = norm
 
@@ -665,7 +652,7 @@ class TestRecursiveScript(JitTestCase):
 
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 encoder_norm = nn.ReLU()
                 self.encoder = N(encoder_norm)
 
@@ -682,7 +669,7 @@ class TestRecursiveScript(JitTestCase):
 
         class Model(nn.Module):
             def __init__(self, dummies):
-                super(Model, self).__init__()
+                super().__init__()
                 self._dummies = dummies
 
             def forward(self, x):
@@ -709,7 +696,7 @@ class TestRecursiveScript(JitTestCase):
 
         class ContainsLoaded(torch.nn.Module):
             def __init__(self):
-                super(ContainsLoaded, self).__init__()
+                super().__init__()
                 self.encoder = dummy
 
             def forward(self, input):
@@ -720,7 +707,7 @@ class TestRecursiveScript(JitTestCase):
     def test_optional_module(self):
         class Dummy(nn.Module):
             def __init__(self):
-                super(Dummy, self).__init__()
+                super().__init__()
                 self.foo = nn.Linear(2, 2)
 
             def forward(self, x):

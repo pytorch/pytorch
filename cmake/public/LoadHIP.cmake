@@ -119,6 +119,13 @@ else()
   set(ROCTHRUST_PATH $ENV{ROCTHRUST_PATH})
 endif()
 
+# HIPSOLVER_PATH
+if(NOT DEFINED ENV{HIPSOLVER_PATH})
+  set(HIPSOLVER_PATH ${ROCM_PATH}/hipsolver)
+else()
+  set(HIPSOLVER_PATH $ENV{HIPSOLVER_PATH})
+endif()
+
 # ROCTRACER_PATH
 if(NOT DEFINED ENV{ROCTRACER_PATH})
   set(ROCTRACER_PATH ${ROCM_PATH}/roctracer)
@@ -142,9 +149,6 @@ message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 
 # Add HIP to the CMAKE Module Path
 set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
-
-#Disable kernel assert due to performance regression
-set(ROCM_ENABLE_KERNEL_ASSERTS FALSE CACHE BOOL "Kernel asserts are disabled by default for ROCm")
 
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
@@ -250,6 +254,7 @@ if(HIP_FOUND)
     set(rocprim_DIR ${ROCM_PATH}/lib/cmake/rocprim)
     set(hipcub_DIR ${ROCM_PATH}/lib/cmake/hipcub)
     set(rocthrust_DIR ${ROCM_PATH}/lib/cmake/rocthrust)
+    set(hipsolver_DIR ${ROCM_PATH}/lib/cmake/hipsolver)
   else()
     set(hip_DIR ${HIP_PATH}/lib/cmake/hip)
     set(hsa-runtime64_DIR ${ROCM_PATH}/lib/cmake/hsa-runtime64)
@@ -266,6 +271,7 @@ if(HIP_FOUND)
     set(rocprim_DIR ${ROCPRIM_PATH}/lib/cmake/rocprim)
     set(hipcub_DIR ${HIPCUB_PATH}/lib/cmake/hipcub)
     set(rocthrust_DIR ${ROCTHRUST_PATH}/lib/cmake/rocthrust)
+    set(hipsolver_DIR ${HIPSOLVER_PATH}/lib/cmake/hipsolver)
   endif()
 
   find_package_and_print_version(hip REQUIRED)
@@ -285,19 +291,7 @@ if(HIP_FOUND)
   find_package_and_print_version(rocprim REQUIRED)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
-
-  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
-    if(ROCM_ENABLE_KERNEL_ASSERTS)
-      message("ROCm version >= 4.1; enabling asserts")
-    else()
-      add_definitions(-DROCM_DISABLE_GPU_ASSERTS)
-      message("ROCm version >= 4.1; kernel asserts are disabled")
-    endif()
-  else()
-    # Disable Asserts In Code (Can't use asserts on HIP stack.)
-    add_definitions(-DNDEBUG)
-    message("ROCm version < 4.1; disablng asserts")
-  endif()
+  find_package_and_print_version(hipsolver REQUIRED)
 
   if(HIP_COMPILER STREQUAL clang)
     set(hip_library_name amdhip64)
@@ -329,5 +323,4 @@ if(HIP_FOUND)
   find_library(ROCM_HIPRTC_LIB ${hip_library_name} HINTS ${HIP_PATH}/lib)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCTRACER_PATH}/lib)
-  set(roctracer_INCLUDE_DIRS ${ROCTRACER_PATH}/include)
 endif()

@@ -6,7 +6,12 @@
 #include <ATen/TensorGeometry.h>
 #include <ATen/Utils.h>
 
+#include <utility>
+
 // These functions are NOT in Utils.h, because this file has a dep on Tensor.h
+
+#define TORCH_CHECK_TENSOR_ALL(cond, ...) \
+  TORCH_CHECK((cond)._is_all_true().item<bool>(), __VA_ARGS__);
 
 namespace at {
 
@@ -37,7 +42,7 @@ struct TORCH_API TensorGeometryArg {
   /* implicit */ TensorGeometryArg(TensorArg arg)
       : tensor(TensorGeometry{arg.tensor}), name(arg.name), pos(arg.pos) {}
   TensorGeometryArg(TensorGeometry tensor, const char* name, int pos)
-      : tensor(tensor), name(name), pos(pos) {}
+      : tensor(std::move(tensor)), name(name), pos(pos) {}
   const TensorGeometry* operator->() const {
     return &tensor;
   }
@@ -105,8 +110,8 @@ TORCH_API void checkNumel(
     int64_t numel);
 TORCH_API void checkSameNumel(
     CheckedFrom c,
-    const TensorGeometryArg& t1,
-    const TensorGeometryArg& t2);
+    const TensorArg& t1,
+    const TensorArg& t2);
 TORCH_API void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors);
 TORCH_API void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType s);
 TORCH_API void checkScalarTypes(
@@ -127,6 +132,7 @@ TORCH_API void checkSameSize(
     CheckedFrom c,
     const TensorArg& t1,
     const TensorArg& t2);
+TORCH_API void checkAllSameSize(CheckedFrom c, ArrayRef<TensorArg> tensors);
 TORCH_API void checkDefined(CheckedFrom c, const TensorArg& t);
 TORCH_API void checkAllDefined(CheckedFrom c, at::ArrayRef<TensorArg> t);
 

@@ -27,7 +27,7 @@ class TestUnsafeCoalesceOp(hu.HypothesisTestCase):
         )
 
         def reference_func(*args):
-            self.assertEquals(len(args), n)
+            self.assertEqual(len(args), n)
             return list(args) + [np.concatenate([x.flatten() for x in args])]
 
         self.assertReferenceChecks(gc, coalesce_op, test_inputs, reference_func)

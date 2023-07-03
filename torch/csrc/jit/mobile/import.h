@@ -23,7 +23,8 @@ constexpr const char* kArchiveNameVersion = "version";
 TORCH_API mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files);
+    ExtraFilesMap& extra_file,
+    uint64_t module_load_options = kDefaultMobileLoadOptions);
 
 TORCH_API mobile::Module _load_for_mobile(
     const std::string& filename,
@@ -106,19 +107,6 @@ TORCH_API std::set<std::string> _export_operator_list(
     torch::jit::mobile::Module& module);
 
 } // namespace mobile
-
-extern mobile::Module (*load_flatbuffer_bytes)(
-    std::shared_ptr<char>,
-    size_t size,
-    c10::optional<at::Device>,
-    ExtraFilesMap*);
-
-extern mobile::Module (*load_flatbuffer_bytes_no_object)(
-    std::shared_ptr<char>,
-    size_t size,
-    c10::optional<at::Device>);
-
-extern uint64_t (*get_flatbuffer_bytecode_version)(char* flatbuffer_content);
 
 } // namespace jit
 } // namespace torch

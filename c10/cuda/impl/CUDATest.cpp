@@ -10,8 +10,8 @@ namespace cuda {
 namespace impl {
 
 bool has_cuda_gpu() {
-  int count;
-  C10_CUDA_CHECK(cudaGetDeviceCount(&count));
+  int count = 0;
+  C10_CUDA_IGNORE_ERROR(cudaGetDeviceCount(&count));
 
   return count != 0;
 }

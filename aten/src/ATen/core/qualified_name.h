@@ -10,7 +10,7 @@ namespace c10 {
 
 // Represents a name of the form "foo.bar.baz"
 struct QualifiedName {
-  QualifiedName() {}
+  QualifiedName() = default;
 
   // `name` can be a dotted string, like "foo.bar.baz", or just a bare name.
   /* implicit */ QualifiedName(const std::string& name) {
@@ -22,28 +22,28 @@ struct QualifiedName {
     while (pos != std::string::npos) {
       auto atom = name.substr(startSearchFrom, pos - startSearchFrom);
       TORCH_INTERNAL_ASSERT(
-          atom.size() > 0, "Invalid name for qualified name: '", name, "'");
+          !atom.empty(), "Invalid name for qualified name: '", name, "'");
       atoms_.push_back(std::move(atom));
       startSearchFrom = pos + 1;
       pos = name.find(delimiter_, startSearchFrom);
     }
 
-    auto finalAtom = name.substr(startSearchFrom, pos - startSearchFrom);
+    auto finalAtom = name.substr(startSearchFrom);
     TORCH_INTERNAL_ASSERT(
-        finalAtom.size() > 0, "Invalid name for qualified name: '", name, "'");
+        !finalAtom.empty(), "Invalid name for qualified name: '", name, "'");
     atoms_.emplace_back(std::move(finalAtom));
 
     cacheAccessors();
   }
 
-  explicit QualifiedName(std::vector<std::string> atoms) {
-    for (const auto& atom : atoms) {
+  explicit QualifiedName(std::vector<std::string> atoms) : atoms_(std::move(atoms)) {
+    for (const auto& atom : atoms_) {
       TORCH_CHECK(!atom.empty(), "Atom cannot be empty");
       TORCH_CHECK(
           atom.find(delimiter_) == std::string::npos,
           "Delimiter not allowed in atom");
     }
-    atoms_ = std::move(atoms);
+
     cacheAccessors();
   }
   // Unnecessary copy. Ideally we'd use something like std::string_view.
@@ -134,7 +134,7 @@ struct QualifiedName {
       prefix_ = join(delimiter_, prefixView);
     }
 
-    if (atoms_.size() >= 1) {
+    if (!atoms_.empty()) {
       name_ = atoms_.back();
     }
   }

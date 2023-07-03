@@ -28,12 +28,12 @@ from collections import deque
 from contextlib import contextmanager
 import threading
 from typing import (
-    TYPE_CHECKING,
     Any,
     Deque,
     Generator,
     List,
     Optional,
+    Protocol,
     Union,
     Sequence,
     Tuple
@@ -58,12 +58,6 @@ TensorOrTensors = Union[Tensor, Tensors]
 # Types for shared memory between Checkpoint and Recompute.
 Recomputed = Tuple[TensorOrTensors, Tensors]  # (output, input_leaf)
 RNGStates = Tuple[Tensor, Optional[Tensor]]  # (cpu_rng_state, gpu_rng_state)
-
-
-if TYPE_CHECKING:
-    from typing_extensions import Protocol
-else:
-    Protocol = object
 
 
 # Protocol with __call__ instead of Callable can be used as an attribute type.

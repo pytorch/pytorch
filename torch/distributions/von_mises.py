@@ -8,6 +8,7 @@ from torch.distributions.utils import broadcast_all, lazy_property
 
 __all__ = ['VonMises']
 
+
 def _eval_poly(y, coef):
     coef = list(coef)
     result = coef.pop()
@@ -77,7 +78,7 @@ class VonMises(Distribution):
     Example::
         >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = VonMises(torch.tensor([1.0]), torch.tensor([1.0]))
-        >>> m.sample() # von Mises distributed with loc=1 and concentration=1
+        >>> m.sample()  # von Mises distributed with loc=1 and concentration=1
         tensor([1.9777])
 
     :param torch.Tensor loc: an angle in radians.
@@ -97,7 +98,7 @@ class VonMises(Distribution):
         rho = (tau - (2 * tau).sqrt()) / (2 * self.concentration)
         self._proposal_r = (1 + rho ** 2) / (2 * rho)
 
-        super(VonMises, self).__init__(batch_shape, event_shape, validate_args)
+        super().__init__(batch_shape, event_shape, validate_args)
 
     def log_prob(self, value):
         if self._validate_args:
@@ -119,7 +120,7 @@ class VonMises(Distribution):
 
     def expand(self, batch_shape):
         try:
-            return super(VonMises, self).expand(batch_shape)
+            return super().expand(batch_shape)
         except NotImplementedError:
             validate_args = self.__dict__.get('_validate_args')
             loc = self.loc.expand(batch_shape)

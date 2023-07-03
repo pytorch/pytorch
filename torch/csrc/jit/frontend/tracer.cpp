@@ -26,9 +26,7 @@
 #include <sstream>
 #include <string>
 
-namespace torch {
-namespace jit {
-namespace tracer {
+namespace torch::jit::tracer {
 
 ////////////////////////////////////////////////////////////////////////////////
 // Recording the traces
@@ -112,7 +110,7 @@ void TracingState::delValue(const IValue& var) {
 Value* getValueTrace(const IValue& var) {
   return getTracingState()->getValue(var);
 }
-Value* getOptTensorValueTrace(const c10::optional<at::Tensor>& var) {
+static Value* getOptTensorValueTrace(const c10::optional<at::Tensor>& var) {
   return getValueTrace(IValue(var));
 }
 Value* TracingState::getValue(const IValue& var) {
@@ -376,7 +374,7 @@ static IValue addInput(
 
     // Unpack the list values statically
     for (const auto& entry : dict) {
-      IValue key = entry.key();
+      const IValue& key = entry.key();
       auto static_key = state->graph->insertConstant(key);
       auto static_value =
           state->graph->insert(aten::__getitem__, {value, static_key});
@@ -554,6 +552,15 @@ void TracingState::setValue(const IValue& v, Value* value) {
     auto& var = v.toTensor();
     AT_ASSERT(var.defined());
     env_stack.back()[v] = value;
+
+    // If the value comes from a CallFunction or CallMethod, it may not have
+    // shape information attached. For debuggability, we enhance the type
+    // information by assigning the concrete value's tupe to the jit::Value.
+    if (auto tensor_type = value->type()->cast<TensorType>()) {
+      if (!tensor_type->isComplete()) {
+        value->inferTypeFrom(var);
+      }
+    }
   } else if (v.isTensorList()) {
     auto outputs = v.toTensorList();
     Node* unpack_node =
@@ -683,7 +690,7 @@ void addInputs(Node* n, const char* name, at::Device value) {
   detail::genericAddInput(n, value);
 }
 void addInputs(Node* n, const char* name, c10::Stream stream) {
-  detail::genericAddInput(n, static_cast<int64_t>(stream.pack()));
+  detail::genericAddInput(n, c10::IValue(stream));
 }
 void addInputs(Node* n, const char* name, at::Layout value) {
   detail::genericAddInput(n, static_cast<int64_t>(value));
@@ -776,19 +783,6 @@ void addInputs(
   n->addInput(list_node->output());
 }
 
-void addInputs(
-    Node* n,
-    const char* name,
-    c10::optional<caffe2::TypeMeta> opt_dtype) {
-  if (opt_dtype.has_value()) {
-    return addInputs(n, name, at::typeMetaToScalarType(*opt_dtype));
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
-}
-
 void addInputs(Node* n, const char* name, at::IntArrayRef value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   std::vector<Value*> info = ArgumentStash::hasIntArrayRef(name)
@@ -814,7 +808,7 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
 }
 
 void addInputs(Node* n, const char* name, c10::SymIntArrayRef value) {
-  addInputs(n, name, asIntArrayRefSlow(value));
+  addInputs(n, name, C10_AS_INTARRAYREF_SLOW(value));
 }
 
 void addInputs(Node* n, const char* name, c10::optional<c10::SymInt> value) {
@@ -1055,7 +1049,7 @@ void ArgumentStash::stashValue(
 // Stack trace recording
 ////////////////////////////////////////////////////////////////////////////////
 // no python present so we just do not record source information
-void defaultRecordSourceLocation(Node* n) {}
+static void defaultRecordSourceLocation(Node* n) {}
 std::atomic<decltype(&defaultRecordSourceLocation)> record_source_location(
     defaultRecordSourceLocation);
 void recordSourceLocation(Node* n) {
@@ -1065,7 +1059,7 @@ void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
 }
 
-std::vector<StackEntry> defaultPythonCallstack() {
+static std::vector<StackEntry> defaultPythonCallstack() {
   return std::vector<StackEntry>();
 }
 std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
@@ -1077,7 +1071,7 @@ void setPythonCallstack(std::vector<StackEntry> (*v)()) {
   python_callstack_fn.store(v);
 }
 
-void defaultWarn(const std::string& str) {
+static void defaultWarn(const std::string& str) {
   TORCH_WARN(str);
 }
 std::atomic<warn_fn_type> warn_callback{defaultWarn};
@@ -1114,6 +1108,4 @@ void _do_warn(const char* _reason, const char* _kind) {
 void setWarn(warn_fn_type fn) {
   warn_callback.store(fn);
 }
-} // namespace tracer
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tracer

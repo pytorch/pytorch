@@ -23,7 +23,7 @@ class Int8AveragePoolOp final : public ConvPoolOpBase<CPUContext> {
         this->order_ == StorageOrder::NHWC, "Int8 only supports NHWC order.");
   }
 
-  ~Int8AveragePoolOp() {
+  ~Int8AveragePoolOp() override {
     if (this->qnnpackOperator_ != nullptr) {
       qnnp_delete_operator(this->qnnpackOperator_);
       this->qnnpackOperator_ = nullptr;

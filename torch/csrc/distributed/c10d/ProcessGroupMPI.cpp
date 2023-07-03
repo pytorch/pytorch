@@ -305,7 +305,7 @@ c10::intrusive_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
 }
 
 ProcessGroupMPI::ProcessGroupMPI(int rank, int size, MPI_Comm pgComm)
-    : ProcessGroup(rank, size), stop_(false), pgComm_(pgComm) {
+    : Backend(rank, size), stop_(false), pgComm_(pgComm) {
   if (pgComm_ == MPI_COMM_NULL) {
     TORCH_CHECK(false, "pgComm_ must not be MPI_COMM_NULL");
   }
@@ -774,10 +774,10 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall(
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& opts) {
   TORCH_CHECK(
-      inputTensors.size() == size_,
+      inputTensors.size() == static_cast<size_t>(size_),
       "Number of input tensors are not equal to group size");
   TORCH_CHECK(
-      outputTensors.size() == size_,
+      outputTensors.size() == static_cast<size_t>(size_),
       "Number of output tensors are not equal to group size");
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [this](std::unique_ptr<WorkEntry>& entry) {

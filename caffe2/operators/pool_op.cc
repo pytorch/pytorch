@@ -863,9 +863,9 @@ $$dim_{out}=\frac{dim_{in}-kernel+2*pad}{stride}+1$$
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pool_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pool_op.cc
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/conv_pool_op_base.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/pool_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/pool_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/conv_pool_op_base.h
 
 
 <details>
@@ -933,9 +933,9 @@ $$dim_{out}=\frac{dim_{in}-kernel+2*pad}{stride}+1$$
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pool_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pool_op.cc
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/conv_pool_op_base.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/pool_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/pool_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/conv_pool_op_base.h
 
 <details>
 

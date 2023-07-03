@@ -2164,12 +2164,7 @@ TEST(StaticRuntime, Permute) {
   c10::List<int64_t> dims_b{0, 2, 1};
   std::vector<IValue> args_b{b, dims_b};
 
-  auto c = at::randn({3, 3, 3});
-  c10::List<int64_t> dims_c{0, -1, 1};
-  std::vector<IValue> args_c{c, dims_c};
-
   testStaticRuntime(permute_script, args_a);
-  testStaticRuntime(permute_script, args_c);
   testStaticRuntime(permute_script, args_a, args_b);
 
   permute_script = R"JIT(
@@ -2560,8 +2555,8 @@ TEST(StaticRuntime, Tensor_Split) {
   std::vector<IValue> args2{at::randn({8}), torch::tensor(3), 0};
 
   const auto tensor_split_str3 = R"JIT(
-    def forward(self, a: Tensor, indicies: List[int], dim: int):
-        return torch.tensor_split(a, indicies, dim)
+    def forward(self, a: Tensor, indices: List[int], dim: int):
+        return torch.tensor_split(a, indices, dim)
   )JIT";
   std::vector<IValue> args3{at::randn({8}), c10::List<int64_t>({1, 6}), 0};
 

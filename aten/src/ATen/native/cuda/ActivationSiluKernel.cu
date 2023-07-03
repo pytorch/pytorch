@@ -16,8 +16,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 void silu_kernel(TensorIteratorBase& iter) {
@@ -57,5 +56,4 @@ void silu_backward_kernel(TensorIteratorBase& iter) {
 REGISTER_DISPATCH(silu_stub, &silu_kernel);
 REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

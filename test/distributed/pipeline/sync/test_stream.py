@@ -21,6 +21,7 @@ from torch.distributed.pipeline.sync.stream import (
     use_stream,
     wait_stream,
 )
+from torch.testing._internal.common_utils import run_tests
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 
@@ -188,3 +189,7 @@ class TestRecordStream:
         with torch.cuda.stream(stream_alloc):
             z = torch.rand(2, device=torch.device("cuda"))
         assert z.data_ptr() != data_ptr
+
+
+if __name__ == "__main__":
+    run_tests()

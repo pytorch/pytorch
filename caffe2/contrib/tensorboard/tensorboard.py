@@ -28,7 +28,7 @@ except ImportError:
         # tensorflow<=0.12.1
         from tensorflow.train import SummaryWriter as FileWriter
 
-class Config(object):
+class Config:
     HEIGHT = 600
     ASPECT_RATIO = 1.6
 

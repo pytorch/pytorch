@@ -436,6 +436,7 @@ TEST(BoundShapeInference, ConcatMissingInput) {
       {spec.max_batch_size, 2, 60});
 }
 
+#ifdef USE_PYTORCH_QNNPACK
 // See https://github.com/pytorch/pytorch/issues/35544
 TEST(
     BoundShapeInference,
@@ -495,6 +496,7 @@ TEST(
       TensorProto_DataType_UINT8,
       true);
 }
+#endif /* USE_PYTORCH_QNNPACK */
 
 TEST(BoundShapeInference, ConcatInferInputBackwards) {
   NetDef net;
@@ -765,6 +767,7 @@ TEST(BoundShapeInference, Split) {
       {spec.max_batch_size, 48});
 }
 
+#ifdef USE_PYTORCH_QNNPACK
 // https://github.com/pytorch/pytorch/issues/41471
 TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
   NetDef net;
@@ -842,6 +845,7 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
       TensorProto_DataType_UINT8,
       true);
 }
+#endif /* USE_PYTORCH_QNNPACK */
 
 TEST(BoundShapeInference, FC3D) {
   NetDef net;

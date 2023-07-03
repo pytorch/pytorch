@@ -5,7 +5,6 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
-#include <torch/csrc/PythonTypes.h>
 #include <torch/csrc/Storage.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/cuda_enabled.h>
@@ -13,6 +12,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <ATen/ATen.h>
+#include <ATen/FunctionalStorageImpl.h>
 
 #include <array>
 #include <memory>
@@ -40,10 +40,14 @@ at::DeprecatedTypeProperties* get_type_properties(
     backend = at::Backend::CUDA;
   } else if (device_type == at::kXPU) {
     backend = at::Backend::XPU;
+  } else if (device_type == at::kHPU) {
+    backend = at::Backend::HPU;
   } else if (device_type == at::kMPS) {
     backend = at::Backend::MPS;
   } else if (device_type == at::DeviceType::Meta) {
     backend = at::Backend::Undefined;
+  } else if (device_type == at::DeviceType::PrivateUse1) {
+    backend = at::Backend::PrivateUse1;
   } else {
     TORCH_CHECK(false, "Invalid device for storage: ", device_type);
   }
@@ -77,7 +81,11 @@ THPLayout* getTHPLayout(at::Layout layout) {
 
 PyObject* createPyObject(const at::Storage& storage) {
   if (storage.device_type() != at::DeviceType::Meta &&
-      storage.data() == nullptr && storage.nbytes() != 0) {
+      storage.data() == nullptr && storage.sym_nbytes() != 0 &&
+      // Grabbing storage() from FunctionalTensorWrapper is allowed.
+      // This is useful for checking aliasing info from python
+      dynamic_cast<at::functionalization::FunctionalStorageImpl*>(
+          storage.unsafeGetStorageImpl()) == nullptr) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "python bindings to nullptr storage (e.g., from torch.Tensor._make_wrapper_subclass) are currently unsafe and thus disabled.  See https://github.com/pytorch/pytorch/issues/61669 for more details");
@@ -86,8 +94,8 @@ PyObject* createPyObject(const at::Storage& storage) {
   auto obj = THPObjectPtr(type->tp_alloc(type, 0));
   if (!obj)
     throw python_error();
-  ((THPVoidStorage*)obj.get())->cdata =
-      at::Storage(/* copy */ storage).unsafeReleaseStorageImpl();
+  ((THPStorage*)obj.get())->cdata =
+      c10::MaybeOwned<at::Storage>::owned(at::Storage(/* copy */ storage));
   return obj.release();
 }
 
@@ -126,8 +134,8 @@ at::Storage createStorageGetType(
 
   if (is_typed_storage) {
     // NOTE: `PyObject_GetAttrString` increments the refcounts to `dtype` and
-    // `_storage`, so we must decrement them. The refcounts will still stay
-    // nonzero since the `TypedStorage` maintains a reference.
+    // `_untyped_storage`, so we must decrement them. The refcounts will still
+    // stay nonzero since the `TypedStorage` maintains a reference.
     PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
     TORCH_INTERNAL_ASSERT(dtype_obj);
     Py_DECREF(dtype_obj);
@@ -135,7 +143,7 @@ at::Storage createStorageGetType(
     TORCH_INTERNAL_ASSERT(THPDtype_Check(dtype_obj));
     scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
 
-    untyped_storage_obj = PyObject_GetAttrString(obj, "_storage");
+    untyped_storage_obj = PyObject_GetAttrString(obj, "_untyped_storage");
     TORCH_INTERNAL_ASSERT(untyped_storage_obj);
     Py_DECREF(untyped_storage_obj);
 
@@ -149,14 +157,11 @@ at::Storage createStorageGetType(
     throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
   }
 
-  c10::StorageImpl* impl = static_cast<c10::StorageImpl*>(
-      ((THPVoidStorage*)untyped_storage_obj)->cdata);
-  c10::DeviceType device_type = impl->device().type();
-
+  const auto& storage = THPStorage_Unpack(untyped_storage_obj);
+  c10::DeviceType device_type = storage.device().type();
   auto type_properties = get_type_properties(device_type, at::kByte);
-
   return type_properties->unsafeStorageFromTH(
-      ((THPVoidStorage*)untyped_storage_obj)->cdata, true);
+      storage.unsafeGetStorageImpl(), true);
 }
 
 at::Storage createStorage(PyObject* obj) {

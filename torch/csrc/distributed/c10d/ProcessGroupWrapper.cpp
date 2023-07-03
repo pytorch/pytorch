@@ -13,6 +13,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include <stdexcept>
+#include <utility>
 
 namespace c10d {
 
@@ -23,18 +24,22 @@ struct CollectiveFingerPrint {
   // Current collective's operation type.
   OpType op_type_;
   // Number of input tensors
-  std::size_t num_tensors_;
+  std::size_t num_tensors_{};
   // input tensor data types
   std::vector<int8_t> tensor_dtypes_;
   // input tensor device types
   std::vector<int8_t> tensor_device_types_;
   // input tensor sizes
   std::vector<std::vector<int64_t>> tensor_sizes_;
+  int sequence_number_;
 
-  explicit CollectiveFingerPrint(
+  CollectiveFingerPrint(
       OpType op_type,
-      const std::vector<at::Tensor>& input_tensors)
-      : op_type_(op_type), num_tensors_(input_tensors.size()) {
+      const std::vector<at::Tensor>& input_tensors,
+      int sequence_number)
+      : op_type_(op_type),
+        num_tensors_(input_tensors.size()),
+        sequence_number_(sequence_number) {
     tensor_dtypes_.reserve(num_tensors_);
     tensor_device_types_.reserve(num_tensors_);
     tensor_sizes_.reserve(num_tensors_);
@@ -48,13 +53,17 @@ struct CollectiveFingerPrint {
   // Constructor for the data received from deserialized fingerprint
   CollectiveFingerPrint(
       OpType op_type,
+      size_t num_tensors,
       std::vector<int8_t> tensor_dtypes,
       std::vector<int8_t> tensor_device_types,
-      std::vector<std::vector<int64_t>> tensor_sizes)
+      std::vector<std::vector<int64_t>> tensor_sizes,
+      int sequence_number)
       : op_type_(op_type),
-        tensor_dtypes_(tensor_dtypes),
-        tensor_device_types_(tensor_device_types),
-        tensor_sizes_(tensor_sizes) {}
+        num_tensors_(num_tensors),
+        tensor_dtypes_(std::move(tensor_dtypes)),
+        tensor_device_types_(std::move(tensor_device_types)),
+        tensor_sizes_(std::move(tensor_sizes)),
+        sequence_number_(sequence_number) {}
 
   // Logs collective information in case of a failure.
   friend std::ostream& operator<<(
@@ -62,7 +71,7 @@ struct CollectiveFingerPrint {
       const CollectiveFingerPrint& collective_fingerprint);
 
   // Executes and verifies the collective fingerprint.
-  void verify(c10::intrusive_ptr<ProcessGroup> pg) {
+  void verify(c10::intrusive_ptr<Backend> backend) {
     at::Tensor serialized_tensor = serialize_fingerprint();
     std::vector<at::Tensor> inp{serialized_tensor};
     // First verify tensor shapes. This is needed because if e.g. tensor dim
@@ -72,9 +81,9 @@ struct CollectiveFingerPrint {
     // the shape will be a single int k_i and we need to make sure k_i is
     // consistent across the whole world.
     std::vector<at::Tensor> sp = c10d::getTensorShapes(inp);
-    verify_tensors(sp, pg);
+    verify_tensors(sp, backend);
     // Now verify consistency for the actual tensor.
-    verify_tensors(inp, pg);
+    verify_tensors(inp, backend);
   }
 
   // Takes a serialized fingerprint from
@@ -86,13 +95,16 @@ struct CollectiveFingerPrint {
     auto device_types = std::vector<int8_t>();
     auto sizes = std::vector<std::vector<int64_t>>();
     int index = 0;
+    int seq = 0;
     // 1. OpType
     optype = OpType(serialized_tensor[index].item<int>());
     index++;
-
+    int num_tensors = 0;
     if (index < serialized_tensor.size(0)) {
+      seq = serialized_tensor[index].item<int64_t>();
+      index++;
       // 2. Num tensors
-      int num_tensors = serialized_tensor[index].item<int>();
+      num_tensors = serialized_tensor[index].item<int>();
       index++;
       dtypes.reserve(num_tensors);
       device_types.reserve(num_tensors);
@@ -123,13 +135,14 @@ struct CollectiveFingerPrint {
         sizes.push_back(shapeVec);
       }
     }
-    return CollectiveFingerPrint(optype, dtypes, device_types, sizes);
+    return CollectiveFingerPrint(
+        optype, num_tensors, dtypes, device_types, sizes, seq);
   }
 
  private:
   void verify_tensors(
       std::vector<at::Tensor>& tensors_to_verify,
-      c10::intrusive_ptr<ProcessGroup>& pg) {
+      c10::intrusive_ptr<Backend>& backend) {
     // Create output tensor data structure to pass into allgather.
     std::vector<std::vector<at::Tensor>> output_tensors;
     // output tensors: [<tensor 0 outputs>, <tensor 1 outputs>, ..., <tensor n
@@ -140,32 +153,138 @@ struct CollectiveFingerPrint {
       // <tensor 0 outputs>: [<rank 0 tensor>, <rank 1 tensor>, ..., <rank n
       // tensor>]
       std::vector<at::Tensor> outputs;
-      outputs.reserve(pg->getSize());
-      for (const auto i : c10::irange(pg->getSize())) {
+      outputs.reserve(backend->getSize());
+      for (const auto i : c10::irange(backend->getSize())) {
         std::ignore = i; // Suppress unused variable warning
         outputs.emplace_back(at::zeros_like(tensor_shape));
       }
       output_tensors.emplace_back(outputs);
     }
     // Allgather tensor shapes.
-    pg->allgather(output_tensors, tensors_to_verify)->wait();
+    backend->allgather(output_tensors, tensors_to_verify)->wait();
     // Verify equivalence
     for (const auto i : c10::irange(output_tensors.size())) {
       const std::vector<at::Tensor> gathered_tensors = output_tensors[i];
       const at::Tensor reference_tensor = tensors_to_verify[i];
-      for (int rank = 0; rank < gathered_tensors.size(); rank++) {
+      for (const auto rank : c10::irange(gathered_tensors.size())) {
         const auto& rank_tensor = gathered_tensors[rank];
         if (!rank_tensor.equal(reference_tensor)) {
           CollectiveFingerPrint rank_fingerprint =
               deserialize_fingerprint(rank_tensor);
           std::stringstream ss;
           ss << "Detected mismatch between collectives on ranks. Rank "
-             << pg->getRank() << " is running collective: " << *this
+             << backend->getRank() << " is running collective: " << *this
              << ", but Rank " << rank
              << " is running collective: " << rank_fingerprint << ".";
+          auto diff_result = compute_collective_diff(rank_fingerprint);
+          if (std::get<0>(diff_result)) {
+            ss << std::get<1>(diff_result);
+          }
+
           TORCH_CHECK(false, ss.str());
         }
       }
+    }
+  }
+
+  static std::vector<std::string> get_size_strs(
+      const CollectiveFingerPrint& collective_fingerprint) {
+    std::vector<std::string> size_strs;
+    if (!collective_fingerprint.tensor_sizes_.empty()) {
+      for (const auto& single_tensor_shape_num :
+           collective_fingerprint.tensor_sizes_[0]) {
+        size_strs.emplace_back(std::to_string(single_tensor_shape_num));
+      }
+    }
+    return size_strs;
+  }
+
+  static std::vector<std::string> get_dtype_strs(
+      const CollectiveFingerPrint& collective_fingerprint) {
+    std::vector<std::string> dtype_strs;
+    dtype_strs.reserve(collective_fingerprint.tensor_dtypes_.size());
+    for (const auto& tensor_dtype : collective_fingerprint.tensor_dtypes_) {
+      dtype_strs.emplace_back(
+          c10::toString(static_cast<at::ScalarType>(tensor_dtype)));
+    }
+    return dtype_strs;
+  }
+
+  static std::vector<std::string> get_device_type_strs(
+      const CollectiveFingerPrint& collective_fingerprint) {
+    std::vector<std::string> device_type_strs;
+    device_type_strs.reserve(
+        collective_fingerprint.tensor_device_types_.size());
+    for (const auto& tensor_device_type :
+         collective_fingerprint.tensor_device_types_) {
+      device_type_strs.emplace_back(
+          c10::toString(static_cast<at::DeviceType>(tensor_device_type)));
+    }
+    return device_type_strs;
+  }
+
+  std::pair<bool, std::string> compute_collective_diff(
+      CollectiveFingerPrint& other) {
+    // Computes the difference between two collectives (seq num, tensor shapes,
+    // collective type, etc) for easier understanding of how mismatched
+    // collectives across ranks differ.
+    bool found_diff = false;
+    std::stringstream ss;
+    ss << "Collectives differ in the following aspects: ";
+    // Check seq_num
+    if (other.sequence_number_ != sequence_number_) {
+      found_diff = true;
+      ss << c10::str(
+          "\t Sequence number: ",
+          sequence_number_,
+          "vs ",
+          other.sequence_number_);
+    }
+    // Check op type
+    auto other_op = opTypeToString(other.op_type_);
+    auto this_op = opTypeToString(op_type_);
+    if (other_op.compare(this_op) != 0) {
+      found_diff = true;
+      ss << c10::str("  Op type: ", this_op, "vs ", other_op);
+    }
+
+    auto check = [&ss, &found_diff](
+                     const char* arg,
+                     std::vector<std::string> other,
+                     std::vector<std::string> curr) {
+      if (other.size() != curr.size()) {
+        found_diff = true;
+        ss << c10::str("  Tensor ", arg, ": ", curr, "vs ", other);
+        return;
+      }
+      for (size_t i = 0; i < other.size(); ++i) {
+        if (other[i].compare(curr[i]) != 0) {
+          found_diff = true;
+          ss << c10::str("  Tensor ", arg, ": ", curr, "vs ", other);
+          return;
+        }
+      }
+    };
+
+    // check tensor sizes
+    auto other_sizes = get_size_strs(other);
+    auto this_sizes = get_size_strs(*this);
+    check("Tensor shapes", other_sizes, this_sizes);
+
+    // check tensor dtypes
+    auto other_dtypes = get_dtype_strs(other);
+    auto this_dtypes = get_dtype_strs(*this);
+    check("Tensor dtypes", other_dtypes, this_dtypes);
+
+    // check tensor devices
+    auto other_devices = get_device_type_strs(other);
+    auto this_devices = get_device_type_strs(*this);
+
+    check("Tensor devices", other_devices, this_devices);
+    if (!found_diff) {
+      return std::make_pair(false, ss.str());
+    } else {
+      return std::make_pair(true, ss.str());
     }
   }
 
@@ -176,6 +295,8 @@ struct CollectiveFingerPrint {
     // std::vector<int64_t> data;
     // 1. OpType
     data->push_back(static_cast<int64_t>(op_type_));
+    // sequence number
+    data->push_back(sequence_number_);
     // 2. Num tensors
     data->push_back(static_cast<int64_t>(num_tensors_));
     // 3. Tensor dtypes
@@ -215,31 +336,22 @@ std::ostream& operator<<(
     std::ostream& output,
     const CollectiveFingerPrint& collective_fingerprint) {
   std::string collectiveInfo;
+  auto op_type_str = opTypeToString(collective_fingerprint.op_type_);
   if (collective_fingerprint.num_tensors_ != 0) {
     // Convert dtype and device type info to string.
-    std::vector<std::string> dtype_strs;
-    std::vector<std::string> device_type_strs;
-    std::vector<std::string> size_strs;
-    for (const auto& tensor_dtype : collective_fingerprint.tensor_dtypes_) {
-      dtype_strs.emplace_back(
-          c10::toString(static_cast<at::ScalarType>(tensor_dtype)));
-    }
-    for (const auto& tensor_device_type :
-         collective_fingerprint.tensor_device_types_) {
-      device_type_strs.emplace_back(
-          c10::toString(static_cast<at::DeviceType>(tensor_device_type)));
-    }
-    if (!collective_fingerprint.tensor_sizes_.empty()) {
-      for (const auto& single_tensor_shape_num :
-           collective_fingerprint.tensor_sizes_[0]) {
-        size_strs.emplace_back(std::to_string(single_tensor_shape_num));
-      }
-    }
+    std::vector<std::string> dtype_strs =
+        CollectiveFingerPrint::get_dtype_strs(collective_fingerprint);
+    std::vector<std::string> device_type_strs =
+        CollectiveFingerPrint::get_device_type_strs(collective_fingerprint);
+    std::vector<std::string> size_strs =
+        CollectiveFingerPrint::get_size_strs(collective_fingerprint);
 
     collectiveInfo = c10::str(
         "CollectiveFingerPrint(",
-        "OpType=",
-        opTypeToString(collective_fingerprint.op_type_),
+        "SequenceNumber=",
+        collective_fingerprint.sequence_number_,
+        ", OpType=",
+        op_type_str,
         ", TensorShape=[",
         c10::Join(", ", size_strs),
         "], TensorDtypes=",
@@ -250,8 +362,10 @@ std::ostream& operator<<(
   } else {
     collectiveInfo = c10::str(
         "CollectiveFingerPrint(",
+        "SequenceNumber=",
+        collective_fingerprint.sequence_number_,
         "OpType=",
-        opTypeToString(collective_fingerprint.op_type_),
+        op_type_str,
         ")");
   }
   return output << collectiveInfo;
@@ -260,29 +374,31 @@ std::ostream& operator<<(
 } // namespace
 
 ProcessGroupWrapper::ProcessGroupWrapper(
-    c10::intrusive_ptr<ProcessGroup> pg,
-    c10::intrusive_ptr<ProcessGroupGloo> glooPg)
-    : ProcessGroup(pg->getRank(), pg->getSize()), pg_(pg), glooPg_(glooPg) {
+    c10::intrusive_ptr<Backend> backend,
+    c10::intrusive_ptr<Backend> glooBackend)
+    : Backend(backend->getRank(), backend->getSize()),
+      backend_(backend),
+      glooBackend_(std::move(glooBackend)) {
   // Set the sequence number for the underlying process group.
-  pg_->setSequenceNumberForGroup();
+  backend_->setSequenceNumberForGroup();
 }
 
 const std::string ProcessGroupWrapper::getBackendName() const {
-  return pg_->getBackendName();
+  return backend_->getBackendName();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::broadcast(
     std::vector<at::Tensor>& data,
     const BroadcastOptions& opts) {
   runCollectiveChecks(OpType::BROADCAST, data);
-  return pg_->broadcast(data, opts);
+  return backend_->broadcast(data, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::allreduce(
     std::vector<at::Tensor>& data,
     const AllreduceOptions& opts) {
   runCollectiveChecks(OpType::ALLREDUCE, data);
-  return pg_->allreduce(data, opts);
+  return backend_->allreduce(data, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::allreduce_coalesced(
@@ -293,14 +409,14 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allreduce_coalesced(
   // inconsistent shapes, see python implementation in distributed_c10d for
   // details.
   runCollectiveChecks(OpType::ALLREDUCE_COALESCED, {});
-  return pg_->allreduce_coalesced(tensors, opts);
+  return backend_->allreduce_coalesced(tensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   runCollectiveChecks(OpType::REDUCE, tensors);
-  return pg_->reduce(tensors, opts);
+  return backend_->reduce(tensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather(
@@ -308,7 +424,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather(
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
   runCollectiveChecks(OpType::ALLGATHER, inputTensors);
-  return pg_->allgather(outputTensors, inputTensors, opts);
+  return backend_->allgather(outputTensors, inputTensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::_allgather_base(
@@ -317,7 +433,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::_allgather_base(
     const AllgatherOptions& opts) {
   std::vector<at::Tensor> inputTensors({inputBuffer});
   runCollectiveChecks(OpType::_ALLGATHER_BASE, inputTensors);
-  return pg_->_allgather_base(outputBuffer, inputBuffer, opts);
+  return backend_->_allgather_base(outputBuffer, inputBuffer, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather_coalesced(
@@ -329,7 +445,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather_coalesced(
   // inconsistent shapes, see python implementation in distributed_c10d for
   // details.
   runCollectiveChecks(OpType::ALLGATHER_COALESCED, {});
-  return pg_->allgather_coalesced(outputTensorLists, inputTensors, opts);
+  return backend_->allgather_coalesced(outputTensorLists, inputTensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::gather(
@@ -337,7 +453,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::gather(
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
   runCollectiveChecks(OpType::GATHER, inputTensors);
-  return pg_->gather(outputTensors, inputTensors, opts);
+  return backend_->gather(outputTensors, inputTensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::scatter(
@@ -345,7 +461,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::scatter(
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
   runCollectiveChecks(OpType::SCATTER, outputTensors);
-  return pg_->scatter(outputTensors, inputTensors, opts);
+  return backend_->scatter(outputTensors, inputTensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter(
@@ -353,7 +469,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter(
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
   runCollectiveChecks(OpType::REDUCE_SCATTER, outputTensors);
-  return pg_->reduce_scatter(outputTensors, inputTensors, opts);
+  return backend_->reduce_scatter(outputTensors, inputTensors, opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall_base(
@@ -364,7 +480,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall_base(
     const AllToAllOptions& opts) {
   // alltoall supports uneven split, so don't enforce shape checking.
   runCollectiveChecks(OpType::ALLTOALL_BASE, {});
-  return pg_->alltoall_base(
+  return backend_->alltoall_base(
       outputTensor, inputTensor, outputSplitSizes, inputSplitSizes, opts);
 }
 
@@ -374,51 +490,51 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall(
     const AllToAllOptions& opts) {
   // alltoall supports uneven split, so don't enforce shape checking.
   runCollectiveChecks(OpType::ALLTOALL, {});
-  return pg_->alltoall(outputTensors, inputTensors, opts);
+  return backend_->alltoall(outputTensors, inputTensors, opts);
 }
 
 void ProcessGroupWrapper::monitoredBarrier(
     const BarrierOptions& opts,
     bool waitAllRanks) {
-  return pg_->monitoredBarrier(opts, waitAllRanks);
+  return backend_->monitoredBarrier(opts, waitAllRanks);
 }
 
 void ProcessGroupWrapper::setSequenceNumberForGroup() {
   // Set underlying pg's sequence number if it is not set.
-  if (pg_->getSequenceNumberForGroup() == 0) {
+  if (backend_->getSequenceNumberForGroup() == 0) {
     // Set the sequence number for the underlying process group.
-    pg_->setSequenceNumberForGroup();
+    backend_->setSequenceNumberForGroup();
   }
 }
 
 uint64_t ProcessGroupWrapper::getSequenceNumberForGroup() {
-  return pg_->getSequenceNumberForGroup();
+  return backend_->getSequenceNumberForGroup();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
-  return pg_->send(tensors, dstRank, tag);
+  return backend_->send(tensors, dstRank, tag);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
-  return pg_->recv(tensors, srcRank, tag);
+  return backend_->recv(tensors, srcRank, tag);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::recvAnysource(
     std::vector<at::Tensor>& tensors,
     int tag) {
-  return pg_->recvAnysource(tensors, tag);
+  return backend_->recvAnysource(tensors, tag);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::barrier(
     const BarrierOptions& opts) {
   runCollectiveChecks(OpType::BARRIER, {});
-  return pg_->barrier(opts);
+  return backend_->barrier(opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::_reduce_scatter_base(
@@ -427,23 +543,26 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::_reduce_scatter_base(
     const ReduceScatterOptions& opts) {
   runCollectiveChecks(
       OpType::_REDUCE_SCATTER_BASE, {inputBuffer, outputBuffer});
-  return pg_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);
+  return backend_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);
 }
 
-c10::intrusive_ptr<ProcessGroup> ProcessGroupWrapper::getWrappedPg() const {
-  return pg_;
+c10::intrusive_ptr<Backend> ProcessGroupWrapper::getWrappedPg() const {
+  return backend_;
 }
 
 void ProcessGroupWrapper::runCollectiveChecks(
     OpType op_type,
-    const std::vector<at::Tensor>& tensors) const {
+    const std::vector<at::Tensor>& tensors) {
   // first perform a monitored barrier to ensure all ranks can synchronize.
   c10d::BarrierOptions options;
-  // TODO: we should use wrapped pg_'s timeout here, but C++ ProcessGroup API
-  // does not expose timeout.
-  auto finger_print = CollectiveFingerPrint(op_type, tensors);
+  // TODO: we should use wrapped backend_'s timeout here, but C++ ProcessGroup
+  // API does not expose timeout.
+  auto seq = getSequenceNumberForGroup();
+  auto finger_print = CollectiveFingerPrint(op_type, tensors, seq);
+  LOG(INFO) << "[Rank " << getRank() << "] "
+            << "Running collective: " << finger_print;
   try {
-    glooPg_->monitoredBarrier(options, /* waitAllRanks */ true);
+    glooBackend_->monitoredBarrier(options, /* waitAllRanks */ true);
   } catch (const std::runtime_error& e) {
     // Attach collective info to the exception and re-raise.
     std::stringstream ss;
@@ -457,7 +576,7 @@ void ProcessGroupWrapper::runCollectiveChecks(
     TORCH_CHECK(false, err_msg);
   }
   // Will throw if an ill-formed collective is detected.
-  finger_print.verify(glooPg_);
+  finger_print.verify(glooBackend_);
 }
 
 } // namespace c10d

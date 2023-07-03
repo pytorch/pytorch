@@ -16,4 +16,11 @@ py::handle get_symfloat_class() {
   return symfloat_class;
 }
 
+py::handle get_symbool_class() {
+  // NB: leak
+  static py::handle symbool_class =
+      py::object(py::module::import("torch").attr("SymBool")).release();
+  return symbool_class;
+}
+
 } // namespace torch

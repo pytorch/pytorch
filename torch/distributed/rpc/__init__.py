@@ -78,7 +78,7 @@ if is_available():
     rendezvous_iterator: Generator[Tuple[Store, int, int], None, None]
 
     __all__ += ["init_rpc", "BackendType", "TensorPipeRpcBackendOptions"]
-    __all__ = __all__ + api.__all__ + backend_registry.__all__
+    __all__ = __all__ + api.__all__ + backend_registry.__all__  # noqa: PLE0605
 
     def init_rpc(
         name,
@@ -148,10 +148,11 @@ if is_available():
             # Ignore type error because mypy doesn't handle dynamically generated type objects (#4865)
             if backend != BackendType.TENSORPIPE:  # type: ignore[attr-defined]
                 logger.warning(
-                    f"RPC was initialized with no explicit backend but with options "  # type: ignore[attr-defined]
-                    f"corresponding to {backend}, hence that backend will be used "
-                    f"instead of the default {BackendType.TENSORPIPE}. To silence this "
-                    f"warning pass `backend={backend}` explicitly."
+                    "RPC was initialized with no explicit backend but with options "  # type: ignore[attr-defined]
+                    "corresponding to %(backend)s, hence that backend will be used "
+                    "instead of the default BackendType.TENSORPIPE. To silence this "
+                    "warning pass `backend=%(backend)s` explicitly.",
+                    {'backend': backend}
                 )
 
         if backend is None:

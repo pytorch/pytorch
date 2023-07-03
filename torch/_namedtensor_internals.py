@@ -122,10 +122,12 @@ def update_names(tensor, names, rename_map, inplace):
 
     For example,
     ```
+    >>> # xdoctest: +SKIP
     >>> x = torch.empty(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
     >>> x.rename('...', 'height', 'width').names
     ('N', 'C', 'height', 'width')
 
+    >>> # xdoctest: +SKIP
     >>> x.rename('batch', '...', 'width').names
     ('batch', 'C', 'H', 'width')
 
@@ -136,6 +138,7 @@ def update_names(tensor, names, rename_map, inplace):
 
     For example,
     ```
+    >>> # xdoctest: +SKIP
     >>> x = torch.empty(2, 3, 5, 7, names=('N', 'C', 'H', 'W'))
     >>> x.rename(W='width', H='height').names
     ('N', 'C', 'height', 'width')

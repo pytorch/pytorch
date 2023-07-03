@@ -123,9 +123,7 @@ def hierarchical_pickle(data):
     if isinstance(data, torch.utils.show_pickle.FakeObject):
         typename = f"{data.module}.{data.name}"
         if (
-            typename.startswith("__torch__.") or
-            typename.startswith("torch.jit.LoweredWrapper.") or
-            typename.startswith("torch.jit.LoweredModule.")
+            typename.startswith(('__torch__.', 'torch.jit.LoweredWrapper.', 'torch.jit.LoweredModule.'))
         ):
             assert data.args == ()
             return {
@@ -134,7 +132,10 @@ def hierarchical_pickle(data):
             }
         if typename == "torch._utils._rebuild_tensor_v2":
             assert data.state is None
-            storage, offset, size, stride, requires_grad, hooks = data.args
+            if len(data.args) == 6:
+                storage, offset, size, stride, requires_grad, hooks = data.args
+            else:
+                storage, offset, size, stride, requires_grad, hooks, metadata = data.args
             storage_info = get_storage_info(storage)
             return {"__tensor_v2__": [storage_info, offset, size, stride, requires_grad]}
         if typename == "torch._utils._rebuild_qtensor":
@@ -356,9 +357,6 @@ def get_inline_skeleton():
     The returned HTML page has no external network dependencies for code.
     It can load model_info.json over HTTP, or be passed to burn_in_info.
     """
-
-    if sys.version_info < (3, 7):
-        raise Exception("get_inline_skeleton requires Python 3.7")
 
     import importlib.resources
 

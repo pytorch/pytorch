@@ -64,7 +64,7 @@ TORCH_META_FUNC(topk)
   // Build the output size, which is the dim being selected set to
   // size k
   DimVector topKSize(self.sizes().vec());
-  if (topKSize.size() > 0) {
+  if (!topKSize.empty()) {
     topKSize[dim] = k;
   }
   set_output_raw_strided(0, topKSize, {}, self.options());
@@ -394,7 +394,7 @@ void quantile_out_impl(
   resize_output(out, out_shape);
 
   auto quantile = quantile_compute(
-      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, out_shape);
+      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, std::move(out_shape));
   out.copy_(quantile);
 }
 
@@ -412,7 +412,7 @@ Tensor quantile_impl(
   auto out_shape = quantile_output_shape(original_dim, self, q, keepdim, wrapped_dim);
 
   return quantile_compute(
-      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, out_shape);
+      self, q, original_dim, keepdim, interpolation, ignore_nan, wrapped_dim, std::move(out_shape));
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(

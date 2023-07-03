@@ -10,8 +10,7 @@
 #include <ATen/ops/result_type.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // original values given by raw_*. If an original value is not contiguous, will make a contiguous copy to
 // the corresponding trimmed_* value. Additionally, if the dtypes of the boundary and input tensor do not
@@ -134,6 +133,13 @@ inline void searchsorted_pre_check(
 
     TORCH_CHECK(sorter.scalar_type() == ScalarType::Long, "torch.searchsorted(): sorter must be a tensor of long ",
       "dtype but got dtype ", sorter.scalar_type());
+
+    if (sorter.numel() > 0) {
+      auto minmax = sorter.aminmax();
+      int64_t vmin = std::get<0>(minmax).item().toLong();
+      int64_t vmax = std::get<1>(minmax).item().toLong();
+      TORCH_CHECK(vmin >= 0 && vmax < sorter.sizes().back(), "torch.searchsorted(): sorter index out of range");
+    }
   }
 
   TORCH_CHECK(input.dim() > 0 || (input.dim() == 0 && input.numel() == 1 && boundaries.dim() == 1),
@@ -164,4 +170,4 @@ inline void searchsorted_pre_check(
   }
 }
 
-}}
+} // namespace at::native

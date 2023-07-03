@@ -33,7 +33,7 @@ class WrapperTensor(torch.Tensor):
 
     @classmethod
     def get_wrapper_properties(cls, *args, **kwargs):
-        # Should return both an example Tensor and a dictionaly of kwargs
+        # Should return both an example Tensor and a dictionary of kwargs
         # to override any of that example Tensor's properly.
         # This is very similar to the `t.new_*(args)` API
         raise NotImplementedError("You need to implement get_wrapper_properties")

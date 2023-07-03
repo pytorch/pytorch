@@ -82,7 +82,7 @@ class ViterbiPathOp : public Operator<CPUContext> {
 
     CAFFE_ENFORCE(
         predictions.dim() == 2 && transitions.dim() == 2,
-        "Predictions and transitions hould 2D matrices");
+        "Predictions and transitions hold 2D matrices");
 
     CAFFE_ENFORCE(
         predictions.size(1) == transitions.size(0),

@@ -16,7 +16,7 @@
 #include <ATen/cuda/NumericLimits.cuh>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 template <typename acc_t>
 struct MinNanFunctor {
@@ -55,4 +55,4 @@ void min_all_launch_kernel(TensorIterator &iter) {
 
 REGISTER_DISPATCH(min_values_stub, &min_values_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

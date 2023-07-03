@@ -7,7 +7,7 @@ sudo apt-get -y install expect-dev
 # This is where the local pytorch install in the docker image is located
 pt_checkout="/var/lib/jenkins/workspace"
 
-source "$pt_checkout/.jenkins/pytorch/common_utils.sh"
+source "$pt_checkout/.ci/pytorch/common_utils.sh"
 
 echo "python_doc_push_script.sh: Invoked with $*"
 
@@ -23,7 +23,7 @@ set -ex
 #       but since DOCS_INSTALL_PATH can be derived from DOCS_VERSION it's probably better to
 #       try and gather it first, just so we don't potentially break people who rely on this script
 # Argument 2: What version of the docs we are building.
-version="${2:-${DOCS_VERSION:-master}}"
+version="${2:-${DOCS_VERSION:-main}}"
 if [ -z "$version" ]; then
 echo "error: python_doc_push_script.sh: version (arg2) not specified"
   exit 1
@@ -38,7 +38,7 @@ echo "error: python_doc_push_script.sh: install_path (arg1) not specified"
 fi
 
 is_main_doc=false
-if [ "$version" == "master" ]; then
+if [ "$version" == "main" ]; then
   is_main_doc=true
 fi
 
@@ -77,6 +77,9 @@ pushd pytorch.github.io
 
 export LC_ALL=C
 export PATH=/opt/conda/bin:$PATH
+if [ -n $ANACONDA_PYTHON_VERSION ]; then
+  export PATH=/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:$PATH
+fi
 
 rm -rf pytorch || true
 
@@ -106,6 +109,7 @@ if [ "$is_main_doc" = true ]; then
   elif [ $undocumented -gt 0 ]; then
     echo undocumented objects found:
     cat build/coverage/python.txt
+    echo "Make sure you've updated relevant .rsts in docs/source!"
     exit 1
   fi
 else
@@ -137,6 +141,7 @@ git status
 if [[ "${WITH_PUSH:-}" == true ]]; then
   # push to a temp branch first to trigger CLA check and satisfy branch protections
   git push -u origin HEAD:pytorchbot/temp-branch-py -f
+  git push -u origin HEAD^:pytorchbot/base -f
   sleep 30
   git push -u origin "${branch}"
 fi

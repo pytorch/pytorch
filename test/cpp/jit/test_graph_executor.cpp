@@ -59,7 +59,7 @@ TEST(GraphExecutorTest, runAsync_executor) {
     mtx.lock();
     ++asyncCounter;
     mtx.unlock();
-    at::launch(move(f));
+    at::launch(std::move(f));
   };
   std::vector<IValue> stack;
   // NOLINTNEXTLINE(modernize-use-emplace)

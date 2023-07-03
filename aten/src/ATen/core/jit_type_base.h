@@ -3,11 +3,13 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/type_ptr.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymFloat.h>
+#include <c10/core/SymBool.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -29,6 +31,7 @@ namespace c10 {
   _(FloatType)              \
   _(ComplexType)            \
   _(FutureType)             \
+  _(AwaitType)              \
   _(RRefType)               \
   _(IntType)                \
   _(NoneType)               \
@@ -54,6 +57,7 @@ namespace c10 {
   _(AnyClassType)           \
   _(SymIntType)             \
   _(SymFloatType)           \
+  _(SymBoolType)            \
   _(UnionType)              \
   _(DynamicType)
 
@@ -451,7 +455,7 @@ struct TORCH_API Type {
         return *renamed;
       }
     }
-    return annotation_str_impl(printer);
+    return annotation_str_impl(std::move(printer));
   }
   std::string annotation_str() const {
     // Overload instead of define a default value for `printer` to help

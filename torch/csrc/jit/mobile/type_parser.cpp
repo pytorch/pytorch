@@ -132,7 +132,7 @@ TypePtr TypeParser::parse() {
   const auto& baseTypes = DynamicTypeFactory::basePythonTypes();
   auto simpleTypeIt = baseTypes.find(token);
   if (simpleTypeIt != baseTypes.end()) {
-    if (cur() != "]" && cur() != "," && cur() != "") {
+    if (cur() != "]" && cur() != "," && !cur().empty()) {
       TORCH_CHECK(
           false, "Simple type ", token, " is followed by ", "invalid chars.");
     }

@@ -424,7 +424,7 @@ class TestLayers(LayersTestCase):
         workspace.RunNetOnce(train_net.Proto())
         embedding_after_training = workspace.FetchBlob("sparse_lookup/w")
         # Verify row 0's value does not change after reset
-        self.assertEquals(embedding_after_training.all(), embedding_after_init.all())
+        self.assertEqual(embedding_after_training.all(), embedding_after_init.all())
 
 
     def testSparseLookupSumPooling(self):

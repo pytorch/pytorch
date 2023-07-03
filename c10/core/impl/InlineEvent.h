@@ -21,11 +21,11 @@ struct InlineEvent final {
   InlineEvent& operator=(const InlineEvent&) = delete;
 
   // Move constructor and move assignment operator
-  InlineEvent(InlineEvent&& other)
+  InlineEvent(InlineEvent&& other) noexcept
       : InlineEvent(other.device_type_, other.flag_) {
     swap(std::move(other));
   }
-  InlineEvent& operator=(InlineEvent&& other) {
+  InlineEvent& operator=(InlineEvent&& other) noexcept {
     swap(std::move(other));
     return *this;
   }

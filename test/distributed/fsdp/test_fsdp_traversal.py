@@ -38,7 +38,7 @@ class TestTraversal(FSDPTest):
             CUDAInitMode.CUDA_BEFORE,
         )
         modules = FSDP.fsdp_modules(nested_wrapped_module)
-        self.assertEquals(
+        self.assertEqual(
             modules,
             [
                 nested_wrapped_module.module.get_submodule("1"),

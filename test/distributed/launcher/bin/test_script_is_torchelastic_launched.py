@@ -27,6 +27,7 @@ import torch.distributed as dist
 def parse_args():
     parser = argparse.ArgumentParser(description="test script")
     parser.add_argument(
+        "--out-file",
         "--out_file",
         help="file to write indicating whether this script was launched with torchelastic",
     )

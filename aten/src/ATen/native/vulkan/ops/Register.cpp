@@ -1,11 +1,13 @@
 #ifdef USE_VULKAN_API
 
+#include <ATen/native/vulkan/ops/Batchnorm.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Gru.h>
 #include <ATen/native/vulkan/ops/Lstm.h>
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/QuantizedFunctions.h>
+#include <ATen/native/vulkan/ops/Register.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
@@ -13,9 +15,42 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace ops {
+
+int register_vulkan_conv2d_packed_context() {
+  static auto register_vulkan_conv2d_context =
+      torch::selective_class_<Conv2dPackedContext>(
+          "vulkan", TORCH_SELECTIVE_CLASS("Conv2dPackedContext"))
+          .def_pickle(
+              // __getstate__
+              [](const c10::intrusive_ptr<Conv2dPackedContext>& context) {
+                // context is packed
+                return context->unpack();
+              },
+              // __setstate__
+              [](c10::impl::GenericList state) {
+                // state is unpacked
+                return c10::make_intrusive<Conv2dPackedContext>(
+                    Conv2dPackedContext::pack(state));
+              });
+  return 0;
+}
+
 namespace {
 
 TORCH_LIBRARY(vulkan, m) {
+  m.class_<BatchNormPackedContext>("BatchNormPackedContext")
+      .def_pickle(
+          // __getstate__
+          [](const c10::intrusive_ptr<BatchNormPackedContext>& context) {
+            // context is packed
+            return context->unpack();
+          },
+          // __setstate__
+          [](c10::impl::GenericList state) {
+            // state is unpacked
+            return c10::make_intrusive<BatchNormPackedContext>(
+                BatchNormPackedContext::pack(state));
+          });
   m.class_<LinearPackedContext>("LinearPackedContext")
       .def_pickle(
           // __getstate__
@@ -55,19 +90,7 @@ TORCH_LIBRARY(vulkan, m) {
             return c10::make_intrusive<LstmPackedContext>(
                 LstmPackedContext::pack(state));
           });
-  m.class_<Conv2dPackedContext>("Conv2dPackedContext")
-      .def_pickle(
-          // __getstate__
-          [](const c10::intrusive_ptr<Conv2dPackedContext>& context) {
-            // context is packed
-            return context->unpack();
-          },
-          // __setstate__
-          [](c10::impl::GenericList state) {
-            // state is unpacked
-            return c10::make_intrusive<Conv2dPackedContext>(
-                Conv2dPackedContext::pack(state));
-          });
+  register_vulkan_conv2d_packed_context();
   // To maintain backwards compatibility.
   m.class_<Conv2dOpContext>("Conv2dOpContext")
       .def_pickle(
@@ -115,6 +138,14 @@ TORCH_LIBRARY(vulkan_prepack, m) {
       "vulkan_prepack::run_tconv2d_context(Tensor X, "
       "__torch__.torch.classes.vulkan.Conv2dPackedContext W_prepack) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::create_qconv2d_context(Tensor W, Tensor? B, "
+      "int[2] stride, int[2] padding, int[2] dilation, int groups, "
+      "Scalar? output_min=None, Scalar? output_max=None) "
+      "-> __torch__.torch.classes.vulkan.Conv2dPackedContext"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::run_qconv2d_context(Tensor X, float scale, int zero_point, "
+      "__torch__.torch.classes.vulkan.Conv2dPackedContext vk_context) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
       "vulkan_prepack::create_linear_context(Tensor W, Tensor? B) "
       "-> __torch__.torch.classes.vulkan.LinearPackedContext"));
   m.def(TORCH_SELECTIVE_SCHEMA(
@@ -147,6 +178,22 @@ TORCH_LIBRARY(vulkan_prepack, m) {
       "Tensor hx_vk, "
       "Tensor cx_vk, "
       "__torch__.torch.classes.vulkan.LstmPackedContext L_prepack) -> (Tensor next_input, Tensor hidden_state, Tensor cell_state)"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::create_batchnorm_context("
+      "Tensor? weight_opt, "
+      "Tensor? bias_opt, "
+      "Tensor? running_mean_opt, "
+      "Tensor? running_var_opt, "
+      "bool training, "
+      "float momentum, "
+      "float eps, "
+      "bool cudnn_enable) "
+      "-> __torch__.torch.classes.vulkan.BatchNormPackedContext"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "vulkan_prepack::run_batchnorm_context("
+      "Tensor input_vk, "
+      "__torch__.torch.classes.vulkan.BatchNormPackedContext context) "
+      "-> Tensor out"));
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
@@ -168,6 +215,15 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("vulkan_prepack::create_lstm_context"),
       TORCH_FN(create_lstm_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::create_batchnorm_context"),
+      TORCH_FN(create_batchnorm_context));
+}
+
+TORCH_LIBRARY_IMPL(vulkan_prepack, QuantizedCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::create_qconv2d_context"),
+      TORCH_FN(create_qconv2d_context));
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
@@ -181,6 +237,9 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
       TORCH_SELECTIVE_NAME("vulkan_prepack::run_tconv2d_context"),
       TORCH_FN(run_tconv2d_context));
   m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::run_qconv2d_context"),
+      TORCH_FN(run_qconv2d_context));
+  m.impl(
       TORCH_SELECTIVE_NAME("vulkan_prepack::run_linear_context"),
       TORCH_FN(run_linear_context));
   m.impl(
@@ -189,6 +248,43 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("vulkan_prepack::run_lstm_context"),
       TORCH_FN(run_lstm_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::run_batchnorm_context"),
+      TORCH_FN(run_batchnorm_context));
+}
+
+TORCH_LIBRARY(vulkan_quantized, m) {
+  m.def(
+      TORCH_SELECTIVE_SCHEMA("vulkan_quantized::add(Tensor qa, "
+                             "Tensor qb, "
+                             "float scale, "
+                             "int zero_point) -> Tensor qc"));
+  m.def(
+      TORCH_SELECTIVE_SCHEMA("vulkan_quantized::sub(Tensor qa, "
+                             "Tensor qb, "
+                             "float scale, "
+                             "int zero_point)-> Tensor qc"));
+  m.def(
+      TORCH_SELECTIVE_SCHEMA("vulkan_quantized::mul(Tensor qa, "
+                             "Tensor qb, "
+                             "float scale, "
+                             "int zero_point)-> Tensor qc"));
+  m.def(
+      TORCH_SELECTIVE_SCHEMA("vulkan_quantized::div(Tensor qa, "
+                             "Tensor qb, "
+                             "float scale, "
+                             "int zero_point)-> Tensor qc"));
+}
+
+TORCH_LIBRARY_IMPL(vulkan_quantized, Vulkan, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_quantized::add"), TORCH_FN(quantized_add));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_quantized::sub"), TORCH_FN(quantized_sub));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_quantized::mul"), TORCH_FN(quantized_mul));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_quantized::div"), TORCH_FN(quantized_div));
 }
 
 } // namespace

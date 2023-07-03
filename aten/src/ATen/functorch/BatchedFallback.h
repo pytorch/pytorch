@@ -9,8 +9,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 // This file contains code for the vmap fallback (also known as the
 // BatchedTensor fallback or the Batched fallback). This code runs
@@ -31,6 +30,8 @@ namespace functorch {
 // extra copy from stacking the sliced outputs. Because of this, we prefer to
 // write batching rules for operators whenever possible.
 void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
+
+void vmapErrorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
 // The vmap fallback emits a warning by default, but it may be disabled if
 // the user finds it to be too annoying.
@@ -76,5 +77,4 @@ std::tuple<A, B, C> slow_fallback(const c10::OperatorHandle& op, ArrayRef<IValue
 }
 
 
-}
-} // namespace at
+} // namespace at::functorch

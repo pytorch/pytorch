@@ -21,7 +21,7 @@ inline void check_inputs(const Tensor& qa, const Tensor& qb) {
       "MatMul operands should have same data type.");
   TORCH_CHECK(
       qa.qscheme() == kPerTensorAffine || qa.qscheme() == kPerTensorSymmetric,
-      "Only per-tensor quantization is suported in Matmul.");
+      "Only per-tensor quantization is supported in Matmul.");
   TORCH_CHECK(
       qa.qscheme() == qb.qscheme(),
       "Both inputs to Matmul must have the same quantization scheme.");
@@ -45,7 +45,7 @@ Tensor qmatmul(
       " and ", b_num_dims, " provided)");
   TORCH_CHECK(
       num_dims >= 2,
-      "Quantized Matmul currently only suports operands which are at least 2-dimensional. (",
+      "Quantized Matmul currently only supports operands which are at least 2-dimensional. (",
       num_dims, " provided)");
 
   const int64_t m = qa.size(num_dims - 2);

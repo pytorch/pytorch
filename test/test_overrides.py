@@ -84,7 +84,7 @@ def implements_diagonal(torch_function):
         return func
     return decorator
 
-class DiagonalTensor(object):
+class DiagonalTensor:
     """A class with __torch_function__ and a specific diagonal representation
 
     This class has limited utility and is mostly useful for verifying that the
@@ -358,7 +358,7 @@ def generate_tensor_like_torch_implementations():
 
 generate_tensor_like_torch_implementations()
 
-class TensorLike(object):
+class TensorLike:
     """A class that overrides the full torch API
 
     This class is used to explicitly test that the full torch.tensor API
@@ -386,6 +386,10 @@ class TestTorchFunctionOverride(TestCase):
         self.assertEqual(bar(t2), 1)
         self.assertEqual(torch.mean(t3), 4.0)
         self.assertEqual(bar(t3), 0)
+
+    def test_has_torch_function_non_sequence(self):
+        with self.assertRaisesRegex(TypeError, "expected a sequence"):
+            has_torch_function(object())
 
     def test_mm_semantics(self):
         """Test that a function with multiple arguments can be overrided"""
@@ -625,53 +629,64 @@ def generate_tensor_like_override_tests(cls):
 
         func_args = []
         is_method = is_tensor_method_or_property(func)
+
+        def _simple_type_parser(func, arg_name, arg_type):
+            # Guess valid input to aten function based on type of argument
+            if arg_type == "Tensor":
+                return instance_gen()
+            elif arg_type == "TensorList" or arg_type == "ITensorListRef":
+                return [instance_gen(), instance_gen()]
+            elif arg_type == "c10::List<c10::optional<Tensor>>":
+                return [instance_gen(), instance_gen()]
+            elif arg_type == "IntArrayRef" or arg_type == "SymIntArrayRef":
+                size = arg.get("size", 2)
+                if size == 1:
+                    return 1
+                else:
+                    return [1] * size
+            elif arg_type == "Scalar":
+                return 3.5
+            elif arg_type == "bool":
+                return False
+            elif arg_type == "Dimname":
+                return ""
+            elif arg_type == "DimnameList":
+                return [""]
+            elif arg_type.startswith("int"):
+                return 0
+            elif arg_type in {"Stream"}:
+                return torch.Stream()
+            elif arg_type.startswith("float") or arg_type == "double":
+                return 1.0
+            elif arg_type in {"Generator", "MemoryFormat", "TensorOptions"}:
+                return None
+            elif arg_type == "ScalarType":
+                return torch.float32
+            elif arg_type == "c10::string_view":
+                return ""
+            elif arg_type == "SymInt":
+                # TODO: generate actual SymbolicInt
+                return 1
+            else:
+                raise RuntimeError(
+                    f"Unsupported argument type {arg_type} for {arg_name} of function {func}"
+                )
+
         if func in annotated_args:
             for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
-                t = arg['simple_type']
-                if t.endswith('?'):
+                t = arg["simple_type"]
+                if t.endswith("?"):
                     t = t[:-1]
-                if t == 'Tensor':
-                    if is_method and arg['name'] == 'self':
-                        # See "Note: properties and __get__"
-                        func = func.__get__(instance_gen())
-                        continue
-                    func_args.append(instance_gen())
-                elif t == 'TensorList' or t == 'ITensorListRef':
-                    func_args.append([instance_gen(), instance_gen()])
-                elif t == 'c10::List<c10::optional<Tensor>>':
-                    func_args.append([instance_gen(), instance_gen()])
-                elif t == 'IntArrayRef' or t == 'SymIntArrayRef':
-                    size = arg.get('size', 2)
-                    if size == 1:
-                        func_args.append(1)
-                    else:
-                        func_args.append([1] * size)
-                elif t == 'Scalar':
-                    func_args.append(3.5)
-                elif t == 'bool':
-                    func_args.append(False)
-                elif t == 'Dimname':
-                    func_args.append("")
-                elif t == 'DimnameList':
-                    func_args.append([""])
-                elif t.startswith('int'):
-                    func_args.append(0)
-                elif t in {'Stream'}:
-                    func_args.append(torch.Stream())
-                elif t.startswith('float') or t == 'double':
-                    func_args.append(1.0)
-                elif t in {'Generator', 'MemoryFormat', 'TensorOptions'}:
-                    func_args.append(None)
-                elif t == 'ScalarType':
-                    func_args.append(torch.float32)
-                elif t == 'c10::string_view':
-                    func_args.append('')
-                elif t == 'SymInt':
-                    # TODO: generate actual SymbolicInt
-                    func_args.append(1)
+                if t == "Tensor" and is_method and arg["name"] == "self":
+                    # See "Note: properties and __get__"
+                    func = func.__get__(instance_gen())
+                    continue
+                arg_to_add = _simple_type_parser(func, arg["name"], t)
+                if "is_kwarg_only" in arg and arg["is_kwarg_only"] == str(True):
+                    kwargs[arg["name"]] = arg_to_add
                 else:
-                    raise RuntimeError(f"Unsupported argument type {t} for {arg['name']} of function {func}")
+                    func_args.append(arg_to_add)
         else:
             args = inspect.getfullargspec(override)
             try:
@@ -756,7 +771,7 @@ class Wrapper:
         val = getattr(self._data, name)
 
         # If it's a method
-        if callable(val):
+        if not isinstance(val, torch.device) and callable(val):
             c = getattr(type(self._data), name)
             # Don't append self to args if classmethod/staticmethod
             if c is val:
@@ -897,13 +912,11 @@ class TestGradCheckOverride(TestCase):
                 'dtype',
                 'is_floating_point',
                 'is_sparse',
-                'is_sparse_csr',
                 'layout',
                 'new_zeros',
                 'numel',
                 'requires_grad',
                 'requires_grad_',
-                'retain_grad',
                 'size',
                 'stride',
             }
@@ -917,7 +930,6 @@ class TestGradCheckOverride(TestCase):
                 torch.Tensor.size,
                 torch.Tensor.is_floating_point,
                 torch.Tensor.numel,
-                torch.Tensor.retain_grad,
                 torch.Tensor.stride,
                 torch.Tensor.requires_grad_,
                 torch.autograd.grad,
@@ -1148,8 +1160,8 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.tensor([1]), -1)
             self.assertEqual(torch.sparse_coo_tensor(1, 1, 1), -1)
             self.assertEqual(torch.sparse_csr_tensor(1, 1, 1), -1)
-            self.assertEqual(torch._sparse_coo_tensor_unsafe(1, 1, (1, 1)), -1)
-            self.assertEqual(torch._sparse_csr_tensor_unsafe(1, 1, 1, (1, 1)), -1)
+            self.assertEqual(torch.sparse_coo_tensor(1, 1, (1, 1), check_invariants=False), -1)
+            self.assertEqual(torch.sparse_csr_tensor(1, 1, 1, (1, 1), check_invariants=False), -1)
             self.assertEqual(torch.as_tensor([1]), -1)
 
     def test_modes_handle_first(self):
@@ -1444,10 +1456,31 @@ class TestTorchFunctionMode(TestCase):
 
         x = B(torch.randn(5))
         with A():
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 self.assertNotIsInstance(torch.sum(x), B)
 
         self.assertTrue(called)
+
+    def test_disable_subclass_mode(self):
+        called = False
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                nonlocal called
+                if kwargs is None:
+                    kwargs = {}
+                called = True
+                return func(*args, **kwargs)
+
+        class B(torch.Tensor):
+            pass
+
+        x = B(torch.randn(5))
+        with A():
+            with torch._C.DisableTorchFunction():
+                self.assertNotIsInstance(torch.sum(x), B)
+
+        self.assertFalse(called)
 
     def test_disable_enable_subclass(self):
         called = False
@@ -1456,7 +1489,7 @@ class TestTorchFunctionMode(TestCase):
             pass
 
         x = A(torch.randn(5))
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             g = torch._C._EnableTorchFunction()
             try:
                 self.assertIsInstance(torch.sum(x), A)

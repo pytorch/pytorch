@@ -8,8 +8,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // WILL states that a node/block must hit the exit, MIGHT that it may happen,
 // WONT that it will not happen. THROWS states that a node/block always throws,
@@ -126,7 +125,7 @@ struct ExitTransformer {
   }
 
   static void removeOutputs(Block* b) {
-    while (b->outputs().size() > 0) {
+    while (!b->outputs().empty()) {
       b->eraseOutput(0);
     }
   }
@@ -348,7 +347,7 @@ struct ExitTransformer {
       new_if->addOutput()->setType(block->outputs().at(i)->type());
     }
 
-    while (block->outputs().size() > 0) {
+    while (!block->outputs().empty()) {
       block->eraseOutput(0);
     }
     for (auto out : new_if->outputs()) {
@@ -369,7 +368,7 @@ struct ExitTransformer {
   // never be used, it is safe to replace them with unitialized value
   void destroyNodeAfterExit(Node* n) {
     for (auto output : n->outputs()) {
-      if (output->uses().size() > 0) {
+      if (!output->uses().empty()) {
         output->replaceAllUsesWith(getUnitValue(output->type()));
       }
     }
@@ -523,7 +522,7 @@ struct ExitTransformer {
   std::shared_ptr<Graph> graph_;
 };
 
-bool inlineConsecutiveIfs(Node* node) {
+static bool inlineConsecutiveIfs(Node* node) {
   if (node->kind() != prim::If || node->next()->kind() != prim::If) {
     return false;
   }
@@ -606,7 +605,7 @@ bool inlineConsecutiveIfs(Node* node) {
 //   return 1
 // else:
 //   return 2
-void inlineConsecutiveIfs(Block* block) {
+static void inlineConsecutiveIfs(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     for (Block* b : it->blocks()) {
@@ -846,5 +845,5 @@ void TransformExits(std::shared_ptr<Graph>& graph) {
   inlineConsecutiveIfs(graph->block());
   convertWithBlocksToEnterExitNodes(graph);
 }
-} // namespace jit
-} // namespace torch
+
+} // namespace torch::jit

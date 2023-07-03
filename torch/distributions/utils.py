@@ -121,10 +121,10 @@ class _lazy_property_and_property(lazy_property, property):
     * lazy_property when Distribution validate_args looks
     """
     def __init__(self, wrapped):
-        return property.__init__(self, wrapped)
+        property.__init__(self, wrapped)
 
 
-def tril_matrix_to_vec(mat, diag=0):
+def tril_matrix_to_vec(mat: torch.Tensor, diag: int = 0) -> torch.Tensor:
     r"""
     Convert a `D x D` matrix or a batch of matrices into a (batched) vector
     which comprises of lower triangular elements from the matrix in row order.
@@ -138,7 +138,7 @@ def tril_matrix_to_vec(mat, diag=0):
     return vec
 
 
-def vec_to_tril_matrix(vec, diag=0):
+def vec_to_tril_matrix(vec: torch.Tensor, diag: int = 0) -> torch.Tensor:
     r"""
     Convert a vector or a batch of vectors into a batched `D x D`
     lower triangular matrix containing elements from the vector in row order.
@@ -149,7 +149,7 @@ def vec_to_tril_matrix(vec, diag=0):
     if not torch._C._get_tracing_state() and (round(n) - n > eps):
         raise ValueError(f'The size of last dimension is {vec.shape[-1]} which cannot be expressed as ' +
                          'the lower triangular part of a square D x D matrix.')
-    n = torch.round(n).long() if isinstance(n, torch.Tensor) else round(n)
+    n = round(n.item()) if isinstance(n, torch.Tensor) else round(n)
     mat = vec.new_zeros(vec.shape[:-1] + torch.Size((n, n)))
     arange = torch.arange(n, device=vec.device)
     tril_mask = arange < arange.view(-1, 1) + (diag + 1)

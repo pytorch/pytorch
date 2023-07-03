@@ -14,7 +14,6 @@ import cimodel.data.simple.docker_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.nightly_ios
 import cimodel.data.simple.anaconda_prune_defintions
-import cimodel.data.simple.ios_definitions
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.miniyaml as miniyaml
 
@@ -141,7 +140,6 @@ def gen_build_workflows_tree():
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
-        cimodel.data.simple.ios_definitions.get_workflow_jobs,
     ]
     build_jobs = [f() for f in build_workflows_functions]
     build_jobs.extend(

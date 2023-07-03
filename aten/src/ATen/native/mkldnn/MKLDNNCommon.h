@@ -10,6 +10,9 @@ namespace at { namespace native {
 
 // Mapping ScalarType to ideep tensor data_type
 TORCH_API ideep::tensor::data_type get_mkldnn_dtype(ScalarType type);
+static inline ideep::tensor::data_type get_mkldnn_dtype(const Tensor& t) {
+  return get_mkldnn_dtype(t.scalar_type());
+}
 
 // Construct aten MKL-DNN tensor given an ideep tensor
 TORCH_API Tensor new_with_itensor_mkldnn(ideep::tensor&& it, c10::optional<ScalarType> dtype, c10::optional<Device> device);

@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.18)
 project(functorch)
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -14,6 +14,8 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE FUNCTORCH_BUILD_MAIN_LIB)
 target_compile_definitions(${PROJECT_NAME} PRIVATE TORCH_EXTENSION_NAME=_C)
 target_compile_definitions(${PROJECT_NAME} PRIVATE TORCH_API_INCLUDE_EXTENSION_H)
 target_compile_options(${PROJECT_NAME} PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
+target_compile_options_if_supported(${PROJECT_NAME} "-Wmissing-prototypes")
+target_compile_options_if_supported(${PROJECT_NAME} "-Werror=missing-prototypes")
 target_link_libraries(${PROJECT_NAME} PRIVATE torch torch_python)
 target_link_libraries(${PROJECT_NAME} PRIVATE pybind::pybind11)
 

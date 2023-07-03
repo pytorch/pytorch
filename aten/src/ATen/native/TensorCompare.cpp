@@ -21,6 +21,7 @@
 #else
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
+#include <ATen/ops/_functional_assert_async_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/allclose_native.h>
@@ -67,6 +68,8 @@
 #include <ATen/ops/where.h>
 #include <ATen/ops/where_native.h>
 #include <ATen/ops/zeros_like.h>
+
+#include <utility>
 #endif
 
 namespace at {
@@ -403,6 +406,19 @@ void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
 }
 
+void _assert_async_msg_cpu(const Tensor& self, c10::string_view assert_msg) {
+  TORCH_CHECK(native::is_nonzero(self), assert_msg != "" ? assert_msg : "Assertion is failed");
+}
+
+Tensor _functional_assert_async_msg_cpu(
+  const Tensor& self,
+  c10::string_view assert_msg,
+  const Tensor& dep_token) {
+  _assert_async_msg_cpu(self, assert_msg);
+  return dep_token;
+}
+
+
 // Sorting-based algorithm for isin(); used when the number of test elements is large.
 static void isin_sorting(
     const Tensor& elements,
@@ -425,7 +441,7 @@ static void isin_sorting(
   // 2. Stable sort all elements, maintaining order indices to reverse the
   //    operation. Stable sort is necessary to keep elements before test
   //    elements within the sorted list.
-  Tensor all_elements = at::cat({elements_flat, test_elements_flat});
+  Tensor all_elements = at::cat({std::move(elements_flat), std::move(test_elements_flat)});
   Tensor sorted_elements, sorted_order;
   std::tie (sorted_elements, sorted_order) = all_elements.sort(
       /*stable=*/ true, /*dim=*/ 0, /*descending=*/ false);
@@ -754,10 +770,10 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
 std::tuple<Tensor&, Tensor&> max_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& max, Tensor& max_indices) {
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
 }
-Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
+static Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmax");
 }
-Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
+static Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmin");
 }
 Tensor argsort(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {

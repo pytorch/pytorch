@@ -7,14 +7,13 @@ import unittest
 import torch
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
-                                                  TEST_NUMPY, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict)
+                                                  TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
+                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
                                                         dtypes, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, get_all_math_dtypes, floating_types, get_all_dtypes
-)
-from torch.testing._creation import (
-    float_to_corresponding_complex_type_map
+    all_types_and_complex_and, get_all_math_dtypes, floating_types, get_all_dtypes,
+    float_to_corresponding_complex_type_map,
 )
 
 
@@ -30,14 +29,10 @@ load_tests = load_tests
 def float_double_default_dtype(fn):
     @wraps(fn)
     def wrapped_fn(*args, **kwargs):
-        cur_dtype = torch.get_default_dtype()
-        try:
-            torch.set_default_dtype(torch.float)
+        with set_default_dtype(torch.float):
             fn(*args, **kwargs)
-            torch.set_default_dtype(torch.double)
+        with set_default_dtype(torch.double):
             fn(*args, **kwargs)
-        finally:
-            torch.set_default_dtype(cur_dtype)
 
     return wrapped_fn
 
@@ -438,6 +433,7 @@ class TestTypePromotion(TestCase):
                          torch.tensor(True, device=device), True),
                          torch.tensor(True, device=device))
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @float_double_default_dtype
     def test_create_bool_tensors(self, device):
         expected = torch.tensor([0], dtype=torch.int64, device=device)
@@ -476,7 +472,7 @@ class TestTypePromotion(TestCase):
             elif isinstance(x, complex):
                 return torch.complex64
             else:
-                raise AssertionError(f"Unkonwn type {x}")
+                raise AssertionError(f"Unknown type {x}")
 
         # tensor against tensor
         a_tensor = torch.tensor((0, 1), device=device, dtype=dtypes[0])
@@ -1142,8 +1138,7 @@ class TestTypePromotion(TestCase):
             exp_type = expected_type(inp, min_v, max_v)
             if exp_type != torch.bool:
                 actual = torch.clamp(inp, min_v, max_v)
-                inps = list(map(lambda x: x.to(exp_type) if isinstance(x, torch.Tensor) else x,
-                            (inp, min_v, max_v)))
+                inps = [x.to(exp_type) if isinstance(x, torch.Tensor) else x for x in (inp, min_v, max_v)]
                 expected = torch.clamp(inps[0], inps[1], inps[2])
                 self.assertEqual(actual, expected)
                 if inp.dtype in floating_types() or exp_type == inp.dtype:
@@ -1155,8 +1150,7 @@ class TestTypePromotion(TestCase):
             exp_type = expected_type(inp, val)
             if exp_type != torch.bool:
                 actual = torch.clamp_min(inp, val)
-                inps = list(map(lambda x: x.to(exp_type) if isinstance(x, torch.Tensor) else x,
-                            (inp, val)))
+                inps = [x.to(exp_type) if isinstance(x, torch.Tensor) else x for x in (inp, val)]
                 expected = torch.clamp_min(inps[0], inps[1])
                 self.assertEqual(actual.dtype, exp_type)
                 self.assertEqual(actual, expected)

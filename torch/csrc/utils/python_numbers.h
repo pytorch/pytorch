@@ -32,7 +32,16 @@ inline PyObject* THPUtils_packDoubleAsInt(double value) {
   return PyLong_FromDouble(value);
 }
 
+inline bool THPUtils_checkLongExact(PyObject* obj) {
+  return PyLong_CheckExact(obj) && !PyBool_Check(obj);
+}
+
 inline bool THPUtils_checkLong(PyObject* obj) {
+  // Fast path
+  if (THPUtils_checkLongExact(obj)) {
+    return true;
+  }
+
 #ifdef USE_NUMPY
   if (torch::utils::is_numpy_int(obj)) {
     return true;
@@ -91,21 +100,7 @@ inline uint64_t THPUtils_unpackUInt64(PyObject* obj) {
   return (uint64_t)value;
 }
 
-inline bool THPUtils_checkIndex(PyObject* obj) {
-  if (PyBool_Check(obj)) {
-    return false;
-  }
-  if (THPUtils_checkLong(obj)) {
-    return true;
-  }
-  torch::jit::tracer::NoWarn no_warn_guard;
-  auto index = THPObjectPtr(PyNumber_Index(obj));
-  if (!index) {
-    PyErr_Clear();
-    return false;
-  }
-  return true;
-}
+bool THPUtils_checkIndex(PyObject* obj);
 
 inline int64_t THPUtils_unpackIndex(PyObject* obj) {
   if (!THPUtils_checkLong(obj)) {
@@ -128,6 +123,15 @@ inline bool THPUtils_unpackBool(PyObject* obj) {
   } else {
     throw std::runtime_error("couldn't convert python object to boolean");
   }
+}
+
+inline bool THPUtils_checkBool(PyObject* obj) {
+#ifdef USE_NUMPY
+  if (torch::utils::is_numpy_bool(obj)) {
+    return true;
+  }
+#endif
+  return PyBool_Check(obj);
 }
 
 inline bool THPUtils_checkDouble(PyObject* obj) {

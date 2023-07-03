@@ -12,7 +12,7 @@ import unittest
 import threading
 
 
-class PythonOpStats(object):
+class PythonOpStats:
     lock = threading.Lock()
     num_instances = 0
     num_calls = 0
@@ -101,7 +101,7 @@ class TestNetBuilder(unittest.TestCase):
         ]
         for b, expected in expected:
             actual = ws.blobs[str(b)].fetch()
-            self.assertEquals(actual, expected)
+            self.assertEqual(actual, expected)
 
     def _expected_loop(self):
         total = 0
@@ -152,7 +152,7 @@ class TestNetBuilder(unittest.TestCase):
             result = final_output(total)
         with LocalSession() as session:
             session.run(task)
-            self.assertEquals(2, result.fetch())
+            self.assertEqual(2, result.fetch())
 
     def test_loops(self):
         with Task() as task:
@@ -162,7 +162,7 @@ class TestNetBuilder(unittest.TestCase):
             expected = self._expected_loop()
             actual = [o.fetch() for o in out_actual]
             for e, a in zip(expected, actual):
-                self.assertEquals(e, a)
+                self.assertEqual(e, a)
 
     def test_setup(self):
         with Task() as task:
@@ -184,9 +184,9 @@ class TestNetBuilder(unittest.TestCase):
             o7_2 = final_output(seven_2)
         with LocalSession() as session:
             session.run(task)
-            self.assertEquals(o6.fetch(), 6)
-            self.assertEquals(o7_1.fetch(), 7)
-            self.assertEquals(o7_2.fetch(), 7)
+            self.assertEqual(o6.fetch(), 6)
+            self.assertEqual(o7_1.fetch(), 7)
+            self.assertEqual(o7_2.fetch(), 7)
 
     def test_multi_instance_python_op(self):
         """
@@ -203,8 +203,8 @@ class TestNetBuilder(unittest.TestCase):
             PythonOpStats.num_instances = 0
             PythonOpStats.num_calls = 0
             session.run(task)
-            self.assertEquals(PythonOpStats.num_instances, 64)
-            self.assertEquals(PythonOpStats.num_calls, 256)
+            self.assertEqual(PythonOpStats.num_instances, 64)
+            self.assertEqual(PythonOpStats.num_calls, 256)
 
     def test_multi_instance(self):
         NUM_INSTANCES = 10
@@ -242,9 +242,9 @@ class TestNetBuilder(unittest.TestCase):
 
         with LocalSession() as session:
             session.run(tg)
-            self.assertEquals(total1.fetch(), NUM_INSTANCES * NUM_ITERS)
-            self.assertEquals(total2.fetch(), NUM_INSTANCES * (NUM_ITERS ** 2))
-            self.assertEquals(total3.fetch(), NUM_INSTANCES * (NUM_ITERS ** 2))
+            self.assertEqual(total1.fetch(), NUM_INSTANCES * NUM_ITERS)
+            self.assertEqual(total2.fetch(), NUM_INSTANCES * (NUM_ITERS ** 2))
+            self.assertEqual(total3.fetch(), NUM_INSTANCES * (NUM_ITERS ** 2))
 
     def test_if_net(self):
         with NetBuilder() as nb:
@@ -303,11 +303,11 @@ class TestNetBuilder(unittest.TestCase):
         y1_value = ws.blobs[str(y1)].fetch()
         y2_value = ws.blobs[str(y2)].fetch()
 
-        self.assertEquals(first_res_value, 1)
-        self.assertEquals(second_res_value, 2)
-        self.assertEquals(y0_value, 1000)
-        self.assertEquals(y1_value, 101)
-        self.assertEquals(y2_value, 108)
+        self.assertEqual(first_res_value, 1)
+        self.assertEqual(second_res_value, 2)
+        self.assertEqual(y0_value, 1000)
+        self.assertEqual(y1_value, 101)
+        self.assertEqual(y2_value, 108)
         self.assertTrue(str(local_blob) not in ws.blobs)
 
     def test_while_net(self):

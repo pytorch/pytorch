@@ -44,6 +44,14 @@ static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_leve
   return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
 }
 
+Tensor GradInterpreterPtr::lift(const Tensor& tensor) const {
+  return materializeGradWrappers(tensor, level());
+}
+
+Tensor JvpInterpreterPtr::lift(const Tensor& tensor) const {
+  return materializeGradWrappers(tensor, level());
+}
+
 static void autogradBasedTransformProcess(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
@@ -61,19 +69,19 @@ static void autogradBasedTransformProcess(
   auto num_args = op.schema().arguments().size();
   foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), maybeTransformGradWrappers);
 
-  auto exclude = keysToExcludeWhenEnteringDynamicLayer(transform_type);
-  setup_dispatch_key_tls(exclude, {});
+  setup_dispatch_key_tls(transform_type, {});
   op.callBoxed(stack);
 }
 
 static void autogradBasedTransformSendToNext(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
-    int64_t current_level,
+    const Interpreter& interpreter,
     TransformType transform_type,
     optional<bool> prev_grad_mode,
     optional<bool> prev_fwd_grad_mode,
     bool grad_special_case) {
+  auto current_level = interpreter.level();
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
   }
@@ -102,7 +110,7 @@ static void autogradBasedTransformSendToNext(
     // if (c10::show_dispatch_trace_enabled()) {
     //   std::cout << "wrap " << current_level << std::endl;
     // }
-    return makeTensorWrapper(tensor, current_level, is_immutable);
+    return makeTensorWrapper(tensor, interpreter, is_immutable);
   };
 
   // TODO: we only need to do the following (marked with !) on in-place functions
@@ -131,7 +139,7 @@ static void autogradBasedTransformSendToNext(
       if (!ivalue.isTensor()) {
         continue; // only input that can be aliased is a tensor, not a tensor list (expect in ops without returns)
       }
-      const auto tensor = ivalue.toTensor();
+      const auto& tensor = ivalue.toTensor();
       auto* maybe_tensor_wrapper = maybeGetTensorWrapper(tensor);
       if (!maybe_tensor_wrapper || maybe_tensor_wrapper->is_immutable()) {
         // if the input is immutable, we find if it aliases anything, noting that
@@ -160,7 +168,7 @@ static void autogradBasedTransformSendToNext(
   }
 
   // Re-dispatch
-  if (getDynamicLayerStack().size() == 0) {
+  if (getDynamicLayerStack().empty()) {
     sanityCheckStack(op, stack);
   }
 
@@ -200,8 +208,11 @@ void GradInterpreterPtr::sendToNextInterpreterImpl(
     torch::jit::Stack* stack,
     bool grad_special_case) {
   autogradBasedTransformSendToNext(
-      op, stack, level(),
-      TransformType::Grad, prevGradMode(), nullopt, grad_special_case);
+      op, stack, *base_,
+      TransformType::Grad,
+      prevGradMode(),
+      nullopt,
+      grad_special_case);
 }
 
 void JvpInterpreterPtr::processImpl(
@@ -215,8 +226,11 @@ void JvpInterpreterPtr::sendToNextInterpreterImpl(
     torch::jit::Stack* stack,
     bool grad_special_case) {
   autogradBasedTransformSendToNext(
-      op, stack, level(),
-      TransformType::Jvp, nullopt, prevFwdGradMode(), grad_special_case);
+      op, stack, *base_,
+      TransformType::Jvp,
+      nullopt,
+      prevFwdGradMode(),
+      grad_special_case);
 }
 
 }} // namespace at::functorch

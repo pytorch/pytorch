@@ -8,6 +8,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -358,8 +359,8 @@ struct Param : public TreeView {
       bool kwarg_only) {
     TreeRef kwarg_only_tree =
         Compound::create(kwarg_only ? TK_TRUE : TK_FALSE, range, {});
-    return Param(
-        Compound::create(TK_PARAM, range, {ident, type, def, kwarg_only_tree}));
+    return Param(Compound::create(
+        TK_PARAM, range, {ident, type, def, std::move(kwarg_only_tree)}));
   }
   Ident ident() const {
     return Ident(subtree(0));

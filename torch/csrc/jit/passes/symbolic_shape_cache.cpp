@@ -2,7 +2,9 @@
 #include <torch/csrc/jit/passes/symbolic_shape_cache.h>
 #include <torch/csrc/lazy/core/cache.h>
 
-// SHAPE CACHINHG CODE
+#include <utility>
+
+// SHAPE CACHING CODE
 namespace torch {
 namespace jit {
 namespace {
@@ -20,9 +22,9 @@ CanonicalArgVec cannonicalizeVec(
   for (auto& arg : arg_vec) {
     if (const IValue* iv = c10::get_if<IValue>(&arg)) {
       if (deep_copy) {
-        canonical_args.push_back(iv->deepcopy());
+        canonical_args.emplace_back(iv->deepcopy());
       } else {
-        canonical_args.push_back(*iv);
+        canonical_args.emplace_back(*iv);
       }
     } else {
       auto& ss = c10::get<at::SymbolicShape>(arg);
@@ -38,7 +40,7 @@ std::vector<CanonicalizedSymbolicShape> cannonicalizeVec(
   std::vector<CanonicalizedSymbolicShape> canonical_rets;
   canonical_rets.reserve(ret_vec.size());
   for (auto& ss : ret_vec) {
-    canonical_rets.emplace_back(CanonicalizedSymbolicShape(ss, ss_map));
+    canonical_rets.emplace_back(ss, ss_map);
   }
   return canonical_rets;
 }
@@ -104,7 +106,7 @@ TORCH_API void cache_shape_function(
   auto cache_key = get_cache_key(schema, arg_vec, ss_map, /* deep_copy */ true);
   auto can_ret_vec = std::make_shared<std::vector<CanonicalizedSymbolicShape>>(
       cannonicalizeVec(ret_vec, ss_map));
-  shapeCache.Add(cache_key, can_ret_vec);
+  shapeCache.Add(std::move(cache_key), std::move(can_ret_vec));
 }
 
 TORCH_API c10::optional<std::vector<at::SymbolicShape>>

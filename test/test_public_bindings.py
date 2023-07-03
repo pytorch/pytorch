@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: autograd"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON, IS_WINDOWS
 import pkgutil
 import torch
 import sys
@@ -50,6 +50,7 @@ class TestPublicBindings(TestCase):
             "AnyType",
             "Argument",
             "ArgumentSpec",
+            "AwaitType",
             "autocast_decrement_nesting",
             "autocast_increment_nesting",
             "AVG",
@@ -69,7 +70,6 @@ class TestPublicBindings(TestCase):
             "ComplexType",
             "ConcreteModuleType",
             "ConcreteModuleTypeBuilder",
-            "CONV_BN_FUSION",
             "cpp",
             "CudaBFloat16TensorBase",
             "CudaBFloat16TensorBase",
@@ -100,6 +100,7 @@ class TestPublicBindings(TestCase):
             "DeviceObjType",
             "DictType",
             "DisableTorchFunction",
+            "DisableTorchFunctionSubclass",
             "DispatchKey",
             "DispatchKeySet",
             "dtype",
@@ -113,11 +114,11 @@ class TestPublicBindings(TestCase):
             "FloatType",
             "fork",
             "FunctionSchema",
-            "FUSE_ADD_RELU",
             "Future",
             "FutureType",
             "Generator",
             "get_autocast_cpu_dtype",
+            "get_autocast_ipu_dtype",
             "get_default_dtype",
             "get_num_interop_threads",
             "get_num_threads",
@@ -132,22 +133,22 @@ class TestPublicBindings(TestCase):
             "has_mps",
             "has_openmp",
             "has_spectral",
-            "HOIST_CONV_PACKED_PARAMS",
             "iinfo",
             "import_ir_module_from_buffer",
             "import_ir_module",
             "InferredType",
             "init_num_threads",
-            "INSERT_FOLD_PREPACK_OPS",
             "InterfaceType",
             "IntType",
             "SymFloatType",
+            "SymBoolType",
             "SymIntType",
             "IODescriptor",
             "is_anomaly_enabled",
             "is_anomaly_check_nan_enabled",
             "is_autocast_cache_enabled",
             "is_autocast_cpu_enabled",
+            "is_autocast_ipu_enabled",
             "is_autocast_enabled",
             "is_grad_enabled",
             "is_inference_mode_enabled",
@@ -159,7 +160,6 @@ class TestPublicBindings(TestCase):
             "LoggerBase",
             "memory_format",
             "merge_type_from_type_comment",
-            "MobileOptimizerType",
             "ModuleDict",
             "Node",
             "NoneType",
@@ -176,7 +176,6 @@ class TestPublicBindings(TestCase):
             "PyTorchFileWriter",
             "qscheme",
             "read_vitals",
-            "REMOVE_DROPOUT",
             "RRefType",
             "ScriptClass",
             "ScriptClassFunction",
@@ -195,7 +194,9 @@ class TestPublicBindings(TestCase):
             "set_anomaly_enabled",
             "set_autocast_cache_enabled",
             "set_autocast_cpu_dtype",
+            "set_autocast_ipu_dtype",
             "set_autocast_cpu_enabled",
+            "set_autocast_ipu_enabled",
             "set_autocast_enabled",
             "set_flush_denormal",
             "set_num_interop_threads",
@@ -261,9 +262,12 @@ class TestPublicBindings(TestCase):
             "set_num_threads",
             "unify_type_list",
             "vitals_enabled",
-            "VULKAN_AUTOMATIC_GPU_TRANSFER",
             "wait",
             "Tag",
+            "set_autocast_xla_enabled",
+            "set_autocast_xla_dtype",
+            "get_autocast_xla_dtype",
+            "is_autocast_xla_enabled",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 
@@ -276,7 +280,7 @@ class TestPublicBindings(TestCase):
         self.assertTrue(torch_C_bindings.issubset(torch_C_allowlist_superset), msg)
 
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
-    @unittest.skipIf(IS_WINDOWS, "Distributed Attribute Error")
+    @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
     def test_correct_module_names(self):
         '''
         An API is considered public, if  its  `__module__` starts with `torch.`

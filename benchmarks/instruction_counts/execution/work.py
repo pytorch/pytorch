@@ -100,7 +100,7 @@ class _BenchmarkProcess:
 
         cmd.extend([
             _PYTHON, WORKER_PATH,
-            "--communication_file", self._communication_file,
+            "--communication-file", self._communication_file,
         ])
         return " ".join(cmd)
 

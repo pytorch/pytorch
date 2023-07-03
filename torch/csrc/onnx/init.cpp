@@ -47,9 +47,15 @@ void initONNXBindings(PyObject* module) {
                  const std::vector<at::Tensor>& tensors,
                  const python::IODescriptor& desc,
                  bool onnx_shape_inference,
-                 bool is_script) {
+                 bool is_script,
+                 int opset_version) {
                 ONNXAssignOutputShape(
-                    graph, tensors, desc, onnx_shape_inference, is_script);
+                    graph,
+                    tensors,
+                    desc,
+                    onnx_shape_inference,
+                    is_script,
+                    opset_version);
               }))
       .def(
           "_jit_pass_onnx_function_substitution",
@@ -132,7 +138,10 @@ void initONNXBindings(PyObject* module) {
                  std::map<std::string, IValue>& params_dict,
                  int opset_version) {
                 ONNXShapeTypeInference(graph, params_dict, opset_version);
-              }))
+              }),
+          py::arg("graph"),
+          py::arg("params_dict"),
+          py::arg("opset_version"))
       .def(
           "_jit_pass_onnx_set_dynamic_input_shape",
           ::torch::wrap_pybind_function(ONNXSetDynamicInputShape))
@@ -240,11 +249,10 @@ void initONNXBindings(PyObject* module) {
 
   m.def(
       "_check_onnx_proto",
-      [](const std::string& proto_string, bool full_check) {
-        check_onnx_proto(proto_string, full_check);
-      },
-      py::arg("proto_string"),
-      py::arg("full_check") = false);
+      ::torch::wrap_pybind_function([](const std::string& proto_string) {
+        check_onnx_proto(proto_string);
+      }),
+      py::arg("proto_string"));
 
   auto onnx = m.def_submodule("_onnx");
   py::enum_<::ONNX_NAMESPACE::TensorProto_DataType>(onnx, "TensorProtoDataType")

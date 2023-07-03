@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/native/FractionalMaxPooling.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -129,28 +130,6 @@ namespace native {
 namespace {
 
 template <typename scalar_t>
-static std::vector<int> fractional_max_pool2d_generate_intervals(
-  scalar_t sample,
-  int inputSize,
-  int outputSize,
-  int poolSize) {
-  std::vector<int> sequence(outputSize);
-  if (outputSize > 1) {
-    scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
-      static_cast<scalar_t>(outputSize - 1);
-
-    for (int i = 0; i < outputSize - 1; ++i) {
-      sequence[i] =
-        static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
-    }
-  }
-  if (outputSize > 0) {
-    sequence[outputSize - 1] = inputSize - poolSize;
-  }
-  return sequence;
-}
-
-template <typename scalar_t>
 static void fractional_max_pool2d_out_single_batch_frame(
   scalar_t* input,
   scalar_t* output,
@@ -166,9 +145,9 @@ static void fractional_max_pool2d_out_single_batch_frame(
       scalar_t* randomSamplesForPlane = randomSamples + plane * 2;
 
       /* Generate interval sequence */
-      auto sequenceW = fractional_max_pool2d_generate_intervals<scalar_t>(
+      auto sequenceW = generate_intervals<scalar_t>(
           randomSamplesForPlane[0], inputW, outputW, poolSizeW);
-      auto sequenceH = fractional_max_pool2d_generate_intervals<scalar_t>(
+      auto sequenceH = generate_intervals<scalar_t>(
           randomSamplesForPlane[1], inputH, outputH, poolSizeH);
 
       /* loop over output */
@@ -305,9 +284,15 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
   const at::Tensor& input_,
   IntArrayRef pool_size,
   IntArrayRef output_size,
-  const at::Tensor& randomSamples,
+  const at::Tensor& randomSamples_,
   const at::Tensor& output,
   const at::Tensor& indices) {
+
+  fractional_max_pool_check_shape</*ndim*/ 2>(input_, randomSamples_);
+
+  if (output.numel() == 0) {
+    return;
+  }
 
   int64_t numBatch = 1;
   int64_t planeDim = 0;
@@ -318,8 +303,9 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
   int64_t poolSizeH = pool_size[0];
   int64_t poolSizeW = pool_size[1];
 
-  /* get contiguous input */
+  /* get contiguous input and samples */
   auto input = input_.contiguous();
+  auto randomSamples = randomSamples_.contiguous();
 
   int64_t ndims = input.ndimension();
 

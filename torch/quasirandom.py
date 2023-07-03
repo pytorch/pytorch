@@ -2,7 +2,7 @@ import torch
 from typing import Optional
 
 
-class SobolEngine(object):
+class SobolEngine:
     r"""
     The :class:`torch.quasirandom.SobolEngine` is an engine for generating
     (scrambled) Sobol sequences. Sobol sequences are an example of low

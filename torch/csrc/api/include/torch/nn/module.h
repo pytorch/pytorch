@@ -302,7 +302,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   virtual void to(torch::Device device, bool non_blocking = false);
 
   /// Recursively zeros out the `grad` value of each registered parameter.
-  virtual void zero_grad(bool set_to_none = false);
+  virtual void zero_grad(bool set_to_none = true);
 
   /// Attempts to cast this `Module` to the given `ModuleType`.
   ///

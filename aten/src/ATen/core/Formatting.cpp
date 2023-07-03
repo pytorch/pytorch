@@ -13,7 +13,7 @@ std::ostream& operator<<(std::ostream & out, Backend b) {
   return out << toString(b);
 }
 
-std::ostream& operator<<(std::ostream & out, Scalar s) {
+std::ostream& operator<<(std::ostream & out, const Scalar& s) {
   if (s.isFloatingPoint()) {
     return out << s.toDouble();
   }
@@ -35,7 +35,7 @@ std::ostream& operator<<(std::ostream & out, Scalar s) {
   throw std::logic_error("Unknown type in Scalar");
 }
 
-std::string toString(Scalar s) {
+std::string toString(const Scalar& s) {
   std::stringstream out;
   out << s;
   return out.str();
@@ -213,7 +213,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
   }
 }
 
-void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
+static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
 {
   std::vector<int64_t> counter(self.ndimension()-2);
   bool start = true;

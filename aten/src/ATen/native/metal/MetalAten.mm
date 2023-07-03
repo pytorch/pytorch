@@ -76,7 +76,7 @@ Tensor empty(
     optional<Device> device,
     optional<bool> pin_memory,
     c10::optional<MemoryFormat> memory_format) {
-  auto size = c10::asIntArrayRefSlow(sym_size);
+  auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
   TORCH_CHECK(
       !pin_memory.has_value(),
       "'pin_memory' argument is incompatible with Metal tensor");

@@ -15,7 +15,10 @@ from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, cast
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
-from .grad_mode import no_grad, enable_grad, set_grad_enabled, inference_mode, set_multithreading_enabled
+from .grad_mode import (
+    no_grad, enable_grad, set_grad_enabled, inference_mode, set_multithreading_enabled, _force_original_view_tracking,
+    _unsafe_preserve_version_counter
+)
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function, is_tensor_like
 from . import functional
@@ -83,6 +86,10 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
             if out.requires_grad:
                 if out.numel() != 1:
                     raise RuntimeError("grad can be implicitly created only for scalar outputs")
+                if not out.dtype.is_floating_point:
+                    msg = ("grad can be implicitly created only for real scalar outputs"
+                           f" but got {out.dtype}")
+                    raise RuntimeError(msg)
                 new_grads.append(torch.ones_like(out, memory_format=torch.preserve_format))
             else:
                 new_grads.append(None)
@@ -191,7 +198,7 @@ def backward(
     if retain_graph is None:
         retain_graph = create_graph
 
-    # The reason we repeat same the comment below is that
+    # The reason we repeat the same comment below is that
     # some Python versions print out the first line of a multi-line function
     # calls in the traceback and some print out the last line
     Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
@@ -205,8 +212,9 @@ def grad(
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
     only_inputs: bool = True,
-    allow_unused: bool = False,
-    is_grads_batched: bool = False
+    allow_unused: Optional[bool] = None,
+    is_grads_batched: bool = False,
+    materialize_grads: bool = False,
 ) -> Tuple[torch.Tensor, ...]:
     r"""Computes and returns the sum of gradients of outputs with respect to
     the inputs.
@@ -243,9 +251,9 @@ def grad(
         create_graph (bool, optional): If ``True``, graph of the derivative will
             be constructed, allowing to compute higher order derivative products.
             Default: ``False``.
-        allow_unused (bool, optional): If ``False``, specifying inputs that were not
-            used when computing outputs (and therefore their grad is always zero)
-            is an error. Defaults to ``False``.
+        allow_unused (Optional[bool], optional): If ``False``, specifying inputs
+            that were not used when computing outputs (and therefore their grad is
+            always zero) is an error. Defaults to the value of ``materialize_grads``.
         is_grads_batched (bool, optional): If ``True``, the first dimension of each
             tensor in ``grad_outputs`` will be interpreted as the batch dimension.
             Instead of computing a single vector-Jacobian product, we compute a
@@ -258,7 +266,17 @@ def grad(
             cliffs. Please use ``torch._C._debug_only_display_vmap_fallback_warnings(True)``
             to show any performance warnings and file an issue on github if warnings exist
             for your use case. Defaults to ``False``.
+        materialize_grads (bool, optional): If ``True``, set the gradient for unused inputs
+            to zero instead of None. This is useful when computing higher-order derivatives.
+            If ``materialize_grads`` is ``True`` and ``allow_unused`` is ``False``, an error
+            will be raised. Defaults to ``False``.
+
     """
+    if materialize_grads and allow_unused is False:
+        raise ValueError("Expected allow_unused to be True or not passed when materialize_grads=True, "
+                         "but got: allow_unused=False.")
+    if allow_unused is None:
+        allow_unused = materialize_grads
     t_outputs = cast(Tuple[torch.Tensor, ...], (outputs,) if is_tensor_like(outputs) else tuple(outputs))
     t_inputs = cast(Tuple[torch.Tensor, ...], (inputs,) if is_tensor_like(inputs) else tuple(inputs))
     overridable_args = t_outputs + t_inputs
@@ -274,6 +292,7 @@ def grad(
             only_inputs=only_inputs,
             allow_unused=allow_unused,
             is_grads_batched=is_grads_batched,
+            materialize_grads=materialize_grads,
         )
 
     if not only_inputs:
@@ -287,7 +306,7 @@ def grad(
     if retain_graph is None:
         retain_graph = create_graph
 
-    # The reason we repeat same the comment several times below is because
+    # The reason we repeat the same comment several times below is because
     # some Python versions print out the first line of multi-line function
     # calls in the traceback and some print out the last line
     if is_grads_batched:
@@ -295,11 +314,15 @@ def grad(
             return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
                 t_outputs, gO, retain_graph, create_graph, t_inputs,
                 allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
-        return _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs_)
+        result = _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs_)
     else:
-        return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+        result = Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, grad_outputs_, retain_graph, create_graph, t_inputs,
             allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
+    if materialize_grads:
+        result = tuple(output if output is not None else torch.zeros_like(input, requires_grad=True)
+                       for (output, input) in zip(result, t_inputs))
+    return result
 
 
 # This function applies in case of gradient checkpointing for memory

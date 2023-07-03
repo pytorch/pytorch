@@ -7,8 +7,17 @@
 #include <cmath>
 #include <cstring>
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if defined(__CUDACC__) && !defined(USE_ROCM)
 #include <cuda_bf16.h>
+#endif
+
+#if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
+#if defined(CL_SYCL_LANGUAGE_VERSION)
+#include <CL/sycl.hpp> // for SYCL 1.2.1
+#else
+#include <sycl/sycl.hpp> // for SYCL 2020
+#endif
+#include <ext/oneapi/bfloat16.hpp>
 #endif
 
 namespace c10 {
@@ -90,9 +99,14 @@ struct alignas(2) BFloat16 {
   inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if defined(__CUDACC__) && !defined(USE_ROCM)
   inline C10_HOST_DEVICE BFloat16(const __nv_bfloat16& value);
   explicit inline C10_HOST_DEVICE operator __nv_bfloat16() const;
+#endif
+
+#if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
+  inline C10_HOST_DEVICE BFloat16(const sycl::ext::oneapi::bfloat16& value);
+  explicit inline C10_HOST_DEVICE operator sycl::ext::oneapi::bfloat16() const;
 #endif
 };
 

@@ -5,19 +5,13 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/library.h>
 
-namespace caffe2 {
-// Required for cpp_custom_type_hack to work
-// NOLINTNEXTLINE(bugprone-exception-escape)
-CAFFE_KNOWN_TYPE(at::RecordFunction);
-} // namespace caffe2
-
 namespace torch {
 namespace autograd {
 namespace profiler {
 
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
-void record_function_enter(
+static void record_function_enter(
     const std::string& name,
     const c10::optional<std::string>& args,
     at::RecordFunction& rec) {
@@ -40,14 +34,11 @@ c10::intrusive_ptr<PythonRecordFunction> record_function_enter_new(
   return rec;
 }
 
+// Ends the profiling scope created with record_function_enter.
 void record_function_exit(at::RecordFunction& rec) {
   rec.end();
 }
 
-void record_function_exit_new(
-    const c10::intrusive_ptr<PythonRecordFunction>& record) {
-  record_function_exit(record->record);
-}
 
 c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_new(
     const c10::intrusive_ptr<PythonRecordFunction>& record,

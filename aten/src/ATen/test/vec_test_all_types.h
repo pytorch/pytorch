@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
+#include <c10/util/bit_cast.h>
 #include <c10/util/irange.h>
 #include <gtest/gtest.h>
 #include <chrono>
@@ -77,6 +78,7 @@ using vqint8 = VecType<c10::qint8>;
 using vquint8 = VecType<c10::quint8>;
 using vqint = VecType<c10::qint32>;
 using vBFloat16 = VecType<c10::BFloat16>;
+using vHalf = VecType<c10::Half>;
 
 template <typename T>
 using ValueType = typename T::value_type;
@@ -162,6 +164,22 @@ struct VecTypeHelper<vqint> {
     static constexpr int unitStorageCount = 1;
 };
 
+template<>
+struct VecTypeHelper<vBFloat16> {
+    using holdType = c10::BFloat16;
+    using memStorageType = typename vBFloat16::value_type;
+    static constexpr int holdCount = vBFloat16::size();
+    static constexpr int unitStorageCount = 1;
+};
+
+template<>
+struct VecTypeHelper<vHalf> {
+    using holdType = c10::Half;
+    using memStorageType = typename vHalf::value_type;
+    static constexpr int holdCount = vHalf::size();
+    static constexpr int unitStorageCount = 1;
+};
+
 template <typename T>
 using UholdType = typename VecTypeHelper<T>::holdType;
 
@@ -232,7 +250,7 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
     stream << "Domain: ";
     if (dmn.ArgsDomain.size() > 0) {
         for (const DomainRange<T>& x : dmn.ArgsDomain) {
-            if (std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value) {
+            if constexpr (std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>) {
                 stream << "\n{ " << static_cast<int>(x.start) << ", " << static_cast<int>(x.end) << " }";
             }
             else {
@@ -247,25 +265,6 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
         stream << "\nError tolerance: " << dmn.ToleranceError;
     }
     return stream;
-}
-
-template <class To, class From>
-typename std::enable_if<
-    (sizeof(To) == sizeof(From)) && std::is_trivially_copyable<From>::value&&
-    std::is_trivial<To>::value,
-    // this implementation requires that To is trivially default constructible
-    To>::type
-    bit_cast(const From& src) noexcept {
-    To dst;
-    std::memcpy(&dst, &src, sizeof(To));
-    return dst;
-}
-
-template <class To, class T>
-To bit_cast_ptr(T* p, size_t N = sizeof(To)) noexcept {
-    unsigned char p1[sizeof(To)] = {};
-    std::memcpy(p1, p, std::min(N, sizeof(To)));
-    return bit_cast<To>(p1);
 }
 
 template <typename T>
@@ -459,7 +458,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, void> filter_zero(Complex<T>& va
 
 template <typename T>
 void filter_int_minimum(T& val) {
-    if (!std::is_integral<T>::value) return;
+    if constexpr (!std::is_integral_v<T>) return;
     if (val == std::numeric_limits<T>::min()) {
         val = 0;
     }
@@ -479,7 +478,7 @@ std::enable_if_t<is_complex<T>::value, void> filter_sub_overflow(T& a, T& b)
 
 template <typename T>
 std::enable_if_t < !is_complex<T>::value, void> filter_add_overflow(T& a, T& b) {
-    if (std::is_integral<T>::value == false) return;
+    if constexpr (std::is_integral_v<T> == false) return;
     T max = std::numeric_limits<T>::max();
     T min = std::numeric_limits<T>::min();
     // min <= (a +b) <= max;
@@ -498,7 +497,7 @@ std::enable_if_t < !is_complex<T>::value, void> filter_add_overflow(T& a, T& b) 
 
 template <typename T>
 std::enable_if_t < !is_complex<T>::value, void> filter_sub_overflow(T& a, T& b) {
-    if (std::is_integral<T>::value == false) return;
+    if constexpr (std::is_integral_v<T> == false) return;
     T max = std::numeric_limits<T>::max();
     T min = std::numeric_limits<T>::min();
     // min <= (a-b) <= max;
@@ -535,7 +534,7 @@ filter_div_ub(T& val1, T& val2) {
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, void>
 filter_mult_overflow(T& val1, T& val2) {
-    if (std::is_integral<T>::value == false) return;
+    if constexpr (std::is_integral_v<T> == false) return;
     if (!is_zero(val2)) {
         T c = (std::numeric_limits<T>::max() - 1) / val2;
         if (std::abs(val1) >= c) {
@@ -871,8 +870,8 @@ public:
         if (bitwise)
         {
             for (const auto i : c10::irange(sizeX)) {
-                BVT b_exp = bit_cast<BVT>(expArr[i]);
-                BVT b_act = bit_cast<BVT>(actArr[i]);
+                BVT b_exp = c10::bit_cast<BVT>(expArr[i]);
+                BVT b_act = c10::bit_cast<BVT>(actArr[i]);
                 EXPECT_EQ(b_exp, b_act) << getDetail(i / unitStorageCount);
                 if (::testing::Test::HasFailure())
                     return true;
@@ -889,13 +888,13 @@ public:
         else
         {
             for (const auto i : c10::irange(sizeX)) {
-                if (std::is_same<UVT, float>::value)
+                if constexpr (std::is_same_v<UVT, float>)
                 {
                     if (!check_both_nan(expArr[i], actArr[i])) {
                         EXPECT_FLOAT_EQ(expArr[i], actArr[i]) << getDetail(i / unitStorageCount);
                     }
                 }
-                else if (std::is_same<UVT, double>::value)
+                else if constexpr (std::is_same_v<UVT, double>)
                 {
                     if (!check_both_nan(expArr[i], actArr[i]))
                     {
@@ -1104,7 +1103,7 @@ T func_cmp(Op call, T v0, T v1) {
     using bit_rep = BitType<T>;
     constexpr bit_rep mask = std::numeric_limits<bit_rep>::max();
     bit_rep  ret = call(v0, v1) ? mask : 0;
-    return bit_cast<T>(ret);
+    return c10::bit_cast<T>(ret);
 }
 
 struct PreventFma
@@ -1283,8 +1282,8 @@ template<typename T>
 std::enable_if_t<!is_complex<T>::value, T>
 local_and(const T& val0, const T& val1) {
     using bit_rep = BitType<T>;
-    bit_rep ret = bit_cast<bit_rep>(val0) & bit_cast<bit_rep>(val1);
-    return bit_cast<T> (ret);
+    bit_rep ret = c10::bit_cast<bit_rep>(val0) & c10::bit_cast<bit_rep>(val1);
+    return c10::bit_cast<T> (ret);
 }
 
 template <typename T>
@@ -1296,17 +1295,17 @@ local_and(const Complex<T>& val0, const Complex<T>& val1)
     T imag1 = val0.imag();
     T real2 = val1.real();
     T imag2 = val1.imag();
-    bit_rep real_ret = bit_cast<bit_rep>(real1) & bit_cast<bit_rep>(real2);
-    bit_rep imag_ret = bit_cast<bit_rep>(imag1) & bit_cast<bit_rep>(imag2);
-    return Complex<T>(bit_cast<T>(real_ret), bit_cast<T>(imag_ret));
+    bit_rep real_ret = c10::bit_cast<bit_rep>(real1) & c10::bit_cast<bit_rep>(real2);
+    bit_rep imag_ret = c10::bit_cast<bit_rep>(imag1) & c10::bit_cast<bit_rep>(imag2);
+    return Complex<T>(c10::bit_cast<T>(real_ret), c10::bit_cast<T>(imag_ret));
 }
 
 template<typename T>
 std::enable_if_t<!is_complex<T>::value, T>
 local_or(const T& val0, const T& val1) {
     using bit_rep = BitType<T>;
-    bit_rep ret = bit_cast<bit_rep>(val0) | bit_cast<bit_rep>(val1);
-    return bit_cast<T> (ret);
+    bit_rep ret = c10::bit_cast<bit_rep>(val0) | c10::bit_cast<bit_rep>(val1);
+    return c10::bit_cast<T> (ret);
 }
 
 template<typename T>
@@ -1317,17 +1316,17 @@ local_or(const Complex<T>& val0, const Complex<T>& val1) {
     T imag1 = val0.imag();
     T real2 = val1.real();
     T imag2 = val1.imag();
-    bit_rep real_ret = bit_cast<bit_rep>(real1) | bit_cast<bit_rep>(real2);
-    bit_rep imag_ret = bit_cast<bit_rep>(imag1) | bit_cast<bit_rep>(imag2);
-    return Complex<T>(bit_cast<T> (real_ret), bit_cast<T>(imag_ret));
+    bit_rep real_ret = c10::bit_cast<bit_rep>(real1) | c10::bit_cast<bit_rep>(real2);
+    bit_rep imag_ret = c10::bit_cast<bit_rep>(imag1) | c10::bit_cast<bit_rep>(imag2);
+    return Complex<T>(c10::bit_cast<T> (real_ret), c10::bit_cast<T>(imag_ret));
 }
 
 template<typename T>
 std::enable_if_t<!is_complex<T>::value, T>
 local_xor(const T& val0, const T& val1) {
     using bit_rep = BitType<T>;
-    bit_rep ret = bit_cast<bit_rep>(val0) ^ bit_cast<bit_rep>(val1);
-    return bit_cast<T> (ret);
+    bit_rep ret = c10::bit_cast<bit_rep>(val0) ^ c10::bit_cast<bit_rep>(val1);
+    return c10::bit_cast<T> (ret);
 }
 
 template<typename T>
@@ -1338,9 +1337,9 @@ local_xor(const Complex<T>& val0, const Complex<T>& val1) {
     T imag1 = val0.imag();
     T real2 = val1.real();
     T imag2 = val1.imag();
-    bit_rep real_ret = bit_cast<bit_rep>(real1) ^ bit_cast<bit_rep>(real2);
-    bit_rep imag_ret = bit_cast<bit_rep>(imag1) ^ bit_cast<bit_rep>(imag2);
-    return Complex<T>(bit_cast<T> (real_ret), bit_cast<T>(imag_ret));
+    bit_rep real_ret = c10::bit_cast<bit_rep>(real1) ^ c10::bit_cast<bit_rep>(real2);
+    bit_rep imag_ret = c10::bit_cast<bit_rep>(imag1) ^ c10::bit_cast<bit_rep>(imag2);
+    return Complex<T>(c10::bit_cast<T> (real_ret), c10::bit_cast<T>(imag_ret));
 }
 
 template <typename T>

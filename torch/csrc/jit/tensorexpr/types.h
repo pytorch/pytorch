@@ -76,7 +76,9 @@ class TORCH_API Dtype {
   }
 
  private:
-  friend std::ostream& operator<<(std::ostream& stream, const Dtype& dtype);
+  friend TORCH_API std::ostream& operator<<(
+      std::ostream& stream,
+      const Dtype& dtype);
   ScalarType scalar_type_;
   int lanes_; // the width of the element for a vector time
 };

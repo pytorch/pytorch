@@ -45,10 +45,10 @@
 #include <hip/hip_fp16.h>
 #endif
 
-#if defined(SYCL_LANGUAGE_VERSION)
-#include <sycl/sycl.hpp> // for SYCL 2020
-#elif defined(CL_SYCL_LANGUAGE_VERSION)
+#if defined(CL_SYCL_LANGUAGE_VERSION)
 #include <CL/sycl.hpp> // for SYCL 1.2.1
+#elif defined(SYCL_LANGUAGE_VERSION)
+#include <sycl/sycl.hpp> // for SYCL 2020
 #endif
 
 // Standard check for compiling CUDA with clang
@@ -296,7 +296,7 @@ inline float fp16_ieee_to_fp32_value(uint16_t h) {
    * single-precision floating-point number is represented as: FP32 = (1 +
    * mantissa * 2**(-23)) * 2**(exponent - 127) Therefore, when the biased
    * exponent is 126, a unit change in the mantissa of the input denormalized
-   * half-precision number causes a change of the constructud single-precision
+   * half-precision number causes a change of the constructed single-precision
    * number by 2**(-24), i.e. the same amount.
    *
    * The last step is to adjust the bias of the constructed single-precision

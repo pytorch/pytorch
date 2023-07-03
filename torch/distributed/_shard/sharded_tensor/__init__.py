@@ -1,12 +1,10 @@
 # coding=utf-8
 
-import copy
 import functools
 from typing import List
 
 import torch
 import torch.distributed._shard.sharding_spec as shard_spec
-from torch.distributed._shard.partial_tensor import _PartialTensor
 
 from .api import (
     _CUSTOM_SHARDED_OPS,
@@ -427,6 +425,7 @@ def custom_sharded_op_impl(func):
     parameters, the function provided will be invoked for that operator.
 
     Example::
+        >>> # xdoctest: +SKIP
         >>> @custom_sharded_op_impl(torch.nn.functional.linear)
         >>> def my_custom_sharded_linear(types, args, kwargs, process_group):
         >>>     ...

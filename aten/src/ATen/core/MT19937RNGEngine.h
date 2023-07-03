@@ -118,7 +118,7 @@ public:
     return data_;
   }
 
-  inline void set_data(mt19937_data_pod data) {
+  inline void set_data(const mt19937_data_pod& data) {
     data_ = data;
   }
 
