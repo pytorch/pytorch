@@ -134,7 +134,7 @@ class PythonStore : public ::c10d::Store {
     pybind11::gil_scoped_acquire gil;
     pybind11::function fn =
         pybind11::get_overload(static_cast<const ::c10d::Store*>(this), "set");
-    TORCH_INTERNAL_ASSERT(fn);
+    TORCH_INTERNAL_ASSERT(fn, "Not implemented.");
     // Call function with a py::bytes object for the value.
     fn(key,
        py::bytes(reinterpret_cast<const char*>(value.data()), value.size()));
@@ -148,7 +148,7 @@ class PythonStore : public ::c10d::Store {
     pybind11::gil_scoped_acquire gil;
     pybind11::function fn =
         pybind11::get_overload(static_cast<const ::c10d::Store*>(this), "get");
-    TORCH_INTERNAL_ASSERT(fn);
+    TORCH_INTERNAL_ASSERT(fn, "Not implemented.");
     // Cast return value from Python to py::bytes, then implicitly
     // convert that to a std::string, so that we can construct a
     // std::vector<uint8_t>. There is no API for directly accessing
@@ -168,13 +168,19 @@ class PythonStore : public ::c10d::Store {
     pybind11::gil_scoped_acquire gil;
     pybind11::function fn = pybind11::get_overload(
         static_cast<const ::c10d::Store*>(this), "compare_set");
-    TORCH_INTERNAL_ASSERT(fn);
+    TORCH_INTERNAL_ASSERT(fn, "Not implemented.");
     // Cast return value from Python to py::bytes, then implicitly
     // convert that to a std::string, so that we can construct a
     // std::vector<uint8_t>. There is no API for directly accessing
     // the contents of the py::bytes object.
-    std::string str =
-        pybind11::cast<py::bytes>(fn(key, expectedValue, desiredValue));
+    std::string str = pybind11::cast<py::bytes>(
+        fn(key,
+           py::bytes(
+               reinterpret_cast<const char*>(expectedValue.data()),
+               expectedValue.size()),
+           py::bytes(
+               reinterpret_cast<const char*>(desiredValue.data()),
+               desiredValue.size())));
     return std::vector<uint8_t>(str.begin(), str.end());
   }
 
@@ -513,6 +519,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           [](::c10d::Reducer& reducer) { reducer.set_optimizer_in_backward(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_set_sparse_metadata",
+          &::c10d::Reducer::setSparseMetadata,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "_set_mixed_precision_param_dtype",
           [](::c10d::Reducer& reducer, py::object data_type_obj) {
             auto scalar_type =
@@ -581,6 +591,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_remove_autograd_hooks",
           [](::c10d::Reducer& reducer) { reducer.remove_autograd_hooks(); },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_check_reducer_finalized",
+          [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -1266,7 +1280,8 @@ Arguments:
     is_master (bool, optional): True when initializing the server store and False for client stores. Default is False.
     timeout (timedelta, optional): Timeout used by the store during initialization and for methods such as :meth:`~torch.distributed.store.get` and :meth:`~torch.distributed.store.wait`. Default is timedelta(seconds=300)
     wait_for_worker (bool, optional): Whether to wait for all the workers to connect with the server store. This is only applicable when world_size is a fixed value. Default is True.
-
+    multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
+    master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. Useful to avoid port assignment races in some scenarios. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
@@ -1285,14 +1300,21 @@ Example::
                       bool isServer,
                       std::chrono::milliseconds timeout,
                       bool waitWorkers,
-                      bool multiTenant) {
+                      bool multiTenant,
+                      c10::optional<int> masterListenFd) {
             c10::optional<std::size_t> numWorkers = c10::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
             ::c10d::TCPStoreOptions opts{
-                port, isServer, numWorkers, waitWorkers, timeout, multiTenant};
+                port,
+                isServer,
+                numWorkers,
+                waitWorkers,
+                timeout,
+                multiTenant,
+                masterListenFd};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -1306,6 +1328,7 @@ Example::
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout),
           py::arg("wait_for_workers") = true,
           py::arg("multi_tenant") = false,
+          py::arg("master_listen_fd") = py::none(),
           py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "host",
@@ -1550,6 +1573,13 @@ Arguments:
               &::c10d::ProcessGroup::_reduce_scatter_base,
               py::arg("outputTensor"),
               py::arg("inputTensor"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "reduce_scatter_tensor_coalesced",
+              &::c10d::ProcessGroup::reduce_scatter_tensor_coalesced,
+              py::arg("outputs"),
+              py::arg("inputs"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
@@ -2135,6 +2165,23 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def_property_readonly(
               "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
 
+#ifdef NCCL_HAS_COMM_CTA_CGA
+  py::class_<ncclConfig_t>(
+      processGroupNCCL,
+      "NCCLConfig",
+      R"(
+ncclConfig_t data type for configuring NCCL communicators.
+See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+for details.
+)")
+      .def(py::init<>())
+      .def_readwrite("blocking", &ncclConfig_t::blocking)
+      .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
+      .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
+      .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
+      .def_readwrite("net_name", &ncclConfig_t::netName);
+#endif
+
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL,
       "Options",
@@ -2148,17 +2195,37 @@ Arguments:
             to prioritize NCCL kernels when there are compute kernels waiting.
             Default is False.
 
+Attributes:
+    config (NCCLConfig): configures NCCL communicators (only avaiable for
+            builds using NCCL 2.17+). This can be used to improve
+            communication-computation overlap for NCCL kernels by tuning
+            available parameters in the config. See
+            https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+            for details.
+
 Example::
     >>> import torch.distributed as dist
     >>>
     >>> nccl_options = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
+    >>> # For builds using NCCL 2.17+, configure communicators
+    >>> nccl_options.config.cga_cluster_size = 2
+    >>> nccl_options.config.max_ctas = 4
+    >>> nccl_options.config.min_ctas = 2
     >>> # initialize a nccl process group with the options just created
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
+#ifdef NCCL_HAS_COMM_CTA_CGA
+      .def_readwrite(
+          "is_high_priority_stream",
+          &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
+      .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config);
+#else
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream);
+#endif
+
 #endif
 
 #ifdef USE_C10D_MPI

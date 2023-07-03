@@ -38,8 +38,8 @@ http_archive(
 
 http_archive(
     name = "pybind11_bazel",
-    strip_prefix = "pybind11_bazel-992381ced716ae12122360b0fbadbc3dda436dbf",
-    urls = ["https://github.com/pybind/pybind11_bazel/archive/992381ced716ae12122360b0fbadbc3dda436dbf.zip"],
+    strip_prefix = "pybind11_bazel-b162c7c88a253e3f6b673df0c621aca27596ce6b",
+    urls = ["https://github.com/pybind/pybind11_bazel/archive/b162c7c88a253e3f6b673df0c621aca27596ce6b.zip"],
 )
 
 new_local_repository(
@@ -192,24 +192,47 @@ http_archive(
 
 http_archive(
     name = "rules_python",
-    sha256 = "aa96a691d3a8177f3215b14b0edc9641787abaaa30363a080165d06ab65e1161",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.0.1/rules_python-0.0.1.tar.gz",
+    # TODO Fix bazel linter to support hashes for release tarballs.
+    #
+    # sha256 = "94750828b18044533e98a129003b6a68001204038dc4749f40b195b24c38f49f",
+    strip_prefix = "rules_python-0.21.0",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.21.0/rules_python-0.21.0.tar.gz",
 )
+
+load("@rules_python//python:repositories.bzl", "py_repositories")
+
+py_repositories()
+
+load("@rules_python//python:repositories.bzl", "python_register_toolchains")
+
+python_register_toolchains(
+    name = "python3_8",
+    python_version = "3.8",
+)
+
+load("@python3_8//:defs.bzl", "interpreter")
+load("@rules_python//python:pip.bzl", "pip_parse")
+
+pip_parse(
+    name = "pip_deps",
+    python_interpreter_target = interpreter,
+    requirements_lock = "//:tools/build/bazel/requirements.txt",
+)
+
+load("@pip_deps//:requirements.bzl", "install_deps")
+
+install_deps()
 
 load("@pybind11_bazel//:python_configure.bzl", "python_configure")
 
 python_configure(
     name = "local_config_python",
-    python_version = "3",
+    python_interpreter_target = interpreter,
 )
 
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 
 protobuf_deps()
-
-load("@rules_python//python:repositories.bzl", "py_repositories")
-
-py_repositories()
 
 new_local_repository(
     name = "cuda",

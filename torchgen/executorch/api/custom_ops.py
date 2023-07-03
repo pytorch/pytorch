@@ -8,7 +8,8 @@ from torchgen import dest
 # disable import sorting to avoid circular dependency.
 from torchgen.api.types import DispatcherSignature  # isort:skip
 from torchgen.context import method_with_native_function
-from torchgen.model import BackendIndex, DispatchKey, NativeFunction, Variant
+from torchgen.executorch.model import ETKernelIndex
+from torchgen.model import DispatchKey, NativeFunction, Variant
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, Target
 
@@ -65,7 +66,7 @@ def gen_custom_ops_registration(
     *,
     native_functions: Sequence[NativeFunction],
     selector: SelectiveBuilder,
-    backend_index: BackendIndex,
+    kernel_index: ETKernelIndex,
     rocm: bool,
 ) -> Tuple[str, str]:
     """
@@ -73,12 +74,16 @@ def gen_custom_ops_registration(
 
     :param native_functions: a sequence of `NativeFunction`
     :param selector: for selective build.
-    :param backend_index: kernels for all the ops.
+    :param kernel_index: kernels for all the ops.
     :param rocm: bool for dest.RegisterDispatchKey.
     :return: generated C++ code to register custom operators into PyTorch
     """
-    dispatch_key = DispatchKey.CPU
 
+    # convert kernel index to BackendIndex. This is because we can't handle ETKernelIndex yet.
+    # TODO larryliu: evaluate if this code is still needed. If yes let it handle ETKernelIndex.
+
+    dispatch_key = DispatchKey.CPU
+    backend_index = kernel_index._to_backend_index()
     static_init_dispatch_registrations = ""
     ns_grouped_native_functions: Dict[str, List[NativeFunction]] = defaultdict(list)
     for native_function in native_functions:

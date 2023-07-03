@@ -2,7 +2,7 @@ import contextlib
 from typing import Sequence
 
 import torch
-from torch._custom_op import custom_op
+from torch._custom_op.impl import custom_op
 from torch.utils._content_store import ContentStoreReader
 
 LOAD_TENSOR_READER = None

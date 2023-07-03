@@ -47,6 +47,9 @@ def fully_shard(
     param_init_fn: Optional[Callable[[nn.Module], None]] = None,
     sync_module_states: bool = False,
     forward_prefetch: bool = False,
+    ignored_states: Union[
+        Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
+    ] = None,
 ) -> nn.Module:
     """
     Applies ``FullyShardedDataParallel` (FSDP) semantics to ``module``.
@@ -56,7 +59,7 @@ def fully_shard(
     if policy is not None and not isinstance(policy, _FSDPPolicy):
         raise ValueError(f"Expects an `_FSDPPolicy` but got {policy}")
     state = fully_shard.state(module)
-    state = _init_ignored_module_states(state, module, ignored_modules)
+    state = _init_ignored_module_states(state, module, ignored_modules, ignored_states)
     state = _init_device_handle(state, module, state._ignored_params, device_id)
     state = _init_process_group_state(
         state, process_group, ShardingStrategy.FULL_SHARD, policy
@@ -96,7 +99,7 @@ def fully_shard(
     _register_root_pre_forward_hook(state, module)  # prepend last
     for submodule in module.modules():
         if (
-            submodule not in state._ignored_modules
+            submodule in state._fully_sharded_module_to_handles
             and _get_module_state(submodule) is None
         ):
             _insert_module_state(submodule, state)
