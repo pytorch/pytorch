@@ -284,7 +284,6 @@ class TestMkldnn(TestCase):
     def test_conv3d(self):
         self._test_conv_base(dim=3)
 
-    # @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_conv_deconv_lower_precision_base(self, dim, conv_module, dtype):
         input_shapes = {1: (224,), 2: (224, 224), 3: (55, 55, 55)}
         options = itertools.product([True, False], [1, 2], [1, 4])
@@ -399,7 +398,6 @@ class TestMkldnn(TestCase):
         self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.float32)
 
-    # @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_conv2d_nhwc_lower_precision(self):
         # when has_bf16_support() or has_fp16_support() returns false,
         # bf16/fp16 CPU conv will fall back to thnn impl
@@ -420,7 +418,6 @@ class TestMkldnn(TestCase):
         self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.float32)
 
-    # @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_conv_transpose2d_nhwc_lower_precision(self):
         # when has_bf16_support() or has_fp16_support() returns false,
         # bf16/fp16 CPU conv will fall back to thnn impl
@@ -1518,16 +1515,40 @@ class TestMkldnn(TestCase):
             torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
             torch.float16: torch.ops.mkldnn._is_mkldnn_fp16_supported,
         }
+
+        def common(self, shape1, shape2, op, dtype):
+            a = torch.randn(shape1, dtype=dtype)
+            a_ref = a.float()
+            b = torch.randn(shape2, dtype=dtype)
+            b_ref = b.float()
+
+            y = op(a, b)
+            y_ref = op(a_ref, b_ref)
+            self.assertEqual(y, y_ref, exact_dtype=False)
+
         for dtype in [torch.bfloat16, torch.float16]:
             if support_check[dtype]():
                 a1 = torch.randn([64, 1, 33], dtype=dtype)
-                # a2 is contiguous tensor but it's strides is not default contiguous strides.
+                # a2 is contiguous tensor but it's strides
+                # is not default contiguous strides.
                 a2 = torch.as_strided(a1.clone(), [64, 1, 33], [33, 3, 1])
                 self.assertTrue(a2.is_contiguous())
                 b = torch.randn(64, 33, 256).to(dtype=dtype)
                 y1 = torch.ops.aten.bmm(a1, b)
                 y2 = torch.bmm(a2, b)
                 self.assertEqual(y1, y2)
+
+                for shape1, shape2, op in [
+                    ((33, 77), (77, 22), torch.matmul),
+                    ((128, 256), (256, 10), torch.matmul),
+                    ((7, 300), (300, 3), torch.matmul),
+                    ((1, 100), (100, 60), torch.matmul),
+                    ((100, 1), (1, 100), torch.matmul),
+                    ((20, 54, 78), (20, 78, 10), torch.bmm),
+                    ((1, 300, 1), (1, 1, 300), torch.bmm),
+                ]:
+                    common(self, shape1, shape2, op, dtype)
+
 
 if __name__ == '__main__':
     run_tests()

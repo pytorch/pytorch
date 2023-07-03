@@ -88,7 +88,7 @@ static bool use_mkldnn_fp16_matmul() {
 
 template<typename scalar_t>
 inline typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, bool>
-mkldnn_lower_gemm(
+mkldnn_lowerp_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -96,12 +96,9 @@ mkldnn_lower_gemm(
     const scalar_t *b_data, int64_t ldb,
     float beta,
     scalar_t *c_data, int64_t ldc) {
-  // TORCH_CHECK((std::is_same_v<scalar_t, c10::BFloat16> || std::is_same_v<scalar_t, c10::Half>),
-  //             "mkldnn_gemm:  only enabled for bf16 and fp16 path")
-  bool is_bf16 = std::is_same_v<scalar_t, c10::BFloat16>;
-  if (!(is_bf16 ? use_mkldnn_bf16_matmul() : use_mkldnn_fp16_matmul()) ||
-      (m * n * k <= 16 * 16 * 16) ||
-      (alpha == 0.0f)) {
+  if (!(std::is_same_v<scalar_t, c10::BFloat16> ? use_mkldnn_bf16_matmul()
+                                                : use_mkldnn_fp16_matmul()) ||
+      (m * n * k <= 16 * 16 * 16) || (alpha == 0.0f)) {
     return false;
   }
 
@@ -169,7 +166,7 @@ bool mkldnn_bf16_gemm(
     const c10::BFloat16 *b, int64_t ldb,
     float beta,
     c10::BFloat16 *c, int64_t ldc) {
-  return mkldnn_lower_gemm<c10::BFloat16>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  return mkldnn_lowerp_gemm<c10::BFloat16>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
 bool mkldnn_fp16_gemm(
@@ -180,7 +177,7 @@ bool mkldnn_fp16_gemm(
     const c10::Half *b, int64_t ldb,
     float beta,
     c10::Half *c, int64_t ldc) {
-  return mkldnn_lower_gemm<c10::Half>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  return mkldnn_lowerp_gemm<c10::Half>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
 
@@ -251,13 +248,15 @@ void mkldnn_matmul(
   Tensor mat2_ = is_mkldnn_optimized_format(mat2_unsqueezed) ? mat2_unsqueezed : mat2_unsqueezed.contiguous();
   // Make sure mat1 and mat2 have default contiguous strides if they are contiguous tensors for better performance.
   auto mat1_sizes = mat1_.sizes();
-  IntArrayRef mat1_default_contiguous_strides = c10::contiguous_strides(mat1_sizes);
-  if (mat1_.is_contiguous() && mat1_.strides() != mat1_default_contiguous_strides) {
+  auto mat1_default_contiguous_strides = c10::contiguous_strides(mat1_sizes);
+  if (mat1_.is_contiguous() &&
+      mat1_.strides() != c10::IntArrayRef(mat1_default_contiguous_strides)) {
      mat1_ = mat1_.as_strided(mat1_sizes, mat1_default_contiguous_strides);
   }
   auto mat2_sizes = mat2_.sizes();
-  IntArrayRef mat2_default_contiguous_strides = c10::contiguous_strides(mat2_sizes);
-  if (mat2_.is_contiguous() && mat2_.strides() != mat2_default_contiguous_strides) {
+  auto mat2_default_contiguous_strides = c10::contiguous_strides(mat2_sizes);
+  if (mat2_.is_contiguous() &&
+      mat2_.strides() != c10::IntArrayRef(mat2_default_contiguous_strides)) {
     mat2_ = mat2_.as_strided(mat2_sizes, mat2_default_contiguous_strides);
   }
 

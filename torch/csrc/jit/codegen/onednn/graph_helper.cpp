@@ -335,7 +335,7 @@ static DeviceType inferDevice(const std::shared_ptr<Graph>& graph) {
   return dt;
 }
 
-static dnnl::graph::engine::kind getLlgaEngineKind(DeviceType type) {
+static dnnl::engine::kind getLlgaEngineKind(DeviceType type) {
   switch (type) {
     case DeviceType::CPU:
       return dnnl::engine::kind::cpu;
