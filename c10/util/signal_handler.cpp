@@ -1,18 +1,16 @@
 #include <c10/util/Backtrace.h>
+#include <c10/util/Logging.h>
 #include <c10/util/signal_handler.h>
 
 #if defined(C10_SUPPORTS_SIGNAL_HANDLER)
 
 // Normal signal handler implementation.
-#include <cxxabi.h>
 #include <dirent.h>
-#include <dlfcn.h>
-#include <fmt/format.h>
+#include <fmt/core.h>
 #include <sys/syscall.h>
-#include <sys/types.h>
 #include <unistd.h>
-#include <unwind.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -114,6 +112,7 @@ FatalSignalHandler::FatalSignalHandler()
       writingCond(PTHREAD_COND_INITIALIZER),
       writingMutex(PTHREAD_MUTEX_INITIALIZER) {}
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 FatalSignalHandler::signal_handler FatalSignalHandler::kSignalHandlers[] = {
     {"SIGABRT", SIGABRT, {}},
     {"SIGINT", SIGINT, {}},
@@ -161,7 +160,7 @@ void FatalSignalHandler::stacktraceSignalHandler(bool needsLock) {
   if (needsLock) {
     pthread_mutex_lock(&writingMutex);
   }
-  pid_t tid = syscall(SYS_gettid);
+  pid_t tid = static_cast<pid_t>(syscall(SYS_gettid));
   std::string backtrace = fmt::format(
       "{}({}), PID: {}, Thread {}: \n {}",
       fatalSignalName,
@@ -203,7 +202,7 @@ void FatalSignalHandler::fatalSignalHandler(int signum) {
   DIR* procDir = opendir("/proc/self/task");
   if (procDir) {
     pid_t pid = getpid();
-    pid_t currentTid = syscall(SYS_gettid);
+    pid_t currentTid = static_cast<pid_t>(syscall(SYS_gettid));
     struct dirent* entry = nullptr;
     pthread_mutex_lock(&writingMutex);
     while ((entry = readdir(procDir)) != nullptr) {

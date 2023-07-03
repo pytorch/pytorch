@@ -8,7 +8,7 @@ from torch import nan
 from itertools import permutations, product
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_dtype import all_types, all_types_and, floating_types_and
+from torch.testing._internal.common_dtype import all_types, all_types_and, floating_types_and, integral_types
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
@@ -249,6 +249,15 @@ class TestSortAndSelect(TestCase):
         values_cont, indices_cont = tensor.sort()
         self.assertEqual(indices, indices_cont)
         self.assertEqual(values, values_cont)
+
+    @slowTest
+    @onlyCPU
+    @dtypes(*integral_types())
+    def test_sort_1d_parallel(self, device, dtype):
+        low = 0 if dtype == torch.uint8 else -128
+        tensor = torch.randint(low=low, high=127, size=(100000, ), device=device, dtype=dtype)
+        vals, _ = torch.sort(tensor, stable=True)
+        self.assertEqual(True, torch.all(vals[:-1] <= vals[1:]))
 
     @dtypes(torch.float32)
     def test_topk_1d_output_discontiguous(self, device, dtype):

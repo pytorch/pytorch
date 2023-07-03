@@ -12,7 +12,7 @@ class TORCH_API StoreHandlerWrapper : public ::gloo::rendezvous::Store {
  public:
   explicit StoreHandlerWrapper(StoreHandler& handler) : handler_(handler) {}
 
-  virtual ~StoreHandlerWrapper() {}
+  virtual ~StoreHandlerWrapper() override {}
 
   virtual void set(const std::string& key, const std::vector<char>& data)
       override;

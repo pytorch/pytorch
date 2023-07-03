@@ -54,11 +54,8 @@ class ConstPropPass(ExportPassBase):
             (not op_is_q_dq and not self.propogate_quant)
             or (op_is_q_dq and self.propogate_quant)
         ) and is_const([args, kwargs]):
-            guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-            try:
+            with torch._C._DisableTorchDispatch():
                 result = op(*args, **kwargs)
-            finally:
-                del guard
             return result.to_tensor() if isinstance(result, ProxyValue) else result
         else:
             return super().call_operator(op, args, kwargs, meta)

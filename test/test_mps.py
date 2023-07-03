@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: mps"]
 
+import io
 import platform
 import sys
 import math
@@ -22,7 +23,7 @@ from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI, NoTest,
-     TEST_WITH_UBSAN, skipIfSlowGradcheckEnv, TEST_WITH_ASAN, suppress_warnings)
+     TEST_WITH_UBSAN, skipIfSlowGradcheckEnv, suppress_warnings)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -77,6 +78,7 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
+        'aminmax': [torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -394,7 +396,6 @@ def mps_ops_modifier(ops):
         'rounddecimals_3': None,
         'rounddecimals_0': None,
         '__rsub__': None,
-        'aminmax': None,
         'angle': None,
         'bucketize': None,
         'cauchy_': None,
@@ -672,6 +673,7 @@ def mps_ops_modifier(ops):
         'nn.functional.dropout': [torch.float32],
         'nn.functional.dropout2d': [torch.float32],
         'nn.functional.dropout3d': [torch.float32],
+        'nn.functional.multi_head_attention_forward': [torch.float32],
 
         # duplicate indices are used in the testcase - undefined behaviour
         'index_put': None,
@@ -815,7 +817,7 @@ if not torch.backends.mps.is_available():
     TestCase = NoTest  # noqa: F811
     NNTestCase = NoTest  # noqa: F811
 
-product_version = float('.'.join(platform.mac_ver()[0].split('.')[:2]))
+product_version = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 
 # Determine whether to enable MPS memory leak check (uses same code as CUDA).
 TEST_MPS_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_MPS_MEM_LEAK_CHECK', '0') == '1'
@@ -4608,6 +4610,23 @@ class TestNLLLoss(TestCaseMPS):
 
         helper((2, 3, 4, 5))
 
+    def test_argmax(self):
+        # https://github.com/pytorch/pytorch/issues/98191
+        cpu_tensor = torch.tensor([[0, 1], [2, 1], [1, 0]])
+        res_cpu = torch.argmax(cpu_tensor, dim=1)
+
+        mps_tensor = cpu_tensor.to(torch.device('mps'))
+        res_mps = torch.argmax(mps_tensor, dim=1)
+        self.assertEqual(res_cpu, res_mps)
+
+        # https://github.com/pytorch/pytorch/issues/92311
+        mps_tensor = torch.randn(10, 2, device='mps', dtype=torch.float32)
+        cpu_tensor = mps_tensor.detach().clone().cpu()
+
+        res_mps = torch.argmax(mps_tensor, dim=1)
+        res_cpu = torch.argmax(cpu_tensor, dim=1)
+        self.assertEqual(res_cpu, res_mps)
+
     # Test forward argmin argmax
     def test_argmin_argmax(self):
         def helper(n, c, h, w, reduction_type, dtype=torch.float32):
@@ -6185,8 +6204,8 @@ class TestNLLLoss(TestCaseMPS):
 
     # Test softplus
     def test_softplus(self):
-        def helper(shape, beta=1, threshold=20):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+        def helper(shape, beta, threshold, dtype):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
             softplus_result = torch.nn.Softplus(beta=beta, threshold=threshold)(x)
@@ -6202,10 +6221,13 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(x.grad, cpu_x.grad)
 
         # Test empty shape too
-        for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
-            for beta in [0.5, 1, 2, 3, 4]:
-                for threshold in [0.5, 20, 30, 40, 50]:
-                    helper(shape, beta, threshold)
+        for shape, beta, threshold, dtype in product(
+            [(), (2, 3), (10, 10), (2, 3, 4, 5)],
+            [0.5, 1, 2, 3, 4],
+            [0.5, 20, 30, 40, 50],
+            [torch.float16, torch.float32]
+        ):
+            helper(shape, beta, threshold, dtype)
 
     # Test silu
 
@@ -7345,6 +7367,15 @@ class TestNLLLoss(TestCaseMPS):
         x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
         x = net1(x)
         torch.mps.profiler.stop()
+
+    def test_jit_save_load(self):
+        m = torch.nn.Module()
+        m.x = torch.rand(3, 3, device='mps')
+        buffer = io.BytesIO()
+        torch.jit.save(torch.jit.script(m), buffer)
+        buffer.seek(0)
+        n = torch.jit.load(buffer)
+        self.assertEqual(n.x, m.x)
 
     # Test random_, random_.to and random_.from
     def test_random(self):
@@ -10364,6 +10395,17 @@ class TestNoRegression(TestCase):
             self.assertEqual(x, x2)
             self.assertEqual(x2.device.type, "cpu")
 
+        # Ensures that `mps:0` Tensors can be loaded on mps
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2, device="mps:0")
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f, map_location="mps:0")
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "mps")
+
 
 MPS_DTYPES = get_all_dtypes()
 for t in [torch.double, torch.cdouble, torch.cfloat, torch.bfloat16]:
@@ -10393,7 +10435,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
-        'round', 'xlogy',
+        'round', 'xlogy', 'addcmul',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
@@ -10563,6 +10605,10 @@ class TestConsistency(TestCaseMPS):
             cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
             mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
 
+            if op.name in ["nn.functional.gelu", "nn.functional.glu"] and dtype == torch.float16:
+                atol = 1e-3
+                rtol = 1e-3
+
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
 
@@ -10618,7 +10664,6 @@ class TestCommon(TestCase):
     # MPS still requires some fairly heavy special casing in the test framework.
     # When MPS becomes more consistent, this can probably be merged with that test using
     # `@dtypesIfMPS(torch.float32)`, but for now, the assertions themselves need to be loosened
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     # MPS only supports float32
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))

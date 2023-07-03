@@ -145,10 +145,13 @@ aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)
 register_backend(name="cudagraphs", compiler_fn=aot_cudagraphs)
 
 
-def cudagraphs_inner(model, inputs, copy_outputs=True):
+def cudagraphs_inner(model, inputs, copy_outputs=True, copy_inputs=True):
     """This isn't registered as a backend, but is used in some benchmarks"""
     assert isinstance(inputs, (list, tuple))
-    static_inputs = [torch.zeros_like(x) for x in inputs]
+    if copy_inputs:
+        static_inputs = [torch.zeros_like(x) for x in inputs]
+    else:
+        static_inputs = list(inputs)
 
     # warmup
     torch.cuda.synchronize()
@@ -169,8 +172,9 @@ def cudagraphs_inner(model, inputs, copy_outputs=True):
 
     def run(*new_inputs):
         assert len(static_inputs) == len(new_inputs)
-        for dst, src in zip(static_inputs, new_inputs):
-            dst.copy_(src)
+        if copy_inputs:
+            for dst, src in zip(static_inputs, new_inputs):
+                dst.copy_(src)
         graph.replay()
         if copy_outputs:
             return [x.clone() for x in static_outputs]
