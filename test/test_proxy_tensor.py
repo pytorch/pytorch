@@ -1361,28 +1361,6 @@ def forward(self, a_1):
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
         self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] < 20""")
 
-    def test_guard_upperbound_range_refinement_multivariate(self):
-        def f(a):
-            assert a.shape[0] > 5 and a.shape[0] > 12
-            assert a.shape[1] > 5 and a.shape[1] > a.shape[0]
-            return a.cos()
-        tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 20)))
-        self.assertExpectedInline(show_guards(tensor), """\
-L['a'].size()[1] > L['a'].size()[0]
-L['a'].size()[0] > 12""")
-
-    def test_guard_lowerbound_range_refinement_multivariate(self):
-        def f(a):
-            assert a.shape[0] < 20 and a.shape[0] < 30
-            assert a.shape[1] < 30 and a.shape[1] < a.shape[0]
-            return a.cos()
-        tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 5)))
-        self.assertExpectedInline(
-            show_guards(tensor),
-            """\
-L['a'].size()[1] < L['a'].size()[0]
-L['a'].size()[0] < 20""")
-
     def test_sym_storage_offset(self):
         def f(x, y):
             return x + y
@@ -1563,11 +1541,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.grid_sample', ''),  # aten.grid_sampler_2d.default - couldn't find symbolic meta function/decompos...
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
-    xfail('nn.functional.max_pool1d', ''),  # Trying to call aten.size on a tensor with symbolic shapes.
-    xfail('nn.functional.max_pool3d', ''),  # aten.max_pool3d_with_indices.default - couldn't find symbolic meta function/d...
-    xfail('nn.functional.max_unpool1d', 'grad'),  # aten.max_unpool2d.default - couldn't find symbolic meta function/decom...
-    xfail('nn.functional.max_unpool2d', 'grad'),  # aten.max_unpool2d.default - couldn't find symbolic meta function/decom...
-    xfail('nn.functional.max_unpool3d', 'grad'),  # aten.max_unpool3d.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.multi_margin_loss', ''),  # Could not run 'aten::multi_margin_loss' with arguments from the...
     xfail('nn.functional.multilabel_margin_loss', ''),  # Could not run 'aten::multilabel_margin_loss_forward' with ...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
