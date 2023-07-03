@@ -28,6 +28,7 @@ import contextlib
 import weakref
 import copy
 import torch._functorch.config
+import torch.testing._internal.optests as optests
 from unittest.mock import patch
 
 from torch import distributed as dist
@@ -203,6 +204,11 @@ class FakeTensorTest(TestCase):
             out = y + y
 
         self.assertTrue(isinstance(out, FakeTensor))
+
+    def test_full(self):
+        # Test torch.full returns tensor with correct dtype
+        with torch._subclasses.CrossRefFakeMode():
+            y = torch.full((4, 4), 1)
 
     def check_function_with_fake(self, fn):
         out = fn()
@@ -764,12 +770,7 @@ class FakeTensorOpInfoTest(TestCase):
         for sample_input in sample_inputs_itr:
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
-        with torch._subclasses.CrossRefFakeMode():
-            try:
-                op(*args, **kwargs)
-            except DynamicOutputShapeException:
-                if op.name not in data_dependent_outputs:
-                    raise
+            optests.fake_check(op, args, kwargs, op.name in data_dependent_outputs)
 
 
 class FakeTensorConverterTest(TestCase):
