@@ -1573,6 +1573,13 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 2, 1, 2, 2, 2, 1),))
 
+    def test_squeeze_varargs(self):
+        def fn(x):
+            return x.squeeze(1, 2).clone()
+
+        a = torch.randn(1024, 1, 1)
+        self.common(fn, (a,))
+
     def test_simplify_loops(self):
         def fn(a, b):
             return a + b
@@ -3145,6 +3152,7 @@ class CommonTemplate:
             check_lowp=False,  # accuracy issues with relatively large matmuls
         )
 
+    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)

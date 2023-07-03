@@ -462,75 +462,6 @@ def gen_foreach_derivativeinfo(
             for arg in foreach_function.func.arguments.flat_non_out
             if arg.name in all_var_names
         ]
-
-    forward_derivatives: List[ForwardDerivative] = []
-    fw_derivative: ForwardDerivative
-    for fw_derivative in ref_diff_info.forward_derivatives:
-        var_names: List[str] = list(fw_derivative.var_names)  # type: ignore[no-redef]
-        var_types: List[Type] = list(fw_derivative.var_types)
-        required_inputs_fw_grad: List[str] = []
-        required_inputs_primal: List[str] = []
-        if fw_derivative.required_inputs_fw_grad is not None:
-            required_inputs_fw_grad = list(fw_derivative.required_inputs_fw_grad)
-        if fw_derivative.required_inputs_primal:
-            required_inputs_primal = list(fw_derivative.required_inputs_primal)
-        modified_formula = fw_derivative.formula
-
-        # Foreach's result is TensorList
-        if "result" in modified_formula:
-            modified_formula = fw_derivative.formula.replace("result", "result[i]")
-
-        for foreach_arg, ref_arg in zip(
-            foreach_function.func.arguments.flat_non_out,
-            ref_diff_info.func.func.arguments.flat_non_out,
-        ):
-            # Modify reference forward formula
-            if (
-                isinstance(foreach_arg.type, ListType)
-                and not foreach_arg.type.is_tensor_like()
-            ):
-                # Assuming ScalarList
-                modified_formula = modified_formula.replace(
-                    ref_arg.name, foreach_arg.name + "[i]"
-                )
-            elif foreach_arg.type.is_tensor_like():
-                # Assuming TensorList / Tensor
-                assert isinstance(foreach_arg.type, ListType)
-                for suffix in ("_p", "_t"):
-                    curr_expr = ref_arg.name + suffix
-                    if curr_expr in modified_formula:
-                        new_expr = foreach_arg.name + suffix
-                        modified_formula = modified_formula.replace(curr_expr, new_expr)
-            else:
-                # Assuming Scalar
-                if foreach_arg.name != ref_arg.name:
-                    modified_formula = modified_formula.replace(
-                        ref_arg.name, foreach_arg.name
-                    )
-
-            # note(crcrpar): there should exist a cooler way...
-            for i, name in enumerate(var_names):
-                if name == ref_arg.name:
-                    var_names[i] = foreach_arg.name
-                    var_types[i] = foreach_arg.type
-            for i, name in enumerate(required_inputs_fw_grad):
-                if name == ref_arg.name:
-                    required_inputs_fw_grad[i] = foreach_arg.name
-            for i, name in enumerate(required_inputs_primal):
-                if name == ref_arg.name:
-                    required_inputs_primal[i] = foreach_arg.name
-        forward_derivatives.append(
-            ForwardDerivative(
-                formula=modified_formula,
-                var_names=tuple(var_names),
-                var_types=tuple(var_types),
-                required_inputs_fw_grad=tuple(required_inputs_fw_grad),
-                required_inputs_primal=tuple(required_inputs_primal),
-                required_original_self_value=fw_derivative.required_original_self_value,
-                is_reusing_outplace_formula=fw_derivative.is_reusing_outplace_formula,
-            )
-        )
-
     return (
         DifferentiabilityInfo(
             name=foreach_function.func.name.name.base,
@@ -539,7 +470,7 @@ def gen_foreach_derivativeinfo(
                 ref_diff_info.op, foreach_function.func.name.overload_name
             ),
             derivatives=modified_derivative_formulas,
-            forward_derivatives=forward_derivatives,
+            forward_derivatives=[],
             all_saved_inputs=tuple(set(all_saved_inputs)),
             all_saved_outputs=tuple(set(all_saved_outputs)),
             available_named_gradients=(),
