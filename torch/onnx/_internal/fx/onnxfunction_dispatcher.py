@@ -63,7 +63,7 @@ def _find_operator_overloads_in_onnx_registry_disagnostic_message_formatter(
 ) -> str:
     """Format the diagnostic message for the nearest match warning."""
     op_full_name = internal_opname.internal_name()
-    return f"Searching operator overload: {op_full_name} in onnx registry... \n"
+    return f"Searching operator overload: '{op_full_name}' in onnx registry...\n"
 
 
 class OnnxFunctionDispatcher:

@@ -177,13 +177,13 @@ class OnnxRegistry:
         return set(self._registry)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class OpName:
     """A class representing an operator name in internal ONNX converter."""
 
-    _domain: str
-    _op_name: str
-    _overload: str
+    domain: str
+    op_name: str
+    overload: str
 
     @classmethod
     @_beartype.beartype
@@ -213,15 +213,3 @@ class OpName:
     @_beartype.beartype
     def internal_name(self) -> str:
         return f"{self.domain}::{self.op_name}.{self.overload}"
-
-    @property
-    def domain(self) -> str:
-        return self._domain
-
-    @property
-    def op_name(self) -> str:
-        return self._op_name
-
-    @property
-    def overload(self) -> str:
-        return self._overload
