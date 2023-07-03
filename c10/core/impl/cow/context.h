@@ -1,12 +1,11 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/UniqueVoidPtr.h>
 
 #include <atomic>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <shared_mutex>
 #include <variant>
 

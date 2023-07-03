@@ -65,11 +65,11 @@ def load_state_dict(
         >>> my_model = MyModule()
         >>> optimizer = Adagrad(my_model.parameters())
         >>> model_state_dict = my_model.state_dict()
-        >>> fs_storage_loader = torch.distributed.checkpoint.FileSystemLoader("/checkpoint/1")
+        >>> fs_storage_reader = torch.distributed.checkpoint.FileSystemReader("/checkpoint/1")
 
         >>> torch.distributed.checkpoint.load_state_dict(
         >>>     state_dict=model_state_dict,
-        >>>     storage_reader=fs_storage_loader,
+        >>>     storage_reader=fs_storage_reader,
         >>> )
 
         >>> # module.load_state_dict() function might have customized steps

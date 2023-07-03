@@ -6,7 +6,7 @@
 namespace torch {
 namespace jit {
 
-void UpdateDifferentiableGraphRequiresGrad(
+static void UpdateDifferentiableGraphRequiresGrad(
     Block* block,
     c10::optional<bool> new_requires_grad) {
   for (Node* n : block->nodes()) {
