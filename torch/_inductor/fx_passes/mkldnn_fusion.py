@@ -5,16 +5,33 @@ import torch
 
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
-from .. import ir
+from .. import config, ir
 
 from ..lowering import lowerings as L
-from ..pattern_matcher import Arg, CallFunction, filter_nodes, get_arg_value, KeywordArg
+from ..pattern_matcher import (
+    Arg,
+    CallFunction,
+    filter_nodes,
+    get_arg_value,
+    init_once_fakemode,
+    KeywordArg,
+    PatternMatcherPass,
+    register_graph_pattern,
+    stable_topological_sort,
+)
 from ..virtualized import ops
-from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 
 
 if torch._C._has_mkldnn:
+    # First pass_patterns[0](weight packing passes) are applied,
+    # then [1](pre-process for fusion passes), then [2](fusion passes).
+    pass_patterns = [
+        PatternMatcherPass(),
+        PatternMatcherPass(),
+        PatternMatcherPass(),
+    ]
+
     aten = torch.ops.aten
     mkldnn = torch.ops.mkldnn
     _conv_args = [Arg() for i in range(10)]
@@ -54,10 +71,10 @@ if torch._C._has_mkldnn:
         return fn
 
     def _register_unary_fusion_pattern(pattern, unary_op_name, computation_op):
-        @register_freezing_graph_pattern(
+        @register_graph_pattern(
             pattern,
             extra_check=_is_single_computation_op(computation_op),
-            pass_number=2,
+            pass_dict=pass_patterns[2],
         )
         def fn(match, *args):
             graph = match.graph
@@ -77,10 +94,10 @@ if torch._C._has_mkldnn:
     def _register_unary_fusion_with_parameters_pattern(
         pattern, unary_op_name, computation_op
     ):
-        @register_freezing_graph_pattern(
+        @register_graph_pattern(
             pattern,
             extra_check=_is_single_computation_op(computation_op),
-            pass_number=2,
+            pass_dict=pass_patterns[2],
         )
         def fn(match, *args, **kwargs):
             assert unary_op_name in ["leaky_relu", "gelu", "hardtanh"]
@@ -419,7 +436,7 @@ if torch._C._has_mkldnn:
 
     def _recover_linear():
         # convert reshape+linear+reshape to a single linear for applying fusion path.
-        @register_freezing_graph_pattern(
+        @register_graph_pattern(
             CallFunction(
                 aten.view.default,
                 CallFunction(
@@ -433,7 +450,7 @@ if torch._C._has_mkldnn:
                 ),
                 KeywordArg("reshape_2"),
             ),
-            pass_number=1,
+            pass_dict=pass_patterns[1],
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
             reshape_1 = kwargs.get("reshape_1")
@@ -460,14 +477,14 @@ if torch._C._has_mkldnn:
             )
 
         # convert linear+bias to a single linear for applying fusion path.
-        @register_freezing_graph_pattern(
+        @register_graph_pattern(
             CallFunction(
                 aten.add.Tensor,
                 CallFunction(mkldnn._linear_pointwise.default, *_linear_args),
                 Arg(),
             ),
-            pass_number=1,
             extra_check=is_linear_add_bias,
+            pass_dict=pass_patterns[1],
         )
         def linear_bias_pattern(match, *args):
             graph = match.graph
@@ -584,9 +601,10 @@ if torch._C._has_mkldnn:
     )
 
     def _register_weight_pack_pass():
-        @register_freezing_graph_pattern(
+        @register_graph_pattern(
             CallFunction(aten.convolution.default, *_aten_conv_args),
             extra_check=_is_packable_convolution,
+            pass_dict=pass_patterns[0],
         )
         def convolution(match, *args, **kwargs):
             is_transposed = kwargs.get("is_transposed")
@@ -595,20 +613,15 @@ if torch._C._has_mkldnn:
             conv_node = match.output_node()
             input_size = conv_node.args[0].meta.get("val").shape
             with graph.inserting_before(conv_node):
-                mkldnn_tensor_node = graph.create_node(
-                    "call_method", "to_mkldnn", (args[1],)
-                )
                 constant_args = [args[4], args[3], args[5], args[-1]]
-                packed_weight_op = torch._C._nn.mkldnn_reorder_conv2d_weight
+                packed_weight_op = mkldnn._reorder_convolution_weight
                 packed_conv_op = mkldnn._convolution_pointwise.default
                 if is_transposed:
                     constant_args.insert(1, args[-2])  # output_padding
                     packed_weight_op = mkldnn._reorder_convolution_transpose_weight
                     packed_conv_op = mkldnn._convolution_transpose_pointwise.default
 
-                packed_weight_inputs = (
-                    (mkldnn_tensor_node,) + tuple(constant_args) + (input_size,)
-                )
+                packed_weight_inputs = (args[1],) + tuple(constant_args) + (input_size,)
                 packed_weight_node = graph.create_node(
                     "call_function", packed_weight_op, args=packed_weight_inputs
                 )
@@ -624,13 +637,15 @@ if torch._C._has_mkldnn:
                 packed_conv_node.meta.update(conv_node.meta)
                 graph.erase_node(conv_node)
 
-        @register_freezing_graph_pattern(
+        @register_graph_pattern(
             CallFunction(aten.addmm.default, Arg(), Arg(), Arg()),
             extra_check=_is_packable_linear,
+            pass_dict=pass_patterns[0],
         )
-        @register_freezing_graph_pattern(
+        @register_graph_pattern(
             CallFunction(aten.mm.default, Arg(), Arg()),
             extra_check=_is_packable_linear,
+            pass_dict=pass_patterns[0],
         )
         def linear(match, *args, **kwargs):
             graph = match.graph
@@ -642,12 +657,9 @@ if torch._C._has_mkldnn:
                 transpose_weight_node = graph.create_node(
                     "call_function", aten.permute.default, (weight, (1, 0))
                 )
-                mkldnn_tensor_node = graph.create_node(
-                    "call_method", "to_mkldnn", (transpose_weight_node,)
-                )
                 is_bf16_weight = weight.meta.get("val").dtype == torch.bfloat16
                 batch_size = input.meta.get("val").shape[0]
-                packed_weight_inputs = (mkldnn_tensor_node, batch_size)
+                packed_weight_inputs = (transpose_weight_node, batch_size)
                 packed_weight_op = (
                     mkldnn._reorder_linear_weight
                     if is_bf16_weight
@@ -713,6 +725,7 @@ if torch._C._has_mkldnn:
     def _mkldnn_fusion_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_inplace_fusion()
+            # TODO: remove those passed at freezing pass?
             _register_binary_unary_fusion()
             _register_binary_fusion()
 
@@ -722,3 +735,20 @@ if torch._C._has_mkldnn:
             _register_weight_pack_pass()
             _recover_linear()
             _register_unary_fusion()
+
+    def mkldnn_freezing_passes(gm: torch.fx.GraphModule):
+        """
+        Passes that are applied to the graph to mkldnn freeze pass.
+        """
+        if config.cpp.weight_prepack:
+            lazy_init()
+            for patterns in pass_patterns:
+                patterns.apply(gm.graph)
+
+            stable_topological_sort(gm.graph)
+            gm.recompile()
+            gm.graph.lint()
+
+    @init_once_fakemode
+    def lazy_init():
+        _mkldnn_weight_pack_init()

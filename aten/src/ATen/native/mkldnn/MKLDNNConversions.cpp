@@ -13,6 +13,7 @@
 #include <ATen/ops/_to_dense_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/mkldnn_reorder_conv2d_weight_native.h>
 #include <ATen/ops/mkldnn_reorder_conv3d_weight_native.h>
 #include <ATen/ops/to_mkldnn_native.h>
@@ -136,7 +137,7 @@ Tensor mkldnn_reorder_conv2d_weight(
   const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
-  auto w = itensor_from_mkldnn(self);
+  auto w = itensor_from_tensor(self);
 
   // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
   // dimension when groups > 1, having dimension [g, o/g, i, h, w] instead of
@@ -219,7 +220,7 @@ static Tensor mkldnn_reorder_linear_weight(
   }
   auto out_features = self.size(0);
   auto in_features = self.size(1);
-  auto w = itensor_from_mkldnn(self);
+  auto w = itensor_from_tensor(self);
   ideep::dims input_size;
   auto dtype = w.get_data_type();
   if (batch_size_opt.has_value()) {
@@ -330,13 +331,16 @@ static Tensor mkldnn_reorder_conv_transpose2d_weight(
                                  self.options().device_opt());
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_transpose_weight"),
       TORCH_FN(mkldnn_reorder_conv_transpose2d_weight));
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_linear_weight"),
       TORCH_FN(mkldnn_reorder_linear_weight));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_weight"),
+      TORCH_FN(mkldnn_reorder_conv2d_weight));
 }
 
 #else
@@ -407,10 +411,28 @@ static Tensor mkl_reorder_linear_weight(
   return packed_weight;
 }
 
-TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
+static Tensor mkl_reorder_linear_weight_meta(
+    const Tensor& weight,
+    const int64_t batch_size) {
+  auto M = batch_size;
+  auto N = weight.size(0);
+  auto K = weight.size(1);
+  int64_t pack_size =
+      (int64_t)(cblas_sgemm_pack_get_size(CblasBMatrix, M, N, K) / sizeof(float) + 1);
+
+  return at::empty_strided({pack_size, 1}, {1, 0}, weight.options());
+}
+
+TORCH_LIBRARY_IMPL(mkl, CPU, m) {
+  m.impl(
+    TORCH_SELECTIVE_NAME("mkl::_mkl_reorder_linear_weight"),
+    TORCH_FN(mkl_reorder_linear_weight));
+}
+
+TORCH_LIBRARY_IMPL(mkl, Meta, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkl::_mkl_reorder_linear_weight"),
-      TORCH_FN(mkl_reorder_linear_weight));
+      TORCH_FN(mkl_reorder_linear_weight_meta));
 }
 
 #endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED

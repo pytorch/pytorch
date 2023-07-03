@@ -220,6 +220,14 @@ def freeze(
     constant_fold(aot_autograd_gm)
 
     fuse_conv_bn(aot_autograd_gm)
+    if torch._C._has_mkldnn:
+        from torch._inductor.fx_passes.mkldnn_fusion import mkldnn_freezing_passes
+
+        mkldnn_freezing_passes(aot_autograd_gm)
+    # now, decompose fusible ops if we were unable to fuse it.
+    aot_autograd_gm = decompose_unfused_fusion_ops(
+        aot_autograd_gm, example_inputs, preserved_arg_indices
+    )
 
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)
@@ -229,10 +237,6 @@ def freeze(
     # TODO - apply legalization in pattern matcher
     torch.fx.passes.tools_common.legalize_graph(aot_autograd_gm)
     constant_fold(aot_autograd_gm)
-    # now, decompose fusible ops if we were unable to fuse it.
-    aot_autograd_gm = decompose_unfused_fusion_ops(
-        aot_autograd_gm, example_inputs, preserved_arg_indices
-    )
 
     # invalidate nn Modules
     if config.freezing_discard_parameters:
