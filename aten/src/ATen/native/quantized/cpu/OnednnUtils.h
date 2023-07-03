@@ -55,20 +55,7 @@ struct LinearPrimitiveCache : PrimitiveCache {
     this->param = param;
   }
 
-  LinearPrimitiveCache(
-      const PrimitiveCacheKey& key,
-      const LinearParams& param,
-      const ideep::tensor& bias) {
-    this->key = key;
-    this->param = param;
-    if (!bias.is_empty()) {
-      expected_bias =
-          bias.reorder_if_differ_in(param.pd.bias_desc(), param.bias_attr);
-    }
-  }
-
   LinearParams param;
-  ideep::tensor expected_bias;
 
   // For dynamic qlinear, scale and zero point
   // are set at execution time. So we only need to compare
@@ -84,10 +71,6 @@ struct LinearPrimitiveCache : PrimitiveCache {
   LinearParams& get_param() {
     return param;
   }
-
-  ideep::tensor& get_expected_bias() {
-    return expected_bias;
-  }
 };
 
 struct ConvPrimitiveCache : PrimitiveCache {
@@ -95,25 +78,15 @@ struct ConvPrimitiveCache : PrimitiveCache {
 
   ConvPrimitiveCache(
       const PrimitiveCacheKey& key,
-      const ConvParams& params,
-      const ideep::tensor& bias) {
+      const ConvParams& params) {
     this->key = key;
     this->params = params;
-    if (!bias.is_empty()) {
-      this->expected_bias =
-          bias.reorder_if_differ_in(params.pd.bias_desc(), params.bias_attr);
-    }
   }
 
-  ideep::tensor expected_bias;
   ConvParams params;
 
   ConvParams& get_params() {
     return params;
-  }
-
-  ideep::tensor& get_bias() {
-    return expected_bias;
   }
 };
 
@@ -122,25 +95,15 @@ struct DeconvPrimitiveCache : PrimitiveCache {
 
   DeconvPrimitiveCache(
       const PrimitiveCacheKey& key,
-      const DeconvParams& params,
-      const ideep::tensor& bias) {
+      const DeconvParams& params) {
     this->key = key;
     this->params = params;
-    if (!bias.is_empty()) {
-      this->expected_bias =
-          bias.reorder_if_differ_in(params.pd.bias_desc(), params.bias_attr);
-    }
   }
 
   DeconvParams params;
-  ideep::tensor expected_bias;
 
   DeconvParams& get_params() {
     return params;
-  }
-
-  ideep::tensor& get_bias() {
-    return expected_bias;
   }
 };
 

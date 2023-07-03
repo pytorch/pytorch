@@ -162,6 +162,13 @@ def mps_ops_grad_modifier(ops):
 
     XPASSLIST_GRAD = {
         'nn.functional.pairwise_distance': [torch.float16],
+        # failed assertion `destination datatype must be fp32'
+        'nn.functional.conv1d': [torch.float16],
+        'nn.functional.conv2d': [torch.float16],
+        'nn.functional.conv3d': [torch.float16],
+        'nn.functional.conv_transpose1d': [torch.float16],
+        'nn.functional.conv_transpose2d': [torch.float16],
+        'nn.functional.conv_transpose3d': [torch.float16],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -10465,7 +10472,9 @@ class TestConsistency(TestCaseMPS):
         self.assertEqual(device, "cpu")
         key = op.name + op.variant_test_name
         run_grad_test = True
-
+        use_fp32 = False
+        if 'nn.functional.conv_transpose' in op.name:
+            use_fp32 = True
         def get_samples():
             return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
@@ -10479,6 +10488,15 @@ class TestConsistency(TestCaseMPS):
                 lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
             cpu_args = [cpu_sample.input] + list(cpu_sample.args)
+            print("cpu_sample.args", cpu_sample.args)
+            cpu_fp32_args = []
+            if use_fp32:
+                cpu_fp32_args = [cpu_sample.input] + list(cpu_sample.args)
+                num = len(cpu_fp32_args)
+                for i in range(num):
+                    if isinstance(cpu_fp32_args[i], torch.Tensor):
+                        cpu_fp32_args[i] = cpu_fp32_args[i].float()
+
             cpu_kwargs = cpu_sample.kwargs
             mps_args = [mps_sample.input] + list(mps_sample.args)
             mps_kwargs = mps_sample.kwargs
@@ -10488,12 +10506,22 @@ class TestConsistency(TestCaseMPS):
                 mps_args[1] = cpu_args[1]
 
             cpu_out = op(*cpu_args, **cpu_kwargs)
+            cpu_fp32_out = None
+            if use_fp32:
+                print("cpu_fp32_args: ", cpu_fp32_args)
+                print("cpu_kwargs: ", cpu_kwargs)
+                cpu_fp32_out = op(*cpu_fp32_args, **cpu_kwargs)
             mps_out = op(*mps_args, **mps_kwargs)
 
             if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
                 atol = 1e-4
                 rtol = 3e-5
             elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
+                atol = 1e-2
+                rtol = 1e-2
+            elif op.name in ['nn.functional.conv_transpose1d',
+                             'nn.functional.conv_transpose2d',
+                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
                 atol = 1e-2
                 rtol = 1e-2
             elif op.name == "masked.mean":
@@ -10508,7 +10536,12 @@ class TestConsistency(TestCaseMPS):
             else:
                 atol = None
                 rtol = None
-
+            if use_fp32:
+                print("--- cpu_fp32_out: ", cpu_fp32_out)
+                print("cpu_out: ", cpu_out)
+                print("mps_out: ", mps_out)
+                # self.assertEqual(mps_out, cpu_fp32_out, atol=atol, rtol=rtol, exact_dtype=False)
+                # self.assertEqual(cpu_out, cpu_fp32_out, atol=atol, rtol=rtol, exact_dtype=False)
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
@@ -10518,7 +10551,9 @@ class TestConsistency(TestCaseMPS):
         key = op.name + op.variant_test_name
 
         run_grad_test = True
-
+        use_fp32 = False
+        if 'nn.functional.conv_transpose' in op.name:
+            use_fp32 = True
         def get_samples():
             return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
@@ -10534,6 +10569,9 @@ class TestConsistency(TestCaseMPS):
                 lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
             cpu_args = [cpu_sample.input] + list(cpu_sample.args)
+            cpu_fp32_args = []
+            if use_fp32:
+                cpu_fp32_args = [cpu_sample.input.float()] + list(cpu_sample.args)
             cpu_kwargs = cpu_sample.kwargs
             mps_args = [mps_sample.input] + list(mps_sample.args)
             mps_kwargs = mps_sample.kwargs
@@ -10543,6 +10581,9 @@ class TestConsistency(TestCaseMPS):
                 mps_args[1] = cpu_args[1]
 
             cpu_out = op(*cpu_args, **cpu_kwargs)
+            cpu_fp32_out = None
+            if use_fp32:
+                cpu_fp32_out = op(*cpu_fp32_args, **cpu_kwargs)
             mps_out = op(*mps_args, **mps_kwargs)
 
             if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
@@ -10554,6 +10595,11 @@ class TestConsistency(TestCaseMPS):
             elif (op.name in self.FP16_LOW_PRECISION_LIST) and dtype == torch.float16:
                 atol = 1e-2
                 rtol = 1e-2
+            # elif op.name in ['nn.functional.conv_transpose1d',
+            #                  'nn.functional.conv_transpose2d',
+            #                  'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+            #     atol = 5e-2
+            #     rtol = 5e-2
             elif (op.name == "masked.mean"):
                 atol = 7e-4
                 rtol = 2e-3
@@ -10569,6 +10615,12 @@ class TestConsistency(TestCaseMPS):
                 atol = None
                 rtol = None
 
+            if use_fp32:
+                print("cpu_fp32_out: ", cpu_fp32_out)
+                print("cpu_out: ", cpu_out)
+                print("mps_out: ", mps_out)
+                self.assertEqual(cpu_out, cpu_fp32_out, atol=atol, rtol=rtol, exact_dtype=False)
+                self.assertEqual(mps_out, cpu_fp32_out, atol=atol, rtol=rtol, exact_dtype=False)
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 

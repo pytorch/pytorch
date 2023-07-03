@@ -21,6 +21,10 @@ static bool is_mkldnn_bf16_supported() {
 #endif
 }
 
+static bool is_mkldnn_fp16_supported() {
+  return mkldnn_fp16_device_check();
+}
+
 TORCH_LIBRARY(mkldnn, m) {
   m.class_<ConvOpContext>(TORCH_SELECTIVE_CLASS("ConvOpContext"))
       .def_pickle(
@@ -58,6 +62,7 @@ TORCH_LIBRARY(mkldnn, m) {
   m.def(TORCH_SELECTIVE_SCHEMA(
       "mkldnn::_reorder_linear_weight(Tensor self, int? batch_size=None) -> Tensor Y"));
   m.def("_is_mkldnn_bf16_supported", &is_mkldnn_bf16_supported);
+  m.def("_is_mkldnn_fp16_supported", &is_mkldnn_fp16_supported);
 }
 
 TORCH_LIBRARY(mkldnn_prepacked, m) {

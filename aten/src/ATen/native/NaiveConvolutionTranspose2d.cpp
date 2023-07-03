@@ -21,6 +21,7 @@
 
 #include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
+#include <iostream>
 
 namespace at {
 namespace {
@@ -251,6 +252,7 @@ void slow_conv_transpose2d_out_cpu_template(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
+  std::cout << "slow_conv_transpose2d_out_cpu_template\n";
   int64_t kernel_height = kernel_size[0];
   int64_t kernel_width = kernel_size[1];
   int64_t dilation_height = dilation[0];
@@ -298,8 +300,8 @@ void slow_conv_transpose2d_out_cpu_template(
   }
   columns.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Long, at::ScalarType::BFloat16,
-      input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND3(at::ScalarType::Long, at::ScalarType::BFloat16,
+      at::ScalarType::Half, input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
 
     at::parallel_for(0, batch_size, 0, [&](int64_t begin, int64_t end) {
       // For each elt in batch, do:
@@ -493,7 +495,7 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
     }
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half,
       grad_output.scalar_type(), "slow_conv_transpose2d_backward_out_cpu", [&] {
         // Helpers
         Tensor grad_input_n = Tensor();
@@ -685,7 +687,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
     }
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16,
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half,
       input.scalar_type(), "slow_conv_transpose2d_acc_grad_parameters_cpu", [&] {
         // Helpers
         Tensor input_n = Tensor();
