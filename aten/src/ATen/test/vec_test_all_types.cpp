@@ -70,7 +70,7 @@ namespace {
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
-#if !defined(CPU_CAPABILITY_DEFAULT) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     using Quantization8BitWithTailTestedTypes =
         ::testing::Types<vqint8, vquint8>;
 #endif
@@ -106,7 +106,7 @@ namespace {
     TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatTestedTypes);
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
-#if !defined(CPU_CAPABILITY_DEFAULT) && !defined(_MSC_VER)
+#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     TYPED_TEST_SUITE(
         Quantization8BitWithTailTests,
         Quantization8BitWithTailTestedTypes);
@@ -1146,8 +1146,8 @@ namespace {
             if (AssertVectorized<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
         } //trials;
     }
-#if !defined(CPU_CAPABILITY_DEFAULT) && !defined(_MSC_VER)
-    // This testcase aim to test at::vec::QuantizeAvx512 and
+#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
+    // This test case aims to test at::vec::QuantizeAvx512 and
     // at::vec::QuantizeAVX2 which do not support CPU_CAPABILITY_DEFAULT case
     TYPED_TEST(Quantization8BitWithTailTests, QuantizeTile) {
       using vec = TypeParam;
