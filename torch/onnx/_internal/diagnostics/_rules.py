@@ -434,6 +434,26 @@ class _OpLevelDebugging(infra.Rule):
         return self, level, self.format_message(node=node, symbolic_fn=symbolic_fn)
 
 
+class _FindOpschemaMatchedSymbolicFunction(infra.Rule):
+    """Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas."""
+
+    def format_message(self, symbolic_fn, node) -> str:  # type: ignore[override]
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'The OnnxFunction: {symbolic_fn} is the nearest match of the node {node}.'
+        """
+        return self.message_default_template.format(symbolic_fn=symbolic_fn, node=node)
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, symbolic_fn, node
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'The OnnxFunction: {symbolic_fn} is the nearest match of the node {node}.'
+        """
+        return self, level, self.format_message(symbolic_fn=symbolic_fn, node=node)
+
+
 class _ArgFormatTooVerbose(infra.Rule):
     """The formatted str for argument to display is too verbose."""
 
@@ -888,6 +908,31 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """Report any op level validation failure in warnings."""
+
+    find_opschema_matched_symbolic_function: _FindOpschemaMatchedSymbolicFunction = dataclasses.field(
+        default=_FindOpschemaMatchedSymbolicFunction.from_sarif(
+            **{
+                "id": "FXE0014",
+                "name": "find-opschema-matched-symbolic-function",
+                "short_description": {
+                    "text": "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas."
+                },
+                "full_description": {
+                    "text": "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas. A warning will be issued if the matched OnnxFunction is not an exact match.",
+                    "markdown": "When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input\ndtypes of the ATen/Custom operator are compared with the input dtypes of the OnnxFunction opschemas\nto find a match. However, if a perfect/exact match is not found, the dispatcher will attempt to find\nthe nearest match with the highest number of input dtypes matching the OnnxFunction opschemas, while\nissuing a warning.\n\nThere are two types of level that can be triggered in this rule:\n\n1. NOTE: A perfect match is found, and no warning is issued.\n2. WARNING: The matched OnnxFunction is not a perfect/exact match.\n\nHere are some suggestions based on the WARNING situation:\n\n1. If there are NO errors or mismatches in the results, it is safe to disregard this warning,\n  as the definition of OnnxFunction schema is usually more stringent.\n2. If there are errors or mismatches in the results, it is recommended to:\n  (a) Enable op_level_debugging to determine if the OnnxFunction might be incorrect.\n  (b) Report the issue to the PyTorch-ONNX team.\n  (c) Create/register a custom symbolic function to replace the default one.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "The OnnxFunction: {symbolic_fn} is the nearest match of the node {node}."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas."""
 
     arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
         default=_ArgFormatTooVerbose.from_sarif(
