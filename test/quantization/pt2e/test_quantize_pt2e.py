@@ -221,17 +221,19 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         expected_node_list=None,
         check_against_fx_quant=False,
         fx_qconfig_mapping=None,
+        export_with_dynamic_shape=False,
     ):
         m_eager = model.eval()
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m, guards = torchdynamo.export(
-            m,
-            *copy.deepcopy(example_inputs),
-            aten_graph=True,
-            tracing_mode="real",
-        )
+        with torchdynamo.config.patch(dynamic_shapes=export_with_dynamic_shape):
+            m, guards = torchdynamo.export(
+                m,
+                *copy.deepcopy(example_inputs),
+                aten_graph=True,
+                tracing_mode="symbolic" if export_with_dynamic_shape else "real",
+            )
 
         m = prepare_pt2e_quantizer(m, quantizer)
         # Calibrate
@@ -258,12 +260,13 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m_fx = _convert_to_reference_decomposed_fx(
                 m_fx, backend_config=backend_config
             )
-            m_fx, guards = torchdynamo.export(
-                m_fx,
-                *copy.deepcopy(example_inputs),
-                aten_graph=True,
-                tracing_mode="real",
-            )
+            with torchdynamo.config.patch(dynamic_shapes=export_with_dynamic_shape):
+                m_fx, guards = torchdynamo.export(
+                    m_fx,
+                    *copy.deepcopy(example_inputs),
+                    aten_graph=True,
+                    tracing_mode="symbolic" if export_with_dynamic_shape else "real",
+                )
             node_occurrence = {}
             for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
                 if k in expected_node_occurrence:
@@ -1092,6 +1095,34 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             [],
             True,
             qconfig_mapping,
+        )
+
+    def test_qnnpack_quantizer_linear_with_dynamic_shape(self):
+        quantizer = QNNPackQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m_eager = TestHelperModules.TwoLinearModule().eval()
+
+        # Test with 2d inputs
+        example_inputs_3d = (torch.randn(9, 10, 8),)
+        node_occurrence = {
+            # input and output are using quantize_per_tensor and weight is using quantize_per_channel
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+        }
+        qconfig = default_per_channel_symmetric_qnnpack_qconfig
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
+        self._test_quantizer(
+            m_eager,
+            example_inputs_3d,
+            quantizer,
+            node_occurrence,
+            [],
+            True,
+            qconfig_mapping,
+            export_with_dynamic_shape=True,
         )
 
     def test_qnnpack_quantizer_obs_sharing_ops(self):

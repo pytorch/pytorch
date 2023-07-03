@@ -144,10 +144,11 @@ class _KinetoProfile:
             if (
                 is_cuda11_or_lower
                 and hasattr(torch, '_inductor')
-                and torch._inductor.config.triton.cudagraphs
             ):
-                os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
-                self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
+                import torch._inductor.config as inductor_config
+                if inductor_config.triton.cudagraphs:
+                    os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+                    self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
 
     def stop_trace(self):
         assert self.profiler is not None
