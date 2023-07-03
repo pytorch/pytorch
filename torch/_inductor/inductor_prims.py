@@ -26,6 +26,17 @@ def make_prim(
     )
 
 
+def eager_force_stride(input_tensor, stride):
+    if input_tensor.stride() == stride:
+        return input_tensor
+    new_tensor = input_tensor.clone().as_strided(
+        input_tensor.shape,
+        stride,
+    )
+    new_tensor.copy_(input_tensor)
+    return new_tensor
+
+
 # Custom prims used for handling randomness
 seed = make_prim(
     "inductor_seed(Device device) -> Tensor",
@@ -49,11 +60,14 @@ random = make_prim(
     "inductor_random(SymInt[] size, Tensor seed, str mode) -> Tensor",
     lambda size, seed, mode: getattr(torch, mode)(size, device=seed.device),
     doc="torch.rand()/torch.randn() using backend-specific RNG that can be fused",
-    tags=(torch.Tag.nondeterministic_seeded,),
 )
 randint = make_prim(
     "inductor_randint(SymInt low, SymInt high, SymInt[] size, Tensor seed) -> Tensor",
     lambda low, high, size, seed: torch.randint(low, high, size, device=seed.device),
     doc="torch.randint() using backend-specific RNG that can be fused",
-    tags=(torch.Tag.nondeterministic_seeded,),
+)
+force_stride_order = make_prim(
+    "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
+    lambda input_tensor, stride: eager_force_stride(input_tensor, stride),
+    doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
 )

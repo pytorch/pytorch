@@ -10,6 +10,7 @@ from .quantizer import (
     Quantizer,
     SharedQuantizationSpec,
 )
+from .x86_inductor_quantizer import X86InductorQuantizer
 
 from .composable_quantizer import ComposableQuantizer
 from .embedding_quantizer import EmbeddingQuantizer
@@ -27,4 +28,5 @@ __all__ = [
     "SharedQuantizationSpec",
     "DerivedQuantizationSpec",
     "QuantizationAnnotation",
+    "X86InductorQuantizer",
 ]
