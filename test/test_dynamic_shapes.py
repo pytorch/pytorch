@@ -20,7 +20,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
-    FloorDiv,
     guard_bool,
     guard_float,
     guard_int,
@@ -40,6 +39,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
+from torch.utils._sympy.functions import FloorDiv
 
 aten = torch.ops.aten
 
