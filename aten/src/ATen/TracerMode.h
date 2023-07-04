@@ -109,8 +109,8 @@
 //   off.
 
 namespace at {
-// TODO: move this from `at::` to `jit::torch::` after
-// `aten/src/ATen/cpp_custom_type_hack.h` is removed.
+// Currently only used by scalar_tensor_static in ATen,
+// otherwise this could be moved to torch::jit
 
 namespace tracer {
 namespace impl {
