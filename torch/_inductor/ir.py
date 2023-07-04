@@ -229,6 +229,14 @@ class OptionalScalar(OptionalAttr):
         self.name = "optional_scalar"
 
 
+class OptionalLayout(OptionalAttr):
+    def __init__(self):
+        self.name = "optional_layout"
+
+
+default_value_map = {"Optional[Layout]": OptionalLayout}
+
+
 def may_convert_to_optional(optional_value, value):
     return optional_value if not value and V.graph.cpp_wrapper else value
 
@@ -2874,6 +2882,27 @@ class ExternKernel(InputsKernel):
         args.extend(self.codegen_const_args())
         return args
 
+    def get_kwargs_value(self, arg_name):
+        if arg_name in self.kwargs:
+            return self.kwargs.get(arg_name)
+        if (
+            hasattr(self, "kwargs_default_value")
+            and arg_name in self.kwargs_default_value
+        ):
+            default_value = self.kwargs_default_value.get(arg_name).get("value")
+            if default_value is None:
+                arg_type = self.kwargs_default_value.get(arg_name).get("type")
+                # TODO: extend the support here
+                assert (
+                    str(arg_type) in default_value_map
+                ), f"unsupported default_value arg_type: {str(arg_type)}"
+                return default_value_map[str(arg_type)]()
+            else:
+                return default_value
+        raise AssertionError(
+            "arg %s not found in self.kwargs or self.kwargs_default_value" % arg_name
+        )
+
     def codegen_kwargs(self):
         kwargs = []
         if self.kwargs:
@@ -2883,10 +2912,7 @@ class ExternKernel(InputsKernel):
                     self.ordered_kwargs_for_cpp_kernel
                 ), "ordered_kwargs_for_cpp_kernel has to be provided"
                 for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                    assert arg_name in self.kwargs, (
-                        "arg %s not found in self.kwargs" % arg_name
-                    )
-                    v = self.kwargs.get(arg_name)
+                    v = self.get_kwargs_value(arg_name)
                     kwargs.append(V.graph.wrapper_code.val_to_str(v))
             else:
                 kwargs = [
@@ -3272,6 +3298,16 @@ class FallbackKernel(ExternKernelAlloc):
                 if V.graph.cpp_wrapper
                 else f"aten.{kernel.__name__}"
             )
+            # TODO: use_key="" for now. Should be overload name?
+            schema = torch._C._get_schema(op_overload_packet._qualified_op_name, "")
+            self.ordered_kwargs_for_cpp_kernel = [
+                x.name for x in schema.arguments if x.kwarg_only
+            ]
+            self.kwargs_default_value = {
+                x.name: {"type": x.real_type, "value": x.default_value}
+                for x in schema.arguments
+                if x.kwarg_only
+            }
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
                 self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
