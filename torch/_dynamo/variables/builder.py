@@ -42,6 +42,7 @@ from ..source import (
     TupleIteratorGetItemSource,
 )
 from ..utils import (
+    build_checkpoint_variable,
     clone_input,
     get_fake_value,
     getfile,
@@ -49,11 +50,11 @@ from ..utils import (
     HAS_NUMPY,
     is_namedtuple,
     is_typing,
+    is_utils_checkpoint,
     istype,
     np,
     odict_values,
     preserve_rng_state,
-    requires_higher_order_op,
     tensor_always_has_static_shape,
     tuple_iterator,
     tuple_iterator_getitem,
@@ -461,6 +462,8 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.BUILTIN_MATCH),
             )
+        elif is_utils_checkpoint(value):
+            return build_checkpoint_variable(source=self.source)
         elif is_allowed(value):
             return TorchVariable(
                 value,
@@ -488,7 +491,6 @@ class VariableBuilder:
             istype(value, (type, types.FunctionType))
             and skipfiles.check(getfile(value), allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
-            and not requires_higher_order_op(value)
         ):
             return SkipFilesVariable(
                 value,
@@ -1041,6 +1043,7 @@ class VariableBuilder:
                         constraint_dim=None,
                     ),
                     hint=value,
+                    source=self.source,
                 )
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
@@ -1465,10 +1468,9 @@ def wrap_to_fake_tensor_and_record(
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
-        tx.output.tensor_weakref_to_sizes_strides_offset[WeakIdRef(e)] = {
+        tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
-            "storage_offset": fake_e.storage_offset(),
         }
         return fake_e
     else:
