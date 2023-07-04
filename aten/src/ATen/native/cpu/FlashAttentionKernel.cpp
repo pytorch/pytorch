@@ -99,6 +99,22 @@ inline void _mkl_gemm(
       ldc);
 }
 
+template <typename scalar_t>
+inline void fill_stub(scalar_t* data, scalar_t val, int64_t size) {
+  using Vec = Vectorized<scalar_t>;
+  Vec data_vec = Vec(val);
+  int64_t d = 0;
+  for (; d < size - (size % Vec::size()); d += Vec::size()) {
+    data_vec.store(data + d);
+  }
+  #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
+  # pragma unroll
+  #endif
+  for (; d < size; d++) {
+    data[d] = val;
+  }
+}
+
 inline void _exp_reduce_sum_fusion_kernel(
     float* a,
     const int& size,
@@ -143,26 +159,6 @@ inline void _reduce_max_fusion_kernel(
   using fVec = vec::Vectorized<float>;
   max = vec::reduce_all<float>(
     [](fVec& x, fVec& y) { return vec::maximum(x, y); }, out, size);
-}
-
-inline void _init_mha_buffer_kernel(float* max, float* sum, const int& size) {
-  using fVec = vec::Vectorized<float>;
-  float tmp_max = -std::numeric_limits<float>::infinity();
-  auto vec_tmp_max = fVec(tmp_max);
-  float tmp_zero = 0;
-  auto vec_tmp_zero = fVec(tmp_zero);
-  int64_t i = 0;
-  for (i = 0; i < fVec::size() * (size / fVec::size()); i += fVec::size()) {
-    _store(max + i, vec_tmp_max);
-    _store(sum + i, vec_tmp_zero);
-  }
-  #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
-  # pragma unroll
-  #endif
-  for (; i < size; i++) {
-    max[i] = tmp_max;
-    sum[i] = tmp_zero;
-  }
 }
 
 /**
@@ -301,7 +297,7 @@ void cpu_flash_attention(
   int64_t num_head = query.size(1);
   int64_t headSize = query.size(3);
   int64_t hiddenSize = num_head * headSize;
-  
+
   float scaling_factor =
       sdp::calculate_scale(query, scale).as_float_unchecked();
 
@@ -330,8 +326,6 @@ void cpu_flash_attention(
 
   int64_t qSlice = (qSize - 1) / qSplitSize + 1;
   int64_t qTail = (qSize - 1) % qSplitSize + 1;
-  int64_t kvSlice = (kvSize - 1) / kvSplitSize + 1;
-  int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
 
   int64_t num_thread = at::get_num_threads();
 
@@ -355,15 +349,17 @@ void cpu_flash_attention(
     int64_t i = 0, j = 0, k = 0;
     data_index_init(begin, i, batchSize, j, num_head, k, qSlice);
     int ompIdx = at::get_thread_num();
-
-    for (int64_t x = begin; x < end; x++) {
-      int qBlockSize = (k == qSlice - 1) ? qTail : qSplitSize;
-      _init_mha_buffer_kernel(
-          qk_max_data + ompIdx * qSplitSize,
-          qk_sum_data + ompIdx * qSplitSize,
-          qBlockSize);
-      for (int l = 0; l < kvSlice; ++l) {
-        int kvBlockSize = (l == kvSlice - 1) ? kvTail : kvSplitSize;
+    for (const auto x : c10::irange(begin, end)) {
+      (void)x; // Suppress unused variable
+      int64_t m = k * qSplitSize;
+      int64_t qBlockSize = (k == qSlice - 1) ? qTail : qSplitSize;
+      // Initialize max and sum
+      fill_stub(qk_max_data + ompIdx * qSplitSize, -std::numeric_limits<float>::infinity(), qBlockSize);
+      fill_stub(qk_sum_data + ompIdx * qSplitSize, 0.f, qBlockSize);
+      int64_t num_keys = is_causal ? std::min(m + qSplitSize, kvSize) : kvSize;
+      for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
+        int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
+        // Calculate Q @ K.T
         _mkl_gemm(
             true,
             false,
@@ -372,7 +368,7 @@ void cpu_flash_attention(
             headSize,
             scaling_factor,
             k_data + i * kvSize * kStride + headSize * j +
-                l * kvSplitSize * kStride,
+                n * kStride,
             kStride,
             q_data + i * qSize * qStride + headSize * j +
                 k * qSplitSize * qStride,
@@ -380,6 +376,15 @@ void cpu_flash_attention(
             0.f,
             qk_data + ompIdx * qSplitSize * kvSplitSize,
             kvBlockSize);
+        // Apply casual mask
+        if (is_causal && num_keys - n <= kvSplitSize) {
+          for (const auto row : c10::irange(qBlockSize)) {
+            int64_t last_col = m + row - n;
+            float* row_ptr = qk_data + ompIdx * qSplitSize * kvSplitSize + row * kvSplitSize;
+            fill_stub(row_ptr + last_col + 1, -std::numeric_limits<float>::infinity(), kvBlockSize - last_col - 1);
+          }
+        }
+        // Update coefficients with Softmax
         _mha_softmax_kernel<scalar_t>(
             qk_data + ompIdx * qSplitSize * kvSplitSize,
             qk_norm_data + ompIdx * qSplitSize * kvSplitSize,
@@ -389,7 +394,8 @@ void cpu_flash_attention(
             qBlockSize,
             kvBlockSize,
             headSize,
-            l);
+            n);
+        // Calculate Softmax(Q @ K.T) @ V
         _mkl_gemm(
             false,
             false,
@@ -398,11 +404,11 @@ void cpu_flash_attention(
             kvBlockSize,
             1.f,
             v_data + i * kvSize * vStride + headSize * j +
-                l * kvSplitSize * vStride,
+                n * vStride,
             vStride,
             qk_norm_data + ompIdx * qSplitSize * kvSplitSize,
             kvBlockSize,
-            l == 0 ? 0.f : 1.f,
+            n == 0 ? 0.f : 1.f,
             dst_data + ompIdx * qSplitSize * headSize,
             headSize);
       }
@@ -436,13 +442,13 @@ void flash_attention_kernel_impl(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
-  AT_DISPATCH_SWITCH(query.scalar_type(), "op_name",
-    AT_DISPATCH_CASE(ScalarType::Float, "flash_attention", [&] {
+  AT_DISPATCH_SWITCH(query.scalar_type(), "flash_attention",
+    AT_DISPATCH_CASE(ScalarType::Float, [&] {
       cpu_flash_attention<scalar_t>(output, logsumexp, cum_seq_q, cum_seq_k,
           max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
           query, key, value, dropout_p, is_causal, return_debug_mask, scale);
     });
-    AT_DISPATCH_CASE(ScalarType::BFloat16, "flash_attention", [&] {
+    AT_DISPATCH_CASE(ScalarType::BFloat16, [&] {
       cpu_flash_attention<scalar_t>(output, logsumexp, cum_seq_q, cum_seq_k,
           max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
           query, key, value, dropout_p, is_causal, return_debug_mask, scale);

@@ -734,7 +734,7 @@ _scaled_dot_product_flash_attention_cpu(
   flash_attention_kernel(kCPU, output, logsumexp, cum_seq_q, cum_seq_k,
       max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
       query, key, value, dropout_p, is_causal, return_debug_mask, scale);
-  
+
   output = output.view({batchSize, qSize, num_head, headSize}).transpose(1, 2);
 
   return std::make_tuple(std::move(output), logsumexp, cum_seq_q, cum_seq_k,
