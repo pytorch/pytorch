@@ -470,7 +470,7 @@ Tensor mkldnn_convolution_pointwise_binary(
     ideep::post_ops po;
     po.append_binary(it_binary->second, other_desc);
     if (unary_attr_value != "none") {
-      po.append_eltwise(1.0, unary_alg, 0.f, 0.f);
+      po.append_eltwise(unary_alg, 0.f, 0.f);
     }
     op_attr.set_post_ops(po);
 
