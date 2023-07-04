@@ -35,8 +35,9 @@ c10::intrusive_ptr<PythonRecordFunction> record_function_enter_new(
 }
 
 // Ends the profiling scope created with record_function_enter.
-void record_function_exit(at::RecordFunction& rec) {
-  rec.end();
+static void record_function_exit(
+    const c10::intrusive_ptr<PythonRecordFunction>& record) {
+  record->record.end();
 }
 
 
@@ -70,7 +71,7 @@ TORCH_LIBRARY_FRAGMENT(profiler, m) {
       "_record_function_enter_new(str name, str? args=None) -> "
       "__torch__.torch.classes.profiler._RecordFunction",
       &record_function_enter_new);
-  m.def("_record_function_exit._RecordFunction", &record_function_exit_new);
+  m.def("_record_function_exit._RecordFunction", &record_function_exit);
 
   torch::jit::registerOperator(torch::jit::Operator(
       "profiler::_call_end_callbacks_on_jit_fut._RecordFunction("
