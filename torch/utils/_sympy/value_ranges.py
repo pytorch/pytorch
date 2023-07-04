@@ -267,6 +267,7 @@ class ValueRangeAnalysis:
                 return ValueRanges(sympy_dtype(0), sympy_dtype(1))
         else:
             # int to float or float to int
+            assert isinstance(x.lower, (sympy.Integer, sympy.Float)), (x, type(x.lower))
             return ValueRanges(sympy_dtype(x.lower), sympy_dtype(x.upper))
 
     @staticmethod
