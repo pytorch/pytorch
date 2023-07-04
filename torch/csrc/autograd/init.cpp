@@ -670,12 +670,24 @@ static PyObject* set_autocast_cache_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_grad_enabled(PyObject* _unused, PyObject* arg) {
+static PyObject* set_grad_enabled(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  static PythonArgParser parser({
+      "set_grad_enabled(bool enabled)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (at::impl::torch_function_mode_enabled()) {
+    auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+    return handle_torch_function(
+        r, args, kwargs, torch_C_module, "torch._C", "_set_grad_enabled");
   }
-  GradMode::set_enabled(arg == Py_True);
+  auto grad_enabled = r.toBool(0);
+  GradMode::set_enabled(grad_enabled);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -908,7 +920,10 @@ PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
 
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
-    {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
+    {"_set_grad_enabled",
+     castPyCFunctionWithKeywords(set_grad_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"is_grad_enabled", is_grad_enabled, METH_NOARGS, nullptr},
     {"_set_fwd_grad_enabled", set_fwd_grad_enabled, METH_O, nullptr},
     {"_is_fwd_grad_enabled", is_fwd_grad_enabled, METH_NOARGS, nullptr},
