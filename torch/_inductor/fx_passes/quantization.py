@@ -1,3 +1,4 @@
+import copy
 import functools
 
 import torch
@@ -248,6 +249,68 @@ def register_quantization_lowerings():
     _register_quantized_conv_lowering_pt2e(quantize_conv_output_pattern_pt2e)
 
 
+dequant_node_pattern = CallFunction(
+    aten.mul.Tensor,
+    CallFunction(
+        aten.sub.Tensor,
+        CallFunction(
+            prims.convert_element_type.default,
+            KeywordArg("x"),
+            KeywordArg("o_dtype"),  # dtype=torch.float32
+        ),
+        KeywordArg("dequant_zp"),  # dequant zp
+    ),
+    KeywordArg("dequant_scale"),  # dequant_scale
+)
+
+
+def _register_dequant_promotion_pass(pattern):
+    @register_freezing_graph_pattern(
+        pattern, pass_number=0
+    )  # pass_number=0, so it will run before insert weight prepack node
+    def dequant_promotion(match: Match, *args, **kwargs):
+        to_fp32_node = match.nodes[0]
+        sub_node = match.nodes[1]
+        mul_node = match.nodes[2]
+        graph = match.graph
+        if len(list(mul_node.users)) > 1:
+            # Dequant Node used by multiply nodes
+            # Will do dequant promotion, so each used node has a seperate dequant pattern connected
+            for index in range(len(list(mul_node.users)) - 1):
+                user_node = list(mul_node.users)[index]
+                with graph.inserting_before(user_node):
+                    # Step1: Duplicate the mul node
+                    new_mul_node = graph.call_function(
+                        torch.ops.aten.mul.Tensor,
+                        args=mul_node.args,
+                        kwargs=mul_node.kwargs,
+                    )
+                    new_mul_node.meta = copy.copy(mul_node.meta)
+                    user_node.replace_input_with(mul_node, new_mul_node)
+
+                    with graph.inserting_before(new_mul_node):
+                        # Step2: Duplicate the sub node
+                        new_sub_node = graph.call_function(
+                            torch.ops.aten.sub.Tensor,
+                            args=sub_node.args,
+                            kwargs=sub_node.kwargs,
+                        )
+                        new_sub_node.meta = copy.copy(sub_node.meta)
+                        new_mul_node.replace_input_with(sub_node, new_sub_node)
+
+                        with graph.inserting_before(new_sub_node):
+                            # Step3: Duplicate the to_fp32 node
+                            new_to_fp32_node = graph.call_function(
+                                torch.ops.prims.convert_element_type.default,
+                                args=to_fp32_node.args,
+                                kwargs=to_fp32_node.kwargs,
+                            )
+                            new_to_fp32_node.meta = copy.copy(to_fp32_node.meta)
+                            new_sub_node.replace_input_with(
+                                to_fp32_node, new_to_fp32_node
+                            )
+
+
 dequant_per_channel_pattern = CallFunction(
     quantized_decomposed.dequantize_per_channel.default,  # dequant_per_channel node
     KeywordArg("q_weight"),  # bias
@@ -359,4 +422,5 @@ def _register_qconv_weight_prepack_pass(pattern):
 
 @functools.lru_cache(None)
 def _quantization_mkldnn_weight_pack_init():
+    _register_dequant_promotion_pass(dequant_node_pattern)
     _register_qconv_weight_prepack_pass(dequant_convolution_node_pattern)
