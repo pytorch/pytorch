@@ -4758,7 +4758,7 @@ class CommonTemplate:
     def test_scatter_reduce2(self):
         def fn(a, dim, index, b, reduce):
             return aten.scatter_reduce(a, dim, index, b, reduce, include_self=False)
-        
+
         for reduce in ["sum", "amax"]:
             self.common(
                 fn,
