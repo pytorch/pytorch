@@ -902,6 +902,7 @@ def trace(
 _trace_module_map: Optional[Dict[Any, Any]] = None
 
 
+@torch._disable_dynamo
 def trace_module(
     mod,
     inputs,
@@ -1229,6 +1230,7 @@ def _script_if_tracing(fn):
     return wrapper
 
 
+@torch._disable_dynamo
 def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False,
                      return_inputs=False, _return_inputs_states=False):
     """

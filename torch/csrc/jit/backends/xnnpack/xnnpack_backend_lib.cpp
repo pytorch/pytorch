@@ -27,8 +27,7 @@ class XNNPackBackend : public PyTorchBackendInterface {
   // Constructor.
   // NOLINTNEXTLINE(modernize-use-equals-default)
   explicit XNNPackBackend() {}
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~XNNPackBackend() = default;
+  virtual ~XNNPackBackend() override = default;
 
   bool is_available() override {
     return xnn_status_success == xnn_initialize(/*allocator=*/nullptr);

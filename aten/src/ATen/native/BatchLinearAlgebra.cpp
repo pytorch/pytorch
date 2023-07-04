@@ -1698,7 +1698,7 @@ Tensor cholesky(const Tensor &self, bool upper) {
     "and\n"
     "U = torch.cholesky(A, upper=True)\n",
     "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).mH().\n"
+    "U = torch.linalg.cholesky(A).mH\n"
     "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
   );
   if (self.numel() == 0) {
@@ -1733,7 +1733,7 @@ Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
     "and\n"
     "U = torch.cholesky(A, upper=True)\n",
     "should be replaced with\n",
-    "U = torch.linalg.cholesky(A).mH().\n"
+    "U = torch.linalg.cholesky(A).mH\n"
     "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
   );
   checkSameDevice("cholesky", result, self);
@@ -3273,7 +3273,7 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
   //     "U, S, V = torch.svd(A, some=some, compute_uv=True) (default)\n",
   //     "should be replaced with\n",
   //     "U, S, Vh = torch.linalg.svd(A, full_matrices=not some)\n",
-  //     "V = Vh.mH()\n",
+  //     "V = Vh.mH\n",
   //     "and\n",
   //     "_, S, _ = torch.svd(A, some=some, compute_uv=False)\n",
   //     "should be replaced with\n",
