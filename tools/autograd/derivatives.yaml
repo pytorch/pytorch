@@ -1858,7 +1858,7 @@
   result: auto_linear
 
 - name: sparse_mask(Tensor self, Tensor mask) -> Tensor
-  self: grad.to_dense().sparse_mask(mask).to_dense()
+  self: sparse_mask_backward(grad, mask, self.layout())
   mask: non_differentiable
 
 - name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, SymInt[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
