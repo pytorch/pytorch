@@ -600,8 +600,7 @@ Tensor scaled_dot_product_attention(
     bool is_causal,
     c10::optional<double> scale) {
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
-  // int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
-  int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::flash_attention);
+  int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (query_.device().type() == DeviceType::CUDA){
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
       query_, key, value, attn_mask_, dropout_p, is_causal, scale);
