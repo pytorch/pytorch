@@ -192,7 +192,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.binary_cross_entropy,
             aten.binary_cross_entropy_backward,
             aten.binary_cross_entropy_with_logits,
-            aten.bucketize,
             aten.celu,
             aten.col2im,
             aten.count_nonzero,
