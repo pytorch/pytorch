@@ -3434,6 +3434,103 @@ def arange_start(
     )
 
 
+def _multi_margin_loss_shape_check(ndims, input, target):
+    valid_inputs = (
+        (ndims == 2 and input.size(1) != 0)
+        or (ndims == 1 and input.size(0) != 0)
+        or ndims == 0
+    )
+    if ndims <= 1:
+        nframe = 1
+        dim = 1 if ndims == 0 else input.size(0)
+    else:
+        nframe = input.size(0)
+        dim = input.size(1)
+    torch._check(
+        valid_inputs,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+    )
+    torch._check(
+        valid_inputs and target.ndim <= 1 and target.numel() == nframe,
+        lambda: f"inconsistent target size, got: {target.shape}",
+    )
+    return nframe, dim
+
+
+@register_decomposition(aten.multi_margin_loss)
+@out_wrapper()
+def multi_margin_loss(
+    input: Tensor,
+    target: Tensor,
+    p: NumberType = 1,
+    margin: NumberType = 1,
+    weight: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    ndims = input.ndim
+    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
+    _multi_margin_loss_shape_check(ndims, input, target)
+    input = torch.atleast_2d(input)
+    target = torch.atleast_1d(target)
+    if weight is not None:
+        weight = torch.atleast_1d(weight)
+    size = input.size(1)
+    mask = torch.arange(size, device=input.device) != target.unsqueeze(1)
+
+    def _f(x):
+        return torch.gather(x, dim=1, index=target.unsqueeze(-1))
+
+    z = margin - _f(input) + input
+    z = z.clamp_min(0)
+    z = z if p == 1 else z * z
+    if weight is not None:
+        z = z * weight[target].unsqueeze(1)
+    loss = z.where(mask, 0).sum(dim=1).div(size)
+    return apply_loss_reduction(loss, reduction)
+
+
+@register_decomposition(aten.multi_margin_loss_backward)
+@out_wrapper()
+def multi_margin_loss_backward(
+    grad_output: Tensor,
+    input: Tensor,
+    target: Tensor,
+    p: NumberType,
+    margin: NumberType,
+    weight: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    ndims = input.ndim
+    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
+    nframe, dim = _multi_margin_loss_shape_check(ndims, input, target)
+    orig_shape = input.shape
+    input = torch.atleast_2d(input)
+    target = torch.atleast_1d(target)
+    if weight is not None:
+        weight = torch.atleast_1d(weight)
+    size = input.size(1)
+    mask = torch.arange(size, device=input.device) != target.unsqueeze(1)
+
+    def _f(x):
+        return torch.gather(x, dim=1, index=target.unsqueeze(-1))
+
+    z = margin - _f(input) + input
+    z = z.clamp_min(0)
+    g = 1.0 / (nframe * dim) if reduction == Reduction.MEAN.value else 1.0 / dim
+    g = torch.tensor(g, dtype=input.dtype, device=input.device)
+    z = torch.where(z > 0, g, 0) if p == 1 else 2 * g * z
+    if weight is not None:
+        z = z * weight[target].unsqueeze(1)
+    z = z.where(mask, 0)
+    s = z.neg().sum(dim=1)
+    grad_input = torch.where(mask, z, s.unsqueeze(1))
+    if reduction != Reduction.NONE.value or grad_output.ndim == 0:
+        grad_input = grad_input * grad_output
+    else:
+        grad_input = grad_input * grad_output.unsqueeze(1)
+    return grad_input.reshape(orig_shape)
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
