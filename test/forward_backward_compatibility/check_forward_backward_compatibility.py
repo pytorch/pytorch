@@ -311,6 +311,17 @@ ALLOW_LIST = [
     ("aten::to_sparse_csc.out", datetime.date(2023, 12, 31)),
     ("aten::to_sparse_csr.out", datetime.date(2023, 12, 31)),
     ("aten::_structured_sparse_linear", datetime.date(2023, 12, 31)),
+    ("aten::fbgemm_linear_int8_weight_fp32_activation", datetime.date(2023, 8, 1)),
+    ("aten::fbgemm_linear_int8_weight", datetime.date(2023, 8, 1)),
+    ("aten::fbgemm_linear_quantize_weight", datetime.date(2023, 8, 1)),
+    ("aten::fbgemm_pack_gemm_matrix_fp16", datetime.date(2023, 8, 1)),
+    ("aten::fbgemm_linear_fp16_weight_fp32_activation", datetime.date(2023, 8, 1)),
+    ("aten::fbgemm_linear_fp16_weight", datetime.date(2023, 8, 1)),
+    ("aten::fbgemm_pack_quantized_matrix", datetime.date(2023, 8, 1)),
+    ("aten::quantized_lstm_cell", datetime.date(2023, 8, 1)),
+    ("aten::quantized_gru_cell", datetime.date(2023, 8, 1)),
+    ("aten::quantized_rnn_relu_cell", datetime.date(2023, 8, 1)),
+    ("aten::quantized_rnn_tanh_cell", datetime.date(2023, 8, 1)),
 
 ]
 
