@@ -1,12 +1,16 @@
 import functools
+from functools import reduce
 
 import torch
+
+from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .. import ir
 
 from ..lowering import lowerings as L
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, get_arg_value, KeywordArg
 from ..virtualized import ops
+from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 
 
@@ -541,6 +545,298 @@ if torch._C._has_mkldnn:
                     unary_attr=UnaryAttr("relu"),
                 )
 
+    def _recover_linear():
+        # convert reshape+linear+reshape to a single linear for applying fusion path.
+        @register_freezing_graph_pattern(
+            CallFunction(
+                aten.view.default,
+                CallFunction(
+                    mkldnn._linear_pointwise.default,
+                    CallFunction(aten.view.default, Arg(), KeywordArg("reshape_1")),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                ),
+                KeywordArg("reshape_2"),
+            ),
+            pass_number=1,
+        )
+        def reshape_linear_reshape_pattern(match, *args, **kwargs):
+            reshape_1 = kwargs.get("reshape_1")
+            reshape_2 = kwargs.get("reshape_1")
+            graph = match.graph
+            node = match.output_node()
+            if reshape_1[0] == reduce(lambda x, y: x * y, reshape_2[:-1]):
+                repl = graph.call_function(mkldnn._linear_pointwise.default, args)
+                repl.meta.update(node.meta)
+                node.replace_all_uses_with(repl)
+                match.erase_nodes(graph)
+
+        def is_linear_add_bias(match):
+            add_node = match.output_node()
+            linear_node = add_node.args[0]
+            weight_meta = linear_node.args[1].meta.get("val")
+            bias_meta = add_node.args[1].meta.get("val")
+            if weight_meta is None or bias_meta is None:
+                return False
+            return (
+                linear_node.args[2] is None
+                and bias_meta.dim() == 1
+                and bias_meta.size(0) == weight_meta.size(0)
+            )
+
+        # convert linear+bias to a single linear for applying fusion path.
+        @register_freezing_graph_pattern(
+            CallFunction(
+                aten.add.Tensor,
+                CallFunction(mkldnn._linear_pointwise.default, *_linear_args),
+                Arg(),
+            ),
+            pass_number=1,
+            extra_check=is_linear_add_bias,
+        )
+        def linear_bias_pattern(match, *args):
+            graph = match.graph
+            add_node = match.output_node()
+            linear_node = add_node.args[0]
+            new_args = list(linear_node.args)
+            new_args[2] = add_node.args[1]
+            repl = graph.call_function(
+                mkldnn._linear_pointwise.default, tuple(new_args)
+            )
+            repl.meta.update(add_node.meta)
+            add_node.replace_all_uses_with(repl)
+            match.erase_nodes(graph)
+
+    def _is_packable_convolution(match):
+        """
+        Check if the node is supported for MKLDNN convolution.
+        """
+        conv_node = match.output_node()
+        input_meta_value = conv_node.args[0].meta.get("val")
+        weight_meta_value = conv_node.args[1].meta.get("val")
+        if input_meta_value is None or weight_meta_value is None:
+            return False
+        input_size = input_meta_value.shape
+        # TODO: support dynamic input size.
+        if free_symbols(input_size) or conv_node.args[1].op != "get_attr":
+            return False
+        for meta_value in [input_meta_value, weight_meta_value]:
+            if (
+                meta_value is None
+                or meta_value.device.type != "cpu"
+                or meta_value.dim() != 4
+            ):
+                return False
+        if (
+            input_meta_value.dtype == torch.bfloat16
+            or weight_meta_value.dtype == torch.bfloat16
+        ):
+            if not mkldnn._is_mkldnn_bf16_supported():
+                return False
+        is_transposed = conv_node.args[-3]
+        if is_transposed:
+            groups = conv_node.args[-1]
+            in_channels = weight_meta_value.size(0)
+            # doesn't support group_depthwise_conv_transpose.
+            if groups > 1 and groups == in_channels:
+                return False
+            # Port from: aten/src/ATen/native/Convolution.cpp:is_output_padding_big
+            output_paddings = conv_node.args[-2]
+            strides = conv_node.args[3]
+            if any(
+                output_padding >= stride
+                for output_padding, stride in zip(output_paddings, strides)
+            ):
+                return False
+        return True
+
+    def _is_packable_linear(match):
+        """
+        Check if the node is supported for MKLDNN linear.
+        """
+        linear_node = match.output_node()
+        # weight_idx is 1 for aten.mm and is 2 for aten.addmm
+        weight_idx = 2 if linear_node.target == aten.addmm.default else 1
+        if linear_node.args[weight_idx].op != "get_attr":
+            return False
+        input_meta_value = linear_node.args[weight_idx - 1].meta.get("val")
+        weight_meta_value = linear_node.args[weight_idx].meta.get("val")
+        if input_meta_value is None or weight_meta_value is None:
+            return False
+        batch_size = input_meta_value.shape[0]
+        is_bf16_weight = weight_meta_value.dtype == torch.bfloat16
+        # for fp32, batch_size should not be a free symbol.
+        if not is_bf16_weight and free_symbols(batch_size):
+            return False
+        for meta_value in [input_meta_value, weight_meta_value]:
+            if (
+                meta_value is None
+                or meta_value.device.type != "cpu"
+                or meta_value.dim() != 2
+            ):
+                return False
+        if weight_idx == 2:
+            bias_meta_value = linear_node.args[0].meta.get("val")
+            if (
+                bias_meta_value is None
+                or meta_value.device.type != "cpu"
+                or bias_meta_value.dim() != 1
+                or bias_meta_value.size(0) != weight_meta_value.size(1)
+            ):
+                return False
+
+        if (
+            input_meta_value.dtype == torch.bfloat16
+            or weight_meta_value.dtype == torch.bfloat16
+        ):
+            if not mkldnn._is_mkldnn_bf16_supported():
+                return False
+            if free_symbols(batch_size):
+                # TODO: support symbolic input size for bfloat16 path
+                return False
+        return True
+
+    _aten_conv_args = (
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        Arg(),
+        KeywordArg("is_transposed"),
+        Arg(),
+        Arg(),
+    )
+
+    def _register_weight_pack_pass():
+        @register_freezing_graph_pattern(
+            CallFunction(aten.convolution.default, *_aten_conv_args),
+            extra_check=_is_packable_convolution,
+        )
+        def convolution(match, *args, **kwargs):
+            is_transposed = kwargs.get("is_transposed")
+            assert isinstance(is_transposed, bool)
+            graph = match.graph
+            conv_node = match.output_node()
+            input_size = conv_node.args[0].meta.get("val").shape
+            with graph.inserting_before(conv_node):
+                mkldnn_tensor_node = graph.create_node(
+                    "call_method", "to_mkldnn", (args[1],)
+                )
+                constant_args = [args[4], args[3], args[5], args[-1]]
+                packed_weight_op = torch._C._nn.mkldnn_reorder_conv2d_weight
+                packed_conv_op = mkldnn._convolution_pointwise.default
+                if is_transposed:
+                    constant_args.insert(1, args[-2])  # output_padding
+                    packed_weight_op = mkldnn._reorder_convolution_transpose_weight
+                    packed_conv_op = mkldnn._convolution_transpose_pointwise.default
+
+                packed_weight_inputs = (
+                    (mkldnn_tensor_node,) + tuple(constant_args) + (input_size,)
+                )
+                packed_weight_node = graph.create_node(
+                    "call_function", packed_weight_op, args=packed_weight_inputs
+                )
+                packed_conv_inputs = (
+                    (args[0], packed_weight_node, args[2])
+                    + tuple(constant_args)
+                    + ("none", [], "")
+                )
+                packed_conv_node = graph.create_node(
+                    "call_function", packed_conv_op, tuple(packed_conv_inputs)
+                )
+                conv_node.replace_all_uses_with(packed_conv_node)
+                packed_conv_node.meta.update(conv_node.meta)
+                graph.erase_node(conv_node)
+
+        @register_freezing_graph_pattern(
+            CallFunction(aten.addmm.default, Arg(), Arg(), Arg()),
+            extra_check=_is_packable_linear,
+        )
+        @register_freezing_graph_pattern(
+            CallFunction(aten.mm.default, Arg(), Arg()),
+            extra_check=_is_packable_linear,
+        )
+        def linear(match, *args, **kwargs):
+            graph = match.graph
+            linear_node = match.output_node()
+            input = args[0] if linear_node.target == aten.mm.default else args[1]
+            bias = None if linear_node.target == aten.mm.default else args[0]
+            weight = args[1] if linear_node.target == aten.mm.default else args[2]
+            with graph.inserting_before(linear_node):
+                transpose_weight_node = graph.create_node(
+                    "call_function", aten.permute.default, (weight, (1, 0))
+                )
+                mkldnn_tensor_node = graph.create_node(
+                    "call_method", "to_mkldnn", (transpose_weight_node,)
+                )
+                is_bf16_weight = weight.meta.get("val").dtype == torch.bfloat16
+                batch_size = input.meta.get("val").shape[0]
+                packed_weight_inputs = (mkldnn_tensor_node, batch_size)
+                packed_weight_op = (
+                    mkldnn._reorder_linear_weight
+                    if is_bf16_weight
+                    else torch.ops.mkl._mkl_reorder_linear_weight
+                )
+                packed_weight_node = graph.create_node(
+                    "call_function", packed_weight_op, args=packed_weight_inputs
+                )
+                packed_linear_inputs = (input, packed_weight_node)
+                if is_bf16_weight:
+                    packed_linear_inputs += (bias, "none", [], "")
+                    packed_linear_op = mkldnn._linear_pointwise.default
+                else:
+                    packed_linear_inputs += (transpose_weight_node, bias, batch_size)
+                    packed_linear_op = torch.ops.mkl._mkl_linear
+                packed_linear_node = graph.create_node(
+                    "call_function", packed_linear_op, packed_linear_inputs
+                )
+                linear_node.replace_all_uses_with(packed_linear_node)
+                packed_linear_node.meta.update(linear_node.meta)
+                graph.erase_node(linear_node)
+
+    def _eliminate_duplicate_packed_nodes(gm):
+        """
+        Combine packed weight nodes with the same inputs to reduce memory usage.
+        for example:
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(32, 32, bias=True)
+
+            def forward(self, x):
+                return self.linear(self.linear(x))
+
+        the above's packed weight nodes are duplicate if two linear calls have same input size.
+        """
+        if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
+            return gm
+        for node in gm.graph.nodes:
+            if node.target == "to_mkldnn" and len(node.args[0].users) > 1:
+                for user_node in list(node.args[0].users.keys()):
+                    if user_node.target == "to_mkldnn" and user_node != node:
+                        user_node.replace_all_uses_with(node)
+                        gm.graph.erase_node(user_node)
+        packed_weight_ops = [
+            torch._C._nn.mkldnn_reorder_conv2d_weight,
+            mkldnn._reorder_convolution_transpose_weight,
+            mkldnn._reorder_linear_weight,
+            torch.ops.mkl._mkl_reorder_linear_weight,
+        ]
+        for node in gm.graph.nodes:
+            if node.target in packed_weight_ops and len(node.args[0].users) > 1:
+                for user_node in list(node.args[0].users.keys()):
+                    if (
+                        user_node.target == node.target
+                        and user_node != node
+                        and user_node.args == node.args
+                    ):
+                        user_node.replace_all_uses_with(node)
+                        gm.graph.erase_node(user_node)
+
     @functools.lru_cache(None)
     def _mkldnn_fusion_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
@@ -548,3 +844,9 @@ if torch._C._has_mkldnn:
             _register_inplace_fusion()
             _register_binary_unary_fusion()
             _register_binary_fusion()
+
+    @functools.lru_cache(None)
+    def _mkldnn_weight_pack_init():
+        if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
+            _register_weight_pack_pass()
+            _recover_linear()
