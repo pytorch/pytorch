@@ -211,6 +211,28 @@ def skip_dynamic_fx_test(reason: str):
     return skip_dec
 
 
+def skip_in_ci(reason: str):
+    """Skip test in CI.
+
+    Args:
+        reason: The reason for skipping test in CI.
+
+    Returns:
+        A decorator for skipping test in CI.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if os.getenv("CI"):
+                raise unittest.SkipTest(f"Skip test in CI. {reason}")
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
 def xfail(reason: str):
     """Expect failure.
 
