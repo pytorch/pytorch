@@ -934,7 +934,7 @@ class CPUReproTests(TestCase):
             res = torch.gather(**test_args)
             return res
 
-        for dtype in (torch.bfloat16, ):  # TODO: haozhe, support fp16
+        for dtype in (torch.bfloat16,):  # TODO: haozhe, support fp16
             input_tensor_for_ref = torch.tensor(
                 [[3.0, -5.0]], dtype=dtype, requires_grad=True
             )
