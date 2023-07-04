@@ -190,26 +190,26 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     @staticmethod
     def make(value, source=None, **kwargs):
         if value.__name__ == "cond":
-            return CondVariable(value, source, **kwargs)
+            return HigherOrderCondVariable(value, source, **kwargs)
         elif value.__name__ == "map":
-            return MapVariable(value, source, **kwargs)
+            return HigherOrderMapVariable(value, source, **kwargs)
         elif value.__name__ == "executorch_call_delegate":
-            return ExecutorchDelegateVariable(value, source, **kwargs)
+            return HigherOrderExecutorchVariable(value, source, **kwargs)
         elif value is torch._functorch.eager_transforms.grad_impl:
-            return FunctorchGradVariable(value, source, **kwargs)
+            return HigherOrderFuncTorchGradVariable(value, source, **kwargs)
         elif value.__name__ in (
             "trampoline_autograd_fwd",
             "trampoline_autograd_bwd",
             "trampoline_autograd_apply",
         ):
-            return AutogradTrampolineVariable(value, source, **kwargs)
+            return HigherOrderAutogradFunctionVariable(value, source, **kwargs)
         elif value.__name__ == "wrap":
-            return WrapVariable(value, source, **kwargs)
+            return HigherOrderWrapVariable(value, source, **kwargs)
         elif value.__name__ in (
             "wrap_activation_checkpoint",
             "tag_activation_checkpoint",
         ):
-            return CheckpointVariable(value, source, **kwargs)
+            return HigherOrderCheckpointVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -219,7 +219,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
 
-class CondVariable(TorchHigherOrderOperatorVariable):
+class HigherOrderCondVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -403,7 +403,7 @@ class CondVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class MapVariable(TorchHigherOrderOperatorVariable):
+class HigherOrderMapVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
@@ -486,7 +486,7 @@ class MapVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class ExecutorchDelegateVariable(TorchHigherOrderOperatorVariable):
+class HigherOrderExecutorchVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -532,7 +532,7 @@ class ExecutorchDelegateVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class FunctorchGradVariable(TorchHigherOrderOperatorVariable):
+class HigherOrderFuncTorchGradVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -702,7 +702,7 @@ class FunctorchGradVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class AutogradTrampolineVariable(TorchHigherOrderOperatorVariable):
+class HigherOrderAutogradFunctionVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -790,7 +790,7 @@ class AutogradTrampolineVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class WrapVariable(TorchHigherOrderOperatorVariable):
+class HigherOrderWrapVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -853,7 +853,7 @@ class WrapVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class CheckpointVariable(TorchHigherOrderOperatorVariable):
+class HigherOrderCheckpointVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
