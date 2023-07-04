@@ -527,8 +527,6 @@ at::Tensor _qconv_prepack_pt2e(
   auto dilates = dilation.vec();
   auto op_attr = ideep::attr_t();
 
-  double output_scale = 1.0;
-  int64_t output_zero_point = 0;
   ideep::scale_t weights_scales(weight_scales.numel());
 
   if (weight_scales.ndimension() == 0) {

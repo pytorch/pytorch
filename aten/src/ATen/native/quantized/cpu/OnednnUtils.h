@@ -8,7 +8,18 @@
 #include <cpuinfo.h>
 
 #include <c10/util/CallOnce.h>
+#endif // #if AT_MKLDNN_ENABLED()
 
+enum PostOps {
+  NoPostOp,
+  Relu,
+  LeakyRelu,
+  Tanh,
+  Add,
+  AddRelu,
+};
+
+#if AT_MKLDNN_ENABLED()
 using PrimitiveCacheKey = std::tuple<
     double, // input_scale
     int64_t, // input_zero_point
@@ -105,15 +116,6 @@ struct DeconvPrimitiveCache : PrimitiveCache {
   DeconvParams& get_params() {
     return params;
   }
-};
-
-enum PostOps {
-  NoPostOp,
-  Relu,
-  LeakyRelu,
-  Tanh,
-  Add,
-  AddRelu,
 };
 
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
