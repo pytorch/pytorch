@@ -55,7 +55,7 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 namespace at {
 namespace native {
 
-Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
+static Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
   if (!self.requires_grad() && !other.requires_grad()) {
     auto out_size = infer_size(self.sizes(), other.sizes());
     auto out_dtype = promoteTypes(
