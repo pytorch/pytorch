@@ -74,6 +74,33 @@ class TagActivationCheckpoint(HigherOrderOperator):
     def __init__(self):
         super().__init__("tag_activation_checkpoint")
 
+    @staticmethod
+    def divide_kwargs(kwargs):
+        """
+        checkpoint fn can have mixed kwargs between checkpointed fn and
+        checkpoint fn itself. For example
+        >> def gn(x, y, z=None):
+        >>     a = torch.matmul(x, y)
+        >>     if z is not None:
+        >>         return torch.matmul(a, z)
+        >>     return a
+
+        >> def fn(x, y, z):
+        >>     return torch.cos(checkpoint(gn, x, y, use_reentrant=False, z=z))
+
+        In the above case, z belongs to checkpointed function gn, but
+        use_reentrant belongs to the checkpoint function. This function splits
+        the kwargs into checkpoint_kwargs and gmod_kwargs (or
+        checkpointed_fn_kwargs).
+
+        We do sorting to ensure same graph from run to run for better
+        debuggability. It is not required for correctness.
+        """
+        checkpoint_keys = ("use_reentrant", "context_fn", "determinism_check", "debug", "preserve_rng_state")
+        checkpoint_kwargs = {name: kwargs[name] for name in sorted(kwargs.keys()) if name in checkpoint_keys}
+        gmod_kwargs = {name: kwargs[name] for name in sorted(kwargs.keys()) if name not in checkpoint_keys}
+        return checkpoint_kwargs, gmod_kwargs
+
     def tag_nodes(self, gmod):
         # TODO - This needs major investigation. Currently, we are tagging all
         # the forward nodes as recomputable. However, torch.utils.checkpoint

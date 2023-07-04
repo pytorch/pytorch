@@ -857,13 +857,33 @@ class HigherOrderCheckpointVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable
+        from torch._higher_order_ops.wrap import TagActivationCheckpoint
+        from . import ConstantVariable, TensorVariable
         from .builder import wrap_fx_proxy
 
         assert (
-            all(isinstance(value, ConstantVariable) for value in kwargs.values())
+            all(
+                isinstance(value, (TensorVariable, ConstantVariable))
+                for value in kwargs.values()
+            )
             or not kwargs
         ), "only constant kwargs are supported"
+
+        checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
+
+        # The gmod_kwargs are the keyword positional arguments for the function
+        # to be traced (checkpointed). Since, we can't really create an Fx graph
+        # with forward accepting kwargs, we flatten the gmod_kwargs (remove the
+        # name) and append to the exisiting args of the checkpointed fn.
+        #
+        # This does not affect Dynamo tracing in any manner. Dynamo will analyze
+        # the bytecode as usual, find the bytecode associated with keyword
+        # position, and it will then find the associated TensorVariable tracker.
+        # Just that this tensor is now also tracked as a placeholder in the fx
+        # graph, and that is done by just appending to the existing args.
+        flattened_args = args[1:] + [
+            gmod_kwargs[name] for name in sorted(gmod_kwargs.keys())
+        ]
 
         # See NOTE [HigherOrderOperator tracing design] for more details
         checkpoint = tx.copy_graphstate()
@@ -875,9 +895,7 @@ class HigherOrderCheckpointVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             args[0],
-            [
-                *args[1:],
-            ],
+            flattened_args,
             graph_checkpoint,
             checkpoint,
         )
@@ -892,7 +910,7 @@ class HigherOrderCheckpointVariable(TorchHigherOrderOperatorVariable):
         body_node = make_attr(tx, body_name)
         p_args = (
             body_node,
-            *(arg.as_proxy() for arg in args[1:]),
+            *(arg.as_proxy() for arg in flattened_args),
             *(arg for arg in body_lifted_freevars.keys()),
         )
         example_value = pytree.tree_map_only(
@@ -901,7 +919,9 @@ class HigherOrderCheckpointVariable(TorchHigherOrderOperatorVariable):
             body_r.as_proxy(),
         )
 
-        _, p_kwargs = proxy_args_kwargs([], kwargs)
+        # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
+        # already flattened above and managed inside the fx graph.
+        _, p_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
 
         # Store the invocation as a call
         return wrap_fx_proxy(
