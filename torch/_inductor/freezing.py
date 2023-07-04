@@ -11,7 +11,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import detect_fake_mode, dynamo_timed
 from torch._functorch.compile_utils import fx_graph_cse
 from torch._inductor.fx_passes.freezing_patterns import get_freezing_patterns
-from torch.ao.quantization._pt2e.utils import _fuse_conv_bn_
+from torch.ao.quantization.pt2e.utils import _fuse_conv_bn_
 from torch.fx.experimental.proxy_tensor import make_fx
 from . import config
 from .decomposition import select_decomp_table
