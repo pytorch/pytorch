@@ -16,6 +16,8 @@ from torch.ao.quantization._pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization._pt2e.quantizer.utils import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
+    _is_sym_size_node,
+    _node_only_used_for_sym_size,
     get_bias_qspec,
     get_input_act_qspec,
     get_output_act_qspec,
@@ -40,10 +42,10 @@ from .quantizer import (
     OperatorPatternType,
     QuantizationAnnotation,
     QuantizationConfig,
-    QuantizationSpecBase,
     QuantizationSpec,
-    SharedQuantizationSpec,
+    QuantizationSpecBase,
     Quantizer,
+    SharedQuantizationSpec,
 )
 
 
@@ -517,9 +519,18 @@ class QNNPackQuantizer(Quantizer):
         bias_qspec = get_bias_qspec(quantization_config)
         for module_or_fn_type, partitions in module_partitions.items():
             for p in partitions:
-                if len(p.input_nodes) > 1:
-                    raise ValueError(f"More than one input node found for {module_or_fn_type} partition")
-                act_node = p.input_nodes[0]
+                act_nodes = [
+                    n
+                    for n in p.input_nodes
+                    if not _node_only_used_for_sym_size(n, p.nodes)
+                ]
+                if len(act_nodes) > 1:
+                    raise ValueError(
+                        f"Multiple activation nodes found for partition {p} {act_nodes}"
+                    )
+                if len(act_nodes) == 0:
+                    raise ValueError(f"No activation node found for partition {p}")
+                act_node = act_nodes[0]
                 output_node = p.output_nodes[0]
                 weight_node = None
                 bias_node = None
@@ -533,14 +544,21 @@ class QNNPackQuantizer(Quantizer):
                     raise ValueError("No weight found in Linear pattern")
                 # find use of act node within the matched pattern
                 act_use_node = None
-                for node in p.nodes:
-                    if node in act_node.users:  # type: ignore[union-attr]
-                        act_use_node = node
-                        break
-                if act_use_node is None:
+                # When doing tracing with dynamic shape, we end up with sym_size nodes
+                # This nodes do not need quantization, so skip those.
+                # We can also have quant workflow throw exception when sym_size nodes
+                # are annotated.
+                # This is not specific to linear, so in future diffs we should streamline
+                # this.
+                act_node_users = list(
+                    filter((lambda x: (_is_sym_size_node(x) is False)), act_node.users)
+                )
+                act_use_node_in_p = set(act_node_users).intersection(set(p.nodes))
+                if len(act_use_node_in_p) != 1:
                     raise ValueError(
-                        "Could not find an user of act node within matched pattern."
+                        f"Could not find a valid use of act node. All uses {act_use_node_in_p}"
                     )
+                act_use_node = act_use_node_in_p.pop()
                 if _is_annotated([act_use_node]) is False:  # type: ignore[list-item]
                     _annotate_input_qspec_map(
                         act_use_node,
@@ -560,9 +578,7 @@ class QNNPackQuantizer(Quantizer):
     def _annotate_gru(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        gru_partitions = get_source_partitions(
-            gm.graph, [torch.nn.GRU]
-        )
+        gru_partitions = get_source_partitions(gm.graph, [torch.nn.GRU])
         gru_partitions = list(itertools.chain(*gru_partitions.values()))
         for gru_partition in gru_partitions:
             output_nodes = gru_partition.output_nodes
@@ -581,7 +597,7 @@ class QNNPackQuantizer(Quantizer):
                 input_qspec_map={
                     input_act: get_input_act_qspec(quantization_config),
                 },
-                _annotated=True
+                _annotated=True,
             )
 
             hidden_state = input_nodes[1]
@@ -592,7 +608,7 @@ class QNNPackQuantizer(Quantizer):
                 input_qspec_map={
                     hidden_state: get_input_act_qspec(quantization_config),
                 },
-                _annotated=True
+                _annotated=True,
             )
 
             assert len(output_nodes) == 2, "expecting GRU to have two outputs"
@@ -624,9 +640,11 @@ class QNNPackQuantizer(Quantizer):
             assert isinstance(input_act, Node)
 
             # only annotate maxpool when the output of the input node is annotated
-            if "quantization_annotation" not in input_act.meta or \
-               not input_act.meta["quantization_annotation"]._annotated or \
-               input_act.meta["quantization_annotation"].output_qspec is None:
+            if (
+                "quantization_annotation" not in input_act.meta
+                or not input_act.meta["quantization_annotation"]._annotated
+                or input_act.meta["quantization_annotation"].output_qspec is None
+            ):
                 continue
             # input and output of maxpool will share quantization parameter with input of maxpool
             act_qspec = SharedQuantizationSpec(input_act)
@@ -663,9 +681,11 @@ class QNNPackQuantizer(Quantizer):
 
             # only annotate input output sharing operator
             # when the output of the input node is annotated
-            if "quantization_annotation" not in input_act.meta or \
-               not input_act.meta["quantization_annotation"]._annotated or \
-               input_act.meta["quantization_annotation"].output_qspec is None:
+            if (
+                "quantization_annotation" not in input_act.meta
+                or not input_act.meta["quantization_annotation"]._annotated
+                or input_act.meta["quantization_annotation"].output_qspec is None
+            ):
                 continue
 
             act_qspec = SharedQuantizationSpec(input_act)
