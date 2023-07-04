@@ -37,7 +37,7 @@ kernels from a Python program which is especially relevant for newer GPUs.
 
 TorchDynamo supports many different backends but inductor specifically works
 by generating `Triton <https://github.com/openai/triton>`__ kernels. Suppose our example above
-was called ``trig.py`` we can inspect the code generated triton kernels by 
+was called ``trig.py`` we can inspect the code generated triton kernels by
 running ``TORCH_COMPILE_DEBUG=1 python trig.py`` with the actual generated kernel being
 
 .. code-block:: python
