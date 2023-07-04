@@ -30,6 +30,11 @@ unary_list = {
     torch.nn.Hardsigmoid(): 5,
 }
 
+non_decomposed_unary_list = [
+    torch.nn.ReLU,
+    torch.nn.Sigmoid,
+    torch.nn.Tanh,
+]
 
 # The dict value is (match_count, match_nodes, inplace)
 binary_list = {
@@ -45,6 +50,12 @@ binary_list = {
 
 @config.patch({"freezing": True})
 class TestPaternMatcher(TestCase):
+    def _check_unary_is_decomposed(self, unary_fn):
+        return not any(
+            isinstance(unary_fn, fn)
+            for fn in [torch.nn.ReLU, torch.nn.Sigmoid, torch.nn.Tanh]
+        )
+
     def _clone_inputs(self, inputs):
         def clone(x):
             if not isinstance(x, torch.Tensor):
@@ -130,11 +141,10 @@ class TestPaternMatcher(TestCase):
                 .add(1)
                 .to(memory_format=memory_format)
             )
+            # Add 1 for weight packing pass.
             match_nodes = unary_list[unary_fn] + 1
-            if check_autocast and not any(
-                isinstance(unary_fn, fn)
-                for fn in [torch.nn.ReLU, torch.nn.Sigmoid, torch.nn.Tanh]
-            ):
+            if check_autocast and self._check_unary_is_decomposed(unary_fn):
+                # Has extra dtype conversion nodes for autocast.
                 match_nodes += 2
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=check_autocast)
 
@@ -169,12 +179,12 @@ class TestPaternMatcher(TestCase):
                 # only fuse for linear when the dtype is bf16
                 mod = mod.to(dtype)
                 v = torch.randn(2, 10).to(dtype)
+                # packing pass + unary fusion.
                 matcher_count = 2
+                # Add 1 for weight packing pass.
                 matcher_nodes = unary_list[unary_fn] + 1
-                if not any(
-                    isinstance(unary_fn, fn)
-                    for fn in [torch.nn.ReLU, torch.nn.Sigmoid, torch.nn.Tanh]
-                ):
+                if self._check_unary_is_decomposed(unary_fn):
+                    # Has extra dtype conversion nodes for autocast.
                     matcher_nodes += 2
                 self._test_common(
                     mod, (v,), matcher_count, matcher_nodes, check_autocast=True
@@ -210,11 +220,10 @@ class TestPaternMatcher(TestCase):
             v = torch.randn(x_shape, dtype=torch.float32).to(
                 memory_format=memory_format
             )
+            # Add 1 for weight packing pass.
             match_nodes = unary_list[unary_fn] + 1
-            if check_autocast and not any(
-                isinstance(unary_fn, fn)
-                for fn in [torch.nn.ReLU, torch.nn.Sigmoid, torch.nn.Tanh]
-            ):
+            if check_autocast and self._check_unary_is_decomposed(unary_fn):
+                # Has extra dtype conversion nodes for autocast.
                 match_nodes += 2
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=check_autocast)
 

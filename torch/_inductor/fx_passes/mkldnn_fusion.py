@@ -19,9 +19,9 @@ if torch._C._has_mkldnn:
     mkldnn = torch.ops.mkldnn
     prims = torch.ops.prims
 
-    _conv_args = [Arg() for i in range(10)]
-    _linear_args = [Arg() for i in range(6)]
-    _conv_transpose_args = [Arg() for i in range(11)]
+    _conv_args = [Arg() for _ in range(10)]
+    _linear_args = [Arg() for _ in range(6)]
+    _conv_transpose_args = [Arg() for _ in range(11)]
 
     def _conv_call(users=1):
         return CallFunction(
@@ -56,8 +56,13 @@ if torch._C._has_mkldnn:
             _users=1,
         )
 
-    def _bf16_fusion(computation_call, unary_call, users=1):
-        return _to_bf16(unary_call(_to_float(computation_call, users)))
+    def _unary_fusion_pattern(unary_fusion, call_fn, users, is_bf16):
+        # only insert to_dtype if is_bf16 is True
+        computation_call = (
+            _to_float(call_fn(), users=users) if is_bf16 else call_fn(users=users)
+        )
+        out = unary_fusion(computation_call)
+        return _to_bf16(out) if is_bf16 else out
 
     def _gelu_fusion_1(computation_call):
         return CallFunction(
@@ -177,11 +182,11 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _is_valid_computation_unary_fusion(computation_op, check_bf16=False):
+    def _is_valid_computation_unary_fusion(computation_op, is_bf16=False):
         def fn(match):
             matched = _is_single_computation_op(computation_op)(match)
             computation_node = filter_nodes(match.nodes, computation_op)[0]
-            if check_bf16:
+            if is_bf16:
                 conversion_dtype_nodes = filter_nodes(
                     match.nodes, prims.convert_element_type.default
                 )
@@ -202,11 +207,11 @@ if torch._C._has_mkldnn:
         return fn
 
     def _register_unary_fusion_lowering(
-        pattern, unary_attr, computation_op, check_bf16=False
+        pattern, unary_attr, computation_op, is_bf16=False
     ):
         @register_lowering_pattern(
             pattern,
-            extra_check=_is_valid_computation_unary_fusion(computation_op, check_bf16),
+            extra_check=_is_valid_computation_unary_fusion(computation_op, is_bf16),
         )
         def fn(match, *args, **kwargs):
             computation_args = list(args)[:-3] + [
@@ -218,7 +223,7 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _register_leaky_relu_fusion_lowering(pattern, computation_op, check_bf16=False):
+    def _register_leaky_relu_fusion_lowering(pattern, computation_op, is_bf16=False):
         @register_lowering_pattern(
             pattern, extra_check=_is_single_computation_op(computation_op)
         )
@@ -228,7 +233,7 @@ if torch._C._has_mkldnn:
                 matched = False
             else:  # inp is a Number
                 matched = True
-            if check_bf16:
+            if is_bf16:
                 dtype1 = kwargs.get("to_float")
                 dtype2 = kwargs.get("to_bf16")
                 matched = matched and dtype1 == torch.float and dtype2 == torch.bfloat16
@@ -243,14 +248,14 @@ if torch._C._has_mkldnn:
             else:
                 # computation_args += ["none", [], ""]
                 out = L[computation_op](*computation_args)
-                if check_bf16:
+                if is_bf16:
                     out = L[prims.convert_element_type.default](out, dtype=torch.float)
                 out = L[aten.where](
                     L[aten.gt](out, 0),
                     out,
                     L[aten.mul](out, negative_slope),
                 )
-                if check_bf16:
+                if is_bf16:
                     out = L[prims.convert_element_type.default](
                         out, dtype=torch.bfloat16
                     )
@@ -258,7 +263,7 @@ if torch._C._has_mkldnn:
 
         return fn
 
-    def _register_hardtanh_fusion_lowering(pattern, computation_op, check_bf16=False):
+    def _register_hardtanh_fusion_lowering(pattern, computation_op, is_bf16=False):
         @register_lowering_pattern(
             pattern, extra_check=_is_single_computation_op(computation_op)
         )
@@ -271,7 +276,7 @@ if torch._C._has_mkldnn:
                 matched = False
             else:  # inp is a Number
                 matched = min_value <= max_value
-            if check_bf16:
+            if is_bf16:
                 dtype1 = kwargs.get("to_float")
                 dtype2 = kwargs.get("to_bf16")
                 matched = matched and dtype1 == torch.float and dtype2 == torch.bfloat16
@@ -285,10 +290,10 @@ if torch._C._has_mkldnn:
                 return L[computation_op](*computation_args)
             else:
                 out = L[computation_op](*computation_args)
-                if check_bf16:
+                if is_bf16:
                     out = L[prims.convert_element_type.default](out, dtype=torch.float)
                 out = L[aten.clamp_max](L[aten.clamp_min](out, min_value), max_value)
-                if check_bf16:
+                if is_bf16:
                     out = L[prims.convert_element_type.default](
                         out, dtype=torch.bfloat16
                     )
@@ -450,108 +455,86 @@ if torch._C._has_mkldnn:
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
     def _register_unary_fusion():
-        call_user1 = [
-            _conv_call(users=1),
-            _linear_call(users=1),
-            _conv_transpose_call(users=1),
-        ]
-        call_user3 = [
-            _conv_call(users=3),
-            _linear_call(users=3),
-            _conv_transpose_call(users=3),
-        ]
+        computation_call_fns = [_conv_call, _linear_call, _conv_transpose_call]
 
-        def _fp32_fusion_patterns():
-            call_user2 = [
-                _conv_call(users=2),
-                _linear_call(users=2),
-                _conv_transpose_call(users=2),
-            ]
-            call_user4 = [
-                _conv_call(users=4),
-                _linear_call(users=4),
-                _conv_transpose_call(users=4),
-            ]
+        def _unary_fusion_patterns(is_bf16):
             replacement_unary_fusion_patterns = {
                 UnaryAttr("gelu", algorithm_attr="tanh"): [
-                    _gelu_fusion_2(u) for u in call_user4
+                    _unary_fusion_pattern(_gelu_fusion_2, call_fn, 4, is_bf16)
+                    for call_fn in computation_call_fns
                 ],
                 UnaryAttr("gelu", algorithm_attr="none"): [
-                    _gelu_fusion_1(u) for u in call_user2
-                ],
-                UnaryAttr("hardswish"): [_hardswish_fusion(u) for u in call_user2],
-                UnaryAttr("hardsigmoid"): [_hardsigmoid_fusion(u) for u in call_user1],
-                UnaryAttr("swish"): [_silu_fusion(u) for u in call_user2],
-                UnaryAttr("relu"): [_combined_fusion(u, aten.relu) for u in call_user1],
-                UnaryAttr("sigmoid"): [
-                    _combined_fusion(u, aten.sigmoid) for u in call_user1
-                ],
-                UnaryAttr("tanh"): [_combined_fusion(u, aten.tanh) for u in call_user1],
-            }
-            return replacement_unary_fusion_patterns
-
-        def _bf16_fusion_patterns():
-            replacement_unary_fusion_patterns = {
-                UnaryAttr("gelu", algorithm_attr="tanh"): [
-                    _bf16_fusion(u, _gelu_fusion_2, users=4) for u in call_user1
-                ],
-                UnaryAttr("gelu", algorithm_attr="none"): [
-                    _bf16_fusion(u, _gelu_fusion_1, users=2) for u in call_user1
+                    _unary_fusion_pattern(_gelu_fusion_1, call_fn, 2, is_bf16)
+                    for call_fn in computation_call_fns
                 ],
                 UnaryAttr("hardswish"): [
-                    _bf16_fusion(u, _hardswish_fusion, users=2) for u in call_user1
+                    _unary_fusion_pattern(_hardswish_fusion, call_fn, 2, is_bf16)
+                    for call_fn in computation_call_fns
                 ],
                 UnaryAttr("hardsigmoid"): [
-                    _bf16_fusion(u, _hardsigmoid_fusion, users=1) for u in call_user1
+                    _unary_fusion_pattern(_hardsigmoid_fusion, call_fn, 1, is_bf16)
+                    for call_fn in computation_call_fns
                 ],
                 UnaryAttr("swish"): [
-                    _bf16_fusion(u, _silu_fusion, users=2) for u in call_user1
+                    _unary_fusion_pattern(_silu_fusion, call_fn, 2, is_bf16)
+                    for call_fn in computation_call_fns
                 ],
             }
+            if not is_bf16:
+                call_user1 = [call_fn(users=1) for call_fn in computation_call_fns]
+                replacement_unary_fusion_patterns.update(
+                    {
+                        UnaryAttr("relu"): [
+                            _combined_fusion(u, aten.relu) for u in call_user1
+                        ],
+                        UnaryAttr("sigmoid"): [
+                            _combined_fusion(u, aten.sigmoid) for u in call_user1
+                        ],
+                        UnaryAttr("tanh"): [
+                            _combined_fusion(u, aten.tanh) for u in call_user1
+                        ],
+                    }
+                )
+
             return replacement_unary_fusion_patterns
 
-        for replace_patterns, check_bf16 in zip(
-            [_fp32_fusion_patterns(), _bf16_fusion_patterns()], [False, True]
-        ):
+        for is_bf16 in [True, False]:
+            replace_patterns = _unary_fusion_patterns(is_bf16)
             for unary_attr, patterns in replace_patterns.items():
                 _register_unary_fusion_lowering(
-                    patterns[0], unary_attr, computation_ops[0], check_bf16
+                    patterns[0], unary_attr, computation_ops[0], is_bf16
                 )
                 _register_unary_fusion_lowering(
-                    patterns[1], unary_attr, computation_ops[1], check_bf16
+                    patterns[1], unary_attr, computation_ops[1], is_bf16
                 )
                 _register_unary_fusion_lowering(
-                    patterns[2], unary_attr, computation_ops[2], check_bf16
+                    patterns[2], unary_attr, computation_ops[2], is_bf16
                 )
-        _leaky_relu_patterns = [
-            [_leaky_relu_fusion(u) for u in call_user3],
-            [_bf16_fusion(u, _leaky_relu_fusion, users=3) for u in call_user1],
-        ]
-        _hardtanh_patterns = [
-            [_hardtanh_fusion(user) for user in call_user1],
-            [_bf16_fusion(u, _hardtanh_fusion, users=1) for u in call_user1],
-        ]
-        for patterns, check_bf16 in zip(_leaky_relu_patterns, [False, True]):
-            for pattern, computation_op in zip(patterns, computation_ops):
-                _register_leaky_relu_fusion_lowering(
-                    pattern, computation_op, check_bf16
-                )
-        for patterns, check_bf16 in zip(_hardtanh_patterns, [False, True]):
-            for pattern, computation_op in zip(patterns, computation_ops):
-                _register_hardtanh_fusion_lowering(pattern, computation_op, check_bf16)
+            _leaky_relu_patterns = [
+                _unary_fusion_pattern(_leaky_relu_fusion, call_fn, 3, is_bf16)
+                for call_fn in computation_call_fns
+            ]
+            for pattern, computation_op in zip(_leaky_relu_patterns, computation_ops):
+                _register_leaky_relu_fusion_lowering(pattern, computation_op, is_bf16)
+            hardtanh_patterns = [
+                _unary_fusion_pattern(_hardtanh_fusion, call_fn, 1, is_bf16)
+                for call_fn in computation_call_fns
+            ]
+            for pattern, computation_op in zip(hardtanh_patterns, computation_ops):
+                _register_hardtanh_fusion_lowering(pattern, computation_op, is_bf16)
 
     def _register_inplace_fusion():
         binary_ops = [aten.add, ops.add]
         inplace_fusion_op = mkldnn._convolution_pointwise_.binary
         outplace_fusion_op = mkldnn._convolution_pointwise.binary
-        computation_call = _conv_call(users=1)
-        computation_op = computation_ops[0]
+        conv_call = _conv_call(users=1)
+        conv_op = computation_ops[0]
         for binary_op in binary_ops:
-            binary_v1 = _binary_fusion_v1(computation_call, binary_op)
+            binary_v1 = _binary_fusion_v1(conv_call, binary_op)
             binary_unary_v1 = _combined_fusion(binary_v1, aten.relu)
             _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_unary_v1,
-                computation_op,
+                conv_op,
                 binary_op,
                 inplace_fusion_op,
                 outplace_fusion_op,
@@ -560,17 +543,17 @@ if torch._C._has_mkldnn:
             )
             _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_v1,
-                computation_op,
+                conv_op,
                 binary_op,
                 inplace_fusion_op,
                 outplace_fusion_op,
                 other_index=0,
             )
-            binary_v2 = _binary_fusion_v2(computation_call, binary_op)
+            binary_v2 = _binary_fusion_v2(conv_call, binary_op)
             binary_unary_v2 = _combined_fusion(binary_v2, aten.relu)
             _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_unary_v2,
-                computation_op,
+                conv_op,
                 binary_op,
                 inplace_fusion_op,
                 outplace_fusion_op,
@@ -579,7 +562,7 @@ if torch._C._has_mkldnn:
             )
             _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_v2,
-                computation_op,
+                conv_op,
                 binary_op,
                 inplace_fusion_op,
                 outplace_fusion_op,
