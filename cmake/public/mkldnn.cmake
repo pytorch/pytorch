@@ -4,7 +4,23 @@ if(CPU_AARCH64)
   include(${CMAKE_CURRENT_LIST_DIR}/ComputeLibrary.cmake)
 endif()
 
-find_package(MKLDNN QUIET)
+if(USE_SYSTEM_MKLDNN)
+  find_package(DNNL REQUIRED)
+  set(MKLDNN_FOUND TRUE)
+  set(MKLDNN_INCLUDE_DIR)
+  set(MKLDNN_LIBRARIES)
+
+  get_property(DNNL_INCLUDE_DIR TARGET DNNL::dnnl PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+  list(APPEND MKLDNN_INCLUDE_DIR ${DNNL_INCLUDE_DIR})
+  list(APPEND MKLDNN_LIBRARIES DNNL::dnnl)
+
+  find_path(IDEEP_INCLUDE_DIR ideep.hpp
+    PATHS "${PROJECT_SOURCE_DIR}/third_party/ideep"
+    PATH_SUFFIXES include)
+  list(APPEND MKLDNN_INCLUDE_DIR ${IDEEP_INCLUDE_DIR})
+else()
+  find_package(MKLDNN QUIET)
+endif()
 
 if(NOT TARGET caffe2::mkldnn)
   add_library(caffe2::mkldnn INTERFACE IMPORTED)
