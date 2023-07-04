@@ -8,8 +8,9 @@ import sympy
 
 import torch
 from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
-from .ir import FloorDiv, InterpreterShim, LoopBody, ModularIndexing
+from .ir import InterpreterShim, LoopBody
 from .utils import sympy_subs, sympy_symbol
 from .virtualized import V
 
