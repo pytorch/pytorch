@@ -3075,36 +3075,6 @@ class ScatterFallback(ExternKernel):
     It also handle the case `src` being a scalar properly.
     """
 
-    def codegen_python(self, wrapper, x, index, src):
-        line = f"{self.kernel}({x}, {self.constant_args[0]}, {index}, {src}"
-        if self.kernel == "aten.scatter_":
-            if self.kwargs["reduce"]:
-                line += f", reduce={repr(self.kwargs['reduce'])}"
-        else:
-            line += ", ".join([""] + self.codegen_kwargs())
-        line += f"){wrapper.ending}"
-        return line
-
-    def codegen_cpp(self, wrapper, x, index, src):
-        # TODO: support other overload for cpp wrapper and remove the below assertions
-        line = f"{self.kernel}({x}, {x}, {self.constant_args[0]}, {index}, {src}"
-        if self.fn == "aten.scatter_":
-            if self.src_is_tensor:
-                if self.kwargs["reduce"]:
-                    line += (
-                        f", {V.graph.wrapper_code.val_to_str(self.kwargs['reduce'])}"
-                    )
-            else:
-                assert (
-                    self.kwargs["reduce"] is None
-                ), "Expect reduce to be None for aten.scatter_ with scalar src"
-        else:
-            assert self.kwargs["reduce"] is not None
-            assert self.kwargs["include_self"] is not None
-            line += f", {','.join(self.codegen_kwargs())}"
-        line += f"){wrapper.ending}"
-        return line
-
     def codegen(self, wrapper):
         if self.src_is_tensor:
             (x, index, src) = [t.codegen_reference() for t in self.inputs]
@@ -3159,12 +3129,12 @@ class ScatterFallback(ExternKernel):
         if V.graph.cpp_wrapper:
             # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
             get_operator_enum = {"add": "sum", "multiply": "prod"}
-            if reduce is not None and reduce in get_operator_enum:
+            if reduce in get_operator_enum:
                 reduce = get_operator_enum[reduce]
-            self.fn = fn
             self.kernel = self.get_cpp_kernel(fn, reduce)
         else:
             self.kernel = fn
+        self.fn = fn
 
         constant_args: Tuple[Any, ...]
         if self.src_is_tensor:
