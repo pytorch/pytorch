@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/Parallel.h>
@@ -501,7 +502,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
   int64_t Kv = value.size(-1);
 
   auto attn = at::empty({B, M, H, Kv}, query.options());
-  auto lse = at::empty({B, compute_logsumexp ? M : 0, H}, query.options());
+  const auto dtype = query.scalar_type();
+  const auto accumulate_dtype = toOpMathType(dtype);
+  auto lse = at::empty({B, compute_logsumexp ? M : 0, H}, query.options().dtype(accumulate_dtype));
 
   auto q_t = query.transpose(1, 2);
   auto k_t = key.transpose(1, 2);

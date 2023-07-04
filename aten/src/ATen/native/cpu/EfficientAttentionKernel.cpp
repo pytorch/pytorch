@@ -37,6 +37,18 @@ static inline void fill_stub(scalar_t* data, scalar_t val, int64_t size) {
   }
 }
 
+template <typename scalar_t>
+static inline scalar_t* conditional_data_ptr(scalar_t* ptr, scalar_t* ptr2) {
+  TORCH_INTERNAL_ASSERT(ptr2 == nullptr);
+  return ptr;
+}
+
+template <typename scalar_t,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+static inline scalar_t* conditional_data_ptr(float* ptr, scalar_t* ptr2) {
+  return ptr2;
+}
+
 // NB: CPU kernel for efficient attention
 //
 // Note that inputs and outputs shapes are expected in physical order
@@ -59,8 +71,11 @@ void cpu_efficient_attention(
     bool is_causal,
     c10::optional<double> scale) {
 
-  using Vec = vec::Vectorized<scalar_t>;
-  scalar_t scaling_factor = sdp::calculate_scale(query, scale).as_float_unchecked();
+  constexpr bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
+  using accum_t = at::opmath_type<scalar_t>;
+  using Vec = vec::Vectorized<accum_t>;
+
+  accum_t scaling_factor = sdp::calculate_scale(query, scale).as_float_unchecked();
 
   // sizes
   int64_t B = query.size(0);
@@ -92,20 +107,31 @@ void cpu_efficient_attention(
   scalar_t* k_data = key.data_ptr<scalar_t>();
   scalar_t* v_data = value.data_ptr<scalar_t>();
   scalar_t* out_data = attn.data_ptr<scalar_t>();
-  scalar_t* lse_data = compute_logsumexp ? logsumexp.data_ptr<scalar_t>() : nullptr;
+  accum_t* lse_data = compute_logsumexp ? logsumexp.data_ptr<accum_t>() : nullptr;
 
   // number of blocks along M
   int64_t MB = divup(M, kQueriesPerBlock);
 
-  // allocate per thread temp buffer
+  const auto dtype = query.scalar_type();
+  const auto accumulate_dtype = toOpMathType(dtype);
+
+  // allocate per thread temp buf (accumulate type)
   int64_t size_per_thread =
       /* s_i and s_delta */ kQueriesPerBlock * kKeysPerBlock +
       /* v_prime         */ kQueriesPerBlock * Kv;
 
-  auto buffer = at::empty({at::get_num_threads(), size_per_thread}, query.options());
-  scalar_t* buf_data = buffer.data_ptr<scalar_t>();
+  int nthreads = at::get_num_threads();
+  auto buf = at::empty({nthreads, size_per_thread}, query.options().dtype(accumulate_dtype));
+  accum_t* buf_data = buf.data_ptr<accum_t>();
 
-  // TODO: try blocking on H
+  // allocate per thread temp buf2 (scalar type)
+  // buf2 is only needed for bfloat16 and float16
+  int64_t size2_per_thread =
+      /* s_delta         */ kQueriesPerBlock * kKeysPerBlock;
+
+  auto buf2 = at::empty({nthreads, is_reduced_type ? size2_per_thread : 0}, query.options());
+  scalar_t* buf2_data = is_reduced_type ? buf2.data_ptr<scalar_t>() : nullptr;
+
   // parallel on B, H, MB
   at::parallel_for(0, B * H * MB, 1, [&](int64_t begin, int64_t end) {
     int64_t b{0}, h{0}, mb{0};
@@ -113,19 +139,22 @@ void cpu_efficient_attention(
 
     // get thread local slices
     int tid = at::get_thread_num();
-    scalar_t* buf_ptr = buf_data + tid * size_per_thread;
+    accum_t* buf_ptr = buf_data + tid * size_per_thread;
 
     // s_i and s_delta: (kQueriesPerBlock, kKeysPerBlock)
-    scalar_t* s_i = buf_ptr;
+    accum_t* s_i = buf_ptr;
 
     // s_delta: (kQueriesPerBlock, kKeysPerBlock)
-    scalar_t* s_delta = s_i;
+    accum_t* s_delta = s_i;
+
+    // s_delta2: holds same value as s_delta in bfloat16 or float16
+    scalar_t* s_delta2 = is_reduced_type ? buf2_data + tid * size2_per_thread : nullptr;
 
     // v': (kQueriesPerBlock, Kv)
-    scalar_t* v_prime = s_i + kQueriesPerBlock * kKeysPerBlock;
+    accum_t* v_prime = s_i + kQueriesPerBlock * kKeysPerBlock;
 
-    scalar_t s_prime[kQueriesPerBlock];
-    scalar_t m_prime[kQueriesPerBlock];
+    accum_t s_prime[kQueriesPerBlock];
+    accum_t m_prime[kQueriesPerBlock];
 
     for (const auto i : c10::irange(begin, end)) {
       (void)i; // Suppress unused variable
@@ -136,9 +165,9 @@ void cpu_efficient_attention(
       scalar_t* q_ptr = q_data + b * q_strideB + m * q_strideM + h * q_strideH;
 
       // init v', s' and m'
-      fill_stub<scalar_t>(v_prime, 0, block_size_m * Kv);
-      fill_stub<scalar_t>(s_prime, 0, block_size_m);
-      fill_stub<scalar_t>(m_prime, -std::numeric_limits<scalar_t>::infinity(), block_size_m);
+      fill_stub<accum_t>(v_prime, 0, block_size_m * Kv);
+      fill_stub<accum_t>(s_prime, 0, block_size_m);
+      fill_stub<accum_t>(m_prime, -std::numeric_limits<accum_t>::infinity(), block_size_m);
 
       // loop over Q and V sequence with block size of kKeysPerBlock
       int64_t num_keys = is_causal ? std::min(m + block_size_m, N) : N;
@@ -146,8 +175,6 @@ void cpu_efficient_attention(
         int64_t block_size_n = std::min(kKeysPerBlock, N - n);
         scalar_t* k_ptr = k_data + b * k_strideB + n * k_strideN + h * k_strideH;
 
-
-        // TODO: template me!
         // calculate attn: Q @ K.T
         cpublas::gemm(
             TransposeType::Transpose,
@@ -160,7 +187,7 @@ void cpu_efficient_attention(
             k_strideN,
             q_ptr,
             q_strideM,
-            static_cast<scalar_t>(0),
+            static_cast<accum_t>(0),
             s_i,
             kKeysPerBlock);
 
@@ -174,36 +201,43 @@ void cpu_efficient_attention(
             // for (const auto col : c10::irange(block_size_n)) {
             //   if (col > last_col) {
             //     int64_t idx = row * kKeysPerBlock + col;
-            //     s_i[idx] = -std::numeric_limits<scalar_t>::infinity();
+            //     s_i[idx] = -std::numeric_limits<accum_t>::infinity();
             //   }
             // }
-            scalar_t* row_ptr = s_i + row * kKeysPerBlock;
-            fill_stub(row_ptr + last_col + 1, -std::numeric_limits<scalar_t>::infinity(), block_size_n - last_col - 1);
+            accum_t* row_ptr = s_i + row * kKeysPerBlock;
+            fill_stub(row_ptr + last_col + 1, -std::numeric_limits<accum_t>::infinity(), block_size_n - last_col - 1);
           }
         }
 
         // update the scaling coefficients
         for (const auto row : c10::irange(block_size_m)) {
           // m_i: max value per row
-          scalar_t m_i = vec::reduce_all<scalar_t>(
+          accum_t m_i = vec::reduce_all<accum_t>(
               [](Vec& x, Vec& y) { return vec::maximum(x, y); },
               s_i + row * kKeysPerBlock,
               block_size_n);
           m_i = std::max(m_i, m_prime[row]);
 
           // m_delta <- exp(m' - m_i)
-          scalar_t m_delta = std::exp(m_prime[row] - m_i);
+          accum_t m_delta = std::exp(m_prime[row] - m_i);
 
           // s_delta <- exp(s_i - m_i)
-          vec::map<scalar_t>(
+          vec::map<accum_t>(
               [m_i](Vec x) { return (x - Vec(m_i)).exp(); },
               s_delta + row * kKeysPerBlock,
               s_i + row * kKeysPerBlock,
               block_size_n);
 
+          if (is_reduced_type) {
+            convert<accum_t, scalar_t>(
+                s_delta + row * kKeysPerBlock,
+                s_delta2 + row * kKeysPerBlock,
+                block_size_n);
+          }
+
           // s' <- s' * m_delta + sum(s_delta)
           s_prime[row] *= m_delta;
-          s_prime[row] += vec::reduce_all<scalar_t>(
+          s_prime[row] += vec::reduce_all<accum_t>(
               [](Vec& x, Vec& y) { return x + y; },
               s_delta + row * kKeysPerBlock,
               block_size_n);
@@ -211,7 +245,7 @@ void cpu_efficient_attention(
           m_prime[row] = m_i;
 
           // v' <- v' * m_delta
-          vec::map<scalar_t>(
+          vec::map<accum_t>(
               [m_delta](Vec x) { return x * Vec(m_delta); },
               v_prime + row * Kv,
               v_prime + row * Kv,
@@ -226,19 +260,19 @@ void cpu_efficient_attention(
             Kv,
             block_size_m,
             block_size_n,
-            static_cast<scalar_t>(1),
+            static_cast<accum_t>(1),
             v_ptr,
             v_strideN,
-            s_delta,
+            conditional_data_ptr(s_delta, s_delta2),
             kKeysPerBlock,
-            static_cast<scalar_t>(1),
+            static_cast<accum_t>(1),
             v_prime,
             Kv);
       }
 
       scalar_t* out_ptr = out_data + b * o_strideB + m * o_strideM + h * o_strideH;
       for (const auto row : c10::irange(block_size_m)) {
-        scalar_t s = 1 / s_prime[row];
+        accum_t s = 1 / s_prime[row];
         vec::map<scalar_t>(
             [s](Vec out) { return out * Vec(s); },
             out_ptr + row * o_strideM,
@@ -247,7 +281,7 @@ void cpu_efficient_attention(
       }
 
       if (compute_logsumexp) {
-        scalar_t* lse_ptr = lse_data + b * l_strideB + m * l_strideM + h * l_strideH;
+        accum_t* lse_ptr = lse_data + b * l_strideB + m * l_strideM + h * l_strideH;
         for (const auto row : c10::irange(block_size_m)) {
           lse_ptr[row * l_strideM] = m_prime[row] + std::log(s_prime[row]);
         }
@@ -273,8 +307,11 @@ void cpu_efficient_attention_backward(
     bool is_causal,
     c10::optional<double> scale) {
 
-  using Vec = vec::Vectorized<scalar_t>;
-  scalar_t scaling_factor = sdp::calculate_scale(query, scale).as_float_unchecked();
+  constexpr bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
+  using accum_t = at::opmath_type<scalar_t>;
+  using Vec = vec::Vectorized<accum_t>;
+
+  accum_t scaling_factor = sdp::calculate_scale(query, scale).as_float_unchecked();
 
   // sizes
   int64_t B = query.size(0);
@@ -319,19 +356,28 @@ void cpu_efficient_attention_backward(
   scalar_t* k_data = key.data_ptr<scalar_t>();
   scalar_t* v_data = value.data_ptr<scalar_t>();
   scalar_t* out_data = out.data_ptr<scalar_t>();
-  scalar_t* lse_data = logsumexp.data_ptr<scalar_t>();
+  accum_t* lse_data = logsumexp.data_ptr<accum_t>();
   scalar_t* grad_q_data = grad_q.data_ptr<scalar_t>();
   scalar_t* grad_k_data = grad_k.data_ptr<scalar_t>();
   scalar_t* grad_v_data = grad_v.data_ptr<scalar_t>();
   scalar_t* grad_o_data = grad_out.data_ptr<scalar_t>();
 
-  // allocate per thread temp buffer
+  const auto dtype = query.scalar_type();
+  const auto accumulate_dtype = toOpMathType(dtype);
+
+  // allocate per thread temp buf (accumulate type)
   int64_t size_per_thread =
       /* attn_v          */ kQueriesPerBlock * kKeysPerBlock +
       /* grad_attn_v     */ kQueriesPerBlock * kKeysPerBlock;
 
-  auto buffer = at::empty({at::get_num_threads(), size_per_thread}, query.options());
-  scalar_t* buf_data = buffer.data_ptr<scalar_t>();
+  int nthreads = at::get_num_threads();
+  auto buf = at::empty({nthreads, size_per_thread}, query.options().dtype(accumulate_dtype));
+  accum_t* buf_data = buf.data_ptr<accum_t>();
+
+  // allocate per thread temp buf2 (scalar type)
+  // buf2 is only needed for bfloat16 and float16
+  auto buf2 = at::empty({nthreads, is_reduced_type ? size_per_thread : 0}, query.options());
+  scalar_t* buf2_data = is_reduced_type ? buf2.data_ptr<scalar_t>() : nullptr;
 
   at::parallel_for(0, B * H, 1, [&](int64_t begin, int64_t end) {
     int64_t b{0}, h{0};
@@ -339,16 +385,23 @@ void cpu_efficient_attention_backward(
 
     // get thread local slices
     int tid = at::get_thread_num();
-    scalar_t* buf_ptr = buf_data + tid * size_per_thread;
+    accum_t* buf_ptr = buf_data + tid * size_per_thread;
+    scalar_t* buf2_ptr = is_reduced_type ? buf2_data + tid * size_per_thread : nullptr;
 
     // attn_v: (kQueriesPerBlock, kKeysPerBlock)
-    scalar_t* attn_v = buf_ptr;
+    accum_t* attn_v = buf_ptr;
 
     // grad_attn_v: (kQueriesPerBlock, kKeysPerBlock)
-    scalar_t* grad_attn_v = attn_v + kQueriesPerBlock * kKeysPerBlock;
+    accum_t* grad_attn_v = attn_v + kQueriesPerBlock * kKeysPerBlock;
+
+    // attn_v2: holds same value as attn_v in bfloat16 or float16
+    scalar_t* attn_v2 = is_reduced_type ? buf2_ptr : nullptr;
+
+    // grad_attn_v: holds same value as grad_attn_v in bfloat16 or float16
+    scalar_t* grad_attn_v2 = is_reduced_type ? attn_v2 + kQueriesPerBlock * kKeysPerBlock : nullptr;
 
     // rowsum of grad_out * out
-    scalar_t sum[kQueriesPerBlock];
+    accum_t sum[kQueriesPerBlock];
 
     for (const auto i : c10::irange(begin, end)) {
       (void)i; // Suppress unused variable
@@ -357,7 +410,7 @@ void cpu_efficient_attention_backward(
         int64_t block_size_m = std::min(kQueriesPerBlock, M - m);
 
         scalar_t* q_ptr = q_data + b * q_strideB + m * q_strideM + h * q_strideH;
-        scalar_t* lse_ptr = lse_data + b * l_strideB + m * l_strideM + h * l_strideH;
+        accum_t* lse_ptr = lse_data + b * l_strideB + m * l_strideM + h * l_strideH;
         scalar_t* out_ptr = out_data + b * o_strideB + m * o_strideM + h * o_strideH;
         scalar_t* grad_o_ptr = grad_o_data + b * gO_strideB + m * gO_strideM + h * gO_strideH;
         scalar_t* grad_q_ptr = grad_q_data + b * gQ_strideB + m * gQ_strideM + h * gQ_strideH;
@@ -397,8 +450,8 @@ void cpu_efficient_attention_backward(
           // restore self attention after softmax from logsumexp
           // attn_v <- exp(attn_v * scale - normalizer)
           for (const auto row : c10::irange(block_size_m)) {
-            scalar_t normalizer = lse_ptr[row * l_strideM];
-            vec::map<scalar_t>(
+            accum_t normalizer = lse_ptr[row * l_strideM];
+            vec::map<accum_t>(
                 [=](Vec s) { return (s * Vec(scaling_factor) - Vec(normalizer)).exp(); },
                 attn_v + row * kKeysPerBlock,
                 attn_v + row * kKeysPerBlock,
@@ -409,8 +462,14 @@ void cpu_efficient_attention_backward(
           if (is_causal && num_keys - n <= kKeysPerBlock) {
             for (const auto row : c10::irange(block_size_m)) {
               int64_t last_col = m + row - n;
-              scalar_t* row_ptr = attn_v + row * kKeysPerBlock;
-              fill_stub<scalar_t>(row_ptr + last_col + 1, 0, block_size_n - last_col - 1);
+              accum_t* row_ptr = attn_v + row * kKeysPerBlock;
+              fill_stub<accum_t>(row_ptr + last_col + 1, 0, block_size_n - last_col - 1);
+            }
+          }
+
+          if constexpr (is_reduced_type) {
+            for (const auto row : c10::irange(block_size_m)) {
+              convert<accum_t, scalar_t>(attn_v + row * kKeysPerBlock, attn_v2 + row * kKeysPerBlock, block_size_n);
             }
           }
 
@@ -426,7 +485,7 @@ void cpu_efficient_attention_backward(
               static_cast<scalar_t>(1),
               grad_o_ptr,
               gO_strideM,
-              attn_v,
+              conditional_data_ptr(attn_v, attn_v2),
               kKeysPerBlock,
               static_cast<scalar_t>(1),
               grad_v_ptr,
@@ -452,13 +511,19 @@ void cpu_efficient_attention_backward(
 
           // grad_attn_v <- attn_v * (grad_attn_v - rowsum)
           for (const auto row : c10::irange(block_size_m)) {
-            scalar_t s = sum[row];
-            vec::map2<scalar_t>(
+            accum_t s = sum[row];
+            vec::map2<accum_t>(
                 [s](Vec attn, Vec grad_attn) { return attn * (grad_attn - Vec(s)); },
                 grad_attn_v + row * kKeysPerBlock,
                 attn_v + row * kKeysPerBlock,
                 grad_attn_v + row * kKeysPerBlock,
                 block_size_n);
+          }
+
+          if constexpr (is_reduced_type) {
+            for (const auto row : c10::irange(block_size_m)) {
+              convert<accum_t, scalar_t>(grad_attn_v + row * kKeysPerBlock, grad_attn_v2 + row * kKeysPerBlock, block_size_n);
+            }
           }
 
           // calculate the gradient of Q
@@ -473,7 +538,7 @@ void cpu_efficient_attention_backward(
               scaling_factor,
               k_ptr,
               k_strideN,
-              grad_attn_v,
+              conditional_data_ptr(grad_attn_v, grad_attn_v2),
               kKeysPerBlock,
               static_cast<scalar_t>(1),
               grad_q_ptr,
@@ -490,7 +555,7 @@ void cpu_efficient_attention_backward(
               scaling_factor,
               q_ptr,
               q_strideM,
-              grad_attn_v,
+              conditional_data_ptr(grad_attn_v, grad_attn_v2),
               kKeysPerBlock,
               static_cast<scalar_t>(1),
               grad_k_ptr,
@@ -513,8 +578,7 @@ void efficient_attention_kernel_impl(
     bool compute_logsumexp,
     bool is_causal,
     c10::optional<double> scale) {
-  // TODO: add bfloat16 and float16
-  AT_DISPATCH_FLOATING_TYPES(query.scalar_type(), "efficient_attention", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, query.scalar_type(), "efficient_attention", [&] {
     // TODO: template kQueriesPerBlock and kKeysPerBlock for different platforms
     cpu_efficient_attention<scalar_t, 128, 256>(attn, logsumexp, query, key, value, compute_logsumexp, is_causal, scale);
   });
@@ -537,7 +601,7 @@ void efficient_attention_backward_kernel_impl(
   // zero stride in leading dimension would lead to slow impl for gemm
   auto grad_out_contig = grad_out.contiguous();
 
-  AT_DISPATCH_FLOATING_TYPES(query.scalar_type(), "efficient_attention_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, query.scalar_type(), "efficient_attention_backward", [&] {
     cpu_efficient_attention_backward<scalar_t, 128, 256>(grad_q, grad_k, grad_v, grad_out_contig, query, key, value, out, logsumexp, is_causal, scale);
   });
 }
