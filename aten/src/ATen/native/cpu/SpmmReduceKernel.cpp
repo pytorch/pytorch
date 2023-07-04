@@ -186,7 +186,23 @@ void spmm_reduce_arg_kernel_impl(
   int64_t M = crow_indices.numel() - 1;
   int64_t K = other.size(-1);
 
+  int num_threads = at::get_num_threads();
+  using opmath_t = at::opmath_type<scalar_t>;
+  Tensor buffer;
+  opmath_t* buffer_data = nullptr;
+  static constexpr bool need_acc = is_reduced_floating_point_v<scalar_t>;
+  if constexpr (need_acc) {
+    auto acc_type = at::toAccumulateType(out.scalar_type(), /*is_cuda=*/true);
+    buffer = at::zeros({num_threads, K}, out.options().dtype(acc_type));
+    buffer_data = buffer.data_ptr<opmath_t>();
+  }
+
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
+    int tid = at::get_thread_num();
+    TORCH_CHECK(tid < num_threads,
+                "expect thread id smaller than ", num_threads, ", got thread id ", tid);
+    opmath_t* buffer_ptr = nullptr;
+
     int64_t row_start, row_end, c;
     for (const auto m : c10::irange(begin, end)) {
       row_start = csr_data[m];
@@ -194,18 +210,28 @@ void spmm_reduce_arg_kernel_impl(
 
       scalar_t* out_ptr = out_data + m * K;
       index_t* arg_out_ptr = arg_out_data + m * K;
+      if constexpr (need_acc) {
+        buffer_ptr = buffer_data + tid * K;
+      } else {
+        buffer_ptr = reinterpret_cast<opmath_t*>(out_ptr);
+      }
 
       if (row_end != row_start) {
-        init<scalar_t, reduce>(out_ptr, K, /*include_self*/false);
+        _init<scalar_t, reduce>(out_ptr, buffer_ptr, K, /*include_self*/false);
         for (const auto e : c10::irange(row_start, row_end)) {
           c = col_data[e];
-          scalar_t val = val_data[e];
+          opmath_t val = opmath_t(val_data[e]);
 
           scalar_t* other_ptr = other_data + c * K;
           for (const auto k : c10::irange(K)) {
-            update_with_index<scalar_t, index_t, reduce>(
-                &out_ptr[k], val *  other_ptr[k], &arg_out_ptr[k], index_t(e));
+            update_with_index<opmath_t, index_t, reduce>(
+                &buffer_ptr[k], opmath_t(val *  other_ptr[k]), &arg_out_ptr[k], index_t(e));
           };
+        }
+      }
+      if constexpr (need_acc) {
+        if (row_end != row_start) {
+          vec::convert(buffer_ptr, out_ptr, K);
         }
       }
     }
