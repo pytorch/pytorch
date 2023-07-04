@@ -11,7 +11,7 @@ import os.path
 import re
 import threading
 from enum import auto, Enum
-from typing import List
+from typing import List, Set
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -51,6 +51,33 @@ class HeuristicType(Enum):
     REDUCTION = auto()
     PERSISTENT_REDUCTION = auto()
     TEMPLATE = auto()
+
+
+class AutotuneHint(Enum):
+    ELEMENTS_PER_WARP_32 = 0
+
+    # Triton codegen tries to codegen set of AutotuneHints.
+    # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
+    # which isn't valid python.
+    # Enum.__str__ will just return "AutotuneHint.ELEMENTS_PER_WARP_32".
+    __repr__ = Enum.__str__
+
+
+def autotune_hints_to_configs(hints: Set[AutotuneHint], size_hints, bs) -> List[Config]:
+    configs = []
+
+    for hint in hints:
+        if hint == AutotuneHint.ELEMENTS_PER_WARP_32:
+            configs.append(
+                triton_config(
+                    size_hints,
+                    *[1 for _ in range(len(size_hints) - 1)],
+                    bs // 4,
+                    num_elements_per_warp=32,
+                )
+            )
+
+    return configs
 
 
 def disable_pointwise_autotuning():
@@ -706,6 +733,10 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     numel = functools.reduce(operator.mul, size_hints)
     bs = max(256, min(numel // 128, 1024))
 
+    hinted_configs = autotune_hints_to_configs(
+        meta.get("autotune_hints", {}), size_hints, bs
+    )
+
     if len(size_hints) == 1:
         if disable_pointwise_autotuning() and not (
             config.max_autotune or config.max_autotune_pointwise
@@ -723,7 +754,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
                 [
                     triton_config(size_hints, bs, num_elements_per_warp=256),
                     triton_config(size_hints, bs // 2, num_elements_per_warp=64),
-                    triton_config(size_hints, bs // 4, num_elements_per_warp=32),
+                    *hinted_configs,
                 ],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
@@ -749,6 +780,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
                 triton_config(size_hints, 16, 256),
                 triton_config(size_hints, bs, 1),
                 triton_config(size_hints, 1, bs),
+                *hinted_configs,
             ],
             meta=meta,
             filename=filename,
@@ -773,6 +805,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
                 triton_config(size_hints, bs, 1, 1),
                 triton_config(size_hints, 1, bs, 1),
                 triton_config(size_hints, 1, 1, bs),
+                *hinted_configs,
             ],
             meta=meta,
             filename=filename,

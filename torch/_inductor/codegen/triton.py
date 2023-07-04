@@ -19,6 +19,7 @@ from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..triton_heuristics import AutotuneHint
 from ..utils import (
     DeferredLineBase,
     get_fused_kernel_name,
@@ -742,6 +743,9 @@ class TritonKernel(Kernel):
         )
         self.initialize_range_tree(pid_cache)
 
+        # A set of autotuning hints to pass as part of triton_meta
+        self.autotune_hints: Set[AutotuneHint] = set()
+
         # define this in a closure to make cache local to object
         @functools.lru_cache(None)
         def simplify_indexing(index: sympy.Expr):
@@ -1292,6 +1296,43 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
+    def bucketize(
+        self,
+        values: CSEVariable,
+        offsets_name: str,
+        offsets_size,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ):
+        """
+        See [Note: Inductor bucketize op]
+        """
+
+        # Triton performance for bucketize_binary_search is much better when the number
+        # of threads equals the number of elements.
+        # If we're trying to use a bucketize kernel, we should make sure that an
+        # autotuning config with num_elements_per_warp=32 exists.
+        self.autotune_hints.add(AutotuneHint.ELEMENTS_PER_WARP_32)
+
+        offsets_ptr = self.args.input(offsets_name)
+        block_size = self.dense_size_str()
+
+        if indexing_dtype == torch.int32:
+            triton_dtype = "tl.int32"
+        elif indexing_dtype == torch.int64:
+            triton_dtype = "tl.int64"
+        else:
+            raise NotImplementedError(
+                "Bucketize only supports indexing with int32 and int64"
+            )
+
+        result = self.cse.generate(
+            self.compute,
+            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size}, {block_size})",  # noqa: B950 line too long
+        )
+
+        return result
+
     def reduction_resize(self, value):
         ndims = self.triton_tensor_ndim()
         if ndims == 1:
@@ -1574,7 +1615,7 @@ class TritonKernel(Kernel):
                     import triton.language as tl
                     from torch._inductor.ir import ReductionHint
                     from torch._inductor.ir import TileHint
-                    from torch._inductor.triton_heuristics import {heuristics}
+                    from torch._inductor.triton_heuristics import AutotuneHint, {heuristics}
                     from torch._inductor.utils import instance_descriptor
                     from torch._inductor import triton_helpers
                 """
@@ -1618,6 +1659,7 @@ class TritonKernel(Kernel):
             "device": V.graph.scheduler.current_device.index,
             "constants": {},
             "mutated_arg_names": mutated_args,
+            "autotune_hints": set(self.autotune_hints),
         }
 
         for tree in self.range_trees:
