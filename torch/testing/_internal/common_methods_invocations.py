@@ -11334,7 +11334,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
                # mexp does not support bf16 and fp16
                DecorateInfo(unittest.skip('Skipped!'), 'TestInductorOpInfo', 'test_comprehensive',
-                            dtype=torch.half, device_type="cpu"),
+                            dtypes=[torch.half], device_type="cpu"),
            ),
            supports_out=False,
            ),
