@@ -1292,6 +1292,37 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
+    def bucketize(
+        self,
+        values: CSEVariable,
+        offsets_name: str,
+        offsets_size,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ):
+        """
+        See [Note: Inductor bucketize op]
+        """
+
+        offsets_ptr = self.args.input(offsets_name)
+        block_size = self.dense_size_str()
+
+        if indexing_dtype == torch.int32:
+            triton_dtype = "tl.int32"
+        elif indexing_dtype == torch.int64:
+            triton_dtype = "tl.int64"
+        else:
+            raise NotImplementedError(
+                "Bucketize only supports indexing with int32 and int64"
+            )
+
+        result = self.cse.generate(
+            self.compute,
+            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size}, {block_size})",  # noqa: B950 line too long
+        )
+
+        return result
+
     def reduction_resize(self, value):
         ndims = self.triton_tensor_ndim()
         if ndims == 1:
