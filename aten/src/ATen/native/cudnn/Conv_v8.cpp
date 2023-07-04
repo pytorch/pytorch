@@ -156,9 +156,33 @@ struct CacheKeyFused {
   float alpha;
 };
 
+struct CacheKeyWrapper : ParamsWrapper<CacheKey> {
+  CacheKeyWrapper(const cudnnBackendDescriptorType_t operation, const Tensor& y, const Tensor& x, const Tensor& w, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
+    at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(x, w);
+    setConvolutionParams(&(this->pod.params), x, w, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
+    this->pod.operation = operation;
+    this->pod.x_alignment = getAlignment(x);
+    this->pod.y_alignment = getAlignment(y);
+    this->pod.w_alignment = getAlignment(w);
+  }
+};
+
+struct CacheKeyFusedWrapper : ParamsWrapper<CacheKeyFused> {
+  CacheKeyFusedWrapper(const Tensor& y, const Tensor& x, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
+    at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(x, w);
+    setConvolutionParams(&(this->pod).params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
+    this->pod.x_alignment = getAlignment(x);
+    this->pod.y_alignment = getAlignment(y);
+    this->pod.w_alignment = getAlignment(w);
+    this->pod.z_alignment = getAlignment(z);
+    this->pod.b_alignment = getAlignment(b);
+    this->pod.alpha = alpha;
+  }
+};
+
 template <typename T, typename KeyType>
 struct BenchmarkCache {
-std::unordered_map<KeyType, cudnn_frontend::ExecutionPlan, ParamsHash<KeyType>, ParamsEqual<KeyType>> engine_cache;
+std::unordered_map<KeyType, cudnn_frontend::ExecutionPlan, ParamsWrapperHash<KeyType>> engine_cache;
 
 // no mutexes here as caches are now thread local for v8, can also return a pointer
 // to the Execution Plan if we know it will not be invalidated by another thread
@@ -179,34 +203,10 @@ void update(const KeyType& key, T& results) {
 
 // @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to be thread safe across all engines
 // see Limitations in https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
-thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKey> benchmark_cache;
-thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFused> benchmark_cache_fused;
+thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper> benchmark_cache;
+thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper> benchmark_cache_fused;
 
 } // namespace
-
-// NB: This (and the fused version) can't be a constructor, because then CacheKey
-// would not be a POD anymore.
-void setCacheKey(CacheKey& key, const cudnnBackendDescriptorType_t operation, const Tensor& y, const Tensor& x, const Tensor& w, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
-  memset(&key, 0, sizeof(key));
-  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(x, w);
-  setConvolutionParams(&key.params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
-  key.operation = operation;
-  key.x_alignment = getAlignment(x);
-  key.y_alignment = getAlignment(y);
-  key.w_alignment = getAlignment(w);
-}
-
-void setCacheKeyFused(CacheKeyFused& key, const Tensor& y, const Tensor& x, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, int64_t groups, bool deterministic, bool allow_tf32) {
-  memset(&key, 0, sizeof(key));
-  at::MemoryFormat memory_format = cudnn_conv_suggest_memory_format(x, w);
-  setConvolutionParams(&key.params, x, w, padding, stride, dilation, groups, deterministic, allow_tf32, memory_format);
-  key.x_alignment = getAlignment(x);
-  key.y_alignment = getAlignment(y);
-  key.w_alignment = getAlignment(w);
-  key.z_alignment = getAlignment(z);
-  key.b_alignment = getAlignment(b);
-  key.alpha = alpha;
-}
 
 void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const cudnn_frontend::ExecutionPlan& plan) {
   c10::DeviceGuard g(x.options().device());
@@ -236,12 +236,12 @@ void run_conv_plan_fused(cudnnHandle_t handle, const Tensor& x, const Tensor& y,
   AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
-auto build_opgraph(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation) {
+auto build_opgraph(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKeyWrapper& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation) {
   auto op = cudnn_frontend::OperationBuilder(desc)
-      .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment, key.params.memory_format))
-      .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment, key.params.memory_format))
-      .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment, key.params.memory_format))
-      .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation, x.scalar_type()))
+      .setxDesc(getTensorDescriptor(x, 'x', key.pod.x_alignment, key.pod.params.memory_format))
+      .setyDesc(getTensorDescriptor(y, 'y', key.pod.y_alignment, key.pod.params.memory_format))
+      .setwDesc(getTensorDescriptor(w, 'w', key.pod.w_alignment, key.pod.params.memory_format))
+      .setcDesc(getConvDescriptor(key.pod.params.dataType, padding, stride, dilation, x.scalar_type()))
       .build();
   std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
@@ -251,7 +251,7 @@ auto build_opgraph(const cudnnHandle_t handle, const cudnnBackendDescriptorType_
   return opGraph;
 }
 
-auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const CacheKeyFused& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation) {
+auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const CacheKeyFusedWrapper& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation) {
   // need computation to be done in FLOAT type regardless of reduced precision input
   const auto precision = CUDNN_DATA_FLOAT;
   auto addDesc = cudnn_frontend::PointWiseDescBuilder()
@@ -266,37 +266,37 @@ auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Ten
                            .setMode(CUDNN_POINTWISE_RELU_FWD)
                            .setMathPrecision(precision)
                            .build();
-  auto convDesc = getConvDescriptor(key.params.dataType, padding, stride, dilation, x.scalar_type());
+  auto convDesc = getConvDescriptor(key.pod.params.dataType, padding, stride, dilation, x.scalar_type());
   const float alpha1 = 1.0;
   const float alpha2 = alpha;
   auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-                   .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment, key.params.memory_format))
+                   .setxDesc(getTensorDescriptor(x, 'x', key.pod.x_alignment, key.pod.params.memory_format))
                    // virtual output of conv
-                   .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'C', key.y_alignment, precision, key.params.memory_format, true))
-                   .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment, key.params.memory_format))
+                   .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'C', key.pod.y_alignment, precision, key.pod.params.memory_format, true))
+                   .setwDesc(getTensorDescriptor(w, 'w', key.pod.w_alignment, key.pod.params.memory_format))
                    .setAlpha(alpha1)
                    .setcDesc(convDesc)
                    .build();
   auto add_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                            .setxDesc(conv_op.getOutputTensor())
-                           .setbDesc(getTensorDescriptor(z, 'z', key.z_alignment, key.params.memory_format))
+                           .setbDesc(getTensorDescriptor(z, 'z', key.pod.z_alignment, key.pod.params.memory_format))
                            // another virtual output (of add)
-                           .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'A', key.y_alignment, precision, key.params.memory_format, true))
+                           .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'A', key.pod.y_alignment, precision, key.pod.params.memory_format, true))
                            .setpwDesc(addDesc)
                            .setAlpha(alpha1)
                            .setAlpha2(alpha2)
                            .build();
   auto add_bias_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                            .setxDesc(add_op.getOutputTensor())
-                           .setbDesc(getTensorDescriptor(b, 'b', key.b_alignment, key.params.memory_format))
+                           .setbDesc(getTensorDescriptor(b, 'b', key.pod.b_alignment, key.pod.params.memory_format))
                            // another virtual output (of add bias)
-                           .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'B', key.y_alignment, precision, key.params.memory_format, true))
+                           .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'B', key.pod.y_alignment, precision, key.pod.params.memory_format, true))
                            .setpwDesc(addBiasDesc)
                            .build();
   auto act_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                           .setxDesc(add_bias_op.getOutputTensor())
                           // final output is in original datatype
-                          .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment, key.params.memory_format))
+                          .setyDesc(getTensorDescriptor(y, 'y', key.pod.y_alignment, key.pod.params.memory_format))
                           .setpwDesc(actDesc)
                           .build();
   std::array<cudnn_frontend::Operation const*, 4> ops = {&conv_op, &add_op, &add_bias_op, &act_op};
@@ -400,7 +400,7 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
   }
 }
 
-auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
+auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKeyWrapper& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
   auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
@@ -430,7 +430,7 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
 
 auto get_plans_from_find_fused(const cudnnHandle_t handle,
                                const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b,
-                               const float alpha, const CacheKeyFused& key,
+                               const float alpha, const CacheKeyFusedWrapper& key,
                                const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation,
                                const bool deterministic, const bool allow_tf32) {
   auto opGraph = build_opgraph_fused(handle, x, y, w, z, b, alpha, key, padding, stride, dilation);
@@ -462,7 +462,7 @@ auto get_plans_from_find_fused(const cudnnHandle_t handle,
 
 
 // We only get configs from this stage to avoid building unnecessary plans that are never executed
-auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, std::string& opgraph_tag, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32, const bool fallback) {
+auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, std::string& opgraph_tag, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKeyWrapper& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32, const bool fallback) {
   auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
   opgraph_tag = opGraph.getTag();
   auto heuristic_mode = at::native::cudnnv8_use_heur_mode_b() ? CUDNN_HEUR_MODE_B : CUDNN_HEUR_MODE_INSTANT;
@@ -473,7 +473,7 @@ auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendD
   return configs;
 }
 
-auto get_configs_from_heuristics_fused(const cudnnHandle_t handle, std::string& opgraph_tag, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const CacheKeyFused& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32, const bool fallback) {
+auto get_configs_from_heuristics_fused(const cudnnHandle_t handle, std::string& opgraph_tag, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const CacheKeyFusedWrapper& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32, const bool fallback) {
   auto opGraph = build_opgraph_fused(handle, x, y, w, z, b, alpha, key, padding, stride, dilation);
   opgraph_tag = opGraph.getTag();
   auto heuristic_mode = at::native::cudnnv8_use_heur_mode_b() ? CUDNN_HEUR_MODE_B : CUDNN_HEUR_MODE_INSTANT;
@@ -484,7 +484,7 @@ auto get_configs_from_heuristics_fused(const cudnnHandle_t handle, std::string& 
   return configs;
 }
 
-void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
+void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKeyWrapper& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
   for (auto & plan : plans) {
     try {
       run_conv_plan(handle, x, y, w, plan);
@@ -498,7 +498,7 @@ void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, con
   TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
 }
 
-void try_plans_fused(cudnn_frontend::executionPlans_t& plans, const CacheKeyFused& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b) {
+void try_plans_fused(cudnn_frontend::executionPlans_t& plans, const CacheKeyFusedWrapper& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b) {
   for (auto & plan : plans) {
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
@@ -512,7 +512,7 @@ void try_plans_fused(cudnn_frontend::executionPlans_t& plans, const CacheKeyFuse
   TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
 }
 
-bool try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& opgraph_tag, const CacheKey& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
+bool try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& opgraph_tag, const CacheKeyWrapper& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
   for (auto & config : configs) {
     try {
       auto plan = cudnn_frontend::ExecutionPlanBuilder()
@@ -533,7 +533,7 @@ bool try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& o
   return false;
 }
 
-bool try_configs_fused(cudnn_frontend::EngineConfigList& configs, const std::string& opgraph_tag, const CacheKeyFused& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b) {
+bool try_configs_fused(cudnn_frontend::EngineConfigList& configs, const std::string& opgraph_tag, const CacheKeyFusedWrapper& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b) {
   for (auto & config : configs) {
     try {
       auto plan = cudnn_frontend::ExecutionPlanBuilder()
@@ -559,8 +559,7 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
   const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const int64_t groups,
   const bool benchmark, const bool deterministic, const bool allow_tf32) {
   cudnnHandle_t handle = getCudnnHandle();
-  CacheKey key;
-  setCacheKey(key, operation, y, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
+  CacheKeyWrapper key(operation, y, x, w, padding, stride, dilation, groups, deterministic, allow_tf32);
   // TODO: is this thread safe if cache is updated? is pointer stale?
   auto search = benchmark_cache.find(key);
   if (search) {
@@ -607,8 +606,7 @@ void run_fused_conv(const Tensor& x, const Tensor& y, const Tensor& w, const Ten
   int64_t groups, const bool benchmark, const bool deterministic, const bool allow_tf32) {
   cudnnHandle_t handle = getCudnnHandle();
 
-  CacheKeyFused key;
-  setCacheKeyFused(key, y, x, w, z, b, alpha, padding, stride, dilation, groups, deterministic, allow_tf32);
+  CacheKeyFusedWrapper key(y, x, w, z, b, alpha, padding, stride, dilation, groups, deterministic, allow_tf32);
   auto search = benchmark_cache_fused.find(key);
   if (search) {
     try {
