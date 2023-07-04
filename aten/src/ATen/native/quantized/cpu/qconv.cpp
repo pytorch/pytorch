@@ -32,6 +32,8 @@
 #include <ATen/ops/quantize_per_channel_native.h>
 #include <ATen/ops/quantize_per_tensor_native.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/round.h>
+#include <ATen/ops/clamp.h>
 #endif
 
 #include <c10/util/irange.h>
@@ -1788,6 +1790,43 @@ class QConvPT2E final {
     TORCH_CHECK(false, "Unimplemented as onednn is not available.")
 #endif
   }
+
+  static at::Tensor run_dynamic_qconv(
+      at::Tensor x, // contains quantized values but not QTensor
+      double x_scale,
+      int64_t x_zero_point,
+      at::Tensor prepacked_w,
+      at::Tensor weight_scales,
+      at::Tensor weight_zero_points,
+      int64_t weight_axis,
+      c10::optional<at::Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      bool transposed,
+      torch::List<int64_t> output_padding,
+      int64_t groups) {
+#if AT_MKLDNN_ENABLED()
+    // Do quantization of x
+    // TODO<Leslie>: Here we hardcode the min, max of at::clamp with 0 and 255
+    // We need to think about how to get these 2 values from the quant node
+    auto input = at::clamp((at::round(x / x_scale) + x_zero_point), 0, 255).to(c10::ScalarType::Byte);
+
+    // int8-in, fp32-ouput
+    at::Tensor output_fp32 = _quantized_convolution_pt2e<postOpFused>(
+        input, x_scale, x_zero_point,
+        prepacked_w, weight_scales, weight_zero_points,
+        bias, stride, padding, dilation, /*transposed*/transposed,
+        groups, /*output_scale*/ 1.0, /*output_zero_point*/0,
+        /*accum*/c10::nullopt, /*accum_scale*/0.0, /*accum_zero_point*/0,
+        /*fp32_output*/true
+    );
+    return output_fp32;
+#else
+    TORCH_CHECK(false, "Unimplemented as onednn is not available.")
+#endif
+  }
+
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
@@ -1832,6 +1871,8 @@ TORCH_LIBRARY_IMPL(quantized, MkldnnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_add_pt2e"), QConvPT2E<PostOps::Add>::run_add);
   // PostOP AddReLU
   m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_add_relu_pt2e"), QConvPT2E<PostOps::AddRelu>::run_add);
+
+  m.impl(TORCH_SELECTIVE_NAME("quantized::dynamic_quant_qconv.tensor"), QConvPT2E<PostOps::NoPostOp>::run_dynamic_qconv);
 
 }
 

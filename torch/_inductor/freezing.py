@@ -121,6 +121,15 @@ class ConstantFolder(torch.fx.Interpreter):
 
         # TODO - remove constant from node_replacement when it has no uses
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
+            if (
+                node.target
+                == torch.ops.quantized_decomposed.dequantize_per_channel.default
+            ):
+                # For the pattern fp32_weight -> quantized_decomposed.quantize_per_channel.default
+                # -> quantized_decomposed.dequantize_per_channel.default
+                # We only folding fp32_weight -> quantized_decomposed.quantize_per_channel.default into
+                # int8_weight and leave quantized_decomposed.dequantize_per_channel.default in graph to be fused
+                return out
             self.node_replacements[node] = out
 
         return out

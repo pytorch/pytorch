@@ -241,6 +241,8 @@ TORCH_LIBRARY(quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_add_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
   // Post Op AddReLU
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_add_relu_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
+
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::dynamic_quant_qconv.tensor(Tensor x, float x_scale, int x_zero_point, Tensor prepacked_w, Tensor w_scale, Tensor w_zero_point, int w_axis, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed,  int[] output_padding, int groups) -> Tensor"));
 }
 
 // According to #33294: The "_" prefix registration will be
