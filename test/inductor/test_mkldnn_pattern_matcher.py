@@ -125,7 +125,7 @@ class TestPaternMatcher(TestCase):
         options = itertools.product(
             unary_list.keys(),
             [torch.contiguous_format, torch.channels_last],
-            [True, False],
+            [True, False] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False],
         )
 
         for (
@@ -210,7 +210,7 @@ class TestPaternMatcher(TestCase):
         options = itertools.product(
             unary_list,
             [torch.contiguous_format, torch.channels_last],
-            [True, False],
+            [True, False] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False],
         )
 
         for unary_fn, memory_format, check_autocast in options:
