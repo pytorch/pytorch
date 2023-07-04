@@ -1,4 +1,4 @@
-import copy
+import dataclasses
 import itertools
 import operator
 from typing import Any, Callable, Dict, List, Tuple
@@ -8,7 +8,14 @@ from torch.fx import Graph, GraphModule, Node
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 import torch.nn.functional as F
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
+from .quantizer import (
+    DerivedQuantizationSpec,
+    EdgeOrNode,
+    SharedQuantizationSpec,
+    QuantizationSpecBase,
+)
 from .utils import _fold_bn_weights_into_conv_node
+from .utils import _get_aten_graph_module
 
 # Example inputs for `_conv2d_bn_pattern`, `_qat_conv2d_bn_pattern`, and `_qat_conv2d_bn_pattern_no_bias`
 _conv2d_bn_pattern_example_inputs = (
@@ -171,7 +178,12 @@ def _get_input_output_quantized_filter():
     return _input_output_quantized_filter
 
 
-def _get_quantized_qat_conv2d_bn_pattern(is_per_channel: bool, has_relu: bool, has_bias: bool):
+def _get_quantized_qat_conv2d_bn_pattern(
+    is_per_channel: bool,
+    has_relu: bool,
+    has_bias: bool,
+    relu_is_inplace: bool,
+) -> Callable:
     """
     Return the quantized version of QAT conv + BN pattern.
     This is based on `nniqat.ConvBn2d._forward_approximate`,
@@ -227,11 +239,19 @@ def _get_quantized_qat_conv2d_bn_pattern(is_per_channel: bool, has_relu: bool, h
             x = x + kwargs["conv_bias"].reshape(bias_shape)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
         if has_relu:
-            x = F.relu(x)
+            if relu_is_inplace:
+                x = F.relu_(x)
+            else:
+                x = F.relu(x)
         return x
     return _quantized_qat_conv2d_bn_pattern
 
-def _get_folded_quantized_qat_conv2d_bn_pattern(is_per_channel: bool, has_relu: bool, has_bias: bool):
+def _get_folded_quantized_qat_conv2d_bn_pattern(
+    is_per_channel: bool,
+    has_relu: bool,
+    has_bias: bool,
+    relu_is_inplace: bool,
+) -> Callable:
     """
     Quantized QAT conv - bn pattern with bn weights being folded into conv.
     """
@@ -272,30 +292,12 @@ def _get_folded_quantized_qat_conv2d_bn_pattern(is_per_channel: bool, has_relu: 
             x = F.conv2d(x, conv_weight, None)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
         if has_relu:
-            x = F.relu(x)
+            if relu_is_inplace:
+                x = F.relu_(x)
+            else:
+                x = F.relu(x)
         return x
     return _folded_quantized_qat_conv2d_bn_pattern
-
-def _get_aten_graph_module(
-    pattern: Callable,
-    example_inputs: Tuple[Any, ...],
-    **kwargs,
-) -> GraphModule:
-    """
-    Convert the pattern to an FX graph with decomposed aten ops.
-    """
-    # Avoid circular imports
-    import torch._dynamo
-    aten_pattern, _ = torch._dynamo.export(
-        pattern,
-        *copy.deepcopy(example_inputs),
-        aten_graph=True,
-        tracing_mode="real",
-        **kwargs,
-    )
-    aten_pattern.graph.eliminate_dead_code()
-    aten_pattern.recompile()
-    return aten_pattern
 
 def _has_conv_bias_filter(
     match: "InternalMatch",  # type: ignore[name-defined]
@@ -411,6 +413,75 @@ def _copy_over_literal_conv_args(original_node: Node, new_node: Node):
     # x, weight, bias, [stride, padding, dilation, transposed, output_padding, groups]
     new_node.args = new_node.args[:3] + original_node.args[3:]
 
+def _update_conv_input_qspec_map_after_replacement(original_node: Node, replacement_node: Node):
+    """
+    Update the `input_qspec_map` in the annotation after subgraph rewriting.
+
+    The original annotation referred to the nodes in the original graph,
+    so the keys in the `input_qspec_map` will need to be updated to reflect
+    the corresponding nodes in the replacement graph.
+    """
+    assert original_node.target == torch.ops.aten.convolution.default
+    assert replacement_node.target == torch.ops.aten.convolution.default
+    if "quantization_annotation" not in original_node.meta:
+        return
+    original_input_qspec_map = original_node.meta["quantization_annotation"].input_qspec_map
+    input_qspec_map = {}
+    # get the list of configs, it should be ordered as input, weight, bias
+    # note: this is really hacky, we need a better solution, hopefully
+    # in subgraph_rewriter, issue tracking the problem: https://github.com/pytorch/pytorch/issues/101820
+    all_configs = list(original_input_qspec_map.items())
+    # input activation
+    input_qspec_map[replacement_node.args[0]] = all_configs[0][1]
+    # weight
+    input_qspec_map[replacement_node.args[1]] = all_configs[1][1]
+    # bias
+    if len(replacement_node.args) > 2 and len(all_configs) > 2:
+        input_qspec_map[replacement_node.args[2]] = all_configs[2][1]
+    replacement_node.meta["quantization_annotation"].input_qspec_map = input_qspec_map
+
+def _update_special_qspecs_after_replacement(
+    node: Node,
+    original_to_replacement_node: Dict[Node, Node],
+):
+    """
+    Update the `SharedQuantizationSpec`s and `DerivedQuantizationSpec`s
+    used in `node`'s quantization annotation after subgraph rewriting.
+
+    The original annotation referred to the nodes in the original graph,
+    so the nodes used in these special quantization specs will need to
+    be updated to the corresponding nodes in the replacement graph.
+    """
+    def _get_new_edge_or_node(edge_or_node: EdgeOrNode):
+        if isinstance(edge_or_node, Node):
+            _node = edge_or_node
+            return original_to_replacement_node.get(_node, _node)
+        elif isinstance(edge_or_node, Tuple[Node, Node]):
+            src, dest = edge_or_node
+            return (
+                original_to_replacement_node.get(src, src),
+                original_to_replacement_node.get(dest, dest),
+            )
+        else:
+            raise ValueError("unexpected type for edge_or_node: ", type(edge_or_node))
+
+    def _get_new_qspec(qspec: QuantizationSpecBase):
+        if isinstance(qspec, SharedQuantizationSpec):
+            new_edge_or_node = _get_new_edge_or_node(qspec.edge_or_node)
+            return SharedQuantizationSpec(new_edge_or_node)
+        elif isinstance(qspec, DerivedQuantizationSpec):
+            new_derived_from = [_get_new_edge_or_node(x) for x in qspec.derived_from]
+            return dataclasses.replace(qspec, derived_from=new_derived_from)
+        else:
+            return qspec
+
+    if "quantization_annotation" not in node.meta:
+        return
+    annotation = node.meta["quantization_annotation"]
+    for input_node, qspec in annotation.input_qspec_map.items():
+        annotation.input_qspec_map[input_node] = _get_new_qspec(qspec)
+    annotation.output_qspec = _get_new_qspec(annotation.output_qspec)
+
 def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     """
     Given a graph of decomposed aten ops, replace the (conv + bn) pattern with
@@ -464,50 +535,94 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     # Due to limited functionality in the subgraph rewriter, here we manually
     # update the replacement graph as follows:
     #
-    #   (1) Copy over metadata from original subgraph. This ensures the stack traces
+    #   (a) Copy over metadata from original subgraph. This ensures the stack traces
     #       and annotations are preserved in the new subgraph
     #
-    #   (2) Copy over literal args for conv from the original subgraph
+    #   (b) Copy over literal args for conv from the original subgraph
     #       TODO: do this for literal args for batchnorm as well
+    #
+    #   (c) Update all references of the old nodes in the original subgraph to refer
+    #       to the corresponding nodes in the new subgraph in the annotations
     #
     # In the future, we should try to push as much of this functionality into the
     # subgraph rewriter as possible, so we don't have to manually copy anything over.
     # For more detail, see https://github.com/pytorch/pytorch/issues/100419.
 
+    original_to_replacement_node = {}
     for r in replacements_with_conv_bias + replacements_no_conv_bias:
         (replacement_conv_node, replacement_bn_node, replacement_getitem_node) =\
             _get_conv_bn_getitem_nodes(r.replacements)
 
-        # Copy over metadata for all three nodes in [conv - bn - getitem]
-        # Also copy over literal args for conv
+        # Step (3a): Copy over metadata for all three nodes in [conv - bn - getitem]
         for match_pattern_node, original_node in _filter_nodes_map(r.nodes_map).items():
             if original_node.target == torch.ops.aten.convolution.default:
-                _copy_over_literal_conv_args(original_node, replacement_conv_node)
                 replacement_conv_node.meta = original_node.meta
-                # original annotation is referring to the node object in the graph
-                # after rewrite we'll need to update this mapping (input_qspec_map)
-                # update quantization_annotation
-                original_input_qspec_map = original_node.meta["quantization_annotation"].input_qspec_map
-                if "quantization_annotation" not in original_node.meta:
-                    continue
-                input_qspec_map = {}
-                # get the list of configs, it should be ordered as input, weight, bias
-                # note: this is really hacky, we need a better solution, hopefully
-                # in subgraph_rewriter, issue tracking the problem: https://github.com/pytorch/pytorch/issues/101820
-                all_configs = list(original_input_qspec_map.items())
-                # input activation
-                input_qspec_map[replacement_conv_node.args[0]] = all_configs[0][1]
-                # weight
-                input_qspec_map[replacement_conv_node.args[1]] = all_configs[1][1]
-                # bias
-                if len(replacement_conv_node.args) > 2 and len(all_configs) > 2:
-                    input_qspec_map[replacement_conv_node.args[2]] = all_configs[2][1]
-                replacement_conv_node.meta["quantization_annotation"].input_qspec_map = input_qspec_map
+                original_to_replacement_node[original_node] = replacement_conv_node
+                # Step (3b): Copy over conv literal args
+                _copy_over_literal_conv_args(original_node, replacement_conv_node)
+                # Step (3c): Update old references in the conv node's input_qspec_map
+                _update_conv_input_qspec_map_after_replacement(original_node, replacement_conv_node)
             if original_node.target == torch.ops.aten._native_batch_norm_legit.default:
                 replacement_bn_node.meta = original_node.meta
+                original_to_replacement_node[original_node] = replacement_bn_node
             if original_node.target == operator.getitem:
                 replacement_getitem_node.meta = original_node.meta
+                original_to_replacement_node[original_node] = replacement_getitem_node
+
+    # Step (3c): Update old references in the special qspecs for all nodes in the graph
+    for n in m.graph.nodes:
+        _update_special_qspecs_after_replacement(n, original_to_replacement_node)
+
     return m
+
+def _duplicate_dequantize_node(m: GraphModule):
+    """
+    Helper function to duplicate all dequantize nodes in the graph if the
+    node has more than one user. For example:
+
+    Before:
+      quantize -> dequantize -> a
+                          \\--> b
+                          \\--> c
+
+    After:
+      quantize -> dequantize_1 -> a
+            \\--> dequantize_2 -> b
+            \\--> dequantize_3 -> c
+
+    This is useful for subgraph rewriting. E.g. if we wish to match the
+    pattern [dequantize - a] above, subgraph matching would fail because
+    the dequantize node has users outside the matched portion of the graph.
+    Instead, we match [dequantize_1 - a], which is safe.
+    """
+    dq_op = torch.ops.quantized_decomposed.dequantize_per_tensor
+    for n in m.graph.nodes:
+        if n.op != "call_function" or n.target != dq_op or len(n.users) == 1:
+            continue
+        for user in list(n.users):
+            with m.graph.inserting_before(n):
+                new_node = m.graph.create_node("call_function", dq_op, n.args, n.kwargs)
+            user.replace_input_with(n, new_node)
+        m.graph.erase_node(n)
+    m.recompile()
+
+def _remove_extra_dequantize(m: GraphModule):
+    """
+    Removes duplicate dequant nodes in the graph, for an operator that has
+    multiple dequant nodes as a user, replace them with a single dequant node
+    that can be shared across all the uses. This should be seen as the "reverse"
+    of `_duplicate_dequantize_node`.
+    """
+    dq_op = torch.ops.quantized_decomposed.dequantize_per_tensor
+    for n in m.graph.nodes:
+        dq_users = [user for user in n.users if user.op == "call_function" and user.target == dq_op]
+        if len(dq_users) > 1:
+            with m.graph.inserting_after(dq_users[0]):
+                new_node = m.graph.create_node("call_function", dq_op, dq_users[0].args, {})
+            for dq_user in dq_users:
+                dq_user.replace_all_uses_with(new_node)
+                m.graph.erase_node(dq_user)
+    m.recompile()
 
 def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
     """
@@ -515,6 +630,7 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
     """
     m.graph.eliminate_dead_code()
     m.recompile()
+    _duplicate_dequantize_node(m)
 
     # Step (1): Replace QAT pattern with simple [conv - bn] pattern
     replacements = []
@@ -522,13 +638,22 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
         [True, False],  # is_per_channel
         [True, False],  # has_relu
         [True, False],  # has_bias
+        [True, False],  # relu_is_inplace
     )
-    for is_per_channel, has_relu, has_bias in replacement_options:
+    for is_per_channel, has_relu, has_bias, relu_is_inplace in replacement_options:
+        # For the cases without relu, `relu_is_inplace` is irrelevant, so here we arbitrarily
+        # filter out one of the values for this flag to avoid having duplicate patterns
+        if not has_relu and relu_is_inplace:
+            continue
         example_inputs = _quantized_conv2d_bn_pattern_example_inputs
         kwargs = _get_quantized_conv2d_bn_pattern_example_inputs_kwargs(is_per_channel, has_bias)
-        match_pattern = _get_quantized_qat_conv2d_bn_pattern(is_per_channel, has_relu, has_bias)
+        match_pattern = _get_quantized_qat_conv2d_bn_pattern(
+            is_per_channel, has_relu, has_bias, relu_is_inplace,
+        )
         match_pattern = _get_aten_graph_module(match_pattern, example_inputs, **kwargs)
-        replacement_pattern = _get_folded_quantized_qat_conv2d_bn_pattern(is_per_channel, has_relu, has_bias)
+        replacement_pattern = _get_folded_quantized_qat_conv2d_bn_pattern(
+            is_per_channel, has_relu, has_bias, relu_is_inplace,
+        )
         replacement_pattern = _get_aten_graph_module(replacement_pattern, example_inputs, **kwargs)
         replacements.extend(
             replace_pattern_with_filters(
@@ -540,6 +665,7 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
             )
         )
     m.recompile()
+    _remove_extra_dequantize(m)
 
     # Step (2): Fold BN weights into conv
     for r in replacements:

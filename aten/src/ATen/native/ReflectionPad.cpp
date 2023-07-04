@@ -61,10 +61,9 @@ TORCH_META_FUNC(reflection_pad1d)(const Tensor& input, IntArrayRef padding) {
 
   TORCH_CHECK(
       output_w >= 1,
-      2,
       "input (W: ",
       input_w,
-      ")is too small. Calculated output W: ",
+      ") is too small. Calculated output W: ",
       output_w);
 
   if (input.ndimension() == 2) {
@@ -202,7 +201,7 @@ TORCH_META_FUNC(reflection_pad3d_backward)(
   TORCH_CHECK(output_h == grad_output.size(dim_h), "grad_output height unexpected."
     " Expected: ", output_h, ", Got: ", grad_output.size(dim_h));
   TORCH_CHECK(output_d == grad_output.size(dim_d), "grad_output depth unexpected."
-    " Expected: ", output_h, ", Got: ", grad_output.size(dim_d));
+    " Expected: ", output_d, ", Got: ", grad_output.size(dim_d));
 
   set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
@@ -244,15 +243,15 @@ void reflection_pad2d_out_template(
   TORCH_CHECK(pad_l < input_w && pad_r < input_w,
     "Argument #4: Padding size should be less than the corresponding "
     "input dimension, but got: padding (", pad_l, ", ", pad_r,
-    ") at dimension ", dim_w, " of input ", ndim);
+    ") at dimension ", dim_w, " of input ", input.sizes());
 
   TORCH_CHECK(pad_t < input_h && pad_b < input_h,
     "Argument #6: Padding size should be less than the corresponding "
     "input dimension, but got: padding (", pad_t, ", ", pad_b,
-    ") at dimension ", dim_h, " of input ", ndim);
+    ") at dimension ", dim_h, " of input ", input.sizes());
 
   TORCH_CHECK(output_w >= 1 || output_h >= 1,
-    "input (H: ", input_h, ", W: ", input_w, ")is too small. Calculated "
+    "input (H: ", input_h, ", W: ", input_w, ") is too small. Calculated "
     "output H: ", output_h, " W: ", output_w);
 
   /* resize output */

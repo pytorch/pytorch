@@ -9,7 +9,7 @@ from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -103,8 +103,8 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
 
     def test_cat_addmm(self):
         def fn(a, b, c):
@@ -125,8 +125,8 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
 
     @expectedFailureDynamicWrapper
     def test_cat_slice_cat(self):
@@ -367,5 +367,5 @@ class TestPaternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
+    if IS_LINUX and HAS_CUDA:
         run_tests()
