@@ -34,6 +34,7 @@ from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
     IndexingConstant,
+    is_triton,
     ops_wrapper,
     PermuteView,
     Pointwise,
@@ -1553,6 +1554,48 @@ def inductor_randint(
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=[*size],
+    )
+
+
+@register_lowering(inductor_prims._bucketize, type_promotion_kind=None)
+def _inductor_bucketize(
+    input: TensorBox,
+    boundaries: TensorBox,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+):
+    assert len(boundaries.get_size()) == 1
+
+    if not (is_triton(input) and is_triton(boundaries)):
+        return fallback_handler(inductor_prims._bucketize, add_to_fallback_set=False)(
+            input, boundaries, out_int32=out_int32, right=right
+        )
+
+    boundaries_size = boundaries.get_size()[0]
+    boundaries_loader = boundaries.make_loader()
+    device = input.get_device()
+    input_loader = input.make_loader()
+
+    index_dtype = torch.int32 if out_int32 else torch.int64
+
+    def inner_fn(index):
+        val = input_loader(index)
+        indices = ops.bucketize(
+            val,
+            boundaries.get_name(),
+            ops.index_expr(boundaries_size, index_dtype),
+            index_dtype,
+            right,
+        )
+
+        return indices
+
+    return Pointwise.create(
+        device=device,
+        dtype=index_dtype,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
     )
 
 
