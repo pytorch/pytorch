@@ -69,7 +69,7 @@ void cpu_max_pool(
         for (int64_t iw = iw0; iw < iw1; iw += dilationW) {
           int64_t index = ih * input_width + iw;
           accscalar_t val = accscalar_t(input_ptr[index]);
-          if ((val > maxval) || std::isnan(val)) {
+          if ((val > maxval) || is_nan(val)) {
             maxval = val;
             maxindex = index;
           }
@@ -94,38 +94,47 @@ void cpu_max_pool(
 }
 
 template <typename scalar_t>
-vec::Vectorized<scalar_t> is_nan(vec::Vectorized<scalar_t> vec) {
+bool is_nan(scalar_t v) {
+  if (std::is_integeral<scalar_t>::value || std::is_same<scalar_t, unsigned char>::value) {
+    return false;
+  }
+  return std::isnan(v);
+}
+
+
+template <typename scalar_t>
+vec::Vectorized<scalar_t> is_nan_vec(vec::Vectorized<scalar_t> vec) {
   return vec.isnan();
 }
 
 // TODO: use is_integeral/is_same to check the scalar_t and simplify the implementation
 // currently it does not work
 template <>
-vec::Vectorized<unsigned char> is_nan<unsigned char>(vec::Vectorized<unsigned char> vec) {
+vec::Vectorized<unsigned char> is_nan_vec<unsigned char>(vec::Vectorized<unsigned char> vec) {
   Vectorized<unsigned char> ret(false);
   return ret;
 }
 
 template <>
-vec::Vectorized<signed char> is_nan<signed char>(vec::Vectorized<signed char> vec) {
+vec::Vectorized<signed char> is_nan_vec<signed char>(vec::Vectorized<signed char> vec) {
   Vectorized<signed char> ret(false);
   return ret;
 }
 
 template <>
-vec::Vectorized<short> is_nan<short>(vec::Vectorized<short> vec) {
+vec::Vectorized<short> is_nan_vec<short>(vec::Vectorized<short> vec) {
   Vectorized<short> ret(false);
   return ret;
 }
 
 template <>
-vec::Vectorized<int> is_nan<int>(vec::Vectorized<int> vec) {
+vec::Vectorized<int> is_nan_vec<int>(vec::Vectorized<int> vec) {
   Vectorized<int> ret(false);
   return ret;
 }
 
 template <>
-vec::Vectorized<int64_t> is_nan<int64_t>(vec::Vectorized<int64_t> vec) {
+vec::Vectorized<int64_t> is_nan_vec<int64_t>(vec::Vectorized<int64_t> vec) {
   Vectorized<int64_t> ret(false);
   return ret;
 }
@@ -215,7 +224,7 @@ void cpu_max_pool_channels_last(
             Vec maxval_vec = Vec::loadu(out + d2);
 
             // true = all ones, false = all zeros
-            Vec mask = (val_vec > maxval_vec) | is_nan(val_vec);
+            Vec mask = (val_vec > maxval_vec) | is_nan_vec(val_vec);
             iVec imask = vec::cast<integer_t>(mask);
             Vec out_vec = Vec::blendv(maxval_vec, val_vec, mask);
             iVec ind_vec = iVec::blendv(maxindex_vec, index_vec, imask);
@@ -229,7 +238,7 @@ void cpu_max_pool_channels_last(
             int64_t maxindex = ind[d2];
             scalar_t maxval = out[d2];
 
-            bool mask = (val > maxval) || std::isnan(val);
+            bool mask = (val > maxval) || is_nan(val);
             out[d2] = mask ? val : maxval;
             ind[d2] = mask ? index : maxindex;
           }
@@ -341,8 +350,8 @@ void cpu_max_pool_channels_last<BFloat16>(
             fVec maxval_fvec1 = fVec::loadu(max + d2 + fVec::size());
 
             // true = all ones, false = all zeros
-            fVec mask0 = (val_fvec0 > maxval_fvec0) | is_nan(val_fvec0);
-            fVec mask1 = (val_fvec1 > maxval_fvec1) | is_nan(val_fvec1);
+            fVec mask0 = (val_fvec0 > maxval_fvec0) | is_nan_vec(val_fvec0);
+            fVec mask1 = (val_fvec1 > maxval_fvec1) | is_nan_vec(val_fvec1);
             iVec imask0 = vec::cast<int32_t>(mask0);
             iVec imask1 = vec::cast<int32_t>(mask1);
 
