@@ -156,6 +156,7 @@ INSTANTIATE(int16_t);
 INSTANTIATE(int);
 INSTANTIATE(int64_t);
 INSTANTIATE(c10::BFloat16);
+INSTANTIATE(c10::Half);
 #undef INSTANTIATE
 
 } // namespace blas_impl
@@ -181,9 +182,11 @@ inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
 
 template<typename scalar_t>
 void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, int64_t lda, const scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy) {
+  std::cout << "--------gemv-----------\n";
   if(n == 1) lda = m;
 
   if (blas_impl::gemv_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
+    std::cout << "gemv_use_fast_path\n";
     TORCH_CHECK(lda >= std::max<int64_t>(1L, m), "lda should be at least max(1,", m, "), but have ", lda);
     int i_m = (int)m;
     int i_n = (int)n;
@@ -200,18 +203,19 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
       opmath_t sum = 0;
       const scalar_t *row_ = a + lda * i;
       for (const auto j : c10::irange(m)) {
-        sum += x[j * incx] * row_[j];
+        sum += opmath_t(x[j * incx]) * opmath_t(row_[j]);
       }
       if (beta == scalar_t(0)) {
-        y[i * incy] = alpha * sum;
+        y[i * incy] = opmath_t(alpha) * sum;
       } else {
-        y[i * incy] = beta * y[i * incy] + alpha * sum;
+        y[i * incy] = opmath_t(beta) * y[i * incy] + alpha * sum;
       }
     }
   } else {
     if (beta != scalar_t(1) && beta != scalar_t(0)) scal<scalar_t>(m, beta, y, incy);
 
     constexpr bool is_low_precision = !std::is_same_v<opmath_t, scalar_t>;
+    std::cout << "is_low_precision: " << is_low_precision << "\n";
     std::vector<opmath_t> sum;
     if constexpr (is_low_precision) {
       sum.resize(m);
@@ -250,7 +254,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
 
 #define INSTANTIATE(scalar_t, _) \
 template void gemv<scalar_t>(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, int64_t lda, const scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
-AT_FORALL_SCALAR_TYPES_AND(BFloat16, INSTANTIATE);
+AT_FORALL_SCALAR_TYPES_AND2(BFloat16, Half, INSTANTIATE);
 AT_FORALL_COMPLEX_TYPES(INSTANTIATE);
 #undef INSTANTIATE
 

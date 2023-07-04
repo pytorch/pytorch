@@ -1438,7 +1438,7 @@ static void addmm_impl_cpu_(
 
   if(!dispatched) {
     // Apply BLAS routine
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf,
         result.scalar_type(), "addmm_impl_cpu_",
         [&]{
           using opmath_t = at::opmath_type<scalar_t>;
@@ -1679,23 +1679,24 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
             || (strides[1] == 1 && strides[2] >= sizes[1]);
   };
 
-  if (use_mkldnn_bf16_matmul(batch1, batch2, self_or_result)){
+  if (use_mkldnn_lower_precision_matmul(batch1, batch2, self_or_result)){
     mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
     return;
   }
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, batch1.scalar_type(), "bmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, batch1.scalar_type(), "bmm", [&] {
           baddbmm_cpu_kernel<scalar_t, true>(self_or_result, batch1, batch2, beta, alpha);
         });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, batch1.scalar_type(), "baddbmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, batch1.scalar_type(), "baddbmm", [&] {
           baddbmm_cpu_kernel<scalar_t, false>(self_or_result, batch1, batch2, beta, alpha);
         });
     }
   } else if (at::hasMKL() && ((
             self_or_result.scalar_type() != kBFloat16 &&
+            self_or_result.scalar_type() != kHalf &&
             at::native::is_floating_point(self_or_result)) ||
             at::native::is_complex(self_or_result))
             && batch_items_contiguous_or_transposed(batch1)

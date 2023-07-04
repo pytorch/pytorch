@@ -1260,26 +1260,45 @@ class TestMkldnn(TestCase):
             if bias:
                 self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def test_linear_bf16(self):
-        in_features = torch.randint(3, 10, (1,)).item()
-        out_features = torch.randint(3, 100, (1,)).item()
-        x = torch.randn(3, in_features, dtype=torch.float32) * 10
-        x_bf16 = x.bfloat16()
+    def test_linear_lowp(self):
+        def helper(dtype):
+            in_features = torch.randint(3, 10, (1,)).item()
+            out_features = torch.randint(3, 100, (1,)).item()
+            x = torch.randn(3, in_features, dtype=torch.float32) * 10
+            x_lowp = x.to(dtype=dtype)
 
-        for bias in [True, False]:
-            linear = torch.nn.Linear(in_features, out_features, bias=bias).float()
-            mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
-            mkldnn_linear_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(linear), torch.bfloat16)
-            if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-                y = mkldnn_linear(x.to_mkldnn()).to_dense()
-                y_bf16 = mkldnn_linear_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
-                self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
-            else:
-                msg = "mkldnn_linear: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
-                self.assertRaisesRegex(RuntimeError,
-                                       msg,
-                                       lambda: mkldnn_linear_bf16(x_bf16.to_mkldnn()))
+            for bias in [True, False]:
+                linear = torch.nn.Linear(in_features, out_features, bias=bias).float()
+                mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
+                mkldnn_linear_lowp = mkldnn_utils.to_mkldnn(
+                    copy.deepcopy(linear), dtype
+                )
+                lowp_support = {
+                    torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
+                    torch.half: torch.ops.mkldnn._is_mkldnn_fp16_supported,
+                }
+                if lowp_support[dtype]():
+                    y = mkldnn_linear(x.to_mkldnn()).to_dense()
+                    y_lowp = mkldnn_linear_lowp(x_lowp.to_mkldnn()).to_dense(
+                        torch.float32
+                    )
+                    if dtype == torch.bfloat16:
+                        self.assertEqual(y, y_lowp, atol=1e-1, rtol=1e-3)
+                    else:
+                        self.assertEqual(y, y_lowp, atol=5e-3, rtol=1e-3)
+                else:
+                    msg = {
+                        torch.bfloat16: r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq",
+                        torch.half: r"fp16 path needs the cpu support avx512_fp16",
+                    }
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        msg[dtype],
+                        lambda: mkldnn_linear_lowp(x_lowp.to_mkldnn()),
+                    )
+
+        helper(torch.bfloat16)
+        helper(torch.float16)
 
     def test_softmax(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
@@ -1498,17 +1517,45 @@ class TestMkldnn(TestCase):
                         cn2.sum().backward(retain_graph=True)
                         self.assertEqual(c1.grad, c2.grad, rtol=rtol, atol=atol)
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def test_matmul_bf16(self):
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            a1 = torch.randn([64, 1, 33], dtype=torch.bfloat16)
-            # a2 is contiguous tensor but it's strides is not default contiguous strides.
-            a2 = torch.as_strided(a1.clone(), [64, 1, 33], [33, 3, 1])
-            self.assertTrue(a2.is_contiguous())
-            b = torch.randn(64, 33, 256).to(dtype=torch.bfloat16)
-            y1 = torch.ops.aten.bmm(a1, b)
-            y2 = torch.bmm(a2, b)
-            self.assertEqual(y1, y2)
+    def test_matmul_lower_precision(self):
+        support_check = {
+            torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
+            torch.float16: torch.ops.mkldnn._is_mkldnn_fp16_supported,
+        }
+
+        def common(self, shape1, shape2, op, dtype):
+            a = torch.randn(shape1, dtype=dtype)
+            a_ref = a.float()
+            b = torch.randn(shape2, dtype=dtype)
+            b_ref = b.float()
+
+            y = op(a, b)
+            y_ref = op(a_ref, b_ref)
+            self.assertEqual(y, y_ref, exact_dtype=False)
+
+        for dtype in [torch.bfloat16, torch.float16]:
+            if support_check[dtype]():
+                a1 = torch.randn([64, 1, 33], dtype=dtype)
+                # a2 is contiguous tensor but it's strides
+                # is not default contiguous strides.
+                a2 = torch.as_strided(a1.clone(), [64, 1, 33], [33, 3, 1])
+                self.assertTrue(a2.is_contiguous())
+                b = torch.randn(64, 33, 256).to(dtype=dtype)
+                y1 = torch.ops.aten.bmm(a1, b)
+                y2 = torch.bmm(a2, b)
+                self.assertEqual(y1, y2)
+
+                for shape1, shape2, op in [
+                    ((33, 77), (77, 22), torch.matmul),
+                    ((128, 256), (256, 10), torch.matmul),
+                    ((7, 300), (300, 3), torch.matmul),
+                    ((1, 100), (100, 60), torch.matmul),
+                    ((100, 1), (1, 100), torch.matmul),
+                    ((20, 54, 78), (20, 78, 10), torch.bmm),
+                    ((1, 300, 1), (1, 1, 300), torch.bmm),
+                ]:
+                    common(self, shape1, shape2, op, dtype)
+
 
 if __name__ == '__main__':
     run_tests()

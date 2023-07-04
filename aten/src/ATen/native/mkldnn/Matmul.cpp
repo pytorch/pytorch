@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/Context.h>
 #include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/OpMathType.h>
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -25,6 +26,13 @@ bool use_mkldnn_bf16_matmul(
   return false;
 }
 
+bool use_mkldnn_fp16_matmul(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Tensor& result_opt){
+  return false;
+}
+
 bool mkldnn_bf16_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
@@ -34,6 +42,24 @@ bool mkldnn_bf16_gemm(
     float beta,
     c10::BFloat16 *c, int64_t ldc) {
   return false;
+}
+
+bool mkldnn_fp16_gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const c10::Half *a, int64_t lda,
+    const c10::Half *b, int64_t ldb,
+    float beta,
+    c10::Half *c, int64_t ldc) {
+  return false;
+}
+
+bool use_mkldnn_lower_precision_matmul(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Tensor& result) {
+    return false;
 }
 
 } // namespace native
@@ -53,17 +79,26 @@ static bool use_mkldnn_bf16_matmul() {
       mkldnn_bf16_device_check());
 }
 
-bool mkldnn_bf16_gemm(
+static bool use_mkldnn_fp16_matmul() {
+  return (
+      at::globalContext().userEnabledMkldnn() &&
+      mkldnn_fp16_device_check());
+}
+
+
+template<typename scalar_t>
+inline typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, bool>
+mkldnn_lowerp_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
-    const c10::BFloat16 *a_data, int64_t lda,
-    const c10::BFloat16 *b_data, int64_t ldb,
+    const scalar_t *a_data, int64_t lda,
+    const scalar_t *b_data, int64_t ldb,
     float beta,
-    c10::BFloat16 *c_data, int64_t ldc) {
-  if (!use_mkldnn_bf16_matmul() ||
-      (m * n * k <= 16 * 16 * 16) ||
-      (alpha == 0.0f)) {
+    scalar_t *c_data, int64_t ldc) {
+  if (!(std::is_same_v<scalar_t, c10::BFloat16> ? use_mkldnn_bf16_matmul()
+                                                : use_mkldnn_fp16_matmul()) ||
+      (m * n * k <= 16 * 16 * 16) || (alpha == 0.0f)) {
     return false;
   }
 
@@ -83,19 +118,24 @@ bool mkldnn_bf16_gemm(
     std::swap(b_strides[0], b_strides[1]);
   }
 
+  auto idtype = ideep::tensor::data_type::bf16;
+  if constexpr (!std::is_same_v<scalar_t, c10::BFloat16>) {
+    idtype = ideep::tensor::data_type::f16;
+  }
+
   ideep::tensor a({
       /*sizes=*/{k, m},
-      ideep::tensor::data_type::bf16,
+      idtype,
       /*strides=*/a_strides},
-    const_cast<c10::BFloat16*>(a_data));
+    const_cast<scalar_t*>(a_data));
   ideep::tensor b({
       /*sizes=*/{n, k},
-      ideep::tensor::data_type::bf16,
+      idtype,
       /*strides=*/b_strides},
-    const_cast<c10::BFloat16*>(b_data));
+    const_cast<scalar_t*>(b_data));
   ideep::tensor c({
       /*sizes=*/{n, m},
-      ideep::tensor::data_type::bf16,
+      idtype,
       /*strides=*/c_strides},
     c_data);
 
@@ -109,7 +149,7 @@ bool mkldnn_bf16_gemm(
     // under this case, we need copy the re-inited buffer back to given buffer
     ideep::tensor real_output({
         /*sizes=*/{n, m},
-        ideep::tensor::data_type::bf16,
+        idtype,
         /*strides=*/c_strides},
       c_data);
     c.reorder_to(real_output);
@@ -117,6 +157,29 @@ bool mkldnn_bf16_gemm(
 
   return true;
 }
+
+bool mkldnn_bf16_gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const c10::BFloat16 *a, int64_t lda,
+    const c10::BFloat16 *b, int64_t ldb,
+    float beta,
+    c10::BFloat16 *c, int64_t ldc) {
+  return mkldnn_lowerp_gemm<c10::BFloat16>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+}
+
+bool mkldnn_fp16_gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const c10::Half *a, int64_t lda,
+    const c10::Half *b, int64_t ldb,
+    float beta,
+    c10::Half *c, int64_t ldc) {
+  return mkldnn_lowerp_gemm<c10::Half>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+}
+
 
 void mkldnn_matmul(
     const Tensor &mat1,
@@ -142,12 +205,16 @@ void mkldnn_matmul(
                 "mkldnn_matmul: mkldnn_matmul bf16 path needs a cpu with bf16 support");
   }
 #else
-  TORCH_CHECK(mkldnn_bf16_device_check(),
+  TORCH_CHECK((mat1.scalar_type() == at::kBFloat16 || mat1.scalar_type() == at::kHalf) &&
+                 mat2.scalar_type() == mat1.scalar_type() &&
+                 result.scalar_type() == mat1.scalar_type(), "mkldnn_matmul:  only enabled for bf16 and fp16 path");
+  if (mat1.scalar_type() == at::kBFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
     "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx512bw, avx512vl and avx512dq, or AWS Graviton3");
-
-   TORCH_CHECK(mat1.scalar_type() == at::kBFloat16 &&
-               mat2.scalar_type() == at::kBFloat16 &&
-               result.scalar_type() == at::kBFloat16, "mkldnn_matmul:  only enabled for bf16 path");
+  } else {
+    TORCH_CHECK(mkldnn_fp16_device_check(),
+    "mkldnn_matmul: mkldnn_matmul fp16 path needs the cpu support avx512_fp16");
+  }
 #endif
 
   auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
@@ -262,6 +329,28 @@ bool use_mkldnn_bf16_matmul(
         mat2.numel() != 0 &&
         checksize(mat1, mat2));
   }
+}
+
+bool use_mkldnn_fp16_matmul(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Tensor& result) {
+
+    return (
+      use_mkldnn_fp16_matmul() &&
+      mat1.scalar_type() == kHalf &&
+      mat2.scalar_type() == kHalf &&
+      (!result.defined() || result.scalar_type() == kHalf) &&
+      mat1.numel() != 0 &&
+      mat2.numel() != 0 &&
+      checksize(mat1, mat2));
+}
+
+bool use_mkldnn_lower_precision_matmul(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Tensor& result) {
+    return (use_mkldnn_bf16_matmul(mat1, mat2, result) || use_mkldnn_fp16_matmul(mat1, mat2, result));
 }
 
 } // namespace native
