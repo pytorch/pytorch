@@ -24,7 +24,8 @@ from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..optimize_indexing import get_expr_range, range_expressable_in_32_bits
+from ..bounds import get_expr_range
+from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import SchedulerNode
 from ..utils import (
     cache_on_self,
