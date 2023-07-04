@@ -858,9 +858,7 @@ PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPFunction_sequence_nr(
-    PyObject* self,
-    PyObject* noargs) {
+PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS;
   auto cdata = ((THPFunction*)self)->cdata.lock();
   return THPUtils_packUInt64(cdata->sequence_nr());
