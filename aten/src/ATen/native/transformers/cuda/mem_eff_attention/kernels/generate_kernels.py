@@ -324,6 +324,7 @@ def write_decl_impl(
     declarations = cpp_file_header + "#pragma once\n"
     # declarations += f"#ifndef {disable_def}\n"
     declarations += f"""#include {impl_file}\n"""
+    declarations += """using namespace PyTorchMemEffAttention;\n"""
 
     # Declaration of kernel functions
     for k in kernels:
@@ -365,6 +366,7 @@ void dispatch_{family_name}(T cb, int cc = 0) {{
         impl_cu = cpp_file_header
         # impl_cu += f"#ifndef {disable_def}\n"
         impl_cu += f"""#include {impl_file}\n"""
+        impl_cu += """using namespace PyTorchMemEffAttention;\n"""
         for k in f_kernels:
             impl_cu += k.cpp_impl
         # impl_cu += f"#endif // {disable_def}\n"
