@@ -239,7 +239,7 @@ class TestTorchAutocast(TestCase):
             with torch.autocast(device_type=dev):
                 _ = torch.tensor(1)
 
-        msg = "AMP does not supported for"
+        msg = "AMP does not support"
         with self.assertRaisesRegex(RuntimeError, msg):
             meta_fast_dtype = torch.get_autocast_dtype(device="meta")
 

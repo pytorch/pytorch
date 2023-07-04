@@ -490,7 +490,7 @@ static PyObject* set_autocast_enabled(
       at::autocast::set_hpu_enabled(enabled);
       break;
     default:
-      TORCH_CHECK(false, "AMP does not support for ", device.type());
+      TORCH_CHECK(false, "AMP does not support ", device.type());
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -531,7 +531,7 @@ static PyObject* is_autocast_enabled(
       is_enabled = at::autocast::is_hpu_enabled();
       break;
     default:
-      TORCH_CHECK(false, "AMP does not support for ", device.type());
+      TORCH_CHECK(false, "AMP does not support ", device.type());
   }
   if (is_enabled) {
     Py_RETURN_TRUE;
@@ -615,7 +615,7 @@ static PyObject* set_autocast_dtype(
       at::autocast::set_autocast_hpu_dtype(target_type);
       break;
     default:
-      TORCH_CHECK(false, "AMP does not supported for ", device.type());
+      TORCH_CHECK(false, "AMP does not support ", device.type());
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -656,7 +656,7 @@ static PyObject* get_autocast_dtype(
       dtype = at::autocast::get_autocast_hpu_dtype();
       break;
     default:
-      TORCH_CHECK(false, "AMP does not supported for ", device.type());
+      TORCH_CHECK(false, "AMP does not support ", device.type());
   }
   auto py_dtype = (PyObject*)torch::getTHPDtype(dtype);
   Py_INCREF(py_dtype);

@@ -213,15 +213,24 @@ class autocast:
             "xla": [torch.bfloat16],
         }
         if self.custom_backend_name == self.device:
+            message = f"Tried to use AMP with the `{self.custom_backend_name}` backend, but the backend has not "
+            message += "registered a module or  the module miss some necessary funcs. The backend should register "
+            message += "a module by `torch._register_device_module`, and the module must have the func: \n"
+            message += "`get_amp_supported_dtype() -> List[torch.dtype]`. \n"
+
+            assert hasattr(torch, self.custom_backend_name), message
+            self.custom_device_mod = getattr(torch, self.custom_backend_name)
+            func_name = "get_amp_supported_dtype"
+            assert hasattr(self.custom_device_mod, func_name), message + f"But the func `{func_name}` is missing. \n"
             self.device_supported_fast_dtype_map[self.custom_backend_name] = \
-                getattr(torch, self.device).get_amp_supported_dtype()
+                self.custom_device_mod.get_amp_supported_dtype()
         if self.device == "cuda" and enabled and self.fast_dtype == torch.bfloat16 \
                 and not torch.cuda.is_bf16_supported():
             raise RuntimeError('Current CUDA Device does not support bfloat16. Please switch dtype to float16.')
-        supported_dtyps = self.device_supported_fast_dtype_map[self.device]
-        if self.device != "cuda" and self.fast_dtype not in supported_dtyps:
+        supported_dtypes = self.device_supported_fast_dtype_map[self.device]
+        if self.device != "cuda" and self.fast_dtype not in supported_dtypes:
             error_message = f"In {self.device} autocast, but the target dtype is not supported. Disabling"
-            error_message += f"autocast.\n {self.device} Autocast only supports {supported_dtyps} currently."
+            error_message += f"autocast.\n {self.device} Autocast only supports {supported_dtypes} currently."
             warnings.warn(error_message)
             enabled = False
         self._enabled = enabled

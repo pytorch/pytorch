@@ -837,6 +837,10 @@ class TestExtensionUtils(TestCase):
         with self.assertRaises(AttributeError):
             torch.foo.is_available()
 
+        with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
+            with torch.autocast(device_type=custom_backend_name):
+                pass
+
         torch._register_device_module('foo', DummyXPUModule)
         self.assertTrue(torch.foo.is_available())
         with torch.autocast(device_type=custom_backend_name):
