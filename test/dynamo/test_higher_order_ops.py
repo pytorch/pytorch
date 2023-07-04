@@ -1463,7 +1463,9 @@ class GraphModule(torch.nn.Module):
             return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -1485,7 +1487,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
-""")
+""",
+        )
 
     def test_grad_closure_scalar(self):
         counters.clear()
