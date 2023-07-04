@@ -21,7 +21,6 @@ import numpy as np
 
 import torch
 
-import torch._dynamo
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
@@ -1573,6 +1572,13 @@ class CommonTemplate:
             return ((a + 1).squeeze(-1).squeeze(2) + 2, a.squeeze(0) + 2)
 
         self.common(fn, (torch.randn(1, 2, 1, 2, 2, 2, 1),))
+
+    def test_squeeze_varargs(self):
+        def fn(x):
+            return x.squeeze(1, 2).clone()
+
+        a = torch.randn(1024, 1, 1)
+        self.common(fn, (a,))
 
     def test_simplify_loops(self):
         def fn(a, b):
@@ -3146,6 +3152,7 @@ class CommonTemplate:
             check_lowp=False,  # accuracy issues with relatively large matmuls
         )
 
+    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
@@ -5420,7 +5427,7 @@ class CommonTemplate:
         r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
         if self.device == "cuda":
             self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 0)
+            self.assertEqual(bw_code.count("tl.rand"), 1)
         g2 = weight.grad.clone()
         check(r2, g2)
 
@@ -5455,14 +5462,46 @@ class CommonTemplate:
         )
         if self.device == "cuda":
             self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 0)
-            expected_kernel = 4
+            self.assertEqual(bw_code.count("tl.rand"), 2)
+
+            # seed generation
+            self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
+            self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
+
+            expected_kernel = 6
         else:
             expected_kernel = 6
 
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
+
+    @config.patch(search_autotune_cache=False)
+    @torch._functorch.config.patch(partitioner_aggressive_fusion=True)
+    def test_dropout4(self):
+        m = torch.nn.Dropout(0.2)
+
+        @torch._dynamo.optimize_assert("inductor")
+        def run(x):
+            return m(x)
+
+        inp = torch.randn([8, 32], device=self.device, requires_grad=True)
+        result, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(inp))
+        zero_out = (result == 0).sum().item()
+        grad_zero = (inp.grad == 0).sum().item()
+        self.assertEqual(zero_out, grad_zero)
+
+        if self.device == "cuda":
+            self.assertEqual(fw_code.count("tl.rand"), 1)
+            self.assertEqual(bw_code.count("tl.rand"), 1)
+
+            # seed generation
+            self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
+            self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
+
+        else:
+            self.assertEqual(fw_code.count("aten.bernoulli"), 1)
+            self.assertEqual(bw_code.count("aten.bernoulli"), 0)
 
     def test_randint_kernel_count(self):
         @torch._dynamo.optimize_assert("inductor")
@@ -5716,8 +5755,7 @@ class CommonTemplate:
         self.common(forward, inps, atol=1e-05, rtol=2e-05)
 
     @unittest.skipIf(
-        TEST_WITH_ASAN
-        or os.environ.get("BUILD_ENVIRONMENT", "").startswith("parallelnative"),
+        os.environ.get("BUILD_ENVIRONMENT", "").startswith("parallelnative"),
         "TODO: debug this with asan",
     )
     def test_tmp_not_defined_issue2(self):
@@ -6273,6 +6311,7 @@ class CommonTemplate:
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         same(fn(x), opt_fn(x))
 
+    @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
         from torch._inductor.codegen.common import boolean_ops
@@ -6481,10 +6520,12 @@ class CommonTemplate:
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
 
+        # The first two values should be the same, attention output
+        # and logsumexp since dropout is not being set
         def fn(q, k, v, compute_log_sumexp):
             return aten._scaled_dot_product_efficient_attention(
                 q, k, v, compute_log_sumexp
-            )
+            )[:2]
 
         self.common(
             fn,
@@ -6508,6 +6549,45 @@ class CommonTemplate:
             return torch.fft.fftn(x).real
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
+
+    def test_inductor_bucketize(self):
+        def fn(input, boundaries, out_int32, right):
+            return torch.ops.prims._inductor_bucketize(
+                input, boundaries, out_int32=out_int32, right=right
+            )
+
+        input = torch.rand((64, 64)) * 2 - 1
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        for out_int32 in [True, False]:
+            for right in [True, False]:
+                out_int32 = True
+                right = False
+                self.common(fn, (input, boundaries, out_int32, right), check_lowp=False)
+
+    def test_inductor_bucketize_default_kwargs(self):
+        def fn(input, offsets):
+            return torch.ops.prims._inductor_bucketize(input, offsets)
+
+        input = torch.tensor(
+            [-1.0, -0.9, -0.8, -0.5, 0.0, 0.1, 0.2, 0.4, 0.5, 0.6, 0.9, 0.91]
+        )
+        offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        self.common(fn, (input, offsets), check_lowp=False)
+
+    def test_inductor_bucketize_int(self):
+        def fn(input, offsets, out_int32, right):
+            return torch.ops.prims._inductor_bucketize(
+                input, offsets, out_int32=out_int32, right=right
+            )
+
+        input = torch.randint(0, 102, (64, 64))
+        offsets = torch.arange(10, dtype=torch.int32) ** 2 + 1
+
+        for out_int32 in [True, False]:
+            for right in [True, False]:
+                self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
 
 
 @dataclasses.dataclass

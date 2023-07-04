@@ -416,6 +416,14 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, code)
 
+    # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
+    def DUPLICATE_INPUT(self, guard, source_b):
+        ref_a = self.arg_ref(guard)
+        ref_b = self.arg_ref(source_b.name())
+
+        code = [f"{ref_b} is {ref_a}"]
+        self._produce_guard_code(guard, code)
+
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
@@ -909,20 +917,34 @@ class CheckFunctionManager:
                         converted.append(None)
                 return converted
 
+            def convert_offset(offset):
+                if is_concrete_int(offset):
+                    return int(offset)
+                return None
+
             dynamic_dims_sizes = [
                 convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
-                        "size"
-                    ]
+                    self.output_graph.tensor_weakref_to_sizes_strides_offset[
+                        WeakIdRef(t)
+                    ]["size"]
                 )
                 for t in tensor_check_examples
             ]
 
             dynamic_dims_strides = [
                 convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
-                        "stride"
-                    ]
+                    self.output_graph.tensor_weakref_to_sizes_strides_offset[
+                        WeakIdRef(t)
+                    ]["stride"]
+                )
+                for t in tensor_check_examples
+            ]
+
+            dynamic_dims_offset = [
+                convert_offset(
+                    self.output_graph.tensor_weakref_to_sizes_strides_offset[
+                        WeakIdRef(t)
+                    ]["storage_offset"]
                 )
                 for t in tensor_check_examples
             ]
@@ -931,6 +953,7 @@ class CheckFunctionManager:
                 *tensor_check_examples,
                 dynamic_dims_sizes=dynamic_dims_sizes,
                 dynamic_dims_strides=dynamic_dims_strides,
+                dynamic_storage_offset=dynamic_dims_offset,
             )
             check_tensors_fn = tensor_guards.check
             check_tensors_verbose_fn = tensor_guards.check_verbose

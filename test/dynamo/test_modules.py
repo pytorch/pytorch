@@ -928,6 +928,27 @@ class SequentialWithDuplicatedModule2(torch.nn.Module):
         return self.layer(x)
 
 
+class ModuleComparison(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer0 = torch.nn.Linear(10, 10)
+        self.layer1 = torch.nn.Linear(10, 10)
+        self.layer2 = torch.nn.Linear(10, 10)
+
+    @property
+    def encoder_layers(self):
+        return [self.layer0, self.layer1, self.layer2]
+
+    def forward(self, x):
+        for layer in self.encoder_layers:
+            output = layer(x)
+            if layer is None or layer == self.layer0:
+                output = F.relu6(output)
+            else:
+                output = F.relu(output)
+        return output
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -1000,6 +1021,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_sequential_with_duplicated_module2 = make_test(
         SequentialWithDuplicatedModule2()
     )
+    test_module_comparison = make_test(ModuleComparison())
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
@@ -1936,33 +1958,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
-
-    def test_no_graphbreak_builtin_equal(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.layer0 = torch.nn.Linear(10, 10)
-                self.layer1 = torch.nn.Linear(10, 10)
-                self.layer2 = torch.nn.Linear(10, 10)
-
-            @property
-            def encoder_layers(self):
-                return [self.layer0, self.layer1, self.layer2]
-
-            def forward(self, x):
-                for layer in self.encoder_layers:
-                    output = layer(x)
-                    if layer == self.layer0:
-                        output = F.relu6(output)
-                    else:
-                        output = F.relu(output)
-                return output
-
-        x = torch.randn(10, 10)
-
-        m = MyModule()
-
-        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
 
 
 if __name__ == "__main__":

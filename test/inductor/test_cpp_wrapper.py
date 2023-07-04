@@ -3,7 +3,7 @@ import sys
 import unittest
 from typing import NamedTuple
 
-import torch._dynamo
+import torch
 from torch._inductor import config
 from torch.testing._internal.common_utils import (
     IS_MACOS,
@@ -78,16 +78,6 @@ test_failures_cpp_wrapper = {
     ),
     "test_conv2d_binary_inplace_fusion_pass_cpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
-    ),
-}
-
-# see https://github.com/pytorch/pytorch/issues/103194
-test_failures_cuda_wrapper = {
-    "test_fft_real_input_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",)
-    ),
-    "test_fft_real_input_real_output_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",)
     ),
 }
 
@@ -184,6 +174,7 @@ if RUN_CPU:
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_mm_views"),
         BaseTest("test_profiler_mark_wrapper_call"),
+        BaseTest("test_randint"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
@@ -293,7 +284,6 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperTemplate,
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
-        test_failures_cuda_wrapper,
         xfail_prop="_expected_failure_dynamic_wrapper",
     )
 

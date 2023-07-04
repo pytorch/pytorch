@@ -31,11 +31,26 @@ required = _RequiredParameter()
 
 def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
+        import torch._dynamo
         prev_grad = torch.is_grad_enabled()
         try:
+            # Note on graph break below:
+            # we need to graph break to ensure that aot respects the no_grad annotation.
+            # This is important for perf because without this, functionalization will generate an epilogue
+            # which updates the mutated parameters of the optimizer which is *not* visible to inductor, as a result,
+            # inductor will allocate for every parameter in the model, which is horrible.
+            # With this, aot correctly sees that this is an inference graph, and functionalization will generate
+            # an epilogue which is appended to the graph, which *is* visible to inductor, as a result, inductor sees that
+            # step is in place and is able to avoid the extra allocation.
+            # In the future, we will either 1) continue to graph break on backward, so this graph break does not matter
+            # or 2) have a fully fused forward and backward graph, which will have no_grad by default, and we can remove this
+            # graph break to allow the fully fused fwd-bwd-optimizer graph to be compiled.
+            # see https://github.com/pytorch/pytorch/issues/104053
             torch.set_grad_enabled(self.defaults['differentiable'])
+            torch._dynamo.graph_break()
             ret = func(self, *args, **kwargs)
         finally:
+            torch._dynamo.graph_break()
             torch.set_grad_enabled(prev_grad)
         return ret
     functools.update_wrapper(_use_grad, func)
@@ -308,10 +323,7 @@ class Optimizer:
         """Groups a list of lists of tensors by device and dtype.
         Skips this step if we are compiling since this will occur during inductor lowering."""
         if is_compiling():
-            if with_indices:
-                indices = list(range(len(tensorlistlist[0])))
-                tensorlistlist.append(indices)
-            return {(None, None): tensorlistlist}
+            return {(None, None): (tensorlistlist, list(range(len(tensorlistlist[0]))))}
         else:
             return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
 
@@ -364,6 +376,7 @@ class Optimizer:
         self._optimizer_step_post_hooks[handle.id] = hook
         return handle
 
+    @torch._disable_dynamo
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
 
@@ -416,6 +429,7 @@ class Optimizer:
             return value.to(device=param.device)
         return value
 
+    @torch._disable_dynamo
     def load_state_dict(self, state_dict):
         r"""Loads the optimizer state.
 
@@ -472,6 +486,7 @@ class Optimizer:
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
+    @torch._disable_dynamo
     def zero_grad(self, set_to_none: bool = True):
         r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
 
@@ -526,6 +541,7 @@ class Optimizer:
         """
         raise NotImplementedError
 
+    @torch._disable_dynamo
     def add_param_group(self, param_group):
         r"""Add a param group to the :class:`Optimizer` s `param_groups`.
 
