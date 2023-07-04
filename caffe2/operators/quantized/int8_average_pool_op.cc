@@ -18,7 +18,7 @@ subset of the input tensor according to the kernel size and downsampling the
 data into the output blob Y for further processing.
 )DOC";
 
-static std::function<void(OpSchema&)> AveragePoolDocGenerator(
+std::function<void(OpSchema&)> AveragePoolDocGenerator(
     const char* dim,
     bool relu_fused = false) {
   return [=](OpSchema& schema) {

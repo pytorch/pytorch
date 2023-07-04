@@ -1183,6 +1183,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_xla(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_xla());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::is_xpu(Tensor a) -> bool"),
         [](Stack& stack) {
           at::Tensor a;

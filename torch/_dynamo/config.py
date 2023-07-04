@@ -128,6 +128,7 @@ skipfiles_inline_module_allowlist = {
     torch._prims,
     torch._decomp,
     torch.utils._contextlib,
+    torch.utils._pytree,
 }
 
 # If a string representing a PyTorch module is in this ignorelist,
@@ -234,6 +235,9 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 # trace through numpy ndarray as tensor and try to translate numpy function to torch function.
 numpy_ndarray_as_tensor = False
+
+# Uses z3 for validating the guard optimizations transformations.
+translation_validation = False
 
 
 def is_fbcode():
