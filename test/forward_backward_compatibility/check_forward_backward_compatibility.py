@@ -311,7 +311,6 @@ ALLOW_LIST = [
     ("aten::to_sparse_csc.out", datetime.date(2023, 12, 31)),
     ("aten::to_sparse_csr.out", datetime.date(2023, 12, 31)),
     ("aten::_structured_sparse_linear", datetime.date(2023, 12, 31)),
-    ("profiler::_record_function_exit", datetime.date(2023, 8, 1)),
 
 ]
 
