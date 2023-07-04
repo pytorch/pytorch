@@ -254,7 +254,11 @@ class ValueRangeAnalysis:
             else:
                 return ValueRanges(sympy.false, sympy.true)
 
-        sympy_dtype = sympy.Float if dtype.is_floating_point else sympy.Integer
+        # Like sympy.Integer but handles inf values
+        def trunc(x):
+            return sympy.Integer(x) if x.is_finite else x
+
+        sympy_dtype = sympy.Float if dtype.is_floating_point else trunc
         if x.is_bool:
             if x.is_singleton():
                 val = 1 if x.lower else 0
@@ -263,7 +267,6 @@ class ValueRangeAnalysis:
                 return ValueRanges(sympy_dtype(0), sympy_dtype(1))
         else:
             # int to float or float to int
-            assert isinstance(x.lower, (sympy.Integer, sympy.Float))
             return ValueRanges(sympy_dtype(x.lower), sympy_dtype(x.upper))
 
     @staticmethod
