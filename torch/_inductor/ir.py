@@ -3111,11 +3111,15 @@ class ScatterFallback(ExternKernel):
         else:
             (x, index) = [t.codegen_reference() for t in self.inputs]
             src = self.constant_args[1]
-        if V.graph.cpp_wrapper:
-            line = self.codegen_cpp(wrapper, x, index, src)
-        else:
-            line = self.codegen_python(wrapper, x, index, src)
-        wrapper.writeline(line)
+        wrapper.generate_scatter_fallback(
+            x,
+            [x, self.constant_args[0], index, src],
+            self.kernel,
+            self.fn,
+            self.src_is_tensor,
+            self.kwargs["reduce"],
+            self.codegen_kwargs(),
+        )
 
     def should_allocate(self):
         return False
