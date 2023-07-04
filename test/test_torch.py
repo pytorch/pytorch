@@ -326,7 +326,6 @@ class TestTorchDeviceType(TestCase):
         s = t.storage()
         self._check_storage_meta(s, s_check)
 
-    @onlyCPU
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_storage_meta_errors(self, device, dtype):
         s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
@@ -347,7 +346,7 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'only available on CUDA'):
                 s0._share_cuda_()
 
-            with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
+            with self.assertRaisesRegex(TypeError, r"cannot pin 'torch.storage.UntypedStorage' only CPU memory can be pinned"):
                 s0.pin_memory()
 
         with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
@@ -1275,34 +1274,6 @@ else:
                     self.fail(msg=(
                         f'Subprocess exception while attempting to run {test_case_info(fn_name, config)}:\n'
                         + e.output.decode("utf-8")))
-
-    # When deterministic algorithms are enabled, `torch.empty` should fill floating
-    # point tensors with NaN and integer tensors with MAX_INT
-    @skipXLA
-    @skipIfTorchInductor("aot-autograd issue")
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_deterministic_empty(self, device, dtype):
-        gen_fns = [
-            lambda: torch.empty(10, 9, device=device, dtype=dtype),
-            lambda: torch.empty(10, 9, out=torch.zeros(1, device=device, dtype=dtype)),
-            lambda: torch.empty_like(torch.zeros(10, 9, device=device, dtype=dtype)),
-            lambda: torch.empty_like(torch.zeros(10, 9, device=device, dtype=dtype), memory_format=torch.contiguous_format),
-            lambda: torch.empty_strided((10, 9), (1, 5), device=device, dtype=dtype),
-            lambda: torch.empty_permuted((2, 3, 5), (1, 0, 2), device=device, dtype=dtype),
-        ]
-
-        for gen_fn in gen_fns:
-            with DeterministicGuard(True):
-                res = gen_fn()
-
-            if dtype.is_floating_point or dtype.is_complex:
-                self.assertTrue(res.isnan().all())
-            else:
-                if dtype == torch.bool:
-                    max_val = True
-                else:
-                    max_val = torch.iinfo(dtype).max
-                self.assertTrue(res.eq(max_val).all())
 
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture

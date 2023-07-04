@@ -37,7 +37,7 @@ from torch.testing._internal.common_dtype import integral_types, get_all_math_dt
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMps,\
-    TEST_WITH_UBSAN, IS_PPC, \
+    IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, IS_WINDOWS, gcIfJetson
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
@@ -11580,7 +11580,6 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "none", torch.empty([2, 5, 0], device=device), device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "none", torch.empty([2, 5, 7, 0], device=device), device)
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_nll_loss_empty_tensor_reduction_mean(self, device):
         nan = torch.tensor(float('nan'), device=device)
         self._nll_loss_helper([0, 3], "mean", nan, device)
@@ -11597,7 +11596,6 @@ class TestNNDeviceType(NNTestCase):
         self._nll_loss_helper([2, 3, 5, 0], "sum", zero, device)
         self._nll_loss_helper([2, 3, 5, 7, 0], "sum", zero, device)
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_nll_loss_total_weight_is_zero(self, device):
 
         def helper(input_size):
@@ -11614,7 +11612,6 @@ class TestNNDeviceType(NNTestCase):
         helper([2, 3, 5, 7])
         helper([2, 3, 5, 7, 9])
 
-    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_nll_loss_all_ignored(self, device):
 
         def helper(input_size):
@@ -12314,6 +12311,39 @@ class TestNNDeviceType(NNTestCase):
         m.to_empty(device='meta')
         m(input)
 
+    def test_module_to_empty_non_recursive(self, device):
+        class Layer(nn.Module):
+            def __init__(self, in_features, out_features):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(in_features, out_features))
+                self.register_buffer('buf', torch.randn(out_features))
+
+            def forward(self, x):
+                return x @ self.weight + self.buf
+
+        class MyModule(nn.Module):
+            def __init__(self, in_features, out_features):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(in_features, out_features))
+                self.register_buffer('buf1', torch.randn(out_features))
+                self.layer = Layer(out_features, out_features)
+
+            def forward(self, x):
+                return self.layer(x @ self.weight + self.buf1)
+
+        with torch.device('meta'):
+            m = MyModule(3, 5)
+
+        m.to_empty(device=device, recurse=False)
+
+        # params/buffers of parent should have been materialized on device
+        self.assertTrue(not m.weight.is_meta)
+        self.assertTrue(not m.buf1.is_meta)
+
+        # parameters/buffers of children submodules should still be on meta
+        for p in (*m.layer.parameters(), *m.layer.buffers()):
+            self.assertTrue(p.is_meta)
+
     @skipMeta
     def test_skip_init(self, device):
         torch.manual_seed(1)
@@ -12705,6 +12735,15 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_norm_(p1, max_norm, norm_type=norm_type, foreach=foreach)
         clip_grad_norm_([p2], max_norm, norm_type=norm_type, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
+
+    @onlyCUDA
+    @largeTensorTest("20GB", "cuda")
+    def test_softmax_backward_64bit_indexing(self, device):
+        for numel in (2147483650, 2147483650 + 1):
+            x = torch.empty([1, 1, numel], device=device, dtype=torch.float16)
+            x.fill_(1.0 / numel)
+            out = torch._softmax_backward_data(x, x, 2, x.dtype)
+            self.assertEqual(out[0, 0, 0], 1 / numel)
 
 
 class TestFunctionalPickle(TestCase):

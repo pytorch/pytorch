@@ -891,6 +891,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 /* AOTInductor generated code */
 
                 #include <ATen/ScalarOps.h>
+                #include "aot_inductor_interface.cpp"
                 """
             )
         else:
@@ -918,13 +919,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.output_is_tensor = output_is_tensor
 
     def write_prefix(self):
-        return
+        if V.graph.aot_mode:
+            self.prefix.writeline("namespace aot_inductor {")
 
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
-        self.prefix.splice(
-            f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& args) {{"""
-        )
+        if V.graph.aot_mode:
+            self.prefix.splice(
+                """
+                void AOTInductorModel::run_impl(
+                    const std::vector<at::Tensor>& args,
+                    std::vector<at::Tensor>& outputs,
+                    cudaStream_t stream) {
+                """
+            )
+        else:
+            self.prefix.splice(
+                f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& args) {{"""
+            )
         with self.prefix.indent():
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
@@ -965,7 +977,67 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
+    def codegen_model_constructor(self):
+        """
+        // Generated code example
+        AOTInductorModel::AOTInductorModel()
+            : AOTInductorModelBase(4, 1) {
+        inputs_info_[0].name = "linear.weight";
+        inputs_info_[0].shape.reserve(2);
+        inputs_info_[0].shape.emplace_back(10, 10, nullptr);
+        inputs_info_[0].shape.emplace_back(64, 64, nullptr);
+        ...
+        outputs_info_[0].name = "output0";
+        outputs_info_[0].shape.reserve(2);
+        outputs_info_[0].shape.emplace_back(32, 32, nullptr);
+        outputs_info_[0].shape.emplace_back(10, 10, nullptr);
+        }
+        """
+        num_inputs = len(V.graph.graph_inputs)
+        num_outputs = len(V.graph.graph_outputs)
+        self.prefix.splice(
+            f"""
+            AOTInductorModel::AOTInductorModel()
+                : AOTInductorModelBase({num_inputs}, {num_outputs}) {{
+            """
+        )
+
+        with self.prefix.indent():
+            for idx, name in enumerate(V.graph.graph_inputs.keys()):
+                # TODO: handle symbolic expressions later.
+                assert not isinstance(V.graph.graph_inputs[name], sympy.Expr)
+                self.prefix.writeline(f"""inputs_info_[{idx}].name = "{name}";""")
+                sizes = V.graph.graph_inputs[name].get_size()
+                self.prefix.writeline(
+                    f"inputs_info_[{idx}].shape.reserve({len(sizes)});"
+                )
+                for size in sizes:
+                    # FIXME: set the lower bound and the upper bound to be "size".
+                    # Later, we should specify the correct range for dynamic dimentions.
+                    self.prefix.writeline(
+                        f"inputs_info_[{idx}].shape.emplace_back({size}, {size}, nullptr);"
+                    )
+
+            for idx, output in enumerate(V.graph.graph_outputs):
+                # TODO: handle symbolic expressions later.
+                assert not isinstance(output, sympy.Expr)
+                self.prefix.writeline(f"""outputs_info_[{idx}].name = "output{idx}";""")
+                sizes = output.get_size()
+                self.prefix.writeline(
+                    f"outputs_info_[{idx}].shape.reserve({len(sizes)});"
+                )
+                for size in sizes:
+                    # FIXME: set the lower bound and the upper bound to be "size".
+                    # Later, we should specify the correct range for dynamic dimentions.
+                    self.prefix.writeline(
+                        f"outputs_info_[{idx}].shape.emplace_back({size}, {size}, nullptr);"
+                    )
+
+        self.prefix.writeline("}")
+
     def generate(self):
+        if V.graph.aot_mode:
+            self.codegen_model_constructor()
         self.write_wrapper_decl()
         return super().generate()
 
@@ -975,10 +1047,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.header.splice(f"\n{kernel}\n")
 
     def generate_return(self, output_refs):
-        self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
+        # Output tensors are allocated by the AOT runtime.
+        if V.graph.aot_mode:
+            self.wrapper_call.writeline("\n}")
+        else:
+            self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
 
     def generate_end(self, result):
         if V.graph.aot_mode:
+            result.writeline("} // namespace aot_inductor")
             return
 
         result.writeline("'''\n)")
@@ -1086,19 +1163,31 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def make_buffer_allocation(self, buffer):
         from .cpp import DTYPE_TO_ATEN
 
-        # TODO: map layout here
-        device = buffer.get_device()
-        dtype = buffer.get_dtype()
-        shape = tuple(buffer.get_size())
-        stride = tuple(buffer.get_stride())
-        device_str = self.codegen_device
-        return (
-            f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
-            f"{self.codegen_shape_tuple(shape)}, "
-            f"{self.codegen_shape_tuple(stride)}, "
-            f"{self.codegen_device(device)}"
-            f".dtype({DTYPE_TO_ATEN[dtype]})){self.ending}"
-        )
+        output_idx = None
+        for idx, output in enumerate(V.graph.graph_outputs):
+            if isinstance(output, (ir.NoneAsConstantBuffer, ir.ShapeAsConstantBuffer)):
+                continue
+            if buffer == output.data:
+                output_idx = idx
+                break
+        if output_idx is not None and V.graph.aot_mode:
+            # In aot_mode, output buffers are managed by the AOT runtime.
+            return (
+                f"at::Tensor {buffer.get_name()} = outputs[{output_idx}]{self.ending}"
+            )
+        else:
+            # TODO: map layout here.
+            device = buffer.get_device()
+            dtype = buffer.get_dtype()
+            shape = tuple(buffer.get_size())
+            stride = tuple(buffer.get_stride())
+            return (
+                f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
+                f"{self.codegen_shape_tuple(shape)}, "
+                f"{self.codegen_shape_tuple(stride)}, "
+                f"{self.codegen_device(device)}"
+                f".dtype({DTYPE_TO_ATEN[dtype]})){self.ending}"
+            )
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
@@ -1163,7 +1252,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
     def write_header(self):
         super().write_header()
-        self.prefix.splice(
+        self.header.splice(
             """
             #include <ATen/native/BinaryOps.h>
             #include <c10/util/Exception.h>
