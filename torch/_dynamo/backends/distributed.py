@@ -238,7 +238,23 @@ class DDPOptimizer:
                         buckets[0].param_ids.append(id(param))
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
-                if maybe_param.requires_grad and not self._ignore_parameter(
+                if isinstance(maybe_param, torch.fx.GraphModule):
+                    # This indicates presence of a higher order op. For now, we
+                    # have no way to break the higher order op into two buckets.
+                    # So, we treat the subgrpah as atomic. In practice, this
+                    # might be ok because the subgraphs mostly come from
+                    # Autograd function or activation checkpointing, which
+                    # themselves serve as good atomic blocks.
+                    # Moreover, this type of partitioning seems better to be
+                    # done at AOT Dispatched graphs, where these higher order
+                    # ops will be traced through.
+                    gmod = maybe_param
+                    for name, param in gmod.named_parameters():
+                        if param.requires_grad and not self._ignore_parameter(param):
+                            buckets[0].size += param.untyped_storage().nbytes()
+                            buckets[0].params.append(f"{node.gmod}_{name}")
+                            buckets[0].param_ids.append(id(param))
+                elif maybe_param.requires_grad and not self._ignore_parameter(
                     maybe_param
                 ):
                     buckets[0].size += maybe_param.untyped_storage().nbytes()

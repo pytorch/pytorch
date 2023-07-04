@@ -331,6 +331,62 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         body_function = getattr(cnt.graphs[0], wrap_node.args[0].name)
         self.assertEqual(op_count(body_function), 2)
 
+    @requires_cuda()
+    def test_ddp(self):
+        import os
+
+        import torch.distributed as dist
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        from torch.testing._internal.common_utils import find_free_port
+
+        class InnerModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(4, 4)
+                self.linear2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                a = self.linear1(x)
+                a = self.linear2(a)
+                return a
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner_mod1 = InnerModule()
+                self.inner_mod2 = InnerModule()
+
+            def forward(self, x, y):
+                a = checkpoint(self.inner_mod1, x, use_reentrant=False)
+                a = torch.cos(a)
+                a = checkpoint(self.inner_mod2, a, use_reentrant=False)
+                a = torch.cos(a)
+                return a
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        dist.init_process_group("gloo", rank=0, world_size=1)
+
+        mod = MockModule()
+        mod = DDP(mod)
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        args = (x, y)
+
+        backend = "aot_eager"
+        cnt = CompileCounterWithBackend(backend)
+
+        expected = mod(*args)
+        result = torch.compile(mod, backend=cnt)(*args)
+
+        self.assertEqual(result, expected)
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(cnt.graphs), 1)
+
+        wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
+        self.assertEqual(len(wrap_node.args), 6)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
