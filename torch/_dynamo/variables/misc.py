@@ -299,8 +299,10 @@ class AutogradFunctionVariable(VariableTracker):
             if jvp_fn is not torch.autograd.Function.jvp:
                 unimplemented("NYI - User defind jvp")
 
-            from .higher_order_op import TorchHigherOrderOperatorVariable
-            from .torch import safe_or_raise_always_restore
+            from .higher_order_ops import (
+                safe_or_raise_always_restore,
+                TorchHigherOrderOperatorVariable,
+            )
 
             trampoline_autograd_apply = produce_trampoline_autograd_apply(self.fn_cls)
             trampoline_autograd_fwd = produce_trampoline_autograd_fwd(self.fn_cls)
