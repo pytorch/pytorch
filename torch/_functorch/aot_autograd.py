@@ -168,7 +168,7 @@ def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int = 0):
         forward_node_stack = node.metadata.get("traceback_", [])
         forward_node_module_info = str(node.name)
         node.register_prehook(get_prehook(forward_node_stack,
-            node.sequence_nr()))
+                              node.sequence_nr()))
 
         special_stack = forward_node_stack.copy()
         special_stack.append(

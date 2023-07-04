@@ -785,11 +785,12 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                         bwd_seq_id_set.add(seq_id)
 
         # There are 5 common ops in this test:  conv, bn, relu, flatten, fc
-        # This test can't isolate the fwd component of loss from the 
+        # This test can't isolate the fwd component of loss from the
         # bwd component, so we don't expect to see loss in the common ops
         common_ops = fwd_seq_id_set.intersection(bwd_seq_id_set)
-        self.assertTrue(len(fwd_seq_id_set) > 0 and len(bwd_seq_id_set) > 0\
-                and len(common_ops) >= 5)
+        self.assertTrue(
+            len(fwd_seq_id_set) > 0 and len(bwd_seq_id_set) > 0 and len(common_ops) >= 5
+        )
 
 
 if __name__ == "__main__":
