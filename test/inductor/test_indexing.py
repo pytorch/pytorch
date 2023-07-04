@@ -5,10 +5,9 @@ from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 
-from torch._inductor.ir import ModularIndexing
 from torch._inductor.sizevars import SizeVarAllocator
-from torch.fx.experimental.symbolic_shapes import FloorDiv
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 
 class TestIndexingSimplification(TorchTestCase):

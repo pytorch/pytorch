@@ -58,6 +58,10 @@ Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
   auto delta = b.mean - a.mean;
   auto new_weight = a.weight + b.weight;
   auto wb_over_w = b.weight / new_weight;
+  if constexpr (IsVecType<T>::value) {
+    // Guard against division by zero
+    wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
+  }
   auto result = Welford<T>{
     a.mean + delta * wb_over_w,
     a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,

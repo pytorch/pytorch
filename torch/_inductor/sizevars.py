@@ -7,6 +7,7 @@ import sympy
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from .utils import sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
@@ -81,7 +82,6 @@ class SizeVarAllocator:
         Simplify indexing expression with knowledge of the ranges of
         iteration variables.
         """
-        from .ir import FloorDiv, ModularIndexing
 
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
@@ -472,8 +472,6 @@ class SizeVarAllocator:
 
 
 def join_dimensions(expr: Expr) -> Expr:
-    from .ir import ModularIndexing
-
     if not isinstance(expr, sympy.Add) or not expr.has(ModularIndexing):
         return expr  # fast exit path
     return _join_dimensions_cached(expr)
@@ -491,8 +489,6 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
 
     This type of pattern can come from view operations
     """
-    from .ir import FloorDiv, ModularIndexing
-
     assert isinstance(expr, sympy.Add)
 
     scale = sympy.Wild("scale", exclude=[0])
@@ -539,7 +535,7 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
 class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     """
     A wrapper around .virtualize.ops that uses var range information to
-    simplify ir.ModularIndexing/ir.FloorDiv.
+    simplify ModularIndexing/FloorDiv.
     """
 
     def __init__(self, inner, var_ranges: VarRanges):
