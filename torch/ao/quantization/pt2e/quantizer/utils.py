@@ -1,7 +1,7 @@
 from typing import List
 
 import torch
-from torch.ao.quantization._pt2e.quantizer.quantizer import (
+from torch.ao.quantization.pt2e.quantizer.quantizer import (
     QuantizationAnnotation,
     QuantizationConfig,
     QuantizationSpec,

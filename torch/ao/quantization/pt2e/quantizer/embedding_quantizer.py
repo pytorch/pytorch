@@ -5,7 +5,7 @@ from typing import List, Set
 
 import torch
 import torch.nn.functional as F
-from torch.ao.quantization._pt2e.quantizer.quantizer import (
+from torch.ao.quantization.pt2e.quantizer.quantizer import (
     OperatorConfig,
     OperatorPatternType,
     QuantizationAnnotation,

@@ -1,21 +1,21 @@
 from torch.fx import GraphModule
 
-from ._pt2e.prepare import prepare
-from ._pt2e._propagate_annotation import propagate_annotation
-from ._pt2e.qat_utils import (
+from .pt2e.prepare import prepare
+from .pt2e._propagate_annotation import propagate_annotation
+from .pt2e.qat_utils import (
     _fuse_conv_bn_qat,
     _fold_conv_bn_qat,
 )
-from ._pt2e.utils import (
+from .pt2e.utils import (
     _get_node_name_to_scope,
     _fuse_conv_bn_,
     _rearrange_weight_observer_for_decomposed_linear,
 )
-from ._pt2e.representation import reference_representation_rewrite
+from .pt2e.representation import reference_representation_rewrite
 from .fx.prepare import prepare as fx_prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
 from torch.ao.quantization import QConfigMapping
-from torch.ao.quantization._pt2e.quantizer import Quantizer
+from torch.ao.quantization.pt2e.quantizer import Quantizer
 from torch.ao.quantization.backend_config import BackendConfig
 
 from typing import Any, Tuple

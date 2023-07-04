@@ -3,7 +3,7 @@ import copy
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
-from torch.ao.quantization._pt2e.quantizer import (
+from torch.ao.quantization.pt2e.quantizer import (
     X86InductorQuantizer,
 )
 from torch.ao.quantization._quantize_pt2e import (
@@ -43,7 +43,7 @@ class TestQuantizePT2EX86Inductor(QuantizationTestCase):
                 )
 
                 before_fusion_result = m(*example_inputs)
-                import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+                import torch.ao.quantization.pt2e.quantizer.x86_inductor_quantizer as xiq
                 quantizer = X86InductorQuantizer()
                 operator_config = xiq.get_default_x86_inductor_quantization_config()
                 quantizer.set_global(operator_config)

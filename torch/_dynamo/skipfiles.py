@@ -139,9 +139,9 @@ FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
 # TODO: find a better way to express this path without having to import
 # `torch.ao.quantization._pt2e`, which interferes with memory profiling
 FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "ao/quantization/_pt2e/qat_utils.py",
-    _module_dir(torch) + "ao/quantization/_pt2e/quantizer/qnnpack_quantizer.py",
-    _module_dir(torch) + "ao/quantization/_pt2e/representation/rewrite.py",
+    _module_dir(torch) + "ao/quantization/pt2e/qat_utils.py",
+    _module_dir(torch) + "ao/quantization/pt2e/quantizer/qnnpack_quantizer.py",
+    _module_dir(torch) + "ao/quantization/pt2e/representation/rewrite.py",
 }
 
 # TODO (zhxchen17) Make exportdb importable here.
