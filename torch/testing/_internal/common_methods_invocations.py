@@ -11319,8 +11319,7 @@ op_db: List[OpInfo] = [
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('matrix_exp',
-           dtypes=floating_and_complex_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            aliases=('linalg.matrix_exp',),
            sample_inputs_func=sample_inputs_matrix_exp,
            # Needs to construct a 2nx2n matrix by copy_ ing into it
@@ -11330,20 +11329,12 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           decorators=[
-               DecorateInfo(
-                   toleranceOverride({
-                       torch.float32: tol(atol=1e-5, rtol=1e-5),
-                       torch.complex64: tol(atol=1e-5, rtol=1e-5),
-                   }),
-                   "TestInductorOpInfo", "test_comprehensive", device_type="cpu",
-               ),
-           ],
            skips=(
                # times out
                DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
                # mexp does not support bf16 and fp16
-               DecorateInfo(unittest.skip('Skipped!'), 'TestInductorOpInfo', 'test_comprehensive', device_type="cpu"),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestInductorOpInfo', 'test_comprehensive',
+                            dtype=torch.half, device_type="cpu"),
            ),
            supports_out=False,
            ),

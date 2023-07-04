@@ -542,9 +542,6 @@ class TestInductorOpInfo(TestCase):
         with torch.no_grad():
             torch.cuda.empty_cache()
         op_name = op.name
-        if 'matrix_exp' not in op_name:
-            return
-        torch._C._set_mkldnn_enabled(False)
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
 
