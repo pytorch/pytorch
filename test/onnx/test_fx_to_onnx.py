@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import pytorch_test_common
 import torch
-from parameterized import parameterized  # type: ignore[import]
 from torch import nn
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
@@ -42,6 +41,7 @@ def assert_has_diagnostics(
     )
 
 
+@common_utils.instantiate_parametrized_tests
 class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def setUp(self):
         super().setUp()
@@ -143,24 +143,29 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_error_node="aten.embedding.default",
         )
 
-    @parameterized.expand(
+    @common_utils.parametrize(
+        "op_level_debug, rule, expected_error_node",
         [
-            (
-                "bypassing_failed_op_level_debug_raises_diagnostic_warning",
-                True,
-                diagnostics.rules.op_level_debugging,
-                "aten.convolution.default",
+            common_utils.subtest(
+                (
+                    True,
+                    diagnostics.rules.op_level_debugging,
+                    "aten.convolution.default",
+                ),
+                name="bypassing_failed_op_level_debug",
             ),
-            (
-                "nearest_match_raises_diagnostic_warning",
-                False,
-                diagnostics.rules.find_opschema_matched_symbolic_function,
-                "aten::convolution.default",
+            common_utils.subtest(
+                (
+                    False,
+                    diagnostics.rules.find_opschema_matched_symbolic_function,
+                    "aten::convolution.default",
+                ),
+                name="found_nearest_match",
             ),
-        ]
+        ],
     )
-    def test_unsupported_function_schema_raise_diagnostic_warning(
-        self, _: str, op_level_debug: bool, rule: infra.Rule, expected_error_node: str
+    def test_unsupported_function_schema_raises_diagnostic_warning(
+        self, op_level_debug: bool, rule: infra.Rule, expected_error_node: str
     ):
         class TraceModel(torch.nn.Module):
             def __init__(self):

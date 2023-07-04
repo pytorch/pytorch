@@ -19,6 +19,7 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
+from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import codecache, config, ir, metrics
@@ -2776,7 +2777,7 @@ class LoopLevel:
         def do_split_with_tiling():
             sympy_factor = sympy.Integer(factor)
 
-            offset = ir.FloorDiv(self.size, sympy_factor) * sympy_factor
+            offset = FloorDiv(self.size, sympy_factor) * sympy_factor
             main_loop = LoopLevel(self.var, offset)
             main_loop.steps = sympy_factor
             main_loop.parallel = self.parallel
