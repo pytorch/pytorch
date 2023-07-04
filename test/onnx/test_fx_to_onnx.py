@@ -16,7 +16,6 @@ def assert_has_diagnostics(
     rule: infra.Rule,
     level: infra.Level,
     expected_error_node: str,
-    expected_error_message: str,
 ):
     rule_level_pairs = (rule.id, level.name.lower())
     sarif_log = diagnostic_context.sarif_log()
@@ -32,14 +31,12 @@ def assert_has_diagnostics(
                 and result.message.text
                 and result.message.markdown
                 and expected_error_node in result.message.text
-                and expected_error_message in result.message.markdown
             ):
                 return
 
     raise AssertionError(
         f"Expected diagnostic results of rule id and level pair {rule_level_pairs} "
         f"not found with expected error node {expected_error_node} and "
-        f"expected error message {expected_error_message}. "
         f"Actual diagnostic results: {actual_results}"
     )
 
@@ -140,10 +137,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
         assert_has_diagnostics(
             export_output.diagnostic_context,
-            diagnostics.rules.fx_node_to_onnx,
+            diagnostics.rules.op_level_debugging,
             diagnostics.levels.WARNING,
             expected_error_node="aten.embedding.default",
-            expected_error_message="IndexError: index out of range in self",
         )
 
     def test_unsupported_function_schema_with_op_level_debug(self):
@@ -163,13 +159,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
         assert_has_diagnostics(
             export_output.diagnostic_context,
-            diagnostics.rules.fx_node_to_onnx,
+            diagnostics.rules.op_level_debugging,
             diagnostics.levels.WARNING,
             expected_error_node="aten.convolution.default",
-            # TODO(titaiwang): The expected error message comes from other packages, so
-            # it's changed with different ONNX version, and that would break torch internal
-            # test. We should figure out a stable way to catch this error.
-            expected_error_message="ValueError",
         )
 
 

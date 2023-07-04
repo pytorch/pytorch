@@ -9586,6 +9586,7 @@ Rounds elements of :attr:`input` to the nearest integer.
 
 For integer inputs, follows the array-api convention of returning a
 copy of the input tensor.
+The return type of output is same as that of input's dtype.
 
 .. note::
     This function implements the "round half to even" to
@@ -11961,13 +11962,15 @@ Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`
 :attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`.
 
 .. math::
-    \text{output} = min(
-        \text{quant\_max},
-        max(
-            \text{quant\_min},
-            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
-        )
-    )
+    \text{output} = (
+        min(
+            \text{quant\_max},
+            max(
+                \text{quant\_min},
+                \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+            )
+        ) - \text{zero\_point}
+    ) \times \text{scale}
 
 Args:
     input (Tensor): the input value(s), ``torch.float32`` tensor
@@ -11987,7 +11990,7 @@ Example::
     >>> torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255)
     tensor([0.1000, 1.0000, 0.4000, 0.0000])
     >>> torch.fake_quantize_per_tensor_affine(x, torch.tensor(0.1), torch.tensor(0), 0, 255)
-    tensor([0.6000, 0.4000, 0.0000, 0.0000])
+    tensor([0.1000, 1.0000, 0.4000, 0.0000])
 """,
 )
 
@@ -12274,13 +12277,6 @@ memory_format=torch.contiguous_format) -> Tensor
 Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`size`.
 
-.. note::
-    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
-    output tensor is initialized to prevent any possible nondeterministic
-    behavior from using the data as an input to an operation. Floating point
-    and complex tensors are filled with NaN, and integer tensors are filled
-    with the maximum value.
-
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
@@ -12313,13 +12309,6 @@ Returns an uninitialized tensor with the same size as :attr:`input`.
 ``torch.empty_like(input)`` is equivalent to
 ``torch.empty(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
-.. note::
-    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
-    output tensor is initialized to prevent any possible nondeterministic
-    behavior from using the data as an input to an operation. Floating point
-    and complex tensors are filled with NaN, and integer tensors are filled
-    with the maximum value.
-
 Args:
     {input}
 
@@ -12351,13 +12340,6 @@ Creates a tensor with the specified :attr:`size` and :attr:`stride` and filled w
 .. warning::
     If the constructed tensor is "overlapped" (with multiple indices referring to the same element
     in memory) its behavior is undefined.
-
-.. note::
-    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
-    output tensor is initialized to prevent any possible nondeterministic
-    behavior from using the data as an input to an operation. Floating point
-    and complex tensors are filled with NaN, and integer tensors are filled
-    with the maximum value.
 
 Args:
     size (tuple of int): the shape of the output tensor
@@ -12403,13 +12385,6 @@ tensor ``t`` are such that ``t.stride(physical_layout[i]) == contiguous_strides[
 Unlike :func:`torch.empty_strided`, this is guaranteed to produce a dense
 tensor with no overlaps.  If possible, prefer using this function over
 :func:`torch.empty_strided` or manual use of :func:`torch.as_strided`.
-
-.. note::
-    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
-    output tensor is initialized to prevent any possible nondeterministic
-    behavior from using the data as an input to an operation. Floating point
-    and complex tensors are filled with NaN, and integer tensors are filled
-    with the maximum value.
 
 Args:
     size (tuple of int): the shape of the output tensor
