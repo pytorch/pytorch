@@ -226,6 +226,21 @@ TORCH_LIBRARY(quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::prelu(Tensor qx, Tensor weight, float output_scale, int output_zero_point) -> Tensor"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::sigmoid(Tensor qx, float output_scale, int output_zero_point) -> Tensor"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::softmax(Tensor qx, int dim, float output_scale, int output_zero_point) -> Tensor"));
+
+  // New OP definition for Quantization in PyTorch 2.0 Export
+  // Weight Prepack
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv_prepack_pt2e(Tensor weight, Tensor w_scales, int[] x_shape, float x_scale, int x_zp, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor"));
+
+  // Conv1D
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv1d_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv3d_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
+  // Post Op ReLU
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_relu_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
+  // Post Op Add
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_add_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
+  // Post Op AddReLU
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_add_relu_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
 }
 
 // According to #33294: The "_" prefix registration will be

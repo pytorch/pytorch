@@ -19,6 +19,7 @@
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1369,6 +1370,236 @@ template at::Tensor PackedConvWeightsOnednn<3>::apply_relu(
     double output_scale,
     int64_t output_zero_point);
 
+template <PostOps postOpFused>
+static at::Tensor _quantized_convolution_pt2e(
+    at::Tensor act, // contains quantized values but not QTensor
+    double act_scale,
+    int64_t act_zero_point,
+    at::Tensor weight, // MKLDNN tensor with quantized values
+    at::Tensor weight_scales,
+    at::Tensor weight_zero_points,
+    c10::optional<at::Tensor> bias, // Bias is not packed into MKLDNN tensor
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    bool transposed,
+    int64_t groups,
+    double output_scale,
+    int64_t output_zero_point,
+    c10::optional<at::Tensor> accum, // accum to fused with conv add
+    double accum_scale,
+    int64_t accum_zero_point,
+    bool fp32_output,
+    const c10::optional<c10::ArrayRef<c10::IValue>>& post_op_args) {
+  /*********************************/
+  /*          Checks               */
+  /*********************************/
+
+  if (fp32_output) {
+    // when fp32_output, if we set op_attr.set_zero_points, oneDNN will get wrong result
+    // When output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep
+    // When output_zero_point is 0, we will skip invoking of op_attr.set_zero_points in ideep
+    TORCH_CHECK(output_scale == 1.0,  " (ONEDNN): fp32 output, output_scale must be 1.0.");
+    TORCH_CHECK(output_zero_point == 0,  " (ONEDNN): fp32 output, output_zero_point must be 0");
+  }
+
+  int kSpatialDim = act.dim() - 2;
+  bool is_1d = (1 == kSpatialDim);
+  // has_accum: extra input besides the conv to do conv add fusion.
+  bool has_accum = (postOpFused == PostOps::Add) || (postOpFused == PostOps::AddRelu);
+  std::string func_name = "quantized::packed_weights_conv";
+  func_name += std::to_string(kSpatialDim) + "d";
+  if (postOpFused == PostOps::Relu) {
+    func_name += "_relu";
+  } else if(postOpFused == PostOps::Add) {
+    func_name += "_add";
+  } else if (postOpFused == PostOps::AddRelu) {
+    func_name += "_add_relu";
+  }
+  if (kSpatialDim == 1) {
+    kSpatialDim += 1;
+  }
+  TORCH_CHECK(
+    weight.is_mkldnn(),
+    func_name, ": Weight should be prepacked as an MKLDNN tensor"
+  );
+  if (transposed) {
+    TORCH_CHECK(
+      false,
+      func_name, ": to support transposed convolution."
+    );
+  }
+  if (is_1d) {
+    // N, C, L -> N, C, 1, L
+    act = act.unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
+    stride = quant_utils::MakeArgForConv1d(stride, 1);
+    padding = quant_utils::MakeArgForConv1d(padding, 0);
+    dilation = quant_utils::MakeArgForConv1d(dilation, 1);
+  }
+  TORCH_CHECK(
+    act.scalar_type() == c10::ScalarType::Byte,
+    func_name, ": Input tensor should have uint8 (unsigned char) data type");
+  TORCH_CHECK(
+    weight.scalar_type() == c10::ScalarType::Char,
+    func_name, ": Weight tensor should have int8 (char) data type");
+  TORCH_CHECK(
+    weight.ndimension() == kSpatialDim + 2,
+    func_name, ": Weights are expected to have ", kSpatialDim + 2, " dimensions");
+  TORCH_CHECK(
+    stride.size() == (decltype(stride.size()))kSpatialDim,
+    func_name, ": stride should contain ", kSpatialDim, " elements for ",
+    kSpatialDim, "D convolution.");
+  TORCH_CHECK(
+    padding.size() == (decltype(padding.size()))kSpatialDim,
+    func_name, ": Specify front/top/left padding only. "
+    "end/bottom/right padding assumed to be equal to front/top/left");
+  TORCH_CHECK(
+    dilation.size() == (decltype(dilation.size()))kSpatialDim,
+    func_name, ": dilation should contain ", kSpatialDim, " elements for ",
+    kSpatialDim, "D convolution.");
+
+  // Parameters
+  // Scales of ONEDNN and PyTorch are reciprocal
+  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0 / act_scale);
+  double inv_output_scale = 1.0 / output_scale;
+
+  // TODO (leslie): optimize the performance here.
+  ideep::scale_t weights_scales(weight_scales.numel());
+  if (weight_scales.ndimension() == 0) {
+    // Weight is quant per tensor, then weight_scales will be a scalar Tensor
+    weights_scales[0] = 1.0 / weight_scales.item().toDouble(); // Scales of ONEDNN and PyTorch are reciprocal
+  } else {
+    // Weight is quant per channel
+    for (int i = 0; i < weight_scales.numel(); ++i) {
+      weights_scales[i] = 1.0 / weight_scales[i].item().toDouble();
+    }
+  }
+
+  const ideep::zero_point_t src_zero_points = ideep::zero_point_t(1, act_zero_point);
+  const ideep::zero_point_t dst_zero_points = ideep::zero_point_t(1, output_zero_point);
+
+  // Weight
+  auto packed_weight = at::native::itensor_from_mkldnn(weight);
+
+  // Bias
+  ideep::tensor onednn_bias;
+  const int output_channels = weight.size(0);
+  bool with_bias = bias.has_value();
+  if (with_bias) {
+    at::Tensor bias_val = bias.value();
+    TORCH_CHECK(bias_val.dim() == 1, "bias should be a vector (1D Tensor)");
+    TORCH_CHECK(
+        bias_val.size(0) == output_channels,
+        "bias should have K elements: " + std::to_string(output_channels));
+    auto bias_desc = ideep::tensor::desc(bias.value().sizes().vec(), dnnl::memory::data_type::f32);
+    onednn_bias.init(bias_desc, bias.value().data_ptr());
+  }
+
+  const auto& expected_bias = with_bias ? onednn_bias : ideep::tensor();
+
+  /*********************************/
+  /*        Computation            */
+  /*********************************/
+  // src
+  auto act_contig = act.contiguous(kSpatialDim == 2 ?
+                                   c10::MemoryFormat::ChannelsLast :
+                                   c10::MemoryFormat::ChannelsLast3d);
+  auto src_dims = act_contig.sizes().vec();
+  auto src_data_type = dnnl::memory::data_type::u8;
+  auto src_desc = ideep::tensor::desc(src_dims, src_data_type,
+      kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
+  ideep::tensor src;
+  src.init(src_desc, act_contig.data_ptr());
+  // dst
+  const std::vector<int64_t>& input_size = src.get_dims();
+  const auto& kernel_size = packed_weight.get_dims();
+  std::vector<int64_t> output_sizes;
+  output_sizes = at::native::conv_output_size(input_size, kernel_size, padding.vec(), stride.vec(), dilation.vec());
+  ideep::dims dst_dims = ideep::dims({output_sizes.cbegin(), output_sizes.cend()});
+  // Output is not a quantized tensor but data type is uint8
+  at::Tensor output;
+  if (fp32_output) {
+    output = at::empty(
+      dst_dims,
+      device(c10::kCPU)
+        .dtype(c10::kFloat)
+        .memory_format(kSpatialDim == 2 ?
+            c10::MemoryFormat::ChannelsLast :
+            c10::MemoryFormat::ChannelsLast3d),
+      c10::nullopt);
+  } else {
+    output = at::empty(
+      dst_dims,
+      device(c10::kCPU)
+          .dtype(c10::kByte)
+          .memory_format(kSpatialDim == 2 ?
+              c10::MemoryFormat::ChannelsLast :
+              c10::MemoryFormat::ChannelsLast3d)
+    );
+  }
+  if (output.numel() == 0) {
+    return output;
+  }
+  ideep::tensor dst;
+  at::Tensor accum_contig;
+  if (has_accum) {
+    auto dst_desc = ideep::tensor::desc(dst_dims, src_data_type,
+        kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
+    accum_contig = accum.value().contiguous(kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast : c10::MemoryFormat::ChannelsLast3d);
+    TORCH_CHECK(accum_contig.dtype() == output.dtype(), "The output tensor should have same dtype as the accum tensor.");
+    // When fused with sum, the dst tensor will share the data ptr as the accum tensor.
+    dst.init(dst_desc, accum_contig.data_ptr());
+  } else {
+    if (fp32_output) {
+      // Conv without add: int8-in, fp32-output
+      dst = ideep::tensor({dst_dims, ideep::tensor::data_type::f32, {output.strides().cbegin(), output.strides().cend()}},
+                        output.data_ptr());
+    } else {
+      dst = ideep::tensor({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
+                        output.data_ptr());
+    }
+  }
+  ideep::attr_t op_attr;
+  // attr
+  if (has_accum) {
+    op_attr = (postOpFused == PostOps::AddRelu) ? ideep::attr_t::residual_with_sum_zero_point() : ideep::attr_t::fuse_sum();
+    const ideep::scale_t accum_ideep_scale = ideep::scale_t(1, 1.0/accum_scale);
+    const ideep::zero_point_t accum_ideep_zero_points = ideep::zero_point_t(1, accum_zero_point);
+    // Set the dst scale and zero point with the value of accum.
+    // The true scale and zero point is stored in ideep::scale_t(scale_size, inv_output_scale) and dst_zero_points.
+    dst.set_scale(accum_ideep_scale);
+    dst.set_zero_point(accum_ideep_zero_points);
+  } else {
+    op_attr = (postOpFused == PostOps::Relu) ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+  }
+
+  // Weight Reorder
+  ConvParams params;
+  ideep::convolution_forward::prepare(
+      params, src, packed_weight, expected_bias, dst_dims, dst,
+      stride.vec(), dilation.vec(), padding.vec(), padding.vec(), groups,
+      src_scales, weights_scales, ideep::scale_t(1, inv_output_scale),
+      src_zero_points, dst_zero_points,
+      op_attr, dnnl::algorithm::convolution_direct,
+      dnnl::prop_kind::forward_inference,
+      ideep::u8s8, ideep::engine::cpu_engine());
+  auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups);
+  ideep::tensor expected_weight = packed_weight.reorder_if_differ_in(expected_weight_desc);
+
+  // Computation
+  ideep::convolution_forward::compute<false, false>(params, src, expected_weight, expected_bias, dst);
+
+  if (is_1d) {
+    output.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+    return output;
+  }
+  if (has_accum) {
+    return accum_contig;
+  } else {
+    return output;
+  }
+}
+
 #endif // #if AT_MKLDNN_ENABLED()
 
 namespace at::native {
@@ -1497,6 +1728,68 @@ class QConvInt8ForBC final {
   }
 };
 
+template <PostOps postOpFused>
+class QConvPT2E final {
+ public:
+  static at::Tensor run(
+      at::Tensor act, // contains quantized values but not QTensor
+      double act_scale,
+      int64_t act_zero_point,
+      at::Tensor weight, // contains quantized values but not QTensor
+      at::Tensor weight_scales,
+      at::Tensor weight_zero_points,
+      c10::optional<at::Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      double output_scale,
+      int64_t output_zero_point) {
+#if AT_MKLDNN_ENABLED()
+    return _quantized_convolution_pt2e<postOpFused>(
+        act, act_scale, act_zero_point,
+        weight, weight_scales, weight_zero_points,
+        bias, stride, padding, dilation, /*transposed*/false,
+        groups, output_scale, output_zero_point,
+        /*accum*/c10::nullopt, /*accum_scale*/0.0, /*accum_zero_point*/0,
+        /*fp32_output*/false
+    );
+#else
+    TORCH_CHECK(false, "Unimplemented as onednn is not available.")
+#endif
+  }
+  static at::Tensor run_add(
+      at::Tensor act, // contains quantized values but not QTensor
+      double act_scale,
+      int64_t act_zero_point,
+      at::Tensor accum, // contains quantized values but not QTensor
+      double accum_scale,
+      int64_t accum_zero_point,
+      at::Tensor weight, // contains quantized values but not QTensor
+      at::Tensor weight_scales,
+      at::Tensor weight_zero_points,
+      c10::optional<at::Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      double output_scale,
+      int64_t output_zero_point) {
+#if AT_MKLDNN_ENABLED()
+    return _quantized_convolution_pt2e<postOpFused>(
+        act, act_scale, act_zero_point,
+        weight, weight_scales, weight_zero_points,
+        bias, stride, padding, dilation, /*transposed*/false,
+        groups, output_scale, output_zero_point,
+        accum, accum_scale, accum_zero_point,
+        /*fp32_output*/false
+    );
+#else
+    TORCH_CHECK(false, "Unimplemented as onednn is not available.")
+#endif
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d"),          QConv1dInt8<false>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_relu"),     QConv1dInt8<true>::run);
@@ -1527,6 +1820,19 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
   // transpose
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose1d"),  QConv1dInt8<false>::run);
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d"),  QConvInt8<2, false>::run);
+}
+
+TORCH_LIBRARY_IMPL(quantized, MkldnnCPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv1d_pt2e"), QConvPT2E<PostOps::NoPostOp>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_pt2e"), QConvPT2E<PostOps::NoPostOp>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv3d_pt2e"), QConvPT2E<PostOps::NoPostOp>::run);
+  // PostOP ReLU
+  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_relu_pt2e"), QConvPT2E<PostOps::Relu>::run);
+  // PostOP Add
+  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_add_pt2e"), QConvPT2E<PostOps::Add>::run_add);
+  // PostOP AddReLU
+  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_add_relu_pt2e"), QConvPT2E<PostOps::AddRelu>::run_add);
+
 }
 
 } // namespace
