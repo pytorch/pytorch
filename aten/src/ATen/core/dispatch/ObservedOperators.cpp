@@ -14,6 +14,7 @@ std::unordered_set<std::string>& ObservedOperators::getUnobservedOperatorList() 
     "aten::output_nr",
     "aten::_version",
     "aten::is_complex",
+    "profiler::_record_function_enter",
     "profiler::_record_function_enter_new",
     "profiler::_record_function_exit",
   };
