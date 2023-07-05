@@ -16,7 +16,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.testing import same
+from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn import functional as F
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
@@ -729,6 +729,47 @@ class ConvTransposeCallForwardDirectly(torch.nn.Module):
         return self.layer.forward(x)
 
 
+class ConvCallSuperForwardDirectly(torch.nn.Conv1d):
+    def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
+        super(ConvCallSuperForwardDirectly, self).__init__(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            **kwargs,
+        )
+
+    def forward(self, inputs, mask=None):
+        outputs = super(ConvCallSuperForwardDirectly, self).forward(inputs)
+        return outputs
+
+
+class ConvTransposeCallSuperForwardDirectly(torch.nn.ConvTranspose2d):
+    def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
+        super(ConvTransposeCallSuperForwardDirectly, self).__init__(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            **kwargs,
+        )
+
+    def forward(self, x):
+        if x.numel() > 0:
+            return super(ConvTransposeCallSuperForwardDirectly, self).forward(x)
+        output_shape = [
+            ((i - 1) * d - 2 * p + (di * (k - 1) + 1) + op)
+            for i, p, di, k, d, op in zip(
+                x.shape[-2:],
+                self.padding,
+                self.dilation,
+                self.kernel_size,
+                self.stride,
+                self.output_padding,
+            )
+        ]
+        output_shape = [x.shape[0], self.bias.shape[0]] + output_shape
+        return _NewEmptyTensorOp.apply(x, output_shape)
+
+
 class ModuleNameString(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -887,6 +928,27 @@ class SequentialWithDuplicatedModule2(torch.nn.Module):
         return self.layer(x)
 
 
+class ModuleComparison(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer0 = torch.nn.Linear(10, 10)
+        self.layer1 = torch.nn.Linear(10, 10)
+        self.layer2 = torch.nn.Linear(10, 10)
+
+    @property
+    def encoder_layers(self):
+        return [self.layer0, self.layer1, self.layer2]
+
+    def forward(self, x):
+        for layer in self.encoder_layers:
+            output = layer(x)
+            if layer is None or layer == self.layer0:
+                output = F.relu6(output)
+            else:
+                output = F.relu(output)
+        return output
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -959,6 +1021,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_sequential_with_duplicated_module2 = make_test(
         SequentialWithDuplicatedModule2()
     )
+    test_module_comparison = make_test(ModuleComparison())
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
@@ -1145,6 +1208,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
         self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
@@ -1213,6 +1278,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module2(self):
         # Test FX graph 'call_module' works well if argument is lazy module
         m = LazyMLP()
@@ -1224,6 +1291,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_lazy_module3(self):
         m = LazyMLP()
@@ -1242,6 +1311,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(ref, res))
         self.assertEqual(cnt.frame_count, 2)
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module4(self):
         m = LazyMLP()
         x = torch.rand([10, 10])
@@ -1258,6 +1329,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         except RuntimeError:
             self.assertIn("must have same reduction dim", traceback.format_exc())
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module5(self):
         # Test lazy module works well with list/tuple input
         m = LazyModuleWithListInput()
@@ -1267,6 +1340,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module6(self):
         # Test new lazy submodule in lazy module's initialize_parameters
         m = LazyModuleWithLazySubmodule()
@@ -1316,6 +1391,22 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     def test_conv_transpose_call_forward_directly(self):
         m = ConvTransposeCallForwardDirectly()
         x = torch.rand([4, 4, 4, 4])
+        ref = m(x)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_conv_call_super_forward_directly(self):
+        x = torch.randn(4, 4)
+        m = ConvCallSuperForwardDirectly(4, 4, 4)
+        ref = m(x)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_conv_transpose_call_super_forward_directly(self):
+        x = torch.randn(4, 4, 4)
+        m = ConvTransposeCallSuperForwardDirectly(4, 4, 4)
         ref = m(x)
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         res = opt_m(x)
@@ -1397,6 +1488,32 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager")(get_parameter_dtype)
         out_dtype = opt_mod(mod)
         self.assertEqual(out_dtype, torch.float32)
+
+    def test_dir(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.register_buffer("buf0", torch.randn(10, 10))
+                self.register_parameter(
+                    name="param0", param=torch.nn.Parameter(torch.randn(10, 10))
+                )
+
+            def forward(self, x):
+                return self.r(torch.sin(x)) + self.buf0
+
+        mod = MockModule()
+        mod_keys = dir(mod)
+        opt_mod = torch._dynamo.optimize("eager")(mod)
+        opt_mod_keys = dir(opt_mod)
+
+        # Check user-defined attributes, parameters and buffers
+        self.assertIn("linear", opt_mod_keys)
+        self.assertIn("buf0", opt_mod_keys)
+        self.assertIn("param0", opt_mod_keys)
+
+        # Check all attributes, parameters and buffers
+        self.assertTrue(len(set(mod_keys).difference(opt_mod_keys)) == 0)
 
     def test_recursion(self):
         mod = MockModule()

@@ -299,6 +299,7 @@ class BackendConfig:
             self.device_backend_map = {
                 "cpu" : backend_val,
                 "cuda" : backend_val,
+                "xpu" : backend_val,
             }
 
         logger.info(
@@ -896,11 +897,11 @@ def is_torchelastic_launched() -> bool:
 
 
 def _is_barrier_after_init() -> int:
-    # Environment variable to control whether we do a barrier after process group
-    # init. Default value is 1 for now to stay the same with previous behavior.
-    # Users can change it to 0 if such behavior is undesired. We reserve the right
-    # to change the default value to 0 if small rollout is successful.
-    return int(os.getenv("TORCH_DIST_INIT_BARRIER", "1"))
+    # Environment variable to control whether process group should perform a
+    # barrier after its init. Default value is 0, i.e. no barrier. If you
+    # experience issue with this setting, you may set
+    # `TORCH_DIST_INIT_BARRIER=1` to add the barrier.
+    return int(os.getenv("TORCH_DIST_INIT_BARRIER", "0"))
 
 
 def _get_default_group():
@@ -1134,13 +1135,17 @@ def init_process_group(
 
     if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
-        # process groups including global variables are updated correctly on all
-        # ranks.
+        # process groups including global variables (if any) are updated
+        # correctly on all ranks.
         # Update 04/2023: for large-scale runs, this barrier (esp. store-based
         # barrier) may be costly and/or unscalable. Also, in a lot of cases,
-        # these barriers may be unnecessary, as proved by a green CI after
+        # these barriers may be unnecessary, as proven by a green CI after
         # removal. An environment variable `TORCH_DIST_INIT_BARRIER` has been
-        # added which, when set to 0, will disable these barriers.
+        # added which enables this barrier only when set to 1.
+        logger.info(
+            "Performing barrier after ProcessGroup initialization since "
+            "TORCH_DIST_INIT_BARRIER = 1"
+        )
         if backend == Backend.MPI:
             # MPI backend doesn't use store.
             barrier()
@@ -1148,11 +1153,6 @@ def init_process_group(
             # Use store based barrier here since barrier() used a bunch of
             # default devices and messes up NCCL internal state.
             _store_based_barrier(rank, store, group_name, world_size, timeout)
-    else:
-        logger.info(
-            "TORCH_DIST_INIT_BARRIER is set to 0, omitting the barrier after "
-            "ProcessGroup initialization."
-        )
 
 
 def _new_process_group_helper(
@@ -1672,6 +1672,7 @@ def _coalescing_manager(
         # Currently supported:
         # - coalesced `all_reduce`
         # - coalesced `all_gather_into_tensor`
+        # - coalesced `reduce_scatter_tensor`
         op0 = op_list[0].op
         if op0 == all_reduce:
             tensors = []
@@ -1687,6 +1688,15 @@ def _coalescing_manager(
                 inputs.append(op.tensor)
                 outputs.append(op.dst_tensor)
             work = group.allgather_into_tensor_coalesced(outputs, inputs)
+        elif op0 == reduce_scatter_tensor:
+            inputs = []
+            outputs = []
+            for op in op_list:
+                inputs.append(op.tensor)
+                outputs.append(op.dst_tensor)
+                opts = ReduceScatterOptions()
+                opts.reduceOp = op_list[0].redop
+            work = group.reduce_scatter_tensor_coalesced(outputs, inputs, opts)
         else:
             raise AssertionError(
                 f"Coalescing manager does not support fast-path coalescing of {op0}, "
@@ -3306,11 +3316,19 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
     opts = ReduceScatterOptions()
     opts.reduceOp = op
 
-    if group is None:
-        default_pg = _get_default_group()
-        work = default_pg._reduce_scatter_base(output, input, opts)
-    else:
-        work = group._reduce_scatter_base(output, input, opts)
+    group = group or _get_default_group()
+
+    # Check if we are in coalescing context
+    # If we are, do not issue single operation, just append a collective representation
+    if group in _world.pg_coalesce_state.keys():
+        coll = _CollOp(reduce_scatter_tensor, input, output, op, None)
+        _world.pg_coalesce_state[group].append(coll)
+        if async_op:
+            return _IllegalWork()
+        else:
+            return None
+
+    work = group._reduce_scatter_base(output, input, opts)
 
     if async_op:
         return work
@@ -3899,13 +3917,17 @@ def _new_group_with_tag(
 
     if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
-        # process groups including global variables are updated correctly on all
-        # ranks.
-        # Update 04/2023: for large-scale runs, these barriers (esp. store-based
+        # process groups including global variables (if any) are updated
+        # correctly on all ranks.
+        # Update 04/2023: for large-scale runs, this barrier (esp. store-based
         # barrier) may be costly and/or unscalable. Also, in a lot of cases,
-        # these barriers may be unnecessary, as proved by a green CI after
+        # these barriers may be unnecessary, as proven by a green CI after
         # removal. An environment variable `TORCH_DIST_INIT_BARRIER` has been
-        # added which, when set to 0, will disable these barriers.
+        # added which enables this barrier only when set to 1.
+        logger.info(
+            "Performing barrier after ProcessGroup initialization since "
+            "TORCH_DIST_INIT_BARRIER = 1"
+        )
         if backend == Backend.MPI:
             # MPI doesn't have store.
             barrier()
@@ -3915,11 +3937,6 @@ def _new_group_with_tag(
             # Use store based barrier here since barrier() used a bunch of
             # default devices and messes up NCCL internal state.
             _store_based_barrier(global_rank, barrier_store, group_name, world_size, timeout)
-    else:
-        logger.info(
-            "TORCH_DIST_INIT_BARRIER is set to 0, omitting the barrier after "
-            "ProcessGroup initialization."
-        )
 
     return pg
 

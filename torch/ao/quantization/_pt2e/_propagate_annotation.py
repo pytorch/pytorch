@@ -1,12 +1,12 @@
+from typing import Callable
+
 import torch
-from torch.fx import Node
-from typing import (
-    Callable,
-)
 from torch.ao.quantization._pt2e.quantizer import (
     QuantizationAnnotation,
     SharedQuantizationSpec,
 )
+from torch.fx import Node
+
 
 def _is_share_obs_or_fq_op(op: Callable) -> bool:
     # TODO: remove some of these ops in qnnpack_quantizer
@@ -14,10 +14,13 @@ def _is_share_obs_or_fq_op(op: Callable) -> bool:
         torch.ops.aten.hardtanh.default,
         torch.ops.aten.mean.default,
         torch.ops.aten.mean.dim,
+        torch.ops.aten.permute.default,
+        torch.ops.aten.squeeze.dim,
         torch.ops.aten.adaptive_avg_pool2d.default,
         torch.ops.aten.view_copy.default,
         torch.ops.aten.view.default,
     ]
+
 
 def propagate_annotation(model: torch.fx.GraphModule) -> None:
     for n in model.graph.nodes:
@@ -37,7 +40,10 @@ def propagate_annotation(model: torch.fx.GraphModule) -> None:
             continue
 
         # make sure current node is not annotated
-        if "quantization_annotation" in n.meta and n.meta["quantization_annotation"]._annotated:
+        if (
+            "quantization_annotation" in n.meta
+            and n.meta["quantization_annotation"]._annotated
+        ):
             continue
 
         shared_qspec = SharedQuantizationSpec(prev_node)
