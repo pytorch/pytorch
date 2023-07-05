@@ -35,7 +35,13 @@ from torch._inductor import config, cuda_properties, exc
 from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
 
+_HERE = os.path.abspath(__file__)
+_TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
+
 if config.is_fbcode():
+    from triton.fb import build_paths
+    from triton.fb.build import _run_build_command
+
     from torch._inductor.fb.logging import global_cache_log
 else:
 
@@ -93,10 +99,9 @@ def cpp_wrapper_cache_dir(name):
 
 
 class CacheBase:
-    def __init__(self):
-        if not torch.cuda.is_available():
-            return
-
+    @staticmethod
+    @functools.lru_cache(None)
+    def get_system():
         try:
             import triton
 
@@ -104,20 +109,31 @@ class CacheBase:
         except ModuleNotFoundError:
             triton_version = None
 
-        self.system = {
-            "device": torch.cuda.get_device_properties(
-                torch.cuda.current_device()
-            ).name,
+        system = {
+            "device": {
+                "name": torch.cuda.get_device_properties(
+                    torch.cuda.current_device()
+                ).name,
+            },
             "version": {
                 "cuda": torch.version.cuda,
                 "triton": triton_version,
             },
         }
-        self.system["hash"] = hashlib.sha256(
-            json.dumps(self.system, sort_keys=True).encode("utf-8")
+
+        system["hash"] = hashlib.sha256(
+            json.dumps(system, sort_keys=True).encode("utf-8")
         ).hexdigest()
 
-        self.local_cache_path = os.path.join(cache_dir(), "cache")
+        return system
+
+    def __init__(self):
+        if not torch.cuda.is_available():
+            return
+
+        self.system = CacheBase.get_system()
+
+        self.local_cache_path = os.path.join(cache_dir(), self.system["hash"])
         self.global_cache_path = (
             os.path.join(os.path.dirname(config.global_cache_dir), self.system["hash"])
             if config.global_cache_dir is not None
@@ -129,9 +145,6 @@ class CacheBase:
             return {}
         with open(self.local_cache_path, "r") as local_cache_fp:
             local_cache = json.load(local_cache_fp)
-        if local_cache["system"]["hash"] != self.system["hash"]:
-            os.remove(self.local_cache_path)
-            return {}
         return local_cache["cache"]
 
     def update_local_cache(self, local_cache):
@@ -341,6 +354,8 @@ def _run_from_cache(compiled_graph: CompiledFxGraph, inputs):
 
 
 def cpp_compiler():
+    if config.is_fbcode():
+        return build_paths.gcc()
     if isinstance(config.cpp.cxx, (list, tuple)):
         search = tuple(config.cpp.cxx)
     else:
@@ -411,6 +426,7 @@ class VecISA:
     _arch_flags: str
     _dtype_nelements: Dict[torch.dtype, int]
 
+    # Note [Checking for Vectorized Support in Inductor]
     # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
     # Hence, TorchInductor would depend on Sleef* to accelerate mathematical functions
     # like exp, pow, sin, cos and etc.
@@ -423,6 +439,8 @@ class VecISA:
     # TorchInductor. Hence, we dry-compile the following code to check whether current
     # HW platform and PyTorch both could support AVX512 or AVX2. And suppose ARM
     # also needs the logic
+    # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
+    # making the runtime check unnecessary.
     _avx_code = """
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 #include <ATen/cpu/vec/functional.h>
@@ -476,7 +494,9 @@ cdll.LoadLibrary("__lib_path__")
             ).split(" ")
             try:
                 # Check build result
-                subprocess.check_output(build_cmd, stderr=subprocess.STDOUT)
+                compile_file(input_path, output_path, build_cmd)
+                # TODO: get vectorization working in fbcode.
+                # For now, this always fails, so we fall back to generating non-vectorized cpu code.
                 subprocess.check_call(
                     [
                         "python",
@@ -584,13 +604,22 @@ def cpp_flags():
 
 def optimization_flags():
     base_flags = "-O3 -ffast-math -fno-finite-math-only"
+    if config.is_fbcode():
+        # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
+        # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
+        # We will fix it later by exposing the lib path.
+        return base_flags
 
     if sys.platform == "darwin":
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
         # Also, `-march=native` is unrecognized option on M1
-        base_flags += " -Xclang -fopenmp"
+        base_flags += " -Xclang"
     else:
-        base_flags += " -march=native -fopenmp"
+        base_flags += " -march=native"
+
+    # Internal cannot find libgomp.so
+    if not config.is_fbcode():
+        base_flags += " -fopenmp"
     return base_flags
 
 
@@ -598,8 +627,15 @@ def use_custom_generated_macros():
     return "-D C10_USING_CUSTOM_GENERATED_MACROS"
 
 
+def use_fb_internal_macros():
+    if config.is_fbcode():
+        return "-D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG -D C10_MOBILE"
+    else:
+        return ""
+
+
 def get_include_and_linking_paths(
-    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False
+    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False, aot_mode=False
 ):
     from torch.utils import cpp_extension
 
@@ -614,16 +650,27 @@ def get_include_and_linking_paths(
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
         # and we need a way to link to what PyTorch links.
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        if aot_mode:
+            ipaths += [os.path.join(_TORCH_PATH, "_inductor", "aot_inductor_include")]
         lpaths = cpp_extension.library_paths(cuda) + [
             sysconfig.get_config_var("LIBDIR")
         ]
-        libs = ["c10", "torch", "torch_cpu", "torch_python"]
-        libs += ["gomp"]
+        libs = []
+        # No need to manually specify libraries in fbcode.
+        if not config.is_fbcode():
+            libs += ["c10", "torch", "torch_cpu", "torch_python"]
+            libs += ["gomp"]
+        else:
+            # internal remote execution is able to find omp, but not gomp
+            libs += ["omp"]
         macros = vec_isa.build_macro()
         if macros:
             macros = f"-D{macros}"
         if cuda:
-            libs += ["c10_cuda", "cuda", "torch_cuda"]
+            if config.is_fbcode():
+                libs += ["cuda"]
+            else:
+                libs += ["c10_cuda", "cuda", "torch_cuda"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -647,7 +694,16 @@ def get_include_and_linking_paths(
                 ):
                     libs = ["iomp5"]
         else:
-            libs = ["gomp"]
+            libs = ["omp"] if config.is_fbcode() else ["gomp"]
+
+    # third party libs
+    if config.is_fbcode():
+        ipaths.append(build_paths.sleef())
+        ipaths.append(build_paths.openmp())
+        # We also need to bundle includes with absolute paths into a remote directory
+        # (later on, we copy the include paths from cpp_extensions into our remote dir)
+        ipaths.append("include")
+
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
@@ -662,21 +718,31 @@ def cpp_compile_command(
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
     cuda=False,
+    aot_mode=False,
 ):
     ipaths, lpaths, libs, macros = get_include_and_linking_paths(
-        include_pytorch, vec_isa, cuda
+        include_pytorch, vec_isa, cuda, aot_mode
     )
-
+    if config.is_fbcode():
+        # We need to copy any absolute-path torch includes
+        inp_name = os.path.basename(input)
+        out_name = os.path.basename(output)
+        linker_path = f"-B{os.path.dirname(build_paths.ld())}"
+    else:
+        inp_name = input
+        out_name = output
+        linker_path = ""  # let the compiler pick
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {input} {get_shared(shared)}
+            {cpp_compiler()} {inp_name} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
-            {ipaths} {lpaths} {libs} {macros}
+            {ipaths} {lpaths} {libs} {macros} {linker_path}
             {optimization_flags()}
             {use_custom_generated_macros()}
-            -o {output}
+            {use_fb_internal_macros()}
+            -o {out_name}
         """,
     ).strip()
 
@@ -705,7 +771,9 @@ class AotCodeCache:
         # TODO: update cpp_compile_command for different platforms
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
         cpp_command = repr(
-            cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda)
+            cpp_compile_command(
+                "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
+            )
         )
         key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
@@ -725,7 +793,9 @@ class AotCodeCache:
                         output=output_so,
                         vec_isa=picked_vec_isa,
                         cuda=cuda,
+                        aot_mode=graph.aot_mode,
                     ).split(" ")
+                    log.debug("aot compilation command: %s", " ".join(cmd))
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError as e:
@@ -738,6 +808,42 @@ class AotCodeCache:
             return cls.cache[key], *(None for i in range(len(graph.graph_outputs) - 1))
 
         return wrapper_call
+
+
+# Given a path to an input cpp file and an output path,
+# Attempts to compile the file, storing the output in "output_path"
+def compile_file(input_path, output_path, cmd) -> None:
+    input_file = os.path.basename(input_path) if config.is_fbcode() else input_path
+    try:
+        if config.is_fbcode():
+            # Need to copy our header into the same folder as the sourcecode.
+            from torch._inductor.codegen.cpp import cpp_prefix_path
+
+            header_path = cpp_prefix_path()
+            header_name = os.path.basename(header_path)
+            output_name = os.path.basename(output_path)
+            # When we build remotely, we need to make sure to carefully copy any files
+            # that are required during the compilation process into our build directly.
+            # This is where all of the ATen/c10/Torch includes come from.
+            torch_includes_path = os.path.join(
+                torch.utils.cpp_extension._TORCH_PATH, "include"
+            )
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                # Copy everything to tmp compilation folder
+                shutil.copy(header_path, os.path.join(tmp_dir, header_name))
+                shutil.copy(input_path, os.path.join(tmp_dir, input_file))
+                dest_include_path = os.path.join(tmp_dir, "include")
+                shutil.copytree(torch_includes_path, dest_include_path)
+                # Run the build
+                output_file_path = _run_build_command(cmd, tmp_dir, output_name)
+                # Copy output from the build
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                shutil.copy(output_file_path, output_path)
+        else:
+            subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        raise exc.CppCompileError(cmd, e.output) from e
 
 
 class CppCodeCache:
@@ -779,11 +885,7 @@ class CppCodeCache:
                     cmd = cpp_compile_command(
                         input=input_path, output=output_path, vec_isa=picked_vec_isa
                     ).split(" ")
-                    try:
-                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-                    except subprocess.CalledProcessError as e:
-                        raise exc.CppCompileError(cmd, e.output) from e
-
+                    compile_file(input_path, output_path, cmd)
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key
 
@@ -889,7 +991,12 @@ class CppWrapperCodeCache:
                     _use_custom_generated_macros = use_custom_generated_macros()
 
                     extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_use_custom_generated_macros}"
-                    extra_ldflags = f"{_shared} {_lpaths} {_libs}"
+                    # For CPP wrapper, add -ffast-math during linking to make CPU flush denormals.
+                    # CPP wrapper leverages cpp_extension which will do the compilation and linking in two stages.
+                    # We need to explicitly add -ffast-math as a linking flag.
+                    # For the default python wrapper, the compilation and linking are done in one command thus -ffast-math
+                    # will take effect in both compilation and linking.
+                    extra_ldflags = f"{_shared} {_lpaths} {_libs} -ffast-math"
                     extra_include_paths = f"{_ipaths}"
 
                     mod = torch.utils.cpp_extension.load_inline(
