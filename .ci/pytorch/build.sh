@@ -11,10 +11,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
@@ -166,6 +162,15 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
   export CXX=clang++
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
+  export LDSHARED="clang --shared"
+  export USE_CUDA=0
+  export USE_ASAN=1
+  export USE_MKLDNN=0
+  export UBSAN_FLAGS="-fno-sanitize-recover=all;-fno-sanitize=float-divide-by-zero;-fno-sanitize=float-cast-overflow"
+  unset USE_LLVM
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
