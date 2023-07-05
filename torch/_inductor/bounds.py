@@ -1,11 +1,9 @@
-import math
 from functools import partial
 from typing import Dict, Optional
 
 import sympy
 
 import torch
-from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 from .ir import InterpreterShim, LoopBody
@@ -14,8 +12,8 @@ from .virtualized import V
 
 
 def get_expr_range(expr, vars_ranges: dict):
-    fs = list(expr.free_symbols)
-    if len(fs) == 0:
+    free_symbols = list(expr.free_symbols)
+    if len(free_symbols) == 0:
         return ValueRanges(expr, expr)
 
     def replace_symbols_for_deriv(expr):
@@ -54,7 +52,6 @@ def get_expr_range(expr, vars_ranges: dict):
             if (
                 len(diff_free_symbols) == 1
                 and symbol in diff_free_symbols
-                and symbol in vars_ranges
                 and vars_ranges[symbol].lower == vars_ranges[symbol].upper
             ):
                 monotonic_increasing.append(symbol)
@@ -76,10 +73,6 @@ def get_expr_range(expr, vars_ranges: dict):
                 for k, v in vars_ranges.items()
             },
         )
-        if free_symbols(min_val):
-            min_val = -math.inf
-        if free_symbols(max_val):
-            max_val = math.inf
         return ValueRanges(min_val, max_val)
     else:
         # bail on optimizing, have not run into this yet
@@ -95,8 +88,7 @@ class BoundVars:
     def __init__(self, loop_body: LoopBody):
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges(0, v if not free_symbols(v) else math.inf)
-            for k, v in loop_body.var_ranges.items()
+            k: ValueRanges(0, v) for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
         self.unbounded_vars = dominated_nodes(
@@ -166,6 +158,6 @@ class BoundVars:
         if bound is not None:
             return bound
 
-        bound = get_expr_range(expr, self.replacement_vals)
+        bound = self.get_expr_range(expr, self.replacement_vals)
         self.replacement_vals[name] = bound
         return bound
