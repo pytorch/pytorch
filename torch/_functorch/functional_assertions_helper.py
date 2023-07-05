@@ -50,9 +50,6 @@ class DepTokenStateTracker:
 
     @classmethod
     def get_dep_token(cls):
-        if cls._dep_token is None:
-            cls._dep_token = aten._make_dep_token()
-
         return cls._dep_token
 
 
@@ -89,7 +86,8 @@ class FunctionalAssertionsHelper:
     def create_compile_tracing_wrapper(func) -> Callable:
         def _traced_forward(*args):
             outs = func(*args)
-            return outs + (DepTokenStateTracker.get_dep_token(),)
+            dep_token = DepTokenStateTracker.get_dep_token()
+            return outs if dep_token is None else outs + (dep_token,)
 
         return _traced_forward
 
@@ -121,6 +119,15 @@ class FunctionalAssertionsHelper:
 
         return dep_token_arg.name
 
+    @classmethod
+    def get_num_outputs_dep_token(cls) -> int:
+        return (
+            1
+            if cls.functionalization_enabled()
+            and DepTokenStateTracker.get_dep_token() is not None
+            else 0
+        )
+
 
 def _register_decomposition(aten_op):
     return decomp.register_decomposition(aten_op, _decompositions)
@@ -128,8 +135,10 @@ def _register_decomposition(aten_op):
 
 @_register_decomposition(aten._assert_async.msg)
 def _assert_async_msg(val, assert_msg) -> None:
+    dep_token = DepTokenStateTracker.get_dep_token()
+    if dep_token is None:
+        dep_token = aten._make_dep_token()
+
     DepTokenStateTracker.set_dep_token(
-        aten._functional_assert_async.msg(
-            val, assert_msg, DepTokenStateTracker.get_dep_token()
-        )
+        aten._functional_assert_async.msg(val, assert_msg, dep_token)
     )

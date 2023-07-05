@@ -551,8 +551,6 @@ class ViewAndMutationMeta:
         self.num_outputs_rng_offset = 1 if self.is_rng_op_functionalized else 0
 
         self.num_outputs_dep_token = 0
-        if FunctionalAssertionsHelper.functionalization_enabled():
-            self.num_outputs_dep_token = 1
 
     def __eq__(self, other):
         if not isinstance(other, ViewAndMutationMeta):
@@ -1311,6 +1309,9 @@ def create_joint(
 # The function returned has signature that is either:
 # (1) "traced_fn(primals: List[Any])" if trace_joint is False
 # (2) "traced_fn(primals: List[Any], tangents: List[Any])" if trace_joint is True
+#
+# Also `meta` might be mutated while creating functionalized graph so the mutated
+# (or not) `meta` is returned as well.
 def create_functionalized_graph(
     fn,
     args,
@@ -1318,7 +1319,7 @@ def create_functionalized_graph(
     meta: ViewAndMutationMeta,
     aot_config: AOTConfig,
     trace_joint: bool,
-):
+) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta]:
     def functionalized_f_helper(*args):
         # Wrap inputs into functional wrappers
         f_args = pytree.tree_map(to_fun, args)
@@ -1391,8 +1392,9 @@ def create_functionalized_graph(
 
     with enable_python_dispatcher():
         fx_g = make_fx(helper, decomposition_table=aot_config.decompositions)(*args)
+        meta.num_outputs_dep_token = FunctionalAssertionsHelper.get_num_outputs_dep_token()
 
-    return fx_g
+    return fx_g, meta
 
 
 def normalize_as_list(x):
@@ -1488,7 +1490,18 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
             out = normalize_as_list(f(*args))
     return out
 
-def aot_dispatch_base_graph(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
+def aot_dispatch_base_graph(
+    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
+) -> Callable:
+    fx_g, _ = _aot_dispatch_base_graph(
+        flat_fn=flat_fn, flat_args=flat_args, aot_config=aot_config, fw_metadata=fw_metadata
+    )
+    return fx_g
+
+
+def _aot_dispatch_base_graph(
+    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
+) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta]:
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
     # - outputs that are aliases of graph intermediates
@@ -1503,7 +1516,7 @@ def aot_dispatch_base_graph(flat_fn, flat_args: List[Tensor], aot_config: AOTCon
         keep_data_input_mutations=aot_config.keep_inference_input_mutations,
     )
 
-    fw_module = create_functionalized_graph(
+    fw_module, fw_metadata = create_functionalized_graph(
         fn_to_trace,
         flat_args,
         meta=fw_metadata,
@@ -1525,10 +1538,12 @@ def aot_dispatch_base_graph(flat_fn, flat_args: List[Tensor], aot_config: AOTCon
     if aot_config.enable_log:
         aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
 
-    return fw_module
+    return fw_module, fw_metadata
 
-def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
-    fw_module = aot_dispatch_base_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
+def aot_dispatch_base(
+    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
+) -> Callable:
+    fw_module, fw_metadata = _aot_dispatch_base_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = torch._C._DisableAutocast if disable_amp else nullcontext
@@ -2635,11 +2650,21 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
         return traced_forward, (*args, fwd_seed, fwd_base_offset)
 
+def aot_dispatch_autograd_graph(
+    flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
+) -> Callable:
+    fx_g, _ = _aot_dispatch_autograd_graph(
+        flat_fn=flat_fn, flat_args=flat_args, aot_config=aot_config, fw_metadata=fw_metadata,
+    )
+    return fx_g
+
 # Has the precondition that there
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
 # the same storage, so long as they have separate TensorImpls.)
-def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
+def _aot_dispatch_autograd_graph(
+    flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
+) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta]:
     # traced_tangents corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
@@ -2657,7 +2682,7 @@ def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTCo
     )
     joint_fn_to_trace = create_joint(fn_prepared_for_autograd, aot_config=aot_config)
 
-    fx_g = create_functionalized_graph(
+    fx_g, fw_metadata = create_functionalized_graph(
         joint_fn_to_trace,
         joint_inputs,
         meta=fw_metadata,
@@ -2677,12 +2702,14 @@ def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTCo
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
     # when we need to manually detach() some inputs in the forward.
     # Higher order ops might eventually need to do the same.
-    return fx_g
+    return fx_g, fw_metadata
 
-def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
-    fx_g = aot_dispatch_autograd_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
+def aot_dispatch_autograd(
+    flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
+) -> Callable:
+    fx_g, fw_metadata = _aot_dispatch_autograd_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
-    # Copied from aot_dispatch_autograd_graph.
+    # Copied from _aot_dispatch_autograd_graph.
     traced_tangents = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
         fw_metadata.traced_tangents,
@@ -2797,14 +2824,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             if torch._guards.TracingContext.get():
                 torch._guards.TracingContext.get().fw_metadata = fw_metadata
 
-
-            # the compiler need to use this field to find the original modol outputs
-            # from the AOTAutograd fwd module's outputs. Thus compiler can make sure
-            # optimizations like layout optimization does not change those tensors'
-            # layout.
-            # TODO once https://github.com/pytorch/pytorch/pull/100652/files#r1212002707 is in
-            # change to access fw_metadata from the global tracing context.
-            fw_module.meta["original_output_start_index"] = fw_metadata.num_mutated_inputs
 
             compiled_fw_func = aot_config.fw_compiler(
                 fw_module, adjusted_flat_args
@@ -3206,9 +3225,11 @@ def create_aot_dispatcher_function(
                 if shape_env is not None:
                     from torch._dynamo.source import ConstantSource
                     if isinstance(x, int):
+                        source = ConstantSource(f"sym_{idx}")
                         return shape_env.create_symintnode(
-                            shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")),
-                            hint=x
+                            shape_env.create_symbol(x, source),
+                            hint=x,
+                            source=source
                         )
                 if not isinstance(x, torch.Tensor):
                     return x

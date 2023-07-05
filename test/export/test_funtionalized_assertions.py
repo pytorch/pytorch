@@ -49,9 +49,12 @@ def forward(self, arg0_1):
     eq = torch.ops.aten.eq.Scalar(select, 3);  select = None
     _make_dep_token = torch.ops.aten._make_dep_token.default()
     _functional_assert_async = torch.ops.aten._functional_assert_async.msg(eq, 'assertion error', _make_dep_token);  eq = _make_dep_token = None
+    select_1 = torch.ops.aten.select.int(arg0_1, 0, 2)
+    eq_1 = torch.ops.aten.eq.Scalar(select_1, 5);  select_1 = None
+    _functional_assert_async_1 = torch.ops.aten._functional_assert_async.msg(eq_1, 'assertion error', _functional_assert_async);  eq_1 = _functional_assert_async = None
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
     add = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
-    return (add, _functional_assert_async)""")  # noqa: B950
+    return (add, _functional_assert_async_1)""")  # noqa: B950
             return make_boxed_func(gm.forward)
 
         my_compiler = aot_autograd(fw_compiler=my_compiler)
@@ -59,6 +62,7 @@ def forward(self, arg0_1):
         def f(x):
             b = x.sin()
             assert x[0] == 3
+            assert x[2] == 5
             return x.cos() + b
 
         with patch("functorch.compile.config.functionalize_assertion_ops", True), patch(

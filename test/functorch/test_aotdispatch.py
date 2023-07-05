@@ -1977,6 +1977,18 @@ def forward(self, tangents_1):
             with self.assertRaisesRegex(RuntimeError, "test assertion error"):
                 compiled(torch.Tensor([4, 2]))
 
+    def test_functionalized_asserts_no_asserts(self):
+        def fn(x):
+            b = x.sin()
+            return x.cos() + b
+
+        with patch("functorch.compile.config.functionalize_assertion_ops", True), patch(
+            "functorch.compile.config.functionalize_rng_ops", False
+        ):
+            compiled = aot_function(fn, fw_compiler=nop)
+            inp = torch.Tensor([3, 2])
+            self.assertEqual(compiled(inp), fn(inp))
+
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
     return fx_g
@@ -2270,8 +2282,13 @@ class <lambda>(torch.nn.Module):
         def fn(p, x):
             b = x.sin()
             x0 = torch.ops.aten.select.int(x, 0, 0)
-            eq = torch.ops.aten.eq.Scalar(x0, 3)
-            torch.ops.aten._assert_async.msg(eq, "test assertion error")
+            eq0 = torch.ops.aten.eq.Scalar(x0, 3)
+
+            x1 = torch.ops.aten.select.int(x, 0, 1)
+            eq1 = torch.ops.aten.eq.Scalar(x1, 3)
+
+            torch.ops.aten._assert_async.msg(eq0, "test assertion error 0")
+            torch.ops.aten._assert_async.msg(eq1, "test assertion error 1")
             return (x.cos() + b,)
 
         mod = TestMod(fn)
@@ -2304,13 +2321,16 @@ class <lambda>(torch.nn.Module):
         sin: f32[3] = torch.ops.aten.sin.default(arg1_1)
         select: i64[] = torch.ops.aten.select.int(arg1_1, 0, 0)
         eq: b8[] = torch.ops.aten.eq.Scalar(select, 3);  select = None
+        select_1: i64[] = torch.ops.aten.select.int(arg1_1, 0, 1)
+        eq_1: b8[] = torch.ops.aten.eq.Scalar(select_1, 3);  select_1 = None
         _make_dep_token: f32[] = torch.ops.aten._make_dep_token.default()
-        _functional_assert_async: f32[] = torch.ops.aten._functional_assert_async.msg(eq, 'test assertion error', _make_dep_token);  eq = _make_dep_token = None
+        _functional_assert_async: f32[] = torch.ops.aten._functional_assert_async.msg(eq, 'test assertion error 0', _make_dep_token);  eq = _make_dep_token = None
+        _functional_assert_async_1: f32[] = torch.ops.aten._functional_assert_async.msg(eq_1, 'test assertion error 1', _functional_assert_async);  eq_1 = _functional_assert_async = None
         cos: f32[3] = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
         add: f32[3] = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
-        return (add, _functional_assert_async)
+        return (add, _functional_assert_async_1)
         """)  # noqa: B950
-            self.assertEqual(signature.asserts_dep_token, "_functional_assert_async")
+            self.assertEqual(signature.asserts_dep_token, "_functional_assert_async_1")
 
         with patch("functorch.compile.config.functionalize_assertion_ops", False):
             fx_gm, signature = aot_export_module(mod, [inp], trace_joint=False)
@@ -2321,7 +2341,32 @@ class <lambda>(torch.nn.Module):
         sin: f32[3] = torch.ops.aten.sin.default(arg1_1)
         select: i64[] = torch.ops.aten.select.int(arg1_1, 0, 0)
         eq: b8[] = torch.ops.aten.eq.Scalar(select, 3);  select = None
-        _assert_async = torch.ops.aten._assert_async.msg(eq, 'test assertion error');  eq = None
+        select_1: i64[] = torch.ops.aten.select.int(arg1_1, 0, 1)
+        eq_1: b8[] = torch.ops.aten.eq.Scalar(select_1, 3);  select_1 = None
+        _assert_async = torch.ops.aten._assert_async.msg(eq, 'test assertion error 0');  eq = None
+        _assert_async_1 = torch.ops.aten._assert_async.msg(eq_1, 'test assertion error 1');  eq_1 = None
+        cos: f32[3] = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
+        add: f32[3] = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
+        return (add,)
+        """)  # noqa: B950
+            self.assertIsNone(signature.asserts_dep_token)
+
+    def test_aot_export_functionalized_asserts_no_asserts(self) -> None:
+        def fn(p, x):
+            b = x.sin()
+            return (x.cos() + b,)
+
+        mod = TestMod(fn)
+        inp = torch.tensor([3, 2, 1])
+        with patch("functorch.compile.config.functionalize_assertion_ops", True), patch(
+            "functorch.compile.config.functionalize_rng_ops", False
+        ):
+            fx_gm, signature = aot_export_module(mod, [inp], trace_joint=False)
+            self.assertExpectedInline(fx_gm.print_readable(print_output=False), """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: f32[2], arg1_1: i64[3]):
+        # No stacktrace found for following nodes
+        sin: f32[3] = torch.ops.aten.sin.default(arg1_1)
         cos: f32[3] = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
         add: f32[3] = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
         return (add,)
@@ -2897,7 +2942,6 @@ symbolic_aot_autograd_failures = {
     xfail('median', ''),  # could not find kernel
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d_backward.default - couldn't ...
-    xfail('nn.functional.adaptive_max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
     xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2...
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
@@ -2912,16 +2956,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.interpolate', 'area'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
-    xfail('nn.functional.max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.max_pool3d', ''),  # aten.max_pool3d_with_indices.default - couldn't find symbolic m...
-    xfail('nn.functional.max_unpool1d', ''),  # aten.max_unpool2d.default - couldn't find symbolic meta funct...
-    xfail('nn.functional.max_unpool1d', 'grad'),  # aten.max_unpool2d.default - couldn't find symbolic meta ...
-    xfail('nn.functional.max_unpool2d', ''),  # aten.max_unpool2d.default - couldn't find symbolic meta funct...
-    xfail('nn.functional.max_unpool2d', 'grad'),  # aten.max_unpool2d.default - couldn't find symbolic meta ...
-    xfail('nn.functional.max_unpool3d', ''),  # aten.max_unpool3d.default - couldn't find symbolic meta funct...
-    xfail('nn.functional.max_unpool3d', 'grad'),  # aten.max_unpool3d.default - couldn't find symbolic meta ...
-    xfail('nn.functional.multi_margin_loss', ''),  # could not find kernel
-    xfail('nn.functional.multilabel_margin_loss', ''),  # could not find kernel
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
@@ -3059,16 +3093,12 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.AdaptiveAvgPool3d,  # could not find kernel for aten._adaptive_avg_pool3d_backward.default at dispatch key
                                  # DispatchKey.Meta
-    torch.nn.AdaptiveMaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveMaxPool2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
                          # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
     torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
-    torch.nn.MaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.MaxPool3d,  # torch._subclasses.fake_tensor.UnsupportedOperatorException:
-                         # aten.max_pool3d_with_indices.default
 }
 
 
