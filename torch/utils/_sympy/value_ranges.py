@@ -33,7 +33,7 @@ def simple_sympify(e):
     elif isinstance(e, bool):
         return sympy.true if e else sympy.false
     elif isinstance(e, sympy.Expr):
-        assert e.is_constant()
+        assert e.is_constant(), e
         # NaNs can occur when doing things like 0 * sympy.oo, but it is better
         # if the operator notices this and takes care of it, because sometimes
         # the NaN is inappropriate (for example, for ints, the [-oo, oo] range
