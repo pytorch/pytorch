@@ -273,12 +273,12 @@ class TORCH_API Context {
   void unsetDefaultMobileCPUAllocator();
 
  private:
-  void initCUDAIfNeeded(DeviceType p) {
+  void initCUDAIfNeeded(c10::DeviceType p) {
     if (p == c10::DeviceType::CUDA) {
       lazyInitCUDA();
     }
   }
-  void initHIPIfNeeded(DeviceType p) {
+  void initHIPIfNeeded(c10::DeviceType p) {
     if (p == c10::DeviceType::HIP) {
       lazyInitHIP();
     }
