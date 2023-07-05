@@ -6620,6 +6620,13 @@ class TestNLLLoss(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
+    def test_neg_strided_input(self):
+        # See https://github.com/pytorch/pytorch/issues/98074#issuecomment-1496088337
+        x = torch.arange(18.0, device='mps').reshape(2, 3, 3)
+        y = x.permute(1, 0, 2)[..., 1]
+        z = y + y.neg()
+        self.assertEqual(z.abs().max().item(), 0.0)
+
     # Test index add
     def test_index_add(self):
         def helper(shape, dim, index, source_shape, alpha, x_dtype=torch.float32, idx_dtype=torch.int32):
