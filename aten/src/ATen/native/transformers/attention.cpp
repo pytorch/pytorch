@@ -570,7 +570,7 @@ c10::optional<Tensor> convert_boolean_attn_mask(const c10::optional<Tensor>& att
 // Then slices the padded bias to the original size
 // We apply this function to the top level SDPA so that
 // if padding is done it will be tracked for backward automatically
-inline at::Tensor pad_bias(const at::Tensor& attn_bias) {
+at::Tensor pad_bias(const at::Tensor& attn_bias) {
   int align_to = 16;
   if (attn_bias.size(-1) % align_to == 0) {
     return attn_bias;

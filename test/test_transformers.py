@@ -2037,7 +2037,7 @@ class TestSDPA(NNTestCase):
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
                  SM80OrLater else [torch.float16, torch.float32])
     @parametrize("scale", [None, "l1"])
-    def test_mem_efficient_attention__attn_mask_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int,
+    def test_mem_efficient_attention_attn_mask_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int,
                                                                   seq_len_k: int, head_dim: int, is_causal: bool,
                                                                   dropout_p: float, dtype: torch.dtype,
                                                                   scale: str):
@@ -2048,7 +2048,15 @@ class TestSDPA(NNTestCase):
             return mask
 
         def build_alibi_mask(n_queries, n_keys, m=2**(-8 / 4)):
-            return -m * (torch.arange(n_queries)[:, None] - torch.arange(n_keys)[None, :])
+            temp_mask = (
+                torch.ones((n_queries, n_keys))
+                .tril_()
+                .bool()
+            )
+            mask = torch.zeros_like(temp_mask, dtype=torch.float32)
+            mask.masked_fill_(temp_mask.logical_not(), float("-inf"))
+            mask += -m * (torch.arange(n_queries)[:, None] - torch.arange(n_keys)[None, :])
+            return mask
 
         seed = 42
         scale = scale if scale is None else (1 / head_dim)
