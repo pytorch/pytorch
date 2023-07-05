@@ -3878,6 +3878,12 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         backward compatibility.
         Mode ``mode='nearest'`` matches buggy OpenCV's ``INTER_NEAREST`` interpolation algorithm.
 
+    .. note::
+        The use of ``float16`` data type in the backward pass of the upsample operation, specifically
+        for modes such as ``['linear', 'bilinear', 'bicubic', 'trilinear', 'area']``, could potentially
+        lead to precision issues. For instance, any result that exceeds 2048 will be truncated.
+        For more details, please refer to the discussion in `issue#104157 <https://github.com/pytorch/pytorch/issues/104157>`_.
+
     Note:
         {backward_reproducibility_note}
     """
