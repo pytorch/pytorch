@@ -8,10 +8,19 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+#include <type_traits>
 
 namespace at::native {
 
 namespace {
+
+template <typename scalar_t>
+bool is_nan(scalar_t v) {
+  if (std::is_integral<scalar_t>::value || std::is_same<scalar_t, unsigned char>::value) {
+    return false;
+  }
+  return std::isnan(v);
+}
 
 template <typename scalar_t, typename accscalar_t>
 void cpu_max_pool(
@@ -92,15 +101,6 @@ void cpu_max_pool(
     indices_.copy_(indices);
   }
 }
-
-template <typename scalar_t>
-bool is_nan(scalar_t v) {
-  if (std::is_integeral<scalar_t>::value || std::is_same<scalar_t, unsigned char>::value) {
-    return false;
-  }
-  return std::isnan(v);
-}
-
 
 template <typename scalar_t>
 vec::Vectorized<scalar_t> is_nan_vec(vec::Vectorized<scalar_t> vec) {
