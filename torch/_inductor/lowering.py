@@ -27,6 +27,7 @@ from torch._prims_common import (
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from torch.utils._pytree import tree_flatten
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -34,6 +35,7 @@ from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
     IndexingConstant,
+    is_triton,
     ops_wrapper,
     PermuteView,
     Pointwise,
@@ -430,11 +432,14 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             if len(args) < 2:
                 return False
             else:
-                dtype = args[0].data.get_dtype()
-                return any(
-                    isinstance(t, TensorBox) and t.data.get_dtype() != dtype
-                    for t in args
-                )
+                dtype = None
+                for t in args:
+                    if isinstance(t, TensorBox):
+                        if dtype is None:
+                            dtype = t.data.get_dtype()
+                        elif dtype != t.data.get_dtype():
+                            return True
+                return False
 
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
@@ -445,7 +450,15 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             out = defaultdict(list)
             for i, args in enumerate(arg_pairs):
                 use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
-                out[(args[0].get_device(), use_foreach)].append((i, args))
+                device = None
+                for t in args:
+                    if isinstance(t, TensorBox):
+                        device = t.data.get_device()
+                        break
+                assert (
+                    device is not None
+                ), "foreach op should have at least one tensor arg"
+                out[(device, use_foreach)].append((i, args))
             return out
 
         realize_outputs = False
@@ -454,12 +467,26 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 if not (user.op == "call_function" and user.target in foreach_ops):
                     realize_outputs = True
 
-        # replicate scalar input to match lenghth of list input
-        if len(inputs) > 1 and not isinstance(inputs[1], (list, tuple)):
-            inputs = (inputs[0], [inputs[1] for _ in inputs[0]])
+        a_list_input = None
+        for input in inputs:
+            if isinstance(input, (list, tuple)):
+                a_list_input = input
+                break
+        assert (
+            a_list_input is not None
+        ), "at least one input must be a list to a foreach op"
 
-        groups = group_args(zip(*inputs))
-        outputs = [None] * len(inputs[0])
+        # broadcast scalar inputs to match length of list inputs
+        broadcast_inputs = []
+        for input in inputs:
+            if not isinstance(input, (list, tuple)):
+                broadcast_inputs.append([input] * len(a_list_input))
+            else:
+                broadcast_inputs.append(input)
+
+        groups = group_args(zip(*broadcast_inputs))
+
+        outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
             buffer_list = []
             for (
@@ -774,7 +801,7 @@ def repeat(x, repeats):
                 if old_size[i] == 1:
                     index[i] = sympy.Integer(0)
                 else:
-                    index[i] = ir.ModularIndexing(index[i], 1, old_size[i])
+                    index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
     old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
@@ -824,7 +851,7 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
 @register_lowering(aten.roll, type_promotion_kind=None)
 def roll(a, shifts, dims=tuple()):
     """
-    This is based on torch._refs.roll(), but uses ir.ModularIndexing().
+    This is based on torch._refs.roll(), but uses ModularIndexing().
 
     We can't use the ref here because it is based on multiple calls to
     torch.cat() that this will result in terrible code.
@@ -867,7 +894,7 @@ def roll(a, shifts, dims=tuple()):
 
     def fn(index):
         index = list(index)
-        index[dim] = ir.ModularIndexing(
+        index[dim] = ModularIndexing(
             index[dim] + start, sympy.Integer(1), sympy.expand(size)
         )
         return a_loader(index)
@@ -1445,6 +1472,12 @@ def randn(*args, **kwargs):
     raise AssertionError("should have been handled in replace_random.py")
 
 
+@register_lowering(inductor_prims.force_stride_order, type_promotion_kind=None)
+def inductor_force_stride_order(input_tensor, stride):
+    stride_order = ir.get_stride_order(stride)
+    return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
+
+
 @register_lowering(inductor_prims.seed, type_promotion_kind=None)
 def inductor_seed(device: torch.device):
     raise AssertionError("should be handled in fuse_seed_creation_pass()")
@@ -1493,7 +1526,6 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
         inner_fn=inner_fn,
         ranges=[*size],
     )
-    result.realize()
     return result
 
 
@@ -1523,6 +1555,48 @@ def inductor_randint(
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=[*size],
+    )
+
+
+@register_lowering(inductor_prims._bucketize, type_promotion_kind=None)
+def _inductor_bucketize(
+    input: TensorBox,
+    boundaries: TensorBox,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+):
+    assert len(boundaries.get_size()) == 1
+
+    if not (is_triton(input) and is_triton(boundaries)):
+        return fallback_handler(inductor_prims._bucketize, add_to_fallback_set=False)(
+            input, boundaries, out_int32=out_int32, right=right
+        )
+
+    boundaries_size = boundaries.get_size()[0]
+    boundaries_loader = boundaries.make_loader()
+    device = input.get_device()
+    input_loader = input.make_loader()
+
+    index_dtype = torch.int32 if out_int32 else torch.int64
+
+    def inner_fn(index):
+        val = input_loader(index)
+        indices = ops.bucketize(
+            val,
+            boundaries.get_name(),
+            ops.index_expr(boundaries_size, index_dtype),
+            index_dtype,
+            right,
+        )
+
+        return indices
+
+    return Pointwise.create(
+        device=device,
+        dtype=index_dtype,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
     )
 
 
@@ -1730,10 +1804,6 @@ make_fallback(aten.exponential.default, warn=False)
 # ROCm specific fallback, perf issues are observed when registered
 make_fallback(aten.miopen_batch_norm, warn=False)
 
-if torch.version.hip is not None and torch.cuda.is_available():
-    # tl.reduce not available yet in ROCm's version of triton
-    make_fallback(aten.prod, warn=False)
-
 
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=0):
@@ -1817,7 +1887,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = dim_size
 
     src_size = list(x.get_size())
-    src_size[dim] = ir.FloorDiv(sympy.expand(end - start), sympy.expand(step))
+    src_size[dim] = FloorDiv(sympy.expand(end - start), sympy.expand(step))
     src = expand(src, src_size)
     src_loader = src.make_loader()
 
@@ -1828,7 +1898,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
 
         idx_dim = ops.index_expr(idx[dim], torch.int64)
         src_idx = list(idx)
-        src_idx[dim] = ir.FloorDiv(idx[dim] - start, step)
+        src_idx[dim] = FloorDiv(idx[dim] - start, step)
 
         mask = []
         if start != 0:
@@ -1849,7 +1919,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             mask.append(
                 ops.eq(
                     ops.index_expr(
-                        ir.ModularIndexing(idx[dim] - start, 1, step), torch.int64
+                        ModularIndexing(idx[dim] - start, 1, step), torch.int64
                     ),
                     ops.constant(0, torch.torch.int64),
                 )
@@ -3015,12 +3085,12 @@ def constant_boundary_condition_2d(x, fill_value, padding=None, pad_fill_value=1
 
 
 def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
-    x_out = ir.FloorDiv(
+    x_out = FloorDiv(
         x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1), stride[i]
     )
 
     if ceil_mode:
-        x_alt = ir.FloorDiv(
+        x_alt = FloorDiv(
             x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
         )
         if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
@@ -3222,13 +3292,13 @@ def max_pool2d_with_indices_backward(
         h = h + padding[0]
         w = w + padding[1]
         phstart = ops.index_expr(
-            ir.FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
+            FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
         )
         pwstart = ops.index_expr(
-            ir.FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
+            FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
         )
-        phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
-        pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
+        phend = ops.index_expr(FloorDiv(h, stride[0]) + 1, torch.int32)
+        pwend = ops.index_expr(FloorDiv(w, stride[1]) + 1, torch.int32)
 
         phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
         pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
@@ -3373,10 +3443,10 @@ def _adaptive_avg_pool2d(x, output_size):
     dtype = x.get_dtype()
 
     def start_index(index, out_dim, inp_dim):
-        return ir.FloorDiv((index * inp_dim), out_dim)
+        return FloorDiv((index * inp_dim), out_dim)
 
     def end_index(index, out_dim, inp_dim):
-        return ir.FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
 
     h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
     h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
@@ -3429,7 +3499,7 @@ def upsample_nearest2d_backward(
     w_kernel_max = ceildiv(inp_w, out_w)
 
     def start_index(index, out_dim, inp_dim):
-        return ir.CeilDiv(index * inp_dim, out_dim)
+        return CeilDiv(index * inp_dim, out_dim)
 
     def end_index(index, out_dim, inp_dim):
         return start_index((index + 1), out_dim, inp_dim)
@@ -3658,13 +3728,13 @@ def avg_pool2d_backward(
         h = h + padding[0]
         w = w + padding[1]
         phstart = ops.index_expr(
-            ir.FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
+            FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
         )
         pwstart = ops.index_expr(
-            ir.FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
+            FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
         )
-        phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
-        pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
+        phend = ops.index_expr(FloorDiv(h, stride[0]) + 1, torch.int32)
+        pwend = ops.index_expr(FloorDiv(w, stride[1]) + 1, torch.int32)
 
         phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
         pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
@@ -4229,6 +4299,7 @@ register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
+register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
 register_foreach_pointwise(aten._foreach_div.List, div)
 register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
@@ -4341,6 +4412,13 @@ try:
     @register_lowering(c10d_functional.all_gather_into_tensor_coalesced)
     def all_gather_into_tensor_coalesced(self, tag, ranks, group_size):
         result = ir.AllGatherIntoTensorCoalesced.create(self, tag, ranks, group_size)
+        return list(map(TensorBox.create, result))
+
+    @register_lowering(c10d_functional.reduce_scatter_tensor_coalesced)
+    def reduce_scatter_tensor_coalesced(self, reduceOp, tag, ranks, group_size):
+        result = ir.ReduceScatterTensorCoalesced.create(
+            self, reduceOp, tag, ranks, group_size
+        )
         return list(map(TensorBox.create, result))
 
 except ImportError:
