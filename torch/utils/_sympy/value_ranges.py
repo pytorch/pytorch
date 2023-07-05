@@ -448,11 +448,12 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
             # dtype is int or float
             if dtype.is_floating_point:
                 return sympy.Float(x)
-            elif x.is_finite:
-                return sympy.Integer(x)
             else:
-                # inf cannot be cast to Integer
-                return x
+                try:
+                    return sympy.Integer(x)
+                except TypeError:
+                    # inf cannot be cast to Integer
+                    return x
 
         if x.is_bool:
             if x.is_singleton():
