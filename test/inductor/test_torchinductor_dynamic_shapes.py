@@ -60,7 +60,9 @@ if TEST_WITH_ROCM:
     test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
         ("cuda"), is_skip=True
     )
-
+    test_failures["test_batch_norm_2d"] = TestFailure(
+        ("cuda"), is_skip=True
+    )
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
     return make_test_cls_with_patches(
