@@ -152,7 +152,6 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
         torch.save(model.state_dict(), checkpoint)
         # Deepcopy to save current state_dict to compare with the loaded state dict below.
         ref_state_dict = deepcopy(model.state_dict())
-        # Hmmm...Why does ```torch.save(ref_state_dict, checkpoint)``` not work while torch.save(model.state_dict()) work?
 
         # Update the parameters so model.state_dict() will be different from ref_dtensor_sd.
         model(model.get_input()).sum().backward()
