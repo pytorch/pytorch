@@ -62,7 +62,7 @@ def export_as_test_case(
         shutil.rmtree(data_set_dir)
     os.makedirs(data_set_dir)
 
-    proto = onnx.load_from_string(model_bytes)
+    proto = onnx.load_model_from_string(model_bytes)
 
     for i, (input_proto, input) in enumerate(zip(proto.graph.input, inputs_data)):
         export_data(input, input_proto, os.path.join(data_set_dir, f"input_{i}.pb"))
@@ -227,7 +227,7 @@ def _add_onnxscript_fn(
     # size > 2GB, and if it for some reason did not, the model would fail on
     # serialization anyway in terms of the protobuf limitation. So we don't
     # need to worry about > 2GB model getting here.
-    model_proto = onnx.load_from_string(model_bytes)
+    model_proto = onnx.load_model_from_string(model_bytes)
 
     # Iterate graph nodes to insert only the included custom
     # function_proto into model_proto
