@@ -983,6 +983,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                     f"item but got {str(type(args[0]))} "
                     f"with original python type {str(args[0].python_type())}.",
                 )
+            tx.output.guards.update(args[0].guards)
 
             # operands
             if type(args[3]) is not ListVariable:
