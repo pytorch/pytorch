@@ -22,7 +22,7 @@ static bool EmbeddingLookup_int32_t_float_float__avx2_fma(
     const float* scale_bias,
     bool normalize_by_lengths,
     float* out) {
-  const int prefdist_T0 = 16;
+  constexpr int prefdist_T0 = 16;
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int fused_block_size = block_size + 0;
   int dataInd = 0;

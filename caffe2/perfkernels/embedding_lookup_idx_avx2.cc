@@ -3910,7 +3910,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
     const float* scale_bias,
     bool normalize_by_lengths,
     float* out) {
-  const int64_t prefdist_T0 = 16;
+  constexpr int64_t prefdist_T0 = 16;
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   const int64_t fused_block_size = block_size + 0;
   int64_t dataInd = 0;
