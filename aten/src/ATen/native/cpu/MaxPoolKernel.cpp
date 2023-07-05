@@ -78,7 +78,7 @@ void cpu_max_pool(
         for (int64_t iw = iw0; iw < iw1; iw += dilationW) {
           int64_t index = ih * input_width + iw;
           accscalar_t val = accscalar_t(input_ptr[index]);
-          if ((val > maxval) || is_nan(val)) {
+          if ((val > maxval) || is_nan(static_cast<double>(val))) {
             maxval = val;
             maxindex = index;
           }
@@ -238,7 +238,7 @@ void cpu_max_pool_channels_last(
             int64_t maxindex = ind[d2];
             scalar_t maxval = out[d2];
 
-            bool mask = (val > maxval) || is_nan(val);
+            bool mask = (val > maxval) || is_nan(static_cast<double>(val));
             out[d2] = mask ? val : maxval;
             ind[d2] = mask ? index : maxindex;
           }
