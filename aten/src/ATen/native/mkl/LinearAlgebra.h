@@ -33,7 +33,7 @@ void mkl_gemm_batched(
 void mkl_gemm_bf16bf16f32(
     TransposeType trans_A, TransposeType trans_B,
     int M, int N, int K, const float alpha,
-    const BFloat16* A, int lda, const BFloat16* B, int ldb,
+    const c10::BFloat16* A, int lda, const c10::BFloat16* B, int ldb,
     const float beta, float* C, int ldc);
 
 }}  // namespace at::native
