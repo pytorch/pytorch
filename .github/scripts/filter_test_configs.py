@@ -73,6 +73,7 @@ TEST_JOB_NAME = "test"
 BUILD_AND_TEST_JOB_NAME = "build-and-test"
 JOB_NAME_CFG_REGEX = re.compile(r"(?P<job>[\w-]+)\s+\((?P<cfg>[\w-]+)\)")
 EXCLUDED_BRANCHES = ["nightly"]
+MEM_LEAK_LABEL = "enable-mem-leak-check"
 
 
 class IssueType(Enum):
@@ -557,6 +558,12 @@ def main() -> None:
         filtered_test_matrix = mark_unstable_jobs(
             args.workflow, args.job_name, filtered_test_matrix
         )
+
+    if MEM_LEAK_LABEL in labels:
+        # Enable mem leak check if label is added
+        for config in filtered_test_matrix.get("include", []):
+            if is_cuda_or_rocm(job_name):
+                config[mode] = mode
 
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
