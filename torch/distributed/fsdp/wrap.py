@@ -34,19 +34,19 @@ __all__ = [
 ]
 
 
+# NOTE: We intentionally keep this function simple and isolate the complexity
+# to `fn` to enable using this function generically. We may move this to a
+# non-FSDP-specific folder and/or make it public in the future.
 def _post_order_apply(
     root_module: nn.Module,
-    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
-    fn_to_apply: Callable[[Any], nn.Module],
-) -> None:
+    fn: Callable[[nn.Module], Optional[nn.Module]],
+):
     """
-    This applies a function ``fn_to_apply`` to some target modules with
-    specified kwargs per target module (via ``target_module_to_kwargs``)
-    following a post-order traversal. This reduces the problem to constructing
-    ``target_module_to_kwargs``.
-
-    NOTE: Since the auto wrap policy is an arg to FSDP, this does not apply the
-    function to the root module, as the caller should be exactly that.
+    This applies ``fn`` to every module in the module tree of ``root_module``
+    following a post-order traversal. If ``fn`` returns an :class:`nn.Module`,
+    then this replaces the original module with the newly returned one in the
+    tree. Otherwise, ``fn`` should return ``None``, in which case the module is
+    not changed.
     """
     # Track visited modules to avoid visiting shared modules multiple times
     visited_modules: Set[nn.Module] = {root_module}
@@ -60,16 +60,37 @@ def _post_order_apply(
             if child_module not in visited_modules:
                 visited_modules.add(child_module)
                 _post_order_apply_inner(child_module, child_module_name, module)
-        if module in target_module_to_kwargs and module is not root_module:
+        optional_module = fn(module)
+        if optional_module is not None:
             assert module_name != "", (
                 "Non-root modules should have their module name set but got "
                 f"an empty module name for {module}"
             )
-            kwargs = target_module_to_kwargs[module]
-            new_module = fn_to_apply(module, **kwargs)
-            setattr(parent_module, module_name, new_module)
+            setattr(parent_module, module_name, optional_module)
 
     _post_order_apply_inner(root_module, "", None)
+
+
+def _construct_wrap_fn(
+    root_module: nn.Module,
+    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
+    fsdp_fn: Callable,
+) -> Callable[[nn.Module], Optional[nn.Module]]:
+    """
+    This constructs the "wrap" function to pass to :func:`_post_order_apply`
+    based on ``target_module_to_kwargs``, which should be constructed from the
+    wrapping policy.
+    """
+
+    def fn(module: nn.Module) -> Optional[nn.Module]:
+        # Explicitly avoid wrapping the root module since for FSDP, it is
+        # handled by the caller
+        if module in target_module_to_kwargs and module is not root_module:
+            kwargs = target_module_to_kwargs[module]
+            return fsdp_fn(module, **kwargs)
+        return None
+
+    return fn
 
 
 def _run_module_wrap_policy(
