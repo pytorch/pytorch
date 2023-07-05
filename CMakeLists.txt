@@ -348,6 +348,11 @@ cmake_dependent_option(
 cmake_dependent_option(
     BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 
+option(USE_MIMALLOC "Use mimalloc" OFF)
+# Enable third party mimalloc library to improve memory allocation performance on Windows.
+if(WIN32)
+  set(USE_MIMALLOC ON)
+endif()
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -817,6 +822,8 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wvla-extension" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnewline-eof" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Winconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
@@ -861,6 +868,8 @@ if(NOT MSVC)
 
   append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-override" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
@@ -1020,6 +1029,12 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
+
+if(USE_MIMALLOC)
+  add_definitions(-DUSE_MIMALLOC)
+  add_subdirectory(third_party/mimalloc)
+  include_directories(third_party/mimalloc/include)
+endif()
 
 # ---[ Main build
 add_subdirectory(c10)

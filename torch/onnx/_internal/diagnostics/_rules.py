@@ -414,6 +414,46 @@ class _UnsupportedFxNodeAnalysis(infra.Rule):
         )
 
 
+class _OpLevelDebugging(infra.Rule):
+    """Report any op level validation failure in warnings."""
+
+    def format_message(self, node, symbolic_fn) -> str:  # type: ignore[override]
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'FX node: {node} and its onnx function: {symbolic_fn} fails on op level validation.'
+        """
+        return self.message_default_template.format(node=node, symbolic_fn=symbolic_fn)
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, node, symbolic_fn
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'FX node: {node} and its onnx function: {symbolic_fn} fails on op level validation.'
+        """
+        return self, level, self.format_message(node=node, symbolic_fn=symbolic_fn)
+
+
+class _FindOpschemaMatchedSymbolicFunction(infra.Rule):
+    """Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas."""
+
+    def format_message(self, symbolic_fn, node) -> str:  # type: ignore[override]
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'The OnnxFunction: {symbolic_fn} is the nearest match of the node {node}.'
+        """
+        return self.message_default_template.format(symbolic_fn=symbolic_fn, node=node)
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, symbolic_fn, node
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'The OnnxFunction: {symbolic_fn} is the nearest match of the node {node}.'
+        """
+        return self, level, self.format_message(symbolic_fn=symbolic_fn, node=node)
+
+
 class _ArgFormatTooVerbose(infra.Rule):
     """The formatted str for argument to display is too verbose."""
 
@@ -843,6 +883,56 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """Result from FX graph analysis to reveal unsupported FX nodes."""
+
+    op_level_debugging: _OpLevelDebugging = dataclasses.field(
+        default=_OpLevelDebugging.from_sarif(
+            **{
+                "id": "FXE0013",
+                "name": "op-level-debugging",
+                "short_description": {
+                    "text": "Report any op level validation failure in warnings."
+                },
+                "full_description": {
+                    "text": "Report any op level validation failure in warnings.",
+                    "markdown": "This warning message indicates that during op level debugging, certain symbolic functions\nhave failed to match the results of torch ops when using real tensors generated from fake\ntensors. It is important to note that the symbolic functions may not necessarily be\nincorrect, as the validation process is non-deterministic and should only be used as a\nreference.\n\nThere are two categories of warnings that can be triggered:\n\n1. Non-validated operators:\n  If the warnings are caused by the following errors, they can be disregarded by users,\n  as these errors occur due to the non-deterministic nature of the validation. However,\n  it is important to be aware that the operators have not been validated.\n\n  - IndexError: Unsupported input arguments of randomized dimensions/indices(INT64).\n  - RuntimeError: Unsupported input arguments for torch ops are generated.\n  - ValueError: Arguments/keyword arguments do not match the signature of the symbolic function.\n\n2. Potentially wrong torchlib operators:\n  If the warnings are triggered by the following error, users should be aware that\n  the results from symbolic functions do not match the results of torch ops, suggesting\n  that the symbolic functions may be incorrect in dispatching or implementation. In such cases,\n  it is recommended to report the issue to the PyTorch-ONNX team, or create/register a custom\n  symbolic function to replace the default one.\n\n  - AssertionError: The symbolic function is potentially wrong.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "FX node: {node} and its onnx function: {symbolic_fn} fails on op level validation."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Report any op level validation failure in warnings."""
+
+    find_opschema_matched_symbolic_function: _FindOpschemaMatchedSymbolicFunction = dataclasses.field(
+        default=_FindOpschemaMatchedSymbolicFunction.from_sarif(
+            **{
+                "id": "FXE0014",
+                "name": "find-opschema-matched-symbolic-function",
+                "short_description": {
+                    "text": "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas."
+                },
+                "full_description": {
+                    "text": "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas. A warning will be issued if the matched OnnxFunction is not an exact match.",
+                    "markdown": "When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input\ndtypes of the ATen/Custom operator are compared with the input dtypes of the OnnxFunction opschemas\nto find a match. However, if a perfect/exact match is not found, the dispatcher will attempt to find\nthe nearest match with the highest number of input dtypes matching the OnnxFunction opschemas, while\nissuing a warning.\n\nThere are two types of level that can be triggered in this rule:\n\n1. NOTE: A perfect match is found, and no warning is issued.\n2. WARNING: The matched OnnxFunction is not a perfect/exact match.\n\nHere are some suggestions based on the WARNING situation:\n\n1. If there are NO errors or mismatches in the results, it is safe to disregard this warning,\n  as the definition of OnnxFunction schema is usually more stringent.\n2. If there are errors or mismatches in the results, it is recommended to:\n  (a) Enable op_level_debugging to determine if the OnnxFunction might be incorrect.\n  (b) Report the issue to the PyTorch-ONNX team.\n  (c) Create/register a custom symbolic function to replace the default one.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "The OnnxFunction: {symbolic_fn} is the nearest match of the node {node}."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas."""
 
     arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
         default=_ArgFormatTooVerbose.from_sarif(

@@ -34,6 +34,7 @@ from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
     IndexingConstant,
+    is_triton,
     ops_wrapper,
     PermuteView,
     Pointwise,
@@ -430,11 +431,14 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             if len(args) < 2:
                 return False
             else:
-                dtype = args[0].data.get_dtype()
-                return any(
-                    isinstance(t, TensorBox) and t.data.get_dtype() != dtype
-                    for t in args
-                )
+                dtype = None
+                for t in args:
+                    if isinstance(t, TensorBox):
+                        if dtype is None:
+                            dtype = t.data.get_dtype()
+                        elif dtype != t.data.get_dtype():
+                            return True
+                return False
 
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
@@ -445,7 +449,15 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             out = defaultdict(list)
             for i, args in enumerate(arg_pairs):
                 use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
-                out[(args[0].get_device(), use_foreach)].append((i, args))
+                device = None
+                for t in args:
+                    if isinstance(t, TensorBox):
+                        device = t.data.get_device()
+                        break
+                assert (
+                    device is not None
+                ), "foreach op should have at least one tensor arg"
+                out[(device, use_foreach)].append((i, args))
             return out
 
         realize_outputs = False
@@ -454,12 +466,26 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 if not (user.op == "call_function" and user.target in foreach_ops):
                     realize_outputs = True
 
-        # replicate scalar input to match lenghth of list input
-        if len(inputs) > 1 and not isinstance(inputs[1], (list, tuple)):
-            inputs = (inputs[0], [inputs[1] for _ in inputs[0]])
+        a_list_input = None
+        for input in inputs:
+            if isinstance(input, (list, tuple)):
+                a_list_input = input
+                break
+        assert (
+            a_list_input is not None
+        ), "at least one input must be a list to a foreach op"
 
-        groups = group_args(zip(*inputs))
-        outputs = [None] * len(inputs[0])
+        # broadcast scalar inputs to match length of list inputs
+        broadcast_inputs = []
+        for input in inputs:
+            if not isinstance(input, (list, tuple)):
+                broadcast_inputs.append([input] * len(a_list_input))
+            else:
+                broadcast_inputs.append(input)
+
+        groups = group_args(zip(*broadcast_inputs))
+
+        outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
             buffer_list = []
             for (
@@ -1445,6 +1471,12 @@ def randn(*args, **kwargs):
     raise AssertionError("should have been handled in replace_random.py")
 
 
+@register_lowering(inductor_prims.force_stride_order, type_promotion_kind=None)
+def inductor_force_stride_order(input_tensor, stride):
+    stride_order = ir.get_stride_order(stride)
+    return ir.ExternKernel.require_stride_order(input_tensor, stride_order)
+
+
 @register_lowering(inductor_prims.seed, type_promotion_kind=None)
 def inductor_seed(device: torch.device):
     raise AssertionError("should be handled in fuse_seed_creation_pass()")
@@ -1493,7 +1525,6 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
         inner_fn=inner_fn,
         ranges=[*size],
     )
-    result.realize()
     return result
 
 
@@ -1523,6 +1554,48 @@ def inductor_randint(
         dtype=dtype,
         inner_fn=inner_fn,
         ranges=[*size],
+    )
+
+
+@register_lowering(inductor_prims._bucketize, type_promotion_kind=None)
+def _inductor_bucketize(
+    input: TensorBox,
+    boundaries: TensorBox,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+):
+    assert len(boundaries.get_size()) == 1
+
+    if not (is_triton(input) and is_triton(boundaries)):
+        return fallback_handler(inductor_prims._bucketize, add_to_fallback_set=False)(
+            input, boundaries, out_int32=out_int32, right=right
+        )
+
+    boundaries_size = boundaries.get_size()[0]
+    boundaries_loader = boundaries.make_loader()
+    device = input.get_device()
+    input_loader = input.make_loader()
+
+    index_dtype = torch.int32 if out_int32 else torch.int64
+
+    def inner_fn(index):
+        val = input_loader(index)
+        indices = ops.bucketize(
+            val,
+            boundaries.get_name(),
+            ops.index_expr(boundaries_size, index_dtype),
+            index_dtype,
+            right,
+        )
+
+        return indices
+
+    return Pointwise.create(
+        device=device,
+        dtype=index_dtype,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
     )
 
 
@@ -1729,10 +1802,6 @@ make_fallback(aten.exponential.default, warn=False)
 
 # ROCm specific fallback, perf issues are observed when registered
 make_fallback(aten.miopen_batch_norm, warn=False)
-
-if torch.version.hip is not None and torch.cuda.is_available():
-    # tl.reduce not available yet in ROCm's version of triton
-    make_fallback(aten.prod, warn=False)
 
 
 @register_lowering(aten.clone)
@@ -4229,6 +4298,7 @@ register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
+register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
 register_foreach_pointwise(aten._foreach_div.List, div)
 register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
