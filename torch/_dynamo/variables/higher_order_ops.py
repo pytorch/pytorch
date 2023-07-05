@@ -845,45 +845,4 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        from torch._higher_order_ops.wrap import TagActivationCheckpoint
-        from . import ConstantVariable, TensorVariable
-        from .builder import wrap_fx_proxy
-
-        self.check_kwargs(kwargs, (ConstantVariable, TensorVariable))
-
-        checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
-
-        # The gmod_kwargs are the keyword positional arguments for the function
-        # to be traced (checkpointed). Since, we can't really create an Fx graph
-        # with forward accepting kwargs, we flatten the gmod_kwargs (remove the
-        # name) and append to the exisiting args of the checkpointed fn.
-        #
-        # This does not affect Dynamo tracing in any manner. Dynamo will analyze
-        # the bytecode as usual, find the bytecode associated with keyword
-        # position, and it will then find the associated TensorVariable tracker.
-        # Just that this tensor is now also tracked as a placeholder in the fx
-        # graph, and that is done by just appending to the existing args.
-        flattened_args = args + [
-            gmod_kwargs[name] for name in sorted(gmod_kwargs.keys())
-        ]
-
-        # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
-        # already flattened above and managed inside the fx graph.
-        p_args, p_kwargs, example_value = self.create_wrapped_node(
-            tx, flattened_args, checkpoint_kwargs
-        )
-
-        # Store the invocation as a call
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                self.value,
-                args=tuple(p_args),
-                kwargs=p_kwargs,
-            ),
-            example_value=example_value,
-        )
+    pass
