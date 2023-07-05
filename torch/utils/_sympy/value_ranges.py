@@ -1,4 +1,5 @@
 import dataclasses
+from copy import deepcopy
 import itertools
 import sympy
 from sympy.logic.boolalg import BooleanAtom, Boolean as SympyBoolean
@@ -520,5 +521,11 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
 
 
 def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> ValueRanges:
-    # CeilDiv does not occur in practice
+    # Add dynamic shapes within the expression as potentially unbounded
+    dynamic_shapes = expr.free_symbols - ranges.keys()
+    if dynamic_shapes:
+        ranges = deepcopy(ranges)
+        for s in dynamic_shapes:
+            ranges[s] = ValueRanges(0, math.inf)
+
     return sympy_interp(SymPyValueRangeAnalysis(), ranges, expr)
