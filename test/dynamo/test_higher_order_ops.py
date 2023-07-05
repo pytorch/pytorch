@@ -40,9 +40,7 @@ def normalize_gm(gm_str):
 
 def check_dynamic_shape_capture():
     # This also mirrors config from `test/dynamo/test_dynamic_shapes.py:make_dynamic_cls`
-    if config.assume_static_by_default and config.automatic_dynamic_shapes:
-        return True
-    if not config.assume_static_by_default and not config.automatic_dynamic_shapes:
+    if not config.assume_static_by_default:
         return True
     return False
 
@@ -1464,7 +1462,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -1486,9 +1487,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_grad_closure_scalar(self):
         counters.clear()
