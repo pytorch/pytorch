@@ -1764,9 +1764,9 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Hopper', '9.0+PTX'),
     ])
 
-    supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0']
-    valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
+    known_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
+                    '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0']
+    valid_known_arch_strings = known_arches + [arch + "+PTX" for arch in known_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
     # First check for an env var (same as used by the main setup.py)
@@ -1776,7 +1776,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
 
     # If not given, determine what's best for the GPU / CUDA version that can be found
     if not _arch_list:
-        arch_list = []
+        arch_list: List[str] = []
         # the assumption is that the extension should run on any of the currently visible cards,
         # which could be of different types - therefore all archs for visible cards should be included
         for i in range(torch.cuda.device_count()):
@@ -1803,15 +1803,34 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
 
         arch_list = _arch_list.split(';')
 
-    flags = []
+    flags: List[str] = []
     for arch in arch_list:
-        if arch not in valid_arch_strings:
-            raise ValueError(f"Unknown CUDA arch ({arch}) or GPU not supported")
-        else:
-            num = arch[0] + arch[2]
-            flags.append(f'-gencode=arch=compute_{num},code=sm_{num}')
-            if arch.endswith('+PTX'):
-                flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
+        if arch not in valid_known_arch_strings:
+            if arch == "":
+                warnings.warn("Unknown CUDA arch (empty string) requested.")
+                continue
+            elif arch[0].isdigit:
+                # Assumes that a value starting with a number is an actual capability.
+                # If a user specifies a capability like "9.0" or "90", we assume they know
+                # what they're doing and don't want us to break their build.
+                # We can warn them about it, but we shouldn't outright break.
+                warnings.warn(
+                    f"Unknown CUDA arch ({arch}) requested."
+                    " Assuming a newer capability than known was specified and continuing."
+                    " Compilation may fail!"
+                )
+            else:
+                raise ValueError(f"Unknown CUDA arch ({arch}) requested.")
+
+        with_ptx = arch.endswith('+PTX')
+        arch = arch.removesuffix('+PTX')
+        # It's not enough to just take the first and third character because we need to support:
+        # - capabilities with more than one digit in the major version
+        # - capabilities with characters (e.g., 90a: https://docs.nvidia.com/cuda/archive/12.1.1/cuda-compiler-driver-nvcc/index.html#gpu-feature-list)
+        num = arch.replace('.', '')
+        flags.append(f'-gencode=arch=compute_{num},code=sm_{num}')
+        if with_ptx:
+            flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
 
     return sorted(set(flags))
 
