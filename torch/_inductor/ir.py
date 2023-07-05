@@ -3455,6 +3455,8 @@ def _prepare_convolution_fusion_create(
 
     x.realize()
     weight.realize()
+    if bias is not None:
+        bias.realize()
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)

@@ -10,7 +10,7 @@ import torch.utils._pytree as pytree
 
 from torch._dynamo.utils import detect_fake_mode, dynamo_timed
 from torch._functorch.compile_utils import fx_graph_cse
-from torch._inductor.fx_passes.freezing_patterns import get_freezing_patterns
+from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch.ao.quantization._pt2e.utils import _fuse_conv_bn_
 from torch.fx.experimental.proxy_tensor import make_fx
 from . import config
@@ -52,32 +52,24 @@ def replace_node_with_constant(gm, node, constant):
 def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     """
     Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
-
     Returns a list of indices representing the input parameters that were not converted to constants.
     """
-
     params = [node for node in gm.graph.nodes if node.op == "placeholder"]
     fake_inp_nodes = params[: len(params)]
-
     g = gm.graph
-
     preserved_arg_indices = []
     aliased_input_args = [
         out_info.base_idx
         for out_info in fw_metadata.output_info
         if out_info.base_idx is not None
     ]
-
     for i, (real_input, node) in enumerate(zip(flat_params, fake_inp_nodes)):
         if i in fw_metadata.mutated_inp_indices or aliased_input_args:
             preserved_arg_indices.append(i)
             continue
-
         replace_node_with_constant(gm, node, real_input)
-
     # add on non param inputs
     preserved_arg_indices.extend(range(len(flat_params), len(params)))
-
     # is this necessary ?
     gm.recompile()
     return preserved_arg_indices
@@ -229,14 +221,17 @@ def freeze(
     aot_autograd_gm.graph = cse_graph
     aot_autograd_gm.recompile()
 
-    patterns = get_freezing_patterns()
+    from torch._inductor.compile_fx import fake_tensor_prop
 
-    patterns.apply(aot_autograd_gm.graph)
+    # Make sure meta['val'] is properly setup(weight conversion
+    # or decompose_unfused_batchnorms lost meta['val']).
+    aot_example_inputs = [example_inputs[ind] for ind in preserved_arg_indices]
+    fake_tensor_prop(aot_autograd_gm, aot_example_inputs, True)
+    freezing_passes(aot_autograd_gm)
 
     # TODO - apply legalization in pattern matcher
     torch.fx.passes.tools_common.legalize_graph(aot_autograd_gm)
     constant_fold(aot_autograd_gm)
-
     # invalidate nn Modules
     if config.freezing_discard_parameters:
         invalidate_eager_modules()
