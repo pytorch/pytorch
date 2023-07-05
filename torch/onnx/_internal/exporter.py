@@ -451,7 +451,7 @@ class ExportOutput:
                 In that case, besides saving the ONNX model, a folder with "_initializers" suffix (without extension)
                 will be created to store the each initializer of the ONNX model in a separate file. For example, if the
                 destination is "/path/model.onnx", the initializers will be saved in "/path/model_initializers/" folder.
-            model_state_dict: The state_dict of the PyTorch model with all weights on it.
+            model_state_dict: The state_dict of the PyTorch model with all weights on it (e.g. `model.state_dict()`).
                 Required when ``enable_fake_mode`` is used but real initializers are needed on the ONNX graph.
                 It can be either a string with the path to a checkpoint or a dictionary with the actual model state.
             serializer: The serializer to use. If not specified, the model will be serialized as Protobuf.
@@ -461,37 +461,44 @@ class ExportOutput:
             serializer = ProtobufExportOutputSerializer()
 
         # Add initializers when symbolic tracing is enabled
+        _model_state_dict_files = None
         if model_state_dict is not None:
             if isinstance(model_state_dict, dict):
                 model_state_dict_file = io.BytesIO()
                 torch.save(model_state_dict, model_state_dict_file)
                 model_state_dict_file.seek(0)
             else:
+                isinstance(
+                    model_state_dict, str
+                ), "model_state_dict must be a path to the model's state_dict or the actual state_dict"
                 model_state_dict_file = model_state_dict
 
             ctx = patcher.ONNXTorchPatcher()
             with ctx:
                 _ = torch.load(model_state_dict_file)
-            self._model_state_dict_files = ctx.paths
+                _model_state_dict_files = ctx.paths
 
             # Reset the buffer to the beginning before reading it again
             if isinstance(model_state_dict, dict):
                 for file_obj in ctx.paths:
                     file_obj.seek(0)  # type: ignore[union-attr]
 
-        if self._model_state_dict_files is not None:
+        if _model_state_dict_files is not None:
             if not isinstance(destination, str):
-                raise RuntimeError("Cannot save to file when model has state_dict")
+                raise RuntimeError(
+                    "`destination` must be a string with a path when model_state_dict is specified."
+                )
             destination_path, destination_filename = os.path.split(destination)
             onnx_model_location = destination_filename
             onnx_initializer_location = (
                 destination_filename.split(".")[0] + "_initializers"
             )
+            # TODO: Should this be part of the serializer?
             fx_serialization.save_model_with_external_data(
                 destination_path,
                 onnx_model_location,
                 onnx_initializer_location,
-                tuple(self._model_state_dict_files),
+                tuple(_model_state_dict_files),
                 self.model_proto,
             )
         else:
@@ -601,11 +608,14 @@ class Exporter:
             for val in self.model_kwargs.values()
             if val is not None
         )
-        has_any_fake_param = any(
-            isinstance(param, torch._subclasses.FakeTensor)
-            for param in self.model.parameters()  # type: ignore[union-attr]
-            if param is not None
-        )
+        if isinstance(self.model, torch.nn.Module):
+            has_any_fake_param = any(
+                isinstance(param, torch._subclasses.FakeTensor)
+                for param in self.model.parameters()  # type: ignore[union-attr]
+                if param is not None
+            )
+        else:
+            has_any_fake_param = False
         if (
             has_any_fake_tensor or has_any_fake_param
         ) and not self.options.fake_context:
@@ -623,17 +633,17 @@ class Exporter:
             for val in self.model_kwargs.values()
             if val is not None
         )
-        has_any_non_fake_param = any(
-            not isinstance(param, torch._subclasses.FakeTensor)
-            for param in self.model.parameters()  # type: ignore[union-attr]
-            if param is not None
-        )
+        if isinstance(self.model, torch.nn.Module):
+            has_any_non_fake_param = any(
+                not isinstance(param, torch._subclasses.FakeTensor)
+                for param in self.model.parameters()  # type: ignore[union-attr]
+                if param is not None
+            )
+        else:
+            has_any_non_fake_param = False
         if (
             has_any_non_fake_tensors or has_any_non_fake_param
         ) and self.options.fake_context:
-            import pdb
-
-            pdb.set_trace()
             raise OnnxExporterError(
                 self.options.diagnostic_context,
                 "Cannot export a model with non fake inputs/weights and enabled fake mode.",

@@ -814,7 +814,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_pytorch_only_extra_kwargs():
             return {"return_dict": False}
 
-        self._test_large_scale_exporter(
+        self._test_fx_symbolic_tracer_large_scale_exporter(
             "tiny_gpt2",
             create_model,
             create_args,
