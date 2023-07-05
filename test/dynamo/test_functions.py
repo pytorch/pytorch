@@ -15,7 +15,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.testing import expectedFailureDynamic, requires_numpy_pytorch_interop
-from torch._dynamo.utils import same
+from torch._dynamo.utils import guard_if_dyn, same
 from torch.nn import functional as F
 
 d = torch.ones(10, 10)
@@ -920,13 +920,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if tmp.startswith("1.23"):
             return a + b
 
-    # https://github.com/pytorch/pytorch/issues/103602
-    @expectedFailureDynamic
     @make_test
     def test_fstrings2(x):
-        tmp = f"{x.shape[0]} bar"
+        guarded = guard_if_dyn(x)
+        tmp = f"{guarded.shape[0]} bar"
         if tmp.startswith("10"):
-            return x + 1
+            return guarded + 1
 
     @make_test
     def test_fstrings3(x):
