@@ -25,42 +25,35 @@ static constexpr int launch_size_nd = 128;
 
 template<int nt, int vt, typename func_t>
 C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
-__global__ void index_elementwise_kernel(const int64_t N, const func_t f, TORCH_DSA_KERNEL_ARGS) {
-  const auto tid = threadIdx.x;
-  const auto nv = nt * vt;
-  auto idx = nv * blockIdx.x + tid;
+__global__ void index_elementwise_kernel(int N, func_t f) {
+  int tid = threadIdx.x;
+  int nv = nt * vt;
+  int idx = nv * blockIdx.x + tid;
   #pragma unroll
   for (int i = 0; i < vt; i++) {
     if (idx < N) {
-      f(idx, TORCH_DSA_KERNEL_ARGS_PASS);
+      f(idx);
       idx += nt;
     }
   }
 }
 
 template<int nt, int vt, typename func_t>
-static void launch_kernel(const int64_t N, const func_t& f) {
-  TORCH_INTERNAL_ASSERT(0 <= N && N <= std::numeric_limits<int32_t>::max());
+static void launch_kernel(int64_t N, const func_t& f) {
+  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
   }
-  const dim3 block(nt);
-  const dim3 grid((N + block.x * vt - 1) / (block.x * vt));
-  const auto stream = at::cuda::getCurrentCUDAStream();
-  TORCH_DSA_KERNEL_LAUNCH(
-    (index_elementwise_kernel<nt, vt, func_t>),
-    grid,
-    block,
-    0,
-    stream,
-    N,
-    f
-  );
+  dim3 block(nt);
+  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  auto stream = at::cuda::getCurrentCUDAStream();
+  index_elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename func_t>
-void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const func_t& f) {
-  const auto num_indices = index_size.size();
+void gpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
+  int num_indices = index_size.size();
   AT_ASSERT(static_cast<size_t>(num_indices) == index_stride.size());
   AT_ASSERT(num_indices == iter.ntensors() - 2);
 
@@ -78,26 +71,26 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
   auto sizes = at::detail::Array<int64_t, MAX_DIMS>(0);
   auto strides = at::detail::Array<int64_t, MAX_DIMS>(0);
   auto index_ptrs = at::detail::Array<char*, MAX_DIMS>(nullptr);
-  for (const auto i : c10::irange(num_indices)) {
+  for (int i = 0; i < num_indices; i++) {
     sizes[i] = index_size[i];
     strides[i] = index_stride[i];
-    index_ptrs[i] = static_cast<char*>(iter.data_ptr(i + 2));
+    index_ptrs[i] = (char*)iter.data_ptr(i + 2);
   }
 
-  char* const out_ptr = static_cast<char*>(iter.data_ptr(0));
-  char* const in_ptr = static_cast<char*>(iter.data_ptr(1));
+  char* out_ptr = (char*)iter.data_ptr(0);
+  char* in_ptr = (char*)iter.data_ptr(1);
 
-  const auto offset_calc = make_offset_calculator<3>(iter);
-  launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(const int64_t idx, TORCH_DSA_KERNEL_ARGS) {
-    const auto offsets = offset_calc.get(idx);
-    char* const out_data = out_ptr + offsets[0];
-    const char* const in_data = in_ptr + offsets[1];
+  auto offset_calc = make_offset_calculator<3>(iter);
+  launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
+    auto offsets = offset_calc.get(idx);
+    char* out_data = out_ptr + offsets[0];
+    char* in_data = in_ptr + offsets[1];
 
     int64_t offset = 0;
     #pragma unroll
     for (int i = 0; i < num_indices; i++) {
       int64_t index = *(int64_t*)(index_ptrs[i] + offsets[2]);
-      CUDA_KERNEL_ASSERT2(-sizes[i] <= index && index < sizes[i] && "index out of bounds");
+      CUDA_KERNEL_ASSERT(index >= -sizes[i] && index < sizes[i] && "index out of bounds");
       if (index < 0) {
         index += sizes[i];
       }
@@ -115,10 +108,10 @@ template <int N> struct alignas(N) OpaqueType { char data[N]; };
 template <typename scalar_t>
 void index_fill_kernel_impl(
   TensorIterator& iter,
-  const int64_t dim,
-  const int64_t self_dim_size,
-  const int64_t self_dim_stride,
-  const scalar_t fill_val) {
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride,
+  scalar_t fill_val) {
   if (0 == iter.numel()) {
     return;
   }
@@ -130,12 +123,12 @@ void index_fill_kernel_impl(
     return;
   }
 
-  char* const __restrict__ self_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
-  char* const __restrict__ idx_ptr = reinterpret_cast<char*>(iter.data_ptr(1));
+  char* __restrict__ self_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
+  char* __restrict__ idx_ptr = reinterpret_cast<char*>(iter.data_ptr(1));
 
   auto offset_calc = make_offset_calculator<2>(iter);
 
-  const auto loop = [=]C10_DEVICE(const int64_t i, TORCH_DSA_KERNEL_ARGS) {
+  auto loop = [=]C10_DEVICE(int i) {
     auto offsets = offset_calc.get(i);
 
     auto* __restrict__ self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0]);
@@ -153,9 +146,9 @@ void index_fill_kernel_impl(
 template <typename scalar_t>
 void index_copy_kernel_impl(
   TensorIterator& iter,
-  const int64_t dim,
-  const int64_t self_dim_size,
-  const int64_t self_dim_stride) {
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride) {
   if (iter.numel() == 0) {
     return;
   }
@@ -167,13 +160,13 @@ void index_copy_kernel_impl(
     return;
   }
 
-  char* const __restrict__ self_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
-  char* const __restrict__ idx_ptr = reinterpret_cast<char*>(iter.data_ptr(1));
-  char* const __restrict__ source_ptr = reinterpret_cast<char*>(iter.data_ptr(2));
+  char* __restrict__ self_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
+  char* __restrict__ idx_ptr = reinterpret_cast<char*>(iter.data_ptr(1));
+  char* __restrict__ source_ptr = reinterpret_cast<char*>(iter.data_ptr(2));
 
-  const auto offset_calc = make_offset_calculator<3>(iter);
+  auto offset_calc = make_offset_calculator<3>(iter);
 
-  const auto loop = [=]C10_DEVICE(const int64_t i, TORCH_DSA_KERNEL_ARGS) {
+  auto loop = [=]C10_DEVICE(int i) {
     auto offsets = offset_calc.get(i);
 
     auto* __restrict__ self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0]);
@@ -187,20 +180,20 @@ void index_copy_kernel_impl(
 }
 
 template <typename scalar_t>
-void index_kernel_impl(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride) {
-  gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, const char* const in_data, const int64_t offset) {
+void index_kernel_impl(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+  gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
     *(scalar_t*)out_data = *(scalar_t*)(in_data + offset);
   });
 }
 
 template <typename scalar_t>
-void index_put_kernel_impl(TensorIterator& iter, const IntArrayRef index_size, const IntArrayRef index_stride) {
-  gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, const char* const in_data, const int64_t offset) {
+void index_put_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+  gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
     *(scalar_t*)(out_data + offset) = *(scalar_t*)in_data;
   });
 }
 
-static void index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, const IntArrayRef index_stride) {
+static void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16, iter.dtype(), "index_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_kernel_impl<dtype>(iter, index_size, index_stride);
@@ -209,9 +202,9 @@ static void index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size,
 
 static void index_fill_kernel(
   TensorIterator& iter,
-  const int64_t dim,
-  const int64_t self_dim_size,
-  const int64_t self_dim_stride,
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride,
   const Scalar& source) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, kComplexHalf,
@@ -225,9 +218,9 @@ static void index_fill_kernel(
 
 static void index_copy_kernel(
   TensorIterator& iter,
-  const int64_t dim,
-  const int64_t self_dim_size,
-  const int64_t self_dim_stride) {
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride) {
   // See note [Writing Nondeterministic Operations]
   // Nondeterministic when index contains duplicate entries
   // this kernel will not be called when torch.use_deterministic_algorithms(True)
@@ -240,7 +233,7 @@ static void index_copy_kernel(
 }
 
 
-static void index_put_kernel(TensorIterator& iter, const IntArrayRef index_size, const IntArrayRef index_stride, bool accumulate) {
+static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   TORCH_CHECK(!accumulate, "index_put does not support accumulate=true");
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16, iter.dtype(), "index_put", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
@@ -248,16 +241,16 @@ static void index_put_kernel(TensorIterator& iter, const IntArrayRef index_size,
   });
 }
 
-void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef index_size, const IntArrayRef index_stride, bool accumulate, double scale, int zero_point) {
+void index_put_kernel_quantized_cuda(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate, double scale, int zero_point) {
   TORCH_CHECK(!accumulate, "index_put does not support accumulate=true");
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "index_put", [&] {
     constexpr int64_t qmin = std::numeric_limits<typename scalar_t::underlying>::min();
     constexpr int64_t qmax = std::numeric_limits<typename scalar_t::underlying>::max();
-    const float inv_scale = 1.0f / static_cast<float>(scale);
+    float inv_scale = 1.0f / static_cast<float>(scale);
 
-    gpu_index_kernel(iter, index_size, index_stride, [inv_scale, zero_point, qmin, qmax]C10_DEVICE(char* out_data, const char* const in_data, const int64_t offset) {
-      auto qvalue = static_cast<int64_t>(zero_point + nearbyintf(*(float*)in_data * inv_scale));
-      qvalue = std::clamp(qvalue, qmin, qmax);
+    gpu_index_kernel(iter, index_size, index_stride, [inv_scale, zero_point, qmin, qmax]C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
+      int64_t qvalue = static_cast<int64_t>(zero_point + nearbyintf(*(float*)in_data * inv_scale));
+      qvalue = min(max(qvalue, qmin), qmax);
       *(scalar_t*)(out_data + offset) = static_cast<scalar_t>(qvalue);
     });
   });
@@ -278,8 +271,8 @@ void cuda_take_put_kernel(
   const auto numel = indexed.numel();
   const bool is_contiguous = indexed.is_contiguous();
 
-  char* const __restrict__ iterated_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
-  char* const __restrict__ idx_ptr = reinterpret_cast<char*>(iter.data_ptr(1));
+  char* __restrict__ iterated_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
+  char* __restrict__ idx_ptr = reinterpret_cast<char*>(iter.data_ptr(1));
 
   const auto offset_calc = make_offset_calculator<2>(iter);
   using uindex_t = std::make_unsigned_t<index_t>;
@@ -287,13 +280,13 @@ void cuda_take_put_kernel(
   // OffsetCalculator needs the sizes and strides reveresed
   const auto indexed_sizes = std::vector<int64_t>(indexed.sizes().rbegin(), indexed.sizes().rend());
   const auto indexed_strides = std::vector<int64_t>(indexed.strides().rbegin(), indexed.strides().rend());
-  const auto* const indexed_strides_data = indexed_strides.data();
+  const auto* indexed_strides_data = indexed_strides.data();
   const auto offset_indexed = OffsetCalculator<1, uindex_t>(indexed.dim(),
                                                             indexed_sizes.data(),
                                                             &indexed_strides_data);
 
-  const auto loop = [=]C10_DEVICE(const int64_t i, TORCH_DSA_KERNEL_ARGS) {
-    const auto offsets = offset_calc.get(i);
+  auto loop = [=]C10_DEVICE(int i) {
+    auto offsets = offset_calc.get(i);
 
     auto& iterated = *reinterpret_cast<scalar_t*>(iterated_ptr + offsets[0]);
     const auto idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1]);
@@ -318,7 +311,7 @@ void put_kernel(TensorIterator& iter, const TensorBase& output, const bool accum
         "put_cuda_index", [&] {
            auto* __restrict__ indexed_ptr = output.template data_ptr<scalar_t>();
            if (accumulate) {
-             const index_t numel = output.numel();
+             index_t numel = output.numel();
              cuda_take_put_kernel<scalar_t, index_t>(iter, output,
                  [numel, indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                    fastSpecializedAtomicAdd(indexed_ptr, offset, numel, iterated);
@@ -341,7 +334,7 @@ void take_kernel(
     // Cannot use `OpaqueType`, as Tensor::data_ptr<OpaqueType<N>> is not implemented
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(input) ? ScalarType::Int : ScalarType::Long,
       "take_cuda_index", [&] {
-         const auto* const __restrict__ indexed_ptr = input.template data_ptr<scalar_t>();
+         const auto* __restrict__ indexed_ptr = input.template data_ptr<scalar_t>();
          cuda_take_put_kernel<scalar_t, index_t>(iter, input,
             [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                iterated = indexed_ptr[offset];
@@ -358,7 +351,7 @@ __global__ void masked_scatter_size_check(
   const int64_t srcSize,
   TORCH_DSA_KERNEL_ARGS) {
   // Convert exclusive sum to inclusive sum
-  const auto totalElements = *mask_exclusive_sum + *mask;
+  auto totalElements = *mask_exclusive_sum + *mask;
   CUDA_KERNEL_ASSERT2(totalElements <= srcSize);
 }
 
@@ -367,9 +360,9 @@ __global__ void masked_scatter_size_check(
 void launch_masked_scatter_kernel(
     const TensorBase &self, const TensorBase &mask,
     const TensorBase &maskPrefixSum, const TensorBase &source) {
-  const auto srcSize = source.numel();
-  const auto mask_cont = mask.contiguous();
-  const auto mask_numel = mask.numel();
+  auto srcSize = source.numel();
+  auto mask_cont = mask.contiguous();
+  auto mask_numel = mask.numel();
 
   // Use a prefix sum to determine the output locations of the masked elements
   auto maskPrefixSum_data = maskPrefixSum.mutable_data_ptr<int64_t>();
@@ -411,7 +404,7 @@ void launch_masked_scatter_kernel(
       self.scalar_type(),
       "masked_scatter_",
       [&]() {
-        auto *const source_ptr = source_contig.const_data_ptr<scalar_t>();
+        auto source_ptr = source_contig.const_data_ptr<scalar_t>();
         gpu_kernel(
             iter, [=] GPU_LAMBDA(scalar_t a, bool mask, int64_t maskPrefixSum) -> scalar_t {
               if (mask) {
@@ -437,7 +430,7 @@ void flip_kernel_impl(TensorIterator& iter) {
 
   const auto offset_calc = make_offset_calculator<2, /*signed_strides=*/true>(iter);
 
-  const auto loop = [=]C10_DEVICE(const int64_t i, TORCH_DSA_KERNEL_ARGS) {
+  auto loop = [=]C10_DEVICE(const int i) {
     const auto offsets = offset_calc.get(i);
     // offsets can be negative here, but it's fine
     scalar_t* const __restrict__ out_data = reinterpret_cast<scalar_t*>(out_ptr + offsets[0]);

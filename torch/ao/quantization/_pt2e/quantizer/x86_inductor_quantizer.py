@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import copy
 import functools
 import itertools
+import operator
 from .quantizer import (
     OperatorConfig,
     OperatorPatternType,
@@ -11,6 +12,7 @@ from .quantizer import (
     Quantizer,
     QuantizationAnnotation,
 )
+from torch.ao.quantization._pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization._pt2e.quantizer.utils import (
     get_input_act_qspec,
     get_output_act_qspec,
@@ -28,7 +30,10 @@ from torch.ao.quantization.observer import (
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from typing import List, Dict, Optional, Set, Any
 from torch.fx import Node
-from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
+from torch.fx.passes.utils.source_matcher_utils import (
+    get_source_partitions,
+    SourcePartition,
+)
 
 __all__ = [
     "X86InductorQuantizer",
@@ -43,6 +48,24 @@ def supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
             [F.conv2d],
         ],
     }
+
+    # Append Conv Optional(Add) Optioinal(ReLU)
+    conv_add_relu_options = itertools.product(
+        [torch.nn.Conv2d, F.conv2d],
+        [torch.add, operator.add, None],  # add
+        [torch.nn.ReLU, F.relu, None],  # relu
+    )
+    for conv_op, add_op, relu_op in conv_add_relu_options:
+        if add_op is None:
+            # Append Conv ReLU
+            supported_operators["conv2d"].append([conv_op, relu_op])
+        elif relu_op is None:
+            # Append Conv Add
+            supported_operators["conv2d"].append([conv_op, add_op])
+        else:
+            # Append Conv Add ReLU
+            supported_operators["conv2d"].append([conv_op, add_op, relu_op])
+
     return copy.deepcopy(supported_operators)
 
 
@@ -141,6 +164,78 @@ class X86InductorQuantizer(Quantizer):
         self.operator_type_config[operator_type] = quantization_config
         return self
 
+    def _annotate_conv_node_helper(
+            self,
+            conv_node: torch.fx.Node,
+            annotate_output: bool,
+            quantization_config: QuantizationConfig,
+    ) -> None :
+        """ Helper function to annotate the conv node
+        """
+        input_qspec_map = {}
+        input_node = conv_node.args[0]
+        assert isinstance(input_node, Node)
+        input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
+        weight_node = conv_node.args[1]
+        assert isinstance(weight_node, Node)
+        input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
+        bias_node = conv_node.args[2]
+        if isinstance(bias_node, Node):
+            input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
+        if annotate_output:
+            conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map=input_qspec_map,
+                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
+                output_qspec=get_output_act_qspec(quantization_config),
+                _annotated=True
+            )
+        else:
+            conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map=input_qspec_map,
+                _annotated=True
+            )
+
+    def _get_output_nodes_of_partitions(
+        self,
+        partition_list: List[SourcePartition],
+    ) -> List[torch.fx.Node]:
+        """ Helper function to get the output node list from partition list
+        """
+        output_node_list = []
+        for partition in partition_list:
+            if len(partition.output_nodes) > 1:
+                raise ValueError("Input partition has more than one output node")
+            output_node = partition.output_nodes[0]
+            assert isinstance(output_node, Node)
+            output_node_list.append(output_node)
+        if len(output_node_list) != len(partition_list):
+            raise ValueError("length of output_node_list should equal to length of partition_list")
+        return output_node_list
+
+    def _get_input_idx_for_binary_node(
+        self,
+        conv_gemm_node: torch.fx.Node,
+        binary_node: torch.fx.Node,
+    ):
+        """ Helper function to check conv_gemm and extra input node index
+        for binary node fused with conv_gemm.
+        """
+        conv_gemm_node_idx = None
+        extra_input_node_idx = None
+        if (binary_node.args[0].op == "call_function") and (
+            binary_node.args[0] == conv_gemm_node
+        ):
+            conv_gemm_node_idx = 0
+            extra_input_node_idx = 1
+        elif (binary_node.args[1].op == "call_function") and (
+            binary_node.args[1] == conv_gemm_node
+        ):
+            conv_gemm_node_idx = 1
+            extra_input_node_idx = 0
+        extra_input_node = binary_node.args[extra_input_node_idx]
+        assert isinstance(extra_input_node, Node)
+        return conv_gemm_node_idx, extra_input_node_idx
+
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """ just handling global spec for now
         """
@@ -155,9 +250,103 @@ class X86InductorQuantizer(Quantizer):
         # and we will mark the matched node with "_annoated" so fusion operator pattern
         # can take precedence over single operator pattern in this way
         config = self.global_config
+        self._annotate_conv2d_binary_unary(model, config)
+        self._annotate_conv2d_binary(model, config)
+        self._annotate_conv2d_unary(model, config)
         self._annotate_conv2d(model, config)
-
         return model
+
+    def _annotate_conv2d_binary_unary(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        # Conv2d + add + unary op
+        fused_partitions = find_sequential_partitions(
+            gm, [torch.nn.Conv2d, operator.add, torch.nn.ReLU]
+        )
+        for fused_partition in fused_partitions:
+            conv_partition, binary_partition, unary_partition = fused_partition
+            conv_node, binary_node, unary_node = self._get_output_nodes_of_partitions(
+                [conv_partition, binary_partition, unary_partition]
+            )
+            conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(conv_node, binary_node)
+            if (conv_node_idx is None) or (extra_input_node_idx is None):
+                continue
+            if conv_node != binary_node.args[conv_node_idx]:
+                raise ValueError(f"{conv_node} doesn't match input of binary node")
+            extra_input_node = binary_node.args[extra_input_node_idx]
+            if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
+                # No conv node found to be fused with add
+                continue
+            if _is_annotated([unary_node, binary_node, conv_node]):
+                continue
+            self._annotate_conv_node_helper(conv_node, False, quantization_config)
+            binary_node_input_qspec_map = {}
+            binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(quantization_config)
+            binary_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map=binary_node_input_qspec_map,
+                _annotated=True
+            )
+            unary_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
+                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                _annotated=True
+            )
+
+    def _annotate_conv2d_binary(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        # Conv2d + add
+        fused_partitions = find_sequential_partitions(
+            gm, [torch.nn.Conv2d, operator.add]
+        )
+        for fused_partition in fused_partitions:
+            conv_partition, binary_partition = fused_partition
+            conv_node, binary_node = self._get_output_nodes_of_partitions(
+                [conv_partition, binary_partition]
+            )
+            conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(conv_node, binary_node)
+            if (conv_node_idx is None) or (extra_input_node_idx is None):
+                continue
+            if conv_node != binary_node.args[conv_node_idx]:
+                raise ValueError(f"{conv_node} doesn't match input of binary node")
+            extra_input_node = binary_node.args[extra_input_node_idx]
+            assert isinstance(conv_node, Node)
+            if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
+                # No conv node found to be fused with add
+                continue
+            if _is_annotated([binary_node, conv_node]):
+                continue
+            self._annotate_conv_node_helper(conv_node, False, quantization_config)
+            binary_node_input_qspec_map = {}
+            binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(quantization_config)
+            binary_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map=binary_node_input_qspec_map,
+                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
+                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                _annotated=True
+            )
+
+    def _annotate_conv2d_unary(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        fused_partitions = find_sequential_partitions(
+            gm, [torch.nn.Conv2d, torch.nn.ReLU]
+        )
+        for fused_partition in fused_partitions:
+            conv_partition, unary_partition = fused_partition
+            conv_node, unary_node = self._get_output_nodes_of_partitions(
+                [conv_partition, unary_partition]
+            )
+            if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
+                continue
+            if _is_annotated([unary_node, conv_node]):
+                continue
+            self._annotate_conv_node_helper(conv_node, False, quantization_config)
+            unary_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
+                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                _annotated=True
+            )
 
     def _annotate_conv2d(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
@@ -178,25 +367,7 @@ class X86InductorQuantizer(Quantizer):
             # skip annotation if it is already annotated
             if _is_annotated([conv_node]):
                 continue
-            input_qspec_map = {}
-            input_node = conv_node.args[0]
-            assert isinstance(input_node, Node)
-            input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
-
-            weight_node = conv_node.args[1]
-            assert isinstance(weight_node, Node)
-            input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
-
-            bias_node = conv_node.args[2]
-            if isinstance(bias_node, Node):
-                input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
-
-            conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
-                input_qspec_map=input_qspec_map,
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
-                output_qspec=get_output_act_qspec(quantization_config),
-                _annotated=True
-            )
+            self._annotate_conv_node_helper(conv_node, True, quantization_config)
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
