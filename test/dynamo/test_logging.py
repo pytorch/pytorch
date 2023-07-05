@@ -80,7 +80,6 @@ class LoggingTests(LoggingTestCase):
     test_bytecode = multi_record_test(2, bytecode=True)
     test_output_code = multi_record_test(2, output_code=True)
     test_aot_graphs = multi_record_test(2, aot_graphs=True)
-    test_trace_source = within_range_record_test(1, 100, trace_source=True)
 
     @requires_cuda()
     @make_logging_test(schedule=True)
@@ -257,6 +256,97 @@ class LoggingTests(LoggingTestCase):
         self.assertIsNotNone(handler)
         self.assertIn("[INFO]", handler.format(records[0]))
         self.assertEqual("custom format", handler.format(records[1]))
+
+    test_trace_source_simple = within_range_record_test(1, 100, trace_source=True)
+
+    @make_logging_test(trace_source=True)
+    def test_trace_source_if_stmt(self, records):
+        def fn(x):
+            if x.sum() > 0:
+                return x * 2
+            return x * 3
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.ones(3, 3))
+
+        found_x2 = False
+        found_x3 = False
+        for record in records:
+            msg = record.getMessage()
+            if "return x * 2" in msg:
+                found_x2 = True
+            if "return x * 3" in msg:
+                found_x3 = True
+
+        self.assertTrue(found_x2)
+        self.assertFalse(found_x3)
+
+    @make_logging_test(trace_source=True)
+    def test_trace_source_nested(self, records):
+        def fn1(x):
+            x = fn2(x)
+            return x * 2
+
+        def fn2(x):
+            x = fn3(x)
+            return x * 3
+
+        def fn3(x):
+            return x * 4
+
+        fn_opt = torch._dynamo.optimize("eager")(fn1)
+        fn_opt(torch.ones(3, 3))
+
+        found_x2 = False
+        found_x3 = False
+        found_x4 = False
+        for record in records:
+            msg = record.getMessage()
+            if "return x * 2" in msg:
+                found_x2 = True
+                self.assertNotIn("inline depth", msg)
+            elif "return x * 3" in msg:
+                found_x3 = True
+                self.assertIn("inline depth: 1", msg)
+            elif "return x * 4" in msg:
+                found_x4 = True
+                self.assertIn("inline depth: 2", msg)
+        self.assertTrue(found_x2)
+        self.assertTrue(found_x3)
+        self.assertTrue(found_x4)
+
+    @make_logging_test(trace_source=True)
+    def test_trace_source_cond(self, records):
+        from functorch.experimental.control_flow import cond
+
+        def true_fn(x):
+            return x * 2
+
+        def false_fn(x):
+            return x * 3
+
+        def inner(pred, x):
+            return cond(pred, true_fn, false_fn, [x])
+
+        def outer(pred, x):
+            return inner(pred, x)
+
+        fn_opt = torch._dynamo.optimize("eager")(outer)
+        fn_opt(torch.tensor(True), torch.ones(3, 3))
+
+        found_x2 = False
+        found_x3 = False
+        for record in records:
+            msg = record.getMessage()
+            if "return x * 2" in msg:
+                found_x2 = True
+                self.assertIn("inline depth: 2", msg)
+            if "return x * 3" in msg:
+                found_x3 = True
+                self.assertIn("inline depth: 2", msg)
+
+        self.assertTrue(found_x2)
+        self.assertTrue(found_x3)
 
 
 # single record tests
