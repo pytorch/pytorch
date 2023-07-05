@@ -62,7 +62,7 @@ dynamic_shapes = True
 # When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
 # NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
 # see [Note - on the state of mark_dynamic]
-assume_static_by_default = True
+assume_static_by_default = False
 
 # This flag changes how dynamic_shapes=True works, and is meant to be used in conjunction
 # with assume_static_by_default=True.
