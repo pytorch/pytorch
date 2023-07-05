@@ -314,12 +314,15 @@ MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
   }
 
 /**
- * Computes number of elements one needs to transfer to preserve all the elements
+ * Returns distance from lowest to highest element offset in given tensor.
  */
-size_t compute_strided_size(const at::Tensor& t);
+size_t compute_storage_numel_distance(const at::Tensor& t);
 
-inline bool is_strided_contiguous(const at::Tensor& t) {
-  return compute_strided_size(t) == static_cast<size_t>(t.numel());
+/**
+ * Checks whether tensor is mapped to a contiguous area in the storage.
+ */
+inline bool is_dense_in_storage(const at::Tensor& t) {
+  return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
 }
 
 } // namespace mps

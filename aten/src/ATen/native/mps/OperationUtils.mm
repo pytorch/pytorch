@@ -14,9 +14,9 @@
 namespace at::native::mps {
 
 /**
- * Computes number of elements one needs to transfer to preserve all the elements
+ * Computes distance from lowest to highest element offset in given tensor.
  */
-size_t compute_strided_size(const at::Tensor& t) {
+size_t compute_storage_numel_distance(const at::Tensor& t) {
   size_t rc = 1;
   if (t.numel() == 0) {
     return 0;

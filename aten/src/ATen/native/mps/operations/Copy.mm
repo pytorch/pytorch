@@ -158,7 +158,7 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
   const size_t size_to_copy = src.nbytes();
   const void* host_src = static_cast<const char*>(src.storage().data()) + src_byte_offset;
 
-  TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_strided_contiguous(src));
+  TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_dense_in_storage(src));
 
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
@@ -185,12 +185,12 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
   // Typecast to dst_ if needed and expand, which is a no-op
   Tensor src = (src_.dtype() != dst_.dtype() ? src_.to(dst_.dtype()) : src_).expand_as(dst_);
 
-  // If src is not contiguously strided it must be cloned
+  // If src is not densely mapped in storage it must be cloned
   // It does not mean that tensor is contiguous, but rather
   // that it could be represented as 1d view
-  if (!is_strided_contiguous(src)) {
+  if (!is_dense_in_storage(src)) {
     src = src.clone();
-    TORCH_INTERNAL_ASSERT(is_strided_contiguous(src));
+    TORCH_INTERNAL_ASSERT(is_dense_in_storage(src));
   }
   Tensor dst = dst_;
   bool needs_copy = false;
