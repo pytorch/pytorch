@@ -282,29 +282,28 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             FSDP. (Default: ``None``)
         param_init_fn (Optional[Callable[[nn.Module], None]]):
             A ``Callable[torch.nn.Module] -> None`` that
-            specifies how modules that are currently on the meta device should be initialized
-            onto an actual device. Note that as of v1.12, we detect modules on the meta
-            device via ``is_meta`` check and apply a default initialization that calls
-            ``reset_parameters`` method on the passed in ``nn.Module`` if ``param_init_fn``
-            is not specified, otherwise we run ``param_init_fn`` to initialize the passed
-            in ``nn.Module``. In particular, this means that if ``is_meta=True`` for any
-            module parameters for modules that will be wrapped with FSDP and ``param_init_fn``
-            is not specified, we assume your module properly implements a ``reset_parameters()``
-            and will throw errors if not. Note that additionally, we offer support for modules
-            initialized with torchdistX's (https://github.com/pytorch/torchdistX)
-            ``deferred_init`` API. In this case, deferred modules would be initialized
-            by a default initialization function that calls torchdistX's
-            ``materialize_module``, or the passed in ``param_init_fn``, if it is not
-            ``None``. The same ``Callable`` is applied to initialize all meta modules.
-            Note that this initialization function is applied before doing any FSDP sharding
-            logic.
+            specifies how modules that are currently on the meta device should
+            be initialized onto an actual device. As of v1.12, FSDP detects
+            modules with parameters or buffers on meta device via ``is_meta``
+            and either applies ``param_init_fn`` if specified or calls
+            ``nn.Module.reset_parameters()`` otherwise. For both cases, the
+            implementation should *only* initialize the parameters/buffers of
+            the module, not those of its submodules. This is to avoid
+            re-initialization. In addition, FSDP also supports deferred
+            initialization via torchdistX's (https://github.com/pytorch/torchdistX)
+            ``deferred_init()`` API, where the deferred modules are initialized
+            by calling ``param_init_fn`` if specified or torchdistX's default
+            ``materialize_module()`` otherwise. If ``param_init_fn`` is
+            specified, then it is applied to all meta-device modules, meaning
+            that it should probably case on the module type. FSDP calls the
+            initialization function before parameter flattening and sharding.
 
             Example::
 
                 >>> # xdoctest: +SKIP("undefined variables")
                 >>> module = MyModule(device="meta")
-                >>> def my_init_fn(module):
-                >>>     # responsible for initializing a module, such as with reset_parameters
+                >>> def my_init_fn(module: nn.Module):
+                >>>     # E.g. initialize depending on the module type
                 >>>     ...
                 >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=size_based_auto_wrap_policy)
                 >>> print(next(fsdp_model.parameters()).device) # current CUDA device

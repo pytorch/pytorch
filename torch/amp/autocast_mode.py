@@ -374,3 +374,20 @@ class autocast:
         if torch._jit_internal.is_scripting():
             return func
         return autocast_decorator(self, func)
+
+# These functions aren't meant for public usage.
+# They are what we trace into a graph during pre_dispatch tracing
+# when we encounter an autocast context manager.
+def _enter_autocast(*vals):
+    # For pre-dispatch tracing, if a TorchFunction mode is active, we'll want to trace this into a graph.
+    if torch._C._is_torch_function_mode_enabled():
+        return torch.overrides.handle_torch_function(torch.amp._enter_autocast, [], *vals)
+    mode = torch.amp.autocast(*vals)
+    mode.__enter__()
+    return mode
+
+
+def _exit_autocast(mode):
+    if torch._C._is_torch_function_mode_enabled():
+        return torch.overrides.handle_torch_function(torch.amp._exit_autocast, [], mode)
+    mode.__exit__(None, None, None)
