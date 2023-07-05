@@ -10,7 +10,7 @@ from functorch.dim import Tensor, Dim, dims, dimlists, stack, DimensionBindError
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_CUDA, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_CUDA
 
 from unittest import skip, skipIf
 import torch
@@ -105,7 +105,6 @@ class TestMin(TestCase):
             f'extra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:' \
             f' { [type(t) for t in interesting] }'
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_manual_stuff(self):
 
         A_ = torch.rand(3, 4)
@@ -178,11 +177,9 @@ class TestMin(TestCase):
             gpu_time(lambda: B(hidden_state), "positional", r=3)
             gpu_time(lambda: A(hidden_state), "first_class", r=3)
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_attn(self):
         self.attn()
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_inplace(self):
         # some embeddings table
         embeddings = torch.zeros(10, 3)
@@ -244,7 +241,6 @@ class TestMin(TestCase):
         x = r.order(i, [j, k])
         self.assertTrue(torch.allclose(a, x))
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_hello(self):
         A = torch.rand(3, 4)
         B = torch.rand(4, 5)
@@ -340,7 +336,6 @@ class TestMin(TestCase):
         r = [id(x) for x in torch.nn.functional.dropout(A[i, k]).dims]
         assert id(i) in r and id(k) in r
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_simple(self):
         i, j, k = dims()
         x = torch.rand(3, 4)
@@ -392,7 +387,6 @@ class TestMin(TestCase):
 
         assert torch.allclose(r1.order(i, j), r0)
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_compare_dims(self):
         i, j = dims()
         i.size = 3
@@ -402,7 +396,6 @@ class TestMin(TestCase):
     def test_c(self):
         _test_c()
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_seg(self):
         A = torch.rand(3, 4)
         i, k = dims()
@@ -416,7 +409,6 @@ class TestMin(TestCase):
         assert list(A[i].expand(2, 4).order(i).size()) == [3, 2, 4]
 
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, maybe real issue")
     def test_parse(self):
         self.assertEqual(("x", None, None, None), _parse_test(1, 0, "x"))
         self.assertEqual(("x", None, "y", None), _parse_test(1, 0, "x", c="y"))
@@ -467,13 +459,11 @@ class TestMin(TestCase):
         assert b[0].size == 4
         assert b[1].size == 5
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_diag(self):
         i = dims()
         A = torch.rand(4, 4)
         (A[i, i])
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_softmax_split(self):
         a = torch.rand(16)
         g, i = dims(sizes=[2, None])
@@ -525,7 +515,6 @@ class TestMin(TestCase):
         x.new(a)
         # self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_index_placement(self):
         A = torch.rand(1, 2, 3, 4)
 
@@ -541,13 +530,11 @@ class TestMin(TestCase):
         A = torch.rand(3, 4, 5)
         assert torch.allclose(A[i].order(1, i), A.permute(2, 0, 1))
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_mask(self):
         a = torch.rand(5)
         i, j = dims(sizes=[a.size(0), a.size(0)])
         ((i >= j) * a[i]).sum(j).order(i)
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_eq(self):
         i, j = dims(sizes=[3, 3])
         assert (i == j).sum((i, j)) == 3
@@ -564,7 +551,6 @@ class TestMin(TestCase):
         assert str(y.x) == "d1"
         assert str(q) == "d2"
 
-    @skipIf(TEST_WITH_ASAN, "tests gets asan error, put up issue since seems real")
     def test_dir(self):
         i, j = dims(sizes=[3, 3])
         dir(i <= j)
