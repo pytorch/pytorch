@@ -285,6 +285,8 @@ def compile_fx_inner(
         cudagraphs = config.triton.cudagraphs
 
     # Inputs to fx_codegen_and_compile
+    # Anything that affects codegen should go here, so if the signature
+    # of fx_codegen_and_compile changes, the list and dict should be updated accordingly
     graph_args = [gm, example_inputs]
     graph_kwargs = {
         "cudagraphs": cudagraphs,

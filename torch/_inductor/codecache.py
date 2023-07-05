@@ -31,6 +31,8 @@ from threading import Thread
 from time import sleep, time
 from typing import Any, Callable, Dict, List, Set, Union
 
+import triton
+
 import torch
 
 from torch._inductor import config, cuda_properties, exc
@@ -270,10 +272,10 @@ def code_hash(code, extra=""):
     )
 
 
-def serialize_fx_arg(arg: Any):
+def serialize_compiled_fx_arg(arg: Any):
     if isinstance(arg, torch.fx.GraphModule):
         # Special case for fx_graph
-        return arg.print_readable(print_output=False).encode("utf-8")
+        return str(arg).encode("utf-8")
     if isinstance(arg, list):
         if len(arg) > 0 and isinstance(arg[0], torch.Tensor):
             # Special case for example_inputs, everything in torch/csrc/dynamo/guards.cpp
@@ -283,7 +285,7 @@ def serialize_fx_arg(arg: Any):
                 pickled_guards.append(
                     b"".join(
                         [
-                            pickle.dumps(torch._C._dispatch_keys(t).__repr__()),
+                            pickle.dumps(repr(torch._C._dispatch_keys(t))),
                             pickle.dumps(t.dtype),
                             pickle.dumps(t.device),
                             pickle.dumps(t.shape),
@@ -291,11 +293,27 @@ def serialize_fx_arg(arg: Any):
                     )
                 )
             return b"".join(pickled_guards)
-    return pickle.dumps(arg)
+    if isinstance(arg, int):
+        return str(arg).encode("utf-8")
+    if isinstance(arg, bool):
+        return str(arg).encode("utf-8")
+    if isinstance(arg, str):
+        return arg.encode("utf-8")
+    if dataclasses.is_dataclass(arg):
+        return repr(arg).encode("utf-8")
+    if isinstance(arg, frozenset):
+        return repr(arg).encode("utf-8")
+    if isinstance(arg, bytes):
+        return arg
+    if arg is None:
+        return pickle.dumps(arg)
+    raise ValueError(
+        "The type of the argument you are trying to hash is not supported yet. Implement it in serialize_fx_arg"
+    )
 
 
 def compiled_fx_graph_hash(fx_args: List[Any]):
-    serialized_fx_args = b"".join([serialize_fx_arg(arg) for arg in fx_args])
+    serialized_fx_args = b"".join([serialize_compiled_fx_arg(arg) for arg in fx_args])
     hashed_fx_args = base64.b32encode(hashlib.sha256(serialized_fx_args).digest())[:51]
     return "f" + hashed_fx_args.decode("utf-8").lower()
 
@@ -354,6 +372,7 @@ class FxGraphCache:
         fx_args_for_hashing.extend(list(fx_kwargs.values()))
         # Hash also on torch version and current triton config
         fx_args_for_hashing.append(torch.__version__)
+        fx_args_for_hashing.append(triton.jit.version_key())
         fx_args_for_hashing.append(config.save_config())
         key = compiled_fx_graph_hash(fx_args_for_hashing)
         if key not in cls.cache:
@@ -370,8 +389,8 @@ class FxGraphCache:
 
                     disk_compiled_graph = copy(compiled_graph)
                     # Important as compiled models are not pickeable
+                    # TODO: Check status of PR #101651 as that might change the above statement
                     disk_compiled_graph.compiled_artifact = None
-                    print(disk_compiled_graph)
                     write(
                         pickle.dumps(disk_compiled_graph),
                         "cg",
