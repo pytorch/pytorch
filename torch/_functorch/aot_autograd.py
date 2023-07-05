@@ -114,7 +114,7 @@ KNOWN_TYPES = tuple(
 # Set up hooks so that during backward the fx's stack_trace is properly set
 callback_set = False
 
-def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int = 0):
+def setup_stacktrace_preservation_hooks(roots: List):
     def iter_graph(roots):
         if not roots:
             return
@@ -155,7 +155,6 @@ def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int = 0):
 
             fx_traceback.set_stack_trace(stack_)
             fx_traceback.set_bwd_seq_id(seq_id)
-            meta = fx_traceback.get_current_meta()
 
         return prehook
 
@@ -166,7 +165,6 @@ def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int = 0):
 
     for node in iter_graph(roots):
         forward_node_stack = node.metadata.get("traceback_", [])
-        forward_node_module_info = str(node.name)
         node.register_prehook(get_prehook(forward_node_stack,
                               node.sequence_nr()))
 
@@ -1076,7 +1074,6 @@ class AOTConfig:
     aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
-    max_seq_id: int = -1
 
 # This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
 # When tracing the joint forward + backward, for any inputs in the graph that are mutated,
@@ -1251,8 +1248,7 @@ def create_joint(
                 )
                 needed_tangents.append(tangent)
 
-        setup_stacktrace_preservation_hooks(
-            [out.grad_fn for out in needed_outs], aot_config.max_seq_id)
+        setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
 
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
@@ -3682,7 +3678,6 @@ def aot_module_simplified(
     # Next, the input args
     full_args.extend(args)
 
-    mod_count = 0
     if hasattr(mod, "graph"):
         # Non dynamo entrypoints can get to here...
         for i, node in enumerate(mod.graph.nodes):
@@ -3695,9 +3690,6 @@ def aot_module_simplified(
                     assert source not in seen_sources, source
                     seen_sources.add(source)
                     aot_autograd_arg_pos_to_source.append(source)
-            else:
-                if node.op in ("call_function", "call_method", "call_module"):
-                    mod_count += 1
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
@@ -3721,7 +3713,6 @@ def aot_module_simplified(
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
         is_export=False,
         no_tangents=False,
-        max_seq_id=mod_count - 1
     )
 
     compiled_fn = create_aot_dispatcher_function(
@@ -3804,13 +3795,6 @@ def aot_export_module(
 
     num_fw_outs = None
 
-    # Determine max number of fwd ops
-    max_fwd_ops = 0
-    if isinstance(mod, torch.fx.GraphModule):
-        for node in mod.graph.nodes:
-            if node.op in ("call_function", "call_method", "call_module"):
-                max_fwd_ops += 1
-
     if trace_joint:
         # This helper effectively just adds some extra asserts about what the backward will look like:
         # Outputs must include a scalar loss, that we compute gradients w.r.t.
@@ -3874,9 +3858,11 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             decompositions=decompositions,
             num_params_buffers=len(params_and_buffers_flat),
             no_tangents=True,
-            max_fwd_ops=max_fwd_ops,
         )
 
+    # For debug purposes the user may want to inspect the joint graph.
+    # Skipping the flatten_joint stage perserves the node.meta information
+    # available in the joint fwd/bwd graph fx_g.
     if skip_flatten_joint:
         trace_joint = False
 
@@ -4024,7 +4010,6 @@ def _aot_export_function(
     # (requiring it to be a graph input).
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
-    max_fwd_ops: int = 0,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     dynamic_shapes = False
     for x in args:
@@ -4054,7 +4039,6 @@ def _aot_export_function(
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
         no_tangents=no_tangents,
-        max_seq_id=max_fwd_ops - 1
     )
 
     fx_g, meta = create_aot_dispatcher_function(
