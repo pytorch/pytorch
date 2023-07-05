@@ -348,6 +348,11 @@ cmake_dependent_option(
 cmake_dependent_option(
     BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 
+option(USE_MIMALLOC "Use mimalloc" OFF)
+# Enable third party mimalloc library to improve memory allocation performance on Windows.
+if(WIN32)
+  set(USE_MIMALLOC ON)
+endif()
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -408,6 +413,7 @@ option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
 option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
 option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
+option(USE_SYSTEM_ZSTD "Use system-provided zstd." OFF)
 option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
@@ -423,8 +429,14 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_ONNX ON)
   set(USE_SYSTEM_XNNPACK ON)
   set(USE_SYSTEM_PYBIND11 ON)
+  if(USE_NCCL)
+    set(USE_SYSTEM_NCCL ON)
+  endif()
   if(USE_TBB)
     set(USE_SYSTEM_TBB ON)
+  endif()
+  if(USE_ZSTD)
+    set(USE_SYSTEM_ZSTD ON)
   endif()
 endif()
 
@@ -1024,6 +1036,12 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
+
+if(USE_MIMALLOC)
+  add_definitions(-DUSE_MIMALLOC)
+  add_subdirectory(third_party/mimalloc)
+  include_directories(third_party/mimalloc/include)
+endif()
 
 # ---[ Main build
 add_subdirectory(c10)
