@@ -26,7 +26,7 @@ from typing import (
 from unittest.mock import patch
 
 import sympy
-from sympy import Expr, Integer, simplify
+from sympy import Expr, Integer
 
 import torch._logging
 
@@ -40,7 +40,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -109,6 +109,7 @@ def validate_ir(node_or_nodes):
             assert isinstance(
                 nodes,
                 (
+                    torch._inductor.ir.ExpandView,
                     DynamicScalar,
                     TensorBox,
                     sympy.Symbol,
@@ -230,82 +231,6 @@ class OptionalScalar(OptionalAttr):
 
 def may_convert_to_optional(optional_value, value):
     return optional_value if not value and V.graph.cpp_wrapper else value
-
-
-class ModularIndexing(sympy.Function):
-    """
-    ModularIndexing(a, b, c) => (a // b) % c
-    """
-
-    nargs = (3,)
-    is_integer = True
-
-    @classmethod
-    def eval(cls, base, divisor, modulus):
-        if base == 0 or modulus == 1:
-            return sympy.Integer(0)
-
-        if (
-            isinstance(base, sympy.Integer)
-            and isinstance(divisor, sympy.Integer)
-            and isinstance(modulus, sympy.Integer)
-        ):
-            return (base // divisor) % modulus
-
-        if divisor != 1:
-            gcd = sympy.gcd(base, divisor)
-            if gcd != 1:
-                return ModularIndexing(
-                    simplify(base / gcd), simplify(divisor / gcd), modulus
-                )
-
-        if isinstance(base, sympy.Add):
-            new_terms = []
-            all_positive = True
-            for term in base.args:
-                if sympy.gcd(term, modulus * divisor) != modulus * divisor:
-                    if (isinstance(term, sympy.Integer) and term < 0) or (
-                        isinstance(term, sympy.Mul)
-                        and isinstance(term.args[0], sympy.Integer)
-                        and term.args[0] < 0
-                    ):
-                        # workaround for https://github.com/openai/triton/issues/619,
-                        # if there are negative terms, // produces wrong result
-                        # TODO if https://github.com/openai/triton/issues/619 is fixed
-                        # this optimization would become valid
-                        all_positive = False
-                        break
-                    else:
-                        new_terms.append(term)
-
-            if len(new_terms) != len(base.args) and all_positive:
-                return ModularIndexing(sum(new_terms), divisor, modulus)
-
-        if isinstance(base, FloorDiv):
-            return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
-
-
-class CleanDiv(FloorDiv):
-    """
-    Div where we can assume no rounding.
-    This is to enable future optimizations.
-    """
-
-    pass
-
-
-class CeilDiv(sympy.Function):
-    """
-    Div used in indexing that rounds up.
-    """
-
-    is_integer = True
-
-    def __new__(cls, base, divisor):
-        if sympy.gcd(base, divisor) == divisor:
-            return CleanDiv(base, divisor)
-        else:
-            return FloorDiv(base + (divisor - 1), divisor)
 
 
 def get_device_type(x):
@@ -1409,22 +1334,12 @@ class SqueezeView(BaseView):
 
 
 @dataclasses.dataclass
-class View(BaseView):
+class GenericView(BaseView):
     size: List[Expr]
     reindex: Callable[..., Any]
 
     def make_reindexer(self):
         return self.reindex
-
-    @staticmethod
-    def handle_negative_index(idx, size):
-        idx = sympy.expand(idx)
-        size = sympy.expand(size)
-        sizevars = V.graph.sizevars
-        if sizevars.size_hint(idx) < 0:
-            sizevars.guard_lt(idx, 0)
-            idx = idx + size
-        return idx
 
     def reindex_str(self):
         index_old = [sympy_symbol(f"i{n}") for n in range(len(self.size))]
@@ -1437,6 +1352,25 @@ class View(BaseView):
         )
 
     __repr__ = __str__
+
+    @classmethod
+    def create(cls, x, new_size, reindex):
+        return cls(x, list(new_size), reindex)
+
+    def get_size(self):
+        return self.size
+
+
+@dataclasses.dataclass
+class View(GenericView):
+    @staticmethod
+    def handle_negative_index(idx, size):
+        idx = sympy.expand(idx)
+        size = sympy.expand(size)
+        evaluate_expr = V.graph.sizevars.shape_env.evaluate_expr
+        if evaluate_expr(sympy.Lt(idx, 0)):
+            idx = idx + size
+        return idx
 
     @classmethod
     def create(cls, x, new_size):
@@ -1559,9 +1493,6 @@ class View(BaseView):
             return tuple(sympy_subs(x, replacements) for x in view_expr)
 
         return reindex
-
-    def get_size(self):
-        return self.size
 
 
 @dataclasses.dataclass
@@ -2994,6 +2925,7 @@ class RandomSeeds(ExternKernelOut):
             inputs=[],
             constant_args=[limits.min, limits.max, [count]],
             kernel="aten.randint.low_out",
+            cpp_kernel="at::randint_out",
         )
 
 
@@ -3340,16 +3272,7 @@ class FallbackKernel(ExternKernelAlloc):
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
-        fake_incorrect_kernels = (
-            aten._fft_r2c.default,
-            aten._fft_r2c.out,
-            aten._fft_c2r.default,
-            aten._fft_c2c.default,
-            aten._fft_c2c.out,
-            aten._linalg_svd.default,
-            aten._linalg_svd.U,
-            aten._fused_moving_avg_obs_fq_helper_functional,
-        )
+        fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
         context = (
             V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
         )

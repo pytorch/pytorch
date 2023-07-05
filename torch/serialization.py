@@ -32,6 +32,7 @@ STORAGE_KEY_SEPARATOR = ','
 
 FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]]
 MAP_LOCATION: TypeAlias = Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]]
+STORAGE: TypeAlias = Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
 
 __all__ = [
     'SourceChangeWarning',
@@ -39,6 +40,7 @@ __all__ = [
     'register_package',
     'check_module_version_greater_or_equal',
     'validate_cuda_device',
+    'validate_hpu_device',
     'location_tag',
     'default_restore_location',
     'normalize_storage_type',
@@ -89,7 +91,46 @@ def _is_zipfile(f) -> bool:
     return read_bytes == local_header_magic_number
 
 
-def register_package(priority, tagger, deserializer):
+def register_package(
+    priority: int,
+    tagger: Callable[[STORAGE], Optional[str]],
+    deserializer: Callable[[STORAGE, str], Optional[STORAGE]]
+):
+    '''
+    Registers callables for tagging and deserializing storage objects with an associated priority.
+    Tagging associates a device with a storage object at save time while deserializing moves a
+    storage object to an appropriate device at load time. :attr:`tagger` and :attr:`deserializer`
+    are run in the order given by their :attr:`priority` until a tagger/deserializer returns a
+    value that is not `None`.
+
+    To override the deserialization behavior for a device in the global registry, one can register a
+    tagger with a higher priority than the existing tagger.
+
+    This function can also be used to register a tagger and deserializer for new devices.
+
+    Args:
+        priority: Indicates the priority associated with the tagger and deserializer, where a lower
+            value indicates higher priority.
+        tagger: Callable that takes in a storage object and returns its tagged device as a string
+            or None.
+        deserializer: Callable that takes in storage object and a device string and returns a storage
+            object on the appropriate device or None.
+
+    Returns:
+        `None`
+
+    Example:
+        >>> def ipu_tag(obj):
+        >>>     if obj.device.type == 'ipu':
+        >>>         return 'ipu'
+        >>> def ipu_deserialize(obj, location):
+        >>>     if location.startswith('ipu'):
+        >>>         ipu = getattr(torch, "ipu", None)
+        >>>         assert ipu is not None, "IPU device module is not loaded"
+        >>>         assert torch.ipu.is_available(), "ipu is not available"
+        >>>         return obj.ipu(location)
+        >>> torch.serialization.register_package(11, ipu_tag, ipu_deserialize)
+    '''
     queue_elem = (priority, tagger, deserializer)
     _package_registry.append(queue_elem)
     _package_registry.sort()
@@ -145,6 +186,9 @@ def _cuda_tag(obj):
     if obj.device.type == 'cuda':
         return 'cuda:' + str(obj.device.index)
 
+def _hpu_tag(obj):
+    if obj.device.type == 'hpu':
+        return 'hpu:' + str(obj.device.index)
 
 def _mps_tag(obj):
     if obj.device.type == 'mps':
@@ -196,6 +240,38 @@ def _cuda_deserialize(obj, location):
                 return torch.UntypedStorage(obj.nbytes(), device=torch.device(location))
         else:
             return obj.cuda(device)
+
+
+def validate_hpu_device(location):
+    hpu = getattr(torch, "hpu", None)
+    assert hpu is not None, "HPU device module is not loaded"
+    device = hpu._utils._get_device_index(location, optional=True)
+
+    if not hpu.is_available():
+        raise RuntimeError('Attempting to deserialize object on a HPU '
+                           'device but torch.hpu.is_available() is False. '
+                           'If you are running on a CPU-only machine, '
+                           'please use torch.load with map_location=torch.device(\'cpu\') '
+                           'to map your storages to the CPU.')
+    device_count = hpu.device_count()
+    if device >= device_count:
+        raise RuntimeError('Attempting to deserialize object on HPU device '
+                           f'{device} but torch.hpu.device_count() is {device_count}. Please use '
+                           'torch.load with map_location to map your storages '
+                           'to an existing device.')
+    return device
+
+
+def _hpu_deserialize(obj, location):
+    hpu = getattr(torch, "hpu", None)
+    assert hpu is not None, "HPU device module is not loaded"
+    if location.startswith('hpu'):
+        device = validate_hpu_device(location)
+        if getattr(obj, "_torch_load_uninitialized", False):
+            with hpu.device(device):
+                return torch.UntypedStorage(obj.nbytes(), device=torch.device(location))
+        else:
+            return obj.hpu(device)
 
 
 def _mps_deserialize(obj, location):
@@ -251,6 +327,7 @@ register_package(20, _cuda_tag, _cuda_deserialize)
 register_package(21, _mps_tag, _mps_deserialize)
 register_package(22, _meta_tag, _meta_deserialize)
 register_package(23, _privateuse1_tag, _privateuse1_deserialize)
+register_package(24, _hpu_tag, _hpu_deserialize)
 
 
 def location_tag(storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]):
