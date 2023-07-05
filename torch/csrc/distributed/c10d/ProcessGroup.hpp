@@ -369,6 +369,31 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.timeout.count()));
   }
 
+  // This function is a coalesced version of `reduce_scatter_tensor` (currently
+  // still named as `_reduce_scatter_base`). Each tensor in the vector corresponds to
+  // an input/output of one `reduce_scatter_tensor` operation.
+  virtual c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::reduce_scatter_tensor_coalesced_", "")
+            .typed<c10::intrusive_ptr<Work>(
+                const at::TensorList,
+                const at::TensorList,
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                int64_t)>();
+
+    return op.call(
+        outputTensors,
+        inputTensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
+        c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
+        opts.timeout.count());
+  }
+
   virtual c10::intrusive_ptr<Work> alltoall_base(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,

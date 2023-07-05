@@ -253,10 +253,205 @@ def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
     return type_hints
 
 
+def get_max_pool_dispatch(name: str, arg_list: List[str]) -> Dict[str, List[str]]:
+    flag_pos = arg_list.index("{return_indices}")
+    # If return_indices is positional arg, everything before should have no default
+    arg_list_positional = (
+        [
+            ", ".join(single_arg.split(" = ")[0] for single_arg in arg.split(", "))
+            for arg in arg_list[: flag_pos + 1]
+        ]
+        + ["/"]
+        + arg_list[flag_pos + 1 :]
+    )
+    # Otherwise force return_indices to be kwarg
+    arg_list_keyword = arg_list.copy()
+    arg_list_keyword.insert(flag_pos, "*")
+    tmpl = "def {name}({args}) -> {{return_type}}: ..."
+    return {
+        name: [
+            tmpl.format(name=name, args=", ".join(arg_list)).format(
+                return_indices="return_indices: Literal[False] = False",
+                return_type="Tensor",
+            ),
+            tmpl.format(name=name, args=", ".join(arg_list_positional)).format(
+                return_indices="return_indices: Literal[True]",
+                return_type="Tuple[Tensor, Tensor]",
+            ),
+            tmpl.format(name=name, args=", ".join(arg_list_keyword)).format(
+                return_indices="return_indices: Literal[True]",
+                return_type="Tuple[Tensor, Tensor]",
+            ),
+        ]
+    }
+
+
 def gen_nn_functional(fm: FileManager) -> None:
+    INPUT = "input: Tensor"
+    KERNEL_SIZE = "kernel_size: Union[_int, _size]"
+    STRIDE_PADDING = ", ".join(
+        [
+            "stride: Optional[Union[_int, _size]] = None",
+            "padding: Union[_int, _size] = 0",
+        ]
+    )
+
+    # TODO the list for `torch._C._nn` is nonexhaustive
+    unsorted_c_nn_function_hints: Dict[str, List[str]] = {}
+
+    for d in (2, 3):
+        unsorted_c_nn_function_hints.update(
+            {
+                f"avg_pool{d}d": [
+                    f"def avg_pool{d}d({{}}) -> Tensor: ...".format(
+                        ", ".join(
+                            [
+                                f"{INPUT}",
+                                f"{KERNEL_SIZE}",
+                                f"{STRIDE_PADDING}",
+                                "ceil_mode: bool = False",
+                                "count_include_pad: bool = True",
+                                "divisor_override: Optional[int] = None",
+                            ]
+                        )
+                    )
+                ],
+                f"fractional_max_pool{d}d": [
+                    f"def fractional_max_pool{d}d({{}}) -> {{}}: ...".format(
+                        ", ".join(
+                            [
+                                f"{INPUT}",
+                                f"{KERNEL_SIZE}",
+                                "output_size: Union[_int, _size]",
+                                "_random_samples: Tensor",
+                            ]
+                        ),
+                        "Tuple[Tensor, Tensor]",
+                    )
+                ],
+                f"adaptive_max_pool{d}d": [
+                    f"def adaptive_max_pool{d}d({{}}) -> {{}}: ...".format(
+                        ", ".join([f"{INPUT}", "output_size: Union[_int, _size]"]),
+                        "Tuple[Tensor, Tensor]",
+                    )
+                ],
+            }
+        )
+
+    unsorted_c_nn_function_hints.update(
+        {
+            "hardtanh": [
+                "def hardtanh({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "min_val: float = ...",
+                            "max_val: float = ...",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "hardtanh_": [
+                "def hardtanh_({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "min_val: float = ...",
+                            "max_val: float = ...",
+                        ]
+                    )
+                )
+            ],
+            "elu_": ["def elu_(input: Tensor, alpha: float = ...) -> Tensor: ..."],
+            "leaky_relu": [
+                "def leaky_relu({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "negative_slope: float = ...",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "leaky_relu_": [
+                "def leaky_relu_({}) -> Tensor: ...".format(
+                    ", ".join(["input: Tensor", "negative_slope: float = ..."])
+                )
+            ],
+            "log_sigmoid": ["def log_sigmoid(input: Tensor) -> Tensor: ..."],
+            "gelu": ["def gelu(input: Tensor, approximate: str = ...) -> Tensor: ..."],
+            "softplus": [
+                "def softplus({}) -> Tensor: ...".format(
+                    ", ".join(
+                        ["input: Tensor", "beta: int = ...", "threshold: int = ..."]
+                    )
+                )
+            ],
+            "softshrink": [
+                "def softshrink(input: Tensor, lambd: float = ...) -> Tensor: ..."
+            ],
+            "hardsigmoid": [
+                "def hardsigmoid({}) -> Tensor: ...".format(
+                    ", ".join(["input: Tensor", "*", "out: Optional[Tensor] = None"])
+                )
+            ],
+            "linear": [
+                "def linear({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "weight: Tensor",
+                            "bias: Optional[Tensor] = None",
+                        ]
+                    )
+                )
+            ],
+            "pad": [
+                "def pad({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "pad: Sequence[int]",
+                            "mode: str = ...",
+                            "value: Optional[float] = None",
+                        ]
+                    )
+                )
+            ],
+            "one_hot": [
+                "def one_hot(tensor: Tensor, num_classes: int = ...) -> Tensor: ..."
+            ],
+            "scaled_dot_product_attention": [
+                "def scaled_dot_product_attention({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "query: Tensor",
+                            "key: Tensor",
+                            "value: Tensor",
+                            "attn_mask: Optional[Tensor] = None",
+                            "dropout_p: float = 0.0",
+                            "is_causal: bool = False",
+                            "scale: Optional[float] = None",
+                        ]
+                    )
+                )
+            ],
+        }
+    )
+
+    c_nn_function_hints: List[str] = []
+    for _, hints in sorted(unsorted_c_nn_function_hints.items()):
+        if len(hints) > 1:
+            hints = ["@overload\n" + h for h in hints]
+        c_nn_function_hints += hints
+
     # Functions imported into `torch.nn.functional` from `torch`, perhaps being filtered
     # through an `_add_docstr` call
-    imports = [
+    torch_imports = [
         "conv1d",
         "conv2d",
         "conv3d",
@@ -265,63 +460,100 @@ def gen_nn_functional(fm: FileManager) -> None:
         "conv_transpose3d",
         "conv_tbc",
         "avg_pool1d",
+        "adaptive_avg_pool1d",
         "relu_",
         "selu_",
         "celu_",
+        "prelu",
         "rrelu_",
+        "hardshrink",
+        "bilinear",
         "pixel_shuffle",
         "pixel_unshuffle",
         "channel_shuffle",
         "native_channel_shuffle",
+        "pairwise_distance",
         "pdist",
         "cosine_similarity",
     ]
-    # Functions generated by `torch._jit_internal.boolean_dispatch`
-    dispatches = [
-        "fractional_max_pool2d",
-        "fractional_max_pool3d",
-        "max_pool1d",
-        "max_pool2d",
-        "max_pool3d",
-        "adaptive_max_pool1d",
-        "adaptive_max_pool2d",
-        "adaptive_max_pool3d",
-    ]
-    # Functions directly imported from `torch._C`
-    from_c = [
+    imported_hints = ["from .. import {0} as {0}".format(_) for _ in torch_imports]
+
+    # Functions imported into `torch.nn.functional` from `torch._C._nn`
+    c_nn_imports = [
         "avg_pool2d",
         "avg_pool3d",
         "hardtanh_",
         "elu_",
         "leaky_relu_",
-        "logsigmoid",
+        "gelu",
         "softplus",
         "softshrink",
+        "linear",
+        "pad",
         "one_hot",
         "scaled_dot_product_attention",
     ]
-    import_code = ["from .. import {0} as {0}".format(_) for _ in imports]
-    # TODO make these types more precise
-    dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
+    imported_hints += [
+        "from .._C._nn import {0} as {0}".format(_) for _ in c_nn_imports
+    ]
+    # This is from `torch._C._nn` but renamed
+    imported_hints.append("from .._C._nn import log_sigmoid\nlogsigmoid = log_sigmoid")
+
+    # Functions generated by `torch._jit_internal.boolean_dispatch` in `nn.functional`
+    unsorted_dispatched_hints: Dict[str, List[str]] = {}
+
+    for d in (1, 2, 3):
+        unsorted_dispatched_hints.update(
+            **get_max_pool_dispatch(
+                f"max_pool{d}d",
+                [
+                    f"{INPUT}",
+                    f"{KERNEL_SIZE}",
+                    f"{STRIDE_PADDING}",
+                    "dilation: Union[_int, _size] = 1",
+                    "ceil_mode: bool = False",
+                    "{return_indices}",
+                ],
+            ),
+            **get_max_pool_dispatch(
+                f"fractional_max_pool{d}d",
+                [
+                    f"{INPUT}",
+                    f"{KERNEL_SIZE}",
+                    "output_size: Optional[Union[_int, _size]] = None",
+                    "output_ratio: Optional[_ratio_any_t] = None",
+                    "{return_indices}",
+                    "_random_samples: Optional[Tensor] = None",
+                ],
+            ),
+            **get_max_pool_dispatch(
+                f"adaptive_max_pool{d}d",
+                [f"{INPUT}", "output_size: Union[_int, _size]", "{return_indices}"],
+            ),
+        )
+
+    # There's no fractional_max_pool1d
+    del unsorted_dispatched_hints["fractional_max_pool1d"]
+
+    dispatched_hints: List[str] = []
+    for _, hints in sorted(unsorted_dispatched_hints.items()):
+        if len(hints) > 1:
+            hints = ["@overload\n" + h for h in hints]
+        dispatched_hints += hints
+
     fm.write_with_template(
         "torch/nn/functional.pyi",
         "torch/nn/functional.pyi.in",
         lambda: {
-            "imported_hints": import_code,
-            "dispatched_hints": dispatch_code,
+            "imported_hints": imported_hints,
+            "dispatched_hints": dispatched_hints,
         },
     )
-
-    # functional.pyi already contains the definitions for those functions
-    # so, we don't export then to it
-    from_c.extend(["hardtanh", "leaky_relu", "hardsigmoid"])
-    dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
     fm.write_with_template(
         "torch/_C/_nn.pyi",
         "torch/_C/_nn.pyi.in",
         lambda: {
-            "imported_hints": import_code,
-            "dispatched_hints": dispatch_code,
+            "c_nn_function_hints": c_nn_function_hints,
         },
     )
 

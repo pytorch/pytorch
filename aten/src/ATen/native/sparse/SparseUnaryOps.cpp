@@ -7,6 +7,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
 #include <ATen/ops/asin.h>
@@ -187,7 +188,12 @@ COALESCED_UNARY_UFUNC(sqrt);
 COALESCED_UNARY_UFUNC(tan);
 COALESCED_UNARY_UFUNC(tanh);
 COALESCED_UNARY_UFUNC(trunc);
+// relu function has no declaration, it may be unused in Pytorch.
+// But we keep it and ignore the warning here until verified in the future.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
 COALESCED_UNARY_UFUNC(relu);
+#pragma clang diagnostic pop
 
 COALESCED_UNARY_UFUNC_NO_INPLACE(signbit);
 COALESCED_UNARY_UFUNC_NO_INPLACE(isneginf);

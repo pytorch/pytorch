@@ -27,8 +27,8 @@ class InputDim(NamedTuple):
 
 @dataclass
 class RangeConstraint:
-    min_val: sympy.Integer
-    max_val: sympy.Integer
+    min_val: sympy.Expr
+    max_val: sympy.Expr
 
 
 def _convert_to_int(val):
@@ -65,6 +65,13 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         graph_module = copy.deepcopy(graph_module)
         graph = graph_module.graph
 
+        insert_loc = None
+        for node in graph.nodes:
+            if node.op != "placeholder":
+                continue
+            insert_loc = node
+        assert insert_loc is not None
+
         # Add runtime asserts for input shape constraints. We do this after all
         # placeholder nodes so that we can handle both (unary) predicates and
         # (binary) relations.
@@ -80,15 +87,14 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 continue
 
             fake_tensor_shape = node.meta["val"].shape
-            prev_node = node
             for dim, shape in enumerate(fake_tensor_shape):
-                with graph.inserting_after(prev_node):
+                with graph.inserting_after(insert_loc):
                     dim_node = graph.call_function(
                         torch.ops.aten.sym_size.int, (node, dim)
                     )
                 input_dim = InputDim(node.name, dim)
                 inputdim_to_node[input_dim] = dim_node
-                prev_node = dim_node
+                insert_loc = dim_node
 
                 if isinstance(shape, SymInt):
                     # If the shape is dynamic, add range assertions

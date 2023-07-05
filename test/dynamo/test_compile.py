@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
 
+import inspect
 import os
 import tempfile
 import unittest
 
 import torch
+import torch._dynamo
 from torch._dynamo.testing import CompileCounter
 
 
@@ -69,3 +71,32 @@ class InPlaceCompilationTests(unittest.TestCase):
             torch.jit.save(scripted_model, os.path.join(tmpdirname, "model.pt"))
             loaded_model = torch.jit.load(os.path.join(tmpdirname, "model.pt"))
             loaded_model(torch.randn(1, 10))
+
+
+# The private variants of the below functions are extensively tested
+# So as long as the signatures match we're good
+class PublicTorchCompilerTests(unittest.TestCase):
+    def check_signature(self, public_fn_name, private_fn_name, private_namespace):
+        public_fn = getattr(torch.compiler, public_fn_name)
+        private_fn = getattr(private_namespace, private_fn_name)
+
+        public_sig = inspect.signature(public_fn)
+        private_sig = inspect.signature(private_fn)
+
+        self.assertEqual(
+            public_sig,
+            private_sig,
+            f"Signatures do not match for function {public_fn_name}() \n Public: {public_sig} \n Private: {private_sig}",
+        )
+
+    def test_dynamo_signatures(self):
+        function_names = [
+            "reset",
+            "allow_in_graph",
+            "list_backends",
+            "assume_constant_result",
+            "disable",
+        ]
+
+        for fn_name in function_names:
+            self.check_signature(fn_name, fn_name, torch._dynamo)

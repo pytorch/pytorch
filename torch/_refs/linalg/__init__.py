@@ -21,16 +21,10 @@ from torch._prims_common import (
 )
 from torch._prims_common.wrappers import _maybe_convert_to_dtype, out_wrapper
 
-__all__ = [
-    "diagonal",
-    "svd",
-    "vector_norm",
-    "matrix_norm",
-    "norm",
-]
+__all__ = ["diagonal", "matrix_norm", "norm", "svd", "svdvals", "vector_norm"]
 
 
-def check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_name: str):
+def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_name: str):
     """
     Checks related to the dtype kwarg in `linalg.*norm` functions
     """
@@ -99,7 +93,7 @@ def vector_norm(
                 f"dimension {d} because this dimension is empty and the "
                 "operation does not have an identity",
             )
-    check_norm_dtype(dtype, x.dtype, "linalg.vector_norm")
+    _check_norm_dtype(dtype, x.dtype, "linalg.vector_norm")
 
     computation_dtype, result_dtype = utils.reduction_dtypes(
         x, utils.REDUCTION_OUTPUT_TYPE_KIND.COMPLEX_TO_FLOAT, dtype
@@ -124,7 +118,7 @@ def vector_norm(
         return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]
 
 
-def backshift_permutation(dim0, dim1, ndim):
+def _backshift_permutation(dim0, dim1, ndim):
     # Auxiliary function for matrix_norm
     # Computes the permutation that moves the two given dimensions to the back
     ret = [i for i in range(ndim) if i != dim0 and i != dim1]
@@ -132,7 +126,7 @@ def backshift_permutation(dim0, dim1, ndim):
     return ret
 
 
-def inverse_permutation(perm):
+def _inverse_permutation(perm):
     # Given a permutation, returns its inverse. It's equivalent to argsort on an array
     return [i for i, j in sorted(enumerate(perm), key=lambda i_j: i_j[1])]
 
@@ -159,7 +153,7 @@ def matrix_norm(
         lambda: "linalg.matrix_norm: dims must be different. Got ({dim[0]}, {dim[1]})",
     )
     # dtype arg
-    check_norm_dtype(dtype, A.dtype, "linalg.matrix_norm")
+    _check_norm_dtype(dtype, A.dtype, "linalg.matrix_norm")
 
     if isinstance(ord, str):
         # ord
@@ -177,10 +171,10 @@ def matrix_norm(
         else:  # ord == "nuc"
             if dtype is not None:
                 A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
-            perm = backshift_permutation(dim[0], dim[1], A.ndim)
+            perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = torch.sum(svdvals(prims.transpose(A, perm)), -1, keepdim)
             if keepdim:
-                inv_perm = inverse_permutation(perm)
+                inv_perm = _inverse_permutation(perm)
                 result = prims.transpose(torch.unsqueeze(result, -1), inv_perm)
             return result
     else:
@@ -200,10 +194,10 @@ def matrix_norm(
         if abs_ord == 2.0:
             if dtype is not None:
                 A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
-            perm = backshift_permutation(dim[0], dim[1], A.ndim)
+            perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = max_min(svdvals(prims.transpose(A, perm)), dim=-1)
             if keepdim:
-                inv_perm = inverse_permutation(perm)
+                inv_perm = _inverse_permutation(perm)
                 result = prims.transpose(torch.unsqueeze(result, -1), inv_perm)
             return result
         else:  # 1, -1, inf, -inf

@@ -8,6 +8,10 @@
 - torch/_inductor/**
 - test/inductor/**
 
+"module: export":
+- torch/_export/**
+- test/export/**
+
 "ciflow/inductor":
 - torch/_decomp/**
 - torch/_dynamo/**
@@ -20,7 +24,8 @@
 - test/distributed/test_inductor_collectives.py
 - functorch/_src/partitioners.py
 - functorch/_src/aot_autograd.py
-- .ci/docker/ci_commit_pins/triton.txt
+- .ci/docker/ci_commit_pins/**
+- .github/ci_commit_pins/**
 
 "module: cpu":
 - aten/src/ATen/cpu/**

@@ -751,7 +751,7 @@ Tensor fft_rfftfreq(int64_t n, double d,
 
 // If an array dim is specified, wraps them according to self.dim().
 // Otherwise returns a vector of all dims.
-DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
+static DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
   DimVector dim;
   if (dim_opt) {
     IntArrayRef dim_unwrapped = *dim_opt;
@@ -1175,7 +1175,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 #undef REPR
 }
 
-Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
+static Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
              const optional<int64_t> win_lengthOpt, const Tensor& window,
              const bool center, const bool normalized, const optional<bool> onesidedOpt,
              const optional<int64_t> lengthOpt) {

@@ -279,22 +279,15 @@ def _sync_module_states(
     parameter shapes are consistent before running the synchronization. This can
     be checked with ``_verify_param_shape_across_processes``.
     """
-    from torch.distributed._tensor import DTensor
     module_states: List[torch.Tensor] = []
     for name, param in module.named_parameters():
         if name not in params_and_buffers_to_ignore:
-            if isinstance(param, DTensor):
-                module_states.append(param.to_local().detach())
-            else:
-                module_states.append(param.detach())
+            module_states.append(param.detach())
 
     if broadcast_buffers:
         for name, buffer in module.named_buffers():
             if name not in params_and_buffers_to_ignore:
-                if isinstance(buffer, DTensor):
-                    module_states.append(buffer.to_local().detach())
-                else:
-                    module_states.append(buffer.detach())
+                module_states.append(buffer.detach())
 
     _sync_params_and_buffers(process_group, module_states, broadcast_bucket_size, src)
 

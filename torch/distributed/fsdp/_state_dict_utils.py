@@ -624,9 +624,15 @@ def _sharded_pre_load_state_dict_hook(
         tensor = torch.empty(
             chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype, device=device
         )
-        dist.all_gather_into_tensor(
-            tensor, local_tensor, group=fsdp_state.process_group
-        )
+        if local_tensor.is_cpu:
+            tensor_list = list(
+                torch.chunk(tensor, dist.get_world_size(fsdp_state.process_group))
+            )
+            dist.all_gather(tensor_list, local_tensor, group=fsdp_state.process_group)
+        else:
+            dist.all_gather_into_tensor(
+                tensor, local_tensor, group=fsdp_state.process_group
+            )
         tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
         state_dict[fqn_from_global_root] = tensor
 

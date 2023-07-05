@@ -32,103 +32,102 @@ class ExportPassBaseError(RuntimeError):
     pass
 
 
-class ExportTracer(PythonKeyTracer):
-    """
-    Tracer used to create nodes during the retracing part of the ExportPassBase
-    """
-    def __init__(self, callback: "ExportPassBase", codegen: CodeGen) -> None:
-        super().__init__()
-        self.callback = callback
-        self.root = torch.nn.Module()
-        self.graph = torch.fx.Graph()
-        self.graph.set_codegen(codegen)
-        self.tensor_attrs: Dict[str, torch.Tensor] = {}  # type: ignore[assignment]
-        self.fake_tensor_mode: Optional[FakeTensorMode] = None
-        self.submodules: Dict[torch.nn.Module, str] = {}
-
-    def trace(self) -> None:
-        raise ExportPassBaseError("ExportTracer doesn't support trace().")
-
-    def create_arg(self, a: Argument) -> torch.fx.Node:
-        if isinstance(a, torch.nn.Module):
-            if a not in self.submodules:
-                name_submodule = f"submodule_{len(self.submodules)}"
-                self.root.add_module(name_submodule, a)
-                self.submodules[a] = name_submodule
-        elif isinstance(a, FakeTensor):
-            if not hasattr(a, "constant") or a.constant is None:
-                raise ExportPassBaseError(f"Cannot add {a} to graph.")
-            a = a.constant
-        node = super().create_arg(a)
-        if (
-            isinstance(a, torch.Tensor)
-            and isinstance(node, torch.fx.Node)
-            and node.op == "get_attr"
-        ):
-            self.set_metadata(node, a)
-            self.callback.on_attr(ProxyValue(a, node))
-        return node
-
-    def set_metadata(
-        self, node: torch.fx.Node, value: Argument,
-    ) -> None:
-        # propagate the fake tensor or sym nodes
-        def make_val(
-            x: Argument,
-        ) -> Union[FakeTensor, torch.SymInt, torch.SymFloat, torch.SymBool, int, None]:
-            if isinstance(x, FakeTensor):
-                return x
-            elif isinstance(x, torch.Tensor):
-                if x.is_quantized:
-                    # TODO (tmanlaibaatar) properly support Quantized FakeTensor
-                    x = torch.dequantize(x)
-
-                try:
-                    assert self.fake_tensor_mode is not None
-                    fake_tensor = self.fake_tensor_mode.from_tensor(x)
-                except UnsupportedFakeTensorException:
-                    # TODO: This is just a workaround to get over the
-                    # x.as_subclass error
-                    print(
-                        "Fakeifying a Tensor subclass is not supported \
-                        right now. Instead a TensorMetadata is used."
-                    )
-                    fake_tensor = None
-                return fake_tensor
-            elif isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool, int)):
-                return x
-            else:
-                return None
-
-        node.meta["val"] = pytree.tree_map(make_val, value)
-
-        # Set the tensor_metadata for values that do not have a corresponding FakeTensor
-        def make_tensor_meta(x: Argument) -> Optional[TensorMetadata]:
-            if not isinstance(x, FakeTensor) and isinstance(x, torch.Tensor):
-                if x.is_quantized:
-                    # TODO (tmanlaibaatar) properly support Quantized FakeTensor
-                    x = torch.dequantize(x)
-
-                try:
-                    assert self.fake_tensor_mode is not None
-                    _ = self.fake_tensor_mode.from_tensor(x)
-                    tensor_meta = None
-                except UnsupportedFakeTensorException:
-                    # TODO: This is just a workaround to get over the
-                    # x.as_subclass error
-                    tensor_meta = _extract_tensor_metadata(x)
-                return tensor_meta
-            else:
-                return None
-
-        node.meta["tensor_meta"] = pytree.tree_map(make_tensor_meta, value)
-
-
 class ExportPassBase(PassBase):
     """
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
     """
+
+    class ExportTracer(PythonKeyTracer):
+        """
+        Tracer used to create nodes during the retracing part of the ExportPassBase
+        """
+        def __init__(self, callback: "ExportPassBase", codegen: CodeGen) -> None:
+            super().__init__()
+            self.callback = callback
+            self.root = torch.nn.Module()
+            self.graph = torch.fx.Graph()
+            self.graph.set_codegen(codegen)
+            self.tensor_attrs: Dict[str, torch.Tensor] = {}  # type: ignore[assignment]
+            self.fake_tensor_mode: Optional[FakeTensorMode] = None
+            self.submodules: Dict[torch.nn.Module, str] = {}
+
+        def trace(self) -> None:
+            raise ExportPassBaseError("ExportTracer doesn't support trace().")
+
+        def create_arg(self, a: Argument) -> torch.fx.Node:
+            if isinstance(a, torch.nn.Module):
+                if a not in self.submodules:
+                    name_submodule = f"submodule_{len(self.submodules)}"
+                    self.root.add_module(name_submodule, a)
+                    self.submodules[a] = name_submodule
+            elif isinstance(a, FakeTensor):
+                if not hasattr(a, "constant") or a.constant is None:
+                    raise ExportPassBaseError(f"Cannot add {a} to graph.")
+                a = a.constant
+            node = super().create_arg(a)
+            if (
+                isinstance(a, torch.Tensor)
+                and isinstance(node, torch.fx.Node)
+                and node.op == "get_attr"
+            ):
+                self.set_metadata(node, a)
+                self.callback.on_attr(ProxyValue(a, node))
+            return node
+
+        def set_metadata(
+            self, node: torch.fx.Node, value: Argument,
+        ) -> None:
+            # propagate the fake tensor or sym nodes
+            def make_val(
+                x: Argument,
+            ) -> Union[FakeTensor, torch.SymInt, torch.SymFloat, torch.SymBool, int, None]:
+                if isinstance(x, FakeTensor):
+                    return x
+                elif isinstance(x, torch.Tensor):
+                    if x.is_quantized:
+                        # TODO (tmanlaibaatar) properly support Quantized FakeTensor
+                        x = torch.dequantize(x)
+
+                    try:
+                        assert self.fake_tensor_mode is not None
+                        fake_tensor = self.fake_tensor_mode.from_tensor(x)
+                    except UnsupportedFakeTensorException:
+                        # TODO: This is just a workaround to get over the
+                        # x.as_subclass error
+                        print(
+                            "Fakeifying a Tensor subclass is not supported \
+                            right now. Instead a TensorMetadata is used."
+                        )
+                        fake_tensor = None
+                    return fake_tensor
+                elif isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool, int)):
+                    return x
+                else:
+                    return None
+
+            node.meta["val"] = pytree.tree_map(make_val, value)
+
+            # Set the tensor_metadata for values that do not have a corresponding FakeTensor
+            def make_tensor_meta(x: Argument) -> Optional[TensorMetadata]:
+                if not isinstance(x, FakeTensor) and isinstance(x, torch.Tensor):
+                    if x.is_quantized:
+                        # TODO (tmanlaibaatar) properly support Quantized FakeTensor
+                        x = torch.dequantize(x)
+
+                    try:
+                        assert self.fake_tensor_mode is not None
+                        _ = self.fake_tensor_mode.from_tensor(x)
+                        tensor_meta = None
+                    except UnsupportedFakeTensorException:
+                        # TODO: This is just a workaround to get over the
+                        # x.as_subclass error
+                        tensor_meta = _extract_tensor_metadata(x)
+                    return tensor_meta
+                else:
+                    return None
+
+            node.meta["tensor_meta"] = pytree.tree_map(make_tensor_meta, value)
 
     class ExportInterpreter(fx.Interpreter):
         """
@@ -212,12 +211,14 @@ class ExportPassBase(PassBase):
     def __init_subclass__(cls, **kwargs):
         if hasattr(cls, "ExportInterpreter"):
             ExportPassBase.ExportInterpreter = cls.ExportInterpreter  # type: ignore[misc]
+        if hasattr(cls, "ExportTracer"):
+            ExportPassBase.ExportTracer = cls.ExportTracer  # type: ignore[misc]
 
     def __init__(self) -> None:
         self.interpreter = torch.fx.Interpreter(
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
-        self.tracer = ExportTracer(self, CodeGen())
+        self.tracer = ExportPassBase.ExportTracer(self, CodeGen())
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self._initialized = True
         self.node_debug_str: typing.Optional[str] = None
@@ -350,12 +351,14 @@ class ExportPassBase(PassBase):
     def call_submodule(
         self, graph_module: fx.GraphModule, inputs: Tuple[Argument, ...]
     ) -> PassResult:
-        prev_tracer, self.tracer = self.tracer, ExportTracer(
+        prev_tracer, self.tracer = self.tracer, ExportPassBase.ExportTracer(
             self, graph_module.graph._codegen
         )
         self.tracer.fake_tensor_mode = prev_tracer.fake_tensor_mode
         interpreter = ExportPassBase.ExportInterpreter(self, graph_module)
-        prev_interpreter, self.interpreter = self.interpreter, super(type(interpreter), interpreter)
+        prev_interpreter, self.interpreter = self.interpreter, torch.fx.Interpreter(
+            torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
+        )
         inputs_data = pytree.tree_map_only(ProxyValue, lambda x: x.data, inputs)
         with fx_traceback.preserve_node_meta():
             interpreter.run(*inputs_data)

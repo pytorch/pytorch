@@ -2,6 +2,7 @@
 
 import torch
 import torch.distributed as dist
+from typing import Any, Callable, Dict, Iterator, Optional, Tuple
 
 import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -61,6 +62,38 @@ def init_model(model_parallel_size=TP_DEGREE):
     twod_model = parallelize_module(twod_model, twod_mesh, PairwiseParallel(), tp_mesh_dim=1)
     module_list = []
 
+    import torch.nn.utils.parametrize as parametrize
+    class DTensorTransform(torch.nn.Module):
+        def __init__(self, st_info):
+            super().__init__()
+            self._st_info = st_info
+
+        def forward(self, x):
+            return DTensor.from_local(
+                x,
+                device_mesh=self._st_info.device_mesh,
+                placements=self._st_info.placements,
+                run_check=False,
+            )
+
+        def named_parameters(
+            self,
+            *args,
+            **kwargs,
+        ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+            """
+            Overrides :meth:`named_parameters()` to intercept parameter names and
+            remove all occurrences of ``_CHECKPOINT_PREFIX``.
+            """
+            for param_name, param in super().named_parameters(*args, **kwargs):
+                yield param_name.replace(".parametrizations", "").replace(".original", ""), DTensor.from_local(
+                    param.data,
+                    device_mesh=self._st_info.device_mesh,
+                    placements=self._st_info.placements,
+                    run_check=False,
+                )
+
+
     # We need to find a way for DDP to replicate local tensor of DTensor.
     for name, param in twod_model.named_parameters():
         if isinstance(param, DTensor):
@@ -85,6 +118,7 @@ def init_model(model_parallel_size=TP_DEGREE):
         if hasattr(parent_module, module_path):
             delattr(parent_module, module_path)
         setattr(parent_module, module_path, t)
+        # parametrize.register_parametrization(parent_module, module_path, DTensorTransform(t._st_info), unsafe=True)
 
 
     twod_model = DDP(twod_model, process_group=dp_pg, find_unused_parameters=True)
@@ -123,6 +157,8 @@ class Test2dParallelIntegration(DTensorTestBase):
     def _check_module(self, m1, m2, check_grad=False):
         named_parameters = dict(m1.named_parameters())
         for name, param_m2 in m2.named_parameters():
+            if name not in named_parameters:
+                print(name, named_parameters.keys())
             self.assertTrue(name in named_parameters)
             param_m1 = named_parameters[name]
             if check_grad:

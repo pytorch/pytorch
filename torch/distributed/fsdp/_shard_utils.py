@@ -13,6 +13,7 @@ from torch.distributed._shard.sharded_tensor import (
     TensorProperties,
 )
 from torch.distributed._shard.sharding_spec import ShardMetadata
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
 
 
 def _all_gather_sharded_tensor(
@@ -54,7 +55,7 @@ def _gather_state_dict(
     pg: Optional[dist.ProcessGroup] = None,
 ) -> Dict[str, Any]:
     """
-    Given a state_dict, this API gathers all the ShardedTensors in the state_dict.
+    Given a state_dict, this API gathers all the ShardedTensors or DTensors in the state_dict.
     """
     new_state_dict = {}
     for key, tensor in state_dict.items():
@@ -69,6 +70,11 @@ def _gather_state_dict(
                 tensor = output_tensor.to(local_shard_device)
             else:
                 tensor = output_tensor
+        elif isinstance(tensor, DTensor):
+            tensor = tensor.redistribute(
+                device_mesh=tensor.device_mesh, placements=[Replicate()]
+            )
+            tensor = tensor.to_local()
         new_state_dict[key] = tensor
     return new_state_dict
 
@@ -124,3 +130,22 @@ def _create_chunk_sharded_tensor(
     return ShardedTensor._init_from_local_shards_and_global_metadata(
         local_shards, sharded_tensor_metadata=sharded_tensor_metadata, process_group=pg
     )
+
+
+def _create_chunk_dtensor(
+    tensor: torch.Tensor,
+    rank: int,
+    device_mesh: DeviceMesh,
+) -> DTensor:
+    """
+    Shard a tensor to chunks along the first dimension. The local rank will gets its
+    corresponding chunk as the local tensor to create a DTensor.
+    """
+    shard_placement = DShard(0)
+    tensor_padded_list, _ = shard_placement._split_tensor(
+        tensor,
+        device_mesh.size(dim=0),
+        with_padding=False,
+        contiguous=True,
+    )
+    return DTensor.from_local(tensor_padded_list[rank], device_mesh, [shard_placement])

@@ -47,6 +47,8 @@ importlib.import_module("filelock")
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_fft_real_input_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_fft_real_input_real_output_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
 
 if TEST_WITH_ROCM:
@@ -64,13 +66,13 @@ if TEST_WITH_ROCM:
     test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
 
 
-def make_dynamic_cls(cls):
+def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
     return make_test_cls_with_patches(
         cls,
         "DynamicShapes",
         "_dynamic_shapes",
-        (torch._dynamo.config, "dynamic_shapes", True),
         (torch._dynamo.config, "assume_static_by_default", False),
+        xfail_prop=xfail_prop,
     )
 
 

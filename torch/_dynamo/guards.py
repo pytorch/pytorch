@@ -588,10 +588,6 @@ class GuardBuilder(GuardBuilderBase):
                     "requires_grad",
                     "ndimension()",
                 ]
-                if not config.dynamic_shapes:
-                    terms.append("stride()")
-                    # We need to do this to avoid the torch.Size type in guards
-                    code.append(f"{tensor_name}.shape == {tuple(value.shape)}")
 
                 for term in terms:
                     real_value = self.get(tensor_name + "." + term)
@@ -808,8 +804,6 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
-        f_locals: Optional[Dict[str, object]] = None,
-        f_globals: Optional[Dict[str, object]] = None,
         guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
@@ -840,12 +834,12 @@ class CheckFunctionManager:
         local_builder = GuardBuilder(
             self.id_ref,
             source_ref,
-            combine_scopes(f_globals, f_locals),
+            combine_scopes(output_graph.global_scope, output_graph.local_scope),
             self,
             local=True,
         )
         global_builder = GuardBuilder(
-            self.id_ref, source_ref, f_globals, self, local=False
+            self.id_ref, source_ref, output_graph.global_scope, self, local=False
         )
         # We need to transplant a copy here, because some guards
         # might get a cross ref between local and global, like L['mod_name'][G['some_key']]

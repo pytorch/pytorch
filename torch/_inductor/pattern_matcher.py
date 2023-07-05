@@ -783,17 +783,18 @@ def is_start_of_fx_graph(graph, node):
     return node is next(iter(graph.nodes))
 
 
+# match: copy_, relu_, _set_grad_enabled, manual_seed, enter_functional_autocast, etc
+_mutation_op_re = re.compile(r"_$|(\b|_)(set|enter|exit|seed)(\b|_)")
+
+
 def is_mutation_op(node):
     if node.op == "call_function":
-        if node.target.__name__.endswith("_"):
+        if _mutation_op_re.search(node.target.__name__):
             return True
     elif node.op == "call_method":
-        if node.target.endswith("_"):
+        if _mutation_op_re.search(node.target):
             return True
-    if "out" in node.kwargs:
-        if node.kwargs["out"] in node.all_input_nodes:
-            return True
-    return False
+    return node.kwargs.get("out") is not None
 
 
 def get_mutation_region_id(graph, node):
@@ -1045,6 +1046,9 @@ def clone_graph(input_graph):
             new_node = super().run_node(old_node)
             if isinstance(new_node, torch.fx.Proxy):
                 new_node.node.meta.update(old_node.meta)
+                new_node.node.name = self.new_graph._graph_namespace.create_name(
+                    old_node.name, None
+                )
             return new_node
 
     return CopyGraph(input_graph).transform()
