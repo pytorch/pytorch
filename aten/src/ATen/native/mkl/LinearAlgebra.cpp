@@ -120,7 +120,7 @@ void mkl_gemm_bf16bf16f32(
   auto transa_cblas = to_cblas(trans_A);
   auto transb_cblas = to_cblas(trans_B);
   cblas_gemm_bf16bf16f32(CblasColMajor, transa_cblas, transb_cblas, M, N, K, alpha,
-                         reinterpret_cast<const MKL_BF16*>(A), lda, reinterpret_cast<const MKL_BF16*>(B), ldb, beta, C, ldc);
+                         (const short unsigned int*)A, lda, (const short unsigned int*)B, ldb, beta, C, ldc);
 }
 
 }} // namespace at::native
