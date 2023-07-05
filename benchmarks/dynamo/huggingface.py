@@ -131,6 +131,7 @@ BATCH_SIZE_DIVISORS = {
     "GoogleFnet": 2,
     "LayoutLMForMaskedLM": 2,
     "LayoutLMForSequenceClassification": 2,
+    "LlamaForCausalLM": 2,
     "M2M100ForConditionalGeneration": 4,
     "MBartForCausalLM": 2,
     "MBartForConditionalGeneration": 2,
@@ -160,6 +161,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     # even for 40 GB machine.
     "DebertaV2ForMaskedLM",
     "BlenderbotForCausalLM",
+    "LlamaForCausalLM",
 }
 
 

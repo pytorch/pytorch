@@ -27,6 +27,7 @@ GPTNeoForSequenceClassification,32
 GoogleFnet,32
 LayoutLMForMaskedLM,32
 LayoutLMForSequenceClassification,32
+LlamaForCausalLM,8
 M2M100ForConditionalGeneration,64
 MBartForCausalLM,8
 MBartForConditionalGeneration,4
