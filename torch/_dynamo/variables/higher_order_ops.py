@@ -190,11 +190,11 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     @staticmethod
     def make(value, source=None, **kwargs):
         if value.__name__ == "cond":
-            return HigherOrderCondVariable(value, source, **kwargs)
+            return CondHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "map":
-            return HigherOrderMapVariable(value, source, **kwargs)
+            return MapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "executorch_call_delegate":
-            return HigherOrderExecutorchVariable(value, source, **kwargs)
+            return ExecutorchCallDelegateHigherOrderVariable(value, source, **kwargs)
         elif value is torch._functorch.eager_transforms.grad_impl:
             return HigherOrderFuncTorchGradVariable(value, source, **kwargs)
         elif value.__name__ in (
@@ -202,16 +202,22 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             "trampoline_autograd_bwd",
             "trampoline_autograd_apply",
         ):
-            return HigherOrderAutogradFunctionVariable(value, source, **kwargs)
+            return AutogradFunctionMethodHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap":
-            return HigherOrderWrapVariable(value, source, **kwargs)
+            return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "wrap_activation_checkpoint",
             "tag_activation_checkpoint",
         ):
-            return HigherOrderCheckpointVariable(value, source, **kwargs)
+            return CheckpointHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
+
+    def check_kwargs(self, kwargs, supported_types):
+        assert (
+            all(isinstance(value, supported_types) for value in kwargs.values())
+            or not kwargs
+        ), "only constant kwargs are supported"
 
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
@@ -219,7 +225,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
 
-class HigherOrderCondVariable(TorchHigherOrderOperatorVariable):
+class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -232,10 +238,7 @@ class HigherOrderCondVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
-        assert (
-            all(isinstance(value, ConstantVariable) for value in kwargs.values())
-            or not kwargs
-        ), "only constant kwargs are supported"
+        self.check_kwargs(kwargs, ConstantVariable)
 
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
@@ -403,7 +406,7 @@ class HigherOrderCondVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class HigherOrderMapVariable(TorchHigherOrderOperatorVariable):
+class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
@@ -415,10 +418,7 @@ class HigherOrderMapVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
-        assert (
-            all(isinstance(value, ConstantVariable) for value in kwargs.values())
-            or not kwargs
-        ), "only constant kwargs are supported"
+        self.check_kwargs(kwargs, ConstantVariable)
 
         assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
         assert type(args[1]) is TensorVariable
@@ -486,17 +486,14 @@ class HigherOrderMapVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class HigherOrderExecutorchVariable(TorchHigherOrderOperatorVariable):
+class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import ConstantVariable
         from .builder import wrap_fx_proxy
 
-        assert (
-            all(isinstance(value, ConstantVariable) for value in kwargs.values())
-            or not kwargs
-        ), "only constant kwargs are supported"
+        self.check_kwargs(kwargs, ConstantVariable)
 
         # This is operator for delegation within Executorch which calls a
         # specific function in the given lowered module with the given
@@ -539,10 +536,7 @@ class HigherOrderFuncTorchGradVariable(TorchHigherOrderOperatorVariable):
         from . import ConstantVariable
         from .builder import wrap_fx_proxy
 
-        assert (
-            all(isinstance(value, ConstantVariable) for value in kwargs.values())
-            or not kwargs
-        ), "only constant kwargs are supported"
+        self.check_kwargs(kwargs, ConstantVariable)
 
         # TODO: Support `fn` with kwargs.
         if not torch._dynamo.config.capture_func_transforms:
@@ -702,17 +696,14 @@ class HigherOrderFuncTorchGradVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class HigherOrderAutogradFunctionVariable(TorchHigherOrderOperatorVariable):
+class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import ConstantVariable, UserFunctionVariable
         from .builder import wrap_fx_proxy
 
-        assert (
-            all(isinstance(value, ConstantVariable) for value in kwargs.values())
-            or not kwargs
-        ), "only constant kwargs are supported"
+        self.check_kwargs(kwargs, ConstantVariable)
 
         from . import AutogradFunctionVariable, TorchVariable
 
@@ -790,18 +781,8 @@ class HigherOrderAutogradFunctionVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class HigherOrderWrapVariable(TorchHigherOrderOperatorVariable):
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        from . import ConstantVariable
-        from .builder import wrap_fx_proxy
-
-        assert (
-            all(isinstance(value, ConstantVariable) for value in kwargs.values())
-            or not kwargs
-        ), "only constant kwargs are supported"
-
+class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def create_wrapped_node(self, tx, args, kwargs):
         # See NOTE [HigherOrderOperator tracing design] for more details
         checkpoint = tx.copy_graphstate()
         graph_checkpoint = tx.output.graph
@@ -837,8 +818,18 @@ class HigherOrderWrapVariable(TorchHigherOrderOperatorVariable):
             lambda a: a.node.meta["example_value"],
             body_r.as_proxy(),
         )
-
         _, p_kwargs = proxy_args_kwargs([], kwargs)
+        return p_args, p_kwargs, example_value
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from . import ConstantVariable
+        from .builder import wrap_fx_proxy
+
+        self.check_kwargs(kwargs, ConstantVariable)
+
+        p_args, p_kwargs, example_value = self.create_wrapped_node(tx, args, kwargs)
 
         # Store the invocation as a call
         return wrap_fx_proxy(
@@ -853,7 +844,7 @@ class HigherOrderWrapVariable(TorchHigherOrderOperatorVariable):
         )
 
 
-class HigherOrderCheckpointVariable(TorchHigherOrderOperatorVariable):
+class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -861,13 +852,7 @@ class HigherOrderCheckpointVariable(TorchHigherOrderOperatorVariable):
         from . import ConstantVariable, TensorVariable
         from .builder import wrap_fx_proxy
 
-        assert (
-            all(
-                isinstance(value, (TensorVariable, ConstantVariable))
-                for value in kwargs.values()
-            )
-            or not kwargs
-        ), "only constant kwargs are supported"
+        self.check_kwargs(kwargs, (ConstantVariable, TensorVariable))
 
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 
@@ -881,47 +866,15 @@ class HigherOrderCheckpointVariable(TorchHigherOrderOperatorVariable):
         # position, and it will then find the associated TensorVariable tracker.
         # Just that this tensor is now also tracked as a placeholder in the fx
         # graph, and that is done by just appending to the existing args.
-        flattened_args = args[1:] + [
+        flattened_args = args + [
             gmod_kwargs[name] for name in sorted(gmod_kwargs.keys())
         ]
 
-        # See NOTE [HigherOrderOperator tracing design] for more details
-        checkpoint = tx.copy_graphstate()
-        graph_checkpoint = tx.output.graph
-        (
-            body_r,
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            args[0],
-            flattened_args,
-            graph_checkpoint,
-            checkpoint,
-        )
-
-        body_name = add_subgraph(
-            tx,
-            self.source,
-            "wrap_body",
-            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
-        )
-
-        body_node = make_attr(tx, body_name)
-        p_args = (
-            body_node,
-            *(arg.as_proxy() for arg in flattened_args),
-            *(arg for arg in body_lifted_freevars.keys()),
-        )
-        example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
-
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
         # already flattened above and managed inside the fx graph.
-        _, p_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
+        p_args, p_kwargs, example_value = self.create_wrapped_node(
+            tx, flattened_args, checkpoint_kwargs
+        )
 
         # Store the invocation as a call
         return wrap_fx_proxy(
