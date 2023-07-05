@@ -58,7 +58,7 @@ AutogradFallbackMode getAutogradFallbackMode() {
   return kAutogradFallbackMode;
 }
 
-void warnAutogradNotImplemented(const std::string& op_name) {
+static void warnAutogradNotImplemented(const std::string& op_name) {
   TORCH_WARN(
       op_name,
       ": an autograd kernel was not registered to the Autograd key(s) ",

@@ -22,6 +22,9 @@ enum class AutogradFallbackMode {
 };
 
 // Change the behavior of "basicAutogradNotImplementedFallback"
+// In Python this is:
+// - torch._C._set_autograd_fallback_mode(str) -> None
+// - torch._C._get_autograd_fallback_mode() -> str
 TORCH_API void setAutogradFallbackMode(AutogradFallbackMode mode);
 TORCH_API AutogradFallbackMode getAutogradFallbackMode();
 
