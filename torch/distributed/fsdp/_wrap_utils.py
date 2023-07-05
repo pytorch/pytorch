@@ -63,9 +63,7 @@ def _auto_wrap(
                 root_module, mixed_precision._module_classes_to_ignore
             )
             _warn_on_overridden_mixed_precision(overridden_module_classes)
-        wrap_fn = _construct_wrap_fn(
-            root_module, target_module_to_kwargs, fsdp_fn
-        )
+        wrap_fn = _construct_wrap_fn(root_module, target_module_to_kwargs, fsdp_fn)
         _post_order_apply(root_module, wrap_fn)
         return
 
