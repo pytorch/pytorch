@@ -23,6 +23,7 @@ import sympy
 import torch
 from torch.autograd import DeviceType
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
 from .cuda_properties import current_device, get_device_capability
@@ -382,8 +383,6 @@ def sympy_str(expr: sympy.Expr):
         return " + ".join(map(sympy_str, expr.args))
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
-
-    from .ir import CleanDiv, FloorDiv, ModularIndexing
 
     if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"

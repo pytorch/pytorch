@@ -1,4 +1,5 @@
 import collections
+import itertools
 import warnings
 from typing import (
     Any,
@@ -481,10 +482,10 @@ def _init_param_handle_from_module(
     """
     Initializes a ``FlatParamHandle`` from a module ``fully_sharded_module``.
     """
-    _check_single_device_module(fully_sharded_module, state._ignored_params)
+    _check_single_device_module(fully_sharded_module, state._ignored_params, device_id)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
     is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
-        fully_sharded_module, state._ignored_params
+        fully_sharded_module, state._ignored_params, state._ignored_modules
     )
     # Materialize the module if needed
     if (is_meta_module or is_torchdistX_deferred_init) and param_init_fn is not None:
@@ -686,6 +687,7 @@ def _get_buffer_names(root_module: nn.Module) -> Set[str]:
 def _check_single_device_module(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
+    device_id: Optional[Union[int, torch.device]],
 ) -> None:
     """
     Raises an error if ``module`` has original parameters on multiple devices,
@@ -693,7 +695,19 @@ def _check_single_device_module(
     module must be either fully on the CPU or fully on a non-CPU device.
     """
     devices = {param.device for param in _get_orig_params(module, ignored_params)}
-    if len(devices) > 1:
+    # We allow module to be partially on CPU and partially on GPU if device_id is not
+    # None, since the device_id arg will result in the CPU portion being moved to
+    # GPU. This is useful in cases where part of the module may be parallelized
+    # by another algorithm and may already be on GPU. We'd like to enforce device_id
+    # to not be None, otherwise we'd flatten parameters in a mixed module which is
+    # not supported.
+    if len(devices) == 2 and torch.device("cpu") in devices:
+        if device_id is None:
+            raise RuntimeError(
+                "To support a module with both CPU and GPU params, "
+                "please pass in device_id argument."
+            )
+    elif len(devices) > 1:
         raise RuntimeError(
             f"FSDP only supports single device modules but got params on {devices}"
         )
@@ -728,6 +742,7 @@ def _get_device_from_device_id(
 def _need_to_materialize_module(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
+    ignored_modules: Set[nn.Module],
 ) -> Tuple[bool, bool]:
     """
     Returns if ``module`` has parameters on meta device and if ``module`` is
@@ -737,6 +752,14 @@ def _need_to_materialize_module(
     """
     managed_params = list(_get_orig_params(module, ignored_params))
     is_meta_module = any(param.is_meta for param in managed_params)
+    # TODO: We need to establish a contract for FSDP and buffers. For now, we
+    # skip checking for meta buffers from ignored modules. We should consider
+    # refactoring the initialization holistically to avoid so many traversals.
+    for submodule in module.modules():
+        if submodule in ignored_modules:
+            continue
+        for buf in submodule.buffers(recurse=False):
+            is_meta_module |= buf.is_meta
     is_torchdistX_deferred_init = (
         not is_meta_module
         and _TORCHDISTX_AVAIL
@@ -746,35 +769,67 @@ def _need_to_materialize_module(
 
 
 def _materialize_with_param_init_fn(
-    module: nn.Module,
-    param_init_fn,
+    root_module: nn.Module,
+    param_init_fn: Callable[[nn.Module], None],
 ) -> None:
     if not callable(param_init_fn):
         raise ValueError(
             f"Expected {param_init_fn} to be callable but got {type(param_init_fn)}"
         )
-    param_init_fn(module)
+    modules_to_materialize = _get_modules_to_materialize(root_module)
+    for module in modules_to_materialize:
+        param_init_fn(module)
 
 
 def _materialize_meta_module(
-    module: nn.Module,
+    root_module: nn.Module,
     device_from_device_id: Optional[torch.device],
 ):
     # Run default meta device initialization
     materialization_device = device_from_device_id or torch.device(
         torch.cuda.current_device()
     )
-    module.to_empty(device=materialization_device)
+    modules_to_materialize = _get_modules_to_materialize(root_module)
     try:
+        # Assume that each module's `reset_parameters()` only initializes its
+        # own parameters and not those of its children
         with torch.no_grad():
-            module.reset_parameters()  # type: ignore[operator]
+            for module in modules_to_materialize:
+                # As a contract to the user, only call `reset_parameters()` if
+                # the module has directly managed parameters/buffers
+                module_state_iter = itertools.chain(
+                    module.parameters(recurse=False), module.buffers(recurse=False)
+                )
+                has_module_states = len(list(module_state_iter)) > 0
+                if has_module_states:
+                    module.to_empty(device=materialization_device, recurse=False)
+                    module.reset_parameters()  # type: ignore[operator]
     except BaseException as e:
         warnings.warn(
             "Unable to call `reset_parameters()` for module on meta "
-            f"device with error {str(e)}. Please ensure your "
-            "module implements a `reset_parameters()` method."
+            f"device with error {str(e)}. Please ensure that your module of"
+            f"type {type(module)} implements a `reset_parameters()` method."
         )
         raise e
+
+
+def _get_modules_to_materialize(root_module: nn.Module) -> List[nn.Module]:
+    # Run BFS to collect the modules to materialize via `reset_parameters()`,
+    # stopping at any module with FSDP already applied
+    modules_to_materialize: List[nn.Module] = []
+    queue = collections.deque([root_module])
+    visited_modules: Set[nn.Module] = {root_module}
+    while queue:
+        module = queue.popleft()
+        modules_to_materialize.append(module)
+        for child_module in module.children():
+            if (
+                child_module not in visited_modules
+                and _get_module_fsdp_state(child_module) is None
+            ):
+                visited_modules.add(child_module)
+                queue.append(child_module)
+    return modules_to_materialize
 
 
 def _move_module_to_device(
