@@ -4,8 +4,7 @@
 import logging
 import torch
 from torch.nn.utils.parametrize import is_parametrized
-import unittest
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TestCase
 
 from typing import Tuple
 from torch import nn
@@ -511,7 +510,6 @@ class Model(nn.Module):
 
 
 class TestQuantizationUtils(TestCase):
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN due to address sanitization")
     def test_ptq_sparsify_first(self):
         """The expectation is post_training_sparse_quantize function
         1. Takes in a model
@@ -551,7 +549,6 @@ class TestQuantizationUtils(TestCase):
         assert abs(sl_emb1 - 0.80) <= 0.05  # +- 5% leeway
         assert abs(sl_embbag1 - 0.80) <= 0.05  # +- 5% leeway
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN due to address sanitization")
     def test_ptq_quantize_first(self):
         """The expectation is post_training_sparse_quantize function
         1. Takes in a model

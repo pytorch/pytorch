@@ -1189,6 +1189,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         except torch._dynamo.exc.Unsupported:
             pass
 
+    def test_threading_local(self):
+        import threading
+
+        foo = threading.local()
+        foo.x = torch.rand(1)
+
+        def f(x):
+            return torch.cat([x, foo.x])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch._dynamo.optimize(cnt, nopython=True)(f)
+
+        inp = torch.ones(1)
+        out = f(inp)
+        opt_out = opt_f(inp)
+        self.assertEqual(opt_out, out)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_seq_append_list(self):
         x = torch.randn(4, 10)
         model = SequentialAppendList(
@@ -3346,6 +3364,49 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = fn(x)
         ref = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_unspecialized_nn_module_with_torch_variable_attribute(self):
+        """
+        In this case self.fn = something that should be a TorchVariable.
+        When it's not a TorchVariable, dynamo tries to trace through and fails.
+        This makes sure that the self.fn is handled as a TorchVariable.
+        """
+
+        class UserModule(torch.nn.Module):
+            torchdynamo_force_dynamic = True  # forced to be a UnspecializedNNModule
+
+            def __init__(self, fn):
+                super().__init__()
+                self.fn = fn
+
+            def forward(self, **inp):
+                return self.fn(**inp)
+
+        inputs = {
+            "input": torch.randn([2, 9]).uniform_(0, 1),
+            "target": torch.randn([2, 9]).uniform_(0, 1),
+            "reduction": "mean",
+        }
+
+        mod = UserModule(torch.nn.functional.binary_cross_entropy)
+        ref = mod(**inputs)
+        res = torch._dynamo.optimize("eager", nopython=True)(mod)(**inputs)
+        self.assertEqual(ref, res)
+
+    def test_call_finally_python_3_8(self):
+        # Issue - https://github.com/pytorch/pytorch/issues/97811
+        def make_fn(g):
+            def fn():
+                while True:
+                    try:
+                        print(g)
+                        break
+                    except Exception as _:
+                        break
+
+            return torch.compile(fn, backend="eager")
+
+        make_fn(None)()
 
 
 if __name__ == "__main__":
