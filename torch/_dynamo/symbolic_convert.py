@@ -11,7 +11,6 @@ import linecache
 import logging
 import operator
 import sys
-import textwrap
 import traceback
 import types
 import typing
@@ -628,7 +627,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             line = traceback.StackSummary.from_list([]).format_frame_summary(
                 frame_summary
             )
-            log_str += textwrap.indent(line, " " * 4 * self.inline_depth)
         trace_source_log.debug(log_str)
 
     def step(self):
