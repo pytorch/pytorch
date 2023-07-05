@@ -6,7 +6,7 @@ from torch._C import _add_docstr, _sparse  # type: ignore[attr-defined]
 from torch import Tensor
 
 # Semi structured sparsity support
-from .semi_structured import SparseSemiStructuredTensor
+from .semi_structured import SparseSemiStructuredTensor, to_sparse_semi_structured
 
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
@@ -27,6 +27,7 @@ __all__ = [
     'softmax',
     'log_softmax',
     'SparseSemiStructuredTensor',
+    'to_sparse_semi_structured',
 ]
 
 addmm = _add_docstr(_sparse._sparse_addmm, r"""
