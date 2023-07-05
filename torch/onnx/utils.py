@@ -1225,7 +1225,6 @@ def _model_to_graph(
 
 
 @_beartype.beartype
-@torch._disable_dynamo
 def export_to_pretty_string(
     model,
     args,
