@@ -226,7 +226,7 @@ def freeze(
 
     # We have convert conv's weight to channels last which may meet error for .view
     # when doing fake_tensor_prop. So we need to convert view to reshape first.
-    # see https://github.com/pytorch/pytorch/blob/main/torch/_inductor/compile_fx.py#L472.
+    # See the details in fx_codegen_and_compile of compile_fx.py.
     view_to_reshape(aot_autograd_gm)
     # Make sure meta['val'] is properly setup(weight conversion
     # or decompose_unfused_batchnorms lost meta['val']).
