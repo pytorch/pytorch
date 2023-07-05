@@ -9,6 +9,7 @@ from torch import nn
 from torch.sparse.semi_structured import (
     _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG,
     SparseSemiStructuredTensor,
+    to_sparse_semi_structured,
 )
 
 from torch.testing import make_tensor
@@ -72,6 +73,20 @@ def rand_dense_2by4(r, c, dtype, device, choice=None):
 
 
 class TestSparseSemiStructured(TestCase):
+
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
+    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    def test_to_sparse_semi_structured(self, dtype):
+        A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
+        A_sparse = to_sparse_semi_structured(A)
+
+        assert A.shape == A_sparse.shape
+        assert A.device == A_sparse.device
+        assert A.dtype == A_sparse.dtype
+
+        assert isinstance(A, torch.Tensor)
+        assert isinstance(A_sparse, SparseSemiStructuredTensor)
+
 
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
@@ -278,6 +293,13 @@ class TestSparseSemiStructured(TestCase):
 
             compressed = SparseSemiStructuredTensor(dense_ref)
 
+            # The torch.ops.aten._to_sparse_semi_structured operator
+            # uses CUTLASS to perform conversion from given dense
+            # matrix to the pair of corresponding sparse and metadata
+            # matrices, with the later used here as a reference to
+            # compare the metadata matrix produced by conversion
+            # performed by SparseSemiStructuredTensor class
+            # constructor against.
             _, meta_ref = torch.ops.aten._to_sparse_semi_structured(dense_ref)
             meta = compressed.indices()
             torch.testing.assert_close(meta, meta_ref, rtol=0, atol=0)
