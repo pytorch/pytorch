@@ -6,7 +6,6 @@ import collections
 import contextlib
 import copy
 import csv
-import dataclasses
 import functools
 import importlib
 import itertools
@@ -31,13 +30,12 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.utils
+import torch._export
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
-from torch._decomp import core_aten_decompositions
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
-from torch._export import ExportDynamoConfig
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
@@ -1962,17 +1960,23 @@ class BenchmarkRunner:
                 model_copy = deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
                 if self.args.export:
-                    with torch._dynamo.config.patch(
-                        dataclasses.asdict(ExportDynamoConfig())
-                    ):
-                        # torch._dynamo.export only need 1 forward
-                        # no need for n iterations
-                        optimized_model_iter_fn, _ = optimize_ctx(
-                            self.model_iter_fn, model_copy, example_inputs
+                    # TB and TIMM use list example_inputs
+                    # HF use dict example_inputs
+                    if isinstance(example_inputs, dict):
+                        raise RuntimeError(
+                            "expect example_inputs as list/tuple, but got dict. need to support kwargs in torch._export.export"
                         )
+                    # apply export on module directly
+                    # no need for n iterations
+                    # the logic should be the same to self.model_iter_fn (forward_pass)
+                    with self.autocast():
+                        optimized_model_iter_fn = optimize_ctx(
+                            model_copy, example_inputs
+                        )
+                        new_result = optimized_model_iter_fn(*example_inputs)
                 else:
                     optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                new_result = optimized_model_iter_fn(model_copy, example_inputs)
+                    new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception(e)
                 print(
@@ -2999,14 +3003,7 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         output_filename = "inductor.csv"
     elif args.export:
-        optimize_ctx = functools.partial(
-            torch._dynamo.export,
-            aten_graph=True,
-            tracing_mode="symbolic",
-            decomposition_table=core_aten_decompositions(),
-            constraints=None,
-            assume_static_by_default=True,
-        )
+        optimize_ctx = torch._export.export
         experiment = speedup_experiment
         output_filename = "export.csv"
     elif args.xla:
