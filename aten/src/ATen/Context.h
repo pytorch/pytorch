@@ -44,7 +44,7 @@ class TORCH_API Context {
     } else if (device_type == at::kMPS) {
       return at::detail::getMPSHooks().getDefaultMPSGenerator();
     } else {
-      AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
+      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
   Device getDeviceFromPtr(void* data, c10::DeviceType device_type) {
@@ -55,7 +55,7 @@ class TORCH_API Context {
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDeviceFromPtr(data);
     } else {
-      AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
+      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
   static bool isPinnedPtr(const void* data) {
