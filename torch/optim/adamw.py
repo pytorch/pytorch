@@ -382,8 +382,7 @@ def _single_tensor_adamw(
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
-        # If we are compiling, the compiler will determine if cudagraphs
-        # is applicable
+        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch._utils.is_compiling() and capturable:
             assert (
                 param.is_cuda and step_t.is_cuda
