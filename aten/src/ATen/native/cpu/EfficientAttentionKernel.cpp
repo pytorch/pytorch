@@ -515,7 +515,6 @@ void efficient_attention_kernel_impl(
     c10::optional<double> scale) {
   // TODO: add bfloat16 and float16
   AT_DISPATCH_FLOATING_TYPES(query.scalar_type(), "efficient_attention", [&] {
-    // TODO: template kQueriesPerBlock and kKeysPerBlock for different platforms
     cpu_efficient_attention<scalar_t, 128, 256>(attn, logsumexp, query, key, value, compute_logsumexp, is_causal, scale);
   });
 }
