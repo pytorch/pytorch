@@ -3879,9 +3879,9 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         Mode ``mode='nearest'`` matches buggy OpenCV's ``INTER_NEAREST`` interpolation algorithm.
 
     .. note::
-        The use of ``float16`` data type in the backward pass of the upsample operation, specifically
-        for modes such as ``['linear', 'bilinear', 'bicubic', 'trilinear', 'area']``, could potentially
-        lead to precision issues. For more details, please refer to the discussion in
+        The gradients for the dtype ``float16`` on CUDA may be inaccurate in the upsample operation
+        when using modes ``['linear', 'bilinear', 'bicubic', 'trilinear', 'area']``.
+        For more details, please refer to the discussion in
         `issue#104157 <https://github.com/pytorch/pytorch/issues/104157>`_.
 
     Note:
