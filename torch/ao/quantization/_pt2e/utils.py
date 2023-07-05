@@ -9,7 +9,8 @@ from torch.ao.quantization.fx.prepare import (
     _is_activation_post_process_node,
 )
 import operator
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple, Callable, Any
+import copy
 
 
 def _get_tensor_constant_from_node(node, m):
@@ -32,7 +33,7 @@ def _get_all_arguments(orig_args, orig_kwargs, args_schema):
 def _fold_bn_weights_into_conv_node(
     conv_node: Node,
     conv_weight_node: Node,
-    conv_bias_node: Node,
+    conv_bias_node: Optional[Node],
     bn_node: Node,
     m: GraphModule
 ) -> None:
@@ -63,7 +64,8 @@ def _fold_bn_weights_into_conv_node(
     conv_args = list(conv_node.args)
     # calling data since the fused_weight and fused_bias are nn.Parameter
     weight_attr_name = conv_weight_node.target
-    setattr(m, weight_attr_name, fused_weight)  # type: ignore[arg-type]
+    assert isinstance(weight_attr_name, str)
+    setattr(m, weight_attr_name, fused_weight)
     if conv_bias_node is not None:
         bias_attr_name = conv_bias_node.target
     else:
@@ -171,3 +173,45 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
             current_scope = (bt[0].split(".")[-1], bt[1])
         node_name_to_scope[n.name] = current_scope
     return node_name_to_scope
+
+def _get_aten_graph_module(
+    pattern: Callable,
+    example_inputs: Tuple[Any, ...],
+    **kwargs,
+) -> GraphModule:
+    """
+    Convert the pattern to an FX graph with decomposed aten ops.
+    """
+    # Avoid circular imports
+    import torch._dynamo
+    aten_pattern, _ = torch._dynamo.export(
+        pattern,
+        *copy.deepcopy(example_inputs),
+        aten_graph=True,
+        tracing_mode="real",
+        **kwargs,
+    )
+    aten_pattern.graph.eliminate_dead_code()
+    aten_pattern.recompile()
+    return aten_pattern
+
+def _remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
+    """ Remove .tensor overload for quantize/dequantize ops so that we can
+    use the match_pattern that we get from torchdynamo export to match the output of convert_pt2e
+    """
+    _MAP = {
+        torch.ops.quantized_decomposed.quantize_per_tensor.default: torch.ops.quantized_decomposed.quantize_per_tensor,
+        torch.ops.quantized_decomposed.dequantize_per_tensor.default: torch.ops.quantized_decomposed.dequantize_per_tensor,
+        torch.ops.quantized_decomposed.quantize_per_tensor.tensor: torch.ops.quantized_decomposed.quantize_per_tensor,
+        torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: torch.ops.quantized_decomposed.dequantize_per_tensor,
+        torch.ops.quantized_decomposed.quantize_per_tensor.tensor2: torch.ops.quantized_decomposed.quantize_per_tensor,
+        torch.ops.quantized_decomposed.dequantize_per_tensor.tensor2: torch.ops.quantized_decomposed.dequantize_per_tensor,
+        torch.ops.quantized_decomposed.quantize_per_channel.default: torch.ops.quantized_decomposed.quantize_per_channel,
+        torch.ops.quantized_decomposed.dequantize_per_channel.default: torch.ops.quantized_decomposed.dequantize_per_channel,
+        torch.ops.aten.clamp.Tensor: torch.ops.aten.clamp,
+    }
+    for n in match_pattern.graph.nodes:
+        if n.op != "call_function":
+            continue
+        if n.target in _MAP:
+            n.target = _MAP[n.target]

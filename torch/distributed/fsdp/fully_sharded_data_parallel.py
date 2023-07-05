@@ -282,29 +282,28 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             FSDP. (Default: ``None``)
         param_init_fn (Optional[Callable[[nn.Module], None]]):
             A ``Callable[torch.nn.Module] -> None`` that
-            specifies how modules that are currently on the meta device should be initialized
-            onto an actual device. Note that as of v1.12, we detect modules on the meta
-            device via ``is_meta`` check and apply a default initialization that calls
-            ``reset_parameters`` method on the passed in ``nn.Module`` if ``param_init_fn``
-            is not specified, otherwise we run ``param_init_fn`` to initialize the passed
-            in ``nn.Module``. In particular, this means that if ``is_meta=True`` for any
-            module parameters for modules that will be wrapped with FSDP and ``param_init_fn``
-            is not specified, we assume your module properly implements a ``reset_parameters()``
-            and will throw errors if not. Note that additionally, we offer support for modules
-            initialized with torchdistX's (https://github.com/pytorch/torchdistX)
-            ``deferred_init`` API. In this case, deferred modules would be initialized
-            by a default initialization function that calls torchdistX's
-            ``materialize_module``, or the passed in ``param_init_fn``, if it is not
-            ``None``. The same ``Callable`` is applied to initialize all meta modules.
-            Note that this initialization function is applied before doing any FSDP sharding
-            logic.
+            specifies how modules that are currently on the meta device should
+            be initialized onto an actual device. As of v1.12, FSDP detects
+            modules with parameters or buffers on meta device via ``is_meta``
+            and either applies ``param_init_fn`` if specified or calls
+            ``nn.Module.reset_parameters()`` otherwise. For both cases, the
+            implementation should *only* initialize the parameters/buffers of
+            the module, not those of its submodules. This is to avoid
+            re-initialization. In addition, FSDP also supports deferred
+            initialization via torchdistX's (https://github.com/pytorch/torchdistX)
+            ``deferred_init()`` API, where the deferred modules are initialized
+            by calling ``param_init_fn`` if specified or torchdistX's default
+            ``materialize_module()`` otherwise. If ``param_init_fn`` is
+            specified, then it is applied to all meta-device modules, meaning
+            that it should probably case on the module type. FSDP calls the
+            initialization function before parameter flattening and sharding.
 
             Example::
 
                 >>> # xdoctest: +SKIP("undefined variables")
                 >>> module = MyModule(device="meta")
-                >>> def my_init_fn(module):
-                >>>     # responsible for initializing a module, such as with reset_parameters
+                >>> def my_init_fn(module: nn.Module):
+                >>>     # E.g. initialize depending on the module type
                 >>>     ...
                 >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=size_based_auto_wrap_policy)
                 >>> print(next(fsdp_model.parameters()).device) # current CUDA device
@@ -359,14 +358,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             use ``torch.compile()``. Setting this to ``False`` exposes FSDP's
             internal :class:`FlatParameter` s to the user via
             :meth:`nn.Module.named_parameters`. (Default: ``False``)
-        ignored_parameters (Optional[Iterable[torch.nn.Parameter]]): Ignored
-            parameters will not be managed by this FSDP instance, which means
-            that they will not be flattened and sharded and that their
-            gradients will not be reduced across ranks. With this newly added
-            argument, ``ignored_modules`` could be deprecated soon. For
-            backward compatibility, we keep both ``ignored_modules`` and
-            ``ignored_parameters``, but FSDP only allows one of them to be
-            specified as not ``None``.
+        ignored_states (Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]):
+            Ignored parameters or modules that will not be managed by this FSDP
+            instance, meaning that the parameters are not sharded and their
+            gradients are not reduced across ranks. This argument unifies with
+            the existing ``ignored_modules`` argument, and we may deprecate
+            ``ignored_modules`` soon. For backward compatibility, we keep both
+            ``ignored_states`` and `ignored_modules``, but FSDP only allows one
+            of them to be specified as not ``None``.
     """
 
     def __init__(
@@ -1793,49 +1792,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         )
 
     @staticmethod
-    def optim_state_dict_post_hook(
-        model: torch.nn.Module,
-        optim: torch.optim.Optimizer,
-        optim_state_dict: Dict[str, Any],
-        group: Optional[dist.ProcessGroup] = None,
-    ) -> Dict[str, Any]:
-        """
-        This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionality is identical to :meth:`optim_state_dict` except
-        for the different arguments.
-
-        Args:
-            model (torch.nn.Module): Root module (which may or may not be a
-                :class:`FullyShardedDataParallel` instance) whose parameters
-                were passed into the optimizer ``optim``.
-            optim (torch.optim.Optimizer): Optimizer for ``model`` 's
-                parameters.
-            optim (Dict[str, Any]: the optim_state_dict to be converted. The value
-               is typically returned by ``NamedOptimizer.state_dict()``.
-            group (dist.ProcessGroup): Model's process group across which parameters
-                are sharded or ``None`` if using the default process group. (
-                Default: ``None``)
-
-        Returns:
-            Dict[str, Any]: A :class:`dict` containing the optimizer state for
-            ``model``. The sharding of the optimizer state is based on
-            ``state_dict_type``.
-        """
-        state_dict_settings = FullyShardedDataParallel.get_state_dict_type(model)
-        return FullyShardedDataParallel._optim_state_dict_impl(
-            model=model,
-            optim=optim,
-            optim_state_dict=optim_state_dict,
-            optim_input=None,
-            rank0_only=getattr(
-                state_dict_settings.optim_state_dict_config, "rank0_only", False
-            ),
-            full_state_dict=state_dict_settings.state_dict_type
-            == StateDictType.FULL_STATE_DICT,
-            group=None,
-        )
-
-    @staticmethod
     def optim_state_dict_to_load(
         model: torch.nn.Module,
         optim: torch.optim.Optimizer,
@@ -1922,41 +1878,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         if load_directly:
             optim.load_state_dict(result)
         return result
-
-    @staticmethod
-    def load_optim_state_dict_pre_hook(
-        model: torch.nn.Module,
-        optim: torch.optim.Optimizer,
-        optim_state_dict: Dict[str, Any],
-        group: Optional[dist.ProcessGroup] = None,
-    ) -> Dict[str, Any]:
-        """
-        This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionality is identical to :meth:`optim_state_dict_to_load`
-        except for the different arguments.
-
-        Args:
-            model (torch.nn.Module): Root module (which may or may not be a
-                :class:`FullyShardedDataParallel` instance) whose parameters
-                were passed into the optimizer ``optim``.
-            optim (torch.optim.Optimizer): Optimizer for ``model`` 's
-                parameters.
-            optim_state_dict (Dict[str, Any]): The optimizer states to be loaded.
-            group (dist.ProcessGroup): Model's process group across which parameters
-                are sharded or ``None`` if using the default process group. (
-                Default: ``None``)
-        """
-        state_dict_settings = FullyShardedDataParallel.get_state_dict_type(model)
-        return FullyShardedDataParallel._optim_state_dict_to_load_impl(
-            optim_state_dict=optim_state_dict,
-            model=model,
-            optim_input=None,
-            optim=optim,
-            full_state_dict=state_dict_settings.state_dict_type
-            == StateDictType.FULL_STATE_DICT,
-            is_named_optimizer=True,
-            group=group,
-        )
 
     def register_comm_hook(self, state: object, hook: callable):
         """

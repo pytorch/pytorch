@@ -16,7 +16,7 @@ import torch._logging
 from torch._prims_common import is_integer_dtype
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
-from ..codecache import get_code_path
+from ..codecache import code_hash, get_path
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
@@ -734,10 +734,8 @@ class TritonKernel(Kernel):
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
-        is_rocm = torch.version.hip is not None and torch.cuda.is_available()
         self.no_x_dim = (
-            not is_rocm
-            and self.reduction_hint == ReductionHint.INNER
+            self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
             and len(self.numels) == 2
             and self.numels[-1] >= 256
@@ -1294,6 +1292,37 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
+    def bucketize(
+        self,
+        values: CSEVariable,
+        offsets_name: str,
+        offsets_size,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ):
+        """
+        See [Note: Inductor bucketize op]
+        """
+
+        offsets_ptr = self.args.input(offsets_name)
+        block_size = self.dense_size_str()
+
+        if indexing_dtype == torch.int32:
+            triton_dtype = "tl.int32"
+        elif indexing_dtype == torch.int64:
+            triton_dtype = "tl.int64"
+        else:
+            raise NotImplementedError(
+                "Bucketize only supports indexing with int32 and int64"
+            )
+
+        result = self.cse.generate(
+            self.compute,
+            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size}, {block_size})",  # noqa: B950 line too long
+        )
+
+        return result
+
     def reduction_resize(self, value):
         ndims = self.triton_tensor_ndim()
         if ndims == 1:
@@ -1315,11 +1344,8 @@ class TritonKernel(Kernel):
         reduction_sizes = ["None" for _ in self.range_trees]
         reduction_sizes[-1] = ":"
 
-        if reduction_type == "any":
-            reduction_type = "max"
-
         def final_reduction(value):
-            use_helper = reduction_type in {"max", "min", "prod"}
+            use_helper = reduction_type in {"any", "max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
             if reduction_type in {"max", "min"}:
                 return self.reduction_resize(
@@ -1850,9 +1876,7 @@ class TritonScheduling:
         can fuse node1 and node2.  These nodes might already be
         FusedSchedulerNodes.
         """
-        if isinstance(node1, scheduler.ForeachKernelSchedulerNode) and isinstance(
-            node2, scheduler.ForeachKernelSchedulerNode
-        ):
+        if isinstance(node1, scheduler.ForeachKernelSchedulerNode):
             return node1.can_fuse(node2)
 
         if isinstance(node1, scheduler.ForeachKernelSchedulerNode) or isinstance(
@@ -2187,7 +2211,7 @@ class TritonScheduling:
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
 
-            basename, _, kernel_path = get_code_path(src_code, "py", extra="")
+            basename, _, kernel_path = get_path(code_hash(src_code), "py")
 
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")

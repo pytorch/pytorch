@@ -52,7 +52,7 @@ def bucket_has_external_output(bucket: Bucket) -> bool:
     return False
 
 
-def pretty_print_buckets(buckets: List[Bucket]):
+def pretty_print_buckets(buckets: List[Bucket], bucket_bytes_cap: int):
     headers = ("Index", "Size (b)", "Param Names")
     rows = []
     extended_buckets = []
@@ -71,6 +71,21 @@ def pretty_print_buckets(buckets: List[Bucket]):
             )
 
     if len(rows):
+        log.info(
+            "\nDDPOptimizer used bucket cap %s and created %d buckets. Enable debug logs for detailed bucket info.",
+            bucket_bytes_cap,
+            len(buckets),
+        )
+
+        if len(extended_buckets):
+            log.warning(
+                "Some buckets were extended beyond their requested parameter capacities"
+                " in order to ensure each subgraph has an output node, required for fx graph partitioning."
+                " This can be the case when a subgraph would have only contained nodes performing inplace mutation,"
+                " and returning no logical outputs. This should not be a problem, unless it results in too few graph"
+                " partitions for optimal DDP performance."
+            )
+
         try:
             from tabulate import tabulate
 
@@ -81,20 +96,16 @@ def pretty_print_buckets(buckets: List[Bucket]):
 
             if len(extended_buckets):
                 log.warning(
-                    "These buckets were extended beyond their requested parameter capacities"
-                    " in order to ensure each subgraph has"
-                    " an output node, required for fx graph partitioning. This can be the case when a subgraph would have"
-                    " only contained nodes performing inplace mutation, and returning no logical outputs. This should not"
-                    " be a problem, unless it results in too few graph partitions for optimal DDP performance."
-                    "\n%s",
+                    "DDPOptimizer extended these buckets to ensure per-subgraph output nodes:\n%s",
                     tabulate(
                         extended_buckets,
                         headers=("Index", "Extra Ops", "Extra Param Size (b)"),
+                        tablefmt="simple_grid",
                     ),
                 )
         except ImportError:
-            log.info(
-                "Please `pip install tabulate` in order to pretty-print ddp bucket sizes"
+            log.debug(
+                "Please `pip install tabulate` in order to display ddp bucket sizes and diagnostic information."
             )
     else:
         log.debug("DDPOptimizer captured no parameters and did not split this graph.")
@@ -246,11 +257,7 @@ class DDPOptimizer:
 
         # stash buckets for testing/debugging purposes
         self.buckets = buckets
-        log.info(
-            "DDPOptimizer used bucket cap %s and produced the following buckets:",
-            self.bucket_bytes_cap,
-        )
-        pretty_print_buckets(buckets)
+        pretty_print_buckets(buckets, self.bucket_bytes_cap)
 
         if len(buckets) == 1:
             # bypass split/fuse logic if there is only one bucket

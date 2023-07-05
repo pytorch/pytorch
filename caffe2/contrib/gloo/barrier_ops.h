@@ -24,7 +24,7 @@ class BarrierOp final : public Operator<Context> {
     }
   }
 
-  virtual ~BarrierOp() {}
+  ~BarrierOp() override {}
 
   bool RunOnDevice() override {
     auto context = OperatorBase::Input<std::shared_ptr<::gloo::Context>>(0);
