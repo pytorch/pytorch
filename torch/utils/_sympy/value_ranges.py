@@ -429,21 +429,25 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
             else:
                 return ValueRanges(sympy.false, sympy.true)
 
-        # Like sympy.Integer but handles inf values
-        def trunc(x):
-            return sympy.Integer(x) if x.is_finite else x
+        def cast(x, dtype):
+            # dtype is int or float
+            if dtype.is_floating_point:
+                return sympy.Float(x)
+            elif x.is_finite:
+                return sympy.Integer(x)
+            else:
+                # inf cannot be cast to Integer
+                return x
 
-        sympy_dtype = sympy.Float if dtype.is_floating_point else trunc
         if x.is_bool:
             if x.is_singleton():
                 val = 1 if x.lower else 0
-                return ValueRanges.wrap(sympy_dtype(val))
+                return ValueRanges.wrap(cast(val, dtype))
             else:
-                return ValueRanges(sympy_dtype(0), sympy_dtype(1))
+                return ValueRanges(cast(0, dtype), cast(1, dtype))
         else:
             # int to float or float to int
-            assert isinstance(x.lower, (sympy.Integer, sympy.Float)), (x, type(x.lower))
-            return ValueRanges(sympy_dtype(x.lower), sympy_dtype(x.upper))
+            return ValueRanges(cast(x.lower, dtype), cast(x.upper, dtype))
 
     @staticmethod
     def square(x):
