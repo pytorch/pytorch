@@ -158,6 +158,6 @@ class BoundVars:
         if bound is not None:
             return bound
 
-        bound = self.get_expr_range(expr, self.replacement_vals)
+        bound = get_expr_range(expr, self.replacement_vals)
         self.replacement_vals[name] = bound
         return bound
