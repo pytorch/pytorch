@@ -196,7 +196,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         elif value.__name__ == "executorch_call_delegate":
             return ExecutorchCallDelegateHigherOrderVariable(value, source, **kwargs)
         elif value is torch._functorch.eager_transforms.grad_impl:
-            return HigherOrderFuncTorchGradVariable(value, source, **kwargs)
+            return FunctorchGradHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "trampoline_autograd_fwd",
             "trampoline_autograd_bwd",
@@ -529,7 +529,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
         )
 
 
-class HigherOrderFuncTorchGradVariable(TorchHigherOrderOperatorVariable):
+class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
