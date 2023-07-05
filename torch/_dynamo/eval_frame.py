@@ -740,6 +740,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         matched_input_elements_positions: List[int],
         matched_output_elements_positions: List[int],
         example_fake_inputs: List[torch.Tensor],
+        fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
     ):
         super().__init__(m)
 
@@ -747,7 +748,6 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             val: example_fake_inputs[ix]
             for ix, val in enumerate(matched_input_elements_positions)
         }
-        fake_mode = _guards.detect_fake_mode(example_fake_inputs)
 
         self.new_args = []
         for i in range(0, len(flat_args)):
@@ -1032,6 +1032,7 @@ def export(
         matched_input_elements_positions,
         matched_output_elements_positions,
         example_fake_inputs,
+        fake_mode,
     ).transform()
 
     # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
@@ -1316,6 +1317,10 @@ class TorchPatcher:
         #     TorchDynamo does not trigger again on the frames created by
         #     utils.checkpoint innards.
         torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
+
+        torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
+        torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()
+        torch._dynamo.variables.dicts._register_dynamo_dict_to_tree_spec()
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
