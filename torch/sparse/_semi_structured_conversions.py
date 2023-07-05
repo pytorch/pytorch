@@ -2,6 +2,11 @@ import torch
 
 import torch._inductor.config as cfg
 
+# Use more agressive TorchInductor optimizations, in order to fuse
+# generated Triton kernels as much as possbile when compiling the
+# functions below.  This line, together with the import line above,
+# may be removed at some later stage, if detected that TorchInductor
+# produces the same code without it.
 cfg.aggressive_fusion = True
 
 
