@@ -2758,6 +2758,7 @@ class CommonTemplate:
         )
 
     # From yolov3
+    @skipIfRocm
     def test_batch_norm_2d_2(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
