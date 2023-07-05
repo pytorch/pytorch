@@ -248,7 +248,7 @@ class TestSparseSemiStructured(TestCase):
             weight_sparse = weight.masked_select(weight != 0).view(m, k // 2)
 
             meta = SparseSemiStructuredTensor(weight).indices()
-            
+
             output1 = torch._sparse_semi_structured_linear(input, weight_sparse, meta, bias=bias, activation=activation)
             torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=rtol, atol=atol)
 

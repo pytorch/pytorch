@@ -80,6 +80,12 @@ Tensor two_four_sgemm_cutlass(
     using ElementInputE = typename Gemm::ElementE;
     using LayoutInputE = cutlass::layout::RowMajor;
     using ReorderedLayoutInputE = typename Gemm::LayoutE;
+    static_assert(
+        std::is_same<ReorderedLayoutInputE,
+                     cutlass::layout::ColumnMajorInterleaved<2>>::value,
+        "Matrix layout used by CUTLASS for reordered metadata for sparse GEMM "
+        "change, thus code doing conversions from/to dense matrix has to be "
+        "updated.");
 
     constexpr auto kSparse = Gemm::kSparse;
     constexpr int kElementsPerElementE = Gemm::kElementsPerElementE;
