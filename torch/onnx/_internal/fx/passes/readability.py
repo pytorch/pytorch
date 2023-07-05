@@ -14,7 +14,12 @@ class RestoreParameterAndBufferNames(_pass.Transform):
     parameter and buffer names from the original module. For example, if the original
     module has a parameter named `root.linear.0.weight`, and the parameter is renamed to
     `_param_constant9` by FX, this pass will rename it back.
+
+    This pass must be run after `Decompose` pass. Because this pass is expected to be called on
+    `fx.GraphModule` produced by `proxy_tensor.make_fx`, where all parameters and buffers
+    are registered at root level.
     """
+
     def __init__(
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
@@ -31,8 +36,7 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         nodes: Sequence[torch.fx.Node],
         new_name: str,
     ) -> None:
-        """Rename the parameter/buffer and replace corresponding nodes with new nodes of updated target.
-        """
+        """Rename the parameter/buffer and replace corresponding nodes with new nodes of updated target."""
         assert len(nodes) > 0, "`nodes` cannot be empty"
         assert (
             len({node.target for node in nodes}) == 1
@@ -40,6 +44,7 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         old_name = nodes[0].target
         assert isinstance(old_name, str), f"Expected str, got type({old_name})"
         # Parameter/buffer name cannot contain "."
+        # TODO(bowbao): fix #104670 and replace "." with "/" to avoid collision.
         normalized_name = new_name.replace(".", "_")
         attr_value = getattr(self.module, old_name)
         setattr(self.module, normalized_name, attr_value)
@@ -67,6 +72,8 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         assert (
             len(kwargs) == 0
         ), "RestoreParameterAndBufferNames does not take any kwargs"
+        # state_to_readable_name[parameter/buffer] returns the original readable name of
+        # the parameter/buffer. E.g., "self.linear.weight".
         state_to_readable_name: Dict[Union[torch.nn.Parameter, torch.Tensor], str] = {}
         state_to_readable_name.update(
             {v: k for k, v in self.original_module.named_parameters()}
@@ -76,6 +83,9 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         )
         diagnostic = self.diagnostic_context.inflight_diagnostic()
 
+        # old_name_to_nodes[old_name] returns a tuple of (nodes, new_name)
+        # where `nodes` is a list of `get_attr` nodes with `old_name` as `target` and
+        # `new_name` is the new readable name.
         old_name_to_nodes: Dict[str, Tuple[List[torch.fx.Node], str]] = {}
 
         for node in self.module.graph.nodes:
@@ -83,6 +93,12 @@ class RestoreParameterAndBufferNames(_pass.Transform):
                 assert isinstance(
                     node.target, str
                 ), f"Expected str, got type({node.target})"
+                if node.target.find(".") != -1:
+                    raise RuntimeError(
+                        f"Unexpected target {node.target} in get_attr, found '.' in target. "
+                        f"All parameters and buffers are expected to be registered at root level, "
+                        f"i.e., self.module. "
+                    )
                 if node.target in old_name_to_nodes:
                     # We have already processed this parameter/buffer.
                     old_name_to_nodes[node.target][0].append(node)
