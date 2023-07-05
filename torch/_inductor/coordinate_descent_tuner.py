@@ -44,10 +44,36 @@ class CoordescTuner:
           i.e., there are multiple local optima..
     """
 
-    def __init__(self, is_mm=False, name="unknown"):
+    def __init__(self, is_mm=False, name="unknown", size_hints=None):
         self.is_mm = is_mm  # we will tune num_stages for mm
         self.cached_benchmark_results = {}
         self.name = name
+        self.size_hints = size_hints
+
+    def get_xmax(self):
+        xmax = inductor_config.triton.max_block["X"]
+        if self.size_hints and len(self.size_hints) > 0:
+            xmax = min(xmax, self.size_hints[0])
+        return xmax
+
+    def get_ymax(self):
+        ymax = inductor_config.triton.max_block["Y"]
+        if self.size_hints and len(self.size_hints) > 1:
+            ymax = min(ymax, self.size_hints[1])
+        return ymax
+
+    def get_zmax(self):
+        zmax = inductor_config.triton.max_block["Z"]
+        if self.size_hints and len(self.size_hints) > 2:
+            zmax = min(zmax, self.size_hints[2])
+        return zmax
+
+    def get_rmax(self):
+        if self.size_hints and len(self.size_hints) > 0:
+            return self.size_hints[-1]  # the last one is for reduction
+        else:
+            # large enough. We should not pick this large RBLOCK anyway
+            return 2**30
 
     def cache_benchmark_result(self, config, timing):
         self.cached_benchmark_results[triton_config_to_hashable(config)] = timing
@@ -85,8 +111,19 @@ class CoordescTuner:
 
         return out
 
-    @staticmethod
-    def get_neighbour_values(name, orig_val, radius=1, include_self=False):
+    def value_too_large(self, name, val):
+        if name == "XBLOCK":
+            return val > self.get_xmax()
+        if name == "YBLOCK":
+            return val > self.get_ymax()
+        if name == "ZBLOCK":
+            return val > self.get_zmax()
+        if name == "RBLOCK":
+            return val > self.get_rmax()
+
+        return False
+
+    def get_neighbour_values(self, name, orig_val, radius=1, include_self=False):
         """
         Get neighbour values in 'radius' steps. The original value is not
         returned as it's own neighbour.
@@ -110,6 +147,8 @@ class CoordescTuner:
         cur_val = orig_val
         for _ in range(radius):
             cur_val = update(cur_val, True)
+            if self.value_too_large(name, cur_val):
+                break
             out.append(cur_val)
 
         # decrement loop
@@ -225,8 +264,10 @@ class CoordescTuner:
                 if cur_val is None:
                     continue
 
+                # It's possible that candidate_values is empty.
+                # E.g., if XBLOCK is 1 initially and size_hint for x is also 1.
+                # We would not try either larger or smaller XBLOCK in this case.
                 candidate_values = self.get_neighbour_values(name, cur_val)
-                assert len(candidate_values) > 0
 
                 for next_val in candidate_values:
                     candidate_config = copy.deepcopy(best_config)

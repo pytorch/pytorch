@@ -561,10 +561,12 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(FuncTorchVmapMode)
       DEF_ONE(FuncTorchGradWrapper)
       DEF_ONE(PythonDispatcher)
+      DEF_ONE(PreDispatch)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)
       DEF_ONE(AutocastXPU)
       DEF_ONE(AutocastHPU)
+      DEF_ONE(AutocastIPU)
       DEF_ONE(AutocastCUDA)
       DEF_ONE(AutocastPrivateUse1)
   // clang-format on

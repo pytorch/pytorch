@@ -416,6 +416,14 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, code)
 
+    # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
+    def DUPLICATE_INPUT(self, guard, source_b):
+        ref_a = self.arg_ref(guard)
+        ref_b = self.arg_ref(source_b.name())
+
+        code = [f"{ref_b} is {ref_a}"]
+        self._produce_guard_code(guard, code)
+
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
@@ -804,8 +812,6 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
-        f_locals: Optional[Dict[str, object]] = None,
-        f_globals: Optional[Dict[str, object]] = None,
         guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
@@ -836,12 +842,12 @@ class CheckFunctionManager:
         local_builder = GuardBuilder(
             self.id_ref,
             source_ref,
-            combine_scopes(f_globals, f_locals),
+            combine_scopes(output_graph.global_scope, output_graph.local_scope),
             self,
             local=True,
         )
         global_builder = GuardBuilder(
-            self.id_ref, source_ref, f_globals, self, local=False
+            self.id_ref, source_ref, output_graph.global_scope, self, local=False
         )
         # We need to transplant a copy here, because some guards
         # might get a cross ref between local and global, like L['mod_name'][G['some_key']]

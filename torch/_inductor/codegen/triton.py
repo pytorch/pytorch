@@ -14,10 +14,10 @@ import torch
 
 import torch._logging
 from torch._prims_common import is_integer_dtype
-from ..._dynamo import config as dynamo_config
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
-from ..codecache import get_code_path
+from ..codecache import code_hash, get_path
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
@@ -537,11 +537,9 @@ class IterationRangesRoot(IterationRanges):
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.statically_known_equals(divisor * length, self.numel):
-            expr = ir.FloorDiv(sympy_symbol(f"{self.prefix}index"), divisor)
+            expr = FloorDiv(sympy_symbol(f"{self.prefix}index"), divisor)
         else:
-            expr = ir.ModularIndexing(
-                sympy_symbol(f"{self.prefix}index"), divisor, length
-            )
+            expr = ModularIndexing(sympy_symbol(f"{self.prefix}index"), divisor, length)
 
         if expr not in self.nodes:
             node = IterationRangesEntry(
@@ -586,12 +584,12 @@ class IterationRangesRoot(IterationRanges):
         for node in nodes:
             if not V.graph.sizevars.statically_known_equals(node.divisor, divisor):
                 # fill in unused index var
-                add(self.lookup(divisor, ir.FloorDiv(node.divisor, divisor)))
+                add(self.lookup(divisor, FloorDiv(node.divisor, divisor)))
                 divisor = node.divisor
             add(node)
         if not V.graph.sizevars.statically_known_equals(self.numel, divisor):
             # fill in unused index var
-            add(self.lookup(divisor, ir.FloorDiv(self.numel, divisor)))
+            add(self.lookup(divisor, FloorDiv(self.numel, divisor)))
 
         return list(reversed(index_vars)), list(reversed(sizes))
 
@@ -600,6 +598,12 @@ class IterationRangesRoot(IterationRanges):
         index_dtype = self.kernel.index_dtype
         convert = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
         return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}{convert}"
+
+    def scalar_code(self, value):
+        index_dtype = self.kernel.index_dtype
+        ndim = self.kernel.triton_tensor_ndim()
+        size = [1] * ndim
+        return f"tl.full({size}, {value}, {index_dtype})"
 
     def get_pid(self):
         key = f"tl.program_id({self.index})"
@@ -618,11 +622,14 @@ class IterationRangesRoot(IterationRanges):
                 f"{self.name} = {self.ranges_code()}",
             )
         else:
-            ranges_code = f" + {self.ranges_code()}" if not no_x_dim else ""
+            if not no_x_dim:
+                line = f"{x}offset + {self.ranges_code()}"
+            else:
+                line = self.scalar_code(f"{x}offset")
             code.writelines(
                 [
                     f"{x}offset = {self.get_pid()} * {x.upper()}BLOCK",
-                    f"{self.name} = {x}offset {ranges_code}",
+                    f"{self.name} = {line}",
                 ]
             )
         code.writeline(f"{x}mask = {self.name} < {x}numel")
@@ -675,7 +682,7 @@ class IterationRangesEntry(IterationRanges):
         precomputed_args = []
         if isinstance(self.expr, sympy.Symbol):
             return precomputed_args
-        assert isinstance(self.expr, (ir.FloorDiv, ir.ModularIndexing)), type(self.expr)
+        assert isinstance(self.expr, (FloorDiv, ModularIndexing)), type(self.expr)
         for arg in self.expr.args[1:]:
             if not isinstance(arg, (sympy.Integer, sympy.Symbol)):
                 symbols = arg.free_symbols
@@ -726,10 +733,8 @@ class TritonKernel(Kernel):
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
-        is_rocm = torch.version.hip is not None and torch.cuda.is_available()
         self.no_x_dim = (
-            not is_rocm
-            and self.reduction_hint == ReductionHint.INNER
+            self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
             and len(self.numels) == 2
             and self.numels[-1] >= 256
@@ -836,7 +841,7 @@ class TritonKernel(Kernel):
             if not sv.statically_known_multiple_of(remaining[i], expr):
                 raise CantSplit()
             # guard on the last item out
-            remaining[i] = ir.FloorDiv(remaining[i], expr)
+            remaining[i] = FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
             return next(var_count)
 
@@ -869,7 +874,7 @@ class TritonKernel(Kernel):
                     ):
                         raise CantSplit()
                     size1 = remaining[current_group]
-                    size2 = ir.FloorDiv(size, remaining[current_group])
+                    size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
                         make_combined(
                             size2,
@@ -934,7 +939,22 @@ class TritonKernel(Kernel):
         # Note. This may not be correct when there is indirect indexing
         if self.is_indirect_indexing(index):
             return False
-        return not set.issubset(set(self.range_tree_nodes.keys()), index.free_symbols)
+
+        index_numels = [1] * len(self.numels)
+        for symbol in index.free_symbols:
+            if symbol not in self.range_tree_nodes:
+                # Non-iterated variables, e.g. strides
+                continue
+            entry = self.range_tree_nodes[symbol]
+            index_numels[entry.parent.index] *= entry.length
+
+        # If the index variables only iterate over a subset of the kernel
+        # numels, then it must be broadcasted.
+        simplify = V.graph.sizevars.simplify
+        return any(
+            simplify(idx_range) != simplify(iter_range)
+            for idx_range, iter_range in zip(index_numels, self.numels)
+        )
 
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
@@ -1271,13 +1291,45 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
-    def reduction_size_str(self):
-        if self.no_x_dim:
-            return ""
+    def bucketize(
+        self,
+        values: CSEVariable,
+        offsets_name: str,
+        offsets_size,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ):
+        """
+        See [Note: Inductor bucketize op]
+        """
+
+        offsets_ptr = self.args.input(offsets_name)
+        block_size = self.dense_size_str()
+
+        if indexing_dtype == torch.int32:
+            triton_dtype = "tl.int32"
+        elif indexing_dtype == torch.int64:
+            triton_dtype = "tl.int64"
         else:
-            sizes = [":" for _ in self.range_trees]
-            sizes[-1] = "None"
-            return f"[{', '.join(sizes)}]"
+            raise NotImplementedError(
+                "Bucketize only supports indexing with int32 and int64"
+            )
+
+        result = self.cse.generate(
+            self.compute,
+            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size}, {block_size})",  # noqa: B950 line too long
+        )
+
+        return result
+
+    def reduction_resize(self, value):
+        ndims = self.triton_tensor_ndim()
+        if ndims == 1:
+            return f"triton_helpers.promote_to_tensor({value})"
+
+        sizes = [":"] * ndims
+        sizes[-1] = "None"
+        return f"{value}[{', '.join(sizes)}]"
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
@@ -1291,23 +1343,20 @@ class TritonKernel(Kernel):
         reduction_sizes = ["None" for _ in self.range_trees]
         reduction_sizes[-1] = ":"
 
-        if reduction_type == "any":
-            reduction_type = "max"
-
         def final_reduction(value):
-            use_helper = reduction_type in {"max", "min", "prod"}
+            use_helper = reduction_type in {"any", "max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
             if reduction_type in {"max", "min"}:
-                return f"{module}.{reduction_type}2({value}, {dim}){self.reduction_size_str()}"
-            return (
-                f"{module}.{reduction_type}({value}, {dim}){self.reduction_size_str()}"
-            )
+                return self.reduction_resize(
+                    f"{module}.{reduction_type}2({value}, {dim})"
+                )
+            return self.reduction_resize(f"{module}.{reduction_type}({value}, {dim})")
 
         def final_argreduce(buffer, result_var, value, index):
             buffer.splice(
                 f"""\
                 _, {result_var}_tmp = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
-                {result_var} = {result_var}_tmp{self.reduction_size_str()}
+                {result_var} = {self.reduction_resize(f'{result_var}_tmp')}
                 """
             )
 
@@ -1692,12 +1741,15 @@ class TritonKernel(Kernel):
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
+    def triton_tensor_ndim(self):
+        no_x_dim = int(bool(self.no_x_dim))
+        no_r_dim = self.numels[-1] == 1
+        return len(self.range_trees) - no_x_dim - no_r_dim
+
     def indexing_size_str(self, i=None, x=None):
         # no_x_dim is sympy.logic.boolalg.BooleanTrue
         no_x_dim = int(bool(self.no_x_dim))
-        sizes = ["None"] * (
-            len(self.range_trees) - int(self.numels[-1] == 1) - no_x_dim
-        )
+        sizes = ["None"] * self.triton_tensor_ndim()
         if i is not None:
             idx = i - no_x_dim
             sizes[idx] = ":"
@@ -1823,9 +1875,7 @@ class TritonScheduling:
         can fuse node1 and node2.  These nodes might already be
         FusedSchedulerNodes.
         """
-        if isinstance(node1, scheduler.ForeachKernelSchedulerNode) and isinstance(
-            node2, scheduler.ForeachKernelSchedulerNode
-        ):
+        if isinstance(node1, scheduler.ForeachKernelSchedulerNode):
             return node1.can_fuse(node2)
 
         if isinstance(node1, scheduler.ForeachKernelSchedulerNode) or isinstance(
@@ -2132,16 +2182,8 @@ class TritonScheduling:
                     stack.close()
                     kernel.set_last_usage(current_reduction_nodes(node_schedule[i:]))
                 else:
-                    # TODO - mostly works but needs a couple fixes
-                    # Problem looks like free variables NYI: s0
-                    # We need to detect if the proposed ranges would have
-                    # symbols and bail out on this optimization if so
-                    if (
-                        not dynamo_config.dynamic_shapes
-                        and dynamo_config.assume_static_by_default
-                    ):
-                        # TODO - use split ranges ?
-                        indexing_dtype_strength_reduction(node._body)
+                    # TODO - use split ranges ?
+                    indexing_dtype_strength_reduction(node._body)
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 
@@ -2168,7 +2210,7 @@ class TritonScheduling:
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
 
-            basename, _, kernel_path = get_code_path(src_code, "py", extra="")
+            basename, _, kernel_path = get_path(code_hash(src_code), "py")
 
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
@@ -2350,7 +2392,7 @@ class TritonScheduling:
                     b0, b1 = ranked_tilings[0]
                 assert V.graph.sizevars.size_hint(a1 - b1) > 0
                 if V.graph.sizevars.statically_known_multiple_of(a1, b1):
-                    tiling = (a0, ir.FloorDiv(a1, b1), b1)
+                    tiling = (a0, FloorDiv(a1, b1), b1)
                     ranked_tilings = [tiling] + ranked_tilings
                     break  # only 1 choice for now
 
