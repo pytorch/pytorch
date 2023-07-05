@@ -562,8 +562,8 @@ def main() -> None:
     if MEM_LEAK_LABEL in labels:
         # Enable mem leak check if label is added
         for config in filtered_test_matrix.get("include", []):
-            if is_cuda_or_rocm(job_name):
-                config[mode] = mode
+            if is_cuda_or_rocm_job(args.job_name):
+                config["mem_leak_check"] = "mem_leak_check"
 
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
