@@ -346,7 +346,7 @@ void cpu_adaptive_max_pool_backward(
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   int64_t ndim = grad_output.ndimension();
   // treat batch size and channels as one dimension
@@ -393,7 +393,7 @@ void cpu_adaptive_max_pool_backward_channels_last(
   auto grad_output = grad_output_.contiguous(memory_format);
   auto indices = indices_.contiguous(memory_format);
 
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 

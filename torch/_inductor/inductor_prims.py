@@ -2,6 +2,7 @@ import logging
 
 import torch
 from torch import _prims
+from torch._prims_common import RETURN_TYPE
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +25,17 @@ def make_prim(
         doc=doc,
         tags=tags,
     )
+
+
+def eager_force_stride(input_tensor, stride):
+    if input_tensor.stride() == stride:
+        return input_tensor
+    new_tensor = input_tensor.clone().as_strided(
+        input_tensor.shape,
+        stride,
+    )
+    new_tensor.copy_(input_tensor)
+    return new_tensor
 
 
 # Custom prims used for handling randomness
@@ -49,11 +61,35 @@ random = make_prim(
     "inductor_random(SymInt[] size, Tensor seed, str mode) -> Tensor",
     lambda size, seed, mode: getattr(torch, mode)(size, device=seed.device),
     doc="torch.rand()/torch.randn() using backend-specific RNG that can be fused",
-    tags=(torch.Tag.nondeterministic_seeded,),
 )
 randint = make_prim(
     "inductor_randint(SymInt low, SymInt high, SymInt[] size, Tensor seed) -> Tensor",
     lambda low, high, size, seed: torch.randint(low, high, size, device=seed.device),
     doc="torch.randint() using backend-specific RNG that can be fused",
-    tags=(torch.Tag.nondeterministic_seeded,),
+)
+force_stride_order = make_prim(
+    "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
+    lambda input_tensor, stride: eager_force_stride(input_tensor, stride),
+    doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
+)
+
+
+def _inductor_bucketize_impl(input, boundaries, *, out_int32=False, right=False):
+    return torch.bucketize(input, boundaries, out_int32=out_int32, right=right)
+
+
+def _inductor_bucketize_meta(input, boundaries, *, out_int32=False, right=False):
+    return torch.empty_like(
+        input,
+        memory_format=torch.preserve_format,
+        dtype=(torch.int32 if out_int32 else torch.int64),
+    )
+
+
+_bucketize = _prims._make_prim(
+    schema="_inductor_bucketize(Tensor input, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor",
+    meta=_inductor_bucketize_meta,
+    impl_aten=_inductor_bucketize_impl,
+    return_type=RETURN_TYPE.NEW,
+    doc="Same as torch.bucketize(), but does not get decomposed.",
 )

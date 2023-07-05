@@ -16,9 +16,12 @@ from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..utils import (
     fqn,
+    get_custom_getattr,
     get_fake_value,
     get_real_value,
+    guard_if_dyn,
     HAS_NUMPY_TORCH_INTEROP,
+    object_has_getattribute,
     product,
     proxy_args_kwargs,
     tensortype_to_dtype,
@@ -84,6 +87,7 @@ class TensorVariable(VariableTracker):
         stride=None,
         is_contiguous=None,
         specialized_value=None,
+        storage_offset=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -100,6 +104,7 @@ class TensorVariable(VariableTracker):
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.specialized_value = specialized_value
+        self.storage_offset = storage_offset
 
     def as_proxy(self):
         return self.proxy
@@ -148,7 +153,56 @@ class TensorVariable(VariableTracker):
                     if value.is_contiguous(memory_format=x)
                 ]
             )
+            props["storage_offset"] = value.storage_offset()
+
         return props
+
+    def dynamic_getattr(self, tx, name):
+        if not self.source:
+            raise NotImplementedError()
+
+        # For local source, we associate the real value. We use this real value
+        # for implementing getattr fallthrough on the variable tracker base class.
+
+        # Note - this scope construction is mirrored in guards
+        # A subsequent PR will introduce a util.
+        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
+        try:
+            # We raise in case we get a typerror bug w/ SuperSource.
+            # SuperSource has bugs in it atm, and can produce code like
+            # eval("super(L['mod'].model.model.encoder.embed_positions.forward__class__,
+            # L['mod'].model.model.encoder.embed_positions)", scope)
+            # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
+            _input_associated_real_value = eval(self.source.name(), scope)
+        except Exception:
+            raise NotImplementedError()
+
+        if _input_associated_real_value is None:
+            raise NotImplementedError()
+
+        if object_has_getattribute(_input_associated_real_value):
+            raise NotImplementedError()
+
+        if get_custom_getattr(_input_associated_real_value):
+            raise NotImplementedError()
+
+        real_value = getattr(_input_associated_real_value, name)
+        if callable(real_value):
+            # Callables have more nuanced handling, and we should let the existing system delegate here.
+            # Raising was past behavior and so should always be sound to fall back.
+            # Note - at a certain point we may want to handle
+            raise NotImplementedError()
+
+        from ..guards import GuardBuilder
+        from .builder import VariableBuilder
+
+        attr_source = AttrSource(self.source, name)
+        has_attr_guard = attr_source.make_guard(GuardBuilder.HASATTR)
+        return (
+            VariableBuilder(tx, attr_source)(real_value)
+            .add_options(self)
+            .add_guard(has_attr_guard)
+        )
 
     def var_getattr(self, tx, name):
         from . import ConstantVariable, TorchVariable
@@ -178,6 +232,10 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.is_quantized, **options)
         elif name == "is_sparse" and self.is_sparse is not None:
             result = ConstantVariable(self.is_sparse, **options)
+        elif name == "storage_offset":
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: ConstantVariable(self.storage_offset)
+            ).add_options(self)
         elif name == "shape" and self.size is None:
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
@@ -237,8 +295,10 @@ class TensorVariable(VariableTracker):
             result = try_generic_attr_handling()
 
         if result is None:
-            raise NotImplementedError()
+            result = self.dynamic_getattr(tx, name)
 
+        if result is None:
+            raise NotImplementedError()
         return result
 
     def has_unpack_var_sequence(self, tx):
@@ -291,15 +351,7 @@ class TensorVariable(VariableTracker):
             else:
                 assert not args and not kwargs, f"Tensor.{name}() unhandled args/kwargs"
 
-            dim = None
-            if isinstance(dim_var, SymNodeVariable):
-                # This is because SymNodeVariable intentionally doesn't define
-                # as_python_constant to avoid shunting down some codepaths
-                # that expect consts.   In this case, we know we definitely
-                # want to specialize though.
-                dim = dim_var.evaluate_expr()
-            elif dim_var is not None:
-                dim = dim_var.as_python_constant()
+            dim = guard_if_dyn(dim_var)
 
             def make_const_size_variable(x, **options):
                 return SizeVariable(
@@ -417,6 +469,20 @@ class TensorVariable(VariableTracker):
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable(index, **options)
+        elif name == "storage_offset":
+            # Constant path
+            if self.storage_offset is not None:
+                return ConstantVariable(self.storage_offset, **options)
+            # dyn shapes path
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + list(args), kwargs),
+                ),
+                **options,
+            )
         else:
             constant_result = None
 
