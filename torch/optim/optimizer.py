@@ -376,7 +376,6 @@ class Optimizer:
         self._optimizer_step_post_hooks[handle.id] = hook
         return handle
 
-    @torch._disable_dynamo
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
 
@@ -429,7 +428,6 @@ class Optimizer:
             return value.to(device=param.device)
         return value
 
-    @torch._disable_dynamo
     def load_state_dict(self, state_dict):
         r"""Loads the optimizer state.
 
@@ -486,7 +484,6 @@ class Optimizer:
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
-    @torch._disable_dynamo
     def zero_grad(self, set_to_none: bool = True):
         r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
 
@@ -541,7 +538,6 @@ class Optimizer:
         """
         raise NotImplementedError
 
-    @torch._disable_dynamo
     def add_param_group(self, param_group):
         r"""Add a param group to the :class:`Optimizer` s `param_groups`.
 
