@@ -51,6 +51,7 @@ import importlib
 import torch
 import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
+import torch.utils.checkpoint
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
@@ -1694,11 +1695,20 @@ def defake(x):
     return y
 
 
-def is_utils_checkpoint(obj):
-    # Lazy import to avoid circular dependenices
-    import torch.utils.checkpoint
+# NB: The check of utils.checkpoipt is done lazily after TorchPatcher is called so
+# that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
+# sitting in a separate function.
+# We also need the original untouched/ not disabled torch utils checkpoint
+# becuase distributed checkpointed wrappers import these utils before
+# TorchDynamo TorchPatcher runs.
+untouched_torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
 
-    return obj is torch.utils.checkpoint.checkpoint
+
+def is_utils_checkpoint(obj):
+    return (
+        obj is torch.utils.checkpoint.checkpoint
+        or obj is untouched_torch_utils_checkpoint
+    )
 
 
 def build_checkpoint_variable(**options):
