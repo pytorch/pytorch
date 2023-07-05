@@ -814,9 +814,9 @@ XLA             fn_XLA [kernel]
 Lazy            fn_Lazy [kernel]
 FPGA            fn_CompositeImplicitAutograd [math kernel]
 AutogradOther   fn_CompositeImplicitAutograd [math kernel]
-AutogradCPU     fallthrough [backend fallback]
-AutogradXLA     fallthrough [backend fallback]
-AutogradLazy    fallthrough [backend fallback]
+AutogradCPU     [backend fallback]
+AutogradXLA     [backend fallback]
+AutogradLazy    [backend fallback]
 '''
         )
 
@@ -836,8 +836,8 @@ Lazy            fn_Lazy [kernel]
 FPGA            fn_CompositeImplicitAutograd [math kernel]
 AutogradOther   fn_CompositeImplicitAutograd [math kernel]
 AutogradCPU     fn_AutogradCPU [kernel]
-AutogradXLA     fallthrough [backend fallback]
-AutogradLazy    fallthrough [backend fallback]
+AutogradXLA     [backend fallback]
+AutogradLazy    [backend fallback]
 '''
         )
         self.assertExpectedInline(
@@ -869,10 +869,10 @@ CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
 Lazy            fn_Lazy [kernel]
 FPGA            fn_CompositeExplicitAutograd [default backend kernel]
-AutogradOther   fallthrough [backend fallback]
+AutogradOther   [backend fallback]
 AutogradCPU     fn_AutogradCPU [kernel]
-AutogradXLA     fallthrough [backend fallback]
-AutogradLazy    fallthrough [backend fallback]
+AutogradXLA     [backend fallback]
+AutogradLazy    [backend fallback]
 '''
         )
 
@@ -906,7 +906,7 @@ XLA             fn_CompositeImplicitAutograd [math kernel]
 Lazy            fn_CompositeImplicitAutograd [math kernel]
 FPGA            fn_FPGA [kernel]
 AutogradOther   ambiguous_autogradother [ambiguous autogradother]
-AutogradCPU     fallthrough [backend fallback]
+AutogradCPU     [backend fallback]
 AutogradXLA     fn_CompositeImplicitAutograd [math kernel]
 AutogradLazy    fn_CompositeImplicitAutograd [math kernel]
 '''
