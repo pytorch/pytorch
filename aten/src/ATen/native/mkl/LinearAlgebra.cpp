@@ -41,7 +41,7 @@ void mkl_gemm_batched(
 void mkl_gemm_bf16bf16f32(
     TransposeType trans_A, TransposeType trans_B,
     int M, int N, int K, const float alpha,
-    const BFloat16* A, int lda, const BFloat16* B, int ldb,
+    const c10::BFloat16* A, int lda, const c10::BFloat16* B, int ldb,
     const float beta, float* C, int ldc) {
   TORCH_INTERNAL_ASSERT(false, "mkl_gemm_bf16bf16f32: ATen not compiled with MKL support");
 }
@@ -115,7 +115,7 @@ void mkl_gemm_batched(
 void mkl_gemm_bf16bf16f32(
     TransposeType trans_A, TransposeType trans_B,
     int M, int N, int K, const float alpha,
-    const BFloat16* A, int lda, const BFloat16* B, int ldb,
+    const c10::BFloat16* A, int lda, const c10::BFloat16* B, int ldb,
     const float beta, float* C, int ldc) {
   auto transa_cblas = to_cblas(trans_A);
   auto transb_cblas = to_cblas(trans_B);
