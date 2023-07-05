@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import atexit
 import contextlib
 import functools
 import logging
@@ -79,6 +80,7 @@ class LoggingTests(LoggingTestCase):
     test_bytecode = multi_record_test(2, bytecode=True)
     test_output_code = multi_record_test(2, output_code=True)
     test_aot_graphs = multi_record_test(2, aot_graphs=True)
+    test_trace_source = within_range_record_test(1, 100, trace_source=True)
 
     @requires_cuda()
     @make_logging_test(schedule=True)
@@ -102,10 +104,11 @@ class LoggingTests(LoggingTestCase):
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
     @make_logging_test(dynamo=logging.DEBUG)
-    def test_dynamo_debug_no_bytecode(self, records):
+    def test_dynamo_debug_default_off_artifacts(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(torch.ones(1000, 1000))
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
+        self.assertEqual(len([r for r in records if ".__trace_source" in r.name]), 0)
 
     @make_logging_test(dynamo=logging.ERROR)
     def test_dynamo_error(self, records):
@@ -224,6 +227,37 @@ class LoggingTests(LoggingTestCase):
 
         self.assertEqual(len(records), 1)
 
+    @make_settings_test("torch._dynamo.utils")
+    def test_dump_compile_times(self, records):
+        fn_opt = torch._dynamo.optimize("inductor")(example_fn)
+        fn_opt(torch.ones(1000, 1000))
+        # explicitly invoke the atexit registered functions
+        atexit._run_exitfuncs()
+        self.assertEqual(
+            len(
+                [r for r in records if "TorchDynamo compilation metrics" in str(r.msg)]
+            ),
+            1,
+        )
+
+    @make_logging_test(dynamo=logging.INFO)
+    def test_custom_format(self, records):
+        dynamo_log = logging.getLogger(torch._dynamo.__name__)
+        test_log = torch._logging.getArtifactLogger(
+            torch._dynamo.__name__, "custom_format_test_artifact"
+        )
+        dynamo_log.info("test dynamo")
+        test_log.info("custom format")
+        self.assertEqual(len(records), 2)
+        # unfortunately there's no easy way to test the final formatted log other than
+        # to ask the dynamo logger's handler to format it.
+        for handler in dynamo_log.handlers:
+            if torch._logging._internal._is_torch_handler(handler):
+                break
+        self.assertIsNotNone(handler)
+        self.assertIn("[INFO]", handler.format(records[0]))
+        self.assertEqual("custom format", handler.format(records[1]))
+
 
 # single record tests
 exclusions = {
@@ -236,6 +270,8 @@ exclusions = {
     "ddp_graphs",
     "perf_hints",
     "not_implemented",
+    "trace_source",
+    "custom_format_test_artifact",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

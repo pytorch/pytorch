@@ -3,7 +3,6 @@ import contextlib
 import copy
 import functools
 import itertools
-import linecache
 import logging
 import operator
 import re
@@ -41,6 +40,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
+from .current_scope_id import enter_new_scope
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
@@ -84,7 +84,6 @@ from .variables.tensor import (
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
-graph_source_log = torch._logging.getArtifactLogger(__name__, "graph_source")
 
 
 class OutputGraphState(NamedTuple):
@@ -354,11 +353,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @contextlib.contextmanager
     def new_subtracer(self):
+        new_scope_ctx = enter_new_scope()
         try:
+            new_scope_ctx.__enter__()
             tracer = SubgraphTracer(self, parent=self.current_tracer)
             self.tracers.append(tracer)
             yield tracer
         finally:
+            new_scope_ctx.__exit__(None, None, None)
             self.tracers.pop()
 
     @property
@@ -510,6 +512,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def count_calls(self):
         return count_calls(self.graph)
+
+    def is_empty_graph(self):
+        return len(list(self.graph.nodes)) == 0
 
     def get_submodule(self, keys):
         assert keys
@@ -833,20 +838,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
 
-    def log_graph_source_code(self, name):
-        graph_source = f"GRAPH SOURCE CODE\n===== {name} =====\n"
-        for node in self.graph.nodes:
-            if not hasattr(node, "source_code_data"):
-                continue
-            graph_source += node.format_node() + "\n"
-            funcname, filename, lineno, depth = node.source_code_data
-            graph_source += (
-                f"function `{funcname}` {filename}:{lineno} (inline depth {depth})\n"
-            )
-            line = linecache.getline(filename, lineno)
-            graph_source += (" " * 4 * depth) + line + "\n"
-        graph_source_log.debug(graph_source)
-
     @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
@@ -879,9 +870,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
-
-        if torch._logging._internal.log_state.is_artifact_enabled("graph_source"):
-            self.log_graph_source_code(name)
 
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
@@ -1137,13 +1125,6 @@ class SubgraphTracer(fx.Tracer):
         # append stack trace to fx node
         tx = self.output_graph.current_tx
 
-        rv.node.source_code_data = (
-            tx.f_code.co_name,
-            tx.f_code.co_filename,
-            tx.lineno,
-            tx.inline_depth,
-        )
-
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
@@ -1242,9 +1223,9 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        assert (
-            self.parent is not None
-        ), "lift_tracked_freevar_to_input on root SubgraphTracer"
+        assert self.parent is not None or not self.is_name_bound(
+            proxy.node.name
+        ), "lift_tracked_freevar_to_input on root SubgraphTracer should only be called with non-free variables."
         new_proxy = self.create_graph_input(proxy.node.name)
         new_proxy.node.meta["example_value"] = proxy.node.meta["example_value"]
         self.lifted_freevars[proxy] = None

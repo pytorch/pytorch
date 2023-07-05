@@ -4,7 +4,7 @@
 
 namespace caffe2 {
 
-static vector<TensorShape> TensorInferenceForAddPadding(
+vector<TensorShape> TensorInferenceForAddPadding(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
   ArgumentHelper helper(def);
