@@ -240,7 +240,7 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-static vector<TensorShape> TensorInferenceForDotProduct(
+vector<TensorShape> TensorInferenceForDotProduct(
     const OperatorDef& /* def */,
     const vector<TensorShape>& in) {
   CAFFE_ENFORCE_GT(in.size(), 0);
@@ -250,7 +250,7 @@ static vector<TensorShape> TensorInferenceForDotProduct(
   return vector<TensorShape>{CreateTensorShape(dims, in[0].data_type())};
 }
 
-static OpSchema::Cost CostInferenceForDotProduct(
+OpSchema::Cost CostInferenceForDotProduct(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
   std::vector<TensorShape> out = TensorInferenceForDotProduct(def, in);
