@@ -77,9 +77,7 @@ def _param_name_infos(
 ) -> Iterator[Tuple[str, str, str]]:
     if not _has_fsdp_params(fsdp_state, module):
         return
-    for param_name, module_name in _module_handle(fsdp_state, module)[
-        0
-    ].param_module_names():
+    for param_name, module_name in _module_handle(fsdp_state, module).param_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
         fqn = f"{module_name}{param_name}"
         yield fqn, param_name, module_name
@@ -88,9 +86,7 @@ def _param_name_infos(
 def _shared_param_name_infos(
     module: nn.Module, fsdp_state
 ) -> Iterator[Tuple[str, str, str]]:
-    for param_name, module_name in _module_handle(fsdp_state, module)[
-        0
-    ].shared_param_module_names():
+    for param_name, module_name in _module_handle(fsdp_state, module).shared_param_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
         fqn = f"{module_name}{param_name}"
         yield fqn, param_name, module_name
@@ -388,7 +384,7 @@ def _local_pre_state_dict_hook(
     """
     if (
         _has_fsdp_params(fsdp_state, module)
-        and not _module_handle(fsdp_state, module)[0].uses_sharded_strategy
+        and not _module_handle(fsdp_state, module).uses_sharded_strategy
     ):
         raise RuntimeError(
             "``local_state_dict`` can only be used when parameters are flatten "
@@ -419,7 +415,7 @@ def _local_post_state_dict_hook(
     # nn.Module.state_dict() will detach the parameter. Therefore, we need
     # to get flat_param to get the metadata.
     assert _module_handle(fsdp_state, module), "Should have returned early"
-    flat_param = _module_handle(fsdp_state, module)[0].flat_param
+    flat_param = _module_handle(fsdp_state, module).flat_param
     # Constructs a ShardedTensor from the flat_param "without" padding.
     # Removing the padding allows users to change the number of ranks
     # when loading the local_state_dict.
@@ -479,7 +475,7 @@ def _local_pre_load_state_dict_hook(
     ), "Tensors in local_state_dict should be ShardedTensor."
 
     # Convert the ShardedTensor to a Tensor.
-    flat_param = _module_handle(fsdp_state, module)[0].flat_param
+    flat_param = _module_handle(fsdp_state, module).flat_param
     assert flat_param is not None
     valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
     shards = load_tensor.local_shards()
@@ -513,7 +509,7 @@ def _sharded_pre_state_dict_hook(
     """
     if (
         _has_fsdp_params(fsdp_state, module)
-        and not _module_handle(fsdp_state, module)[0].uses_sharded_strategy
+        and not _module_handle(fsdp_state, module).uses_sharded_strategy
     ):
         raise RuntimeError(
             "``sharded_state_dict`` can only be used when parameters are flatten "
@@ -592,7 +588,7 @@ def _sharded_pre_load_state_dict_hook(
     if not _has_fsdp_params(fsdp_state, module):
         return
 
-    handle = _module_handle(fsdp_state, module)[0]
+    handle = _module_handle(fsdp_state, module)
     if not handle.uses_sharded_strategy:
         raise RuntimeError(
             "load_sharded_state_dict can only be called when parameters "
