@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import atexit
 import contextlib
 import functools
 import logging
@@ -224,6 +225,37 @@ class LoggingTests(LoggingTestCase):
 
         self.assertEqual(len(records), 1)
 
+    @make_settings_test("torch._dynamo.utils")
+    def test_dump_compile_times(self, records):
+        fn_opt = torch._dynamo.optimize("inductor")(example_fn)
+        fn_opt(torch.ones(1000, 1000))
+        # explicitly invoke the atexit registered functions
+        atexit._run_exitfuncs()
+        self.assertEqual(
+            len(
+                [r for r in records if "TorchDynamo compilation metrics" in str(r.msg)]
+            ),
+            1,
+        )
+
+    @make_logging_test(dynamo=logging.INFO)
+    def test_custom_format(self, records):
+        dynamo_log = logging.getLogger(torch._dynamo.__name__)
+        test_log = torch._logging.getArtifactLogger(
+            torch._dynamo.__name__, "custom_format_test_artifact"
+        )
+        dynamo_log.info("test dynamo")
+        test_log.info("custom format")
+        self.assertEqual(len(records), 2)
+        # unfortunately there's no easy way to test the final formatted log other than
+        # to ask the dynamo logger's handler to format it.
+        for handler in dynamo_log.handlers:
+            if torch._logging._internal._is_torch_handler(handler):
+                break
+        self.assertIsNotNone(handler)
+        self.assertIn("[INFO]", handler.format(records[0]))
+        self.assertEqual("custom format", handler.format(records[1]))
+
 
 # single record tests
 exclusions = {
@@ -236,6 +268,7 @@ exclusions = {
     "ddp_graphs",
     "perf_hints",
     "not_implemented",
+    "custom_format_test_artifact",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

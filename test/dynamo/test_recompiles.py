@@ -98,7 +98,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             return run_foo_6_times_and_count_recompiles()
 
         without = run_without_automatic()
-        self.assertEqual(without.frame_count, 5)
+        self.assertEqual(without.frame_count, 2)
         self.assertEqual(without.op_count, 5)
         torch._dynamo.reset()
         with_automatic = run_with_automatic()

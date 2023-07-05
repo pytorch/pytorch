@@ -522,94 +522,6 @@ const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTens
   return self;
 }
 
-SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
-  if (layout.has_value()) {
-    if (blocksize.has_value() && !(*layout == kSparseBsr || *layout == kSparseBsc)) {
-      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout,
-               " conversion does not use the specified blocksize ", blocksize.value(), ".");
-    }
-    if (self.layout() == *layout) {
-      return self;
-    }
-    switch (*layout) {
-    case kStrided:
-      return self;
-    case kSparse:
-      return dense_to_sparse(self, self.dim() - dense_dim_opt.value_or(0));
-    case kSparseCsr:
-      return self.to_sparse_csr(dense_dim_opt);
-    case kSparseCsc:
-      return self.to_sparse_csc(dense_dim_opt);
-    case kSparseBsr:
-      if (blocksize.has_value()) {
-        return self.to_sparse_bsr(*blocksize, dense_dim_opt);
-      }
-      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
-      break;
-    case kSparseBsc:
-      if (blocksize.has_value()) {
-        return self.to_sparse_bsc(*blocksize, dense_dim_opt);
-      }
-      break;
-      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion requires blocksize");
-    default:
-      break;
-    }
-    AT_ERROR("to_sparse not implemented for ", self.layout(), " to ", *layout, " conversion");
-  }
-  return dense_to_sparse(self, self.dim() - dense_dim_opt.value_or(0));
-}
-
-SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
-  int64_t dims = self.dim();
-  // TODO: it seems like sparse_dim == 0 could be supported even if self.dim() >
-  // 0, but this would take some work and doesn't seem particularly useful.
-  TORCH_CHECK(
-      sparse_dim > 0 || self.dim() == 0,
-      "sparse_dim must be >0 if dimensionality > 0");
-  TORCH_CHECK(
-      sparse_dim <= dims,
-      "sparse_dim must be less than or equal to self.dim()");
-  at::TensorOptions sparse_options = self.options().layout(kSparse);
-  std::vector<int64_t> sizes = self.sizes().vec();
-
-  Tensor nz = self.nonzero().transpose(0, 1);
-  if (nz.size(1) == 0) {
-    auto sparse = new_with_dims_sparse(
-        sparse_dim,
-        dims - sparse_dim,
-        sizes,
-        optTypeMetaToScalarType(sparse_options.dtype_opt()),
-        sparse_options.layout_opt(),
-        sparse_options.device_opt(),
-        sparse_options.pinned_memory_opt());
-    return sparse._coalesced_(true);
-  }
-  Tensor indices;
-  if (sparse_dim == dims) {
-    indices = nz.clone();
-  } else {
-    Tensor i = nz.narrow(0, 0, sparse_dim);
-    std::tie(indices, std::ignore, std::ignore) = unique_dim(i, 1);
-    indices = indices.contiguous(); // many sparse CUDA kernels require
-                                    // contiguity, see issue #12633
-  }
-
-  Tensor values;
-  if (self.dim() > 0) {
-    auto ix = toListOfOptionalTensors(indices.chunk(indices.size(0), 0));
-    values = self.index(ix).squeeze(0).clone(at::MemoryFormat::Preserve);
-  } else {
-    AT_ASSERT(nz.sizes().equals({0, 1}));
-    // In this cases, indices is a clone of nz, which is a tensor of shape (0,
-    // 1). Given sparse tensor invariants, values should be shape (1,)
-    values = self.unsqueeze(0).clone(at::MemoryFormat::Preserve);
-  }
-
-  Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
-  return sparse._coalesced_(true);
-}
-
 // NB: Dropped the resizeNd variants
 
 SparseTensor& copy_sparse_wrapper_(
@@ -750,7 +662,7 @@ DEFINE_DISPATCH(sparse_mask_projection_out_stub);
 
 using OptTensor = c10::optional<Tensor>;
 
-std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inputs(
+static std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inputs(
     const std::string& method_name,
     const Tensor& t,
     const Tensor& mask) {
@@ -790,10 +702,11 @@ std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inputs(
 
   Tensor lhs;
   OptTensor lhs_hash_opt;
+  bool lhs_is_movable;
 
-  std::tie(lhs, lhs_hash_opt) = [&]() -> auto {
+  std::tie(lhs, lhs_hash_opt, lhs_is_movable) = [&]() -> auto {
     if (t.is_coalesced()) {
-      return std::make_tuple(t, static_cast<OptTensor>(c10::nullopt));
+      return std::make_tuple(t, static_cast<OptTensor>(c10::nullopt), false);
     } else {
       const auto indices_hash = at::sparse::flatten_indices(t._indices(), t.sizes());
       const auto argsort_indices_hash = std::get<1>(indices_hash.sort(0));
@@ -804,13 +717,16 @@ std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inputs(
       // NOTE: res is not necessariy coalesced, but it is sorted.
       // We mark it as "coalesced" to skip sorting in the intersection kernel.
       auto res = wrapped_tensor(t, res_indices, res_values)._coalesced_(true);
-      return std::make_tuple(res, static_cast<OptTensor>(indices_hash_sorted));
+      return std::make_tuple(std::move(res), static_cast<OptTensor>(std::move(indices_hash_sorted)), true);
     }
   }();
 
   const auto rhs = mask.is_coalesced() ? wrapped_tensor(mask) : mask;
+  const auto rhs_is_movable = mask.is_coalesced() ? true : false;
 
-  return std::make_tuple(lhs, rhs, lhs_hash_opt);
+  return std::make_tuple(lhs_is_movable ? std::move(lhs) : lhs,
+                         rhs_is_movable ? std::move(rhs) : rhs,
+                         lhs_hash_opt);
 }
 
 SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
@@ -852,7 +768,7 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
   return t.mul(mask_template).to(t.scalar_type());
 }
 
-Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask) {
+Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask, bool accumulate_matches) {
   TORCH_INTERNAL_ASSERT(t.is_sparse());
   TORCH_INTERNAL_ASSERT(mask.is_sparse());
 
@@ -873,7 +789,7 @@ Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask) {
   Tensor lhs, rhs;
   OptTensor lhs_hash_opt;
   std::tie(lhs, rhs, lhs_hash_opt) = sparse_mask_like_prepare_sparse_inputs("_sparse_mask_projection", mask, t);
-  sparse_mask_projection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt);
+  sparse_mask_projection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt, accumulate_matches);
   return res._coalesced_(t.is_coalesced());
 }
 

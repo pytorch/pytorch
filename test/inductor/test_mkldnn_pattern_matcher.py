@@ -3,11 +3,10 @@ import itertools
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 unary_list = {
@@ -259,7 +258,6 @@ class TestPaternMatcher(TestCase):
             )
             self._test_common(mod, (v,), 1, match_nodes)
 
-    @expectedFailureDynamicWrapper
     def test_linear_binary(self):
         class M(torch.nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
@@ -279,6 +277,7 @@ class TestPaternMatcher(TestCase):
         out_feature = 30
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             for binary_fn, input_shape, bias in options:
+                torch._dynamo.reset()
                 mod = M(binary_fn, input_shape[-1], out_feature, bias).to(dtype).eval()
                 v = torch.randn(input_shape).to(dtype)
                 other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
@@ -499,10 +498,5 @@ class TestPaternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    if (
-        IS_LINUX
-        and HAS_CPU
-        and torch.backends.mkldnn.is_available()
-        and not TEST_WITH_ROCM
-    ):
+    if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():
         run_tests()

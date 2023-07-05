@@ -27,10 +27,10 @@ size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 # enable loop reordering based on input orders
 pick_loop_orders = True
 
-# generate inplace computations
+# reuse a kernel input as the output
 inplace_buffers = True
 
-# allow reusing buffers for more efficient memory use
+# reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
 
 # codegen benchmark harness
@@ -50,6 +50,9 @@ split_cat_fx_passes = True
 
 # enable reordering pass
 reordering = True
+
+# inductor engine name
+dll_name = "inductor_engine.so"
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -200,7 +203,8 @@ _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
-disable_cpp_codegen = is_fbcode()
+# TODO: remove later
+disable_cpp_codegen = False
 
 
 # Freezing will attempt to inline weights as constants in optimization
