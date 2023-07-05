@@ -63,19 +63,31 @@ class AutotuneHint(Enum):
     __repr__ = Enum.__str__
 
 
-def autotune_hints_to_configs(hints: Set[AutotuneHint], size_hints, bs) -> List[Config]:
+def autotune_hints_to_configs(
+    hints: Set[AutotuneHint], size_hints, block_size
+) -> List[Config]:
     configs = []
 
     for hint in hints:
         if hint == AutotuneHint.ELEMENTS_PER_WARP_32:
-            configs.append(
-                triton_config(
-                    size_hints,
-                    *[1 for _ in range(len(size_hints) - 1)],
-                    bs // 4,
-                    num_elements_per_warp=32,
+            if len(size_hints) == 1:
+                xyz_options = [(block_size // 4,)]
+            elif len(size_hints) == 2:
+                xyz_options = ((block_size // 4, 1), (1, block_size // 4))
+            elif len(size_hints) == 3:
+                xyz_options = (
+                    (block_size // 4, 1, 1),
+                    (1, block_size // 4, 1),
+                    (1, 1, block_size // 4),
                 )
-            )
+            for xyz in xyz_options:
+                configs.append(
+                    triton_config(
+                        size_hints,
+                        *xyz,
+                        num_elements_per_warp=32,
+                    )
+                )
 
     return configs
 
@@ -734,7 +746,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     bs = max(256, min(numel // 128, 1024))
 
     hinted_configs = autotune_hints_to_configs(
-        meta.get("autotune_hints", {}), size_hints, bs
+        meta.get("autotune_hints", set()), size_hints, bs
     )
 
     if len(size_hints) == 1:
