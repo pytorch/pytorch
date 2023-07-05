@@ -481,8 +481,7 @@ def _multi_tensor_adamw(
     if len(params) == 0:
         return
 
-    # If we are compiling, the compiler will determine if cudagraphs
-    # is applicable
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
         assert all(
             p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
