@@ -515,6 +515,14 @@ class TestSparseCompressed(TestCase):
         if len(samples) == 0:
             raise ValueError("Expected at least one 2 or higher D tensor in samples.")
 
+        # Re-define atol and rtol for operations that result values
+        # are random (and hence, non-comparable) be we still want to
+        # check the shape, dtype, etc attributes of the results:
+        atol = rtol = None
+        if op.name == 'randn_like':
+            atol = 1e300
+            rtol = 1
+
         for sample, sparse_sample in samples:
             expected = op(sample.input, *sample.args, **sample.kwargs)
             assert torch.is_tensor(expected)
@@ -524,7 +532,7 @@ class TestSparseCompressed(TestCase):
             if require_mask and sample.kwargs.get('mask') is not None:
                 output_mask = torch.masked._output_mask(op.op, sample.input, *sample.args, **sample.kwargs)
                 expected.masked_fill_(~output_mask, 0)
-            self.assertEqual(strided_output, expected)
+            self.assertEqual(strided_output, expected, atol=atol, rtol=rtol)
 
     @skipMeta
     @all_sparse_compressed_layouts()

@@ -22,6 +22,7 @@ from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
 from functools import partial
+from importlib import abc
 from threading import Thread
 from time import sleep, time
 from typing import Any, Callable, Dict, List, Union
@@ -843,7 +844,7 @@ class CppWrapperCodeCache:
                     spec = importlib.util.spec_from_file_location(name, filepath)
                     assert spec is not None
                     mod = importlib.util.module_from_spec(spec)
-                    assert isinstance(spec.loader, importlib.abc.Loader)
+                    assert isinstance(spec.loader, abc.Loader)
                     spec.loader.exec_module(mod)
                     log.debug("Cpp wrapper done loading %s", filepath)
 

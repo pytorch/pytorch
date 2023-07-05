@@ -22,6 +22,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._tensor import DTensor
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -32,7 +33,10 @@ from torch.distributed.fsdp._common_utils import (
     _named_parameters_with_duplicates,
     clean_tensor_name,
 )
-from torch.distributed.fsdp._fsdp_extensions import _ext_chunk_tensor
+from torch.distributed.fsdp._fsdp_extensions import (
+    _ext_chunk_dtensor,
+    _ext_chunk_tensor,
+)
 from torch.distributed.fsdp._runtime_utils import _clear_grads_if_needed, _lazy_init
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
@@ -275,16 +279,23 @@ def _unflatten_communicated_optim_state(
                 flat_param_views[state_name] = views
             else:
                 views = flat_param_views[state_name]
-            optim_state: Union[torch.Tensor, ShardedTensor] = next(views)
+            optim_state: Union[torch.Tensor, ShardedTensor, DTensor] = next(views)
             if shard_state:
-                assert fsdp_state.process_group is not None
-                optim_state = _ext_chunk_tensor(
-                    optim_state,
-                    fsdp_state.rank,
-                    fsdp_state.world_size,
-                    fsdp_state._device_handle.device_count(),
-                    fsdp_state.process_group,
-                )
+                if not fsdp_state._optim_state_dict_config.use_dtensor:
+                    assert fsdp_state.process_group is not None
+                    optim_state = _ext_chunk_tensor(
+                        optim_state,
+                        fsdp_state.rank,
+                        fsdp_state.world_size,
+                        fsdp_state._device_handle.device_count(),
+                        fsdp_state.process_group,
+                    )
+                else:
+                    assert fsdp_state._device_mesh is not None
+                    optim_state = _ext_chunk_dtensor(
+                        optim_state, fsdp_state.rank, fsdp_state._device_mesh
+                    )
+
             unflat_state_param[state_name] = optim_state
 
         # Add zero-dimension tensor state: take the target rank's value
@@ -1603,14 +1614,20 @@ def _gather_orig_param_state(
             flat_param._shapes[param_idx]
         )
         if shard_state:
-            assert fsdp_state.process_group is not None
-            value = _ext_chunk_tensor(
-                value,
-                fsdp_state.rank,
-                fsdp_state.world_size,
-                fsdp_state._device_handle.device_count(),
-                fsdp_state.process_group,
-            )
+            if not fsdp_state._optim_state_dict_config.use_dtensor:
+                assert fsdp_state.process_group is not None
+                value = _ext_chunk_tensor(
+                    value,
+                    fsdp_state.rank,
+                    fsdp_state.world_size,
+                    fsdp_state._device_handle.device_count(),
+                    fsdp_state.process_group,
+                )
+            else:
+                assert fsdp_state._device_mesh is not None
+                value = _ext_chunk_dtensor(
+                    value, fsdp_state.rank, fsdp_state._device_mesh
+                )
         value = value.cpu()
         gathered_state[state_name] = value
     return gathered_state

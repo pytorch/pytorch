@@ -1034,7 +1034,9 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
 
 # Run PyTorch tests with TorchDynamo
 TEST_WITH_TORCHINDUCTOR = os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
-TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
+# AOT_EAGER not tested in ci, useful for debugging
+TEST_WITH_AOT_EAGER = os.getenv('PYTORCH_TEST_WITH_AOT_EAGER') == '1'
+TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
@@ -1819,6 +1821,7 @@ def check_if_enable(test: unittest.TestCase):
                         "asan": TEST_WITH_ASAN,
                         "dynamo": TEST_WITH_TORCHDYNAMO,
                         "inductor": TEST_WITH_TORCHINDUCTOR,
+                        "slow": TEST_WITH_SLOW,
                     }
 
                     invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
@@ -2157,6 +2160,9 @@ class TestCase(expecttest.TestCase):
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
 
+    def assertExpectedInline(self, actual, expect, skip=0):
+        return super().assertExpectedInline(actual if isinstance(actual, str) else str(actual), expect, skip + 1)
+
     def assertLogs(self, logger=None, level=None):
         if logger is None:
             logger = logging.getLogger("torch")
@@ -2263,6 +2269,8 @@ class TestCase(expecttest.TestCase):
         super_run = super().run
         if TEST_WITH_TORCHINDUCTOR:
             super_run = torch._dynamo.optimize("inductor")(super_run)
+        elif TEST_WITH_AOT_EAGER:
+            super_run = torch._dynamo.optimize("aot_eager")(super_run)
         elif TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
             super_run = torch._dynamo.optimize("eager")(super_run)

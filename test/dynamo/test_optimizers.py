@@ -7,7 +7,6 @@ import functools
 # Owner(s): ["module: dynamo"]
 
 import inspect
-import unittest
 
 import torch
 
@@ -15,14 +14,13 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.nn import Parameter
-from torch.testing._internal.common_utils import IS_FBCODE
 
 input = torch.ones([10, 10])
 model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
 model(input).sum().backward()
 
 
-def make_test(optim_cls, exp_graph_count=1, closure=None, **kwargs):
+def make_test(optim_cls, closure=None, **kwargs):
     opt = optim_cls(model.parameters(), **kwargs)
 
     def test_fn(self):
@@ -35,9 +33,7 @@ def make_test(optim_cls, exp_graph_count=1, closure=None, **kwargs):
         else:
             fn = opt.step
 
-        graphs = torch._dynamo.explain(fn).graphs
-
-        self.assertEqual(exp_graph_count, len(graphs))
+        torch.compile(fn, backend="eager", fullgraph=True)()
 
     return test_fn
 
@@ -56,9 +52,9 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
     # furthermore, the break is inside a for loop, so we bail on the frame
     # entirely.  This is basically an xfail; if the frame count goes up
     # you done good
-    test_radam = unittest.skipIf(IS_FBCODE, "TypeError: _use_grad() missing")(
-        make_test(torch.optim.RAdam, exp_graph_count=0)
-    )
+    # test_radam = unittest.skipIf(IS_FBCODE, "TypeError: _use_grad() missing")(
+    #    make_test(torch.optim.RAdam, exp_graph_count=0)
+    # )
 
 
 # exclude SparseAdam because other areas of the stack don't support it yet

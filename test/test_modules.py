@@ -13,7 +13,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, skipIfTorchInductor)
+    gradgradcheck)
 from unittest.mock import patch, call
 
 
@@ -324,7 +324,6 @@ class TestModule(TestCase):
         self._traverse_obj(obj, inner_zero_grad)
 
     @modules(module_db)
-    @skipIfTorchInductor("to be fixed")
     def test_non_contiguous_tensors(self, device, dtype, module_info, training):
         # Check modules work with non-contiguous tensors
 
@@ -488,7 +487,6 @@ class TestModule(TestCase):
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)
-    @skipIfTorchInductor("to be fixed")
     def test_cpu_gpu_parity(self, device, dtype, module_info, training):
         # TODO: RNN / GRU / LSTM don't support backwards on eval mode for cuDNN; skip this in a
         # nicer way for eval mode only.
@@ -580,7 +578,6 @@ class TestModule(TestCase):
 
     @with_tf32_off
     @modules(module_db)
-    @skipIfTorchInductor("to be fixed")
     def test_memory_format(self, device, dtype, module_info, training):
         is_sm86or80 = device.startswith("cuda") and (torch.cuda.get_device_capability(0) == (8, 6)
                                                      or torch.cuda.get_device_capability(0) == (8, 0))

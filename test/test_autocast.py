@@ -127,7 +127,7 @@ class TestAutocastCPU(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_autocast_rnn(self):
-        if torch._C.has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_bf16_supported():
             x = torch.randn(1, 2, 1)
             hx = torch.randn(2, 2, 1)
             cx = torch.randn(2, 2, 1)
