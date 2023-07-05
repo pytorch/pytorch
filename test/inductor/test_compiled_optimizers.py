@@ -47,8 +47,9 @@ def make_test(optim_cls, closure=None, **kwargs):
         # unwrap step to avoid a deliberate graph break due to
         # a limitation of functionalization/no_grad detection
         # see the [Note on graph break] in optimizer.py
-        # This ignores the outer _use_grad_if_differentiable wrapper, which is fine for now
-        # as dynamo does not support differentiable optimizers anyway
+        # This ignores the outer _use_grad_if_differentiable wrapper
+        # and instead manually disables grad before calling step, which is fine
+        # for now as dynamo does not support differentiable optimizers anyway
         step_fn = opt_compiled.step.__wrapped__
         if closure is not None:
 
