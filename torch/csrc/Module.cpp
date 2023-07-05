@@ -1803,7 +1803,7 @@ Call this whenever a new thread is created in order to propagate values from
 inline void pytorch_duplicate_guard() {
   static int initialized = 0;
   if (initialized) {
-    fmt::println(stderr, "pytorch: _C shared library re-initialized");
+    fmt::print(stderr, "pytorch: _C shared library re-initialized\n");
     abort();
   }
   initialized = 1;

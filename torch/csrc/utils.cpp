@@ -283,7 +283,7 @@ char* tensor_repr(at::Tensor tensor) {
   result =
       static_cast<char*>(malloc(bufsize + 1)); // account for the trailing \0
   if (!result) {
-    fmt::println(stderr, "cannot allocate memory for the result");
+    fmt::print(stderr, "cannot allocate memory for the result\n");
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;
   }
