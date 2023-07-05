@@ -664,7 +664,7 @@ inline DispatchKey computeDispatchKey(
     case Layout::Sparse:
       switch (device_.type()) {
 #define DO_CASE(device, _)              \
-  case c10::DeviceType::device: {            \
+  case c10::DeviceType::device: {       \
     return DispatchKey::Sparse##device; \
   }
         C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
