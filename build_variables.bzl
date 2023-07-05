@@ -438,6 +438,7 @@ core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
 ]
 
 core_sources_full = core_sources_full_mobile + [
+    "torch/csrc/inductor/inductor_ops.cpp",
     "torch/csrc/jit/runtime/static/fusion.cpp",
     "torch/csrc/jit/runtime/static/generated_ops.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
@@ -825,7 +826,6 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/cpython_defs.c",
     "torch/csrc/dynamo/eval_frame.c",
     "torch/csrc/dynamo/guards.cpp",
-    "torch/csrc/dynamo/inductor_ops.cpp",
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/functorch/init.cpp",
     "torch/csrc/mps/Module.cpp",

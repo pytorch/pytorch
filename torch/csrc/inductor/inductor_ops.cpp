@@ -1,4 +1,4 @@
-#include <torch/csrc/dynamo/inductor_ops.h>
+#include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 
 namespace torch {
@@ -44,10 +44,10 @@ Tensor _reinterpret_tensor(
 TORCH_LIBRARY_FRAGMENT(inductor, m) {
   m.def(
       "_alloc_from_pool(Tensor self, int offset_bytes, ScalarType dtype, int[] size, int[] stride) -> Tensor",
-      &_alloc_from_pool);
+      _alloc_from_pool);
   m.def(
       "_reinterpret_tensor(Tensor self, int[] size, int[] stride, int offset_increment=0) -> Tensor",
-      &_reinterpret_tensor);
+      _reinterpret_tensor);
 }
 
 } // namespace inductor

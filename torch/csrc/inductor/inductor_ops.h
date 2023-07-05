@@ -1,16 +1,18 @@
+#pragma once
+
 #include <ATen/Tensor.h>
 
 namespace torch {
 namespace inductor {
 
-at::Tensor _alloc_from_pool(
+TORCH_API at::Tensor _alloc_from_pool(
     const at::Tensor& self,
     int64_t offset_bytes,
     at::ScalarType dtype,
     at::IntArrayRef size,
     at::IntArrayRef stride);
 
-at::Tensor _reinterpret_tensor(
+TORCH_API at::Tensor _reinterpret_tensor(
     const at::Tensor& self,
     at::IntArrayRef size,
     at::IntArrayRef stride,

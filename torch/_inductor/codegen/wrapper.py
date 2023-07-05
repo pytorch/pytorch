@@ -945,7 +945,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.header.splice(
             f"""
-            #include <torch/csrc/dynamo/inductor_ops.h>
+            #include <torch/csrc/inductor/inductor_ops.h>
             #define alloc_from_pool torch::inductor::_alloc_from_pool
             #define reinterpret_tensor torch::inductor::_reinterpret_tensor
             #define align(x) torch::inductor::_align(x, {ALIGN_BYTES})

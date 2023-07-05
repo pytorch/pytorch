@@ -24,14 +24,13 @@ add_custom_target(aot_inductor_output_target ALL
         DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libaot_inductor_output.so)
 add_dependencies(test_aot_inductor aot_inductor_output_target)
 
+target_include_directories(test_aot_inductor PRIVATE
+  ${TORCH_SRC_DIR}/_inductor/aot_inductor_include
+)
+
 target_link_libraries(test_aot_inductor PRIVATE
   torch
   gtest
-  ${CMAKE_CURRENT_BINARY_DIR}/libaot_inductor_output.so
-)
-
-target_include_directories(test_aot_inductor PRIVATE
-  ${TORCH_SRC_DIR}/_inductor/aot_inductor_include
 )
 
 if(USE_CUDA)
@@ -47,6 +46,10 @@ if(USE_CUDA)
 
   target_compile_definitions(test_aot_inductor PRIVATE USE_CUDA)
 endif()
+
+target_link_libraries(test_aot_inductor PRIVATE
+  ${CMAKE_CURRENT_BINARY_DIR}/libaot_inductor_output.so
+)
 
 if(INSTALL_TEST)
   install(TARGETS test_aot_inductor DESTINATION bin)
