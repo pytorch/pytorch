@@ -511,6 +511,6 @@ def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> Va
     if dynamic_shapes:
         ranges = deepcopy(ranges)
         for s in dynamic_shapes:
-            ranges[s] = ValueRanges(0, math.inf)
+            ranges[s] = ValueRanges(0, math.inf)  # type: ignore[index]
 
     return sympy_interp(SymPyValueRangeAnalysis(), ranges, expr)
