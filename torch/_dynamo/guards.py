@@ -917,34 +917,20 @@ class CheckFunctionManager:
                         converted.append(None)
                 return converted
 
-            def convert_offset(offset):
-                if is_concrete_int(offset):
-                    return int(offset)
-                return None
-
             dynamic_dims_sizes = [
                 convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides_offset[
-                        WeakIdRef(t)
-                    ]["size"]
+                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                        "size"
+                    ]
                 )
                 for t in tensor_check_examples
             ]
 
             dynamic_dims_strides = [
                 convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides_offset[
-                        WeakIdRef(t)
-                    ]["stride"]
-                )
-                for t in tensor_check_examples
-            ]
-
-            dynamic_dims_offset = [
-                convert_offset(
-                    self.output_graph.tensor_weakref_to_sizes_strides_offset[
-                        WeakIdRef(t)
-                    ]["storage_offset"]
+                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                        "stride"
+                    ]
                 )
                 for t in tensor_check_examples
             ]
@@ -953,7 +939,6 @@ class CheckFunctionManager:
                 *tensor_check_examples,
                 dynamic_dims_sizes=dynamic_dims_sizes,
                 dynamic_dims_strides=dynamic_dims_strides,
-                dynamic_storage_offset=dynamic_dims_offset,
             )
             check_tensors_fn = tensor_guards.check
             check_tensors_verbose_fn = tensor_guards.check_verbose
