@@ -10,6 +10,7 @@ from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
 from torch.distributed.fsdp._utils import _override_module_mixed_precision
 
 from torch.distributed.fsdp.wrap import (
+    _construct_wrap_fn,
     _FSDPPolicy,
     _or_policy,
     _post_order_apply,
@@ -70,7 +71,10 @@ def _auto_wrap(
                 root_module, mixed_precision._module_classes_to_ignore
             )
             _warn_on_overridden_mixed_precision(overridden_module_classes)
-        _post_order_apply(root_module, target_module_to_kwargs, module_wrapper_cls)
+        wrap_fn = _construct_wrap_fn(
+            root_module, target_module_to_kwargs, module_wrapper_cls
+        )
+        _post_order_apply(root_module, wrap_fn)
         return
 
     # Support new way to pass an auto wrap policy
