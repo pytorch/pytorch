@@ -230,7 +230,8 @@ class DDPOptimizer:
                 "This is not supported. Please turn off DDP optimizer using "
                 "torch._dynamo.config.optimize_ddp=False. Note that this can "
                 "cause performance degradation because there will be one bucket "
-                "for the entire Dynamo graph."
+                "for the entire Dynamo graph. Please refer to this issue - "
+                "https://github.com/pytorch/pytorch/issues/104674."
             )
 
         # 1: compute the partition map according to DDP bucket logic
