@@ -4,7 +4,6 @@ import itertools
 import torch
 
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
@@ -269,7 +268,6 @@ class TestPaternMatcher(TestCase):
                 match_nodes += 1
             self._test_common(mod, (v,), match_count, match_nodes + 2)
 
-    @expectedFailureDynamicWrapper
     def test_linear_binary(self):
         class M(torch.nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
@@ -289,6 +287,7 @@ class TestPaternMatcher(TestCase):
         out_feature = 30
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             for binary_fn, input_shape, bias in options:
+                torch._dynamo.reset()
                 # addmm(mm) + (linear+add)
                 match_count = 2
                 match_nodes = 3
