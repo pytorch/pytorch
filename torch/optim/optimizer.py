@@ -252,9 +252,15 @@ class Optimizer:
 
     # Currently needed by Adam and AdamW
     def _cuda_graph_capture_health_check(self):
-        # If we are compiling, we take the capturable path automatically by setting the flag
-        # to true during tracing
-        # Inductor will decide whether cudagraphs
+        # Note [torch.compile x capturable]
+        # If we are compiling, we try to take the capturable path automatically by
+        # setting the flag to True during tracing. Due to this, we skip all the checks
+        # normally required for determining whether we can use CUDA graphs and
+        # shunt the responsibility to torch.inductor. This saves time during tracing
+        # since the checks are slow without sacrificing UX since inductor will warn
+        # later if CUDA graphs cannot be enabled, e.g.,
+        # https://github.com/pytorch/pytorch/blob/d3ba8901d8640eb16f88b2bfef9df7fa383d4b47/torch/_inductor/compile_fx.py#L390.
+        # Thus, when compiling, inductor will determine if cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
         if not is_compiling() and torch.backends.cuda.is_built() and torch.cuda.is_available():
             capturing = torch.cuda.is_current_stream_capturing()
