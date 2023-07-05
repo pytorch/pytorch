@@ -26,7 +26,7 @@ from typing import (
 from unittest.mock import patch
 
 import sympy
-from sympy import Expr, Integer, simplify
+from sympy import Expr, Integer
 
 import torch._logging
 
@@ -40,7 +40,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -231,82 +231,6 @@ class OptionalScalar(OptionalAttr):
 
 def may_convert_to_optional(optional_value, value):
     return optional_value if not value and V.graph.cpp_wrapper else value
-
-
-class ModularIndexing(sympy.Function):
-    """
-    ModularIndexing(a, b, c) => (a // b) % c
-    """
-
-    nargs = (3,)
-    is_integer = True
-
-    @classmethod
-    def eval(cls, base, divisor, modulus):
-        if base == 0 or modulus == 1:
-            return sympy.Integer(0)
-
-        if (
-            isinstance(base, sympy.Integer)
-            and isinstance(divisor, sympy.Integer)
-            and isinstance(modulus, sympy.Integer)
-        ):
-            return (base // divisor) % modulus
-
-        if divisor != 1:
-            gcd = sympy.gcd(base, divisor)
-            if gcd != 1:
-                return ModularIndexing(
-                    simplify(base / gcd), simplify(divisor / gcd), modulus
-                )
-
-        if isinstance(base, sympy.Add):
-            new_terms = []
-            all_positive = True
-            for term in base.args:
-                if sympy.gcd(term, modulus * divisor) != modulus * divisor:
-                    if (isinstance(term, sympy.Integer) and term < 0) or (
-                        isinstance(term, sympy.Mul)
-                        and isinstance(term.args[0], sympy.Integer)
-                        and term.args[0] < 0
-                    ):
-                        # workaround for https://github.com/openai/triton/issues/619,
-                        # if there are negative terms, // produces wrong result
-                        # TODO if https://github.com/openai/triton/issues/619 is fixed
-                        # this optimization would become valid
-                        all_positive = False
-                        break
-                    else:
-                        new_terms.append(term)
-
-            if len(new_terms) != len(base.args) and all_positive:
-                return ModularIndexing(sum(new_terms), divisor, modulus)
-
-        if isinstance(base, FloorDiv):
-            return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
-
-
-class CleanDiv(FloorDiv):
-    """
-    Div where we can assume no rounding.
-    This is to enable future optimizations.
-    """
-
-    pass
-
-
-class CeilDiv(sympy.Function):
-    """
-    Div used in indexing that rounds up.
-    """
-
-    is_integer = True
-
-    def __new__(cls, base, divisor):
-        if sympy.gcd(base, divisor) == divisor:
-            return CleanDiv(base, divisor)
-        else:
-            return FloorDiv(base + (divisor - 1), divisor)
 
 
 def get_device_type(x):
