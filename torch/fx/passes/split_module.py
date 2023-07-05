@@ -33,6 +33,10 @@ class Partition:
         )
 
 
+def is_node_get_attr_graph_module(mod, node):
+    return node.op == "get_attr" and isinstance(getattr(mod, node.target), torch.fx.GraphModule)
+
+
 # Creates subgraphs out of main graph
 @compatibility(is_backward_compatible=True)
 def split_module(
@@ -178,9 +182,12 @@ def split_module(
 
             if use_partition_name is not None:
                 use_partition = partitions[use_partition_name]
-                use_partition.inputs.setdefault(def_node.name)
-                if def_partition_name is not None:
-                    use_partition.partitions_dependent_on.setdefault(def_partition_name)
+                # If graph has a subgraph module and accessed through get_attr,
+                # don't save it as an input.
+                if not is_node_get_attr_graph_module(m, def_node):
+                    use_partition.inputs.setdefault(def_node.name)
+                    if def_partition_name is not None:
+                        use_partition.partitions_dependent_on.setdefault(def_partition_name)
 
     # split nodes into partitions
     for node in m.graph.nodes:
@@ -247,9 +254,20 @@ def split_module(
         if hasattr(node, "_fx_partition"):
             partition = partitions[node._fx_partition]
 
+            def node_mapping(node):
+                if node in environment:
+                    return environment[node]
+                if is_node_get_attr_graph_module(m, node):
+                    # Insert a get_attr node and also save the graph module in
+                    # the dict, to construct the submodule later on.
+                    new_node = partition.graph.create_node("get_attr", str(node.target))
+                    partition.targets[node.target] = getattr(m, node.target)
+                    return new_node
+                raise NotImplementedError(f"No mapping for node {node}")
+
             # swap out old graph nodes in kw/args with references to new nodes in this submodule
             environment = partition.environment
-            gathered_args = torch.fx.graph.map_arg(node.args, lambda n: environment[n])
+            gathered_args = torch.fx.graph.map_arg(node.args, node_mapping)
             gathered_kwargs = torch.fx.graph.map_arg(
                 node.kwargs, lambda n: environment[n]
             )

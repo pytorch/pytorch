@@ -339,11 +339,13 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         from torch.nn.parallel import DistributedDataParallel as DDP
         from torch.testing._internal.common_utils import find_free_port
 
+        N = 1000
+
         class InnerModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear1 = torch.nn.Linear(4, 4)
-                self.linear2 = torch.nn.Linear(4, 4)
+                self.linear1 = torch.nn.Linear(N, N)
+                self.linear2 = torch.nn.Linear(N, N)
 
             def forward(self, x):
                 a = self.linear1(x)
@@ -368,9 +370,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         dist.init_process_group("gloo", rank=0, world_size=1)
 
         mod = MockModule()
-        mod = DDP(mod)
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
+        mod = DDP(mod, bucket_cap_mb=1)
+        x = torch.randn(N, N, requires_grad=True)
+        y = torch.randn(N, N, requires_grad=True)
         args = (x, y)
 
         backend = "aot_eager"

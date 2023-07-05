@@ -245,6 +245,7 @@ class DDPOptimizer:
                     # might be ok because the subgraphs mostly come from
                     # Autograd function or activation checkpointing, which
                     # themselves serve as good atomic blocks.
+                    #
                     # Moreover, this type of partitioning seems better to be
                     # done at AOT Dispatched graphs, where these higher order
                     # ops will be traced through.
@@ -252,7 +253,7 @@ class DDPOptimizer:
                     for name, param in gmod.named_parameters():
                         if param.requires_grad and not self._ignore_parameter(param):
                             buckets[0].size += param.untyped_storage().nbytes()
-                            buckets[0].params.append(f"{node.gmod}_{name}")
+                            buckets[0].params.append(f"{gmod}_{name}")
                             buckets[0].param_ids.append(id(param))
                 elif maybe_param.requires_grad and not self._ignore_parameter(
                     maybe_param
