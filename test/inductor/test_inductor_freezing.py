@@ -167,6 +167,11 @@ class OptimizeForInferenceTemplate(TestCase):
                 self.assertEqual(out_eager, out_compiled)
 
     def test_mm_concat(self):
+        # CPU path will replace mm with mkl._linear,
+        # skip this case for now.
+        if self.device == "cpu":
+            raise unittest.SkipTest("NYI CPU")
+
         class MM(torch.nn.Module):
             def __init__(self):
                 super().__init__()
