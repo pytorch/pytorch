@@ -241,7 +241,9 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 numpy_ndarray_as_tensor = False
 
 # Uses z3 for validating the guard optimizations transformations.
-translation_validation = False
+translation_validation = os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATOR", "0") == "1"
+# Timeout for z3 finding a solution.
+translation_validation_timeout = os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATOR_TIMEOUT", "600")
 
 
 def is_fbcode():

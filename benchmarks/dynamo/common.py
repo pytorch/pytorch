@@ -306,34 +306,16 @@ CI_SKIP_OPTIMIZER = {
 # due to timeout.
 
 CI_TV_OFF[CI("aot_eager", training=True, dynamic=True, device="cuda")] = [
-    # TIMM
-    "eca_halonext26ts",
-    "swin_base_patch4_window7_224",
-    "mobilevit_s",
-    # TorchBench
-    "attention_is_all_you_need_pytorch",
-    "hf_GPT2",
-    "yolov3",
 ]
 
 
 CI_TV_OFF[CI("inductor", training=False, dynamic=False, device="cuda")] = [
-    # TorchBench
-    "hf_T5_generate",
 ]
 
 CI_TV_OFF[CI("inductor", training=True, dynamic=True, device="cuda")] = [
-    # TIMM
-    "eca_halonext26ts",
-    "swin_base_patch4_window7_224",
-    # TorchBench
-    "yolov3",
 ]
 
 CI_TV_OFF[CI("inductor", training=False, dynamic=True, device="cpu")] = [
-    # TIMM
-    "eca_halonext26ts",
-    "swin_base_patch4_window7_224",
 ]
 
 

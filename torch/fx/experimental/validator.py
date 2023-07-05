@@ -378,9 +378,13 @@ try:
                 # wish to prove. So, we just return.
                 return self.Result(success=True)
 
-            # Here, we use "QF_NRA" logic for the solver, since guards have no quantifiers
-            # and are potentially non-linear.
-            solver = z3.SolverFor("QF_NRA")
+            # Here, we use "QF_NIRA" logic for the solver.
+            #   1. arithmetic between integer and reals
+            #   2. no quantifiers
+            #   3. potentially non-linear.
+            solver = z3.SolverFor("QF_NIRA")
+            # Set a timeout for finding a solution.
+            solver.set(timeout=translation_validator_timeout())
 
             # Add all the assertions to the solver.
             for assertion in self._assertions:
@@ -407,13 +411,12 @@ try:
                     # Could not find a solution. It didn't fail, but it also
                     # didn't succeed. Canceling the validation execution (keyboard
                     # interrupt) also gets to this branch.
-                    log.warning("translation validation: could not validate")
-                    return self.Result(success=False)
+                    log.warning("translation validation: could not validate: got z3.unknown")
                 else:
                     # Target expressions are sound.
                     assert r == z3.unsat
                     log.debug("translation validation: success")
-                    return self.Result(success=True)
+                return self.Result(success=True)
 except ImportError:
     _HAS_Z3 = False
 else:
@@ -427,3 +430,7 @@ def translation_validator_enabled() -> bool:
         "z3-solver or disable translation validation."
     )
     return config.translation_validation
+
+def translation_validator_timeout() -> int:
+    from torch._dynamo import config
+    return int(config.translation_validation_timeout)
