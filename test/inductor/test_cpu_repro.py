@@ -13,6 +13,7 @@ import torch._dynamo
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
+from torch._export import dynamic_dim, export
 from torch._inductor import codecache, config, metrics
 from torch._inductor.codegen.cpp import (
     CppOverrides,
@@ -1984,6 +1985,29 @@ class CPUReproTests(TestCase):
             ],
         )
         self.assertEqual(metrics.generated_kernel_count, 1)
+
+    def test_export_dynamic(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x.cos()
+
+        x = torch.zeros(2, 2, 3)
+
+        ep = export(
+            M(),
+            (x,),
+            constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6],
+            _add_runtime_assertions=False,
+        )
+
+        fn_compiled = compile_fx(
+            ep.graph_module,
+            (x,),
+        )
+        self.assertTrue(torch.allclose(fn_compiled(x)[0], ep(x)))
 
 
 if __name__ == "__main__":

@@ -964,7 +964,13 @@ def compile_fx(
     # TODO: can add logging before/after the call to create_aot_dispatcher_function
     # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
     # once torchdynamo is merged into pytorch
-    fake_mode = detect_fake_mode(example_inputs_) or torch._subclasses.FakeTensorMode(
+    fake_inputs = [
+        node.meta.get("val") for node in model_.graph.nodes if node.op == "placeholder"
+    ]
+    inputs_ = (
+        fake_inputs if all(v is not None for v in fake_inputs) else example_inputs_
+    )
+    fake_mode = detect_fake_mode(inputs_) or torch._subclasses.FakeTensorMode(
         allow_non_fake_inputs=True
     )
     tracing_context = (
@@ -978,7 +984,7 @@ def compile_fx(
             decompositions=decompositions,
             partition_fn=partition_fn,
             keep_inference_input_mutations=True,
-        )(model_, example_inputs_)
+        )(model_, inputs_)
 
 
 def _shape_env_from_inputs(inputs):
