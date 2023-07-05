@@ -1,4 +1,5 @@
 import dataclasses
+import inspect
 import weakref
 import re
 from collections import OrderedDict
@@ -17,17 +18,21 @@ from .exported_program import (
     ExportGraphSignature,
     _process_constraints,
 )
+from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import torch.utils._pytree as pytree
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
+    ShapeEnv,
     StrictMinMaxConstraint,
 )
+
 from torch._dynamo.exc import UserError, UserErrorType
 from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
 
@@ -67,6 +72,25 @@ from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
 #     ]
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
+    if not isinstance(t, torch.Tensor):
+        raise UserError(
+            UserErrorType.DYNAMIC_DIM,
+            f"Expected tensor as input to dynamic_dim but got {type(t)}"
+        )
+
+    if t.dim() < 1:
+        raise UserError(
+            UserErrorType.DYNAMIC_DIM,
+            "Cannot mark 0-dimension tensors to be dynamic"
+        )
+
+    if index >= t.dim():
+        raise UserError(
+            UserErrorType.DYNAMIC_DIM,
+            f"Expected the dimension passed to dynamic_dim to be in the range [0:{t.dim()-1}]"
+            f" but got {index}, which is out of bounds for the given tensor."
+        )
+
     return Constraint(
         weakref.ref(t),
         id(t),
@@ -98,6 +122,9 @@ def export(
     f: Callable,
     args: Tuple[Any],
     constraints: Optional[List[Constraint]] = None,
+    *,
+    _add_runtime_assertions=True,
+    _functionalize_runtime_assertions=False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -116,6 +143,11 @@ def export(
     """
     if constraints is None:
         constraints = []
+
+    if not isinstance(f, torch.nn.Module):
+        for parameter in inspect.signature(f).parameters.values():
+            if parameter.kind == parameter.VAR_KEYWORD:
+                raise UserError(UserErrorType.INVALID_INPUT, "Kwargs to torch.export is not supported")
 
     with torch._dynamo.config.patch(dataclasses.asdict(ExportDynamoConfig())):  # type: ignore[attr-defined]
         try:
@@ -139,7 +171,16 @@ def export(
                     fake_val = node.meta["val"]
                     fake_inps.append(fake_val)
 
-            fake_mode = detect_fake_mode(fake_inps)
+            fake_mode = FakeTensorMode(
+                allow_fallback_kernels=False,
+                allow_non_fake_inputs=True,
+                shape_env=ShapeEnv(
+                    assume_static_by_default=True,
+                ),
+            )
+
+            if detected_fake_mode := detect_fake_mode(fake_inps):
+                fake_mode = detected_fake_mode
 
             fake_args = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args)
 
@@ -149,7 +190,7 @@ def export(
             flat_args, in_spec = pytree.tree_flatten(args)
             out_spec = orig_out_spec = gm_torch_level._out_spec
             # this means it is scalar return value, so will make it tuple
-            if not isinstance(return_val, (list, tuple, dict)):
+            if not isinstance(return_val, (list, tuple)):
                 out_spec = pytree.tree_flatten((return_val,))[1]
 
             orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
@@ -201,6 +242,7 @@ def export(
                 export_graph_signature,
                 flat_args,
             )
+            assert orig_out_spec is not None
             exported_program = ExportedProgram(
                 gm,
                 gm.graph,
@@ -210,7 +252,13 @@ def export(
                 range_constraints,
                 equality_constraints,
             )
-            return exported_program
+
+            if _add_runtime_assertions:
+                exported_program = exported_program._add_runtime_assertions(
+                    functionalize=_functionalize_runtime_assertions,
+                )
+
+            return exported_program.transform(_ReplaceSymSizeOpPass())
 
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))

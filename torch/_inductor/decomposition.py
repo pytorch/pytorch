@@ -60,6 +60,12 @@ def assert_async_msg_decomp(tensor, msg):
     return
 
 
+# Following `assert_async_msg_decomp` and implement as non-op.
+@register_decomposition([aten._functional_assert_async.msg])
+def functional_assert_async_msg_decomp(tensor, msg):
+    return
+
+
 @register_decomposition([aten.clamp])
 @pw_cast_for_opmath
 def clamp(x, min=None, max=None):
@@ -347,6 +353,20 @@ def dequantize_per_tensor_tensor_decomp_impl(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     return (input.to(torch.float32) - zero_point) * scale
+
+
+@register_decomposition(aten._foreach_addcmul.Scalar)
+def _foreach_addcmul_scalar(self, left_tensors, right_tensors, scalar=1):
+    return aten._foreach_add.List(
+        self, aten._foreach_mul.List(left_tensors, right_tensors), alpha=scalar
+    )
+
+
+@register_decomposition(aten._foreach_addcdiv.Scalar)
+def _foreach_addcdiv_scalar(self, left_tensors, right_tensors, scalar=1):
+    return aten._foreach_add.List(
+        self, aten._foreach_div.List(left_tensors, right_tensors), alpha=scalar
+    )
 
 
 @functools.lru_cache(None)

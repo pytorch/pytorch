@@ -11,17 +11,24 @@ from warnings import warn
 from tools.shared.logging_utils import duration_to_str, pluralize
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
+from tools.stats.upload_stats_lib import emit_metric
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 
+# NUM_PROCS_FOR_SHARDING_CALC must remain consistent across all shards of a job
+# to ensure that sharding is consistent, NUM_PROCS is the actual number of procs
+# used to run tests.  If they are not equal, the only consequence should be
+# unequal shards.
+IS_ROCM = os.path.exists("/opt/rocm")
 NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 2
+NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
 THRESHOLD = 60 * 10  # 10 minutes
 
 # See Note [ROCm parallel CI testing]
 # Special logic for ROCm GHA runners to query number of GPUs available.
 # torch.version.hip was not available to check if this was a ROCm self-hosted runner.
 # Must check for ROCm runner in another way. We look for /opt/rocm directory.
-if os.path.exists("/opt/rocm") and not IS_MEM_LEAK_CHECK:
+if IS_ROCM and not IS_MEM_LEAK_CHECK:
     try:
         # This is the same logic used in GHA health check, see .github/templates/common.yml.j2
         lines = (
@@ -58,7 +65,7 @@ class ShardJob:
         self.parallel: List[ShardedTest] = []
 
     def get_total_time(self) -> float:
-        procs = [0.0 for _ in range(NUM_PROCS)]
+        procs = [0.0 for _ in range(NUM_PROCS_FOR_SHARDING_CALC)]
         for test in self.parallel:
             min_index = procs.index(min(procs))
             procs[min_index] += test.get_time()
@@ -91,15 +98,8 @@ def calculate_shards(
     tests: List[str],
     test_file_times: Dict[str, float],
     must_serial: Optional[Callable[[str], bool]] = None,
-    debug: bool = False,
 ) -> List[Tuple[float, List[ShardedTest]]]:
     must_serial = must_serial or (lambda x: True)
-
-    if debug:
-        print(test_file_times)
-        print(tests)
-        print(num_shards)
-        print([x for x in tests if must_serial(x)])
 
     known_tests = [x for x in tests if x in test_file_times]
     unknown_tests: List[str] = [x for x in tests if x not in known_tests]
@@ -124,11 +124,6 @@ def calculate_shards(
     for unknown_test in unknown_tests:
         sharded_jobs[index].serial.append(ShardedTest(unknown_test, 1, 1, None))
         index = (index + 1) % num_shards
-
-    if debug:
-        for j in sharded_jobs:
-            print(j.convert_to_tuple()[1])
-
     return [job.convert_to_tuple() for job in sharded_jobs]
 
 
@@ -265,6 +260,13 @@ def log_time_savings(
         f"Prioritized tests will run about {duration_to_str(max_time_savings_sec)} sooner than they would've otherwise"
     )
 
+    emit_metric(
+        "test_reordering_time_savings",
+        {
+            "time_savings_sec": max_time_savings_sec,
+        },
+    )
+
     # Return value used by tests
     return max_time_savings_sec
 
@@ -315,7 +317,8 @@ def get_reordered_tests(
         )
         return ([], tests)
 
-    # TODO: Would be great to upload these stats to RDS/Rockset!
+    prioritized_test_names = []
+    remaining_test_names = []
     if bring_to_front:
         test_cnt_str = pluralize(len(tests), "test")
         print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
@@ -326,6 +329,16 @@ def get_reordered_tests(
         print(f"The Rest: {remaining_test_names}")
     else:
         print("Didn't find any tests to prioritize")
+
+    emit_metric(
+        "test_reordering_prioritized_tests",
+        {
+            "prioritized_test_cnt": len(bring_to_front),
+            "total_test_cnt": len(tests),
+            "prioritized_tests": prioritized_test_names,
+            "remaining_tests": remaining_test_names,
+        },
+    )
 
     return (bring_to_front, the_rest)
 

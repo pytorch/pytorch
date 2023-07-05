@@ -9,20 +9,24 @@ import warnings
 
 import torch
 
-import torch._dynamo
+import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._inductor import config
+from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
     IS_WINDOWS,
+    TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
+from torch.utils._python_dispatch import TorchDispatchMode
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -112,6 +116,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         "triton.slow_path_cudagraph_asserts": True,
                     }
                 )
+            )
+            self.graph_stack.enter_context(
+                dynamo_config.patch(automatic_dynamic_shapes=True)
             )
             self.device_idx = torch.rand([0], device="cuda").device.index
             warnings.filterwarnings("ignore")
@@ -340,6 +347,53 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # we should not have cudagraph'd the y backward
             new_id = self.get_manager().new_graph_id().id
             self.assertEqual(new_id, 3)
+
+        def _test_unaligned_static_input_impl(self):
+            def fn(x, y):
+                return (x + y,)
+
+            def get_aligned_inputs():
+                return [torch.rand([5, 5], device="cuda") for _ in range(2)]
+
+            mod = make_fx(fn)(*get_aligned_inputs())
+
+            mode = torch._subclasses.FakeTensorMode()
+
+            with mode:
+                inps = [torch.rand([6, 5], device="cuda")[1:] for _ in range(2)]
+
+            compiled_f = compile_fx_inner(mod, inps, num_fixed=1, cudagraphs=True)
+
+            def get_unaligned_inputs():
+                return [torch.rand([6, 5], device="cuda")[1:] for _ in range(2)]
+
+            class CloneCounterMode(TorchDispatchMode):
+                def __init__(self):
+                    self.count = 0
+
+                def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                    kwargs = {} if kwargs is None else kwargs
+                    self.count += func is torch.ops.aten.clone.default
+                    return func(*args, **kwargs)
+
+            for _ in range(3):
+                with CloneCounterMode() as m:
+                    compiled_f(get_unaligned_inputs())
+                    self.assertEqual(m.count, 2)
+
+                    compiled_f(get_aligned_inputs())
+                    self.assertEqual(m.count, 2)
+
+        def test_unaligned_static_input_trees(self):
+            self._test_unaligned_static_input_impl()
+
+        @torch._inductor.config.patch("triton.cudagraph_trees", False)
+        def test_unaligned_static_input_non_trees(self):
+            self._test_unaligned_static_input_impl()
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_unaligned_static_input_no_cudagraphs(self):
+            self._test_unaligned_static_input_impl()
 
         def test_accumulate_multiple_recordings(self):
             def foo(x):
@@ -1125,6 +1179,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
+    if not TEST_CUDA_GRAPH:
+        if __name__ == "__main__":
+            sys.exit(0)
+        raise unittest.SkipTest("cuda graph test is skipped")
 
     if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
         run_tests(needs="filelock")

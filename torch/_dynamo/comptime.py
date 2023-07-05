@@ -228,7 +228,7 @@ class ComptimeContext:
         # TODO: improve print format, current guard format is extremely
         # verbose
         print(
-            "\n".join(f"-{str(guard)}" for guard in sorted(self.__tx.output.guards)),
+            "\n".join(f"{repr(guard)}" for guard in sorted(self.__tx.output.guards)),
             file=file,
         )
 

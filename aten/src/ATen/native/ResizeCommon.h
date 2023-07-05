@@ -4,7 +4,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 template <typename T>
 inline T storage_size_for(ArrayRef<T> size, ArrayRef<T> stride) {
@@ -44,4 +44,4 @@ inline const Tensor& resize_named_tensor_(
       optional_memory_format.value());
   return self;
 }
-}}
+} // namespace at::native

@@ -1998,6 +1998,7 @@ def define_buck_targets(
                 ("", "torch/csrc/jit/python/*.h"),
                 ("", "torch/csrc/jit/frontend/*.h"),
                 ("", "torch/csrc/jit/serialization/*.h"),
+                ("", "torch/csrc/profiler/**/*.h"),
                 ("", "torch/csrc/utils/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
             ] + ([

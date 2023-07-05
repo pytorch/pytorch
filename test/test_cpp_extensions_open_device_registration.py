@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 from typing import Union
+import tempfile
 import unittest
 
 import torch.testing._internal.common_utils as common
@@ -51,6 +52,9 @@ class DummyModule(object):
     def is_available():
         return True
 
+    @staticmethod
+    def current_device():
+        return 0
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
 class TestCppExtensionOpenRgistration(common.TestCase):
@@ -148,6 +152,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                 torch.utils.rename_privateuse1_backend('xxx')
             # register foo module, torch.foo
             torch._register_device_module('foo', DummyModule)
+            self.assertTrue(torch.utils.backend_registration._get_custom_mod_func("device_count")() == 1)
+            with self.assertRaisesRegex(RuntimeError, "Try to call torch.foo"):
+                torch.utils.backend_registration._get_custom_mod_func("func_name_")
             # default set for_tensor and for_module are True, so only set for_storage is True
             torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
             # generator tensor and module can be registered only once
@@ -328,6 +335,28 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             cpu_storage = torch.empty(4, 4).storage()
             foo_storage = torch.serialization.default_restore_location(cpu_storage, 'foo:0')
             self.assertTrue(foo_storage.is_foo)
+            # test tensor MetaData serialization
+            x = torch.empty(4, 4).long()
+            y = x.foo()
+            self.assertFalse(self.module.check_backend_meta(y))
+            self.module.custom_set_backend_meta(y)
+            self.assertTrue(self.module.check_backend_meta(y))
+
+            self.module.custom_serialization_registry()
+            with tempfile.TemporaryDirectory() as tmpdir:
+                path = os.path.join(tmpdir, 'data.pt')
+                torch.save(y, path)
+                z1 = torch.load(path)
+                # loads correctly onto the foo backend device
+                self.assertTrue(z1.is_foo)
+                # loads BackendMeta data correctly
+                self.assertTrue(self.module.check_backend_meta(z1))
+                # cross-backend
+                z2 = torch.load(path, map_location='cpu')
+                # loads correctly onto the cpu backend device
+                self.assertFalse(z2.is_foo)
+                # loads BackendMeta data correctly
+                self.assertFalse(self.module.check_backend_meta(z2))
 
         def test_open_device_storage_resize():
             torch.utils.rename_privateuse1_backend('foo')
@@ -373,6 +402,17 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             finally:
                 torch.foo.FloatStorage = None
 
+        def test_open_device_faketensor():
+            torch.utils.rename_privateuse1_backend('foo')
+            with torch._subclasses.fake_tensor.FakeTensorMode.push():
+                a = torch.empty(1, device="foo")
+                b = torch.empty(1, device="foo:0")
+                result = a + b
+
+        def test_open_device_named_tensor():
+            torch.utils.rename_privateuse1_backend('foo')
+            a = torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])
+
         test_base_device_registration()
         test_before_common_registration()
         test_common_registration()
@@ -386,6 +426,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_serialization()
         test_open_device_storage_resize()
         test_open_device_storage_type()
+        test_open_device_faketensor()
+        test_open_device_named_tensor()
 
 
 if __name__ == "__main__":
