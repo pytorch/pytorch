@@ -238,7 +238,21 @@ class DDPOptimizer:
                         buckets[0].param_ids.append(id(param))
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
-                if maybe_param.requires_grad and not self._ignore_parameter(
+                if isinstance(maybe_param, torch.fx.GraphModule):
+                    # This indicates presence of a higher order op. For now, we
+                    # have no way to break the higher order op into two buckets.
+                    # Allowing higher order ops in the graph also requires
+                    # changes in the split_module, becuase graph splitter
+                    # currently assumes that all the args of all ops are
+                    # tensors, but in the case of higher order ops, it could be
+                    # a graph module. As a workaround, we are shortcircuiting
+                    log.info(
+                        "DDPOptimizer backend: Found a higher order op in the graph. "
+                        "Falling back to having one bucket for the entire model. This "
+                        "can result in performance degradation"
+                    )
+                    return self.backend_compile_fn(gm, example_inputs)
+                elif maybe_param.requires_grad and not self._ignore_parameter(
                     maybe_param
                 ):
                     buckets[0].size += maybe_param.untyped_storage().nbytes()
