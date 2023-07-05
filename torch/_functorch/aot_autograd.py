@@ -985,8 +985,8 @@ class GraphSignature:
 
     backward_signature: Optional[BackwardSignature]
 
-    # If assertion functionalization is enabled, an extra dependency token will
-    # be returned.
+    # If assertion functionalization is enabled and there is any assertion
+    # in the graph, an extra dependency token will be returned.
     asserts_dep_token: Optional[GraphOutputName] = None
 
     @classmethod
@@ -1490,16 +1490,8 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
             out = normalize_as_list(f(*args))
     return out
 
+
 def aot_dispatch_base_graph(
-    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
-) -> Callable:
-    fx_g, _ = _aot_dispatch_base_graph(
-        flat_fn=flat_fn, flat_args=flat_args, aot_config=aot_config, fw_metadata=fw_metadata
-    )
-    return fx_g
-
-
-def _aot_dispatch_base_graph(
     flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta]:
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
@@ -1542,8 +1534,8 @@ def _aot_dispatch_base_graph(
 
 def aot_dispatch_base(
     flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
-) -> Callable:
-    fw_module, fw_metadata = _aot_dispatch_base_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
+) -> Tuple[Callable, ViewAndMutationMeta]:
+    fw_module, fw_metadata = aot_dispatch_base_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = torch._C._DisableAutocast if disable_amp else nullcontext
@@ -1588,7 +1580,7 @@ def aot_dispatch_base(
         disable_amp=disable_amp
     )
 
-    return compiled_fn
+    return compiled_fn, fw_metadata
 
 
 # Returns the number of detected copy_
@@ -2079,7 +2071,7 @@ def aot_wrapper_dedupe(
     *,
     compiler_fn,
     fw_metadata,
-):
+) -> Tuple[Callable, ViewAndMutationMeta]:
     # Use information about whether or not flat_fn mutates its arguments
     # or not to handle dupe args
 
@@ -2255,7 +2247,7 @@ fw_metadata={str(fw_metadata)}
 
     debugged_compiled_fn._boxed_call = True
 
-    return debugged_compiled_fn
+    return debugged_compiled_fn, fw_metadata
 
 # This layer handles the situation where you have two inputs that alias each other,
 # and one of the inputs is mutated.
@@ -2275,7 +2267,7 @@ def aot_wrapper_synthetic_base(
     # the synthetic base code prohibits more cases in the autograd case than the inference case.
     needs_autograd: bool,
     compiler_fn,
-):
+) -> Tuple[Callable, ViewAndMutationMeta]:
     is_inference = not needs_autograd
     flat_args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
         flat_args, fw_metadata.input_info, is_inference=is_inference,
@@ -2380,7 +2372,7 @@ fw_metadata={str(fw_metadata)}
             return user_outs
         return outs
 
-    return wrapped_compiled_fn
+    return wrapped_compiled_fn, updated_fw_metadata
 
 
 def describe_input(i, aot_config):
@@ -2650,19 +2642,11 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
         return traced_forward, (*args, fwd_seed, fwd_base_offset)
 
-def aot_dispatch_autograd_graph(
-    flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
-) -> Callable:
-    fx_g, _ = _aot_dispatch_autograd_graph(
-        flat_fn=flat_fn, flat_args=flat_args, aot_config=aot_config, fw_metadata=fw_metadata,
-    )
-    return fx_g
-
 # Has the precondition that there
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
 # the same storage, so long as they have separate TensorImpls.)
-def _aot_dispatch_autograd_graph(
+def aot_dispatch_autograd_graph(
     flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta]:
     # traced_tangents corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
@@ -2706,10 +2690,10 @@ def _aot_dispatch_autograd_graph(
 
 def aot_dispatch_autograd(
     flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
-) -> Callable:
-    fx_g, fw_metadata = _aot_dispatch_autograd_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
+) -> Tuple[Callable, ViewAndMutationMeta]:
+    fx_g, fw_metadata = aot_dispatch_autograd_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
-    # Copied from _aot_dispatch_autograd_graph.
+    # Copied from aot_dispatch_autograd_graph.
     traced_tangents = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
         fw_metadata.traced_tangents,
@@ -3125,7 +3109,7 @@ def aot_dispatch_autograd(
     )
 
     if not config.debug_assert:
-        return compiled_function
+        return compiled_function, fw_metadata
 
     flat_requires_grad = [
         a.requires_grad if isinstance(a, Tensor) else None for a in flat_args
@@ -3154,7 +3138,7 @@ def aot_dispatch_autograd(
 
         return compiled_function(*args)
 
-    return debug_compiled_function
+    return debug_compiled_function, fw_metadata
 
 
 @dynamo_timed
@@ -3322,7 +3306,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
         # You can put more passes here
 
         with maybe_enable_functionalize_asserts:
-            compiled_fn = compiler_fn(
+            compiled_fn, fw_metadata = compiler_fn(
                 flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata,
             )
         if aot_config.is_export:
