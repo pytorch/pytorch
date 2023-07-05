@@ -147,6 +147,22 @@ static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vec
   }
 }
 
+static void gen_all_subsets(
+    std::vector<std::vector<int64_t>>& out,
+    int64_t n,
+    unsigned i,
+    std::vector<int64_t> curr) {
+  // generate all subsets of set {0,...,n - 1} through backtracking
+  if (i == n) {
+    out.push_back(curr);
+  } else {
+    curr.push_back(i);
+    gen_all_subsets(out, n, i + 1, curr);
+    curr.pop_back();
+    gen_all_subsets(out, n, i + 1, curr);
+  }
+}
+
 static void slice_test(const std::vector<int64_t>& size, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
   // Arrange
   const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
@@ -2518,6 +2534,217 @@ TEST_F(VulkanAPITest, hardswish_) {
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, masked_fill_invalidinputs_exceptions) {
+  // Arrange: Vulkan masked_fill expects inputs of dim <= 4
+  {
+    const auto in_cpu =
+        at::rand({3, 5, 2, 3, 2}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto mask_cpu =
+        at::randint(0, 2, {2, 3, 2}, at::device(at::kCPU).dtype(at::kBool));
+
+    // Act
+    EXPECT_THROW(
+        {
+          const auto out_vulkan =
+              in_cpu.vulkan().masked_fill(mask_cpu.vulkan(), -7.0f);
+          ;
+        },
+        ::c10::Error);
+  }
+
+  // Arrange: Vulkan masked_fill expects mask of dim <= 4
+  {
+    const auto in_cpu =
+        at::rand({2, 3, 2}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto mask_cpu = at::randint(
+        0, 2, {3, 5, 2, 3, 2}, at::device(at::kCPU).dtype(at::kBool));
+
+    // Act
+    EXPECT_THROW(
+        {
+          const auto out_vulkan =
+              in_cpu.vulkan().masked_fill(mask_cpu.vulkan(), -7.0f);
+          ;
+        },
+        ::c10::Error);
+  }
+
+  // Arrange: shapes of input tensor and mask tensor should be broadcastable
+  {
+    const auto in_cpu =
+        at::rand({2, 3, 2}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto mask_cpu =
+        at::randint(0, 2, {3, 3, 2}, at::device(at::kCPU).dtype(at::kBool));
+
+    // Act
+    EXPECT_THROW(
+        {
+          const auto out_vulkan =
+              in_cpu.vulkan().masked_fill(mask_cpu.vulkan(), -7.0f);
+          ;
+        },
+        ::c10::Error);
+  }
+
+  // Arrange: value should be a 0-dimensional value tensor or a scalar
+  {
+    const auto in_cpu =
+        at::rand({2, 3, 2}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto mask_cpu =
+        at::randint(0, 2, {2, 3, 2}, at::device(at::kCPU).dtype(at::kBool));
+
+    // Act
+    EXPECT_THROW(
+        {
+          const auto out_vulkan =
+              in_cpu.vulkan().masked_fill(mask_cpu.vulkan(), at::rand({1, 2}));
+          ;
+        },
+        ::c10::Error);
+  }
+}
+
+void print_shape(const std::vector<int64_t>& shape) {
+  for (const auto& num : shape) {
+    std::cout << num << " ";
+  }
+}
+
+void test_masked_fill_scalar(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef mask_shape) {
+  c10::InferenceMode mode;
+
+  /**
+   * We test masked_fill by considering all possible broadcasting cases of
+   * input_shape and mask_shape. The given input_shape and mask_shape are
+   * identical, e.g. both are equal to [3, 5, 2, 3]. First we truncate all
+   * possible proceeding dimensions of input_shape and mask_shape respectively.
+   * Denote the results as curr_input_shape and curr_mask_shape, e.g.
+   * curr_input_shape = [5, 2, 3] and curr_mask_shape = [2, 3]. Then for both
+   * curr_input_shape and curr_mask_shape we generate all possible subsets of
+   * the indices and set the corresponding elements to 1 for each subset. For
+   * example, for curr_input_shape = [5, 2, 3], a possible input_idx_subset =
+   * [0, 2]. We set the 0th and 2nd elements of curr_input_shape to be 1, then
+   * curr_input_shape = [1, 2, 1]. Similarly for curr_mask_shape = [2, 3], a
+   * possible mask_idx_subset = [0], then the updated curr_mask_shape = [1, 3].
+   * In the end, we test masked_fill with the combinations of curr_input_shape
+   * and curr_mask_shape. In the example above, an output tensor of shape [1, 2,
+   * 3] will be generated.
+   */
+  const size_t input_dim = input_shape.size();
+  const size_t mask_dim = mask_shape.size();
+  for (int input_shape_id = input_dim - 1; input_shape_id >= 0;
+       --input_shape_id) {
+    // truncate input_shape by the proceeding dimensitions
+    auto curr_input_shape =
+        input_shape.slice(input_shape_id, input_dim - input_shape_id);
+
+    // generate all possible subsets of numbers between 0 and input_dim -
+    // input_shape_id - 1 (inclusive)
+    std::vector<std::vector<int64_t>> input_indices_subsets;
+    std::vector<int64_t> curr_input_indices;
+    gen_all_subsets(
+        input_indices_subsets,
+        input_dim - input_shape_id,
+        0,
+        curr_input_indices);
+
+    for (auto input_idx_subset : input_indices_subsets) {
+      // set the elements at indices of the subset of curr_input_shape to 1
+      auto tmp_curr_input_shape = curr_input_shape.vec();
+      for (auto input_idx : input_idx_subset) {
+        tmp_curr_input_shape[input_idx] = 1;
+      }
+
+      for (int mask_shape_id = mask_dim - 1; mask_shape_id >= 0;
+           --mask_shape_id) {
+        // truncate amsk_shape by the proceeding dimensitions
+        auto curr_mask_shape =
+            mask_shape.slice(mask_shape_id, mask_dim - mask_shape_id);
+
+        // generate all possible subsets of numbers between 0 and mask_dim -
+        // mask_shape_id - 1 (inclusive)
+        std::vector<std::vector<int64_t>> mask_indices_subsets;
+        std::vector<int64_t> curr_mask_indices;
+        gen_all_subsets(
+            mask_indices_subsets,
+            mask_dim - mask_shape_id,
+            0,
+            curr_mask_indices);
+
+        for (auto mask_idx_subset : mask_indices_subsets) {
+          // set the elements at indices of the subset of curr_mask_shape to 1
+          auto tmp_curr_mask_shape = curr_mask_shape.vec();
+          for (auto mask_idx : mask_idx_subset) {
+            tmp_curr_mask_shape[mask_idx] = 1;
+          }
+
+          at::Tensor in_cpu = at::rand(
+              tmp_curr_input_shape, at::device(at::kCPU).dtype(at::kFloat));
+          at::Tensor mask_cpu = at::randint(
+              0, 2, tmp_curr_mask_shape, at::device(at::kCPU).dtype(at::kBool));
+          at::Tensor out_cpu = in_cpu.masked_fill(mask_cpu, -7.0f);
+
+          at::Tensor in_vulkan = in_cpu.vulkan();
+          at::Tensor mask_vulkan = mask_cpu.vulkan();
+          at::Tensor out_vulkan = in_vulkan.masked_fill(mask_vulkan, -7.0f);
+          const bool check = almostEqual(out_cpu, out_vulkan.cpu());
+
+          if (!check) {
+            showRtol(out_cpu, out_vulkan.cpu());
+            std::cout << "Masked_fill test failed when input is of shape [";
+            print_shape(tmp_curr_input_shape);
+            std::cout << "], and mask of shape [";
+            print_shape(tmp_curr_mask_shape);
+            std::cout << "]" << std::endl;
+          }
+
+          ASSERT_TRUE(check);
+        }
+      }
+    }
+  }
+}
+
+TEST_F(VulkanAPITest, masked_fill_scalar_mult4ch) {
+  test_masked_fill_scalar({3, 4, 5, 7}, {3, 4, 5, 7});
+}
+
+TEST_F(VulkanAPITest, masked_fill_scalar_nonmult4ch) {
+  test_masked_fill_scalar({3, 5, 2, 3}, {3, 5, 2, 3});
+}
+
+void test_masked_fill_tensor(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef mask_shape) {
+  c10::InferenceMode mode;
+
+  at::Tensor in_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  at::Tensor mask_cpu =
+      at::randint(0, 2, mask_shape, at::device(at::kCPU).dtype(at::kBool));
+  at::Tensor out_cpu = in_cpu.masked_fill(mask_cpu, at::scalar_tensor(-7.0f));
+  at::Tensor in_vulkan = in_cpu.vulkan();
+  at::Tensor mask_vulkan = mask_cpu.vulkan();
+  at::Tensor out_vulkan =
+      in_vulkan.masked_fill(mask_vulkan, at::scalar_tensor(-7.0f));
+  const bool check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, masked_fill_tensor_mult4ch) {
+  test_masked_fill_tensor({3, 4, 2, 3}, {1, 4, 1, 1});
+}
+
+TEST_F(VulkanAPITest, masked_fill_tensor_nonmult4ch) {
+  test_masked_fill_tensor({3, 5, 2, 3}, {1, 5, 1, 1});
 }
 
 TEST_F(VulkanAPITest, max_pool2d) {
