@@ -143,7 +143,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 
         return callback
 
-    def get_prehook(stack_, seq_id):
+    def get_prehook(stack_, seq_nr):
         def prehook(grad_output):
             global callback_set
 
@@ -154,7 +154,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
                 callback_set = True
 
             fx_traceback.set_stack_trace(stack_)
-            fx_traceback.set_bwd_seq_id(seq_id)
+            fx_traceback.set_bwd_seq_nr(seq_nr)
 
         return prehook
 
@@ -166,7 +166,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
     for node in iter_graph(roots):
         forward_node_stack = node.metadata.get("traceback_", [])
         node.register_prehook(get_prehook(forward_node_stack,
-                              node.sequence_nr()))
+                              node._sequence_nr()))
 
         special_stack = forward_node_stack.copy()
         special_stack.append(

@@ -771,25 +771,25 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             )
 
         # Testing aot full graph
-        seq_id_list = []
-        fwd_seq_id_set = set()
-        bwd_seq_id_set = set()
+        seq_nr_list = []
+        fwd_seq_nr_set = set()
+        bwd_seq_nr_set = set()
         for node in fx_g.graph.nodes:
             if "call_" in node.op:
-                seq_id = node.meta.get("seq_id", -1)
-                if seq_id >= 0:
-                    if not seq_id_list or seq_id_list[-1] < seq_id:
-                        seq_id_list.append(seq_id)
-                        fwd_seq_id_set.add(seq_id)
-                    elif seq_id_list[-1] > seq_id:
-                        bwd_seq_id_set.add(seq_id)
+                seq_nr = node.meta.get("seq_nr", -1)
+                if seq_nr >= 0:
+                    if not seq_nr_list or seq_nr_list[-1] < seq_nr:
+                        seq_nr_list.append(seq_nr)
+                        fwd_seq_nr_set.add(seq_nr)
+                    elif seq_nr_list[-1] > seq_nr:
+                        bwd_seq_nr_set.add(seq_nr)
 
         # There are 5 common ops in this test:  conv, bn, relu, flatten, fc
         # This test can't isolate the fwd component of loss from the
         # bwd component, so we don't expect to see loss in the common ops
-        common_ops = fwd_seq_id_set.intersection(bwd_seq_id_set)
+        common_ops = fwd_seq_nr_set.intersection(bwd_seq_nr_set)
         self.assertTrue(
-            len(fwd_seq_id_set) > 0 and len(bwd_seq_id_set) > 0 and len(common_ops) >= 5
+            len(fwd_seq_nr_set) > 0 and len(bwd_seq_nr_set) > 0 and len(common_ops) >= 5
         )
 
 

@@ -5,7 +5,7 @@ from typing import List, Any, Dict
 from ._compatibility import compatibility
 
 __all__ = ['preserve_node_meta', 'has_preserved_node_meta',
-           'set_stack_trace', 'set_bwd_seq_id', 'format_stack',
+           'set_stack_trace', 'set_bwd_seq_nr', 'format_stack',
            'set_current_meta', 'get_current_meta']
 
 current_meta: Dict[str, Any] = {}
@@ -34,14 +34,14 @@ def set_stack_trace(stack : List[str]):
 
 
 @compatibility(is_backward_compatible=False)
-def set_bwd_seq_id(seq_id):
+def set_bwd_seq_nr(seq_nr):
     global current_meta
 
     if should_preserve_node_meta:
-        # The seq_id of the backward ops are saved
+        # The seq_nr of the backward ops are saved
         # in the autograd::Node data structure at the time
         # the Node is created
-        current_meta["seq_id"] = seq_id
+        current_meta["seq_nr"] = seq_nr
 
 
 @compatibility(is_backward_compatible=False)
@@ -68,7 +68,7 @@ def set_current_meta(meta : Dict[str, Any]):
         try:
             current_meta = meta
             # Record sequence ID right before the node is executed
-            current_meta["seq_id"] = get_sequence_nr()
+            current_meta["seq_nr"] = get_sequence_nr()
             yield
         finally:
             current_meta = saved_meta
