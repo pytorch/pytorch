@@ -6,6 +6,7 @@ import torch
 
 __all__ = [
     "SparseSemiStructuredTensor",
+    "to_sparse_semi_structured",
 ]
 
 _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
