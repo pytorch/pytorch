@@ -105,6 +105,7 @@ from .optimizer import OptimizerVariable
 from .tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
+    TensorSubclassVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
@@ -236,7 +237,11 @@ class VariableBuilder:
         return None
 
     def _can_lift_attrs_to_inputs(self, vt):
-        if type(vt) in [TensorVariable, UserDefinedObjectVariable]:
+        if type(vt) in [
+            TensorVariable,
+            TensorWithTFOverrideVariable,
+            UserDefinedObjectVariable,
+        ]:
             return True
         return False
 
@@ -580,6 +585,8 @@ class VariableBuilder:
             #     source=self.source,
             #     guards=self.make_guards(GuardBuilder.ID_MATCH),
             # )
+        elif value in config.traceable_tensor_subclasses:
+            return TensorSubclassVariable(value, source=self.source)
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):

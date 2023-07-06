@@ -7,6 +7,7 @@ import sympy
 
 import torch.fx
 import torch.random
+
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables
@@ -939,3 +940,22 @@ class FakeItemVariable(TensorVariable):
     @classmethod
     def from_tensor_variable(cls, tensor_variable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
+
+
+class TensorSubclassVariable(VariableTracker):
+    def __init__(self, value, *args, **kwargs):
+        self.value = value
+        super().__init__(*args, **kwargs)
+
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        if len(args) == 1 and isinstance(args[0], TensorVariable):
+            return TensorWithTFOverrideVariable(
+                args[0],
+                args[0].source,
+                self.value.__torch_function__.__func__,
+                self.value,
+            )
+
+        return super().call_function(tx, args, kwargs)
