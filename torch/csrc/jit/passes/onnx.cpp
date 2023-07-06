@@ -478,15 +478,18 @@ void NodeToONNX(
         onnx_registration.attr("registry")
             .attr("is_registered_op")("prim::PythonOp", opset_version)
             .cast<bool>();
+    py::bool_ is_autograd_inlining_enabled =
+        py::cast<bool>(onnx_globals.attr("GLOBALS").attr("autograd_inlining"));
     if (!py::hasattr(pyobj, "symbolic") && !is_registered_op) {
       // Inline the subgraph within the prim::PythonOp unless
       // either of these conditions are satisfied
       // 1. The torch.autograd.Function class of this node object has `symbolic`
       // method defined.
       // 2. Custom export symbolic is registered for prim::PythonOp.
-      if (operator_export_type == ::torch::onnx::OperatorExportTypes::ONNX ||
-          operator_export_type ==
-              ::torch::onnx::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
+      if ((operator_export_type == ::torch::onnx::OperatorExportTypes::ONNX ||
+           operator_export_type ==
+               ::torch::onnx::OperatorExportTypes::ONNX_ATEN_FALLBACK) &&
+          (py::cast<bool>(is_autograd_inlining_enabled))) {
         try {
           inlineAutograd(op);
         } catch (const std::exception& ex) {
