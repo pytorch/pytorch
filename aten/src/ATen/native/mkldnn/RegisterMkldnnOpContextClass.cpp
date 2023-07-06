@@ -57,8 +57,6 @@ TORCH_LIBRARY(mkldnn, m) {
       "mkldnn::_reorder_convolution_transpose_weight(Tensor self, int[2] padding=0, int[2] output_padding=0, int[2] stride=1, int[2] dilation=1, int groups=1, int[]? input_size=None) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
       "mkldnn::_reorder_linear_weight(Tensor self, int? batch_size=None) -> Tensor Y"));
-  m.def(TORCH_SELECTIVE_SCHEMA(
-      "mkldnn::_reorder_convolution_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1, int[]? input_size=None) -> Tensor Y"));
   m.def("_is_mkldnn_bf16_supported", &is_mkldnn_bf16_supported);
 }
 
