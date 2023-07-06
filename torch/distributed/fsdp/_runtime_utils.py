@@ -24,6 +24,7 @@ from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed import get_backend, get_world_size
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
+from torch.distributed.distributed_c10d import _get_group_tag
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
     _FSDPState,
@@ -42,7 +43,6 @@ from torch.distributed.fsdp.flat_param import (
     HandleShardingStrategy,
     HandleTrainingState,
     RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES,
-    _FSDP_FULL_PREC_IN_EVAL,
 )
 from torch.distributed.utils import (
     _apply_to_tensors,
@@ -58,6 +58,7 @@ log = logging.getLogger(__name__)
 HOMOGENEOUS_ATTR_NAMES = (
     "_use_orig_params",
     "limit_all_gathers",
+    "_use_full_prec_in_eval",
 )
 
 
@@ -227,9 +228,16 @@ def _init_device_mesh(
         return None
     if get_backend() == "fake" or not root_state.compute_device:
         return None
+
     device_type = root_state.compute_device.type
     mesh_tensor = torch.arange(get_world_size(root_state.process_group))
-    device_mesh = DeviceMesh(device_type, mesh_tensor)
+    device_mesh = DeviceMesh(device_type, mesh_tensor, _init_process_groups=False)
+    device_mesh._dim_group_infos = [
+        (
+            _get_group_tag(root_state.process_group),
+            mesh_tensor.tolist(),
+        )
+    ]
     return device_mesh
 
 
@@ -252,10 +260,6 @@ def _share_state_and_init_handle_attrs(
     root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
     root_state._device_mesh = _init_device_mesh(root_state)
-    import os
-    root_state._full_prec_in_eval = (
-        os.environ.get(_FSDP_FULL_PREC_IN_EVAL, "") == "1"
-    )
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
@@ -298,7 +302,6 @@ def _share_state_and_init_handle_attrs(
         # Stream for pre-unshard logic, namely allocations and writes for CPU
         # offloading (H2D copy) and mixed precision (low precision cast).
         fsdp_state._streams_pre_unshard = root_state._streams_pre_unshard
-        fsdp_state._full_prec_in_eval = root_state._full_prec_in_eval
         # Default stream for computation
         fsdp_state._streams_default = root_state._streams_default
         fsdp_state._exec_order_data = root_state._exec_order_data
@@ -653,7 +656,7 @@ def _root_cast_forward_input(
     state: _FSDPState, module: torch.nn.Module, args, kwargs
 ) -> Tuple[Any, Any]:
     should_cast_forward_inputs = (
-        (module.training or not state._full_prec_in_eval)
+        (module.training or not state._use_full_prec_in_eval)
         and all(not handle._force_full_precision for handle in state._handles)
     ) and state.mixed_precision.cast_root_forward_inputs
 

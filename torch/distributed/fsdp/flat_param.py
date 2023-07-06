@@ -89,7 +89,7 @@ _FSDP_SKIP_WRITEBACK_CHECK = "FSDP_SKIP_WRITEBACK_CHECK"
 
 # Env var toggling whether when model is in .eval() mode, should we run in fp32
 # or the reduced precision.
-_FSDP_FULL_PREC_IN_EVAL = "FSDP_FULL_PREC_IN_EVAL"
+_FSDP_USE_FULL_PREC_IN_EVAL = "FSDP_USE_FULL_PREC_IN_EVAL"
 
 # Some value to set padding in tensors to for debuggability
 _FLAT_PARAM_PADDING_VALUE = 42
@@ -479,8 +479,8 @@ class FlatParamHandle:
         self._skip_writeback_check = (
             os.environ.get(_FSDP_SKIP_WRITEBACK_CHECK, "") == "1"
         )
-        self._full_prec_in_eval = (
-            os.environ.get(_FSDP_FULL_PREC_IN_EVAL, "") == "1"
+        self._use_full_prec_in_eval = (
+            os.environ.get(_FSDP_USE_FULL_PREC_IN_EVAL, "") == "1"
         )
         if self._skip_writeback_check:
             _warn_skip_writeback_check(
@@ -2472,7 +2472,7 @@ class FlatParamHandle:
             self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
             or
             # Also disable mixed precision in model eval mode, if configured
-            (not self._fully_sharded_module.training and self._full_prec_in_eval)
+            (not self._fully_sharded_module.training and self._use_full_prec_in_eval)
         )
 
 

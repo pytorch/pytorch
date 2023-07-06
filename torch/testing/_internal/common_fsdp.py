@@ -348,8 +348,6 @@ class TransformerWithSharedParams(FSDPTestModel):
                 auto_wrap_policy=auto_wrap_policy,
                 **fsdp_kwargs,
             )
-            for fsdp_module in FSDP.fsdp_modules(fsdp_model):
-                mp = fsdp_module.mixed_precision
             if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
                 fsdp_model = fsdp_model.cuda()
             return fsdp_model
