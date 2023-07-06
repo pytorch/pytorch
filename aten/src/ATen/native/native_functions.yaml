@@ -1899,6 +1899,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: cumprod_out
+    MPS: cumprod_out_mps
 
 - func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator

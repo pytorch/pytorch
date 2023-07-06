@@ -66,7 +66,6 @@ def mps_ops_grad_modifier(ops):
 
         # Unimplemented ops
         '__getitem__': [torch.float16],
-        'prod': [torch.float32],  # The operator 'aten::cumprod.out'
         'sgn': [torch.float16, torch.float32],
         '_segment_reduce': [torch.float16, torch.float32],
         'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
@@ -337,8 +336,10 @@ def mps_ops_modifier(ops):
         'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
         # Unsupported dtypes
         'cumsum': [torch.int64],
+        'cumprod': [torch.int64],
         'cumulative_trapezoid': [torch.int64],
         'masked.cumsum': [torch.int64],
+        'masked.cumprod': [torch.int64],
     }
 
     MACOS_AFTER_13_1_XFAILLIST = {
@@ -405,7 +406,6 @@ def mps_ops_modifier(ops):
         'cholesky_solve': None,
         'cummax': None,
         'cummin': None,
-        'cumprod': None,
         'digamma': None,
         'erfc': None,
         'erfinv': None,
@@ -459,7 +459,6 @@ def mps_ops_modifier(ops):
         'lu': None,
         'lu_solve': None,
         'lu_unpack': None,
-        'masked.cumprod': None,
         'masked.median': None,
         'matrix_exp': None,
         'mode': None,
@@ -3681,6 +3680,75 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(y, cpu_y)
 
         [helper(dtype) for dtype in [torch.float32, torch.int16, torch.int32, torch.uint8]]
+
+    def test_cumsum_backward(self):
+        t = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps", dtype=torch.float).detach().requires_grad_()
+        t_cpu = torch.tensor([1.0, 2.0, 3.0, 4.0], device="cpu", dtype=torch.float).detach().requires_grad_()
+
+        gradient=torch.full_like(t, 2)
+        gradient_cpu=torch.full_like(t_cpu, 2)
+        t.cumsum(0).backward(gradient=gradient)
+        t_cpu.cumsum(0).backward(gradient=gradient_cpu)
+        self.assertEqual(
+            t.grad.cpu(),
+            t_cpu.grad
+        )
+
+    def test_cumprod_all_dtypes(self):
+        def helper(dtype):
+            t = torch.tensor([1, 1, 1, 1], device="mps", dtype=dtype)
+            t_cpu = torch.tensor([1, 1, 1, 1], device="cpu")
+
+            a = t.cumprod(0, dtype=dtype)
+            a_cpu = t_cpu.cumprod(0, dtype=dtype)
+
+            self.assertEqual(a.cpu(), a_cpu)
+        [helper(dtype) for dtype in [torch.int8, torch.int16, torch.int32, torch.float32]]
+
+        try:
+            helper(torch.int64)
+        except Exception as e:
+            e_string = str(e)
+            self.assertEqual(e_string, "MPS does not support cumprod op with int64 input. Support has been added in macOS 13.3")
+
+    def test_cumprod_minus_one_axis(self):
+        def helper(dtype):
+            # Test with axis -1
+            cpu_x = None
+            if(dtype == torch.float32):
+                cpu_x = torch.randn(10, 3, device='cpu', dtype=torch.float32)
+            else:
+                cpu_x = torch.randint(0, 20, (10, 3), device='cpu', dtype=torch.float32)
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_y = cpu_x.cumprod(-1)
+            y = x.cumprod(-1)
+
+            self.assertEqual(y, cpu_y)
+
+        [helper(dtype) for dtype in [torch.float32, torch.int16, torch.int32, torch.uint8]]
+
+    def test_cumprod_backward_single_derivative(self):
+        t = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps", dtype=torch.float).detach().requires_grad_()
+        t_cpu = torch.tensor([1.0, 2.0, 3.0, 4.0], device="cpu", dtype=torch.float).detach().requires_grad_()
+
+        gradient=torch.full_like(t, 2)
+        gradient_cpu=torch.full_like(t_cpu, 2)
+        self.assertEqual(
+            torch.autograd.grad(t.cumprod(0), t, grad_outputs=gradient, create_graph=False),
+            torch.autograd.grad(t_cpu.cumprod(0), t_cpu, grad_outputs=gradient_cpu, create_graph=False)
+        )
+
+    def test_cumprod_backward_multiple_derivative(self):
+        t = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps", dtype=torch.float).detach().requires_grad_()
+        t_cpu = torch.tensor([1.0, 2.0, 3.0, 4.0], device="cpu", dtype=torch.float).detach().requires_grad_()
+        
+        gradient=torch.full_like(t, 2)
+        gradient_cpu=torch.full_like(t_cpu, 2)
+        self.assertEqual(
+            torch.autograd.grad(t.cumprod(0), t, grad_outputs=gradient, create_graph=True),
+            torch.autograd.grad(t_cpu.cumprod(0), t_cpu, grad_outputs=gradient_cpu, create_graph=True)
+        )
 
     def test_median_int16(self):
         def helper(shape, dtype):
@@ -7567,6 +7635,13 @@ class TestNLLLoss(TestCaseMPS):
         self.assertEqual(x.cumsum(0), x.cumsum(-2))
         self.assertRaises(IndexError, lambda: x.cumsum(2))
         self.assertRaises(IndexError, lambda: x.cumsum(-3))
+
+    def test_cumprod_dim_check(self):
+        x = torch.rand((3, 3), device="mps")
+        self.assertEqual(x.cumprod(1), x.cumprod(-1))
+        self.assertEqual(x.cumprod(0), x.cumprod(-2))
+        self.assertRaises(IndexError, lambda: x.cumprod(2))
+        self.assertRaises(IndexError, lambda: x.cumprod(-3))
 
 
 class TestTopK(TestCase):
