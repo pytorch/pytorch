@@ -95,7 +95,7 @@ class OutputGraphState(NamedTuple):
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
-    tensor_weakref_to_sizes_strides_offset: WeakIdKeyDictionary
+    tensor_weakref_to_sizes_strides: WeakIdKeyDictionary
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
@@ -230,7 +230,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
-        self.tensor_weakref_to_sizes_strides_offset: WeakIdKeyDictionary = {}
+        self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(
@@ -432,7 +432,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
-            dict(self.tensor_weakref_to_sizes_strides_offset),
+            dict(self.tensor_weakref_to_sizes_strides),
         )
         self.timestamp += 1
         return state
@@ -448,7 +448,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.param_name_to_source,
             self.side_effects,
             self.timestamp,
-            self.tensor_weakref_to_sizes_strides_offset,
+            self.tensor_weakref_to_sizes_strides,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
         self.tracing_context.module_context.restore_graphstate(module_state)
@@ -1041,16 +1041,19 @@ class SubgraphTracer(fx.Tracer):
 
         # SubgraphTracers can be nested. See NOTE [HigherOrderOperator tracing design]
         self.parent = parent
-        # A list of proxies that exist in the graph being traced. We use this
-        # list to determine that, when tracing the body function of a HigherOrderOperator,
-        # if a new proxy is actually a free variable.
-        self.seen_proxies = set({})
-        # A list of previously free variables that we lifted to being inputs of
-        # the graph. If we are tracing a HigherOrderOperator's body_fn, then we
-        # need to keep track of this so we can rewrite the HigherOrderOperator
-        # call using the traced body_fn. This is a OrderedDict (instead of set)
-        # so that we can maintain the order of args for the HigherOrderOperator
-        # call. The values are None.
+        # A dict mapping previously free variables (Proxy objects)
+        # to new Proxy objects that wrap inputs to this subgraph.
+        #
+        # This dict serves two purposes:
+        # - Proxies are associatd with VariableTrackers. If we see
+        # the same VariableTracker twice (and it is a free variable),
+        # then we want to use the same Proxy in the current subgraph to
+        # record the tracing.
+        # - If we are tracing a HigherOrderOperator's body_fn, then we
+        # need to keep track of what free variables were lifted so we can
+        # rewrite the HigherOrderOperator call using the traced body_fn.
+        # This is a OrderedDict so that we can
+        # maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = collections.OrderedDict()
 
     def create_proxy(
@@ -1102,14 +1105,12 @@ class SubgraphTracer(fx.Tracer):
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Proxy):
                     new_args.append(arg)
-                elif arg in self.seen_proxies:
+                elif arg.tracer == self:
                     new_args.append(arg)
                 elif not hasattr(arg, "node"):
                     new_args.append(arg)
                 elif "saved_tensor_marked" in arg.node.meta:
                     new_args.append(arg)
-                elif arg.node.name in self.input_name_to_proxy:
-                    new_args.append(self.input_name_to_proxy[arg.node.name])
                 else:
                     # Create a new input for this arg, and replace the current arg
                     # with the new arg
@@ -1151,7 +1152,6 @@ class SubgraphTracer(fx.Tracer):
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
         rv.node.stack_trace = "".join(msgs)
 
-        self.seen_proxies.add(rv)
         return rv
 
     def create_node(self, *args, **kwargs):
@@ -1211,25 +1211,22 @@ class SubgraphTracer(fx.Tracer):
                 self.input_name_to_proxy[name] = proxy
             return proxy
 
-    def is_name_bound(self, name):
-        if name in self.input_name_to_proxy:
-            return True
-        for proxy in self.seen_proxies:
-            if proxy.node.name == name:
-                return True
-        return False
-
     # See NOTE: [Nested SubgraphTracer and free_variable handling] for more details
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        assert self.parent is not None or not self.is_name_bound(
-            proxy.node.name
-        ), "lift_tracked_freevar_to_input on root SubgraphTracer should only be called with non-free variables."
+        assert (
+            self.parent is not None
+        ), "lift_tracked_freevar_to_input should not be called on root SubgraphTracer"
+        # Proxys are associated with VariableTracker.
+        # It is possible that we've already lifted the Proxy to be an input.
+        # If that is the case, just return the already lifted Proxy.
+        if proxy in self.lifted_freevars:
+            return self.lifted_freevars[proxy]
         new_proxy = self.create_graph_input(proxy.node.name)
         new_proxy.node.meta["example_value"] = proxy.node.meta["example_value"]
-        self.lifted_freevars[proxy] = None
-        if self.parent is not None and not self.parent.is_name_bound(proxy.node.name):
+        self.lifted_freevars[proxy] = new_proxy
+        if self.parent is not None and proxy.tracer != self.parent:
             self.parent.lift_tracked_freevar_to_input(proxy)
         return new_proxy
 

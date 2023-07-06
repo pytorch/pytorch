@@ -272,13 +272,9 @@ def postprocess_forward_derivatives(
     args_with_derivatives: Sequence[Binding],
 ) -> List[ForwardDerivative]:
     def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
-        is_foreach = f.func.name.name.base.startswith("_foreach_")
         required_inputs = set()
         for arg in args_with_derivatives:
-            if (
-                arg.type in ("at::TensorList", "const at::ITensorListRef &")
-                and not is_foreach
-            ):
+            if arg.type in ("at::TensorList", "const at::ITensorListRef &"):
                 # The functions taking TensorList handle everything internally
                 continue
             arg_name = arg.name
