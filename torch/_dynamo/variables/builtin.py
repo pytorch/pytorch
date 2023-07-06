@@ -1263,11 +1263,11 @@ class BuiltinVariable(VariableTracker):
             UserFunctionVariable,
         )
         from .lists import SizeVariable
+        from .nn_module import FSDPManagedNNModuleVariable
         from .tensor import (
             supported_const_comparison_ops,
             supported_tensor_comparison_ops,
         )
-        from .nn_module import FSDPManagedNNModuleVariable
 
         op = self.fn
 
@@ -1289,20 +1289,22 @@ class BuiltinVariable(VariableTracker):
 
         if (
             all(
-                isinstance(x, (NNModuleVariable, ConstantVariable, FSDPManagedNNModuleVariable))
+                isinstance(
+                    x, (NNModuleVariable, ConstantVariable, FSDPManagedNNModuleVariable)
+                )
                 for x in [left, right]
             )
             and op in supported_const_comparison_ops.values()
         ):
+
             def _get(element):
                 if isinstance(element, NNModuleVariable):
-                    return tx.output.get_submodule(element.module_key)    
+                    return tx.output.get_submodule(element.module_key)
                 if isinstance(element, FSDPManagedNNModuleVariable):
                     return element.value
                 else:
                     return element.as_python_constant()
 
-            
             left = _get(left)
             right = _get(right)
             return ConstantVariable(op(left, right))
@@ -1365,9 +1367,10 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
             return ConstantVariable(op(left.value, right.value))
 
-
-        # Would this invoke user code?        
-        if isinstance(left, variables.UserDefinedObjectVariable) and isinstance(right, variables.UserDefinedObjectVariable):
+        # Would this invoke user code?
+        if isinstance(left, variables.UserDefinedObjectVariable) and isinstance(
+            right, variables.UserDefinedObjectVariable
+        ):
             return ConstantVariable(op(left.value, right.value))
 
         _unimplemented()

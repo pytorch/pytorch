@@ -1035,10 +1035,6 @@ def _catch_all_reshard(
             already_resharded = (
                 state._handle.flat_param.data_ptr()
                 == state._handle.flat_param._local_shard.data_ptr()
-                # If FSDP skipped using sharded views, then the flat parameter
-                # still points to the sharded data, so we need to reshard to
-                # use sharded views
-                and not state._handle._skipped_use_sharded_views
             )
             if already_resharded:
                 return
@@ -1078,13 +1074,6 @@ def _finalize_params(
             # `no_sync()` iterations, and `_saved_grad_shard` remains the
             # sharded gradient from the last synchronized iteration
             return
-        handle.prepare_gradient_for_optim()
-        _p_assert(
-            post_backward_hook_state_len == 1 or post_backward_hook_state_len == 2,
-            f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
-        )
-        flat_param._post_backward_hook_state[-1].remove()
-        delattr(flat_param, "_post_backward_hook_state")
         handle.prepare_gradient_for_optim()
         _p_assert(
             hasattr(flat_param, "_post_backward_called"),
@@ -1200,12 +1189,9 @@ def _register_pre_forward_hook(
         forward_handle.remove()
     state._pre_forward_handles.clear()
     module_param_handles = state._fully_sharded_module_to_handle.get(module, None)
-    unshard_fn = functools.partial(
-        _pre_forward_unshard,
-        state,
-        module_param_handles,
+    hook = functools.partial(
+        _pre_forward, state, module_param_handles, _pre_forward_unshard
     )
-    hook = functools.partial(_pre_forward, state, module_param_handles, unshard_fn)
     state._pre_forward_handles.append(
         module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
     )
@@ -1225,16 +1211,11 @@ def _register_post_forward_hook(
         forward_handle.remove()
     state._post_forward_handles.clear()
     module_param_handles = state._fully_sharded_module_to_handle.get(module, None)
-    reshard_fn = functools.partial(
-        _post_forward_reshard,
-        state,
-        module_param_handles,
-    )
     hook = functools.partial(
         _post_forward,
         state,
         module_param_handles,
-        reshard_fn,
+        _post_forward_reshard,
     )
     state._post_forward_handles.append(module.register_forward_hook(hook))
 

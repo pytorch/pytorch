@@ -4,12 +4,13 @@ import dataclasses
 import enum
 import functools
 import inspect
+import itertools
 import logging
 import operator
 import re
 import types
 from typing import List, NamedTuple, Optional, Union
-import itertools
+
 import torch
 
 from torch import SymInt
@@ -765,7 +766,7 @@ class VariableBuilder:
             #
             # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
             # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
-            
+
             # TODO(voz): Dedup with register_attr
             base = self.name
             name = self.name

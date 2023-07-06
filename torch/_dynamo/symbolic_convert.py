@@ -2142,7 +2142,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         self.call_function(BuiltinVariable(delattr), [obj, key], {})
 
 
-
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
 

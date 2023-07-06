@@ -4,9 +4,9 @@ import itertools
 import types
 from contextlib import contextmanager
 from typing import Dict, List
-from torch._dynamo.variables.base import VariableTracker
 
 import torch.nn
+from torch._dynamo.variables.base import VariableTracker
 
 from .. import skipfiles, variables
 from ..allowed_functions import is_allowed
@@ -153,6 +153,7 @@ class NNModuleVariable(VariableTracker):
         print("Fallback?", name, self, getattr(base, "_is_fsdp_managed_module", False))
         if getattr(base, "_is_fsdp_managed_module", False):
             from .builder import VariableBuilder
+
             # TODO(voz): Why is fsdp here?
             return VariableBuilder(tx, source)(getattr_fn(base, name))
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
@@ -234,9 +235,13 @@ class NNModuleVariable(VariableTracker):
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
             elif istype(subobj, types.GetSetDescriptorType):
                 assert source
-                return VariableBuilder(tx, source)(subobj.__get__(base)).add_options(options)
+                return VariableBuilder(tx, source)(subobj.__get__(base)).add_options(
+                    options
+                )
             else:
-                unimplemented(f"class property {typestr(base)} {typestr(subobj)} {subobj.__class__} {isinstance(subobj, types.GetSetDescriptorType)} {subobj.__get__(base)}")
+                unimplemented(
+                    f"class property {typestr(base)} {typestr(subobj)} {subobj.__class__} {isinstance(subobj, types.GetSetDescriptorType)} {subobj.__get__(base)}"
+                )
 
         return variables.GetAttrVariable(self, name, **options)
 
@@ -813,7 +818,9 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
             self.source = NotNNModuleSource(source)
         self.module_key = module_key
 
-    def call_method(self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]) -> VariableTracker:
+    def call_method(
+        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
         print("FSDPManagedNNModuleVariableMETHOD", name)
         key = self.module_key
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -843,7 +850,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
                 x = name_split.pop(0)
                 source = AttrSource(source, x)
             return source
-        
+
         def wrap_values(items):
             result = []
             for name, submod in items:
@@ -856,7 +863,10 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
                         **options,
                     )
                 )
-            return variables.ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return variables.ListIteratorVariable(
+                result, mutable_local=MutableLocal(), **options
+            )
+
         def named_embed(name, obj):
             return variables.TupleVariable(
                 [
@@ -870,6 +880,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
                     ),
                 ]
             )
+
         if name == "buffers":
             return wrap_values(self.value.named_buffers(**get_kwargs("recurse")))
         elif name == "named_buffers":
@@ -878,7 +889,9 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
                 **get_kwargs("prefix", "recurse", "remove_duplicate")
             ):
                 result.append(named_embed(name, buffer))
-            return variables.ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return variables.ListIteratorVariable(
+                result, mutable_local=MutableLocal(), **options
+            )
         elif name == "children":
             assert not (args or kwargs)
             return wrap_values(self.value.named_children())

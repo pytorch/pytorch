@@ -299,7 +299,9 @@ def convert_frame_assert(
             return None
 
         if is_generator(code):
-            unimplemented(f"generator {code.co_name}' ({code.co_filename}:{code.co_firstlineno}")
+            unimplemented(
+                f"generator {code.co_name}' ({code.co_filename}:{code.co_firstlineno}"
+            )
         if cache_size >= config.cache_size_limit:
 
             def format_func_info(code):
