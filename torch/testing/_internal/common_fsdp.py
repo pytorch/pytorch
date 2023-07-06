@@ -340,8 +340,8 @@ class TransformerWithSharedParams(FSDPTestModel):
                 tformer_pg = group
 
             m = TransformerWithSharedParams(
-                    tformer_pg, cuda_init_mode, add_bn, deterministic
-                )
+                tformer_pg, cuda_init_mode, add_bn, deterministic
+            )
             fsdp_model = FSDP(
                 m,
                 fsdp_pg,

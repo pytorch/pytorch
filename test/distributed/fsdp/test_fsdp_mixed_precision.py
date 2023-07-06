@@ -342,7 +342,7 @@ class TestFSDPMixedPrecision(FSDPTest):
             self.assertEqual(
                 expected_dtype,
                 t.dtype,
-                f"Expected to reduce in {expected_dtype} but got tensors in {t.dtype}"
+                f"Expected to reduce in {expected_dtype} but got tensors in {t.dtype}",
             )
 
         return orig_reduce_scatter(*args, **kwargs)
@@ -777,11 +777,13 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 super().__init__()
                 self.a = nn.Linear(5, 5)
 
-            def forward(self, x, expect_full_prec_in_eval):
-                if expect_full_prec_in_eval:
+            def forward(self, x, expect_use_full_prec_in_eval):
+                if expect_use_full_prec_in_eval:
                     assert x.dtype == torch.float32, f"Expected fp32, got {x.dtype}"
                 else:
-                    assert x.dtype == low_prec_dtype, f"Expected {low_prec_dtype}, got {x.dtype}"
+                    assert (
+                        x.dtype == low_prec_dtype
+                    ), f"Expected {low_prec_dtype}, got {x.dtype}"
                 return self.a(x)
 
         mp_config = MixedPrecision(
@@ -790,30 +792,36 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             buffer_dtype=low_prec_dtype,
         )
 
-        for full_prec_in_eval in [True, False]:
-            os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = "1" if full_prec_in_eval else "0"
+        for use_full_prec_in_eval in [True, False]:
+            os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = (
+                "1" if use_full_prec_in_eval else "0"
+            )
             m = MyModel().cuda()
             m.a = FSDP(m.a, mixed_precision=mp_config)
             model = FSDP(m, mixed_precision=mp_config)
             model.eval()
             inp = torch.randn(5, 5)
-            model(inp, full_prec_in_eval).sum().backward()
+            model(inp, use_full_prec_in_eval).sum().backward()
 
     @skip_if_lt_x_gpu(2)
     def test_full_precision_in_eval(self):
         """
         Tests that eval runs in full precision if FSDP_USE_FULL_PREC_IN_EVAL is set.
         """
-        for use_composable, cast_forward_inputs, full_prec_in_eval in itertools.product(
-            [True, False], [True, False], [True, False]
-        ):
+        for (
+            use_composable,
+            cast_forward_inputs,
+            use_full_prec_in_eval,
+        ) in itertools.product([True, False], [True, False], [True, False]):
             mp_config = MixedPrecision(
                 param_dtype=torch.float16,
                 reduce_dtype=torch.float16,
                 buffer_dtype=torch.float16,
                 cast_forward_inputs=cast_forward_inputs,
             )
-            os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = "1" if full_prec_in_eval else "0"
+            os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = (
+                "1" if use_full_prec_in_eval else "0"
+            )
             model = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.NO_FSDP if use_composable else FSDPInitMode.RECURSIVE,
@@ -840,12 +848,12 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 if p.grad is not None:
                     self.assertEqual(torch.float32, p.grad.dtype)
 
-            # Now in eval mode, loss should be fp32 if full_prec_in_eval is set.
+            # Now in eval mode, loss should be fp32 if use_full_prec_in_eval is set.
             model.eval()
             inp = module_accessor.get_input(torch.device("cuda"))
             output = model(*inp)
             loss = module_accessor.get_loss(inp, output).cuda()
-            expected_dtype = (torch.float32 if full_prec_in_eval else torch.float16)
+            expected_dtype = torch.float32 if use_full_prec_in_eval else torch.float16
             self.assertEqual(expected_dtype, loss.dtype)
 
     @skip_if_lt_x_gpu(2)
@@ -854,10 +862,14 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         Tests that when model.eval() and FSDP_USE_FULL_PREC_IN_EVAL is set,
         buffers are in the full precision.
         """
-        for use_composable, cast_forward_inputs, full_prec_in_eval in itertools.product(
-            [True, False], [True, False], [True, False]
-        ):
-            os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = "1" if full_prec_in_eval else "0"
+        for (
+            use_composable,
+            cast_forward_inputs,
+            use_full_prec_in_eval,
+        ) in itertools.product([True, False], [True, False], [True, False]):
+            os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = (
+                "1" if use_full_prec_in_eval else "0"
+            )
             mp_config = MixedPrecision(
                 param_dtype=torch.float16,
                 reduce_dtype=torch.float16,
@@ -887,7 +899,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             # validated in the nn.Module pre-forward hook to ensure that the
             # buffer computation takes place in the right precision.
             # https://github.com/pytorch/pytorch/issues/104740
-            expected_dtype = _BUFFER_ORIG_DTYPE if full_prec_in_eval else torch.float16
+            expected_dtype = (
+                _BUFFER_ORIG_DTYPE if use_full_prec_in_eval else torch.float16
+            )
             for buf in fsdp_model.buffers():
                 self.assertEqual(expected_dtype, buf.dtype)
 
@@ -899,10 +913,14 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
 
     @skip_if_lt_x_gpu(2)
     def test_full_precision_in_eval_comm(self):
-        for use_composable, cast_forward_inputs, full_prec_in_eval in itertools.product(
-            [True, False], [True, False], [True, False]
-        ):
-            os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = "1" if full_prec_in_eval else "0"
+        for (
+            use_composable,
+            cast_forward_inputs,
+            use_full_prec_in_eval,
+        ) in itertools.product([True, False], [True, False], [True, False]):
+            os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = (
+                "1" if use_full_prec_in_eval else "0"
+            )
             mp_config = MixedPrecision(
                 param_dtype=torch.float32,
                 reduce_dtype=torch.float16,
@@ -918,8 +936,6 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 CUDAInitMode.CUDA_BEFORE,
                 {"mixed_precision": mp_config},
             )
-            for fsdp_module in FSDP.fsdp_modules(model):
-                mp = fsdp_module.mixed_precision
             if use_composable:
                 auto_wrap_policy = ModuleWrapPolicy(
                     {
@@ -935,7 +951,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 self._reduce_scatter_validate_mp,
                 orig_reduce_scatter,
                 mp_config,
-                not full_prec_in_eval,
+                not use_full_prec_in_eval,
             )
             model.eval()
             with patch_reduce_scatter(test_reduce_scatter, torch.float32):

@@ -49,11 +49,11 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.fsdp.flat_param import (
+    _FSDP_USE_FULL_PREC_IN_EVAL,
     _HandlesKey,
     FlatParameter,
     FlatParamHandle,
     HandleShardingStrategy,
-    _FSDP_USE_FULL_PREC_IN_EVAL,
 )
 from torch.distributed.fsdp.wrap import _FSDPPolicy
 from torch.distributed.utils import _sync_params_and_buffers
