@@ -69,6 +69,9 @@ TESTED_OPS: frozenset[str] = frozenset(
         "asinh",
         "atan",
         "atanh",
+        "atleast_1d",
+        "atleast_2d",
+        "atleast_3d",
         "baddbmm",
         "bmm",
         "broadcast_to",
@@ -106,6 +109,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "fmod",
         "full",
         "full_like",
+        "hstack",  # aten::cat is invoked instead
         "index_put",
         "logit",
         # "new_empty",  non-deterministic
@@ -133,6 +137,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "scatter_add",
         "scatter_reduce",
         "unflatten",
+        "vstack",  # aten::cat is invoked instead
     ]
 )
 
@@ -441,6 +446,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "nn.functional.embedding",
         reason=onnx_test_common.reason_onnx_script_does_not_support("aten.embedding_renorm.default"),
+    ),
+    xfail(
+        "nn.functional.max_pool2d",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Max_pool2d"),
     ),
     xfail(
         "scatter_add",

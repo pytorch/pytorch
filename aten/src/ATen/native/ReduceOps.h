@@ -13,7 +13,7 @@ struct TensorIterator;
 class Tensor;
 }
 
-namespace at { namespace native {
+namespace at::native {
 
 using reduce_fn = void(*)(TensorIterator &);
 
@@ -53,4 +53,4 @@ TORCH_API std::tuple<Tensor&,Tensor&> var_mean_out(
     Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim,
     int64_t correction, bool keepdim);
 
-}} // namespace at::native
+} // namespace at::native

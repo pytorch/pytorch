@@ -175,7 +175,7 @@ function checkout_install_torchdeploy() {
   pushd multipy
   git checkout "${commit}"
   python multipy/runtime/example/generate_examples.py
-  pip install -e . --install-option="--cudatests"
+  BUILD_CUDA_TESTS=1 pip install -e .
   popd
   popd
 }
@@ -194,6 +194,7 @@ function install_huggingface() {
   version=$(get_pinned_commit huggingface)
   pip_install pandas
   pip_install scipy
+  pip_install z3-solver
   pip_install "transformers==${version}"
 }
 
@@ -202,6 +203,7 @@ function install_timm() {
   commit=$(get_pinned_commit timm)
   pip_install pandas
   pip_install scipy
+  pip_install z3-solver
   pip_install "git+https://github.com/rwightman/pytorch-image-models@${commit}"
 }
 

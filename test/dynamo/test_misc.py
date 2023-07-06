@@ -19,6 +19,7 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
+import sympy
 import torch
 
 import torch._dynamo.test_case
@@ -26,11 +27,10 @@ import torch._dynamo.testing
 import torch.onnx.operators
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
-from torch._dynamo.output_graph import OutputGraph
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
-    expectedFailureAutomaticDynamic,
     expectedFailureDynamic,
     requires_numpy_pytorch_interop,
     same,
@@ -44,17 +44,17 @@ from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError, FloorDiv
+from torch.fx.experimental.validator import SympyToZ3, TranslationValidator
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
     SM80OrLater,
+    TEST_CUDA,
+    TEST_MULTIGPU,
 )
 from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
-
-TEST_CUDA = torch.cuda.is_available()
-TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
@@ -1698,6 +1698,104 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(out[0], out[1]))
 
+    def test_closure_out_of_scope_cell(self):
+        cell1 = torch.rand(1).item()
+        cell2 = torch.rand(3, 3)
+
+        def indirect():
+            return direct()
+
+        def direct():
+            def inner():
+                return cell1 + 1, cell2 + 3
+
+            return inner()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(indirect)
+        result1, result2 = opt_fn()
+        self.assertAlmostEqual(cell1 + 1, result1)
+        self.assertTrue(torch.allclose(cell2 + 3, result2))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_closure_out_of_scope_cell_with_mutation(self):
+        cell1 = torch.rand(1).item()
+        orig1 = cell1
+        cell2 = torch.rand(3, 3)
+        orig2 = cell2.clone()
+
+        def indirect():
+            return direct()
+
+        def direct():
+            def inner():
+                nonlocal cell1, cell2
+                x = cell2 + 1
+                cell1 += 1
+                cell2 += 10
+                x = x + cell2
+                return cell1, cell2, x
+
+            return inner()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(indirect)
+        for i in range(1, 4):
+            result1, result2, _ = opt_fn()
+            self.assertAlmostEqual(orig1 + 1 * i, result1)
+            self.assertTrue(torch.allclose(orig2 + 10 * i, result2))
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(cnts.op_count, 3)
+            cnts.clear()
+
+    def test_closure_out_of_scope_cell_with_cond(self):
+        # Test closure with out-of-scope cell variable, used in a cond
+        # where the two branches read different closure variables
+        from functorch.experimental.control_flow import cond
+
+        def g(x):
+            return x
+
+        class ModuleCondDeep(torch.nn.Module):
+            def forward(self, pred, x):
+                return self._indirection(pred, x)
+
+            def _indirection(self, pred, x):
+                return self.indirection(pred, x)
+
+            def indirection(self, pred, x):
+                def true_fn(y):
+                    return y + 2
+
+                def false_fn(y):
+                    return y - 2
+
+                def shallow(x):
+                    return x * 2
+
+                def deep(x):
+                    # y = g(x)
+                    y = x
+                    return cond(
+                        x[0][0] > 0,
+                        true_fn,
+                        false_fn,
+                        [y],
+                    )
+
+                return cond(pred, shallow, deep, [x])
+
+        mod = ModuleCondDeep()
+        opt_mod = torch._dynamo.optimize("eager")(mod)
+        inp = torch.randn(3, 3)
+        exp1 = mod(torch.tensor(False), inp)
+        actual1 = opt_mod(torch.tensor(False), inp)
+        exp2 = mod(torch.tensor(True), inp)
+        actual2 = opt_mod(torch.tensor(True), inp)
+        self.assertTrue(torch.allclose(exp1, actual1))
+        self.assertTrue(torch.allclose(exp2, actual2))
+
     def test_top_package_import(self):
         def fn(x):
             import torch.fx
@@ -1971,10 +2069,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(res, ref_run1))
 
-    # NotImplementedError: SymNodeVariable() is not a constant
-    # https://github.com/pytorch/pytorch/issues/103618
-    @expectedFailureDynamic
-    @expectedFailureAutomaticDynamic
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -3307,7 +3401,7 @@ def fn():
 
         mod = Module()
         with self.assertRaisesRegex(
-            TypeError, "missing 1 required positional argument"
+            Unsupported, "Can't inplace modify module params/buffers"
         ):
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
             opt_fn(torch.randn(3, 2))
@@ -3992,6 +4086,23 @@ def fn():
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_variable_tracker_recursively_contains(self):
+        # VariableTracker.recursively_contains should be updated correctly when mutation happens
+        def fn(x):
+            data = [[None] * 3] * 3
+            for i in range(3):
+                if i == 0:
+                    data[0][i] = x
+                else:
+                    data[0][i] = data[0][i - 1] + 1
+            return data[0][-1]
+
+        x = torch.rand(4)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable(self):
@@ -4261,60 +4372,6 @@ def fn():
         for guard in all_guards:
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
-
-    # Note - here be mild dragons.
-    # This test relies a ton on internal implementation. Future refactor efforts
-    # are welcome to delete it if necessary, rewriting this test constantly is a chore, not
-    # a feature. We kept it around with some amount of saddness, as it was extremely useful in debugging.
-    def test_restore_graphstate_internals(self):
-        def fn(x, y):
-            x = x + 1
-            y = y + 1
-            return x * y
-
-        _, guards = torch._dynamo.export(
-            fn, torch.tensor([0.25, 0.25]), torch.tensor([0.25, 0.25])
-        )
-        # Dummy ctor
-        graph = OutputGraph(
-            code_options={},
-            compiler_fn=None,
-            root_tx=None,
-            export=False,
-            export_constraints=None,
-            frame_state={"_id": 0},
-            local_scope={},
-            global_scope={},
-        )
-        graph.nn_modules_sources = {}
-        # Contrived generation timestamp
-        graph.timestamp = 4
-        # Contrived guards
-        graph.tracing_context.guards_context.dynamo_guards = guards
-
-        # Save the state
-        state = graph.copy_graphstate()
-        # Saving increments the generation
-        self.assertEqual(graph.timestamp, 5)
-
-        # Assure that the saved state is valid
-        self.assertEqual(state.timestamp, 4)
-
-        # Ensure that the guards reflect the expected state
-        self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
-        self.assertEqual(graph.guards, guards)
-
-        # Mess around with the state
-        graph.tracing_context.guards_context.dynamo_guards = set()
-        self.assertEqual(graph.guards, set())
-
-        # Restore the state
-        graph.restore_graphstate(state)
-
-        # Make sure it restored correctly
-        self.assertEqual(graph.timestamp, 4)
-        self.assertEqual(graph.guards, guards)
-        self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
 
     def test_call_parent_non_class_methods_from_child(self):
         class A:
@@ -5278,7 +5335,8 @@ def fn():
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
-    @expectedFailureAutomaticDynamic
+    @expectedFailureDynamic
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):
@@ -5309,18 +5367,16 @@ def fn():
             else:
                 base_checker().check("No recompilation detected.").run(prof.report())
 
-            # Ensure correct guard fail message is selected to show to user
-            if torch._dynamo.config.assume_static_by_default:
-                new_shape_input = torch.rand((4, 3, 4))
-                _ = compiled(new_shape_input)
+            new_shape_input = torch.rand((4, 3, 4))
+            _ = compiled(new_shape_input)
 
-                base_checker().check("Recompile Reasons").check("'forward'").check(
-                    "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
-                ).check(
-                    "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
-                ).run(
-                    prof.report()
-                )
+            base_checker().check("Recompile Reasons").check("'forward'").check(
+                "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
+            ).check(
+                "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
+            ).run(
+                prof.report()
+            )
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call
@@ -5631,6 +5687,70 @@ def ___make_guard_fn():
         opt_out = opt_model(x)
         self.assertTrue(same(orig_out, opt_out))
 
+    def test_scalar_tensor_is_equivalent_to_symint_argument(self):
+        class GumbelTopKSampler(torch.nn.Module):
+            def __init__(self, T, k):
+                super(GumbelTopKSampler, self).__init__()
+                self.T = torch.nn.Parameter(
+                    torch.tensor(T, dtype=torch.float32), requires_grad=False
+                )
+                self.k = torch.nn.Parameter(
+                    torch.tensor(k, dtype=torch.int32), requires_grad=False
+                )
+
+            def sample_discrete(self, logits):
+                threshold = torch.topk(logits, self.k, sorted=True)[0][..., -1]
+                samples = torch.ge(logits.squeeze(1), threshold).float()
+                return samples
+
+            def forward(self, logits):
+                dsamples = self.sample_discrete(logits)
+                return dsamples
+
+        x = torch.rand([4, 4, 4, 4])
+        m = GumbelTopKSampler(T=4, k=4)
+        orig_out = m(x)
+        opt_m = torch.compile(backend="eager")(m)
+        opt_out = opt_m(x)
+        self.assertTrue(same(orig_out, opt_out))
+
+    def test_scalar_tensor_is_equivalent_to_symint_list_argument(self):
+        class Jitter(torch.nn.Module):
+            def __init__(self, jitter_val):
+                super(Jitter, self).__init__()
+                self.jitter_val = jitter_val
+
+            def roll_tensor(self, input):
+                h_shift = np.int_(self.jitter_val - 1)
+                w_shift = np.int_(self.jitter_val + 1)
+                return torch.roll(
+                    torch.roll(input, shifts=h_shift, dims=2), shifts=w_shift, dims=3
+                )
+
+            def forward(self, input):
+                return self.roll_tensor(input)
+
+        x = torch.rand([4, 4, 4, 4])
+        m = Jitter(jitter_val=4)
+        orig_out = m(x)
+        opt_m = torch.compile(backend="eager")(m)
+        opt_out = opt_m(x)
+        self.assertTrue(same(orig_out, opt_out))
+
+    def test_scalar_tensor_is_equivalent_to_int_list_argument(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, input):
+                permute = torch.tensor([0, 2, 1])
+                x = input.permute(*permute)
+                return x
+
+        x = torch.randn(2, 3, 4)
+        m = MyModel()
+        orig_out = m(x)
+        opt_m = torch.compile(backend="eager")(m)
+        opt_out = opt_m(x)
+        self.assertTrue(same(orig_out, opt_out))
+
     def test_torch_variable_hasattr(self):
         def fn(x):
             if hasattr(torch.nn, "Module"):
@@ -5652,6 +5772,219 @@ def ___make_guard_fn():
 
         opt = torch._dynamo.optimize("eager")(fn)
         opt()
+
+    def test_tracing_py_tree(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+
+        counter = CompileCounter()
+        torch._dynamo.optimize(counter, nopython=True)(fn)(xs)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 3)
+
+    def test_tracing_nested_py_tree(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+        xsl = [xs, xs, xs, xs]
+
+        counter = CompileCounter()
+        comp_out = torch._dynamo.optimize(counter, nopython=True)(fn)(xsl)
+        real_out = fn(xsl)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 12)
+
+    def test_tracing_nested_py_tree_tuples(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+        xsl = (xs, xs, xs, xs)
+
+        counter = CompileCounter()
+        comp_out = torch._dynamo.optimize(counter, nopython=True)(fn)(xsl)
+        real_out = fn(xsl)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 12)
+
+    def test_tracing_nested_py_tree_dicts(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+        xsl = {
+            "a": xs,
+            "b": xs,
+            "c": xs,
+        }
+
+        counter = CompileCounter()
+        comp_out = torch._dynamo.optimize(counter, nopython=True)(fn)(xsl)
+        real_out = fn(xsl)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 9)
+
+    def test_tracing_nested_py_tree_mixed_all(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            flat_xs, spec = pytree.tree_flatten(xs)
+            res = [x.clone() for x in flat_xs]
+            return pytree.tree_unflatten(res, spec)
+
+        xs = [torch.tensor(i) for i in range(3)]
+        xsa = (xs, xs)
+        xsb = {"aa": xsa, "ab": xs}
+        xsl = {
+            "a": xs,
+            "b": xsa,
+            "c": xsb,
+        }
+
+        counter = CompileCounter()
+        comp_out = torch._dynamo.optimize(counter, nopython=True)(fn)(xsl)
+        real_out = fn(xsl)
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 18)
+
+    def _prepare_for_translation_validator(self):
+        validator = TranslationValidator()
+
+        # SymPy symbols.
+        s0, s1, s2 = sympy.symbols("s0 s1 s2", integer=True)
+
+        # Z3 symbols.
+        [validator.add_var(s, int) for s in (s0, s1, s2)]
+        z0, z1, z2 = [validator.z3var(s) for s in (s0, s1, s2)]
+
+        return (s0, s1, s2), (z0, z1, z2), validator
+
+    @torch._dynamo.config.patch(translation_validation=True)
+    def test_sympy_to_z3_translation(self):
+        import z3
+
+        (
+            (s0, s1, s2),
+            (z0, z1, z2),
+            validator,
+        ) = self._prepare_for_translation_validator()
+
+        test_cases = [
+            # Integer constants.
+            (sympy.S.Zero, z3.IntVal(0)),
+            (sympy.S.One, z3.IntVal(1)),
+            (sympy.S.NegativeOne, z3.IntVal(-1)),
+            (sympy.Integer(2), z3.IntVal(2)),
+            (
+                s0,
+                z0,
+            ),
+            # Arithmetic operations.
+            *[
+                (op(s0, s1), op(z0, z1))
+                for op in (
+                    operator.add,
+                    operator.mod,
+                    operator.mul,
+                    operator.pow,
+                )
+            ],
+            # Logical operations.
+            *[
+                (sympy_op(s0, s1), z3_op(z0, z1))
+                for sympy_op, z3_op in (
+                    (sympy.Eq, operator.eq),
+                    (sympy.Ne, operator.ne),
+                    (sympy.Lt, operator.lt),
+                    (sympy.Le, operator.le),
+                    (sympy.Gt, operator.gt),
+                    (sympy.Ge, operator.ge),
+                )
+            ],
+            # Other operations.
+            (
+                s0 - s1,
+                z0 + z3.IntVal(-1) * z1,
+            ),
+            (
+                s0 / s1,
+                z3.ToReal(z0) * (z1**-1),
+            ),
+            (s2 % (s0 / s1), z2 % z3.ToInt(z3.ToReal(z0) * (z1**-1))),
+            (s2 % (s0**3), z2 % z3.ToInt(z0**3)),
+            (FloorDiv(s0, s1), z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))),
+        ]
+
+        toZ3 = SympyToZ3(validator)
+        for sympy_expr, z3_expr in test_cases:
+            result = toZ3.run(sympy_expr)
+            self.assertTrue(
+                z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}"
+            )
+
+    @torch._dynamo.config.patch(translation_validation=True)
+    def test_translation_validator_sat(self):
+        (
+            (s0, s1, s2),
+            (z0, z1, z2),
+            validator,
+        ) = self._prepare_for_translation_validator()
+
+        validator.add_source_expr(z0 > 5)
+        validator.add_source_expr(z1 / 2 > z0)
+
+        # Solutions for target is a subset of the solutions for the source.
+        validator.add_target_expr(s0 > 20)
+        validator.add_target_expr(s1 > s0**2)
+
+        r = validator.validate()
+        self.assertEqual(r.success, True, msg=f"failed with model: {r.model}")
+        self.assertIsNone(r.model)
+        self.assertIsNone(r.failed_source_expr)
+
+    @torch._dynamo.config.patch(translation_validation=True)
+    def test_translation_validator_unsat(self):
+        (
+            (s0, s1, s2),
+            (z0, z1, z2),
+            validator,
+        ) = self._prepare_for_translation_validator()
+
+        validator.add_source_expr(z0 > 5)
+        validator.add_source_expr(z1 / 2 > z0)
+
+        # Solutions for target is NOT a subset of the solutions for the source.
+        validator.add_target_expr(s0 > 20)
+        # This expression is less restrictive than its counterpart.
+        validator.add_target_expr(s1 > s0 + 2)
+
+        r = validator.validate()
+        self.assertEqual(r.success, False, msg=f"failed with model: {r.model}")
+        self.assertIsNotNone(r.model)
+        self.assertIsNotNone(r.failed_source_expr)
 
 
 class TestTracer(JitTestCase):
