@@ -1,10 +1,15 @@
 #pragma once
+#include <ATen/Config.h>
 #include <ATen/native/TransposeType.h>
 #include <c10/util/complex.h>
 #include <c10/core/ScalarType.h>
 
 namespace at {
 namespace native {
+
+#if AT_MKL_ENABLED()
+#define MKL_HAS_BF16_GEMM (INTEL_MKL_VERSION >= 20210001)
+#endif
 
 void mkl_gemm_batched(
     TransposeType trans_A, TransposeType trans_B,
