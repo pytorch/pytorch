@@ -62,7 +62,7 @@ from .utils import (
     istype,
     proxy_args_kwargs,
 )
-from .variables.base import MutableLocal, typestr, VariableTracker
+from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable, EnumVariable
@@ -89,6 +89,7 @@ from .variables.lists import (
 from .variables.misc import (
     ClosureVariable,
     GetAttrVariable,
+    InlinedClosureVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
@@ -494,7 +495,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     next_instruction: Optional[Instruction]
     block_stack: List[BlockStackEntry]
     lineno: int
-    mutated_closure_cell_contents: Set[str]
     kw_names: Optional[ConstantVariable]
     accept_prefix_inst: bool
     prefix_insts: List[Instruction]
@@ -1932,6 +1932,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
 
 class InstructionTranslator(InstructionTranslatorBase):
+    mutated_closure_cell_contents: Set[str]
+
     def __init__(
         self,
         instructions: List[Instruction],
@@ -2311,6 +2313,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             cell = self.closure_cells[inst.argval]
             val = self.pop()
             if isinstance(cell, ClosureVariable):
+                if not self.output.is_root_tracer():
+                    unimplemented(
+                        "HigherOrderOperator: Mutating a variable not in the current scope (ClosureVariable)"
+                    )
                 self.output.root_tx.symbolic_locals[cell.name] = val
             else:
                 self.output.side_effects.store_cell(cell, val)
@@ -2327,7 +2333,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 if (
                     maybe_cell is not None
                     and maybe_cell.source.name()
-                    not in self.parent.mutated_closure_cell_contents
+                    not in self.output.root_tx.mutated_closure_cell_contents
                 ):
                     # Why is the source name here unique?
                     # mutated_closure_cell_contents is a per-frame
@@ -2335,7 +2341,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     # locals from the frame.  If you had two locals,
                     # they'll get different source names, and therefore
                     # differ here.
-                    self.parent.mutated_closure_cell_contents.add(
+                    self.output.root_tx.mutated_closure_cell_contents.add(
                         maybe_cell.source.name()
                     )
                     raise exc.RestartAnalysis()
@@ -2357,9 +2363,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def LOAD_CLOSURE(self, inst):
         assert inst.argval in self.cell_and_freevars()
-        self.push(self.closure_cells[inst.argval])
+        if inst.argval in self.closure_cells:
+            self.push(self.closure_cells[inst.argval])
+        else:
+            self.push(InlinedClosureVariable(name=inst.argval))
+
+    def check_replace_is_safe(self, oldvar):
+        if not is_side_effect_safe(oldvar.mutable_local):
+            unimplemented(
+                "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)"
+            )
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
+        self.check_replace_is_safe(oldvar)
         newvar = super().replace_all(oldvar, newvar)
         # recursively check and update parent's locals and stack in case oldvar is from parent
         translator: InstructionTranslatorBase = self
