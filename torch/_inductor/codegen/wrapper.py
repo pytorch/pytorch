@@ -286,9 +286,9 @@ class WrapperCodeGen(CodeGen):
         self.write_header()
         self.write_prefix()
 
-        for name, value in V.graph.constants.items():
+        for name, value in V.graph.constant_reprs.items():
             # include a hash so our code cache gives different constants different files
-            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
+            hashed = hashlib.sha256(value).hexdigest()
             self.write_constant(name, hashed)
 
         self.allocated = set()
