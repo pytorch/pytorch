@@ -329,6 +329,29 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
 
+    def test_conv_layout_convert_with_view(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(
+                    3, 128, kernel_size=3, padding=1, stride=1, bias=False
+                )
+
+            def forward(self, x):
+                x = self.conv(x)
+                return torch.flatten(x, 1)
+
+        mod = Model().to(self.device).eval()
+
+        @torch.compile()
+        def foo(mod, inp):
+            return mod(inp)
+
+        with torch.no_grad():
+            x = torch.rand(2, 3, 5, 5).to(self.device)
+            mod_eager = mod(x)
+            self.assertEqual(foo(mod, x), mod_eager)
+
     def test_conv_weight_layout_convert(self):
         class Model(torch.nn.Module):
             def __init__(self):
