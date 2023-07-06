@@ -189,6 +189,23 @@ class TestPaternMatcher(TestCase):
                     mod, (v,), matcher_count, matcher_nodes, check_autocast=True
                 )
 
+    def test_linear_fp32(self):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 30, bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        for bias in [True, False]:
+            mod = M(bias=bias).eval()
+            v = torch.randn(2, 10)
+            # packing pass.
+            matcher_count = 1
+            matcher_nodes = 1
+            self._test_common(mod, (v,), matcher_count, matcher_nodes)
+
     def test_conv_transpose2d_unary(self):
         class M(torch.nn.Module):
             def __init__(
