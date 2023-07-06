@@ -215,6 +215,13 @@ y = TensorVariable()
             'code': None,
             'obj_weakref': None
             'guarded_class': None
+        }
+        shape_env '' SHAPE_ENV
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
         }""",
         )
 

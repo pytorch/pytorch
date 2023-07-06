@@ -290,6 +290,62 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         inp = fsdp_model.module.get_input(device=torch.device("cpu"))
         fsdp_model(*inp).sum().backward()
 
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_init_with_sync_module_states(self):
+        """
+        Tests that passing ``sync_module_states=True`` raises an error for
+        a CPU module since the synchronization requires GPU communication,
+        while additionally passing ``device_id`` does not raise an error, even
+        when the model has CPU buffers.
+        """
+
+        def init_nested_wrapped_module():
+            return NestedWrappedModule.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP,
+                CUDAInitMode.CUDA_NEVER,
+            )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "The module has CPU parameters or buffers when `sync_module_states=True`",
+        ):
+            FSDP(
+                init_nested_wrapped_module(),
+                self.process_group,
+                sync_module_states=True,
+            )
+
+        # Check that `device_id` with `sync_module_states=True` works
+        nested_wrapped_module = init_nested_wrapped_module()
+        nested_wrapped_module.register_buffer(
+            "buf", torch.ones((2, 2), device="cpu") * self.rank
+        )
+        nested_wrapped_module.module[0].register_buffer(
+            "buf", torch.ones((3, 2), device="cpu") * self.rank
+        )
+        nested_wrapped_module = FSDP(
+            nested_wrapped_module,
+            self.process_group,
+            auto_wrap_policy=ModuleWrapPolicy({nn.Linear}),
+            device_id=torch.cuda.current_device(),
+            sync_module_states=True,
+        )
+        # Each rank's buffers should be 0s since rank 0 is the source, and they
+        # should be on GPU since we specified `device_id`
+        self.assertEqual(
+            nested_wrapped_module.buf.device,
+            torch.device("cuda", torch.cuda.current_device()),
+        )
+        self.assertEqual(nested_wrapped_module.buf, torch.zeros((2, 2)))
+        self.assertEqual(
+            nested_wrapped_module.module.module[0].buf.device,
+            torch.device("cuda", torch.cuda.current_device()),
+        )
+        self.assertEqual(
+            nested_wrapped_module.module.module[0].buf, torch.zeros((3, 2))
+        )
+
 
 class TestFSDPMiscMultiThread(FSDPTestMultiThread):
     @property
@@ -426,20 +482,44 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_multi_device_not_supported(self):
-        """Tests that wrapping a multi-device module (i.e. with submodules on
-        both GPU and CPU) with FSDP raises an error."""
+    def test_cpu_gpu_module(self):
+        """Tests a CPU + GPU module supported if device_id is passed
+        in, errors if device_id is not.
+        """
+        torch.cuda.set_device(self.rank)
 
-        class MultiDeviceModule(nn.Module):
+        class CPUGPUModule(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.a = nn.Linear(1, 1).cuda()
                 self.b = nn.Linear(1, 1)
 
+        cpu_gpu = CPUGPUModule()
+        fsdp = FSDP(cpu_gpu, device_id=torch.cuda.current_device())
+        for param in fsdp.parameters():
+            self.assertEqual(param.device, torch.device(torch.cuda.current_device()))
+
+        # without device_id, we hit an error
+        with self.assertRaisesRegex(RuntimeError, "please pass in device_id"):
+            FSDP(CPUGPUModule())
+
+    @skip_if_lt_x_gpu(2)
+    def test_multigpu_module(self):
+        """
+        Module on multiple GPUs wrapped in FSDP should raise an error.
+        """
+
+        class MultiGPUModule(nn.Module):
+            def __init__(self, rank):
+                super().__init__()
+                self.rank = rank
+                self.a = nn.Linear(1, 1).cuda(self.rank)
+                self.b = nn.Linear(1, 1).cuda((self.rank + 1) % dist.get_world_size())
+
         with self.assertRaisesRegex(
             RuntimeError, "FSDP only supports single device modules"
         ):
-            FSDP(MultiDeviceModule())
+            FSDP(MultiGPUModule(self.rank))
 
     @skip_if_lt_x_gpu(2)
     def test_no_params(self):
@@ -475,29 +555,6 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         )
         with context:
             FSDP(no_params, device_id=0)
-
-    @skip_if_lt_x_gpu(2)
-    def test_cpu_init_with_sync_module_states(self):
-        """Tests that passing ``sync_module_states=True`` raises an error for
-        a CPU module since the synchronization requires GPU communication,
-        while additionally passing ``device_id`` does not raise an error."""
-        nested_wrapped_module = NestedWrappedModule.init(
-            self.process_group,
-            FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_NEVER,
-        )
-        with self.assertRaisesRegex(
-            ValueError, "The module has CPU parameters when `sync_module_states=True`"
-        ):
-            FSDP(nested_wrapped_module, self.process_group, sync_module_states=True)
-
-        # Specifying device_id with sync_module_states=True works.
-        FSDP(
-            nested_wrapped_module,
-            self.process_group,
-            device_id=torch.cuda.current_device(),
-            sync_module_states=True,
-        )
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_same_model_across_ranks(self):
