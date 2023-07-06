@@ -1127,15 +1127,18 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         self.diagnostic_context = diagnostic_context
         self.type_promotion_table = type_promotion_table
 
-    def _run_node_and_update_meta_val(self, node) -> Any:
-        """Run a node and update node.meta["val"] with the output value.
+    def _run_node_and_set_meta(self, node) -> Any:
+        """Run node and set meta according to `fx_traceback.get_current_meta()`.
 
         This should be used on new nodes or nodes that have been modified.
-        By default `Interpreter.run_node` does not update `node.meta["val"]`.
+        By default `Interpreter.run_node` does not update `node.meta`.
+        Set `node.meta` to the current meta, except for `node.meta["val"]`, which is
+        recomputed.
         """
         out = super().run_node(node)
         # Update interpreter env state with new output value.
         self.env[node] = out
+        node.meta.update(fx_traceback.get_current_meta())
         node.meta["val"] = proxy_tensor.extract_val(out)
         return out
 
@@ -1158,7 +1161,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
             "output",
         ), f"Unexpected op_type: {op_type}"
         node = getattr(graph, op_type)(target, args, kwargs)
-        self._run_node_and_update_meta_val(node)
+        self._run_node_and_set_meta(node)
         node.meta.update(
             (k, v)
             for k, v in fx_traceback.get_current_meta().items()
@@ -1183,7 +1186,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         ), f"Expected OpOverload, got {type(target)}"
         node.target = find_compatible_op_overload(target.overloadpacket, args, kwargs)
 
-        new_node_val = self._run_node_and_update_meta_val(node)
+        new_node_val = self._run_node_and_set_meta(node)
         assert isinstance(new_node_val, type(node_val)), (
             f"run_node output type should not change between runs. "
             f"Got {type(new_node_val)}, expect {type(node_val)}."
