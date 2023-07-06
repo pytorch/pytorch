@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import operator
-import warnings
 from typing import (
     Any,
     Callable,
@@ -180,10 +179,6 @@ class OnnxFunctionDispatcher:
             overload_match_ranking[symbolic_function] = function_opschema.match_score
 
         # NOTE: If the perfect match is not found, find the nearest match
-        warnings.warn(
-            f"A perfect matched Opchema is not found in torchlib for {node.target}, but \n"
-            f"a nearest match is found. Please check the ONNX output carefully. \n",
-        )
         diagnostic = diagnostic_context.inflight_diagnostic()
         diagnostic.with_additional_message(
             "### Exact match is not found!\n"
