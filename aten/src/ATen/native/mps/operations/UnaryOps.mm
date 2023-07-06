@@ -17,8 +17,8 @@
 #include <ATen/ops/ceil_native.h>
 #include <ATen/ops/cos_native.h>
 #include <ATen/ops/cosh_native.h>
-#include <ATen/ops/cumsum_native.h>
 #include <ATen/ops/cumprod_native.h>
+#include <ATen/ops/cumsum_native.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/exp2_native.h>
 #include <ATen/ops/exp_native.h>

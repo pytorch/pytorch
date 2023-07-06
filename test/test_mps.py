@@ -3717,7 +3717,8 @@ class TestMPS(TestCaseMPS):
 
     @unittest.skipIf(product_version < 13.0, "Skipped on macOS 12")
     def test_cumprod_backward(self):
-        # the gradient computation of cumprod has two different paths depending on whether or not multiple derivatives are to be computed
+        # the gradient computation of cumprod has two different paths
+        # depending on whether or not multiple derivatives are to be computed
         for multiple_derivatives in [False, True]:
             t = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps", dtype=torch.float).detach().requires_grad_()
             t_cpu = torch.tensor([1.0, 2.0, 3.0, 4.0], device="cpu", dtype=torch.float).detach().requires_grad_()
