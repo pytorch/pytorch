@@ -1290,6 +1290,31 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         y = torch.randn(3, 3)
         self._test_wrap_simple(h, (x, y), 3)
 
+    def test_internal_nonlocal(self):
+        def f(x, y):
+            w = 1
+
+            def g(x):
+                nonlocal w
+                w = x
+                return x
+
+            def h(x):
+                nonlocal w
+                w = w + 1
+                return x
+
+            g(x)
+            h(x)
+            return w + y
+
+        def h(x, y):
+            return wrap(f, x, y)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+        self._test_wrap_simple(h, (x, y), 3)
+
     def test_capture_numpy_number(self):
         import numpy as np
 
@@ -1425,8 +1450,6 @@ class GraphModule(torch.nn.Module):
         self.assertExpectedInline(actual, expected)
 
     def test_grad_freevar_tensor(self):
-        # NOTE: Captured variable is treated as side-effect since
-        #       PR https://github.com/pytorch/pytorch/pull/103386
         counters.clear()
         y = torch.randn(3, 3)
 
@@ -1438,12 +1461,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
         expected = wrapper_fn(x)
-        actual = torch.compile(wrapper_fn, backend="aot_eager")(x)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"NYI - torch.func.grad(f) where there are side effects in f": 2},
-        )
+        actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(actual, expected)
 
     def test_grad_freevar_python_scalar(self):
