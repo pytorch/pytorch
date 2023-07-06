@@ -4,7 +4,7 @@ import sys
 import unittest
 
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 try:
@@ -31,6 +31,21 @@ class TestCoordinateDescentTuner(TestCase):
         best_config = tuner.autotune(func, baseline_config)
         self.assertTrue(best_config.kwargs.get("XBLOCK") == 16, str(best_config))
 
+    def test_no_neighbors(self):
+        """
+        Test the case that there is no available neighbor values for a field.
+        """
+
+        # size hint for x being 1 limits the max XBLOCK we try to be 1
+        tuner = CoordescTuner(size_hints=[1])
+        baseline_config = triton.Config({"XBLOCK": 1}, num_warps=8, num_stages=1)
+
+        def func(config):
+            return abs(config.kwargs["XBLOCK"] - 15)
+
+        best_config = tuner.autotune(func, baseline_config)
+        self.assertTrue(best_config.kwargs.get("XBLOCK") == 1, str(best_config))
+
     def test_get_neighbour_values(self):
         tuner = CoordescTuner()
 
@@ -41,5 +56,5 @@ class TestCoordinateDescentTuner(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
+    if IS_LINUX and HAS_CUDA:
         run_tests()
