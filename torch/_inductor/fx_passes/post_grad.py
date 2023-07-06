@@ -395,8 +395,6 @@ def register_addmm_activation_replacement():
     mat1 = functools.partial(torch.empty, (3, 4), device=device)
     mat2 = functools.partial(torch.empty, (4, 5), device=device)
 
-    counters_ref = counters["inductor"].copy()
-
     for pattern, replacement, args in [
         (
             addmm_relu_pattern,
@@ -417,10 +415,6 @@ def register_addmm_activation_replacement():
             inference_patterns,
             extra_check=should_replace_addmm_activation,
         )
-
-    counters[
-        "inductor"
-    ] = counters_ref  # clear view matches encountered during mm tracing
 
 
 def is_valid_splitwithsizes_cat(match):

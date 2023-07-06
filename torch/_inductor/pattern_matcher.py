@@ -1072,10 +1072,17 @@ def init_once_fakemode(fn):
     @functools.lru_cache(None)
     @functools.wraps(fn)
     def lazy_init():
+        counters_ref = counters["inductor"].copy()
+
         with torch._guards.tracing(
             None
         ), maybe_disable_fake_tensor_mode(), FakeTensorMode():
-            return fn()
+            result = fn()
+
+        # clear view matches encountered during tracing
+        counters["inductor"] = counters_ref
+
+        return result
 
     return lazy_init
 
