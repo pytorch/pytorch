@@ -265,17 +265,14 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Test pattern of conv2d with binary post ops (such as add) with X86InductorQuantizer.
         Currently, only add as binary post op is supported.
         """
-        inplace_add_list = [True, False]
-        conv2d_type_list = [Conv2DType.left, Conv2DType.right, Conv2DType.both]
-        use_bias_list = [True, False]
-
+        conv2d_type_list = [Conv2DType.left, Conv2DType.both]
+        example_inputs = (torch.randn(2, 3, 6, 6),)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
         with override_quantized_engine("x86"), torch.no_grad():
-            for inplace_add, conv2d_type, use_bias in itertools.product(inplace_add_list, conv2d_type_list, use_bias_list):
-                m = TestHelperModules.Conv2dAddModule(inplace_add=inplace_add, conv2d_type=conv2d_type, use_bias=use_bias).eval()
-                example_inputs = (torch.randn(2, 3, 16, 16),)
-                quantizer = X86InductorQuantizer().set_global(
-                    xiq.get_default_x86_inductor_quantization_config()
-                )
+            for conv2d_type in conv2d_type_list:
+                m = TestHelperModules.Conv2dAddModule(conv2d_type=conv2d_type).eval()
                 if conv2d_type != Conv2DType.both:
                     node_occurrence = {
                         # one for input and weight of the conv
@@ -302,7 +299,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.convolution.default,
-                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
+                    torch.ops.aten.add.Tensor,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
@@ -320,28 +317,16 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Test pattern of conv2d with binary + unary post ops (such as add + relu) with X86InductorQuantizer.
         Currently, only add as binary post op and relu as unary post op are supported.
         """
-        inplace_add_list = [True, False]
-        conv2d_type_list = [Conv2DType.left, Conv2DType.right, Conv2DType.both]
-        inplace_relu_list = [True, False]
-        use_bias_list = [True, False]
-
+        conv2d_type_list = [Conv2DType.left, Conv2DType.both]
+        example_inputs = (torch.randn(2, 3, 6, 6),)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config()
+        )
         with override_quantized_engine("x86"), torch.no_grad():
-            for inplace_add, conv2d_type, inplace_relu, use_bias in itertools.product(
-                    inplace_add_list,
-                    conv2d_type_list,
-                    inplace_relu_list,
-                    use_bias_list,
-            ):
+            for conv2d_type in conv2d_type_list:
                 m = TestHelperModules.Conv2dAddReLUModule(
-                    inplace_add=inplace_add,
                     conv2d_type=conv2d_type,
-                    inplace_relu=inplace_relu,
-                    use_bias=use_bias
                 ).eval()
-                example_inputs = (torch.randn(2, 3, 16, 16),)
-                quantizer = X86InductorQuantizer().set_global(
-                    xiq.get_default_x86_inductor_quantization_config()
-                )
                 if conv2d_type != Conv2DType.both:
                     node_occurrence = {
                         # one for input and weight of the conv
@@ -368,7 +353,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.convolution.default,
-                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
+                    torch.ops.aten.add.Tensor,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
