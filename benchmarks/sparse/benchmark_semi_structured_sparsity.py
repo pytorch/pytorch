@@ -93,7 +93,7 @@ def test_tensor(m, k, n, dtype, contiguous, backend):
     B = torch.zeros(k, n).to(dtype).cuda()
     bias = torch.rand(n).to(dtype).cuda()
 
-    sA = SparseSemiStructuredTensor(A)
+    sA = to_sparse_semi_structured(A)
 
     # torch.mm calculation
     if dtype is not torch.int8:
