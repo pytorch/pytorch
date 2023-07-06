@@ -665,6 +665,8 @@ class FxOnnxInterpreter:
         attr_tensor = getattr(fx_graph_module, node.target)
         assert isinstance(attr_tensor, torch.Tensor), f"{attr_tensor} is not a tensor."
 
+        # Parameter/buffer name cannot contain "."
+        # Revert from "/" to restore namespace formatting.
         input_ = onnxscript_graph.add_initializer(
             node.target.replace("/", "."), attr_tensor
         )
