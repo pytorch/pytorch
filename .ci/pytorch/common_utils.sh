@@ -135,7 +135,7 @@ function install_filelock() {
 
 function install_triton() {
   local commit
-  if [[ "${TEST_CONFIG}" == *rocm* ]]; then
+  if [[ "${TEST_CONFIG}" == *rocm* ]] || [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
     echo "skipping triton due to rocm"
   else
     commit=$(get_pinned_commit triton)
