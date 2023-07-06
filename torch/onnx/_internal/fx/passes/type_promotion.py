@@ -96,7 +96,7 @@ class TypePromotionRule:
             op_name: Name of the op. E.g. 'add' in 'torch.ops.aten.add'.
             promote_args_positions: Positions of args to promote.
             promote_kwargs_names: Names of kwargs to promote.
-            promotion_kind: Type promotion kind. Checkout _prims_common.elementwise_dtypes for explanation.
+            promotion_kind: Type promotion kind. Refer to [_prims_common.elementwise_dtypes](https://github.com/pytorch/pytorch/blob/main/torch/_prims_common/__init__.py) for detail.  # noqa: B950
         """
         self.namespace = namespace
         self.op_name = op_name
@@ -1097,6 +1097,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         By default `Interpreter.run_node` does not update `node.meta["val"]`.
         """
         out = super().run_node(node)
+        # Update interpreter env state with new output value.
         self.env[node] = out
         node.meta["val"] = proxy_tensor.extract_val(out)
         return out
@@ -1192,7 +1193,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
             raise RuntimeError(f"Unexpected node output type: {type(node_val)}.")
 
     @_beartype.beartype
-    def _promote_arg(
+    def _maybe_promote_arg(
         self,
         diagnostic: diagnostics.Diagnostic,
         node: torch.fx.Node,
@@ -1212,17 +1213,16 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                 # Promote tensor to dtype.
                 graph = node.graph
                 with graph.inserting_before(node):
-                    new_fx_arg = self._create_node(
+                    diagnostic.with_additional_message(
+                        f"Argument {fx_arg}({old_dtype}) is promoted to {dtype}."
+                    )
+                    return self._create_node(
                         graph,
                         "call_function",
                         torch.ops.prims.convert_element_type.default,
                         (fx_arg,),
                         {"dtype": dtype},
                     )
-                    diagnostic.with_additional_message(
-                        f"Argument {fx_arg}({old_dtype}) is promoted to {dtype}."
-                    )
-                    return new_fx_arg
             diagnostic.with_additional_message(
                 f"Argument {fx_arg} is not promoted. Already {dtype}."
             )
@@ -1237,33 +1237,30 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                 graph = node.graph
                 with graph.inserting_before(node):
                     target = getattr(torch.ops.aten.tensor, type(fx_arg).__name__)
-                    new_fx_arg = self._create_node(
-                        graph, "call_function", target, (fx_arg,), {"dtype": dtype}
-                    )
                     diagnostic.with_additional_message(
                         f"Argument {fx_arg}(Scalar of equivalent dtype: {equivalent_dtype}) "
                         f"is promoted to {dtype}."
                     )
-                    return new_fx_arg
+                    return self._create_node(
+                        graph, "call_function", target, (fx_arg,), {"dtype": dtype}
+                    )
             diagnostic.with_additional_message(
                 f"Argument {fx_arg} is not promoted. Already {dtype}."
             )
             return fx_arg
         elif isinstance(fx_arg, (tuple, list)):
-            new_fx_arg = []
             diagnostic.with_additional_message(
                 f"Argument {fx_arg} is a tuple/list. Promoting each element."
             )
-            for fx_arg_elem in fx_arg:
-                new_fx_arg.append(
-                    self._promote_arg(diagnostic, node, fx_arg_elem, dtype)
-                )
-            return type(fx_arg)(new_fx_arg)
+            return type(fx_arg)(
+                self._maybe_promote_arg(diagnostic, node, fx_arg_elem, dtype)
+                for fx_arg_elem in fx_arg
+            )
         else:
             raise NotImplementedError(f"Unknown fx arg type: {type(fx_arg)}")
 
     @_beartype.beartype
-    def _promote_node(
+    def _maybe_promote_node(
         self,
         diagnostic: diagnostics.Diagnostic,
         node: torch.fx.Node,
@@ -1276,13 +1273,13 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         new_kwargs = {}
         for i, arg in enumerate(node.args):
             new_args.append(
-                self._promote_arg(
+                self._maybe_promote_arg(
                     diagnostic, node, arg, type_promotion_info.args_dtypes.get(i, None)
                 )
             )
 
         for name, arg in node.kwargs.items():
-            new_kwargs[name] = self._promote_arg(
+            new_kwargs[name] = self._maybe_promote_arg(
                 diagnostic, node, arg, type_promotion_info.kwargs_dtypes.get(name, None)
             )
         new_args = tuple(new_args)
@@ -1304,7 +1301,18 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         level=diagnostics.levels.NONE,
     )
     def run_node(self, node: torch.fx.Node) -> Any:
-        """Override `torch.fx.Interpreter.run_node` to insert type promotion ops when needed."""
+        """This method is an override which inserts type promotion nodes as needed.
+
+        For each `call_function` node, an initial check is conducted to determine if a type
+        promotion rule is applicable. If a relevant rule exists, type casting nodes are
+        introduced for the corresponding arguments. The OpOverload of the node is updated
+        to one that accommodates the promoted types. Should the output type be different,
+        type casting node is inserted for this output.
+
+        The call `super().run_node(node)` is guaranteed to be invoked for each node.
+        In the case of new or modified nodes, the result of `super().run_node(node)` is
+        used to update its `node.meta["val"]` value.
+        """
         diagnostic = self.diagnostic_context.inflight_diagnostic()
         with self._set_current_node(node):
             if node.op != "call_function":
@@ -1312,7 +1320,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
             elif rule := get_type_promotion_rule(
                 diagnostic, node, self.type_promotion_table
             ):
-                self._promote_node(diagnostic, node, rule)
+                self._maybe_promote_node(diagnostic, node, rule)
 
         return super().run_node(node)
 
@@ -1341,9 +1349,8 @@ class InsertTypePromotion(_pass.Transform):
         type_promotion_table: Optional[TypePromotionTable] = None,
     ):
         super().__init__(diagnostic_context, module)
-        self.type_promotion_table = type_promotion_table or TypePromotionTable()
         self.interpreter = _TypePromotionInterpreter(
-            diagnostic_context, module, self.type_promotion_table
+            diagnostic_context, module, type_promotion_table or TypePromotionTable()
         )
 
     def _detect_fake_mode(self) -> Optional[fake_tensor.FakeTensorMode]:
