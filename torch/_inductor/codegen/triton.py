@@ -1361,6 +1361,7 @@ class TritonKernel(Kernel):
             )
 
         dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
+        acc_type = triton_acc_type(src_dtype)
         result_var = self.cse.newvar()
         result_var.mask_vars = {var for var in masks if var[0] != "r"}
         cond = " & ".join(masks)
@@ -1379,6 +1380,27 @@ class TritonKernel(Kernel):
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
+            elif reduction_type == "var_unnormalized":
+                # For persistent reductions, don't bother with
+                # welford's algorithm since it uses more registers, and
+                # taking two reductions doesn't increase memory usage.
+                sum_ = self.cse.generate(
+                    self.compute,
+                    self.reduction_resize(f"tl.sum({masked_value}, {dim})"),
+                )
+                rnumel = ops.index_expr(self.numels[-1], self.index_dtype)
+                rnumel = self.cse.generate(self.compute, f"{rnumel}.to({acc_type})")
+                mean = ops.div(sum_, rnumel)
+
+                dx = ops.sub(masked_value, mean)
+                dx2 = ops.mul(dx, dx)
+                dx2_masked = self.cse.generate(
+                    self.compute, f"tl.where({cond}, {dx2}, 0.0)"
+                )
+                result_var = self.cse.generate(
+                    self.compute,
+                    self.reduction_resize(f"tl.sum({dx2_masked}, {dim})"),
+                )
             else:
                 result_var = self.cse.generate(
                     self.compute, final_reduction(masked_value)
@@ -1387,7 +1409,7 @@ class TritonKernel(Kernel):
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
             self.body.writeline(
-                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {triton_acc_type(src_dtype)})"
+                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
             )
 
             if reduction_type in {"argmax", "argmin"}:
@@ -1408,6 +1430,36 @@ class TritonKernel(Kernel):
                 """
                 )
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
+            elif reduction_type == "var_unnormalized":
+                accumulator_m2 = f"_{result_var}_m2"
+                accumulator_weight = f"_{result_var}_weight"
+                self.body.writeline(
+                    f"{accumulator_m2} = tl.zeros({self.dense_size_str()}, {acc_type})"
+                )
+                self.body.writeline(
+                    f"{accumulator_weight} = tl.zeros({self.dense_size_str()}, {acc_type})"
+                )
+
+                self.compute.splice(
+                    f"""\
+                {value}_delta = {value} - {accumulator}
+                {accumulator_weight}_next = {accumulator_weight} + ({cond}).to({acc_type})
+                {accumulator}_next = {accumulator} + {value}_delta / {accumulator_weight}_next
+                {accumulator_m2}_next = {accumulator_m2} + {value}_delta * ({value} - {accumulator}_next)
+
+                {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
+                {accumulator_m2} = tl.where({cond}, {accumulator_m2}_next, {accumulator_m2})
+                {accumulator_weight} = tl.where({cond}, {accumulator_weight}_next, {accumulator_weight})
+                """
+                )
+                self.suffix.splice(
+                    f"""\
+                _, {result_var}_tmp, _ = triton_helpers.welford(
+                    {accumulator}, {accumulator_m2}, {accumulator_weight}, {dim}
+                )
+                {result_var} = {self.reduction_resize(f'{result_var}_tmp')}
+                """
+                )
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 updated = combine_fn(accumulator, value)

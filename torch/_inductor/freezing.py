@@ -216,6 +216,7 @@ def freeze(
     aot_autograd_gm = decompose_unfused_batchnorms(
         aot_autograd_gm, example_inputs, preserved_arg_indices
     )
+
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)
     aot_autograd_gm.graph = cse_graph
