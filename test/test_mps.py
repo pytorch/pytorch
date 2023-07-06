@@ -136,7 +136,7 @@ def mps_ops_grad_modifier(ops):
         # fixed in macOS 13. We are not raising error.
         '__rpow__': [torch.float32],
         'pow': [torch.float32],
-        'prod': [torch.float32], # The operator 'aten::cumprod.out' is not supported until macOS 13
+        'prod': [torch.float32],  # The operator 'aten::cumprod.out' is not supported until macOS 13
     }
 
     MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
@@ -3722,12 +3722,11 @@ class TestMPS(TestCaseMPS):
             t = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps", dtype=torch.float).detach().requires_grad_()
             t_cpu = torch.tensor([1.0, 2.0, 3.0, 4.0], device="cpu", dtype=torch.float).detach().requires_grad_()
 
-            gradient=torch.full_like(t, 2)
-            gradient_cpu=torch.full_like(t_cpu, 2)
+            gradient = torch.full_like(t, 2)
+            gradient_cpu = torch.full_like(t_cpu, 2)
             self.assertEqual(
                 torch.autograd.grad(t.cumprod(0), t, grad_outputs=gradient, create_graph=multiple_derivatives),
-                torch.autograd.grad(t_cpu.cumprod(0), t_cpu, grad_outputs=gradient_cpu, create_graph=multiple_derivatives)
-        )
+                torch.autograd.grad(t_cpu.cumprod(0), t_cpu, grad_outputs=gradient_cpu, create_graph=multiple_derivatives))
 
     def test_median_int16(self):
         def helper(shape, dtype):
@@ -5228,8 +5227,8 @@ class TestNLLLoss(TestCaseMPS):
         t = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps", dtype=torch.float).detach().requires_grad_()
         t_cpu = torch.tensor([1.0, 2.0, 3.0, 4.0], device="cpu", dtype=torch.float).detach().requires_grad_()
 
-        gradient=torch.full_like(t, 2)
-        gradient_cpu=torch.full_like(t_cpu, 2)
+        gradient = torch.full_like(t, 2)
+        gradient_cpu = torch.full_like(t_cpu, 2)
         self.assertEqual(
             torch.autograd.grad(t.cumprod(0), t, grad_outputs=gradient, create_graph=False),
             torch.autograd.grad(t_cpu.cumprod(0), t_cpu, grad_outputs=gradient_cpu, create_graph=False)
@@ -5239,8 +5238,8 @@ class TestNLLLoss(TestCaseMPS):
         t = torch.tensor([1.0, 2.0, 0.0, 3.0, 4.0], device="mps", dtype=torch.float).detach().requires_grad_()
         t_cpu = torch.tensor([1.0, 2.0, 0.0, 3.0, 4.0], device="cpu", dtype=torch.float).detach().requires_grad_()
 
-        gradient=torch.full_like(t, 2)
-        gradient_cpu=torch.full_like(t_cpu, 2)
+        gradient = torch.full_like(t, 2)
+        gradient_cpu = torch.full_like(t_cpu, 2)
         self.assertEqual(
             torch.autograd.grad(t.cumprod(0), t, grad_outputs=gradient, create_graph=False),
             torch.autograd.grad(t_cpu.cumprod(0), t_cpu, grad_outputs=gradient_cpu, create_graph=False)
