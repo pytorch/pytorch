@@ -486,6 +486,21 @@ def get_reduction_combine_fn(reduction_type, dtype):
                 ops.where(mask, a_index, b_index),
             )
 
+    elif reduction_type == "var_unnormalized":
+
+        def combine_fn(a, b):
+            a_mean, a_m2, a_weight = a
+            b_mean, b_m2, b_weight = b
+
+            delta = b_mean - a_mean
+            new_weight = a_weight + b_weight
+            w2_over_w = b_weight / new_weight
+            return (
+                a_mean + delta * w2_over_w,
+                a_m2 + b_m2 + delta * delta * a_weight * w2_over_w,
+                new_weight,
+            )
+
     else:
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
 
@@ -563,6 +578,25 @@ class Reduction(Loops):
         reduction_type,
         reduction_numel,
     ):
+        def _is_static(x):
+            return isinstance(x, (int, sympy.Integer))
+
+        should_split = (
+            is_triton(device)
+            and reduction_type
+            not in {
+                "argmax",
+                "argmin",
+                "var_unnormalized",
+            }
+            and config.split_reductions
+            and all(_is_static(r) for r in ranges)
+            and all(_is_static(r) for r in reduction_ranges)
+            and _is_static(reduction_numel)
+        )
+        if not should_split:
+            return ReductionHint.DEFAULT, 1
+
         num_sm = get_device_properties(device).multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
@@ -763,6 +797,19 @@ class Reduction(Loops):
                 )
 
             return lambda index: fn(index)[1]
+        elif reduction_type == "var_unnormalized":
+
+            def value_fn(index, rindex):
+                mean = inner_fn(index, rindex)
+                m2 = ops.constant(0, src_dtype)
+                weight = ops.constant(1, src_dtype)
+                return (mean, m2, weight)
+
+            def project_fn(index):
+                mean, m2, weight = fn(index)
+                return m2
+
+            return project_fn
         else:
             value_fn = inner_fn
             return fn
@@ -818,7 +865,7 @@ class Reduction(Loops):
 
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
-            if reduction_type in ("argmin", "argmax"):
+            if reduction_type in ("argmin", "argmax", "var_unnormalized"):
 
                 def fn(index):
                     return ops.constant(0, dst_dtype)
@@ -846,29 +893,25 @@ class Reduction(Loops):
                 ranges,
             )
 
-        split_reduction = (
-            is_triton(device)
-            and reduction_type
-            not in {
-                "argmax",
-                "argmin",
-            }
-            and config.split_reductions
+        # triton doesn't support reduce to single element well, so break it up
+        hint, split = cls.num_splits(
+            device,
+            dst_dtype,
+            src_dtype,
+            inner_fn,
+            ranges,
+            reduction_ranges,
+            reduction_type,
+            reduction_numel,
         )
-        if split_reduction:
-            # TODO(voz): dedup with sizevar util introduced in other PR
-            def _is_static(x):
-                return isinstance(x, (int, sympy.Integer))
-
-            split_reduction = (
-                all(_is_static(r) for r in ranges)
-                and all(_is_static(r) for r in reduction_ranges)
-                and _is_static(reduction_numel)
-            )
-
-        if split_reduction:
+        # intermediate reduction in split can contain complex indexing,
+        # and num_splits will fail to correctly set the hint
+        # reuse the passed hint if available
+        if reduction_hint == ReductionHint.DEFAULT:
+            reduction_hint = hint
+        if split > 1:
             # triton doesn't support reduce to single element well, so break it up
-            hint, split = cls.num_splits(
+            return cls.create_multilayer(
                 device,
                 dst_dtype,
                 src_dtype,
@@ -876,26 +919,9 @@ class Reduction(Loops):
                 ranges,
                 reduction_ranges,
                 reduction_type,
-                reduction_numel,
+                split,
+                reduction_hint,
             )
-            # intermediate reduction in split can contain complex indexing,
-            # and num_splits will fail to correctly set the hint
-            # reuse the passed hint if available
-            if reduction_hint == ReductionHint.DEFAULT:
-                reduction_hint = hint
-            if split > 1:
-                # triton doesn't support reduce to single element well, so break it up
-                return cls.create_multilayer(
-                    device,
-                    dst_dtype,
-                    src_dtype,
-                    inner_fn,
-                    ranges,
-                    reduction_ranges,
-                    reduction_type,
-                    split,
-                    reduction_hint,
-                )
 
         return TensorBox.create(
             Reduction(
@@ -932,6 +958,7 @@ class Reduction(Loops):
             "prod": 1,
             "xor_sum": 0,
             "any": 0,
+            "var_unnormalized": 0,
         }[reduction_type]
 
     @classmethod
