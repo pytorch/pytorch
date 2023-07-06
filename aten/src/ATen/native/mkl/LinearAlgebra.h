@@ -8,7 +8,7 @@ namespace at {
 namespace native {
 
 #if AT_MKL_ENABLED()
-#define MKL_HAS_BF16_GEMM (INTEL_MKL_VERSION >= 20210001)
+#define MKL_HAS_BF16_GEMM (INTEL_MKL_VERSION >= 20220001)
 #endif
 
 void mkl_gemm_batched(
