@@ -201,7 +201,7 @@ class OpName:
     @classmethod
     @_beartype.beartype
     def from_full_name(cls, full_name: str) -> OpName:
-        """When the name is torch.ops.<namespace>.<op_name>.<overload>"""
+        """When the name is <namespace>::<op_name>[.<overload>]"""
         namespace, opname_overload = full_name.split("::")
         op_name, *overload = opname_overload.split(".", 1)
         overload = overload[0] if overload else "default"
