@@ -152,7 +152,6 @@ inline void _normalization_kernel(
 }
 
 inline void _reduce_max_fusion_kernel(
-    const float* a,
     const int& size,
     float* out,
     float& max) {
@@ -236,7 +235,7 @@ void _mha_softmax_kernel(
     sum_old = sum[i];
 
     _reduce_max_fusion_kernel(
-        a + i * kvsize, kvsize, a + i * kvsize, tmp_max);
+        kvsize, a + i * kvsize, tmp_max);
 
     tmp_max = max[i] > tmp_max ? max[i] : tmp_max;
 
@@ -262,10 +261,7 @@ void _mha_softmax_kernel(
   }
 }
 
-// Return the first output with other outputs arbitrary because they are used
-// for backward.
-// TODO: Calculate other outputs when adding cpu backward.
-template <typename scalar_t>
+template <typename scalar_t, int64_t qSplitSize, int64_t kvSplitSize>
 void cpu_flash_attention(
     const Tensor& output,
     const Tensor& logsumexp,
@@ -282,74 +278,48 @@ void cpu_flash_attention(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    c10::optional<double> scale,
-    const std::vector<int64_t>& qsplit_range,
-    const std::vector<int64_t>& qsplit_size,
-    const std::vector<int64_t>& kvsplit_range,
-    const std::vector<int64_t>& kvsplit_size) {
-
-  // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
-  // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
-  // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
-  int64_t batchSize = query.size(0);
-  int64_t qSize = query.size(2);
-  int64_t kvSize = value.size(2);
-  int64_t num_head = query.size(1);
-  int64_t headSize = query.size(3);
-  int64_t hiddenSize = num_head * headSize;
+    c10::optional<double> scale) {
 
   float scaling_factor =
       sdp::calculate_scale(query, scale).as_float_unchecked();
 
+  // Sizes
   // Query (Batch x Q_seq_len  x Num_heads x Dim_per_head)
   // Key   (Batch x KV_seq_len x Num_heads x Dim_per_head)
   // Value (Batch x KV_seq_len x Num_heads x Dim_per_head)
-  Tensor q = query.transpose(1, 2);
-  Tensor k = key.transpose(1, 2);
-  Tensor v = value.transpose(1, 2);
+  int64_t batchSize = query.size(0);
+  int64_t qSize = query.size(1);
+  int64_t kvSize = value.size(1);
+  int64_t num_head = query.size(2);
+  int64_t headSize = query.size(3);
 
-  int64_t qStrideB = q.stride(0);
-  int64_t qStrideM = q.stride(1);
-  int64_t qStrideH = q.stride(2);
-  int64_t kStrideB = k.stride(0);
-  int64_t kStrideN = k.stride(1);
-  int64_t kStrideH = k.stride(2);
-  int64_t vStrideB = v.stride(0);
-  int64_t vStrideN = v.stride(1);
-  int64_t vStrideH = v.stride(2);
+  // Strides
+  int64_t qStrideB = query.stride(0);
+  int64_t qStrideM = query.stride(1);
+  int64_t qStrideH = query.stride(2);
+  int64_t kStrideB = key.stride(0);
+  int64_t kStrideN = key.stride(1);
+  int64_t kStrideH = key.stride(2);
+  int64_t vStrideB = value.stride(0);
+  int64_t vStrideN = value.stride(1);
+  int64_t vStrideH = value.stride(2);
   int64_t oStrideB = output.stride(0);
   int64_t oStrideM = output.stride(1);
   int64_t oStrideH = output.stride(2);
 
-  int64_t qSplitSize = qSize;
-  for (size_t i = 0; i < qsplit_range.size(); ++i) {
-    if (qSize > qsplit_range[i]) {
-      qSplitSize = qsplit_size[i];
-      break;
-    }
-  }
-  int64_t kvSplitSize = kvSize;
-  for (size_t i = 0; i < kvsplit_range.size(); ++i) {
-    if (kvSize > kvsplit_range[i]) {
-      kvSplitSize = kvsplit_size[i];
-      break;
-    }
-  }
-
   int64_t qSlice = (qSize - 1) / qSplitSize + 1;
-  int64_t qTail = (qSize - 1) % qSplitSize + 1;
-
   int64_t num_thread = at::get_num_threads();
 
   at::Tensor qk = at::empty({num_thread, qSplitSize, kvSplitSize}, at::kFloat);
-  at::Tensor qk_norm = at::empty({num_thread, qSplitSize, kvSplitSize}, q.options());
+  at::Tensor qk_norm = at::empty({num_thread, qSplitSize, kvSplitSize}, query.options());
   at::Tensor qk_max = at::empty({num_thread, qSplitSize}, at::kFloat);
   at::Tensor qk_sum = at::empty({num_thread, qSplitSize}, at::kFloat);
   at::Tensor dst = at::empty({num_thread, qSplitSize, headSize}, at::kFloat);
 
-  scalar_t* q_data = q.data_ptr<scalar_t>();
-  scalar_t* k_data = k.data_ptr<scalar_t>();
-  scalar_t* v_data = v.data_ptr<scalar_t>();
+  // Data ptrs
+  scalar_t* q_data = query.data_ptr<scalar_t>();
+  scalar_t* k_data = key.data_ptr<scalar_t>();
+  scalar_t* v_data = value.data_ptr<scalar_t>();
   scalar_t* out_data = output.data_ptr<scalar_t>();
   float* qk_data = qk.data_ptr<float>();
   scalar_t* qk_norm_data = qk_norm.data_ptr<scalar_t>();
@@ -357,21 +327,21 @@ void cpu_flash_attention(
   float* qk_sum_data = qk_sum.data_ptr<float>();
   float* dst_data = dst.data_ptr<float>();
 
-  at::parallel_for(0, batchSize * num_head * qSlice, 0, [&](int64_t begin, int64_t end) {
+  at::parallel_for(0, batchSize * num_head * qSlice, 1, [&](int64_t begin, int64_t end) {
     int64_t i = 0, j = 0, k = 0;
     data_index_init(begin, i, batchSize, j, num_head, k, qSlice);
     int ompIdx = at::get_thread_num();
     for (const auto x : c10::irange(begin, end)) {
       (void)x; // Suppress unused variable
       int64_t m = k * qSplitSize;
-      int64_t qBlockSize = (k == qSlice - 1) ? qTail : qSplitSize;
+      int64_t qBlockSize = std::min(qSplitSize, qSize - m);
       // Initialize max and sum
       fill_stub(qk_max_data + ompIdx * qSplitSize, -std::numeric_limits<float>::infinity(), qBlockSize);
       fill_stub(qk_sum_data + ompIdx * qSplitSize, 0.f, qBlockSize);
-      int64_t num_keys = is_causal ? std::min(m + qSplitSize, kvSize) : kvSize;
+      int64_t num_keys = is_causal ? std::min(m + qBlockSize, kvSize) : kvSize;
       for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
         int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
-        // Calculate Q @ K.T
+        // Calculate scale * q @ k.T
         _mkl_gemm(
             true,
             false,
@@ -388,12 +358,12 @@ void cpu_flash_attention(
             0.f,
             qk_data + ompIdx * qSplitSize * kvSplitSize,
             kvBlockSize);
-        // Apply casual mask
+        // Apply causal mask, fill unused with -inf
         if (is_causal && num_keys - n <= kvSplitSize) {
           for (const auto row : c10::irange(qBlockSize)) {
             int64_t last_col = m + row - n;
-            float* row_ptr = qk_data + ompIdx * qSplitSize * kvSplitSize + row * kvSplitSize;
-            fill_stub(row_ptr + last_col + 1, -std::numeric_limits<float>::infinity(), kvBlockSize - last_col - 1);
+            float* row_ptr = qk_data + ompIdx * qSplitSize * kvSplitSize + row * kvBlockSize;
+            fill_stub(row_ptr + last_col + 1, -std::numeric_limits<float>::infinity(), kvBlockSize - last_col -1);
           }
         }
         // Update coefficients with Softmax
@@ -407,7 +377,7 @@ void cpu_flash_attention(
             kvBlockSize,
             headSize,
             n);
-        // Calculate Softmax(Q @ K.T) @ V
+        // Calculate Softmax(q @ k.T) @ v
         _mkl_gemm(
             false,
             false,
@@ -431,6 +401,7 @@ void cpu_flash_attention(
           qBlockSize,
           headSize,
           oStrideM);
+      // Move to the next query
       data_index_step(i, batchSize, j, num_head, k, qSlice);
     }
   });
@@ -454,24 +425,18 @@ void flash_attention_kernel_impl(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
-  const std::vector<int64_t> qsplit_range{767, 191, 31};
-  const std::vector<int64_t> qsplit_size{256, 64, 32};
-  const std::vector<int64_t> kvsplit_range{512};
-  const std::vector<int64_t> kvsplit_size{512};
   AT_DISPATCH_SWITCH(query.scalar_type(), "flash_attention",
     AT_DISPATCH_CASE(ScalarType::Float, [&] {
-      cpu_flash_attention<scalar_t>(
+      cpu_flash_attention<scalar_t, 128, 256>(
           output, logsumexp, cum_seq_q, cum_seq_k,
           max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
-          query, key, value, dropout_p, is_causal, return_debug_mask, scale,
-          qsplit_range, qsplit_size, kvsplit_range, kvsplit_size);
+          query, key, value, dropout_p, is_causal, return_debug_mask, scale);
     });
     AT_DISPATCH_CASE(ScalarType::BFloat16, [&] {
-      cpu_flash_attention<scalar_t>(
+      cpu_flash_attention<scalar_t, 128, 256>(
           output, logsumexp, cum_seq_q, cum_seq_k,
           max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
-          query, key, value, dropout_p, is_causal, return_debug_mask, scale,
-          qsplit_range, qsplit_size, kvsplit_range, kvsplit_size);
+          query, key, value, dropout_p, is_causal, return_debug_mask, scale);
     });
   );
 }
