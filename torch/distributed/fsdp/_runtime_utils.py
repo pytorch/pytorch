@@ -336,7 +336,7 @@ def _init_streams(
 @no_type_check
 def _unshard(
     state: _FSDPState,
-    handles: List[FlatParamHandle],
+    handle: FlatParamHandle,
     unshard_stream: torch.Stream,
     pre_unshard_stream: torch.Stream,
 ) -> None:
@@ -1079,18 +1079,12 @@ def _finalize_params(
             # sharded gradient from the last synchronized iteration
             return
         handle.prepare_gradient_for_optim()
-            _p_assert(
-                post_backward_hook_state_len == 1 or post_backward_hook_state_len == 2,
-                f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
-            )
-            flat_param._post_backward_hook_state[-1].remove()
-            delattr(flat_param, "_post_backward_hook_state")
-        if not state._sync_gradients:
-            # Preserve the gradient accumulation state if not synchronizing
-            # gradients: `.grad` remains the unsharded gradient  from prior
-            # `no_sync()` iterations, and `_saved_grad_shard` remains the
-            # sharded gradient from the last synchronized iteration
-            return
+        _p_assert(
+            post_backward_hook_state_len == 1 or post_backward_hook_state_len == 2,
+            f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
+        )
+        flat_param._post_backward_hook_state[-1].remove()
+        delattr(flat_param, "_post_backward_hook_state")
         handle.prepare_gradient_for_optim()
         _p_assert(
             hasattr(flat_param, "_post_backward_called"),
@@ -1433,15 +1427,16 @@ def _wait_for_computation_stream(
 
 
 def _reset_flat_param_grad_info_if_needed(
-    handle: FlatParamHandle,
+    handles: List[FlatParamHandle],
 ):
     """
     Clears the original parameters' gradients if needed. This method's CPU
     overhead is minimal, so we may call it throughout FSDP methods, which serve
     as callsites to free the gradient memory earlier.
     """
-    if handle._use_orig_params:
-        handle._reset_flat_param_grad_info_if_needed()
+    for handle in handles:
+        if handle._use_orig_params:
+            handle._reset_flat_param_grad_info_if_needed()
 
 
 @no_type_check

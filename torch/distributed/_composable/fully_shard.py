@@ -120,7 +120,7 @@ def fully_shard(
     _insert_module_state(module, state)
     for submodule in module.modules():
         if (
-            submodule in state._fully_sharded_module_to_handles
+            submodule in state._fully_sharded_module_to_handle
             and _get_module_state(submodule) is None
         ):
             _insert_module_state(submodule, state)
