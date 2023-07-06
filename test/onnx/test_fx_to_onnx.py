@@ -9,6 +9,7 @@ from torch.onnx import dynamo_export, ExportOptions
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import diagnostics
 from torch.testing._internal import common_utils
+from torch._subclasses import fake_tensor
 
 
 def assert_has_diagnostics(
@@ -67,6 +68,16 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         tensor_x = torch.randn(1, 1, 2)
         _ = dynamo_export(func, tensor_x, export_options=self.export_options)
+
+    def test_args_used_for_export_is_not_converted_to_fake_tensors(self):
+        def func(x, y):
+            return x + y
+
+        tensor_x = torch.randn(1, 1, 2)
+        tensor_y = torch.randn(1, 1, 2)
+        _ = dynamo_export(func, tensor_x, tensor_y, export_options=self.export_options)
+        self.assertNotIsInstance(tensor_x, fake_tensor.FakeTensor)
+        self.assertNotIsInstance(tensor_y, fake_tensor.FakeTensor)
 
     def test_mnist(self):
         class MNISTModel(nn.Module):
