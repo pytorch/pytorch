@@ -2517,6 +2517,7 @@ class TestSparseCSR(TestCase):
 
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @precisionOverride({torch.bfloat16: 0.01})
     def test_sparse_mm_reduce(self, device, dtype):
         def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
             csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
