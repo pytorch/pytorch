@@ -4,6 +4,7 @@ import contextlib
 import functools
 import logging
 import os
+import re
 import unittest.mock
 
 import torch
@@ -347,6 +348,24 @@ class LoggingTests(LoggingTestCase):
 
         self.assertTrue(found_x2)
         self.assertTrue(found_x3)
+
+    @make_logging_test(graph_sizes=True)
+    def test_graph_sizes_dynamic(self, records):
+        def fn(a, b):
+            return a @ b
+
+        fn_opt = torch._dynamo.optimize("eager", dynamic=False)(fn)
+        fn_opt(torch.randn(10, 20), torch.randn(20, 30))
+
+        fn_opt2 = torch._dynamo.optimize("eager", dynamic=True)(fn)
+        fn_opt2(torch.randn(5, 10), torch.randn(10, 15))
+
+        self.assertEqual(len(records), 2)
+        self.assertNotIn("concrete", records[0].getMessage())
+        lines = records[1].getMessage().split("\n")
+        for line in lines:
+            if "concrete" in line:
+                self.assertIsNotNone(re.search(r"\(concrete\): \(\d+, \d+\)", line))
 
 
 # single record tests
