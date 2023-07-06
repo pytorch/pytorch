@@ -190,13 +190,8 @@ static void basicAutogradNotImplementedFallbackImpl(
           // don't require grad, then we install the WarnNotImplemented grad_fn.
           // This grad_fn warns in backward and returns undefined tensor
           // gradients.
-          if (is_mutable_output) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-            rebase_history(const_cast<at::Tensor&>(t), grad_fn);
-          } else {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-            set_history(const_cast<at::Tensor&>(t), grad_fn);
-          }
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          set_history(const_cast<at::Tensor&>(t), grad_fn);
         },
         stack,
         stack->size() - num_returns,
