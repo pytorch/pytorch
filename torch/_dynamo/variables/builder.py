@@ -76,6 +76,7 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
     ListVariable,
     NamedTupleVariable,
@@ -108,12 +109,7 @@ from .tensor import (
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
 )
-from .torch import (
-    tensor_dunder_fns,
-    torch_special_class_types,
-    TorchHigherOrderOperatorVariable,
-    TorchVariable,
-)
+from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
 from .user_defined import (
     ProcessGroupVariable,
     UserDefinedClassVariable,
@@ -536,8 +532,9 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
         elif isinstance(value, HigherOrderOperator):
-            return TorchHigherOrderOperatorVariable(
+            return TorchHigherOrderOperatorVariable.make(
                 value,
+                source=self.source,
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
                 ),
