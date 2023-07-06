@@ -5,7 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 from warnings import warn
 
 from tools.shared.logging_utils import duration_to_str, pluralize
@@ -195,6 +195,40 @@ def _get_modified_tests() -> Set[str]:
     return _python_test_file_to_test_name(set(changed_files))
 
 
+def _query_rockset_for_failed_tests_on_recent_commits() -> Set[str]:
+    r = set()
+    try:
+        import rockset
+        main_commits = subprocess.check_output("git log --pretty=%H -100 origin/main").decode("utf-8").split()
+        parent_commits = subprocess.check_output("git log --pretty=%H -100").decode("utf-8").split()
+        all_commits = main_commits + parent_commits
+        all_commits_str = ",".join(all_commits)
+        query = """
+select
+    DISTINCT t.invoking_file
+from
+    commons.test_run_summary t
+    join workflow_job j on j.id = t.job_id
+where
+    (
+        t.failures > 0
+        or t.errors > 0
+    )
+    and ARRAY_CONTAINS(SPLIT(:shas, ','), j.head_sha)
+    and t._event_time > CURRENT_TIMESTAMP() - DAYS(2)
+ """
+        res: List[Dict[str, Any]] = rockset.RocksetClient(
+            host="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+        ).sql(query, params={"shas": all_commits_str}).results
+    except Exception as e:
+        warn(f"Can't query rockset for failed tests on recent commits due to {e}")
+        return r
+
+    for file in res:
+        r.add(file.replace(".", "/"))
+    return r
+
+
 def _python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
     prefix = f"test{os.path.sep}"
     valid_tests = {f for f in tests if f.startswith(prefix) and f.endswith(".py")}
@@ -298,6 +332,12 @@ def get_reordered_tests(
     pri_test |= _get_modified_tests()
     print_tests(
         pri_test, "If run, these tests will be prioritized because they were modified"
+    )
+    prioritized_tests |= pri_test
+
+    pri_test |= _query_rockset_for_failed_tests_on_recent_commits()
+    print_tests(
+        pri_test, "If run, these tests will be prioritized because I say so"
     )
     prioritized_tests |= pri_test
 
