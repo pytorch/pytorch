@@ -100,9 +100,9 @@ from .composite_compliance import no_dispatch
 # definition.
 # TODO: Expand this class to handle abritrary settings in addition to boolean flags?
 class TestEnvironment:
-    # Set of flags to set for the repro command that is output on test failure.
-    # Specifically, this includes flags are set to non-default values and are not implied.
-    # Mapping from env var name -> value (int)
+    # Set of env vars to set for the repro command that is output on test failure.
+    # Specifically, this includes env vars that are set to non-default values and
+    # are not implied. Maps from env var name -> value (int)
     repro_env_vars: dict = {}
 
     # Defines a flag usable throughout the test suite, determining its value by querying
