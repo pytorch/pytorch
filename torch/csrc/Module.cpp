@@ -54,6 +54,7 @@
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/jit/python/init.h>
@@ -1372,6 +1373,7 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
+  torch::cpu::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
 
@@ -1399,7 +1401,7 @@ PyObject* initModule() {
 #else
   PyObject* has_cudnn = Py_False;
 #endif
-  ASSERT_TRUE(set_module_attr("has_cudnn", has_cudnn));
+  ASSERT_TRUE(set_module_attr("_has_cudnn", has_cudnn));
 
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
   PyObject* has_spectral = Py_True;
@@ -1642,10 +1644,10 @@ Call this whenever a new thread is created in order to propagate values from
   PyObject* has_mps = Py_False;
 #endif
 
-  ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
-  ASSERT_TRUE(set_module_attr("has_mps", has_mps));
+  ASSERT_TRUE(set_module_attr("_has_cuda", has_cuda));
+  ASSERT_TRUE(set_module_attr("_has_mps", has_mps));
   ASSERT_TRUE(
-      set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
+      set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
 #ifdef _GLIBCXX_USE_CXX11_ABI
   ASSERT_TRUE(set_module_attr(
@@ -1729,10 +1731,29 @@ Call this whenever a new thread is created in order to propagate values from
   // torch/csrc/pybind.h` would solve this but it caused segmentation fault in
   // my environment.
   using _DeviceDtypeKey = std::pair<at::Device, std::string>;
+  // Custom hasher is necessary to make unordered_map compilable for Windows
+  // debug targets. As `at::native::ParamsHash` only works on structs with
+  // standard layout, but std::string isn't one in Visual C++ debug builds,
+  // which one can easily verify by running something like:
+  //   #define _DEBUG
+  //   #include <type_traits>
+  //   #include <string>
+  //   static_assert(std::is_standard_layout_v<std::string>, "Oh noes");
+  // If above condition is not met, VC++ raises a very cryptic compilation
+  // error. See
+  // https://github.com/pytorch/pytorch/pull/100007#discussion_r1227116292 for
+  // more detail
+  struct _DeviceDtypeHasher {
+    std::size_t operator()(const _DeviceDtypeKey& k) const noexcept {
+      static at::native::ParamsHash<at::Device> device_hasher;
+      static std::hash<std::string> string_hasher;
+      return device_hasher(k.first) ^ string_hasher(k.second);
+    }
+  };
   using _FlatMap = std::unordered_map<
       _DeviceDtypeKey,
       at::native::TensorsAndIndicesT,
-      at::native::ParamsHash<_DeviceDtypeKey>>;
+      _DeviceDtypeHasher>;
   py_module.def(
       "_group_tensors_by_device_and_dtype",
       [](const std::vector<std::vector<c10::optional<at::Tensor>>>&

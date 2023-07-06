@@ -205,6 +205,10 @@
 #      Use system-provided libraries to satisfy the build dependencies.
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
+#
+#   USE_MIMALLOC
+#      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
+#      By default, It is only enabled on Windows.
 
 import sys
 if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
@@ -1172,7 +1176,6 @@ def main():
         'include/torch/csrc/jit/codegen/cuda/scheduler/*.h',
         'include/torch/csrc/onnx/*.h',
         'include/torch/csrc/profiler/*.h',
-        'include/torch/csrc/profiler/unwind/*.h',
         'include/torch/csrc/profiler/orchestration/*.h',
         'include/torch/csrc/profiler/stubs/*.h',
         'include/torch/csrc/utils/*.h',
@@ -1195,6 +1198,8 @@ def main():
         'include/THH/generic/*.h',
         'include/sleef.h',
         "_inductor/codegen/*.h",
+        "_inductor/aot_inductor_include/*.cpp",
+        "_inductor/aot_inductor_include/*.h",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',

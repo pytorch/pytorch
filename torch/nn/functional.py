@@ -3784,6 +3784,15 @@ if upsample.__doc__:
     upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
 
+def _is_integer(x) -> bool:
+    r"""Type check the input number is an integer.
+    Will return True for int, SymInt and Tensors with integer elements.
+    """
+    if isinstance(x, (int, torch.SymInt)):
+        return True
+    return isinstance(x, Tensor) and not x.is_floating_point()
+
+
 @_overload  # noqa: F811
 def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
     pass
@@ -3913,8 +3922,13 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
                     f"input with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
                     "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
                     "output size in (o1, o2, ...,oK) format."
-
                 )
+            if not torch.jit.is_scripting():
+                if not all(_is_integer(x) for x in size):
+                    raise TypeError(
+                        "expected size to be one of int or Tuple[int] or Tuple[int, int] or "
+                        f"Tuple[int, int, int], but got size with types {[type(x) for x in size]}"
+                    )
             output_size = size
         else:
             output_size = [size for _ in range(dim)]
@@ -4248,7 +4262,7 @@ def grid_sample(
         For example, `PIL`_ and `OpenCV`_ use -0.5 and -0.75 respectively.
         This algorithm may "overshoot" the range of values it's interpolating.
         For example, it may produce negative values or values greater than 255 when interpolating input in [0, 255].
-        Clamp the results with :func: `torch.clamp` to ensure they are within the valid range.
+        Clamp the results with :func:`torch.clamp` to ensure they are within the valid range.
     .. _`cubic convolution algorithm`: https://en.wikipedia.org/wiki/Bicubic_interpolation
     .. _`PIL`: https://github.com/python-pillow/Pillow/blob/4634eafe3c695a014267eefdce830b4a825beed7/src/libImaging/Resample.c#L51
     .. _`OpenCV`: https://github.com/opencv/opencv/blob/f345ed564a06178670750bad59526cfa4033be55/modules/imgproc/src/resize.cpp#L908

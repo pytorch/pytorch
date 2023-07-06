@@ -238,24 +238,24 @@ class StateDictType(Enum):
     This enum indicates that which type of ``state_dict`` the FSDP module is
     currently processing (returning or loading).
     The default value is FULL_STATE_DICT to comply the PyTorch convention.
-    .. note::
-        FSDP currently supports three types of ``state_dict``:
-            1. ``state_dict/load_state_dict`: this pair of APIs return and load
-               the non-sharded, unflattened parameters. The semantics is the
-               same as using DDP.
-            2. ``_local_state_dict/_load_local_state_dict``: this pair of APIs return
-               and load local sharded, flattened parameters. The values returned
-               by ``_local_state_dict`` can be directly used by FSDP and is only
-               meaningful to FSDP (because parameters are flattened). Note that
-               these APIs are meant for use via the :func:`state_dict_type`
-               context manager as follows:
-                   >>> # xdoctest: +SKIP("undefined variables")
-                   >>> with fsdp.state_dict_type(StateDictType.LOCAL_STATE_DICT):
-                   ...     state = fsdp.state_dict()  # loads local state dict
-            3. ``_sharded_state_dict/_load_sharded_state_dict``: this pair of APIs
-               return and load sharded, unflattened parameters. The ``state_dict``
-               return by ``sharded_state_dict`` can be used by all other parallel
-               schemes (resharding may be required).
+
+    .. note:: FSDP currently supports three types of ``state_dict``:
+        1. ``state_dict/load_state_dict`: this pair of APIs return and load
+            the non-sharded, unflattened parameters. The semantics is the
+            same as using DDP.
+        2. ``_local_state_dict/_load_local_state_dict``: this pair of APIs return
+            and load local sharded, flattened parameters. The values returned
+            by ``_local_state_dict`` can be directly used by FSDP and is only
+            meaningful to FSDP (because parameters are flattened). Note that
+            these APIs are meant for use via the :func:`state_dict_type`
+            context manager as follows:
+                >>> # xdoctest: +SKIP("undefined variables")
+                >>> with fsdp.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+                ...     state = fsdp.state_dict()  # loads local state dict
+        3. ``_sharded_state_dict/_load_sharded_state_dict``: this pair of APIs
+            return and load sharded, unflattened parameters. The ``state_dict``
+            return by ``sharded_state_dict`` can be used by all other parallel
+            schemes (resharding may be required).
     """
 
     FULL_STATE_DICT = auto()
@@ -273,6 +273,7 @@ class StateDictConfig:
     """
 
     offload_to_cpu: bool = False
+    use_dtensor: bool = False
 
 
 @dataclass
@@ -330,6 +331,7 @@ class OptimStateDictConfig:
 
     # TODO: actually use this flag in the _optim_utils.py
     offload_to_cpu: bool = True
+    use_dtensor: bool = False
 
 
 @dataclass

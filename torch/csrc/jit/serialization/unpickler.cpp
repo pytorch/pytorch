@@ -465,6 +465,13 @@ PickleOpCode Unpickler::readInstruction() {
           " for stack_ which of size ",
           stack_.size());
       auto dict = c10::impl::GenericDict(AnyType::get(), AnyType::get());
+      TORCH_CHECK(
+          stack_.size() % 2 == 0 && start % 2 == 0,
+          "Parsing error: stack_ is of size ",
+          stack_.size(),
+          " and start index is ",
+          start,
+          ", but stack_ expected to contain even number of elements");
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
       }

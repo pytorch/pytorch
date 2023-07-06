@@ -4,6 +4,7 @@ import functools
 import itertools
 import logging
 import math
+import os
 import re
 import sys
 from copy import copy, deepcopy
@@ -60,6 +61,7 @@ DTYPE_TO_CPP = {
     torch.uint8: "unsigned char",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
+    torch.complex64: "complex64",
 }
 
 DTYPE_TO_ATEN = {
@@ -73,6 +75,7 @@ DTYPE_TO_ATEN = {
     torch.uint8: "at::kByte",
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
+    torch.complex64: "at::kComplexFloat",
 }
 
 DEVICE_TO_ATEN = {
@@ -97,6 +100,12 @@ PYTHON_TO_CPP = {
     "int": "long",
     "float": "double",
     "bool": "bool",
+    "ScalarType": "c10::ScalarType",
+}
+
+CONTAINER_PYTHON_TO_CPP = {
+    "List": "std::vector",
+    "Optional": "c10::optional",
 }
 
 
@@ -169,19 +178,23 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     if reduction_type == "argmax":
         prefix.extend(
             [
-                f"#pragma omp declare reduction(argmax : struct {struct_name} :\\",
+                "#if !defined(__clang_major__) || __clang_major__ > 9",
+                f"#pragma omp declare reduction(argmax : {struct_name} :\\",
                 "    omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\\",
                 "    omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
+                "#endif",
             ]
         )
     elif reduction_type == "argmin":
         prefix.extend(
             [
-                f"#pragma omp declare reduction(argmin : struct {struct_name} :\\",
+                "#if !defined(__clang_major__) || __clang_major__ > 9",
+                f"#pragma omp declare reduction(argmin : {struct_name} :\\",
                 "    omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\\",
                 "    omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
+                "#endif",
             ]
         )
     return prefix
@@ -202,14 +215,25 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
 
 
 @functools.lru_cache()
-def cpp_prefix():
+def cpp_prefix_path():
     path = Path(__file__).parent / "cpp_prefix.h"
     with path.open() as f:
+        content = f.read()
         _, filename = codecache.write(
-            f.read(),
+            content,
             "h",
         )
-    return f'#include "{filename}"'
+    return filename
+
+
+def cpp_prefix():
+    filename = cpp_prefix_path()
+    if config.is_fbcode():
+        # We need relative paths, since we bundle up
+        # everything that we compile into a folder for remote compilation.
+        return f'#include "{os.path.basename(filename)}"'
+    else:
+        return f'#include "{filename}"'
 
 
 class CppPrinter(ExprPrinter):
@@ -245,8 +269,9 @@ class CppPrinter(ExprPrinter):
         # Uses float constants to perform FP div
         base, exp = expr.args
         base = self._print(base)
-        if exp == 0.5:
-            r = f"std::sqrt({base})"
+
+        if exp == 0.5 or exp == -0.5:
+            r = f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
             return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
         assert exp.is_integer
         exp = int(exp)
@@ -649,6 +674,15 @@ class CppVecOverrides(OpOverrides):
             return f"cvt_fp32_to_bf16({x})"
         if opt_ctx_x.dtype == torch.bfloat16 and dtype in (torch.float, torch.float32):
             return f"cvt_bf16_to_fp32({x})"
+        if opt_ctx_x.dtype == torch.uint8 and dtype in (torch.float, torch.float32):
+            # Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
+            return f"at::vec::convert_uint8_to_float({x})"
+        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.uint8:
+            # TODO(Leslie): Add fast path to at::vec::convert_float_to_uint8,
+            # if we already handle the saturation previously.
+            # * Pattern match of quantization op in the loop body.
+            # * Skip the explicit saturation and clamp inside at::vec::convert_float_to_uint8.
+            return f"at::vec::convert_float_to_uint8({x})"
         # TODO(jgong5): support conversion for other types
         # currently we only allow load/store torch.uint8 and handle conversion there
         return f"({x})"
@@ -1335,9 +1369,12 @@ class CppVecKernel(CppKernel):
         if is_broadcast:
             if is_mask:
                 loadbuf = f"flag_to_float_scalar({loadbuf})"
-            line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
+            if dtype in [torch.bfloat16]:
+                line = f"at::vec::Vectorized<bfloat16>({loadbuf})"
+            else:
+                line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
-            line = f"at::vec::load_uint8_as_float({var_expr})"
+            line = f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
         elif is_mask:
             line = f"flag_to_float_vec({loadbuf})"
         elif dtype in [torch.bfloat16]:
@@ -1382,13 +1419,8 @@ class CppVecKernel(CppKernel):
             var_expr = "tmpbuf"
         if V.graph.get_dtype(name) in [torch.bfloat16]:
             line = f"{value}.store({var_expr}, {self.tiling_factor});"
-        elif (V.graph.get_dtype(name) in [torch.uint8]) and (
-            opt_ctx.is_store_float_as_uint8
-        ):
-            # TODO(Leslie): Optimize the implementation of store_float_as_uint8
-            # * Pattern match of quantization op in the loop body.
-            # * Skip the explicit saturation and clamp inside store_float_as_uint8.
-            line = f"at::vec::store_float_as_uint8({value}, {var_expr});"
+        elif V.graph.get_dtype(name) in [torch.uint8]:
+            line = f"{value}.store({var_expr}, {self.tiling_factor});"
         else:
             line = f"{value}.store({var_expr});"
         if non_contiguous:
@@ -1541,8 +1573,15 @@ class CppTile2DKernel(CppVecKernel):
         return sympy_symbol(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
-        return stride_at(self.itervars[self.outer_idx], index) == 1 and index.has(
-            self.itervars[self.tiling_idx]
+        return (
+            stride_at(self.itervars[self.outer_idx], index) == 1
+            and index.has(self.itervars[self.tiling_idx])
+            and not stride_at(self.itervars[self.tiling_idx], index).has(
+                self.itervars[self.tiling_idx]
+            )
+            and not stride_at(self.itervars[self.tiling_idx], index).has(
+                self.itervars[self.outer_idx]
+            )
         )
 
     def gen_transposed_tile_load_store(self, name, var, index, is_store):
@@ -1593,6 +1632,11 @@ class CppTile2DKernel(CppVecKernel):
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
                 line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+            elif (
+                V.graph.get_dtype(name) in [torch.uint8]
+                and opt_ctx.is_load_uint8_as_float
+            ):
+                line = f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
             else:
                 line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             return self.cse.generate(self.loads, line)
@@ -1619,7 +1663,9 @@ class CppTile2DKernel(CppVecKernel):
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
-                line = f"{value}.store({storebuf}, {self.tiling_factor})"
+                line = f"{value}.store({storebuf}, {self.tiling_factor});"
+            elif V.graph.get_dtype(name) in [torch.uint8]:
+                line = f"{value}.store({storebuf}, {self.tiling_factor});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
@@ -1813,10 +1859,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             if store_dtype in [torch.uint8]:
                 value_node = node_ctx.get_fx_node().all_input_nodes[-1]
-                opt_ctx.is_store_float_as_uint8 = self.can_store_fp32_as_uint8(
-                    name, value_node
-                )
-                if not opt_ctx.is_store_float_as_uint8:
+                if not self.can_store_fp32_as_uint8(name, value_node):
                     self.disable_vec("not support store float32 as uint8")
                     return self.simd_vec
 
@@ -2043,13 +2086,8 @@ class CppVecKernelChecker(CppVecKernel):
                                 if input_value.target == "load"
                                 else input_value.args[-1]
                             )
-                            if (dtype == torch.uint8) and (
-                                input_value.target == "load"
-                            ):
-                                # 1. doing uint8 to float.
-                                # 2. the previous node of uint8 to float is load.
-                                opt_ctx.is_load_uint8_as_float = True
-                            elif dtype in [torch.bfloat16, torch.float]:
+                            if dtype in [torch.bfloat16, torch.float, torch.uint8]:
+                                # Convert from dtype to torch.float
                                 pass
                             elif (
                                 dtype in [torch.int32, torch.int64]
@@ -2084,10 +2122,7 @@ class CppVecKernelChecker(CppVecKernel):
                     elif dtype == torch.bool:
                         pass
                     elif dtype == torch.uint8:
-                        opt_ctx.is_store_float_as_uint8 = all(
-                            usr.target in ["store"] for usr in cur_node.users
-                        )
-                        if not opt_ctx.is_store_float_as_uint8:
+                        if not all(usr.target in ["store"] for usr in cur_node.users):
                             self.disable_vec(f"to_dtype: dtype {dtype}")
                     else:
                         self.disable_vec(f"to_dtype: dtype {dtype}")

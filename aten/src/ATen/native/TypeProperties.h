@@ -3,7 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/IListRef.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 struct ResultTypeState {
   c10::ScalarType dimResult = ScalarType::Undefined;
@@ -17,4 +17,4 @@ TORCH_API ScalarType result_type(const ResultTypeState& state);
 
 TORCH_API ScalarType result_type(ITensorListRef tensors);
 
-}}
+} // namespace at::native
