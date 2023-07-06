@@ -110,6 +110,12 @@ _device_not_kwarg_ops = (
 # this op is never actually used
 _non_kwarg_device_constructors = (aten._list_to_tensor,)
 
+# This function indicates if the backend device
+# supports non-contiguous tensors
+def is_noncontiguous_supported(device):
+    if device.type == "hpu":
+        return False
+    return True
 
 # This function indicates if the backend device
 # supports non-contiguous tensors
@@ -1166,8 +1172,6 @@ class FakeTensor(torch.Tensor):
             has_scalar_only_inputs = True
             common_device = torch.device("cpu")
 
-        assert common_device is not None, f"Could not find common device for {func}"
-
         return common_device, has_scalar_only_inputs
 
     __torch_function__ = torch._C._disabled_torch_function_impl
@@ -1531,12 +1535,15 @@ class FakeTensorMode(TorchDispatchMode):
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
         # It's possible that the kernel will return NotImplementedError
         try:
-            device = FakeTensor._find_common_device(func, args, kwargs)
+            common_device = FakeTensor._find_common_device(func, args, kwargs)
             with in_kernel_invocation_manager(self):
                 r = func(*args, **kwargs)
-                if device[0] == torch.device("hpu:0"):
-                    from torch.distributed._tensor.ops.pointwise_ops import pointwise_ops
-                    if (func in pointwise_ops):
+                if common_device is not None and is_noncontiguous_supported(common_device[0]) is False::
+                    from torch.distributed._tensor.ops.pointwise_ops import(
+                        pointwise_ops,
+                    )
+
+                    if func in pointwise_ops:
                         r = r.new_empty(r.shape)
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
@@ -1625,6 +1632,7 @@ class FakeTensorMode(TorchDispatchMode):
                     common_device,
                     has_scalar_only_inputs,
                 ) = FakeTensor._find_common_device(func, args, kwargs)
+                assert common_device is not None, f"Could not find common device for {func}"
 
             if self.is_our_fake(e):
                 torch._check(
