@@ -461,7 +461,7 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
     out_tensor = shard.new_empty(out_size)
     assert out_tensor.is_contiguous()
     # FIXME gloo doesn't support _allgather_base
-    if shard.is_cpu:
+    if dist.get_backend(group) == dist.Backend.GLOO or shard.is_cpu:
         tensor_list = list(torch.chunk(out_tensor, group_size))
         work = dist.all_gather(tensor_list, shard, group=group, async_op=True)
     else:
