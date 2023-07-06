@@ -135,6 +135,7 @@ def set_logs(
     graph: bool = False,
     graph_code: bool = False,
     graph_breaks: bool = False,
+    graph_sizes: bool = False,
     guards: bool = False,
     recompiles: bool = False,
     trace_source: bool = False,
@@ -221,6 +222,10 @@ def set_logs(
 
         graph_breaks (:class:`bool`):
             Whether to emit the graph breaks encountered by TorchDynamo.
+            Default: ``False``
+
+        graph_sizes (:class:`bool`):
+            Whether to emit tensor sizes of the graph captured by TorchDynamo.
             Default: ``False``
 
         guards (:class:`bool`):
@@ -335,6 +340,7 @@ def set_logs(
         graph=graph,
         graph_code=graph_code,
         graph_breaks=graph_breaks,
+        graph_sizes=graph_sizes,
         guards=guards,
         recompiles=recompiles,
         trace_source=trace_source,

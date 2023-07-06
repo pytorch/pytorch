@@ -84,6 +84,7 @@ from .variables.tensor import (
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
+graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 
 
 class OutputGraphState(NamedTuple):
@@ -838,6 +839,31 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
 
+    def log_graph_sizes(self, name):
+        graph_sizes_str = "TRACED GRAPH TENSOR SIZES\n"
+        graph_sizes_str += f"===== {name} =====\n"
+        for node in self.graph.nodes:
+            example_value = node.meta.get("example_value", None)
+            if isinstance(example_value, torch._subclasses.FakeTensor):
+                size = example_value.size()
+                graph_sizes_str += f"{node.name}: {tuple(size)}\n"
+                concrete_size = []
+                has_symint = False
+                for sz in size:
+                    if isinstance(sz, int):
+                        concrete_size.append(sz)
+                    elif isinstance(sz, torch.SymInt):
+                        has_symint = True
+                        concrete_size.append(sz.node.hint)
+                    else:
+                        break
+                else:
+                    if has_symint:
+                        graph_sizes_str += (
+                            f"{node.name} (concrete): {tuple(concrete_size)}\n"
+                        )
+        graph_sizes_log.debug(graph_sizes_str)
+
     @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
@@ -870,6 +896,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
+        if torch._logging._internal.log_state.is_artifact_enabled("graph_sizes"):
+            self.log_graph_sizes(name)
 
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
