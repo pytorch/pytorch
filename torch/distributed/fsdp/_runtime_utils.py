@@ -24,6 +24,7 @@ from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed import get_backend, get_world_size
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
+from torch.distributed.distributed_c10d import _get_group_tag
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
     _FSDPState,
@@ -226,9 +227,14 @@ def _init_device_mesh(
         return None
     if get_backend() == "fake" or not root_state.compute_device:
         return None
+
     device_type = root_state.compute_device.type
     mesh_tensor = torch.arange(get_world_size(root_state.process_group))
-    device_mesh = DeviceMesh(device_type, mesh_tensor)
+    device_mesh = DeviceMesh(device_type, mesh_tensor, _init_process_groups=False)
+    device_mesh._dim_group_infos = (
+        _get_group_tag(root_state.process_group),
+        mesh_tensor.tolist(),
+    )
     return device_mesh
 
 
@@ -573,7 +579,7 @@ def _root_pre_forward(
             # increase some overhead, so not turned on for model wrapper path right now where
             # manual wrapping is more broadly used.
             if _is_composable(state):
-                return _root_cast_forward_input(state, args, kwargs)
+                return _root_cast_forward_input(state, module, args, kwargs)
             return args, kwargs
 
         # We cast buffers back to full precision if we're forcing full precision. Disjointly, we check if buffers
@@ -640,15 +646,17 @@ def _root_pre_forward(
         args = args_tuple[0]
         kwargs = kwargs_tuple[0]
 
-        return _root_cast_forward_input(state, args, kwargs)
+        return _root_cast_forward_input(state, module, args, kwargs)
 
 
 @no_type_check
-def _root_cast_forward_input(state: _FSDPState, args, kwargs) -> Tuple[Any, Any]:
+def _root_cast_forward_input(
+    state: _FSDPState, module: torch.nn.Module, args, kwargs
+) -> Tuple[Any, Any]:
     should_cast_forward_inputs = (
-        all(not handle._force_full_precision for handle in state._handles)
-        and state.mixed_precision.cast_root_forward_inputs
-    )
+        module.training
+        and all(not handle._force_full_precision for handle in state._handles)
+    ) and state.mixed_precision.cast_root_forward_inputs
 
     if should_cast_forward_inputs:
         input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype

@@ -20,25 +20,6 @@ void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedB
   return (void*)alignedAddress;
 }
 
-/**
- * Computes number of elements one needs to transfer to preserve all the elements
- */
-size_t compute_strided_size(const at::Tensor& t) {
-  size_t rc = 1;
-  if (t.numel() == 0) {
-    return 0;
-  }
-  for (const auto i : c10::irange(t.dim())) {
-    assert(t.size(i) > 0);
-    rc += (t.size(i) - 1) * t.stride(i);
-  }
-  return rc;
-}
-
-bool is_strided_contiguous(const at::Tensor& t) {
-  return compute_strided_size(t) == static_cast<size_t>(t.numel());
-}
-
 // Copy sourceBuffer into destBuffer, casting sourceBuffer to src.scalar_type().
 // The shapes and dtypes are taken from dst and src, but their storage pointers are not used.
 void copy_cast_mps(at::Tensor& dst,
@@ -177,7 +158,7 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
   const size_t size_to_copy = src.nbytes();
   const void* host_src = static_cast<const char*>(src.storage().data()) + src_byte_offset;
 
-  TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_strided_contiguous(src));
+  TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_dense_in_storage(src));
 
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache | MTLResourceStorageModeShared;
@@ -204,12 +185,12 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
   // Typecast to dst_ if needed and expand, which is a no-op
   Tensor src = (src_.dtype() != dst_.dtype() ? src_.to(dst_.dtype()) : src_).expand_as(dst_);
 
-  // If src is not contiguously strided it must be cloned
+  // If src is not densely mapped in storage it must be cloned
   // It does not mean that tensor is contiguous, but rather
   // that it could be represented as 1d view
-  if (!is_strided_contiguous(src)) {
+  if (!is_dense_in_storage(src)) {
     src = src.clone();
-    TORCH_INTERNAL_ASSERT(is_strided_contiguous(src));
+    TORCH_INTERNAL_ASSERT(is_dense_in_storage(src));
   }
   Tensor dst = dst_;
   bool needs_copy = false;
