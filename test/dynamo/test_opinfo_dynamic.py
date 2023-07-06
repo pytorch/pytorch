@@ -87,7 +87,7 @@ def check_model(
     correct = model(*ref_inputs, **ref_kwargs)
     called = False
 
-    def detect_specialization(gm, name, *args):
+    def detect_specialization(gm, *args):
         for node in gm.graph.nodes:
             example_value = node.meta.get("example_value", None)
             if node.op == "placeholder" and isinstance(example_value, torch._subclasses.FakeTensor):
@@ -95,18 +95,19 @@ def check_model(
                 for sz in size:
                     if isinstance(sz, int) and sz not in (0, 1):
                         # Found a specialization
-                        specialized_records.append([op, sz, gm])
+                        breakpoint()
+                        specialized_records.append([op.name, sz, gm])
                         break
             elif node.op == "placeholder" and isinstance(example_value, torch.SymInt):
                 si = node.meta["example_value"]
                 if len(torch.fx.experimental.symbolic_shapes.free_symbols(si)) == 0:
                         # Found a specialization
-                        specialized_records.append([op, si, gm])
+                        specialized_records.append([op.name, si, str(node.meta["grapharg"].source)])
                         break
 
 
     def detect_specialization_backend(gm, *args):
-        detect_specialization(gm, "BULL", *args)
+        detect_specialization(gm, *args)
         nonlocal called
         called = True
         print(gm)
@@ -183,7 +184,7 @@ class TestDynamoDynamicOpInfo(TestCase):
                 )
         except Exception as e:
             record = (op.name, "FAIL", str(type(e)))
-            raise e
+            # raise e
         records.append(record)
         
 
