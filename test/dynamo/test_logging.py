@@ -103,10 +103,11 @@ class LoggingTests(LoggingTestCase):
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
     @make_logging_test(dynamo=logging.DEBUG)
-    def test_dynamo_debug_no_bytecode(self, records):
+    def test_dynamo_debug_default_off_artifacts(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(torch.ones(1000, 1000))
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
+        self.assertEqual(len([r for r in records if ".__trace_source" in r.name]), 0)
 
     @make_logging_test(dynamo=logging.ERROR)
     def test_dynamo_error(self, records):
@@ -256,6 +257,97 @@ class LoggingTests(LoggingTestCase):
         self.assertIn("[INFO]", handler.format(records[0]))
         self.assertEqual("custom format", handler.format(records[1]))
 
+    test_trace_source_simple = within_range_record_test(1, 100, trace_source=True)
+
+    @make_logging_test(trace_source=True)
+    def test_trace_source_if_stmt(self, records):
+        def fn(x):
+            if x.sum() > 0:
+                return x * 2
+            return x * 3
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.ones(3, 3))
+
+        found_x2 = False
+        found_x3 = False
+        for record in records:
+            msg = record.getMessage()
+            if "return x * 2" in msg:
+                found_x2 = True
+            if "return x * 3" in msg:
+                found_x3 = True
+
+        self.assertTrue(found_x2)
+        self.assertFalse(found_x3)
+
+    @make_logging_test(trace_source=True)
+    def test_trace_source_nested(self, records):
+        def fn1(x):
+            x = fn2(x)
+            return x * 2
+
+        def fn2(x):
+            x = fn3(x)
+            return x * 3
+
+        def fn3(x):
+            return x * 4
+
+        fn_opt = torch._dynamo.optimize("eager")(fn1)
+        fn_opt(torch.ones(3, 3))
+
+        found_x2 = False
+        found_x3 = False
+        found_x4 = False
+        for record in records:
+            msg = record.getMessage()
+            if "return x * 2" in msg:
+                found_x2 = True
+                self.assertNotIn("inline depth", msg)
+            elif "return x * 3" in msg:
+                found_x3 = True
+                self.assertIn("inline depth: 1", msg)
+            elif "return x * 4" in msg:
+                found_x4 = True
+                self.assertIn("inline depth: 2", msg)
+        self.assertTrue(found_x2)
+        self.assertTrue(found_x3)
+        self.assertTrue(found_x4)
+
+    @make_logging_test(trace_source=True)
+    def test_trace_source_cond(self, records):
+        from functorch.experimental.control_flow import cond
+
+        def true_fn(x):
+            return x * 2
+
+        def false_fn(x):
+            return x * 3
+
+        def inner(pred, x):
+            return cond(pred, true_fn, false_fn, [x])
+
+        def outer(pred, x):
+            return inner(pred, x)
+
+        fn_opt = torch._dynamo.optimize("eager")(outer)
+        fn_opt(torch.tensor(True), torch.ones(3, 3))
+
+        found_x2 = False
+        found_x3 = False
+        for record in records:
+            msg = record.getMessage()
+            if "return x * 2" in msg:
+                found_x2 = True
+                self.assertIn("inline depth: 2", msg)
+            if "return x * 3" in msg:
+                found_x3 = True
+                self.assertIn("inline depth: 2", msg)
+
+        self.assertTrue(found_x2)
+        self.assertTrue(found_x3)
+
 
 # single record tests
 exclusions = {
@@ -268,6 +360,7 @@ exclusions = {
     "ddp_graphs",
     "perf_hints",
     "not_implemented",
+    "trace_source",
     "custom_format_test_artifact",
 }
 for name in torch._logging._internal.log_registry.artifact_names:

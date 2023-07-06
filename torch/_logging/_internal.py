@@ -137,6 +137,7 @@ def set_logs(
     graph_breaks: bool = False,
     guards: bool = False,
     recompiles: bool = False,
+    trace_source: bool = False,
     output_code: bool = False,
     schedule: bool = False,
     perf_hints: bool = False,
@@ -229,6 +230,9 @@ def set_logs(
         recompiles (:class:`bool`):
             Whether to emit a guard failure reason and message every time
             TorchDynamo recompiles a function. Default: ``False``
+
+        trace_source (:class:`bool`):
+            Whether to emit when TorchDynamo begins tracing a new line. Default: ``False``
 
         output_code (:class:`bool`):
             Whether to emit the TorchInductor output code. Default: ``False``
@@ -333,6 +337,7 @@ def set_logs(
         graph_breaks=graph_breaks,
         guards=guards,
         recompiles=recompiles,
+        trace_source=trace_source,
         output_code=output_code,
         schedule=schedule,
         perf_hints=perf_hints,
