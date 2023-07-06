@@ -367,6 +367,15 @@ FOREACH(mklrtl ${mklrtls} "")
   ENDFOREACH(mkliface)
 ENDFOREACH(mklrtl)
 
+IF (MKL_LIBRARIES)
+  SET(CMAKE_REQUIRED_LIBRARIES ${MKL_LIBRARIES})
+  check_function_exists("cblas_gemm_bf16bf16f32" MKL_HAS_SBGEMM)
+  set(CMAKE_REQUIRED_LIBRARIES)
+  IF(MKL_HAS_SBGEMM)
+    add_compile_options(-DMKL_HAS_SBGEMM)
+  ENDIF(MKL_HAS_SBGEMM)
+ENDIF (MKL_LIBRARIES)
+
 # Check for older versions
 IF (NOT MKL_LIBRARIES)
   SET(MKL_VERSION 900)
