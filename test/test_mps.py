@@ -136,6 +136,7 @@ def mps_ops_grad_modifier(ops):
         # fixed in macOS 13. We are not raising error.
         '__rpow__': [torch.float32],
         'pow': [torch.float32],
+        'prod': [torch.float32], # The operator 'aten::cumprod.out' is not supported until macOS 13
     }
 
     MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
@@ -452,7 +453,6 @@ def mps_ops_modifier(ops):
         'linalg.solve_ex': None,
         'linalg.svdvals': None,
         'linalg.tensorsolve': None,
-        'linalg.vander': None,
         'linalg.vecdot': None,
         'logcumsumexp': None,
         'logdet': None,
@@ -3715,6 +3715,7 @@ class TestMPS(TestCaseMPS):
 
         [helper(dtype) for dtype in [torch.float32, torch.int16, torch.int32, torch.uint8]]
 
+    @unittest.skipIf(product_version < 13.0, "Skipped on macOS 12")
     def test_cumprod_backward(self):
         # the gradient computation of cumprod has two different paths depending on whether or not multiple derivatives are to be computed
         for multiple_derivatives in [False, True]:
@@ -5221,7 +5222,19 @@ class TestNLLLoss(TestCaseMPS):
         for dtype in [torch.float32, torch.int32, torch.int64, torch.bool]:
             helper((2, 3), dtype)
 
+    # torch.cumprod is not supported on mps until macOS 13
+    @unittest.skipIf(product_version < 13.0, "Skipped on macOS 12")
     def test_prod_backward(self):
+        t = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps", dtype=torch.float).detach().requires_grad_()
+        t_cpu = torch.tensor([1.0, 2.0, 3.0, 4.0], device="cpu", dtype=torch.float).detach().requires_grad_()
+
+        gradient=torch.full_like(t, 2)
+        gradient_cpu=torch.full_like(t_cpu, 2)
+        self.assertEqual(
+            torch.autograd.grad(t.cumprod(0), t, grad_outputs=gradient, create_graph=False),
+            torch.autograd.grad(t_cpu.cumprod(0), t_cpu, grad_outputs=gradient_cpu, create_graph=False)
+        )
+
         # when there is exactly one zero in the tensor the gradient of prod involves cumprod
         t = torch.tensor([1.0, 2.0, 0.0, 3.0, 4.0], device="mps", dtype=torch.float).detach().requires_grad_()
         t_cpu = torch.tensor([1.0, 2.0, 0.0, 3.0, 4.0], device="cpu", dtype=torch.float).detach().requires_grad_()
