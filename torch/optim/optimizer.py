@@ -54,11 +54,26 @@ required = _RequiredParameter()
 
 def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
+        import torch._dynamo
         prev_grad = torch.is_grad_enabled()
         try:
+            # Note on graph break below:
+            # we need to graph break to ensure that aot respects the no_grad annotation.
+            # This is important for perf because without this, functionalization will generate an epilogue
+            # which updates the mutated parameters of the optimizer which is *not* visible to inductor, as a result,
+            # inductor will allocate for every parameter in the model, which is horrible.
+            # With this, aot correctly sees that this is an inference graph, and functionalization will generate
+            # an epilogue which is appended to the graph, which *is* visible to inductor, as a result, inductor sees that
+            # step is in place and is able to avoid the extra allocation.
+            # In the future, we will either 1) continue to graph break on backward, so this graph break does not matter
+            # or 2) have a fully fused forward and backward graph, which will have no_grad by default, and we can remove this
+            # graph break to allow the fully fused fwd-bwd-optimizer graph to be compiled.
+            # see https://github.com/pytorch/pytorch/issues/104053
             torch.set_grad_enabled(self.defaults['differentiable'])
+            torch._dynamo.graph_break()
             ret = func(self, *args, **kwargs)
         finally:
+            torch._dynamo.graph_break()
             torch.set_grad_enabled(prev_grad)
         return ret
     functools.update_wrapper(_use_grad, func)
@@ -273,9 +288,15 @@ class Optimizer:
 
     # Currently needed by Adam and AdamW
     def _cuda_graph_capture_health_check(self) -> None:
-        # If we are compiling, we take the capturable path automatically
-        # One caveat here is that if we are compiling, we *permit* step/param tensors to be on CPU
-        # so we do not explicitly enable the capturable flag. Inductor will decide whether cudagraphs
+        # Note [torch.compile x capturable]
+        # If we are compiling, we try to take the capturable path automatically by
+        # setting the flag to True during tracing. Due to this, we skip all the checks
+        # normally required for determining whether we can use CUDA graphs and
+        # shunt the responsibility to torch.inductor. This saves time during tracing
+        # since the checks are slow without sacrificing UX since inductor will warn
+        # later if CUDA graphs cannot be enabled, e.g.,
+        # https://github.com/pytorch/pytorch/blob/d3ba8901d8640eb16f88b2bfef9df7fa383d4b47/torch/_inductor/compile_fx.py#L390.
+        # Thus, when compiling, inductor will determine if cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
         if not is_compiling() and torch.backends.cuda.is_built() and torch.cuda.is_available():
             capturing = torch.cuda.is_current_stream_capturing()
@@ -404,6 +425,7 @@ class Optimizer:
         self._optimizer_step_post_hooks[handle.id] = hook
         return handle
 
+    @torch._disable_dynamo
     def state_dict(self) -> Dict[str, Any]:
         r"""Returns the state of the optimizer as a :class:`dict`.
 
@@ -455,12 +477,18 @@ class Optimizer:
                 capturable = pg["capturable"] if "capturable" in pg else False
                 break
 
-        if key != "step" or capturable or fused:
+        if key == 'step':
+            if capturable or fused:
+                return value.to(dtype=torch.float32, device=param.device)
+            else:
+                return value
+        else:
             if param.is_floating_point():
                 return value.to(dtype=param.dtype, device=param.device)
-            return value.to(device=param.device)
-        return value
+            else:
+                return value.to(device=param.device)
 
+    @torch._disable_dynamo
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         r"""Loads the optimizer state.
 
@@ -517,6 +545,7 @@ class Optimizer:
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
+    @torch._disable_dynamo
     def zero_grad(self, set_to_none: bool = True) -> None:
         r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
 
@@ -586,6 +615,7 @@ class Optimizer:
         """
         raise NotImplementedError
 
+    @torch._disable_dynamo
     def add_param_group(self, param_group: Dict[str, Any]) -> None:
         r"""Add a param group to the :class:`Optimizer` s `param_groups`.
 

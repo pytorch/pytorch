@@ -15,7 +15,7 @@ def _get_fused_kernels_supported_devices() -> List[str]:
     r"""
     Return the device type list that supports fused kernels in optimizer.
     """
-    return ["cuda", torch._C._get_privateuse1_backend_name()]
+    return ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
 
 TensorListList: TypeAlias = List[List[Optional[Tensor]]]
 Indices: TypeAlias = List[int]

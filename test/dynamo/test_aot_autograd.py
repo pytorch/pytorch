@@ -5,12 +5,7 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.test_case
-from torch._dynamo.testing import (
-    CompileCounter,
-    expectedFailureAutomaticDynamic,
-    expectedFailureDynamic,
-    rand_strided,
-)
+from torch._dynamo.testing import CompileCounter, expectedFailureDynamic, rand_strided
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
 
@@ -656,7 +651,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(failure_reason, """L['c'] is L['d']""")
 
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
-    @expectedFailureAutomaticDynamic  # as above
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     @patch("torch._functorch.config.debug_assert", True)
     def test_multiple_aot_autograd_calls_dupe_args(self):
         # this is just dealing with the fact that
