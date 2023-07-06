@@ -71,6 +71,37 @@ def rand_dense_2by4(r, c, dtype, device, choice=None):
     dense = dense.masked_fill(~mask, 0)
     return (dense, mask)
 
+def rand_dense_2by4_all_patterns(r, c, dtype, device):
+    choices = [
+        [[0, 0, 0, 0], [1, 1, 0, 0]],
+        [[0, 0, 0, 1], [1, 0, 0, 1]],
+        [[0, 0, 1, 0], [1, 0, 1, 0]],
+        [[0, 0, 1, 1], [0, 0, 1, 1]],
+        [[0, 1, 0, 0], [1, 1, 0, 0]],
+        [[0, 1, 0, 1], [0, 1, 0, 1]],
+        [[0, 1, 1, 0], [0, 1, 1, 0]],
+        [[0, 1, 1, 1], [0, 1, 1, 0]],
+        [[1, 0, 0, 0], [1, 1, 0, 0]],
+        [[1, 0, 0, 1], [1, 0, 0, 1]],
+        [[1, 0, 1, 0], [1, 0, 1, 0]],
+        [[1, 0, 1, 1], [1, 0, 1, 0]],
+        [[1, 1, 0, 0], [1, 1, 0, 0]],
+        [[1, 1, 0, 1], [1, 1, 0, 0]],
+        [[1, 1, 1, 0], [1, 1, 0, 0]],
+        [[1, 1, 1, 1], [1, 1, 0, 0]],
+    ]
+    COL_INV, COL_VAL = 0, 1
+    mask_rows = [random.randint(0, len(choices) - 1) for i in range(r * c // 4)]
+    mask_entries_inv = [choices[i][COL_INV] for i in mask_rows]
+    mask_entries_val = [choices[i][COL_VAL] for i in mask_rows]
+    mask_inv = torch.tensor(mask_entries_inv, dtype=torch.bool).view(r, c).to(device)
+    mask_val = torch.tensor(mask_entries_val, dtype=torch.bool).view(r, c).to(device)
+    dense = make_tensor(r, c, dtype=dtype, device=device)
+    dense[dense == 0] = 1
+    dense_inv = dense.masked_fill(~mask_inv, 0)
+    dense_val = dense_inv.masked_fill(~mask_val, 0)
+    return dense_inv, dense_val
+
 
 class TestSparseSemiStructured(TestCase):
 
@@ -310,6 +341,19 @@ class TestSparseSemiStructured(TestCase):
         shapes = [[32, 128], [32, 256], [64, 128], [64, 256]]
         for r, c in shapes:
             run_test(r, c, device, dtype)
+
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
+    @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
+    @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
+    def test_conversions_all_patterns(self, device, dtype):
+        r, c = 32, 128
+
+        dense_inv, dense_val = rand_dense_2by4_all_patterns(r, c, dtype, device)
+
+        compressed = SparseSemiStructuredTensor(dense_inv)
+        dense = compressed.to_dense()
+
+        torch.testing.assert_close(dense, dense_val, rtol=0, atol=0)
 
 
 instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
