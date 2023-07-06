@@ -170,29 +170,28 @@ processed by autograd internally: default mode (grad mode), no-grad mode,
 and inference mode, all of which can be togglable via context managers and
 decorators.
 
-
 .. list-table::
    :widths: 50 50 50 50 50
    :header-rows: 1
 
    * - Mode
-     - autograd respects the ``requires_grad`` of operator inputs
-     - Operations are recorded in backwards graph
+     - Excludes operations from being recorded in backward graph
+     - Skips additional autograd tracking overhead
      - Tensors created while the mode is enabled can be used in grad-mode later
      - Examples
-   * - grad (default)
-     - ✓
-     - ✓
+   * - default
+     -
+     -
      - ✓
      - Forward pass
    * - no-grad
-     -
+     - ✓
      -
      - ✓
      - Optimizer updates
    * - inference
-     -
-     -
+     - ✓
+     - ✓
      -
      - Data processing, model evaluation
 
