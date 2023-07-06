@@ -1,26 +1,37 @@
 import collections
+import contextlib
 import inspect
 import logging
 
 import math
 import re
 import types
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.variables import UserFunctionVariable
+from torch._dynamo.utils import get_fake_value, get_real_value
+from torch._dynamo.variables import SymNodeVariable, UserFunctionVariable
 from torch._dynamo.variables.user_defined import ProcessGroupVariable
+from torch._guards import GuardsCheckpointState, Source
+from torch.utils import _pytree as pytree
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
-from ..exc import unimplemented
-from ..source import GeneratorStateSource
+from ..exc import unimplemented, Unsupported, UserError, UserErrorType
+from ..guards import GuardBuilder
+from ..source import (
+    FSDPNNModuleSource,
+    GeneratorStateSource,
+    GetItemSource,
+    NNModuleSource,
+)
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    deepcopy_to_fake_tensor,
     HAS_NUMPY,
     istype,
     np,
@@ -31,7 +42,6 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .ctx_manager import AutocastModeVariable, NullContextVariable
-from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
 from .tensor import TensorWithTFOverrideVariable
 
@@ -240,7 +250,7 @@ class TorchVariable(VariableTracker):
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
         elif self.value is torch._functorch.eager_transforms.grad_impl:
-            op = TorchHigherOrderOperatorVariable.make(
+            op = TorchHigherOrderOperatorVariable(
                 self.value,
                 source=self.source,
             ).call_function(tx, args, kwargs)
@@ -777,4 +787,3 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             "CALLING METHOD ON TORCHVARIABLE", self.value, name, args[0].value, kwargs
         )
         return super().call_method(tx, name, args, kwargs)
-

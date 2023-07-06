@@ -19,7 +19,6 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
-import sympy
 import torch
 
 import torch._dynamo.test_case
@@ -44,8 +43,7 @@ from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError, FloorDiv
-from torch.fx.experimental.validator import SympyToZ3, TranslationValidator
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -6073,7 +6071,6 @@ def ___make_guard_fn():
         counter = CompileCounter()
         foo = torch._dynamo.optimize(counter)(foo)
         result = foo([x, x, x, x, y], y)
-
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):

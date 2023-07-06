@@ -2,17 +2,7 @@ import functools
 import logging
 from enum import auto, Enum
 from itertools import chain
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    no_type_check,
-    Optional,
-    Set,
-    Tuple,
-)
+from typing import Any, Callable, Dict, List, no_type_check, Optional, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -1209,64 +1199,54 @@ def _get_training_state(
 
 
 @no_type_check
-def _register_pre_forward_hooks(
+def _register_pre_forward_hook(
     state: _FSDPState,
-    modules: Iterable[nn.Module],
+    module: nn.Module,
 ) -> None:
     """
-    Registers pre-forward hooks on all modules in ``modules``. The pre-forward
-    hooks are partially applied based on the current ``FlatParamHandle``
-    construction, meaning that they must be re-registered if the construction
-    changes.
+    Registers a pre-forward hook on ``module``.
     """
     for forward_handle in state._pre_forward_handles:
         forward_handle.remove()
     state._pre_forward_handles.clear()
-    for module in modules:
-        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
-        if module_param_handles:
-            unshard_fn = functools.partial(
-                _pre_forward_unshard,
-                state,
-                module_param_handles,
-            )
-            hook = functools.partial(
-                _pre_forward, state, module_param_handles, unshard_fn
-            )
-            state._pre_forward_handles.append(
-                module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
-            )
+    module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
+    unshard_fn = functools.partial(
+        _pre_forward_unshard,
+        state,
+        module_param_handles,
+    )
+    hook = functools.partial(_pre_forward, state, module_param_handles, unshard_fn)
+    state._pre_forward_handles.append(
+        module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
+    )
 
 
 @no_type_check
-def _register_post_forward_hooks(
+def _register_post_forward_hook(
     state: _FSDPState,
-    modules: Iterable[nn.Module],
+    module: nn.Module,
 ) -> None:
     """
-    Registers post-forward hooks on all modules in ``modules``. The
-    post-forward hooks are partially applied based on the current
-    ``FlatParamHandle`` construction, meaning that they must be re-registered
-    if the construction changes.
+    Registers a post-forward hook on ``module``. Even if the module has no
+    handles, we should register the hook since it will register the module's
+    pre-backward hook.
     """
     for forward_handle in state._post_forward_handles:
         forward_handle.remove()
     state._post_forward_handles.clear()
-    for module in modules:
-        module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
-        if module_param_handles:
-            reshard_fn = functools.partial(
-                _post_forward_reshard,
-                state,
-                module_param_handles,
-            )
-            hook = functools.partial(
-                _post_forward,
-                state,
-                module_param_handles,
-                reshard_fn,
-            )
-            state._post_forward_handles.append(module.register_forward_hook(hook))
+    module_param_handles = state._fully_sharded_module_to_handles.get(module, [])
+    reshard_fn = functools.partial(
+        _post_forward_reshard,
+        state,
+        module_param_handles,
+    )
+    hook = functools.partial(
+        _post_forward,
+        state,
+        module_param_handles,
+        reshard_fn,
+    )
+    state._post_forward_handles.append(module.register_forward_hook(hook))
 
 
 @no_type_check
@@ -1483,24 +1463,19 @@ def _get_buffers_and_dtypes_for_computation(
     _p_assert(state._is_root, "Expects the root to cast buffers")
     buffers: List[torch.Tensor] = []
     buffer_dtypes: List[Optional[torch.dtype]] = []
-    if _is_composable(state):
-        buffers = [
-            buffer for module in root_module.modules() for buffer in module.buffers()
-        ]
-        buffer_dtypes = [
-            state.mixed_precision.buffer_dtype for _ in range(len(buffers))
-        ]
-    else:
-        visited_buffers = set()
-        # Traverse the FSDP instances bottom-up so that we prefer the owning
-        # FSDP instance's mixed precision setting for each buffer
-        for fsdp_module in reversed(traversal_utils._get_fsdp_states(root_module)):
-            for buffer in fsdp_module.buffers():
-                if buffer in visited_buffers:
-                    continue
-                visited_buffers.add(buffer)
-                buffers.append(buffer)
-                buffer_dtypes.append(fsdp_module.mixed_precision.buffer_dtype)
+    visited_buffers: Set[torch.Tensor] = set()
+    # Traverse the FSDP states bottom-up so that we prefer the owning FSDP
+    # instance's mixed precision setting for each buffer
+    fsdp_states, fsdp_modules = traversal_utils._get_fsdp_states_with_modules(
+        root_module
+    )
+    for fsdp_state, fsdp_module in zip(reversed(fsdp_states), reversed(fsdp_modules)):
+        for buffer in fsdp_module.buffers():
+            if buffer in visited_buffers:
+                continue
+            visited_buffers.add(buffer)
+            buffers.append(buffer)
+            buffer_dtypes.append(fsdp_state.mixed_precision.buffer_dtype)
     assert len(buffers) == len(buffer_dtypes), f"{len(buffers)} {len(buffer_dtypes)}"
     return buffers, buffer_dtypes
 
