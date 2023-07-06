@@ -981,7 +981,11 @@ def compile_fx(
 
     if config.freezing and not torch.is_grad_enabled():
         decompositions = dict(decompositions)
-        del decompositions[torch.ops.aten._native_batch_norm_legit_no_training.default]
+        from .freezing import fused_ops
+
+        for op in fused_ops:
+            assert op in decompositions
+            del decompositions[op]
 
         inference_compiler = functools.partial(
             fw_compiler_freezing,
