@@ -90,8 +90,8 @@ class TestCppExtensionAOT(common.TestCase):
         import torch_test_cpp_extension.mps as mps_extension
 
         tensor_length = 100000
-        x = torch.zeros(tensor_length, device="cpu", dtype=torch.float32)
-        y = torch.zeros(tensor_length, device="cpu", dtype=torch.float32)
+        x = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+        y = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
 
         cpu_output = mps_extension.get_cpu_add_output(x, y)
         mps_output = mps_extension.get_mps_add_output(x.to("mps"), y.to("mps"))
