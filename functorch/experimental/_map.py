@@ -1,5 +1,3 @@
-from functools import partial
-
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet, _ExcludeDispatchKeyGuard
@@ -13,7 +11,6 @@ from torch.fx.experimental.proxy_tensor import (
     make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
-    unwrap_proxy,
 )
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
@@ -184,7 +181,7 @@ def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
 
     proxy_mode.tracer.root.register_module(next_name, body_graph)
     node_args = (body_graph, num_mapped, *args)
-    proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), node_args)
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
                                                name="map_impl")
     return track_tensor_tree(expanded_outs, out_proxy, constant=None, tracer=proxy_mode.tracer)
