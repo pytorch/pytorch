@@ -15,7 +15,6 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -49,7 +48,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchVariable
+from .torch import TorchHigherOrderOperatorVariable, TorchVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
