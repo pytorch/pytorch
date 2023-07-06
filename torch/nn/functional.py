@@ -1210,8 +1210,10 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
     """
     if has_torch_function_unary(input):
         return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size)
-    if torch.tensor(output_size).dim()!=2:
-        raise ValueError(f"output_size should have dimension 2, but has dimension {torch.tensor(output_size).dim()}")
+    if not isinstance(output_size, int):
+        if len(output_size)!=2:
+            raise ValueError(f"output_size must be type int (for square output)" 
+                             f" or have size 2, but has size {len(output_size)}")
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
