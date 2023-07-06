@@ -533,6 +533,8 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     out_device = new_kwargs["input"].device
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
+        if out_device == torch.device("hpu:0"):
+            out = out.new_empty(out.shape)
 
     return FakeTensor(fake_mode, out, out_device)
 
@@ -771,15 +773,17 @@ def make_fast_binary_impl(slow_ref):
         is_channels_last = True
         # TODO: is_non-overlapping_and_dense (not bound from Python
         # no inplace, no out, everything defined
-        for op in operands:
-            if not isinstance(op, torch.Tensor):
-                continue
-            is_contiguous = is_contiguous and op.is_contiguous(
-                memory_format=torch.contiguous_format
-            )
-            is_channels_last = is_channels_last and op.is_contiguous(
-                memory_format=torch.channels_last
-            )
+
+        if common_device != torch.device("hpu:0"):
+            for op in operands:
+                if not isinstance(op, torch.Tensor):
+                    continue
+                is_contiguous = is_contiguous and op.is_contiguous(
+                    memory_format=torch.contiguous_format
+                )
+                is_channels_last = is_channels_last and op.is_contiguous(
+                    memory_format=torch.channels_last
+                )
         if is_contiguous:
             # do contiguous
             count_label("fast is_contiguous")
@@ -1400,8 +1404,13 @@ class FakeTensorMode(TorchDispatchMode):
         # run kernel registered to meta for func, which include
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
         try:
+            device = FakeTensor._find_common_device(func, args, kwargs)
             with in_kernel_invocation_manager(self):
                 r = func(*args, **kwargs)
+                if device[0] == torch.device("hpu:0"):
+                    from torch.distributed._tensor.ops.pointwise_ops import pointwise_ops
+                    if (func in pointwise_ops):
+                        r = r.new_empty(r.shape)
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not can_fallback(func):
