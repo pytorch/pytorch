@@ -625,10 +625,10 @@ if torch._C._has_mkldnn:
         # convert reshape+linear+reshape to a single linear for applying fusion path.
         @register_freezing_graph_pattern(
             CallFunction(
-                aten.view.default,
+                aten.reshape.default,
                 CallFunction(
                     mkldnn._linear_pointwise.default,
-                    CallFunction(aten.view.default, Arg(), KeywordArg("reshape_1")),
+                    CallFunction(aten.reshape.default, Arg(), KeywordArg("reshape_1")),
                     Arg(),
                     Arg(),
                     Arg(),
