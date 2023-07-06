@@ -81,6 +81,7 @@ class CI(NamedTuple):
 
 
 CI_SKIP = collections.defaultdict(list)
+CI_TV_OFF = collections.defaultdict(list)
 
 
 # Skips for dynamic=False
@@ -300,6 +301,40 @@ CI_SKIP_OPTIMIZER = {
     "MobileBertForQuestionAnswering",  # Stack issue in fx
     "PegasusForConditionalGeneration",  # OOM
 }
+
+# Turning translation validation (TV) off for a few benchmarks
+# due to timeout.
+
+CI_TV_OFF[CI("aot_eager", training=True, dynamic=True, device="cuda")] = [
+    # TIMM
+    "eca_halonext26ts",
+    "swin_base_patch4_window7_224",
+    "mobilevit_s",
+    # TorchBench
+    "attention_is_all_you_need_pytorch",
+    "hf_GPT2",
+    "yolov3",
+]
+
+
+CI_TV_OFF[CI("inductor", training=False, dynamic=False, device="cuda")] = [
+    # TorchBench
+    "hf_T5_generate",
+]
+
+CI_TV_OFF[CI("inductor", training=True, dynamic=True, device="cuda")] = [
+    # TIMM
+    "eca_halonext26ts",
+    "swin_base_patch4_window7_224",
+    # TorchBench
+    "yolov3",
+]
+
+CI_TV_OFF[CI("inductor", training=False, dynamic=True, device="cpu")] = [
+    # TIMM
+    "eca_halonext26ts",
+    "swin_base_patch4_window7_224",
+]
 
 
 def model_specified_by_path(path_and_class_str):
@@ -2848,11 +2883,20 @@ def run(runner, args, original_dir=None):
             torch.use_deterministic_algorithms(True)
         if args.only in {"hf_T5_generate"}:
             torch._dynamo.config.automatic_dynamic_shapes = True
+        if args.only is not None and args.only.endswith("_generate"):
+            log.warning(
+                "Disabling cudagraphs for autoregressive generation (reenable if selective cudagraphs implemented)"
+            )
+            args.disable_cudagraphs = True
+            torch._inductor.config.triton.cudagraphs = False
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
+
+        # Set translation validation on by default on accuracy runs.
+        torch._dynamo.config.translation_validation = True
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
@@ -3188,16 +3232,28 @@ def run(runner, args, original_dir=None):
                     args.per_process_memory_fraction
                 )
 
-            model, example_inputs = runner.cast_based_on_args(model, example_inputs)
-            runner.run_one_model(
-                name,
-                model,
-                example_inputs,
-                optimize_ctx,
-                experiment,
-                explain=args.explain,
-                tag=args.tag,
+            # Set translation validation on by default on CI accuracy runs.
+            ci = CI(
+                args.backend,
+                training=args.training,
+                dynamic=args.dynamic_shapes,
+                device=device,
             )
+            translation_validation = args.only not in CI_TV_OFF[ci]
+
+            with torch._dynamo.config.patch(
+                translation_validation=translation_validation
+            ):
+                model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+                runner.run_one_model(
+                    name,
+                    model,
+                    example_inputs,
+                    optimize_ctx,
+                    experiment,
+                    explain=args.explain,
+                    tag=args.tag,
+                )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(
