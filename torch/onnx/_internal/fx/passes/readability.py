@@ -44,8 +44,7 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         old_name = nodes[0].target
         assert isinstance(old_name, str), f"Expected str, got type({old_name})"
         # Parameter/buffer name cannot contain "."
-        # TODO(bowbao): fix #104670 and replace "." with "/" to avoid collision.
-        normalized_name = new_name.replace(".", "_")
+        normalized_name = new_name.replace(".", "/")
         attr_value = getattr(self.module, old_name)
         setattr(self.module, normalized_name, attr_value)
         delattr(self.module, old_name)
