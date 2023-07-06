@@ -282,6 +282,8 @@ variable_list compiled_autograd(
   TORCH_CHECK(
       output_edges.empty() || !accumulate_grad,
       "outputs+accumulate_grad not yet implemented")
+  static std::mutex lock;
+  std::lock_guard<std::mutex> lock_guard(lock);
   pybind11::gil_scoped_acquire gil;
   NoGradGuard no_grad; // TODO(jansel): double backward
 
