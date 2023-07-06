@@ -638,6 +638,8 @@ Tensor scaled_dot_product_attention(
            value.requires_grad());
       if(attn_mask.has_value()){
         attn_mask = pad_bias(attn_mask.value());
+        // Expand to 4d case
+        attn_mask = attn_mask.value().expand({query_.size(0), query_.size(1), query_.size(2), key.size(2)});
       }
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);

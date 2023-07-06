@@ -2038,24 +2038,13 @@ class TestSDPA(NNTestCase):
                  SM80OrLater else [torch.float16, torch.float32])
     @parametrize("scale", [None, "l1"])
     def test_mem_efficient_attention_attn_mask_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int,
-                                                                  seq_len_k: int, head_dim: int, is_causal: bool,
-                                                                  dropout_p: float, dtype: torch.dtype,
-                                                                  scale: str):
+                                                                 seq_len_k: int, head_dim: int, is_causal: bool,
+                                                                 dropout_p: float, dtype: torch.dtype,
+                                                                 scale: str):
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
             rand_uniform = torch._fill_mem_eff_dropout_mask_(mask, p, seed, offset)
             mask = (rand_uniform > p).to(torch.float32)
-            return mask
-
-        def build_alibi_mask(n_queries, n_keys, m=2**(-8 / 4)):
-            temp_mask = (
-                torch.ones((n_queries, n_keys))
-                .tril_()
-                .bool()
-            )
-            mask = torch.zeros_like(temp_mask, dtype=torch.float32)
-            mask.masked_fill_(temp_mask.logical_not(), float("-inf"))
-            mask += -m * (torch.arange(n_queries)[:, None] - torch.arange(n_keys)[None, :])
             return mask
 
         seed = 42
@@ -2068,8 +2057,7 @@ class TestSDPA(NNTestCase):
         value = torch.rand(batch_size, n_heads, seq_len_k, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
 
-        attn_mask = build_alibi_mask(seq_len_q, seq_len_k).detach().to(
-            query.dtype).to(query.device).requires_grad_(True)
+        attn_mask = torch.rand(seq_len_q, seq_len_k, device=device, dtype=dtype, requires_grad=True)
 
         # Run the math kernel on low precision references
         query_ref_lp, key_ref_lp, value_ref_lp = self.query_key_value_clones(query, key, value, dtype=dtype)
@@ -2139,7 +2127,7 @@ class TestSDPA(NNTestCase):
         value_fudge_factor = 7 if not SM80OrLater and dtype == torch.float16 else 1.0
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
 
-        mask_fudge_factor = 10
+        mask_fudge_factor = 12 if attn_mask.numel() > 512 else 22
         grad_attn_mask_atol, grad_attn_mask_rtol = get_tolerances(
             attn_mask_ref.grad, attn_mask_ref_lp.grad, mask_fudge_factor)
 

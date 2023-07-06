@@ -1049,8 +1049,14 @@ std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
 
       // assign strides for bias, viewed as
       // (batch_sz, n_heads, n_queries, n_keys)
-      const at::Tensor bias_4d_view =
-          get_bias_4d_view(*bias, B, num_heads, M, N);
+      // We make sure to expand prior to calling the kernel
+      const at::Tensor& bias_4d_view = *bias;
+      TORCH_CHECK(bias_4d_view.dim()==4);
+      TORCH_CHECK(bias_4d_view.size(0)==B);
+      TORCH_CHECK(bias_4d_view.size(1)==num_heads);
+      TORCH_CHECK(bias_4d_view.size(2)==M);
+      TORCH_CHECK(bias_4d_view.size(3)==N);
+
       ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias_4d_view.stride(0));
       ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias_4d_view.stride(1));
       ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias_4d_view.stride(2));
