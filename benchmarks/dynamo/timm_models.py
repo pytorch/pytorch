@@ -5,11 +5,10 @@ import os
 import re
 import subprocess
 import sys
-import time
 import warnings
 
 import torch
-from common import BenchmarkRunner, main
+from common import BenchmarkRunner, download_retry_decorator, main
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
@@ -44,7 +43,7 @@ with open(filename, "r") as fh:
 
 BATCH_SIZE_DIVISORS = {
     "beit_base_patch16_224": 2,
-    "cait_m36_384": 2,
+    "cait_m36_384": 4,
     "convit_base": 2,
     "convmixer_768_32": 2,
     "convnext_base": 2,
@@ -76,6 +75,11 @@ SCALED_COMPUTE_LOSS = {
     "mnasnet_100",
     "mobilevit_s",
     "sebotnet33ts_256",
+}
+
+FORCE_AMP_FOR_FP16_BF16_MODELS = {
+    "convit_base",
+    "xcit_large_24_p8_224",
 }
 
 
@@ -165,10 +169,33 @@ def refresh_model_names():
             fw.write(model_name + "\n")
 
 
-class TimmRunnner(BenchmarkRunner):
+class TimmRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
+
+    @property
+    def force_amp_for_fp16_bf16_models(self):
+        return FORCE_AMP_FOR_FP16_BF16_MODELS
+
+    @download_retry_decorator
+    def _download_model(self, model_name):
+        model = create_model(
+            model_name,
+            in_chans=3,
+            scriptable=False,
+            num_classes=None,
+            drop_rate=0.0,
+            drop_path_rate=None,
+            drop_block_rate=None,
+            pretrained=True,
+            # global_pool=kwargs.pop('gp', 'fast'),
+            # num_classes=kwargs.pop('num_classes', None),
+            # drop_rate=kwargs.pop('drop', 0.),
+            # drop_path_rate=kwargs.pop('drop_path', None),
+            # drop_block_rate=kwargs.pop('drop_block', None),
+        )
+        return model
 
     def load_model(
         self,
@@ -176,46 +203,20 @@ class TimmRunnner(BenchmarkRunner):
         model_name,
         batch_size=None,
     ):
+        if self.args.enable_activation_checkpointing:
+            raise NotImplementedError(
+                "Activation checkpointing not implemented for Timm models"
+            )
+
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
 
         # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
-
-        tries = 1
-        success = False
-        model = None
-        total_allowed_tries = 5
-        while not success and tries <= total_allowed_tries:
-            try:
-                model = create_model(
-                    model_name,
-                    in_chans=3,
-                    scriptable=False,
-                    num_classes=None,
-                    drop_rate=0.0,
-                    drop_path_rate=None,
-                    drop_block_rate=None,
-                    pretrained=True,
-                    # global_pool=kwargs.pop('gp', 'fast'),
-                    # num_classes=kwargs.pop('num_classes', None),
-                    # drop_rate=kwargs.pop('drop', 0.),
-                    # drop_path_rate=kwargs.pop('drop_path', None),
-                    # drop_block_rate=kwargs.pop('drop_block', None),
-                )
-                success = True
-            except Exception as e:
-                tries += 1
-                if tries <= total_allowed_tries:
-                    wait = tries * 30
-                    print(
-                        f"Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s"
-                    )
-                    time.sleep(wait)
+        model = self._download_model(model_name)
 
         if model is None:
             raise RuntimeError(f"Failed to load model '{model_name}'")
-
         model.to(
             device=device,
             memory_format=torch.channels_last if channels_last else None,
@@ -338,7 +339,7 @@ class TimmRunnner(BenchmarkRunner):
 def timm_main():
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
-    main(TimmRunnner())
+    main(TimmRunner())
 
 
 if __name__ == "__main__":

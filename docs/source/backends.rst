@@ -9,6 +9,7 @@ torch.backends
 
 These backends include:
 
+- ``torch.backends.cpu``
 - ``torch.backends.cuda``
 - ``torch.backends.cudnn``
 - ``torch.backends.mps``
@@ -18,6 +19,11 @@ These backends include:
 - ``torch.backends.opt_einsum``
 - ``torch.backends.xeon``
 
+torch.backends.cpu
+^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.cpu
+
+.. autofunction::  torch.backends.cpu.get_cpu_capability
 
 torch.backends.cuda
 ^^^^^^^^^^^^^^^^^^^
@@ -25,24 +31,27 @@ torch.backends.cuda
 
 .. autofunction::  torch.backends.cuda.is_built
 
-.. attribute::  torch.backends.cuda.matmul.allow_tf32
+.. currentmodule:: torch.backends.cuda.matmul
+.. attribute::  allow_tf32
 
     A :class:`bool` that controls whether TensorFloat-32 tensor cores may be used in matrix
     multiplications on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
 
-.. attribute::  torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+.. attribute::  allow_fp16_reduced_precision_reduction
 
     A :class:`bool` that controls whether reduced precision reductions (e.g., with fp16 accumulation type) are allowed with fp16 GEMMs.
 
-.. attribute::  torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+.. attribute::  allow_bf16_reduced_precision_reduction
 
     A :class:`bool` that controls whether reduced precision reductions are allowed with bf16 GEMMs.
 
-.. attribute::  torch.backends.cuda.cufft_plan_cache
+.. currentmodule:: torch.backends.cuda
+.. attribute::  cufft_plan_cache
 
     ``cufft_plan_cache`` contains the cuFFT plan caches for each CUDA device.
     Query a specific device `i`'s cache via `torch.backends.cuda.cufft_plan_cache[i]`.
 
+    .. currentmodule:: torch.backends.cuda.cufft_plan_cache
     .. attribute::  size
 
         A readonly :class:`int` that shows the number of plans currently in a cuFFT plan cache.
@@ -81,27 +90,27 @@ torch.backends.cudnn
 
 .. autofunction:: torch.backends.cudnn.is_available
 
-.. attribute::  torch.backends.cudnn.enabled
+.. attribute::  enabled
 
     A :class:`bool` that controls whether cuDNN is enabled.
 
-.. attribute::  torch.backends.cudnn.allow_tf32
+.. attribute::  allow_tf32
 
     A :class:`bool` that controls where TensorFloat-32 tensor cores may be used in cuDNN
     convolutions on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
 
-.. attribute::  torch.backends.cudnn.deterministic
+.. attribute::  deterministic
 
     A :class:`bool` that, if True, causes cuDNN to only use deterministic convolution algorithms.
     See also :func:`torch.are_deterministic_algorithms_enabled` and
     :func:`torch.use_deterministic_algorithms`.
 
-.. attribute::  torch.backends.cudnn.benchmark
+.. attribute::  benchmark
 
     A :class:`bool` that, if True, causes cuDNN to benchmark multiple convolution algorithms
     and select the fastest.
 
-.. attribute::  torch.backends.cudnn.benchmark_limit
+.. attribute::  benchmark_limit
 
     A :class:`int` that specifies the maximum number of cuDNN convolution algorithms to try when
     `torch.backends.cudnn.benchmark` is True. Set `benchmark_limit` to zero to try every
@@ -157,7 +166,7 @@ torch.backends.opt_einsum
 
 .. autofunction:: torch.backends.opt_einsum.get_opt_einsum
 
-.. attribute::  torch.backends.opt_einsum.enabled
+.. attribute::  enabled
 
     A :class:``bool`` that controls whether opt_einsum is enabled (``True`` by default). If so,
     torch.einsum will use opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html)
@@ -166,7 +175,7 @@ torch.backends.opt_einsum
     If opt_einsum is not available, torch.einsum will fall back to the default contraction path
     of left to right.
 
-.. attribute::  torch.backends.opt_einsum.strategy
+.. attribute::  strategy
 
     A :class:``str`` that specifies which strategies to try when ``torch.backends.opt_einsum.enabled``
     is ``True``. By default, torch.einsum will try the "auto" strategy, but the "greedy" and "optimal"

@@ -3,9 +3,11 @@
 import tempfile
 
 import torch
+from torch._prims.debug_prims import load_tensor_reader
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
 from torch.utils._content_store import (
     ContentStoreReader,
     ContentStoreWriter,
@@ -57,6 +59,59 @@ class TestContentStore(TestCase):
     def test_scalar(self, device):
         # Should not raise an error
         hash_storage(torch.tensor(2, device=device).untyped_storage())
+
+    @skipIfRocm
+    def test_load_tensor(self, device):
+        with tempfile.TemporaryDirectory() as loc:
+            writer = ContentStoreWriter(loc)
+            x = torch.randn(4, device=device)
+
+            def same_meta_as_x(t):
+                self.assertEqual(t.size(), x.size())
+                self.assertEqual(t.stride(), x.stride())
+                self.assertEqual(t.dtype, x.dtype)
+                self.assertEqual(t.device, x.device)
+
+            writer.write_tensor("x", x)
+
+            with load_tensor_reader(loc):
+                x2 = torch.ops.debugprims.load_tensor.default(
+                    "x", (4,), (1,), dtype=torch.float32, device=device
+                )
+                self.assertEqual(x, x2)
+                x3 = torch.ops.debugprims.load_tensor.default(
+                    "x", (4,), (1,), dtype=torch.float32, device=device
+                )
+                self.assertEqual(x, x3)
+                # Must not alias!
+                self.assertNotEqual(
+                    StorageWeakRef(x.untyped_storage()),
+                    StorageWeakRef(x2.untyped_storage()),
+                )
+                self.assertNotEqual(
+                    StorageWeakRef(x2.untyped_storage()),
+                    StorageWeakRef(x3.untyped_storage()),
+                )
+
+                # Check fake tensor mode works too
+                with FakeTensorMode():
+                    x4 = torch.ops.debugprims.load_tensor.default(
+                        "x", (4,), (1,), dtype=torch.float32, device=device
+                    )
+                    self.assertIsInstance(x4, FakeTensor)
+                    same_meta_as_x(x4)
+
+                # Check fp64 works
+                x5 = torch.ops.debugprims.load_tensor.default(
+                    "x", (4,), (1,), dtype=torch.float64, device=device
+                )
+                self.assertEqual(x5.float(), x)
+                self.assertEqual(x5.dtype, torch.float64)
+
+        x6 = torch.ops.debugprims.load_tensor.default(
+            "x", (4,), (1,), dtype=torch.float32, device=device
+        )
+        same_meta_as_x(x6)
 
 
 instantiate_device_type_tests(TestContentStore, globals())

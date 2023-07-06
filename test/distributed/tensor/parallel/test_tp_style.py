@@ -6,16 +6,15 @@ import torch.distributed as dist
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
-    ColwiseParallelForPairwise,
     make_input_replicate_1d,
     make_input_reshard_replicate,
     make_input_shard_1d,
+    make_sharded_output_tensor,
     make_output_replicate_1d,
     make_output_reshard_tensor,
     make_output_shard_1d,
     make_output_tensor,
     RowwiseParallel,
-    RowwiseParallelForPairwise,
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -207,12 +206,12 @@ class TensorParallelStyleTest(DTensorTestBase):
         output, dtensor, device_mesh = self._test_prepare_output(
             rs._prepare_output, [Shard(0)]
         )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]))
+        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]).to_local())
         # test when input device_mesh is None.
         output, dtensor, device_mesh = self._test_prepare_output(
             rs._prepare_output, [Shard(0)], None, True
         )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]))
+        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]).to_local())
         self._test_prepare_output_error(rs._prepare_output)
 
     @with_comms
@@ -220,23 +219,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         tensor = torch.rand(8, 16, device=self.device_type)
         cs = ColwiseParallel()
         self._1d_input_func_check(tensor, tensor, cs._prepare_input)
-        self.assertEqual(make_output_replicate_1d, cs._prepare_output)
-
-    @with_comms
-    def test_colwise_parallel_for_pairwise_style(self):
-        tensor = torch.rand(8, 16, device=self.device_type)
-        cs = ColwiseParallelForPairwise()
-        self._1d_input_func_check(tensor, tensor, cs._prepare_input)
-        self.assertEqual(None, cs._prepare_output)
-
-    @with_comms
-    def test_rowwise_parallel_for_pairwise_style(self):
-        rs = RowwiseParallelForPairwise()
-        output, dtensor, device_mesh = self._test_prepare_output(
-            rs._prepare_output, [Shard(0)]
-        )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]))
-        self.assertEqual(None, rs._prepare_input)
+        self.assertEqual(make_sharded_output_tensor, cs._prepare_output)
 
 
 if __name__ == "__main__":

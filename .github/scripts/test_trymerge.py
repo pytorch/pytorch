@@ -9,6 +9,7 @@
 
 import json
 import os
+import warnings
 from hashlib import sha256
 from typing import Any, Dict, List, Optional
 from unittest import main, mock, TestCase
@@ -168,6 +169,7 @@ def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeR
             patterns=["*"],
             approved_by=[],
             mandatory_checks_name=["Lint", "Facebook CLA Check", "nonexistent"],
+            ignore_flaky_failures=True,
         ),
     ]
 
@@ -177,12 +179,13 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
         MergeRule(
             name="super",
             patterns=["*"],
-            approved_by=["pytorch/metamates"],
+            approved_by=["pytorch/metamates", "ngimel"],
             mandatory_checks_name=[
                 "Lint",
                 "Facebook CLA Check",
                 "pull / linux-xenial-cuda11.3-py3.7-gcc7 / build",
             ],
+            ignore_flaky_failures=True,
         ),
     ]
 
@@ -195,12 +198,31 @@ def empty_flaky_rules() -> List[FlakyRule]:
     return []
 
 
+def xla_is_flaky_rules() -> List[FlakyRule]:
+    return [
+        FlakyRule("xla", ["FAILED: Build did NOT complete successfully"]),
+    ]
+
+
+def xla_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
+    return [
+        MergeRule(
+            name=" OSS CI / pytorchbot / XLA",
+            patterns=[".github/ci_commit_pins/xla.txt"],
+            approved_by=["pytorchbot"],
+            mandatory_checks_name=[
+                "Lint",
+                "EasyCLA",
+                "pull / linux-bionic-py3_8-clang8-xla / build",
+                "pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.4xlarge)",
+            ],
+            ignore_flaky_failures=False,
+        ),
+    ]
+
+
 def empty_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
     return []
-
-
-def dummy_merge_base() -> str:
-    return "dummy"
 
 
 class DummyGitRepo(GitRepo):
@@ -216,7 +238,6 @@ class DummyGitRepo(GitRepo):
 
 @mock.patch("trymerge.read_flaky_rules", side_effect=empty_flaky_rules)
 @mock.patch("trymerge.get_rockset_results", side_effect=empty_rockset_results)
-@mock.patch("trymerge.GitHubPR.get_merge_base", side_effect=dummy_merge_base)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 class TestTryMerge(TestCase):
     def test_merge_rules_valid(self, *args: Any) -> None:
@@ -432,13 +453,7 @@ class TestTryMerge(TestCase):
     def test_revert_codev_fails(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 91340)
 
-        class GitRepoCoDev(GitRepo):
-            def __init__(self) -> None:
-                super().__init__(get_git_repo_dir(), get_git_remote_name())
-
-            def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
-                return ["FakeCommitSha"]
-
+        class GitRepoCoDev(DummyGitRepo):
             def commit_message(self, ref: str) -> str:
                 return pr.get_body()
 
@@ -448,6 +463,16 @@ class TestTryMerge(TestCase):
             "landed via phabricator",
             lambda: validate_revert(repo, pr, comment_id=1372496233),
         )
+
+    def test_revert_codev_abandoned_diff_succeeds(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 100652)
+
+        class GitRepoCoDev(DummyGitRepo):
+            def commit_message(self, ref: str) -> str:
+                return pr.get_body()
+
+        repo = GitRepoCoDev()
+        validate_revert(repo, pr, comment_id=1588195237)
 
     def test_pr_changed_submodule_detection(self, *args: Any) -> None:
         # Updates submodule during dev-cycle but reverts it later
@@ -501,6 +526,23 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 2)
 
+    def test_get_classifications_unstable(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 104312)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
+        )
+        workflow_name = "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test"
+        job_name = "build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)"
+        self.assertTrue(
+            checks[f"pull / {workflow_name} / {job_name}"].classification == "UNSTABLE"
+        )
+        pending, failed = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+
     def test_ignore_current(self, *args: Any) -> None:
         # Test various interactions of the failure classifier, mostly that
         # ignore current checks takes precedence over classifications for flaky
@@ -553,6 +595,21 @@ class TestBypassFailures(TestCase):
             checks, list(checks.keys()), ok_failed_checks_threshold=1
         )
         self.assertTrue(len(failed) == 0)
+
+    @mock.patch("trymerge.read_flaky_rules", side_effect=xla_is_flaky_rules)
+    @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
+    def test_dont_ignore_flaky_failures(self, *args: Any) -> None:
+        """Regression test for https://github.com/pytorch/test-infra/issues/4126"""
+        pr = GitHubPR("pytorch", "pytorch", 100369)
+        repo = DummyGitRepo()
+        # Check that failure is classified as flaky but still raises exception
+        with warnings.catch_warnings(record=True) as w, self.assertRaises(RuntimeError):
+            rule = find_matching_merge_rule(pr, repo)
+        self.assertEqual(len(w), 1)
+        self.assertIn(
+            "1 checks failed but were likely due flakiness or broken trunk",
+            str(w[0].message),
+        )
 
 
 if __name__ == "__main__":

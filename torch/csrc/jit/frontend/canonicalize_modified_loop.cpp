@@ -12,7 +12,7 @@ namespace torch::jit {
 // Transforms a Loop that has both a trip count specified and a loop
 // body condition so that the iter count is no longer specified
 // and it is recognizable as a python while loop.
-void canonicalizeModifiedLoop(Node* n) {
+static void canonicalizeModifiedLoop(Node* n) {
   LoopView loop(n);
   if (loop.loopType() != LoopView::ModifiedLoop) {
     return;
@@ -48,7 +48,7 @@ void canonicalizeModifiedLoop(Node* n) {
   loop.bodyBlock()->insertOutput(0, new_condition);
 }
 
-void canonicalizeModifiedLoops(Block* block) {
+static void canonicalizeModifiedLoops(Block* block) {
   for (Node* n : block->nodes()) {
     for (Block* b : n->blocks()) {
       canonicalizeModifiedLoops(b);

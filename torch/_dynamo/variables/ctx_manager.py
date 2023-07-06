@@ -190,22 +190,33 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
 
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
-    def create(target_values, kwargs):
+    def create(func, args, kwargs):
+        assert func in [
+            torch.amp.autocast_mode.autocast,
+            torch.cuda.amp.autocast,
+            torch.cpu.amp.autocast,
+        ]
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
         # cache_enabled : Optional[bool] = None):cache_enabled
-        bound_args = inspect.signature(torch.autocast).bind(*target_values, **kwargs)
+        bound_args = inspect.signature(func).bind(*args, **kwargs)
         bound_args.apply_defaults()
         target_values = []
         kwargs.clear()
 
         for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
-            arg = bound_args.arguments[key]
-            if isinstance(arg, VariableTracker):
-                target_values.append(bound_args.arguments[key].as_python_constant())
+            if key == "device_type" and func in [
+                torch.cuda.amp.autocast,
+                torch.cpu.amp.autocast,
+            ]:
+                arg = "cuda" if func is torch.cuda.amp.autocast else "cpu"
             else:
-                target_values.append(bound_args.arguments[key])
+                arg = bound_args.arguments[key]
+            if isinstance(arg, VariableTracker):
+                target_values.append(arg.as_python_constant())
+            else:
+                target_values.append(arg)
 
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
@@ -220,17 +231,17 @@ class AutocastModeVariable(ContextWrappingVariable):
 
     def exit(self, tx, *args):
         self.mode = (
-            exit_functional_autocast(self.mode[0]),
+            torch.amp._exit_autocast(self.mode[0]),
             tx.output.create_node(
-                "call_function", exit_functional_autocast, (self.mode[1],), {}
+                "call_function", torch.amp._exit_autocast, (self.mode[1],), {}
             ),
         )
 
     def enter(self, tx):
         self.mode = (
-            enter_functional_autocast(*self.target_values),
+            torch.amp._enter_autocast(*self.target_values),
             tx.output.create_node(
-                "call_function", enter_functional_autocast, (*self.target_values,), {}
+                "call_function", torch.amp._enter_autocast, (*self.target_values,), {}
             ),
         )
 
@@ -239,16 +250,6 @@ class AutocastModeVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "autocast"
-
-
-def enter_functional_autocast(*vals):
-    mode = torch.amp.autocast(*vals)
-    mode.__enter__()
-    return mode
-
-
-def exit_functional_autocast(mode):
-    mode.__exit__(None, None, None)
 
 
 class NullContextVariable(ContextWrappingVariable):

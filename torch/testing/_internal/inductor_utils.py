@@ -5,7 +5,6 @@ from torch._inductor.utils import has_triton
 from torch.testing._internal.common_utils import (
     LazyVal,
     IS_FBCODE,
-    TEST_WITH_ROCM,
 )
 import torch
 
@@ -23,4 +22,4 @@ def test_cpu():
 
 HAS_CPU = LazyVal(test_cpu)
 
-HAS_CUDA = has_triton() and not TEST_WITH_ROCM
+HAS_CUDA = has_triton()

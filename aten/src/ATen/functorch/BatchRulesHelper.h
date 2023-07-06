@@ -23,7 +23,7 @@
 
 // This file contains helper functions for batching rules.
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 TORCH_API Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
 TORCH_API Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
@@ -44,16 +44,16 @@ Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, i
 void check_randomness(RandomnessType randomness);
 void check_randomness(RandomnessType randomness, bool any_tensor_bdim);
 
-inline Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, int64_t batch_size) {
+inline Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, c10::SymInt batch_size) {
   if (has_bdim) {
     return tensor;
   }
-  const auto sizes = tensor.sizes();
-  DimVector expanded_shape;
+  const auto sizes = tensor.sym_sizes();
+  SymDimVector expanded_shape;
   expanded_shape.reserve(sizes.size());
-  expanded_shape.emplace_back(batch_size);
+  expanded_shape.emplace_back(std::move(batch_size));
   expanded_shape.insert(expanded_shape.end(), sizes.begin(), sizes.end());
-  return tensor.expand(expanded_shape);
+  return tensor.expand_symint(expanded_shape);
 }
 
 #define VMAP_SUPPORT(op, batch_rule) \
@@ -474,4 +474,4 @@ std::tuple<Tensor, Tensor> _binary_pointwise_helper(
     const Tensor& tensor, optional<int64_t> tensor_batch_dim, const Tensor& other, optional<int64_t> other_batch_dim,
     bool do_type_promotion=true);
 
-}}
+} // namespace at::functorch

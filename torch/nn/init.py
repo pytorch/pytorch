@@ -3,7 +3,7 @@ import warnings
 
 from torch import Tensor
 import torch
-
+from typing import Optional as _Optional
 
 # These no_grad_* functions are necessary as wrappers around the parts of these
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
@@ -19,7 +19,7 @@ def _no_grad_normal_(tensor, mean, std):
         return tensor.normal_(mean, std)
 
 
-def _no_grad_trunc_normal_(tensor, mean, std, a, b):
+def _no_grad_trunc_normal_(tensor, mean, std, a, b, generator=None):
     # Method based on https://people.sc.fsu.edu/~jburkardt/presentations/truncated_normal.pdf
     def norm_cdf(x):
         # Computes standard normal cumulative distribution function
@@ -39,7 +39,7 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
 
         # Uniformly fill tensor with values from [l, u], then translate to
         # [2l-1, 2u-1].
-        tensor.uniform_(2 * l - 1, 2 * u - 1)
+        tensor.uniform_(2 * l - 1, 2 * u - 1, generator=generator)
 
         # Use inverse cdf transform for normal distribution to get truncated
         # standard normal
@@ -154,7 +154,14 @@ def normal_(tensor: Tensor, mean: float = 0., std: float = 1.) -> Tensor:
         return torch.overrides.handle_torch_function(normal_, (tensor,), tensor=tensor, mean=mean, std=std)
     return _no_grad_normal_(tensor, mean, std)
 
-def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = -2., b: float = 2.) -> Tensor:
+def trunc_normal_(
+    tensor: Tensor,
+    mean: float = 0.,
+    std: float = 1.,
+    a: float = -2.,
+    b: float = 2.,
+    generator: _Optional[torch.Generator] = None
+) -> Tensor:
     r"""Fills the input Tensor with values drawn from a truncated
     normal distribution. The values are effectively drawn from the
     normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`
@@ -173,7 +180,7 @@ def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = 
         >>> w = torch.empty(3, 5)
         >>> nn.init.trunc_normal_(w)
     """
-    return _no_grad_trunc_normal_(tensor, mean, std, a, b)
+    return _no_grad_trunc_normal_(tensor, mean, std, a, b, generator=generator)
 
 
 def constant_(tensor: Tensor, val: float) -> Tensor:

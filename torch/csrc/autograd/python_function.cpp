@@ -206,36 +206,8 @@ auto PyNode::name() const -> std::string {
 
 // Traverse and clear are required for supporting Python's GC cycle handling.
 static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
-  // cdata could be null if the PyNode has already gone out of scope
-  // by the time we're GC'ing this THPFunction (e.g., the user saved grad_fn
-  // only).
-  //
-  // TODO: I'm not really sure if we're actually obligated to traverse PyObject
-  // that is stored in PyNode, since we don't really own that C++ object.
-  if (auto cdata = self->cdata.lock()) {
-    for (const auto& hook : cdata->tensor_pre_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
-        Py_VISIT(pyhook->dict);
-      }
-    }
-    // See NOTE [retains_grad_hook PyObject traversal]
-    for (const auto& pair : cdata->retains_grad_hooks()) {
-      if (auto pyhook =
-              dynamic_cast<PyFunctionTensorPreHook*>(pair.second.get())) {
-        Py_VISIT(pyhook->dict);
-      }
-    }
-    for (const auto& hook : cdata->pre_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
-        Py_VISIT(pyhook->dict);
-      }
-    }
-    for (const auto& hook : cdata->post_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
-        Py_VISIT(pyhook->dict);
-      }
-    }
-  }
+  // NB: We should not traverse PyObbject stored on PyNode, since we only hold
+  // as weak reference to the PyNode.
   Py_VISIT(self->to_save);
   Py_VISIT(self->non_differentiable);
   Py_VISIT(self->dirty_tensors);
@@ -534,7 +506,7 @@ static void _get_tensors_to_save(
           // TODO: We should really just ALWAYS throw an error here, but
           // doing so will break some internal tests. We should fix those.
           throw torch::TypeError(
-              "save_for_backward can only save variables, but argument %ld is of "
+              "save_for_backward can only save variables, but argument %zu is of "
               "type %s",
               i,
               Py_TYPE(obj)->tp_name);
@@ -775,9 +747,14 @@ static void _trace_post_record(
       }
     }
   }
+  py::object onnx_globals = py::module::import("torch.onnx._globals");
   py::bool_ is_in_onnx_export =
       py::module::import("torch.onnx.__init__").attr("is_in_onnx_export");
-  if (py::cast<bool>(is_in_onnx_export)) {
+  py::bool_ is_autograd_inlining_enabled =
+      py::cast<bool>(onnx_globals.attr("GLOBALS").attr("autograd_inlining"));
+
+  if (py::cast<bool>(is_in_onnx_export) &&
+      py::cast<bool>(is_autograd_inlining_enabled)) {
     _append_subgraph(old_node, graph, std::move(trace_outputs), unpack_output);
   }
 

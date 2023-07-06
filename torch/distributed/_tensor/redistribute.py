@@ -88,11 +88,11 @@ def _redistribute_with_local_tensor(
     for i, (current, target) in sorted_placements:
         my_coordinate = device_mesh.get_coordinate()
         num_chunks = device_mesh.size(dim=i)
-        # TODO: what should happen if rank is not in the mesh?
-        # see issue https://github.com/pytorch/tau/pull/492
-        assert (
-            my_coordinate is not None
-        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return local_tensor,
+            # which should be an empty tensor
+            return local_tensor
 
         if current == target:
             # short cut, just use the original local tensor

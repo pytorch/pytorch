@@ -48,7 +48,7 @@ id<MTLLibrary> MPSDevice::getMetalIndexingLibrary() {
   return _mtl_indexing_library;
 }
 
-id<MTLComputePipelineState> MPSDevice::metalIndexingFunction(const std::string& kernel) {
+id<MTLComputePipelineState> MPSDevice::metalIndexingPSO(const std::string& kernel) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_mtl_device);
   NSError* error = nil;
   static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
@@ -139,10 +139,6 @@ bool is_available() {
 
 bool is_macos_13_or_newer(MacOSVersion version) {
   return MPSDevice::getInstance()->isMacOS13Plus(version);
-}
-
-void device_synchronize() {
-  getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
 }
 
 } // namespace mps

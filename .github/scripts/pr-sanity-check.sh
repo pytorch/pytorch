@@ -15,7 +15,7 @@ ancestor=$(git merge-base "${BASE}" "${HEAD}")
 echo "INFO: Checking aginst the following stats"
 (
     set -x
-    git diff --stat "$ancestor" "${HEAD}" | sed '$d' > "${TMPFILE}"
+    git diff --stat=10000 "$ancestor" "${HEAD}" | sed '$d' > "${TMPFILE}"
 )
 
 while read -r git_attribute; do
@@ -41,10 +41,10 @@ add=$(echo "$details" | grep -o '[0-9]* insertion' | grep -o '[0-9]*' || true)
 remove=$(echo "$details" | grep -o '[0-9]* deletion' | grep -o '[0-9]*' || true)
 pr_size=0
 if [ "$add" ]; then
-  pr_size=$(("$pr_size" + "$add"))
+  pr_size=$((pr_size + add))
 fi
 if [ "$remove" ]; then
-  pr_size=$(("$pr_size" + "$remove"))
+  pr_size=$((pr_size + remove))
 fi
 echo "INFO: PR SIZE is ${pr_size}"
 

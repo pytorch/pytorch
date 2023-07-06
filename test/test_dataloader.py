@@ -25,6 +25,7 @@ from torch.utils.data import (
     IterDataPipe,
     Subset,
     TensorDataset,
+    StackDataset,
     _utils
 )
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
@@ -359,6 +360,58 @@ class TestTensorDataset(TestCase):
             self.assertEqual(t1[i], source[i][1])
             self.assertEqual(t2[i], source[i][2])
             self.assertEqual(t3[i], source[i][3])
+
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
+class TestStackDataset(TestCase):
+
+    def test_empty(self):
+        with self.assertRaisesRegex(ValueError, "At least one dataset should be passed"):
+            StackDataset()
+
+    def test_mixed(self):
+        with self.assertRaisesRegex(ValueError, "Supported either"):
+            StackDataset(TensorDataset(torch.randn(15, 10)), a=TensorDataset(torch.randn(10, 15)))
+
+    def test_size_mismatch(self):
+        with self.assertRaisesRegex(ValueError, "Size mismatch between datasets"):
+            StackDataset(TensorDataset(torch.randn(15, 10)), TensorDataset(torch.randn(10, 15)))
+        with self.assertRaisesRegex(ValueError, "Size mismatch between datasets"):
+            StackDataset(a=TensorDataset(torch.randn(15, 10)), b=TensorDataset(torch.randn(10, 15)))
+
+    def test_len(self):
+        source = StackDataset(TensorDataset(torch.randn(15, 10)), TensorDataset(torch.randn(15)))
+        self.assertEqual(len(source), 15)
+        source = StackDataset(TensorDataset(torch.randn(15, 10)))
+        self.assertEqual(len(source), 15)
+        source = StackDataset(a=TensorDataset(torch.randn(15, 10)), b=TensorDataset(torch.randn(15)))
+        self.assertEqual(len(source), 15)
+        source = StackDataset(a=TensorDataset(torch.randn(15, 10)))
+        self.assertEqual(len(source), 15)
+
+    def test_single(self):
+        t = TensorDataset(torch.randn(15, 10))
+        source = StackDataset(t)
+        for i in range(15):
+            self.assertEqual(t[i], source[i][0])
+        source = StackDataset(a=t)
+        for i in range(15):
+            self.assertEqual(t[i], source[i]['a'])
+
+    def test_getitem(self):
+        t = TensorDataset(torch.randn(15, 10))
+        l = TensorDataset(torch.randn(15, 5, 4))
+        source = StackDataset(t, l)
+        for i in range(15):
+            self.assertEqual(t[i], source[i][0])
+            self.assertEqual(l[i], source[i][1])
+        source = StackDataset(a=t, b=l)
+        for i in range(15):
+            self.assertEqual(t[i], source[i]['a'])
+            self.assertEqual(l[i], source[i]['b'])
 
 
 @unittest.skipIf(

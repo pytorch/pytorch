@@ -8,6 +8,7 @@ from gitutils import (
     GitRepo,
     patterns_to_regex,
     PeekableIterator,
+    retries_decorator,
 )
 
 
@@ -47,6 +48,22 @@ class TestPattern(TestCase):
         ]
         for filename in fnames:
             self.assertTrue(patterns_re.match(filename))
+
+
+class TestRetriesDecorator(TestCase):
+    def test_simple(self) -> None:
+        @retries_decorator()
+        def foo(x: int, y: int) -> int:
+            return x + y
+
+        self.assertEqual(foo(3, 4), 7)
+
+    def test_fails(self) -> None:
+        @retries_decorator(rc=0)
+        def foo(x: int, y: int) -> int:
+            return x + y
+
+        self.assertEqual(foo("a", 4), 0)
 
 
 class TestGitRepo(TestCase):

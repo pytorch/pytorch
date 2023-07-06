@@ -111,7 +111,7 @@ def distribute_module(
 ```python
 class MyModule(nn.Module):
     def __init__(self):
-        super.__init__()
+        super().__init__()
         self.fc1 = nn.Linear(8, 8)
         self.fc2 = nn.Linear(8, 8)
         self.relu = nn.ReLU()
@@ -126,14 +126,15 @@ def shard_params(mod_name, mod, mesh):
     def to_dist_tensor(t): return distribute_tensor(t, mesh, rowwise_placement)
     mod._apply(to_dist_tensor)
 
-sharded_module = distribute_module(model, mesh, partition_fn=shard_params)
+sharded_module = distribute_module(MyModule(), mesh, partition_fn=shard_params)
 
 def shard_fc(mod_name, mod, mesh):
     rowwise_placement = [Shard(0)]
     if mod_name == "fc1":
         mod.weight = torch.nn.Parameter(distribute_tensor(mod.weight, mesh, rowwise_placement))
 
-sharded_module = distribute_module(model, mesh, partition_fn=shard_fc)
+sharded_module = distribute_module(MyModule(), mesh, partition_fn=shard_fc)
+
 ```
 
 ## Compiler and PyTorch DTensor

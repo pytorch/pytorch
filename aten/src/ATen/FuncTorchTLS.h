@@ -29,6 +29,7 @@ struct TORCH_API FuncTorchTLSBase {
   virtual std::unique_ptr<FuncTorchTLSBase> deepcopy() const = 0;
 
   virtual int64_t checkSupportsSingleLevelAutogradFunction() const = 0;
+  virtual void checkSupportsCppAutogradFunction() const = 0;
   virtual void checkSupportsInplaceRequiresGrad() const = 0;
   virtual void checkSupportsRetainGrad() const = 0;
 };

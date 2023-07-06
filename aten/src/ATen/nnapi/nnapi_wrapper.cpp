@@ -23,7 +23,7 @@
 static int loaded = 0;
 static struct nnapi_wrapper nnapi_;
 static struct nnapi_wrapper check_nnapi_;
-int check__getDeviceCount(uint32_t* numDevices) {
+static int check__getDeviceCount(uint32_t* numDevices) {
   CAFFE_ENFORCE(nnapi_._getDeviceCount);
   int ret = nnapi_._getDeviceCount(numDevices);
   // TODO: Maybe add better logging here.
@@ -33,7 +33,7 @@ int check__getDeviceCount(uint32_t* numDevices) {
   );
   return ret;
 }
-int check__getDevice(uint32_t devIndex, ANeuralNetworksDevice** device) {
+static int check__getDevice(uint32_t devIndex, ANeuralNetworksDevice** device) {
   CAFFE_ENFORCE(nnapi_._getDevice);
   int ret = nnapi_._getDevice(devIndex,device);
   // TODO: Maybe add better logging here.
@@ -43,7 +43,7 @@ int check__getDevice(uint32_t devIndex, ANeuralNetworksDevice** device) {
   );
   return ret;
 }
-int check_Device_getName(const ANeuralNetworksDevice* device, const char** name) {
+static int check_Device_getName(const ANeuralNetworksDevice* device, const char** name) {
   CAFFE_ENFORCE(nnapi_.Device_getName);
   int ret = nnapi_.Device_getName(device,name);
   // TODO: Maybe add better logging here.
@@ -53,7 +53,7 @@ int check_Device_getName(const ANeuralNetworksDevice* device, const char** name)
   );
   return ret;
 }
-int check_Device_getVersion(const ANeuralNetworksDevice* device, const char** version) {
+static int check_Device_getVersion(const ANeuralNetworksDevice* device, const char** version) {
   CAFFE_ENFORCE(nnapi_.Device_getVersion);
   int ret = nnapi_.Device_getVersion(device,version);
   // TODO: Maybe add better logging here.
@@ -63,7 +63,7 @@ int check_Device_getVersion(const ANeuralNetworksDevice* device, const char** ve
   );
   return ret;
 }
-int check_Device_getFeatureLevel(const ANeuralNetworksDevice* device, int64_t* featureLevel) {
+static int check_Device_getFeatureLevel(const ANeuralNetworksDevice* device, int64_t* featureLevel) {
   CAFFE_ENFORCE(nnapi_.Device_getFeatureLevel);
   int ret = nnapi_.Device_getFeatureLevel(device,featureLevel);
   // TODO: Maybe add better logging here.
@@ -73,7 +73,7 @@ int check_Device_getFeatureLevel(const ANeuralNetworksDevice* device, int64_t* f
   );
   return ret;
 }
-int check_Model_getSupportedOperationsForDevices( const ANeuralNetworksModel* model, const ANeuralNetworksDevice* const* devices, uint32_t numDevices, bool* supportedOps) {
+static int check_Model_getSupportedOperationsForDevices( const ANeuralNetworksModel* model, const ANeuralNetworksDevice* const* devices, uint32_t numDevices, bool* supportedOps) {
   CAFFE_ENFORCE(nnapi_.Model_getSupportedOperationsForDevices);
   int ret = nnapi_.Model_getSupportedOperationsForDevices(model,devices,numDevices,supportedOps);
   // TODO: Maybe add better logging here.
@@ -83,7 +83,7 @@ int check_Model_getSupportedOperationsForDevices( const ANeuralNetworksModel* mo
   );
   return ret;
 }
-int check_Compilation_createForDevices(ANeuralNetworksModel* model, const ANeuralNetworksDevice* const* devices, uint32_t numDevices, ANeuralNetworksCompilation** compilation) {
+static int check_Compilation_createForDevices(ANeuralNetworksModel* model, const ANeuralNetworksDevice* const* devices, uint32_t numDevices, ANeuralNetworksCompilation** compilation) {
   CAFFE_ENFORCE(nnapi_.Compilation_createForDevices);
   int ret = nnapi_.Compilation_createForDevices(model,devices,numDevices,compilation);
   // TODO: Maybe add better logging here.
@@ -93,7 +93,7 @@ int check_Compilation_createForDevices(ANeuralNetworksModel* model, const ANeura
   );
   return ret;
 }
-int check_Execution_compute(ANeuralNetworksExecution* execution) {
+static int check_Execution_compute(ANeuralNetworksExecution* execution) {
   CAFFE_ENFORCE(nnapi_.Execution_compute);
   int ret = nnapi_.Execution_compute(execution);
   // TODO: Maybe add better logging here.
@@ -103,7 +103,7 @@ int check_Execution_compute(ANeuralNetworksExecution* execution) {
   );
   return ret;
 }
-int check_Memory_createFromFd(size_t size, int protect, int fd, size_t offset, ANeuralNetworksMemory** memory) {
+static int check_Memory_createFromFd(size_t size, int protect, int fd, size_t offset, ANeuralNetworksMemory** memory) {
   CAFFE_ENFORCE(nnapi_.Memory_createFromFd);
   int ret = nnapi_.Memory_createFromFd(size,protect,fd,offset,memory);
   // TODO: Maybe add better logging here.
@@ -113,11 +113,11 @@ int check_Memory_createFromFd(size_t size, int protect, int fd, size_t offset, A
   );
   return ret;
 }
-void check_Memory_free(ANeuralNetworksMemory* memory) {
+static void check_Memory_free(ANeuralNetworksMemory* memory) {
   CAFFE_ENFORCE(nnapi_.Memory_free);
   nnapi_.Memory_free(memory);
 }
-int check_Model_create(ANeuralNetworksModel** model) {
+static int check_Model_create(ANeuralNetworksModel** model) {
   CAFFE_ENFORCE(nnapi_.Model_create);
   int ret = nnapi_.Model_create(model);
   // TODO: Maybe add better logging here.
@@ -127,11 +127,11 @@ int check_Model_create(ANeuralNetworksModel** model) {
   );
   return ret;
 }
-void check_Model_free(ANeuralNetworksModel* model) {
+static void check_Model_free(ANeuralNetworksModel* model) {
   CAFFE_ENFORCE(nnapi_.Model_free);
   nnapi_.Model_free(model);
 }
-int check_Model_finish(ANeuralNetworksModel* model) {
+static int check_Model_finish(ANeuralNetworksModel* model) {
   CAFFE_ENFORCE(nnapi_.Model_finish);
   int ret = nnapi_.Model_finish(model);
   // TODO: Maybe add better logging here.
@@ -141,7 +141,7 @@ int check_Model_finish(ANeuralNetworksModel* model) {
   );
   return ret;
 }
-int check_Model_addOperand(ANeuralNetworksModel* model, const ANeuralNetworksOperandType* type) {
+static int check_Model_addOperand(ANeuralNetworksModel* model, const ANeuralNetworksOperandType* type) {
   CAFFE_ENFORCE(nnapi_.Model_addOperand);
   int ret = nnapi_.Model_addOperand(model,type);
   // TODO: Maybe add better logging here.
@@ -151,7 +151,7 @@ int check_Model_addOperand(ANeuralNetworksModel* model, const ANeuralNetworksOpe
   );
   return ret;
 }
-int check_Model_setOperandValue(ANeuralNetworksModel* model, int32_t index, const void* buffer, size_t length) {
+static int check_Model_setOperandValue(ANeuralNetworksModel* model, int32_t index, const void* buffer, size_t length) {
   CAFFE_ENFORCE(nnapi_.Model_setOperandValue);
   int ret = nnapi_.Model_setOperandValue(model,index,buffer,length);
   // TODO: Maybe add better logging here.
@@ -161,7 +161,7 @@ int check_Model_setOperandValue(ANeuralNetworksModel* model, int32_t index, cons
   );
   return ret;
 }
-int check_Model_setOperandValueFromMemory(ANeuralNetworksModel* model, int32_t index, const ANeuralNetworksMemory* memory, size_t offset, size_t length) {
+static int check_Model_setOperandValueFromMemory(ANeuralNetworksModel* model, int32_t index, const ANeuralNetworksMemory* memory, size_t offset, size_t length) {
   CAFFE_ENFORCE(nnapi_.Model_setOperandValueFromMemory);
   int ret = nnapi_.Model_setOperandValueFromMemory(model,index,memory,offset,length);
   // TODO: Maybe add better logging here.
@@ -171,7 +171,7 @@ int check_Model_setOperandValueFromMemory(ANeuralNetworksModel* model, int32_t i
   );
   return ret;
 }
-int check_Model_addOperation(ANeuralNetworksModel* model, ANeuralNetworksOperationType type, uint32_t inputCount, const uint32_t* inputs, uint32_t outputCount, const uint32_t* outputs) {
+static int check_Model_addOperation(ANeuralNetworksModel* model, ANeuralNetworksOperationType type, uint32_t inputCount, const uint32_t* inputs, uint32_t outputCount, const uint32_t* outputs) {
   CAFFE_ENFORCE(nnapi_.Model_addOperation);
   int ret = nnapi_.Model_addOperation(model,type,inputCount,inputs,outputCount,outputs);
   // TODO: Maybe add better logging here.
@@ -181,7 +181,7 @@ int check_Model_addOperation(ANeuralNetworksModel* model, ANeuralNetworksOperati
   );
   return ret;
 }
-int check_Model_identifyInputsAndOutputs(ANeuralNetworksModel* model, uint32_t inputCount, const uint32_t* inputs, uint32_t outputCount, const uint32_t* outputs) {
+static int check_Model_identifyInputsAndOutputs(ANeuralNetworksModel* model, uint32_t inputCount, const uint32_t* inputs, uint32_t outputCount, const uint32_t* outputs) {
   CAFFE_ENFORCE(nnapi_.Model_identifyInputsAndOutputs);
   int ret = nnapi_.Model_identifyInputsAndOutputs(model,inputCount,inputs,outputCount,outputs);
   // TODO: Maybe add better logging here.
@@ -191,7 +191,7 @@ int check_Model_identifyInputsAndOutputs(ANeuralNetworksModel* model, uint32_t i
   );
   return ret;
 }
-int check_Model_relaxComputationFloat32toFloat16(ANeuralNetworksModel* model, bool allow) {
+static int check_Model_relaxComputationFloat32toFloat16(ANeuralNetworksModel* model, bool allow) {
   CAFFE_ENFORCE(nnapi_.Model_relaxComputationFloat32toFloat16);
   int ret = nnapi_.Model_relaxComputationFloat32toFloat16(model,allow);
   // TODO: Maybe add better logging here.
@@ -201,7 +201,7 @@ int check_Model_relaxComputationFloat32toFloat16(ANeuralNetworksModel* model, bo
   );
   return ret;
 }
-int check_Compilation_create(ANeuralNetworksModel* model, ANeuralNetworksCompilation** compilation) {
+static int check_Compilation_create(ANeuralNetworksModel* model, ANeuralNetworksCompilation** compilation) {
   CAFFE_ENFORCE(nnapi_.Compilation_create);
   int ret = nnapi_.Compilation_create(model,compilation);
   // TODO: Maybe add better logging here.
@@ -211,11 +211,11 @@ int check_Compilation_create(ANeuralNetworksModel* model, ANeuralNetworksCompila
   );
   return ret;
 }
-void check_Compilation_free(ANeuralNetworksCompilation* compilation) {
+static void check_Compilation_free(ANeuralNetworksCompilation* compilation) {
   CAFFE_ENFORCE(nnapi_.Compilation_free);
   nnapi_.Compilation_free(compilation);
 }
-int check_Compilation_setPreference(ANeuralNetworksCompilation* compilation, int32_t preference) {
+static int check_Compilation_setPreference(ANeuralNetworksCompilation* compilation, int32_t preference) {
   CAFFE_ENFORCE(nnapi_.Compilation_setPreference);
   int ret = nnapi_.Compilation_setPreference(compilation,preference);
   // TODO: Maybe add better logging here.
@@ -225,7 +225,7 @@ int check_Compilation_setPreference(ANeuralNetworksCompilation* compilation, int
   );
   return ret;
 }
-int check_Compilation_finish(ANeuralNetworksCompilation* compilation) {
+static int check_Compilation_finish(ANeuralNetworksCompilation* compilation) {
   CAFFE_ENFORCE(nnapi_.Compilation_finish);
   int ret = nnapi_.Compilation_finish(compilation);
   // TODO: Maybe add better logging here.
@@ -235,7 +235,7 @@ int check_Compilation_finish(ANeuralNetworksCompilation* compilation) {
   );
   return ret;
 }
-int check_Execution_create(ANeuralNetworksCompilation* compilation, ANeuralNetworksExecution** execution) {
+static int check_Execution_create(ANeuralNetworksCompilation* compilation, ANeuralNetworksExecution** execution) {
   CAFFE_ENFORCE(nnapi_.Execution_create);
   int ret = nnapi_.Execution_create(compilation,execution);
   // TODO: Maybe add better logging here.
@@ -245,11 +245,11 @@ int check_Execution_create(ANeuralNetworksCompilation* compilation, ANeuralNetwo
   );
   return ret;
 }
-void check_Execution_free(ANeuralNetworksExecution* execution) {
+static void check_Execution_free(ANeuralNetworksExecution* execution) {
   CAFFE_ENFORCE(nnapi_.Execution_free);
   nnapi_.Execution_free(execution);
 }
-int check_Execution_setInput(ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const void* buffer, size_t length) {
+static int check_Execution_setInput(ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const void* buffer, size_t length) {
   CAFFE_ENFORCE(nnapi_.Execution_setInput);
   int ret = nnapi_.Execution_setInput(execution,index,type,buffer,length);
   // TODO: Maybe add better logging here.
@@ -259,7 +259,7 @@ int check_Execution_setInput(ANeuralNetworksExecution* execution, int32_t index,
   );
   return ret;
 }
-int check_Execution_setInputFromMemory(ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length) {
+static int check_Execution_setInputFromMemory(ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length) {
   CAFFE_ENFORCE(nnapi_.Execution_setInputFromMemory);
   int ret = nnapi_.Execution_setInputFromMemory(execution,index,type,memory,offset,length);
   // TODO: Maybe add better logging here.
@@ -269,7 +269,7 @@ int check_Execution_setInputFromMemory(ANeuralNetworksExecution* execution, int3
   );
   return ret;
 }
-int check_Execution_setOutput(ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, void* buffer, size_t length) {
+static int check_Execution_setOutput(ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, void* buffer, size_t length) {
   CAFFE_ENFORCE(nnapi_.Execution_setOutput);
   int ret = nnapi_.Execution_setOutput(execution,index,type,buffer,length);
   // TODO: Maybe add better logging here.
@@ -279,7 +279,7 @@ int check_Execution_setOutput(ANeuralNetworksExecution* execution, int32_t index
   );
   return ret;
 }
-int check_Execution_setOutputFromMemory(ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length) {
+static int check_Execution_setOutputFromMemory(ANeuralNetworksExecution* execution, int32_t index, const ANeuralNetworksOperandType* type, const ANeuralNetworksMemory* memory, size_t offset, size_t length) {
   CAFFE_ENFORCE(nnapi_.Execution_setOutputFromMemory);
   int ret = nnapi_.Execution_setOutputFromMemory(execution,index,type,memory,offset,length);
   // TODO: Maybe add better logging here.
@@ -289,7 +289,7 @@ int check_Execution_setOutputFromMemory(ANeuralNetworksExecution* execution, int
   );
   return ret;
 }
-int check_Execution_startCompute(ANeuralNetworksExecution* execution, ANeuralNetworksEvent** event) {
+static int check_Execution_startCompute(ANeuralNetworksExecution* execution, ANeuralNetworksEvent** event) {
   CAFFE_ENFORCE(nnapi_.Execution_startCompute);
   int ret = nnapi_.Execution_startCompute(execution,event);
   // TODO: Maybe add better logging here.
@@ -299,7 +299,7 @@ int check_Execution_startCompute(ANeuralNetworksExecution* execution, ANeuralNet
   );
   return ret;
 }
-int check_Event_wait(ANeuralNetworksEvent* event) {
+static int check_Event_wait(ANeuralNetworksEvent* event) {
   CAFFE_ENFORCE(nnapi_.Event_wait);
   int ret = nnapi_.Event_wait(event);
   // TODO: Maybe add better logging here.
@@ -309,11 +309,11 @@ int check_Event_wait(ANeuralNetworksEvent* event) {
   );
   return ret;
 }
-void check_Event_free(ANeuralNetworksEvent* event) {
+static void check_Event_free(ANeuralNetworksEvent* event) {
   CAFFE_ENFORCE(nnapi_.Event_free);
   nnapi_.Event_free(event);
 }
-int check_Execution_getOutputOperandRank(ANeuralNetworksExecution* execution, int32_t index, uint32_t* rank) {
+static int check_Execution_getOutputOperandRank(ANeuralNetworksExecution* execution, int32_t index, uint32_t* rank) {
   CAFFE_ENFORCE(nnapi_.Execution_getOutputOperandRank);
   int ret = nnapi_.Execution_getOutputOperandRank(execution,index,rank);
   // TODO: Maybe add better logging here.
@@ -323,7 +323,7 @@ int check_Execution_getOutputOperandRank(ANeuralNetworksExecution* execution, in
   );
   return ret;
 }
-int check_Execution_getOutputOperandDimensions(ANeuralNetworksExecution* execution, int32_t index, uint32_t* dimensions) {
+static int check_Execution_getOutputOperandDimensions(ANeuralNetworksExecution* execution, int32_t index, uint32_t* dimensions) {
   CAFFE_ENFORCE(nnapi_.Execution_getOutputOperandDimensions);
   int ret = nnapi_.Execution_getOutputOperandDimensions(execution,index,dimensions);
   // TODO: Maybe add better logging here.
