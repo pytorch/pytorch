@@ -225,11 +225,17 @@ def freeze(
     aot_autograd_gm = decompose_unfused_batchnorms(
         aot_autograd_gm, example_inputs, preserved_arg_indices
     )
-
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)
     aot_autograd_gm.graph = cse_graph
     aot_autograd_gm.recompile()
+
+    from torch._inductor.compile_fx import fake_tensor_prop
+
+    # Make sure meta['val'] is properly setup(weight conversion
+    # or decompose_unfused_batchnorms lost meta['val']).
+    aot_example_inputs = [example_inputs[ind] for ind in preserved_arg_indices]
+    fake_tensor_prop(aot_autograd_gm, aot_example_inputs, True)
     freezing_passes(aot_autograd_gm)
 
     # TODO - apply legalization in pattern matcher
