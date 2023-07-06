@@ -44,8 +44,7 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         old_name = nodes[0].target
         assert isinstance(old_name, str), f"Expected str, got type({old_name})"
         # Parameter/buffer name cannot contain "."
-        # TODO(bowbao): fix #104670 and replace "." with "/" to avoid collision.
-        normalized_name = new_name.replace(".", "_")
+        normalized_name = new_name.replace(".", "/")
         attr_value = getattr(self.module, old_name)
         setattr(self.module, normalized_name, attr_value)
         delattr(self.module, old_name)
@@ -60,7 +59,7 @@ class RestoreParameterAndBufferNames(_pass.Transform):
             f"normalized from original parameter name '{new_name}'."
         )
 
-    def _run(self) -> torch.fx.GraphModule:
+    def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         """Restore parameter and buffer names from original module.
 
         For each `get_attr` node, if the target is a str representing a parameter or buffer
@@ -68,6 +67,10 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         The parameters and buffers between `self.module` and `self.original_module` refer
         to the same objects, allowing us to use it as key to retrieve the original name.
         """
+        assert len(args) == 0, "RestoreParameterAndBufferNames does not take any args"
+        assert (
+            len(kwargs) == 0
+        ), "RestoreParameterAndBufferNames does not take any kwargs"
         # state_to_readable_name[parameter/buffer] returns the original readable name of
         # the parameter/buffer. E.g., "self.linear.weight".
         state_to_readable_name: Dict[Union[torch.nn.Parameter, torch.Tensor], str] = {}

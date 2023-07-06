@@ -773,18 +773,14 @@ class FxOnnxInterpreter:
         ],
         fx_graph_module: torch.fx.GraphModule,
     ):
-        if not isinstance(node.target, str):
-            raise TypeError(
-                f"node.target must be a str, not {type(node.target)}. Found for node {node}."
-            )
+        assert isinstance(node.target, str), f"node.target {node.target} is not a str."
         attr_tensor = getattr(fx_graph_module, node.target)
+        assert isinstance(attr_tensor, torch.Tensor), f"{attr_tensor} is not a tensor."
 
-        # TODO: Make the initializer name more readable. `node.name` is something like
-        # `_param_constant9`. Options are we improve dynamo (actually, proxy_tensor) to
-        # emit more readable names. Or we pass along a named parameters and buffers
-        # mapping from original model, and do a reverse lookup. It has to be original
-        # model because the parameter names in `fx_module_with_metadata` are already in
-        # the form of `_param_constant9`.
-        fx_name_to_onnxscript_value[node.name] = onnxscript_graph.add_initializer(
-            node.name, attr_tensor
+        input_ = onnxscript_graph.add_initializer(
+            node.target.replace("/", "."), attr_tensor
         )
+
+        assert isinstance(input_, onnxscript_graph_building.TorchScriptTensor)
+        assert isinstance(input_, onnxscript.tensor.Tensor)
+        fx_name_to_onnxscript_value[node.name] = input_
