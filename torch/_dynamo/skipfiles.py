@@ -108,7 +108,7 @@ SKIP_DIRS = [
 
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
-    torch.set_rng_state.__code__.co_filename,
+    # torch.set_rng_state.__code__.co_filename,
     torch._inductor.test_operators.__file__,
     torch.utils._content_store.__file__,
     # These are dynamo files!
