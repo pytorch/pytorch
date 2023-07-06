@@ -97,7 +97,7 @@ def rand_dense_2by4_all_patterns(r, c, dtype, device):
     mask_inv = torch.tensor(mask_entries_inv, dtype=torch.bool).view(r, c).to(device)
     mask_val = torch.tensor(mask_entries_val, dtype=torch.bool).view(r, c).to(device)
     dense = make_tensor(r, c, dtype=dtype, device=device)
-    dense[dense == 0] = 1
+    dense[dense == 0] = 1   # To prevent zeros except where mask below applied.
     dense_inv = dense.masked_fill(~mask_inv, 0)
     dense_val = dense_inv.masked_fill(~mask_val, 0)
     return dense_inv, dense_val
@@ -127,7 +127,7 @@ class TestSparseSemiStructured(TestCase):
         Ensure torch.mm(A_sparse, B.t()) is correct
         """
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
-        A_sparse = SparseSemiStructuredTensor(A)
+        A_sparse = to_sparse_semi_structured(A)
 
         B = torch.rand((128, 128), device=A_sparse.device).to(dtype)
 
@@ -159,7 +159,7 @@ class TestSparseSemiStructured(TestCase):
         Ensure torch.mm(A_sparse.t(), B) throws error
         """
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
-        A_sparse = SparseSemiStructuredTensor(A)
+        A_sparse = to_sparse_semi_structured(A)
 
         B = torch.rand((128, 128), device=A_sparse.device).to(dtype)
 
@@ -176,7 +176,7 @@ class TestSparseSemiStructured(TestCase):
         Ensure torch.mm(A, B_sparse.t()) is correct
         """
         B = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
-        B_sparse = SparseSemiStructuredTensor(B)
+        B_sparse = to_sparse_semi_structured(B)
 
         A = torch.rand((128, 128), device=B_sparse.device).to(dtype)
 
@@ -197,7 +197,7 @@ class TestSparseSemiStructured(TestCase):
         Ensure torch.mm(A, B_sparse) throws error
         """
         B = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
-        B_sparse = SparseSemiStructuredTensor(B)
+        B_sparse = to_sparse_semi_structured(B)
 
         A = torch.rand((128, 128), device=B_sparse.device).to(dtype)
 
@@ -235,14 +235,14 @@ class TestSparseSemiStructured(TestCase):
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     def test_values(self):
         A = rand_sparse_semi_structured_mask(128, 128)
-        A_sparse = SparseSemiStructuredTensor(A)
+        A_sparse = to_sparse_semi_structured(A)
         assert A_sparse.values().shape == (128, 64)
         assert (A_sparse.values() == 1).all()
 
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     def test_indices(self):
         A = rand_sparse_semi_structured_mask(128, 128)
-        A_sparse = SparseSemiStructuredTensor(A)
+        A_sparse = to_sparse_semi_structured(A)
         assert A_sparse.indices().shape == (128, 8)
 
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
@@ -250,7 +250,7 @@ class TestSparseSemiStructured(TestCase):
     def test_unsupported_shape(self, dtype, device):
         A = rand_sparse_semi_structured_mask(4, 4, dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.shape"):
-            A_sparse = SparseSemiStructuredTensor(A)
+            A_sparse = to_sparse_semi_structured(A)
 
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     @dtypes(*all_types_and_complex())
@@ -259,16 +259,16 @@ class TestSparseSemiStructured(TestCase):
 
         if dtype not in SEMI_STRUCTURED_SUPPORTED_DTYPES:
             with self.assertRaisesRegex(RuntimeError, "Error original_tensor.dtype"):
-                A_sparse = SparseSemiStructuredTensor(A)
+                A_sparse = to_sparse_semi_structured(A)
         else:
-            A_sparse = SparseSemiStructuredTensor(A)
+            A_sparse = to_sparse_semi_structured(A)
 
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     def test_unsupported_dim(self, device):
         A = torch.rand(128, 128, 128, device=device, dtype=torch.float16)
 
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.dim"):
-            A_sparse = SparseSemiStructuredTensor(A)
+            A_sparse = to_sparse_semi_structured(A)
 
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
@@ -322,7 +322,7 @@ class TestSparseSemiStructured(TestCase):
         def run_test(r, c, device, dtype):
             dense_ref, _ = rand_dense_2by4(r, c, dtype, device)
 
-            compressed = SparseSemiStructuredTensor(dense_ref)
+            compressed = to_sparse_semi_structured(dense_ref)
 
             # The torch.ops.aten._to_sparse_semi_structured operator
             # uses CUTLASS to perform conversion from given dense
@@ -350,7 +350,7 @@ class TestSparseSemiStructured(TestCase):
 
         dense_inv, dense_val = rand_dense_2by4_all_patterns(r, c, dtype, device)
 
-        compressed = SparseSemiStructuredTensor(dense_inv)
+        compressed = to_sparse_semi_structured(dense_inv)
         dense = compressed.to_dense()
 
         torch.testing.assert_close(dense, dense_val, rtol=0, atol=0)
