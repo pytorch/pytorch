@@ -328,7 +328,7 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.wrap(r)
 
         if b == 0:
-            type_ = type(a)
+            type_ = sympy.Float if a.lower.is_Float else sympy.Integer
             return ValueRanges.wrap(type_(1))
 
         if b < 0:
