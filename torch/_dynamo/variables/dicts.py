@@ -237,6 +237,13 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable(key, **options)
 
 
+def is_valid_global_ref_key(key):
+    if istensor(key):
+        return True
+    else:
+        return isinstance(key, (torch.nn.Module, tuple))
+
+
 class DefaultDictVariable(ConstDictVariable):
     def __init__(self, items, user_cls, default_factory=None, **kwargs):
         super().__init__(items, user_cls, **kwargs)

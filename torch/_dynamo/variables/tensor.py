@@ -123,6 +123,14 @@ class TensorVariable(VariableTracker):
         else:
             return check_type(tensor_type)
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        options = VariableTracker.propagate(self)
+        val = self.as_proxy().node.meta["example_value"]
+        result = hasattr(val, name)
+        return variables.ConstantVariable(result, **options).add_guard(
+            AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+        )
+
     @staticmethod
     def specialize(value: torch.Tensor):
         props = {
