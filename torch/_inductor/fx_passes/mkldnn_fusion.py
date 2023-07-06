@@ -799,15 +799,20 @@ if torch._C._has_mkldnn:
             conv_node = match.output_node()
             input_size = conv_node.args[0].meta.get("val").shape
             with graph.inserting_before(conv_node):
+                mkldnn_tensor_node = graph.create_node(
+                    "call_method", "to_mkldnn", (args[1],)
+                )
                 constant_args = [args[4], args[3], args[5], args[-1]]
-                packed_weight_op = mkldnn._reorder_convolution_weight
+                packed_weight_op = torch._C._nn.mkldnn_reorder_conv2d_weight
                 packed_conv_op = mkldnn._convolution_pointwise.default
                 if is_transposed:
                     constant_args.insert(1, args[-2])  # output_padding
                     packed_weight_op = mkldnn._reorder_convolution_transpose_weight
                     packed_conv_op = mkldnn._convolution_transpose_pointwise.default
 
-                packed_weight_inputs = (args[1],) + tuple(constant_args) + (input_size,)
+                packed_weight_inputs = (
+                    (mkldnn_tensor_node,) + tuple(constant_args) + (input_size,)
+                )
                 packed_weight_node = graph.create_node(
                     "call_function", packed_weight_op, args=packed_weight_inputs
                 )
@@ -841,9 +846,12 @@ if torch._C._has_mkldnn:
                 transpose_weight_node = graph.create_node(
                     "call_function", aten.permute.default, (weight, (1, 0))
                 )
+                mkldnn_tensor_node = graph.create_node(
+                    "call_method", "to_mkldnn", (transpose_weight_node,)
+                )
                 is_bf16_weight = weight.meta.get("val").dtype == torch.bfloat16
                 batch_size = input.meta.get("val").shape[0]
-                packed_weight_inputs = (transpose_weight_node, batch_size)
+                packed_weight_inputs = (mkldnn_tensor_node, batch_size)
                 packed_weight_op = (
                     mkldnn._reorder_linear_weight
                     if is_bf16_weight
