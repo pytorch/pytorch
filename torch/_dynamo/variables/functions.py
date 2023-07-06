@@ -1,5 +1,3 @@
-import abc
-import enum
 import functools
 import inspect
 import itertools
@@ -9,11 +7,10 @@ from typing import Dict, List
 import torch
 
 from .. import variables
-from ..allowed_functions import is_allowed, is_builtin_callable
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
-from ..utils import istensor, istype, make_cell
+from ..utils import make_cell
 from .base import typestr, VariableTracker
 
 
@@ -22,50 +19,16 @@ def wrap_bound_arg(tx, val, options, source=None):
     assert (
         "source" not in options
     ), "Source needs to be separate from options due to recursive calls for lists/dicts"
-
-    if isinstance(val, dict):
-        return variables.ConstDictVariable(
-            {
-                k: wrap_bound_arg(tx, v, options, source=getattr(v, "source", None))
-                for k, v in val.items()
-            },
-            dict,
-            **options,
-        )
-    elif isinstance(val, (tuple, list)):
-        cls = variables.BaseListVariable.cls_for(type(val))
-        return cls(
-            [
-                wrap_bound_arg(tx, x, options, source=getattr(x, "source", None))
-                for x in val
-            ],
-            **options,
-        )
-
-    if variables.ConstantVariable.is_literal(val) or istype(
-        val, (torch.Size, torch.device, torch.dtype)
-    ):
-        return variables.ConstantVariable(val, **options)
-    elif is_builtin_callable(val):
-        return variables.BuiltinVariable(val, source=source, **options)
-    elif is_allowed(val):
-        return variables.TorchVariable(val, source=source, **options)
-    elif isinstance(val, types.FunctionType):
-        return variables.UserFunctionVariable(val, source=source, **options)
-    elif isinstance(val, enum.Enum):
-        return variables.EnumVariable(val, source=source, **options)
-    elif isinstance(val, (type, abc.ABCMeta)):
-        return variables.UserDefinedClassVariable(val, source=source, **options)
-    elif istensor(val):
-        from torch._dynamo.variables.builder import VariableBuilder
-
-        return VariableBuilder(tx, source=source, **options)(val)
-    elif isinstance(val, VariableTracker):
+    if isinstance(val, VariableTracker):
         return val
+    elif not source:
+        from torch._dynamo.variables.builder import SourcelessBuilder
+
+        return SourcelessBuilder()(tx, val).add_options(options)
     else:
         from torch._dynamo.variables.builder import VariableBuilder
 
-        return VariableBuilder(tx, source=source, **options)(val)
+        return VariableBuilder(tx, source=source)(val).add_options(options)
 
 
 def wrap_args_kwargs(tx, result, options):
