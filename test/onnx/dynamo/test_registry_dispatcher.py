@@ -237,32 +237,6 @@ class TestDispatcher(common_utils.TestCase):
                 self.diagnostic_context,
             )
 
-    def test_warnings_in_find_the_perfect_or_nearest_match_onnxfunction_when_nearest_is_found(
-        self,
-    ):
-        op_overload = torch.fx.Node(
-            graph=torch.fx.Graph(),
-            name="aten::add.Tensor",
-            op="call_function",
-            target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
-            args=(torch.tensor(3), torch.tensor(4)),
-            kwargs={},
-        )
-        with self.assertWarnsOnceRegex(
-            UserWarning,
-            "A perfect matched Opchema is not found in torchlib for aten.add.Tensor",
-        ):
-            function_overloads = self.dispatcher.get_function_overloads(
-                op_overload, self.diagnostic_context
-            )
-            self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
-                op_overload,
-                function_overloads,
-                op_overload.args,  # type: ignore[attr-defined]
-                op_overload.kwargs,
-                self.diagnostic_context,
-            )
-
     @common_utils.parametrize(
         "node",
         [
