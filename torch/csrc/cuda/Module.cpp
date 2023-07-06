@@ -887,13 +887,14 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
+      .def_readonly("uuid", &cudaDeviceProp::uuid)
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
                << "', major=" << prop.major << ", minor=" << prop.minor
                << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
-               << ")";
+               << ", uuid=" << prop.uuid.bytes << ")";
         return stream.str();
       });
 

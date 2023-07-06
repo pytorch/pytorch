@@ -2186,6 +2186,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipDeviceAttributeMax", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
         (
+            "CU_DEVICE_ATTRIBUTE_UUID",
+            ("hipDeviceAttributeUuid", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
+        ),
+        (
             "CU_POINTER_ATTRIBUTE_CONTEXT",
             ("hipPointerAttributeContext", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
@@ -4259,6 +4263,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         (
             "cudaDevAttrMultiProcessorCount",
             ("hipDeviceAttributeMultiprocessorCount", CONV_TYPE, API_RUNTIME),
+        ),
+        (
+            "cudaDevAttrUUID",
+            ("hipDeviceAttributeUuid", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
         ),
         (
             "cudaDevAttrKernelExecTimeout",
