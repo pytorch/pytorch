@@ -6,7 +6,6 @@ import operator
 import torch
 import torch._inductor as inductor
 
-from ..._dynamo.utils import counters
 from .. import config, ir, pattern_matcher
 
 from ..lowering import lowerings as L
