@@ -2957,7 +2957,9 @@ def _sum_tensors(ts: Iterable[Tensor]) -> Tensor:
     return reduce(torch.add, ts)
 
 
-def _linspace_from_neg_one(num_steps: int, align_corners: bool, dtype: torch.dtype, device: torch.device):
+def _linspace_from_neg_one(
+    num_steps: int, align_corners: bool, dtype: torch.dtype, device: torch.device
+):
     if num_steps <= 1:
         return torch.tensor(0, device=device, dtype=dtype)
 
@@ -2971,9 +2973,19 @@ def _make_base_grid_4d(theta: Tensor, n: int, h: int, w: int, align_corners: boo
 
     # Using padding and summation generates a single kernel vs using torch.stack where 3 kernels generated
     # corresponding to each individual tensor: grid_x, grid_y, grid_one
-    grid_x = _linspace_from_neg_one(w, align_corners, dtype, device).view(1, 1, w, 1).expand(n, h, w, 1)
-    grid_y = _linspace_from_neg_one(h, align_corners, dtype, device).view(1, h, 1, 1).expand(n, h, w, 1)
-    grid_one = torch.tensor(1, dtype=dtype, device=device).view(1, 1, 1, 1).expand(n, h, w, 1)
+    grid_x = (
+        _linspace_from_neg_one(w, align_corners, dtype, device)
+        .view(1, 1, w, 1)
+        .expand(n, h, w, 1)
+    )
+    grid_y = (
+        _linspace_from_neg_one(h, align_corners, dtype, device)
+        .view(1, h, 1, 1)
+        .expand(n, h, w, 1)
+    )
+    grid_one = (
+        torch.tensor(1, dtype=dtype, device=device).view(1, 1, 1, 1).expand(n, h, w, 1)
+    )
 
     grid_x = torch.nn.functional.pad(grid_x, pad=(0, 2), mode="constant", value=0)
     grid_y = torch.nn.functional.pad(grid_y, pad=(1, 1), mode="constant", value=0)
@@ -2981,14 +2993,32 @@ def _make_base_grid_4d(theta: Tensor, n: int, h: int, w: int, align_corners: boo
     return grid_x + grid_y + grid_one
 
 
-def _make_base_grid_5d(theta: Tensor, n: int, d: int, h: int, w: int, align_corners: bool):
+def _make_base_grid_5d(
+    theta: Tensor, n: int, d: int, h: int, w: int, align_corners: bool
+):
     dtype = theta.dtype
     device = theta.device
 
-    grid_x = _linspace_from_neg_one(w, align_corners, dtype, device).view(1, 1, 1, w, 1).expand(n, d, h, w, 1)
-    grid_y = _linspace_from_neg_one(h, align_corners, dtype, device).view(1, 1, h, 1, 1).expand(n, d, h, w, 1)
-    grid_z = _linspace_from_neg_one(d, align_corners, dtype, device).view(1, d, 1, 1, 1).expand(n, d, h, w, 1)
-    grid_one = torch.tensor(1, dtype=dtype, device=device).view(1, 1, 1, 1, 1).expand(n, d, h, w, 1)
+    grid_x = (
+        _linspace_from_neg_one(w, align_corners, dtype, device)
+        .view(1, 1, 1, w, 1)
+        .expand(n, d, h, w, 1)
+    )
+    grid_y = (
+        _linspace_from_neg_one(h, align_corners, dtype, device)
+        .view(1, 1, h, 1, 1)
+        .expand(n, d, h, w, 1)
+    )
+    grid_z = (
+        _linspace_from_neg_one(d, align_corners, dtype, device)
+        .view(1, d, 1, 1, 1)
+        .expand(n, d, h, w, 1)
+    )
+    grid_one = (
+        torch.tensor(1, dtype=dtype, device=device)
+        .view(1, 1, 1, 1, 1)
+        .expand(n, d, h, w, 1)
+    )
 
     grid_x = torch.nn.functional.pad(grid_x, pad=(0, 3), mode="constant", value=0)
     grid_y = torch.nn.functional.pad(grid_y, pad=(1, 2), mode="constant", value=0)
@@ -2999,20 +3029,16 @@ def _make_base_grid_5d(theta: Tensor, n: int, d: int, h: int, w: int, align_corn
 
 def _affine_grid_generator_4d(theta: Tensor, size: List[int], align_corners: bool):
     n, _, h, w = size
-    base_grid = _make_base_grid_4d(
-        theta, n, h, w, align_corners=align_corners
-    )
+    base_grid = _make_base_grid_4d(theta, n, h, w, align_corners=align_corners)
     grid = base_grid.view(n, h * w, 3).bmm(theta.transpose(1, 2))
     return grid.view(n, h, w, 2)
 
 
 def _affine_grid_generator_5d(theta: Tensor, size: List[int], align_corners: bool):
     n, _, d, h, w = size
-    base_grid = _make_base_grid_5d(
-        theta, n, d, h, w, align_corners=align_corners
-    )
+    base_grid = _make_base_grid_5d(theta, n, d, h, w, align_corners=align_corners)
     grid = base_grid.view(n, d * h * w, 4).bmm(theta.transpose(1, 2))
-    return grid.view(n, h, w, 3)
+    return grid.view(n, d, h, w, 3)
 
 
 @register_decomposition(aten.affine_grid_generator)
@@ -3175,10 +3201,10 @@ def grid_sampler_2d(
                 get_value_bounded(ix_nw + 1, iy_ofs),
                 get_value_bounded(ix_nw + 2, iy_ofs),
             )
-            return _upsample_cubic_interp1d(cs, tx.unsqueeze(1))
+            return _upsample_cubic_interp1d(cs, tx)
 
         coeffs = tuple((get_coeff(ofs) for ofs in range(4)))
-        return _upsample_cubic_interp1d(coeffs, ty.unsqueeze(1))
+        return _upsample_cubic_interp1d(coeffs, ty)
 
 
 @register_decomposition(aten.mv)

@@ -588,8 +588,6 @@ aten::adaptive_max_pool3d_backward.grad_input
 aten::addbmm
 aten::addbmm.out
 aten::addr_
-aten::affine_grid_generator
-aten::affine_grid_generator.out
 aten::alias_copy
 aten::alias_copy.out
 aten::allclose
