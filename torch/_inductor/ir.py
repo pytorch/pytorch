@@ -957,7 +957,7 @@ class Reduction(Loops):
             "prod": 1,
             "xor_sum": 0,
             "any": 0,
-            "var_unnormalized": 0,
+            "welford": (0, 0, 0),
         }[reduction_type]
 
     @classmethod
@@ -1063,6 +1063,277 @@ class Reduction(Loops):
                 reduction_hint,
             )
         )
+
+class WelfordReduction(Reduction):
+    output_index: int
+
+    def __init__(
+            self,
+            device,
+            dtype,
+            mean_fn,
+            m2_fn,
+            weight_fn,
+            ranges,
+            reduction_ranges,
+            reduction_type,
+            reduction_hint,
+            output_index
+    ):
+        def inner_fn(idx, reduction_idx):
+            return (
+                mean_fn(idx, reduction_idx),
+                m2_fn(idx, reduction_idx),
+                weight_fn(idx, reduction_idx)
+            )
+
+        super().__init__(
+            device,
+            dtype,
+            inner_fn,
+            ranges,
+            reduction_ranges,
+            reduction_type,
+            dtype,
+            reduction_hint,
+        )
+        self.output_index = output_index
+
+    def store_reduction(self, output_name, indexer, vars, reduction_vars):
+        values = ops.reduction(
+            self.dtype,
+            self.src_dtype,
+            self.reduction_type,
+            self.inner_fn(vars, reduction_vars),
+        )
+        value = values[self.output_index]
+        return ops.store_reduction(output_name, indexer(vars), value)
+
+    @classmethod
+    def create(  # type: ignore[override]
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        mean_fn: Callable[..., Any],
+        m2_fn: Callable[..., Any],
+        weight_fn: Callable[..., Any],
+        ranges: List[Expr],
+        reduction_ranges: List[Expr],
+        reduction_type: str,
+        reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+    ):
+        assert reduction_type == "welford"
+
+        reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+
+        if reduction_numel == 0:
+
+            def const(idx, val):
+                def inner_fn(idx):
+                    return ops.constant(val, dst_dtype)
+
+                return Pointwise.create(
+                    device=device,
+                    dtype=dtype,
+                    inner_fn=inner_fn,
+                    ranges=list(ranges),
+                )
+
+            mean = const(0)
+            m2 = const(0)
+            weight = const(0)
+            return mean, m2, weight
+
+        if reduction_numel == 1:
+
+            def copy(loader):
+
+                def inner_fn(idx):
+                    reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
+                    return loader(idx, reduction_index)
+
+                return Pointwise.create(
+                    device=device,
+                    dtype=dst_dtype,
+                    inner_fn=inner_fn,
+                    ranges=list(ranges),
+                )
+
+            return copy(mean_fn), copy(m2_fn), copy(weight_fn)
+
+        # TODO: Unrolled reduction
+        # if (
+        #     isinstance(reduction_numel, sympy.Integer)
+        #     and V.graph.sizevars.size_hint(reduction_numel)
+        #     < config.unroll_reductions_threshold
+        #     and sympy_product(ranges) != 1
+        # ):
+        #     return Pointwise.create(
+        #         device,
+        #         dst_dtype,
+        #         cls._unroll_reduction_fn(
+        #             inner_fn, reduction_ranges, reduction_type, src_dtype
+        #         ),
+        #         ranges,
+        #     )
+
+        # triton doesn't support reduce to single element well, so break it up
+        hint, split = Reduction.num_splits(
+            device,
+            dtype,
+            dtype,
+            mean_fn,
+            ranges,
+            reduction_ranges,
+            reduction_type=reduction_type,
+            reduction_numel=reduction_numel,
+        )
+        # intermediate reduction in split can contain complex indexing,
+        # and num_splits will fail to correctly set the hint
+        # reuse the passed hint if available
+        if reduction_hint == ReductionHint.DEFAULT:
+            reduction_hint = hint
+        if split > 1:
+            # triton doesn't support reduce to single element well, so break it up
+            return cls.create_multilayer(
+                device,
+                dtype,
+                mean_fn,
+                m2_fn,
+                weight_fn,
+                ranges,
+                reduction_ranges,
+                reduction_type,
+                split,
+                reduction_hint,
+            )
+
+        results = [
+            TensorBox.create(
+                WelfordReduction(
+                    device,
+                    dtype,
+                    mean_fn,
+                    m2_fn,
+                    weight_fn,
+                    ranges,
+                    reduction_ranges,
+                    reduction_type,
+                    reduction_hint,
+                    output_idx,
+                )
+            )
+            for output_idx in range(3)
+        ]
+        for t in results:
+            t.realize()
+        return results
+
+    @staticmethod
+    def default_value(reduction_type, dtype):
+        return (0, 0, 0)
+
+    @classmethod
+    def create_multilayer(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        mean_fn: Callable[..., Any],
+        m2_fn: Callable[..., Any],
+        weight_fn: Callable[..., Any],
+        ranges: List[Expr],
+        reduction_ranges: List[Expr],
+        reduction_type: str,
+        split: int,
+        reduction_hint: ReductionHint,
+    ):
+        """
+        Break a large reduction up into multiple smaller reductions
+        recursively
+        """
+        # TODO Dedup with Reduction
+        reduction_numel = sympy_product(reduction_ranges)
+
+        # TODO(jansel): convert this to dynamic shapes
+        # TODO(jansel): realize the reduction so we can do dynamic indexing
+        reduction_ranges = [
+            sympy.Integer(V.graph.sizevars.guard_static_shape(s))
+            for s in reduction_ranges
+        ]
+        reduction_numel = sympy.Integer(
+            V.graph.sizevars.guard_static_shape(reduction_numel)
+        )
+
+        if V.graph.sizevars.size_hint(reduction_numel) % split == 0:
+            need_mask = False
+        else:
+            need_mask = True
+
+        split = sympy.Integer(split)
+        block_size = FloorDiv(reduction_numel + (split - 1), split)
+
+        reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
+
+        def wrapper_fn(index, reduction_index, loader):
+            (reduction_index,) = reduction_index
+            *new_index, reduction_block = index
+            indices = block_size * reduction_block + reduction_index
+
+            def body():
+                return loader(new_index, reindex([indices]))
+
+            if need_mask:
+                mask = ops.lt(
+                    ops.index_expr(indices, torch.int32),
+                    ops.index_expr(reduction_numel, torch.int32),
+                )
+                return ops.masked(mask, body, 0)
+            else:
+                return body()
+
+        intermediates = WelfordReduction.create(
+            device,
+            dtype,
+            partial(wrapper_fn, loader=mean_fn),
+            partial(wrapper_fn, loader=m2_fn),
+            partial(wrapper_fn, loader=weight_fn),
+            [*ranges, split],
+            [block_size],
+            reduction_type,
+            reduction_hint,
+        )
+        for i in intermediates:
+            i.realize()
+
+        def intermediate_wrapper_fn(index, reduction_index, loader):
+            return loader([*index, *reduction_index])
+
+        new_mean_fn, new_m2_fn, new_weight_fn = [
+            partial(intermediate_wrapper_fn, loader=i.make_loader())
+            for i in intermediates
+        ]
+
+        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
+        if split <= 512 and numel_hint <= 512 and reduction_hint == ReductionHint.OUTER:
+            reduction_hint = ReductionHint.OUTER_TINY
+        if (
+            split <= 1024
+            and numel_hint <= 256
+            and reduction_hint == ReductionHint.OUTER
+        ):
+            reduction_hint = ReductionHint.OUTER_TINY
+        return WelfordReduction.create(
+            device,
+            dtype,
+            new_mean_fn,
+            new_m2_fn,
+            new_weight_fn,
+            ranges,
+            [split],
+            reduction_type,
+            reduction_hint,
+        )
+
 
 
 def is_storage_and_layout(x):
@@ -4498,6 +4769,13 @@ class LoopBodyBlock:
             def store_reduction(self, name, index, value):
                 index = add_index(index, "writes", name)
                 return self._inner.store_reduction(name, index, value)
+
+            def reduction(self, dtype, src_dtype, reduction_type, value):
+                result = self._inner.reduction(dtype, src_dtype, reduction_type, value)
+                if isinstance(value, tuple):
+                    return [result[i] for i in range(len(value))]
+                return result
+
 
             def index_expr(self, index, dtype):
                 if isinstance(index, (int, sympy.Integer)):

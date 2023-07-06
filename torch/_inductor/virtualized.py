@@ -139,6 +139,14 @@ class KernelFormatterHandler:
 
         return inner
 
+    def reduction(self, dtype, src_dtype, reduction_type, value):
+        num_values = len(value) if isinstance(value, tuple) else 1
+        varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
+        line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
+        self.output.writeline(f"{','.join(varnames)} = {line}")
+        return tuple(varnames)
+
+
     def getvalue(self, result):
         self.output.writeline(f"return {result}")
         return self.output.getvalue()
@@ -222,21 +230,30 @@ class OpsWrapper:
         def inner(*args, **kwargs):
             new_args = [OpsWrapper._unwrap(a) for a in args]
             new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
-            return OpsValue(getattr(_ops, name)(*new_args, **new_kwargs))
+            return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
 
         return inner
 
     @staticmethod
     def _unwrap(x):
+        if isinstance(x, (list, tuple)):
+            return tuple(OpsWrapper._unwrap(v) for v in x)
         if isinstance(x, OpsValue):
             return x.value
         return x
+
+    @staticmethod
+    def _wrap(x):
+        if isinstance(x, (list, tuple)):
+            return tuple(OpsValue(v) for v in x)
+        return OpsValue(x)
 
     @staticmethod
     def indirect_indexing(index, size, check=True):
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)
         return _ops.indirect_indexing(index, size, check)
+
 
 
 ops = OpsWrapper()

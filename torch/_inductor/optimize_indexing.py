@@ -2,6 +2,7 @@ import functools
 import itertools
 import logging
 import math
+import operator
 from typing import Dict, Iterable, Union
 
 import sympy
@@ -188,7 +189,7 @@ class OptimizeIndexing:
             [
                 node
                 for node in self.all_nodes
-                if node.target in ["load", "reduction"]
+                if node.target in ["load", "reduction", operator.getitem]
                 or "masked_subblock" in node.target
             ]
         )

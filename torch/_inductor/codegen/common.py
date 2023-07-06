@@ -672,6 +672,10 @@ class CSE:
     ) -> CSEVariable:
         if isinstance(expr, OpsValue):
             expr = expr.value
+        if isinstance(expr, tuple):
+            for v in expr:
+                assert isinstance(v, CSEVariable)
+            return expr
 
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         assert write or assignment

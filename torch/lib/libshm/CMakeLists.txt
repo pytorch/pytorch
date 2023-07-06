@@ -29,7 +29,12 @@ set_target_properties(shm PROPERTIES
   PREFIX "lib"
   IMPORT_PREFIX "lib"
   CXX_STANDARD 17)
-target_link_libraries(shm PUBLIC torch)
+target_link_libraries(shm PUBLIC
+  torch
+  CUDA::cupti
+  CUDA::cusparse
+  ${CUDNN_LIBRARY_PATH}
+)
 
 if(UNIX AND NOT APPLE)
   include(CheckLibraryExists)
