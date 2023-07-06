@@ -831,11 +831,12 @@ def get_innermost_proxy_mode():
 def disable_proxy_modes_tracing():
     # Only one proxy_mode can be "active" at a time.
     # So we simply remove our active mode.
-    old = _unset_proxy_tensor_mode()
+    maybe_old = None if torch._C._get_proxy_tensor_mode() is None else torch._C._unset_proxy_tensor_mode()
     try:
         yield
     finally:
-        _set_proxy_tensor_mode(old)
+        if maybe_old is not None:
+            _set_proxy_tensor_mode(maybe_old)
 
 
 def get_isolated_graphmodule(func, args, kwargs, tracing_mode="real"):

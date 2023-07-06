@@ -2799,7 +2799,6 @@ def wrap_tensor_subclasses_simple(unwrapped_args: List[Any], *, subclass_metas: 
     # but `subclass_metas` will only correspond to subclass metatadata on `user_fw_outs`.
     # We then need to make sure that we return (*wrapped_user_fw_outs, *activations).
     if num_fw_outs_saved_for_bw is not None:
-        import pdb; pdb.set_trace()
         assert len(unwrapped_args) == num_args_tallied + num_fw_outs_saved_for_bw
         activations = unwrapped_args[num_args_tallied:]
         return tuple(wrapped_args + activations)
@@ -2834,7 +2833,6 @@ def aot_dispatch_subclass_wrapper(runtime_fn: Callable, *, subclass_metas: List[
         # expectation: runtime_fn is a boxed fn
         unwrapped_outs = runtime_fn(unwrapped_args)
         wrapped_outs = wrap_tensor_subclasses_simple(unwrapped_outs, subclass_metas=subclass_metas, num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw)
-        import pdb; pdb.set_trace()
         return wrapped_outs
     return inner_fn
 
@@ -2865,7 +2863,6 @@ def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMe
     keep_input_mutations = meta.keep_input_mutations,
     traced_tangents = [],
 
-    import pdb; pdb.set_trace()
     metadata = ViewAndMutationMeta(
         input_info=input_info,
         requires_grad_info=requires_grad_info,
@@ -3042,7 +3039,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
-            import pdb; pdb.set_trace()
             # TODO: what did I last do? I updated my aot_dispatch_subclass() to generate its own metadata.
             # and when I do that... the joint graph looks wrong I think? there's a None in there somewhere, seems bad.
             # once that's fied: make sure num_inner_fwd_outputs is right.
@@ -3398,7 +3394,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             grad_output_types = [type(x) for x in all_args[-num_contiguous_args:]]
             # In general, we can add more asserts/guards here for when we partitioned
             # with incorrect assumptions about the grad_outputs.
-            import pdb; pdb.set_trace()
             assert grad_output_types == CompiledFunction.metadata.output_types, f"""\
 We incorrectly attempted to compile the backward with incorrect subclass metadata.
 If you run into this error, please file an issue.
