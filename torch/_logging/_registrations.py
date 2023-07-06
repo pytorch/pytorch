@@ -20,3 +20,5 @@ register_artifact("not_implemented")
 register_artifact("output_code", off_by_default=True)
 register_artifact("schedule", off_by_default=True)
 register_artifact("perf_hints", off_by_default=True)
+
+register_artifact("custom_format_test_artifact", log_format="")

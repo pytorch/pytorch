@@ -603,7 +603,10 @@ def remove_unaligned_input_idxs(inputs, static_input_idxs):
     that aren't.
     """
     aligned_static_input_idxs = {
-        idx for idx in static_input_idxs if (inputs[idx].data_ptr() % ALIGNMENT) == 0
+        idx
+        for idx in static_input_idxs
+        if isinstance(inputs[idx], torch.Tensor)
+        and (inputs[idx].data_ptr() % ALIGNMENT) == 0
     }
     if len(aligned_static_input_idxs) != len(static_input_idxs):
         return aligned_static_input_idxs

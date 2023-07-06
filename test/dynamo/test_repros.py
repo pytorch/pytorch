@@ -32,6 +32,9 @@ from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import expectedFailureDynamic, rand_strided, same
 from torch.nn import functional as F
+from torch.testing._internal.common_utils import (
+    disable_translation_validation_if_dynamic_shapes,
+)
 
 
 _orig_module_call = torch.nn.Module.__call__
@@ -978,6 +981,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.frame_count, """3""")
             self.assertExpectedInline(cnt.op_count, """10""")
 
+    @disable_translation_validation_if_dynamic_shapes
     def test_longformer_chunk(self):
         input1 = torch.randn([1, 4096, 1])
         input2 = torch.randn([12, 4096, 64])
@@ -1143,6 +1147,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnt.frame_count, 1)
             self.assertEqual(cnt.op_count, 1)
 
+    @disable_translation_validation_if_dynamic_shapes
     def test_create_rand_mask_from_inputs(self):
         args = [
             torch.randn([1, 64, 64]),
@@ -1188,6 +1193,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.fail("unexpected export success")
         except torch._dynamo.exc.Unsupported:
             pass
+
+    def test_threading_local(self):
+        import threading
+
+        foo = threading.local()
+        foo.x = torch.rand(1)
+
+        def f(x):
+            return torch.cat([x, foo.x])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch._dynamo.optimize(cnt, nopython=True)(f)
+
+        inp = torch.ones(1)
+        out = f(inp)
+        opt_out = opt_f(inp)
+        self.assertEqual(opt_out, out)
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_seq_append_list(self):
         x = torch.randn(4, 10)
@@ -3374,6 +3397,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref = mod(**inputs)
         res = torch._dynamo.optimize("eager", nopython=True)(mod)(**inputs)
         self.assertEqual(ref, res)
+
+    def test_call_finally_python_3_8(self):
+        # Issue - https://github.com/pytorch/pytorch/issues/97811
+        def make_fn(g):
+            def fn():
+                while True:
+                    try:
+                        print(g)
+                        break
+                    except Exception as _:
+                        break
+
+            return torch.compile(fn, backend="eager")
+
+        make_fn(None)()
 
 
 if __name__ == "__main__":
