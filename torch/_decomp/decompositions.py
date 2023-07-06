@@ -1434,19 +1434,16 @@ def native_batch_norm_helper(
         invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
         output = (input - mean) * invstd
 
-    if weight is None:
-        weight = input.new_ones(())
-    else:
+    if weight is not None:
         weight = weight.flatten()
+        weight = _unsqueeze_to_dim(weight, input.dim() - 1)
+        output = output * weight
 
-    if bias is None:
-        bias = input.new_zeros(())
-    else:
+    if bias is not None:
         bias = bias.flatten()
+        bias = _unsqueeze_to_dim(bias, input.dim() - 1)
+        output = output + bias
 
-    weight = _unsqueeze_to_dim(weight, input.dim() - 1)
-    bias = _unsqueeze_to_dim(bias, input.dim() - 1)
-    output = output * weight + bias
     if input.device.type == "cpu":
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
