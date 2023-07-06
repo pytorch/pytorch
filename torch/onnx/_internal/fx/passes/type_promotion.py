@@ -1138,7 +1138,13 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         out = super().run_node(node)
         # Update interpreter env state with new output value.
         self.env[node] = out
-        node.meta.update(fx_traceback.get_current_meta())
+        node.meta.update(
+            {
+                (k, v)
+                for k, v in fx_traceback.get_current_meta().items()
+                if k not in node.meta
+            }
+        )
         node.meta["val"] = proxy_tensor.extract_val(out)
         return out
 
@@ -1162,11 +1168,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         ), f"Unexpected op_type: {op_type}"
         node = getattr(graph, op_type)(target, args, kwargs)
         self._run_node_and_set_meta(node)
-        node.meta.update(
-            (k, v)
-            for k, v in fx_traceback.get_current_meta().items()
-            if k not in node.meta
-        )
         return node
 
     @_beartype.beartype
