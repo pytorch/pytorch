@@ -1252,7 +1252,7 @@ def InitEmptyRecord(net, schema_or_record, enforce_types=False):
 
 
 _DATA_TYPE_FOR_DTYPE = [
-    (np.str, core.DataType.STRING),
+    (str, core.DataType.STRING),
     (np.float16, core.DataType.FLOAT16),
     (np.float32, core.DataType.FLOAT),
     (np.float64, core.DataType.DOUBLE),

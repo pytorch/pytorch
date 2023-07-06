@@ -21,7 +21,6 @@ import numpy as np
 
 import torch
 
-import torch._dynamo
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
@@ -30,7 +29,7 @@ from torch._inductor.codegen.common import DataTypePropagation, OptimizationCont
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing import make_tensor
+from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
@@ -1574,6 +1573,13 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 2, 1, 2, 2, 2, 1),))
 
+    def test_squeeze_varargs(self):
+        def fn(x):
+            return x.squeeze(1, 2).clone()
+
+        a = torch.randn(1024, 1, 1)
+        self.common(fn, (a,))
+
     def test_simplify_loops(self):
         def fn(a, b):
             return a + b
@@ -2752,6 +2758,44 @@ class CommonTemplate:
             check_lowp=False,  # too painful to match types of bn model
         )
 
+    # From yolov3
+    @skipIfRocm
+    def test_batch_norm_2d_2(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.self_0 = torch.nn.Conv2d(
+                    64,
+                    128,
+                    kernel_size=(3, 3),
+                    stride=(2, 2),
+                    padding=(1, 1),
+                    bias=False,
+                )
+                self.self_1 = torch.nn.BatchNorm2d(
+                    128,
+                    eps=0.0001,
+                    momentum=0.03,
+                    affine=True,
+                    track_running_stats=True,
+                )
+                self.self_2 = torch.nn.LeakyReLU(negative_slope=0.1, inplace=True)
+
+            def forward(self, l_input_: torch.Tensor):
+                self_0 = self.self_0(l_input_)
+                self_1 = self.self_1(self_0)
+                self_2 = self.self_2(self_1)
+                return (self_2,)
+
+        inp = torch.randn((4, 64, 192, 256), dtype=torch.float32, device="cuda")
+        mod = Repro().cuda()
+        o1 = mod(inp)
+        o2 = torch.compile(mod)(inp)
+        self.assertEqual(o1, o2)
+
     def test_layer_norm(self):
         m = torch.nn.Sequential(
             torch.nn.LayerNorm(32),
@@ -3107,6 +3151,60 @@ class CommonTemplate:
             ),
             check_lowp=False,  # accuracy issues with relatively large matmuls
         )
+
+    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_remove_no_ops(self):
+        def matmul_with_op(x, y, fn):
+            return fn(x @ y)
+
+        foo_opt = torch.compile(matmul_with_op)
+
+        # test no-op
+        fns = (
+            lambda x: x
+            + torch.zeros(
+                [256, 256], dtype=torch.float32, device=x.device
+            ),  # noqa: E731
+            lambda x: x
+            - torch.zeros(
+                [256, 256], dtype=torch.float32, device=x.device
+            ),  # noqa: E731
+            lambda x: x
+            * torch.ones(
+                [256, 256], dtype=torch.float32, device=x.device
+            ),  # noqa: E731
+            lambda x: x
+            / torch.ones(
+                [256, 256], dtype=torch.float32, device=x.device
+            ),  # noqa: E731
+        )
+
+        inps = [torch.rand([256, 256], device=self.device) for _ in range(2)]
+
+        for fn in fns:
+            out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
+            self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+
+            if self.device == "cpu":
+                FileCheck().check_not("cpp_fused").run(source_codes[0])
+            else:
+                FileCheck().check_not("triton.jit").run(source_codes[0])
+
+        # test dtype conversion
+        inps = [
+            torch.rand([256, 256], device=self.device, dtype=torch.bfloat16)
+            for _ in range(2)
+        ]
+        for fn in fns:
+            out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
+            self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+
+        # test broadcasted shape bail
+        fn = lambda x: x + torch.zeros(  # noqa: E731
+            [256, 256, 256], dtype=torch.bfloat16, device=self.device
+        )
+        out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
+        self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
@@ -5625,8 +5723,7 @@ class CommonTemplate:
         self.common(forward, inps, atol=1e-05, rtol=2e-05)
 
     @unittest.skipIf(
-        TEST_WITH_ASAN
-        or os.environ.get("BUILD_ENVIRONMENT", "").startswith("parallelnative"),
+        os.environ.get("BUILD_ENVIRONMENT", "").startswith("parallelnative"),
         "TODO: debug this with asan",
     )
     def test_tmp_not_defined_issue2(self):
@@ -6182,6 +6279,7 @@ class CommonTemplate:
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         same(fn(x), opt_fn(x))
 
+    @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
         from torch._inductor.codegen.common import boolean_ops
@@ -6390,10 +6488,12 @@ class CommonTemplate:
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
 
+        # The first two values should be the same, attention output
+        # and logsumexp since dropout is not being set
         def fn(q, k, v, compute_log_sumexp):
             return aten._scaled_dot_product_efficient_attention(
                 q, k, v, compute_log_sumexp
-            )
+            )[:2]
 
         self.common(
             fn,
@@ -6417,6 +6517,45 @@ class CommonTemplate:
             return torch.fft.fftn(x).real
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
+
+    def test_inductor_bucketize(self):
+        def fn(input, boundaries, out_int32, right):
+            return torch.ops.prims._inductor_bucketize(
+                input, boundaries, out_int32=out_int32, right=right
+            )
+
+        input = torch.rand((64, 64)) * 2 - 1
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        for out_int32 in [True, False]:
+            for right in [True, False]:
+                out_int32 = True
+                right = False
+                self.common(fn, (input, boundaries, out_int32, right), check_lowp=False)
+
+    def test_inductor_bucketize_default_kwargs(self):
+        def fn(input, offsets):
+            return torch.ops.prims._inductor_bucketize(input, offsets)
+
+        input = torch.tensor(
+            [-1.0, -0.9, -0.8, -0.5, 0.0, 0.1, 0.2, 0.4, 0.5, 0.6, 0.9, 0.91]
+        )
+        offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        self.common(fn, (input, offsets), check_lowp=False)
+
+    def test_inductor_bucketize_int(self):
+        def fn(input, offsets, out_int32, right):
+            return torch.ops.prims._inductor_bucketize(
+                input, offsets, out_int32=out_int32, right=right
+            )
+
+        input = torch.randint(0, 102, (64, 64))
+        offsets = torch.arange(10, dtype=torch.int32) ** 2 + 1
+
+        for out_int32 in [True, False]:
+            for right in [True, False]:
+                self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
 
 
 @dataclasses.dataclass
@@ -6614,6 +6753,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
+        @patch.object(config, "joint_graph_constant_folding", False)
         def test_cant_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")
@@ -6642,6 +6782,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
+        @patch.object(config, "joint_graph_constant_folding", False)
         def test_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")

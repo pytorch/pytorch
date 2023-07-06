@@ -704,6 +704,20 @@ static bool is_int_list(
       return true;
     }
 
+    // in dynamo, FakeTensor is qualified for INT_LIST
+    if (is_dynamo_compiling && THPVariable_Check(item.ptr())) {
+      auto& var = THPVariable_Unpack(item.ptr());
+      if (var.numel() != 1 || !var.sizes().empty() ||
+          !at::isIntegralType(
+              var.dtype().toScalarType(), /*include_bool*/ true)) {
+        if (failed_idx != nullptr) {
+          *failed_idx = 0;
+        }
+        return false;
+      }
+      return true;
+    }
+
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
@@ -724,8 +738,23 @@ static bool is_int_or_symint(PyObject* obj) {
   // which may have side effects if obj is a symint node
   // so we do `is_symint` check first
   // TODO: maybe we should be using checkLong here?
+  if (torch::is_symint(py::handle(obj))) {
+    return true;
+  }
 
-  return torch::is_symint(py::handle(obj)) || THPUtils_checkIndex(obj);
+  if (THPUtils_checkIndex(obj)) {
+    return true;
+  }
+
+  // FakeTensor(..., size=()) is qualified for SymInt param
+  if (is_dynamo_compiling && THPVariable_Check(obj)) {
+    auto& var = THPVariable_Unpack(obj);
+    if (var.numel() == 1 && var.sizes().empty() &&
+        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static bool is_int_or_symint_list(
@@ -739,12 +768,6 @@ static bool is_int_or_symint_list(
     auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
 
     if (is_int_or_symint(item.ptr())) {
-      return true;
-    }
-
-    // NOTE: In dynamo, allow fake tensor as int
-    if (is_dynamo_compiling && THPVariable_Check(item.ptr()) &&
-        THPVariable_Unpack(item.ptr()).sizes().empty()) {
       return true;
     }
 

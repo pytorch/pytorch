@@ -6,9 +6,7 @@
 #include <c10/util/irange.h>
 #include <cmath>
 
-namespace at {
-
-namespace native {
+namespace at::native {
 
 using adaptive_avg_pooling_fn = void(*)(Tensor& output, const Tensor& input, IntArrayRef output_size);
 using adaptive_avg_pooling_backward_fn = void(*)(Tensor& grad_input, const Tensor& grad_output);
@@ -38,4 +36,4 @@ static inline void adaptive_pool_empty_output_check(const Tensor& gradOutput_, c
   }
 }
 
-}} // namespace at::native
+} // namespace at::native
