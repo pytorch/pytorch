@@ -5,7 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 from warnings import warn
 
 from tools.shared.logging_utils import duration_to_str, pluralize
@@ -197,42 +197,26 @@ def _get_modified_tests() -> Set[str]:
 
 def _query_rockset_for_failed_tests_on_recent_commits() -> Set[str]:
     try:
-        import rockset  # type: ignore[import]
+        import requests
 
-        main_commits = (
-            subprocess.check_output("git log --pretty=%H -100 origin/main".split(" "))
+        num = 25
+        child_commits_to_main = (
+            subprocess.check_output("git log --pretty=%H HEAD^..origin/main".split(" "))
+            .decode("utf-8")
+            .split()
+        )[-num:]
+        parent_commits = (
+            subprocess.check_output(f"git log --pretty=%H -{num}".split(" "))
             .decode("utf-8")
             .split()
         )
-        parent_commits = (
-            subprocess.check_output("git log --pretty=%H -100".split(" ")).decode("utf-8").split()
-        )
-        all_commits = main_commits + parent_commits
-        all_commits_str = ",".join(all_commits)
+        all_commits_str = ",".join(child_commits_to_main + parent_commits)
         print(all_commits_str)
-        query = """
-select
-    DISTINCT t.invoking_file
-from
-    commons.test_run_summary t
-    join workflow_job j on j.id = t.job_id
-where
-    (
-        t.failures > 0
-        or t.errors > 0
-    )
-    and ARRAY_CONTAINS(SPLIT(:shas, ','), j.head_sha)
-    and t._event_time > CURRENT_TIMESTAMP() - DAYS(2)
- """
-        res: List[Dict[str, Any]] = (
-            rockset.RocksetClient(
-                host="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-            )
-            .sql(query, params={"shas": all_commits_str})
-            .results
-        )
+        s = requests.get(
+            url=f"https://torchci-5k9gnw3ni-fbopensource.vercel.app/api/cattest?shas={all_commits_str}"
+        ).json()
         r: Set[str] = set()
-        for file in res:
+        for file in s:
             r.add(file["invoking_file"].replace(".", "/"))
         return r
     except Exception as e:
@@ -395,8 +379,3 @@ def get_reordered_tests(
 def get_test_case_configs(dirpath: str) -> None:
     get_slow_tests(dirpath=dirpath)
     get_disabled_tests(dirpath=dirpath)
-
-
-s = _query_rockset_for_failed_tests_on_recent_commits()
-print(len(s))
-print(s)
