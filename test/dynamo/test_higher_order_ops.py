@@ -40,9 +40,7 @@ def normalize_gm(gm_str):
 
 def check_dynamic_shape_capture():
     # This also mirrors config from `test/dynamo/test_dynamic_shapes.py:make_dynamic_cls`
-    if config.assume_static_by_default and config.automatic_dynamic_shapes:
-        return True
-    if not config.assume_static_by_default and not config.automatic_dynamic_shapes:
+    if not config.assume_static_by_default:
         return True
     return False
 
@@ -941,6 +939,21 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(len(backend.graphs), 0)
         self.assertEqual(res, mod_for_eager(torch.tensor(True), torch.tensor(5)))
 
+    def test_cond_with_constant_pred(self):
+        def test(pred, x):
+            def true_fn(x):
+                return x
+
+            def false_fn(x):
+                return -x
+
+            return control_flow.cond(pred, true_fn, false_fn, [x])
+
+        opt_test = torch.compile(test, backend="eager")
+        inp = torch.ones(3, 3)
+        self.assertTrue(torch.allclose(test(True, inp), opt_test(True, inp)))
+        self.assertTrue(torch.allclose(test(False, inp), opt_test(False, inp)))
+
     def test_map_graph_break(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -1501,7 +1514,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -1523,9 +1539,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_grad_closure_scalar(self):
         counters.clear()
