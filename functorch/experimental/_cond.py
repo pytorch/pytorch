@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from functools import partial
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -14,7 +13,6 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     make_fx,
     track_tensor_tree,
-    unwrap_proxy,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import (
@@ -94,7 +92,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
     args = (pred, true_graph, false_graph, operands)
 
-    proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), args)
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
                                                name="conditional")

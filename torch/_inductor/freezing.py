@@ -7,10 +7,12 @@ from typing import List, Optional, Tuple
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
-
 from torch._dynamo.utils import detect_fake_mode, dynamo_timed
 from torch._functorch.compile_utils import fx_graph_cse
+
+from torch._inductor.compile_fx import fake_tensor_prop
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
+from torch._inductor.fx_passes.post_grad import view_to_reshape
 from torch.ao.quantization._pt2e.utils import _fuse_conv_bn_
 from torch.fx.experimental.proxy_tensor import make_fx
 from . import config
@@ -221,8 +223,10 @@ def freeze(
     aot_autograd_gm.graph = cse_graph
     aot_autograd_gm.recompile()
 
-    from torch._inductor.compile_fx import fake_tensor_prop
-
+    # We have convert conv's weight to channels last which may meet error for .view
+    # when doing fake_tensor_prop. So we need to convert view to reshape first.
+    # See the details in fx_codegen_and_compile of compile_fx.py.
+    view_to_reshape(aot_autograd_gm)
     # Make sure meta['val'] is properly setup(weight conversion
     # or decompose_unfused_batchnorms lost meta['val']).
     aot_example_inputs = [example_inputs[ind] for ind in preserved_arg_indices]
