@@ -30,8 +30,6 @@ def simple_sympify(e):
         if math.isinf(e):
             return sympy.oo if e > 0 else -sympy.oo
         return sympy.Float(e)
-    elif isinstance(e, bool):
-        return sympy.true if e else sympy.false
     elif isinstance(e, sympy.Expr):
         assert e.is_constant()
         # NaNs can occur when doing things like 0 * sympy.oo, but it is better
@@ -240,6 +238,8 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def not_(a):
+        a = ValueRanges.wrap(a)
+        assert a.is_bool
         return ValueRanges.decreasing_map(a, sympy.Not)
 
     @staticmethod
@@ -424,26 +424,36 @@ class ValueRangeAnalysis:
         if a.is_singleton():
             a = a.lower
             r = a ** b
-            if r == sympy.zoo:
+            if not r.is_finite:
                 return ValueRanges.unknown()
             return ValueRanges.wrap(r)
 
-        if not is_integer(b):
-            if b < 0 or a.lower < 0:
-                return ValueRanges.unknown()
-            return ValueRanges.increasing_map(a, lambda x: x ** b)
+        if b == 0:
+            type_ = type(a)
+            return ValueRanges.wrap(type_(1))
 
-        # exponentiation by squaring
         if b < 0:
             a = cls.reciprocal(a)
             b = -b
-        acc = ValueRanges.wrap(1)
-        while b > 0:
-            if b % 2 == 1:
-                acc = cls.mul(acc, a)
-            a = cls.mul(a, a)
-            b = b // 2
-        return acc
+
+        if a == ValueRanges.unknown():
+            return ValueRanges.unknown()
+
+        # Here b > 0
+        if not is_integer(b):
+            # If the base is positive, then we're good, otherwise nothing's defined
+            if a.lower >= 0:
+                return ValueRanges.increasing_map(a, lambda x: x ** b)
+            else:
+                return ValueRanges.unknown()
+        else:
+            # b > 0 integer
+            if b % 2 == 0:
+                # x^n where n is even
+                return ValueRanges.convex_min_zero_map(a, lambda x: x ** b)
+            else:
+                # x^n where n is odd
+                return ValueRanges.increasing_map(a, lambda x: x ** b)
 
     @classmethod
     def minimum(cls, a, b):
