@@ -10,7 +10,6 @@ import torch._inductor.config as cfg
 cfg.aggressive_fusion = True
 
 
-# Assumes that dense argument is a matrix in 2:4 sparsity pattern.
 @torch.compile
 def sparse_semi_structured_from_dense(dense):
     if dense.dim() != 2:
@@ -52,12 +51,21 @@ def sparse_semi_structured_from_dense(dense):
     #     [True, False, False, True] -> 0b1100
     #     [False, True, False, True] -> 0b1101
     #     [False, False, True, True] -> 0b1110
+    # Thus, lower two bits in the encoding are index of the True value
+    # at the lowest index in the quadruple, and the higher two bits in
+    # the encoding are index of the other True value in the quadruple.
+    # In case there are less than two True values, than False value or
+    # values at the lowest index or indices are considered True for
+    # the encoding.  In case there are more than two True values, then
+    # the excess True value(s) at the higher index or indices are
+    # considered False for the encoding.
+    #
     # The expressions for individual bits below calculated through
     # minimization of corresponding Boolean functions.
-    bit0 = m1 & ~m0
-    bit1 = m3 & m2
-    bit2 = m3 | ~m2
-    bit3 = m3 | m2
+    bit0 = ~m0 & m1 & (m2 | m3)
+    bit1 = ~m0 & ~m1 & m2 & m3
+    bit2 = m0 & m1 | ~m0 & ~m1 & m3 | ~m2
+    bit3 = (~m0 | ~m1) & (m2 | m3)
     idxs0 = bit0 | (bit1.to(torch.int64) << 1)
     idxs1 = bit2 | (bit3.to(torch.int64) << 1)
 
