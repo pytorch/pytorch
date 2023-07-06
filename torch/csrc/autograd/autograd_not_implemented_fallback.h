@@ -5,13 +5,15 @@
 namespace torch {
 namespace autograd {
 
-// DispatchKey::Autograd fallback for built-in operators
+// Default DispatchKey::Autograd fallback for built-in operators.
+// Can be registered for custom operators.
 TORCH_API torch::CppFunction autogradNotImplementedFallback();
 
-// DispatchKey::AdInplaceOrView fallback for built-in operators
+// Default DispatchKey::AdInplaceOrView fallback for built-in operators
+// Can be registered for custom operators.
 TORCH_API torch::CppFunction autogradNotImplementedInplaceOrViewFallback();
 
-// DispatchKey::Autograd fallback for all other operators (i.e. custom
+// Default DispatchKey::Autograd fallback for all other operators (i.e. custom
 // operators)
 TORCH_API torch::CppFunction basicAutogradNotImplementedFallback();
 
