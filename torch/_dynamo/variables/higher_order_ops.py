@@ -64,10 +64,9 @@ def speculate_subgraph_wrap(
     *,
     always_restore=False,
     enable_grad=False,
-    sub_kwargs=None
+    sub_kwargs=None,
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
-    from .builder import wrap_fx_proxy
 
     if sub_kwargs is None:
         sub_kwargs = {}
@@ -108,8 +107,7 @@ def speculate_subgraph_wrap(
                     )
                 # args.append(new_arg)
 
-            sub_args = sub_args + list(sub_kwargs[key] for key in sorted(sub_kwargs.keys()))
-            print(sub_args, "SUB1234")
+            sub_args = sub_args + [sub_kwargs[key] for key in sorted(sub_kwargs.keys())]
             autograd_ctx = (
                 dynamo_enable_grad(tx) if enable_grad else contextlib.nullcontext()
             )
@@ -156,6 +154,7 @@ def speculate_subgraph_wrap(
         tx.output.graph = graph_checkpoint
         tx.restore_graphstate(checkpoint)
         raise
+
 
 # See NOTE [HigherOrderOperator tracing design] for details of the design
 def speculate_subgraph(
@@ -898,14 +897,11 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         body_node = make_attr(tx, body_name)
-        p_args = (
-            body_node,
-        )
+        p_args = (body_node,)
 
         lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
 
-        p_args = p_args +  lifted_args
-
+        p_args = p_args + lifted_args
         example_value = pytree.tree_map_only(
             torch.fx.Proxy,
             lambda a: a.node.meta["example_value"],
@@ -938,7 +934,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
-    def call_function(self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]) -> VariableTracker:
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
         from torch._higher_order_ops.wrap import TagActivationCheckpoint
         from . import ConstantVariable, TensorVariable
         from .builder import wrap_fx_proxy
@@ -949,9 +947,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
 
         # Here we use checkpoint_kwargs (and not gmod kwargs). gmod_kwargs are
         # already flattened above and managed inside the fx graph.
-        p_args, _, example_value = self.create_wrapped_node(
-            tx, args, gmod_kwargs
-        )
+        p_args, _, example_value = self.create_wrapped_node(tx, args, gmod_kwargs)
 
         _, checkpoint_kwargs = proxy_args_kwargs([], checkpoint_kwargs)
 
