@@ -433,4 +433,4 @@ def translation_validator_enabled() -> bool:
 
 def translation_validator_timeout() -> int:
     from torch._dynamo import config
-    return int(config.translation_validation_timeout)
+    return config.translation_validation_timeout

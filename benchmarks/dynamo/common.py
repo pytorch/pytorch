@@ -81,7 +81,6 @@ class CI(NamedTuple):
 
 
 CI_SKIP = collections.defaultdict(list)
-CI_TV_OFF = collections.defaultdict(list)
 
 
 # Skips for dynamic=False
@@ -301,22 +300,6 @@ CI_SKIP_OPTIMIZER = {
     "MobileBertForQuestionAnswering",  # Stack issue in fx
     "PegasusForConditionalGeneration",  # OOM
 }
-
-# Turning translation validation (TV) off for a few benchmarks
-# due to timeout.
-
-CI_TV_OFF[CI("aot_eager", training=True, dynamic=True, device="cuda")] = [
-]
-
-
-CI_TV_OFF[CI("inductor", training=False, dynamic=False, device="cuda")] = [
-]
-
-CI_TV_OFF[CI("inductor", training=True, dynamic=True, device="cuda")] = [
-]
-
-CI_TV_OFF[CI("inductor", training=False, dynamic=True, device="cpu")] = [
-]
 
 
 def model_specified_by_path(path_and_class_str):
@@ -3214,28 +3197,16 @@ def run(runner, args, original_dir=None):
                     args.per_process_memory_fraction
                 )
 
-            # Set translation validation on by default on CI accuracy runs.
-            ci = CI(
-                args.backend,
-                training=args.training,
-                dynamic=args.dynamic_shapes,
-                device=device,
+            model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            runner.run_one_model(
+                name,
+                model,
+                example_inputs,
+                optimize_ctx,
+                experiment,
+                explain=args.explain,
+                tag=args.tag,
             )
-            translation_validation = args.only not in CI_TV_OFF[ci]
-
-            with torch._dynamo.config.patch(
-                translation_validation=translation_validation
-            ):
-                model, example_inputs = runner.cast_based_on_args(model, example_inputs)
-                runner.run_one_model(
-                    name,
-                    model,
-                    example_inputs,
-                    optimize_ctx,
-                    experiment,
-                    explain=args.explain,
-                    tag=args.tag,
-                )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(
