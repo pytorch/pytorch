@@ -1222,7 +1222,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             """
         )
 
-    def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
+    def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel, node_name=None):
         if output_view:
             output_as_strided = f"{output_view.codegen_reference()}"
             output_name = f"{output_view.get_name()}_as_strided"
@@ -1458,7 +1458,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         return ", ".join(new_args)
 
     def generate_kernel_call(
-        self, name, call_args, grid=None, device_index=None, cuda=True
+        self, name, call_args, grid=None, device_index=None, cuda=True, stream_id=0, kernel_IndentedBuffer=None
     ):
         if not cuda:
             return super().generate_kernel_call(
