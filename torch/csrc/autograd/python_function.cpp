@@ -747,9 +747,14 @@ static void _trace_post_record(
       }
     }
   }
+  py::object onnx_globals = py::module::import("torch.onnx._globals");
   py::bool_ is_in_onnx_export =
       py::module::import("torch.onnx.__init__").attr("is_in_onnx_export");
-  if (py::cast<bool>(is_in_onnx_export)) {
+  py::bool_ is_autograd_inlining_enabled =
+      py::cast<bool>(onnx_globals.attr("GLOBALS").attr("autograd_inlining"));
+
+  if (py::cast<bool>(is_in_onnx_export) &&
+      py::cast<bool>(is_autograd_inlining_enabled)) {
     _append_subgraph(old_node, graph, std::move(trace_outputs), unpack_output);
   }
 
