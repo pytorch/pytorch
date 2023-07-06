@@ -730,6 +730,7 @@ class Graph:
         self._tracer_cls = tracer_cls
         self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
+        self._co_fields : Dict[str, Any] = {}
 
     @property
     def owning_module(self):
