@@ -70,11 +70,9 @@ def list_mode_options(mode: str = None, dynamic: bool = None) -> Dict[str, Any]:
 
     mode_options = {
         "default": {},
-        # enable cudagraphs when dynamic is not set
-        # otherwise, if both cudagraphs and dynamic are enabled, Inductor
-        # recompiles for each new shape
+        # enable cudagraphs
         "reduce-overhead": {
-            "triton.cudagraphs": (dynamic is not True),
+            "triton.cudagraphs": True,
         },
         # enable max-autotune
         "max-autotune-no-cudagraphs": {
