@@ -299,7 +299,7 @@ def compile_fx_inner(
         "user_visible_outputs": user_visible_outputs,
         "layout_opt": layout_opt,
     }
-    if config.fx_graph_cache:
+    if config.fx_graph_cache >= 0:
         compiled_graph: CompiledFxGraph = FxGraphCache.load(
             fx_codegen_and_compile, graph_args, graph_kwargs
         )

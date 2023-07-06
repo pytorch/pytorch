@@ -12,8 +12,10 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
-# use fx aot graph cache
-fx_graph_cache = False
+# use fx aot graph codegen cache
+# -1 deactivates the cache
+# Any  number >=0 activates it, use a change in number to rapidly invalidate
+fx_graph_cache = -1
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False

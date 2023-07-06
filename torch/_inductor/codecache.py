@@ -301,14 +301,15 @@ def serialize_compiled_fx_arg(arg: Any):
         return arg.encode("utf-8")
     if dataclasses.is_dataclass(arg):
         return repr(arg).encode("utf-8")
-    if isinstance(arg, frozenset):
+    if isinstance(arg, set):
         return repr(arg).encode("utf-8")
     if isinstance(arg, bytes):
         return arg
     if arg is None:
         return pickle.dumps(arg)
     raise ValueError(
-        "The type of the argument you are trying to hash is not supported yet. Implement it in serialize_fx_arg"
+        f"The argument with value {arg} and type {type(arg)} you are "
+        "trying to hash is not supported yet. Implement it in serialize_fx_arg"
     )
 
 
@@ -325,7 +326,7 @@ def get_path(basename: str, extension: str):
 
 
 def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
-    assert hash_type in ["code", "cubin"], "Hash type not supported"
+    assert hash_type in ["code", "cubin", "cg"], "Hash type not supported"
     if hash_type == "code":
         return code_hash(content, extra)
     if hash_type == "cubin":
@@ -368,13 +369,19 @@ class FxGraphCache:
     def load(
         cls, compile_fx_fn: Callable, fx_args: List[Any], fx_kwargs: Dict[str, Any]
     ):
+        # Excluded parameters that are not stable between runs
+        fx_kwargs.pop("graph_id")
+        # Add arguments to be hashed
         fx_args_for_hashing = copy(fx_args)
         fx_args_for_hashing.extend(list(fx_kwargs.values()))
-        # Hash also on torch version and current triton config
+        # Hash also on torch version, triton version, and current inductor config
         fx_args_for_hashing.append(torch.__version__)
-        fx_args_for_hashing.append(triton.jit.version_key())
+        fx_args_for_hashing.append(triton.runtime.version_key())
         fx_args_for_hashing.append(config.save_config())
         key = compiled_fx_graph_hash(fx_args_for_hashing)
+        log.debug(
+            "compiled graph cache key %s coming from args %s", key, fx_args_for_hashing
+        )
         if key not in cls.cache:
             from filelock import FileLock
 
