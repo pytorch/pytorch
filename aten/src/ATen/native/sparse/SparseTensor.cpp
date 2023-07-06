@@ -702,10 +702,11 @@ static std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inp
 
   Tensor lhs;
   OptTensor lhs_hash_opt;
+  bool lhs_is_movable;
 
-  std::tie(lhs, lhs_hash_opt) = [&]() -> auto {
+  std::tie(lhs, lhs_hash_opt, lhs_is_movable) = [&]() -> auto {
     if (t.is_coalesced()) {
-      return std::make_tuple(t, static_cast<OptTensor>(c10::nullopt));
+      return std::make_tuple(t, static_cast<OptTensor>(c10::nullopt), false);
     } else {
       const auto indices_hash = at::sparse::flatten_indices(t._indices(), t.sizes());
       const auto argsort_indices_hash = std::get<1>(indices_hash.sort(0));
@@ -716,13 +717,16 @@ static std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inp
       // NOTE: res is not necessariy coalesced, but it is sorted.
       // We mark it as "coalesced" to skip sorting in the intersection kernel.
       auto res = wrapped_tensor(t, res_indices, res_values)._coalesced_(true);
-      return std::make_tuple(res, static_cast<OptTensor>(indices_hash_sorted));
+      return std::make_tuple(std::move(res), static_cast<OptTensor>(std::move(indices_hash_sorted)), true);
     }
   }();
 
   const auto rhs = mask.is_coalesced() ? wrapped_tensor(mask) : mask;
+  const auto rhs_is_movable = mask.is_coalesced() ? true : false;
 
-  return std::make_tuple(lhs, rhs, lhs_hash_opt);
+  return std::make_tuple(lhs_is_movable ? std::move(lhs) : lhs,
+                         rhs_is_movable ? std::move(rhs) : rhs,
+                         lhs_hash_opt);
 }
 
 SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
@@ -764,7 +768,7 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
   return t.mul(mask_template).to(t.scalar_type());
 }
 
-Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask) {
+Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask, bool accumulate_matches) {
   TORCH_INTERNAL_ASSERT(t.is_sparse());
   TORCH_INTERNAL_ASSERT(mask.is_sparse());
 
@@ -785,7 +789,7 @@ Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask) {
   Tensor lhs, rhs;
   OptTensor lhs_hash_opt;
   std::tie(lhs, rhs, lhs_hash_opt) = sparse_mask_like_prepare_sparse_inputs("_sparse_mask_projection", mask, t);
-  sparse_mask_projection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt);
+  sparse_mask_projection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt, accumulate_matches);
   return res._coalesced_(t.is_coalesced());
 }
 

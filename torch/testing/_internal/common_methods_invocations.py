@@ -8653,15 +8653,6 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
-        skips=(
-            # note(crcrpar): excluding cdouble from dtypes above might be better.
-            # Guard for `error: "In-place abs is not supported for complex tensors."`
-            DecorateInfo(
-                unittest.skip("_foreach_zero is not implemented"),
-                'TestForeach',
-                'test_outplace_forward_mode_AD',
-            ),
-        ),
     ),
 ]
 
@@ -12899,7 +12890,7 @@ op_db: List[OpInfo] = [
            # got: Batching rule not implemented for aten::flatten.using_ints
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
            sample_inputs_func=sample_inputs_max_pool),

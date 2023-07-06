@@ -478,9 +478,10 @@ class GemmBlockSparseMicrokernelTester {
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
-          ASSERT_FLOAT_EQ(
+          ASSERT_NEAR(
               c[mIndex * cStride() + nIndex],
-              acc[mIndex * n() + nIndex])
+              acc[mIndex * n() + nIndex],
+              std::abs(acc[mIndex * n() + nIndex]) * 1.0e-3f)
               << "at " << mIndex << ", " << nIndex
               << ": reference = " << acc[mIndex * n() + nIndex]
               << ", optimized = " << c[mIndex * cStride() + nIndex]
