@@ -124,10 +124,17 @@ def speculate_subgraph(
                     )
 
                 tx.output.guards.update(output.guards)
+                # The output proxies might not belong to this SubgraphTracer
+                # (if they are free variables that were never lifted)
+                # so lift them here.
+                output_proxies = output.as_proxy()
+                output_proxies = pytree.tree_map(
+                    tracer.maybe_lift_tracked_freevar_to_input, output_proxies
+                )
                 tx.output.create_node(
                     "output",
                     "output",
-                    (tracer.create_arg((output.as_proxy(),))),
+                    (tracer.create_arg((output_proxies,))),
                     {},
                 )
                 graph = tx.output.graph
