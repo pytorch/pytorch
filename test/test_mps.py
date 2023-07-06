@@ -5222,7 +5222,7 @@ class TestNLLLoss(TestCaseMPS):
         for dtype in [torch.float32, torch.int32, torch.int64, torch.bool]:
             helper((2, 3), dtype)
 
-    # torch.cumprod is not supported on mps until macOS 13
+    # torch.cumprod which is required for the prod gradient is not supported on mps until macOS 13
     @unittest.skipIf(product_version < 13.0, "Skipped on macOS 12")
     def test_prod_backward(self):
         t = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps", dtype=torch.float).detach().requires_grad_()
