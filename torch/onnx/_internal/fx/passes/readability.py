@@ -8,11 +8,11 @@ from torch.onnx._internal.fx import _pass, diagnostics
 
 
 class RestoreParameterAndBufferNames(_pass.Transform):
-    """Restore parameter and buffer names from original module.
+    """Restore parameter and buffer names from original nn.module.
 
     This pass is useful for readability of the exported ONNX graph. It restores the
-    parameter and buffer names from the original module. For example, if the original
-    module has a parameter named `root.linear.0.weight`, and the parameter is renamed to
+    parameter and buffer names from the original nn.module. For example, if the original
+    nn.module has a parameter named `root.linear.0.weight`, and the parameter is renamed to
     `_param_constant9` by FX, this pass will rename it back.
 
     This pass must be run after `Decompose` pass. Because this pass is expected to be called on
@@ -23,11 +23,11 @@ class RestoreParameterAndBufferNames(_pass.Transform):
     def __init__(
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
-        module: torch.fx.GraphModule,
-        original_module: torch.nn.Module,
+        fx_module: torch.fx.GraphModule,
+        nn_module: torch.nn.Module,
     ):
-        super().__init__(diagnostic_context, module)
-        self.original_module = original_module
+        super().__init__(diagnostic_context, fx_module)
+        self.original_module = nn_module
 
     @_beartype.beartype
     def _rename_param_and_buffer(
@@ -60,7 +60,7 @@ class RestoreParameterAndBufferNames(_pass.Transform):
             f"normalized from original parameter name '{new_name}'."
         )
 
-    def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
+    def _run(self) -> torch.fx.GraphModule:
         """Restore parameter and buffer names from original module.
 
         For each `get_attr` node, if the target is a str representing a parameter or buffer
@@ -68,10 +68,6 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         The parameters and buffers between `self.module` and `self.original_module` refer
         to the same objects, allowing us to use it as key to retrieve the original name.
         """
-        assert len(args) == 0, "RestoreParameterAndBufferNames does not take any args"
-        assert (
-            len(kwargs) == 0
-        ), "RestoreParameterAndBufferNames does not take any kwargs"
         # state_to_readable_name[parameter/buffer] returns the original readable name of
         # the parameter/buffer. E.g., "self.linear.weight".
         state_to_readable_name: Dict[Union[torch.nn.Parameter, torch.Tensor], str] = {}
