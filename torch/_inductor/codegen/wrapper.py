@@ -94,6 +94,9 @@ def convert_return_type(python_type):
 
 
 def get_cpp_op_schema(kernel):
+    if config.aot_abi_compatible:
+        return ""
+
     # use x.real_type instead of x.type so that we get ScalarType instead of int
     arg_types = [repr(x.real_type) for x in kernel._schema.arguments]
     arg_names = [x.name for x in kernel._schema.arguments]
@@ -446,6 +449,7 @@ class WrapperCodeGen(CodeGen):
         cpp_op_schema,
         cpp_kernel_key,
         cpp_kernel_overload_name="",
+        schema=None,
     ):
         self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
 
@@ -869,6 +873,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.call_func_name = "inductor_entry_cpp"
         self.cuda = False
         self.supports_intermediate_hooks = False
+        self.arg_var_id = count()
+        self.kernel_callsite_id = count()
 
         from .cpp import cexpr
 
@@ -886,6 +892,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
                 #include <ATen/ScalarOps.h>
                 #include "aot_inductor_interface.cpp"
+
                 """
             )
         else:
@@ -1191,20 +1198,73 @@ class CppWrapperCodeGen(WrapperCodeGen):
         cpp_op_schema,
         cpp_kernel_key,
         cpp_kernel_overload_name="",
+        schema=None,
     ):
-        if cpp_kernel_key not in self.extern_call_ops:
-            self.writeline(
-                f"static auto op_{cpp_kernel_key} = c10::Dispatcher::singleton()"
-            )
-            self.writeline(
-                f'\t.findSchemaOrThrow("{kernel}", "{cpp_kernel_overload_name}")'
-            )
-            self.writeline(f"\t.typed<{cpp_op_schema}>();")
-            self.extern_call_ops.add(cpp_kernel_key)
+        if config.aot_abi_compatible:
+            self.writeline("")
 
-        self.writeline(
-            f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
-        )
+            callsite_id = next(self.kernel_callsite_id)
+            num_args = len(codegen_args)
+            new_args = []
+            for arg in codegen_args:
+                new_args.append(f"c10::IValue({arg})")
+            self.writeline(
+                f"c10::IValue fallback_args_ival_{callsite_id}[] = {{{', '.join(new_args)}}};"
+            )
+            new_args = []
+            for i in range(num_args):
+                new_args.append(f"&fallback_args_ival_{callsite_id}[{i}]")
+            args_var = f"fallback_args_{callsite_id}"
+            self.writeline(f"void* {args_var}[] = {{{', '.join(new_args)}}};")
+
+            assert schema is not None
+            num_returns = len(schema.returns)
+            new_rets = []
+            self.writeline(
+                f"c10::IValue fallback_rets_ival_{callsite_id}[{num_returns}];"
+            )
+            for i in range(num_returns):
+                new_rets.append(f"&fallback_rets_ival_{callsite_id}[{i}]")
+            rets_var = f"fallback_rets_{callsite_id}"
+            self.writeline(f"void* {rets_var}[] = {{{', '.join(new_rets)}}};")
+
+            self.writeline(
+                f'callBoxedInC("{kernel}", "{cpp_kernel_overload_name}", {args_var}, {num_args}, {rets_var});'
+            )
+            if num_returns == 1:
+                ret = schema.returns[0]
+                assert isinstance(
+                    ret.type, torch.TensorType
+                ), "Unsupported return type for c++ fallback op"
+                if isinstance(ret.type, torch.TensorType):
+                    self.writeline(
+                        f"auto {name} = fallback_rets_ival_{callsite_id}[0].toTensor();"
+                    )
+            else:
+                new_rets = []
+                for i, ret in enumerate(schema.returns):
+                    assert isinstance(
+                        ret.type, torch.TensorType
+                    ), "Unsupported return type for c++ tuple"
+                    if isinstance(ret.type, torch.TensorType):
+                        new_rets.append(
+                            f"fallback_rets_ival_{callsite_id}[{i}].toTensor()"
+                        )
+                self.writeline(f"auto {name} = std::make_tuple({', '.join(new_rets)});")
+        else:
+            if cpp_kernel_key not in self.extern_call_ops:
+                self.writeline(
+                    f"static auto op_{cpp_kernel_key} = c10::Dispatcher::singleton()"
+                )
+                self.writeline(
+                    f'\t.findSchemaOrThrow("{kernel}", "{cpp_kernel_overload_name}")'
+                )
+                self.writeline(f"\t.typed<{cpp_op_schema}>();")
+                self.extern_call_ops.add(cpp_kernel_key)
+
+            self.writeline(
+                f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
+            )
 
     def val_to_str(self, val):
         from .cpp import DTYPE_TO_ATEN
@@ -1237,8 +1297,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
     def __init__(self):
         super().__init__()
-        self.kernel_callsite_id = count()
-        self.arg_var_id = count()
         self.cuda = True
 
     def write_header(self):

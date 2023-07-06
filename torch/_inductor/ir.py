@@ -3153,14 +3153,14 @@ class FallbackKernel(ExternKernelAlloc):
 
         op_overload_packet = (
             kernel._overloadpacket
-            if isinstance(kernel, torch._ops.OpOverload)
+            if isinstance(kernel, torch._ops.OpOverload)  # OpOverloadPacket
             else kernel
         )
 
         if (
             getattr(torch.ops.aten, op_overload_packet.__name__, None)
             is op_overload_packet
-        ):
+        ) and not config.aot_abi_compatible:
             self.kernel = (
                 f"at::{op_overload_packet.__name__}"
                 if V.graph.cpp_wrapper
@@ -3188,6 +3188,9 @@ class FallbackKernel(ExternKernelAlloc):
     def set_cpp_kernel(self, kernel):
         from .codegen.wrapper import get_cpp_op_schema
 
+        if isinstance(kernel, torch._ops.OpOverloadPacket):
+            kernel = kernel.default
+
         assert (
             not kernel._schema.is_mutable
         ), f"mutable {kernel.__name__} is not supported with cpp_wrapper"
@@ -3205,12 +3208,12 @@ class FallbackKernel(ExternKernelAlloc):
             is_not_write(x) for x in kernel._schema.returns
         ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
 
+        self.schema = kernel._schema
         self.kernel = kernel._schema.name
         self.cpp_kernel_overlad_name = kernel._schema.overload_name
         self.cpp_kernel_key = (
             f"{self.kernel.replace('::', '_')}_{self.cpp_kernel_overlad_name}"
         )
-
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.ordered_kwargs_for_cpp_kernel = [
             x.name for x in kernel._schema.arguments if x.kwarg_only
@@ -3259,6 +3262,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.cpp_op_schema,
                 self.cpp_kernel_key,
                 self.cpp_kernel_overlad_name,
+                self.schema,
             )
         else:
             super().codegen(wrapper)

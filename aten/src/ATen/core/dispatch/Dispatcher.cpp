@@ -444,3 +444,28 @@ void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction
 }
 
 }
+
+void callBoxedInC(
+        const char* name,
+        const char* overload_name,
+        void** args,
+        int num_args,
+        void** results) {
+  auto op = c10::Dispatcher::singleton().findSchemaOrThrow(name, overload_name);
+  const auto& schema = op.schema();
+  std::vector<c10::IValue> stack;
+  for (auto i : c10::irange(0, num_args)) {
+      stack.emplace_back(*static_cast<c10::IValue*>(args[i]));
+  }
+  const auto num_full_args = schema.arguments().size();
+  for (auto i : c10::irange(num_args, num_full_args)) {
+      stack.emplace_back(schema.arguments()[i].default_value());
+  }
+
+  op.callBoxed(stack);
+  const auto num_returns = schema.returns().size();
+  auto returns = torch::jit::last(stack, num_returns);
+  for (const auto i : c10::irange(num_returns)) {
+    (*static_cast<c10::IValue*>(results[i])) = returns[i];
+  }
+}

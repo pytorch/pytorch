@@ -751,3 +751,12 @@ struct hash<c10::OperatorHandle> {
 };
 
 } // namespace std
+
+extern "C" {
+TORCH_API void callBoxedInC(
+    const char* name,
+    const char* overload_name,
+    void** args,
+    int num_args,
+    void** results);
+}
