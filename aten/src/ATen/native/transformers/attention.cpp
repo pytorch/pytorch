@@ -18,6 +18,7 @@
 #include <c10/util/Exception.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -691,9 +692,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         attn_mask = at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
         attn_mask = convert_boolean_attn_mask(attn_mask, query.dtype());
     }
-    auto attn = at::matmul(query, key.transpose(-2, -1)*scaling_factor);
+    auto attn = at::matmul(query, key.transpose(-2, -1) * scaling_factor);
     if (attn_mask.has_value()) {
+      if (at::areAnyTensorSubclassLike({attn, *attn_mask})) {
+        attn = attn.add(*attn_mask);
+      } else {
         attn.add_(*attn_mask);
+      }
     }
     attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {
