@@ -3085,7 +3085,14 @@ def grid_sampler_2d(
         return compute_coordinates(coords_un, size)
 
     N, C, iH, iW = a.shape
-    _, oH, oW, _ = grid.shape
+    _, oH, oW, two = grid.shape
+
+    # Let's expand grid to [N, C, oH, oW, 2]
+    # This allows to generate a single triton cuda kernel instead of two kernels.
+    # Two kernels are due source indices, weights have shape (N, 1, oH, oW), xnumel=N*oH*oW
+    # and output has shape (N, C, oH, oW), xnumel=N*C*oH*oW
+    # Expanding grid to (N, C, oH, oW, two) unifies xnumel to N*C*oH*oW
+    grid = grid.view(N, 1, oH, oW, two).expand(N, C, oH, oW, two)
 
     def in_bounds_cond(xs: Tensor, ys: Tensor) -> Tensor:
         return torch.logical_and(
@@ -3102,7 +3109,7 @@ def grid_sampler_2d(
         # We also change the shape of the tensor to the appropriate one for
         # broadcasting with N_idx, C_idx for the purposes of advanced indexing
         return tuple(
-            torch.where(cond, t, 0).view(N, 1, oH, oW)
+            torch.where(cond, t, 0).view(N, C, oH, oW)
             for t in (xs.to(dtype=torch.int64), ys.to(dtype=torch.int64), ws)
         )
 
