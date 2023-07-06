@@ -7,6 +7,8 @@ import torch.distributed.distributed_c10d as c10d
 from typing import Tuple, Union, List, cast, TYPE_CHECKING
 from torch.utils._pytree import tree_map_only
 
+import torch._dynamo.config
+
 from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
@@ -380,19 +382,9 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     __slots__ = ['elem']
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
-    @staticmethod
-    def __new__(cls, elem: torch.Tensor):
-
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-            cls, elem.size(),
-            strides=elem.stride(), storage_offset=elem.storage_offset(),
-            dtype=elem.dtype, layout=elem.layout,
-            device=elem.device, requires_grad=False
-        )
-        r.elem = elem
-        return r
+    def __init__(self, elem: torch.Tensor):
+        super().__init__()
+        self.elem = elem
 
     def __repr__(self):
         return f"AsyncCollectiveTensor({self.elem})"
@@ -402,19 +394,18 @@ class AsyncCollectiveTensor(torch.Tensor):
         return self
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         def unwrap(e: AsyncCollectiveTensor):
-            # wait_tensor is idepotent and will do stream sync only once
+            # wait_tensor is idempotent and will do stream sync only once
             wait_tensor(e.elem)
             return e.elem
 
         unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
         unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
 
-        # we don't wrap the result as it doesn't need to be waited on.
-        out = func(*unwrapped_args, **unwrapped_kwargs)
+        return super().__torch_function__(func, types, unwrapped_args, unwrapped_kwargs)
 
-        return out
+torch._dynamo.config.traceable_tensor_subclasses.add(AsyncCollectiveTensor)
 
 def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
     reduceOp = reduceOp.upper()
@@ -619,10 +610,9 @@ def _are_we_tracing() -> bool:
     return mode.tracer is not None
 
 def _maybe_wrap_tensor(self) -> torch.Tensor:
-    if _are_we_tracing():
-        return wait_tensor(self)
     res = AsyncCollectiveTensor(self)
-    _register_wrapper_tensor(res, self)
+    if not _are_we_tracing():
+        _register_wrapper_tensor(res, self)
     return cast(torch.Tensor, res)
 
 def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
