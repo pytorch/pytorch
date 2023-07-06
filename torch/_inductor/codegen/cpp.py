@@ -640,10 +640,8 @@ class CppVecOverrides(OpOverrides):
         assert opt_ctx.dtype in [torch.int32, torch.float32, torch.bfloat16]
         proposed_dtype = opt_ctx.dtype
         if val == float("inf"):
-            assert proposed_dtype == torch.float
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif val == float("-inf"):
-            assert proposed_dtype == torch.float
             quote = f"-std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif math.isnan(val):
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::quiet_NaN()"
