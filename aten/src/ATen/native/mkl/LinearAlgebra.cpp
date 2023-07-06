@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/mkl/LinearAlgebra.h>
-#include <ATen/Config.h>
 
 #if !AT_MKL_ENABLED()
 
@@ -112,6 +111,7 @@ void mkl_gemm_batched(
                     reinterpret_cast<const void*>(&beta), reinterpret_cast<void**>(C), &ldc, 1, &batch_size);
 }
 
+#ifdef MKL_HAS_BF16_GEMM
 void mkl_gemm_bf16bf16f32(
     TransposeType trans_A, TransposeType trans_B,
     int M, int N, int K, const float alpha,
@@ -120,8 +120,17 @@ void mkl_gemm_bf16bf16f32(
   auto transa_cblas = to_cblas(trans_A);
   auto transb_cblas = to_cblas(trans_B);
   cblas_gemm_bf16bf16f32(CblasColMajor, transa_cblas, transb_cblas, M, N, K, alpha,
-                         (const short unsigned int*)A, lda, (const short unsigned int*)B, ldb, beta, C, ldc);
+                         (const MKL_BF16*)A, lda, (const MKL_BF16*)B, ldb, beta, C, ldc);
 }
+#else
+void mkl_gemm_bf16bf16f32(
+    TransposeType trans_A, TransposeType trans_B,
+    int M, int N, int K, const float alpha,
+    const c10::BFloat16* A, int lda, const c10::BFloat16* B, int ldb,
+    const float beta, float* C, int ldc) {
+  TORCH_INTERNAL_ASSERT(false, "mkl_gemm_bf16bf16f32 requires mkl version > 2021.0");
+}
+#endif
 
 }} // namespace at::native
 
