@@ -13,9 +13,9 @@ from torch.distributed.fsdp._common_utils import (
     TrainingState,
 )
 from torch.distributed.fsdp._runtime_utils import (
-    _clear_grads_if_needed,
     _get_fsdp_root_states_with_modules,
     _lazy_init,
+    _reset_flat_param_grad_info_if_needed,
     _reshard,
     _reshard_grads,
     _unshard,
@@ -185,8 +185,8 @@ def _unshard_fsdp_state_params(
 
     handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
 
-    _clear_grads_if_needed(handle)
-    free_unsharded_flat_param = handle.needs_unshard()
+    _reset_flat_param_grad_info_if_needed(handle)
+    free_unsharded_flat_params = handle.needs_unshard() for handle in handles
     # No need to call `wait_stream()` since we unshard in the computation
     # stream directly
     computation_stream = state._device_handle.current_stream()

@@ -176,6 +176,10 @@ def _module_handle(state: _FSDPState, module: nn.Module) -> "FlatParamHandle":
     the handle that contain some parameter in ``module``.
     """
     if _is_composable(state):
+        # A valid FSDP state may have no managed parameters and hence no
+        # handles, meaning no entry in `_fully_sharded_module_to_handles`
+        if len(state._handles) == 0:
+            return []
         assert (
             module in state._fully_sharded_module_to_handle
         ), f"Expects a fully sharded module but got {module} on rank {state.rank}"

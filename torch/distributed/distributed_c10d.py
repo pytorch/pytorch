@@ -404,7 +404,7 @@ class _CollOp:
 # Use them through the _world object to make sure the _world override mechanism
 _pg_map: Dict[ProcessGroup, Tuple[str, Optional[Store]]] = {}
 _pg_names: Dict[ProcessGroup, str] = {}
-_pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = {}
+_pg_group_ranks: Dict[ProcessGroup, Dict[int, int]] = dict()
 # For a pg, it is a map from ProcessGroup to BackendConfig
 _pg_backend_config: Dict[ProcessGroup, str] = {}
 _group_count = 0
@@ -1528,7 +1528,7 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
             group_src_rank = get_group_rank(pg, src)
             return pg.recv([tensor], group_src_rank, tag)
 
-@_exception_logger
+
 def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> None:
     """
     Sends a tensor synchronously.
@@ -1560,7 +1560,7 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
         group_dst_rank = get_group_rank(group, dst)
         group.send([tensor], group_dst_rank, tag).wait()
 
-@_exception_logger
+
 def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> int:
     """
     Receives a tensor synchronously.
@@ -1772,7 +1772,7 @@ def batch_isend_irecv(p2p_op_list):
         return reqs
 
 
-@_exception_logger
+
 def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=0):
     """
     Broadcasts the tensor to the whole group with multiple GPU tensors
@@ -1832,7 +1832,7 @@ def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=
         work.wait()
 
 
-@_exception_logger
+
 def broadcast(tensor, src, group=None, async_op=False):
     """
     Broadcasts the tensor to the whole group.
@@ -1874,7 +1874,7 @@ def broadcast(tensor, src, group=None, async_op=False):
     else:
         work.wait()
 
-@_exception_logger
+
 def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False):
     r"""
     Reduces the tensor data across all machines in such a way that all get
@@ -1935,7 +1935,7 @@ def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False
     else:
         work.wait()
 
-@_exception_logger
+
 def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces the tensor data across all machines in such a way that all get
@@ -2015,7 +2015,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     else:
         work.wait()
 
-@_exception_logger
+
 def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     """
     WARNING: at this time individual shape checking is not implemented across nodes.
@@ -2078,7 +2078,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     else:
         work.wait()
 
-@_exception_logger
+
 def reduce_multigpu(
     tensor_list, dst, op=ReduceOp.SUM, group=None, async_op=False, dst_tensor=0
 ):
@@ -2140,7 +2140,7 @@ def reduce_multigpu(
     else:
         work.wait()
 
-@_exception_logger
+
 def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces the tensor data across all machines.
@@ -2185,7 +2185,7 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
     else:
         work.wait()
 
-@_exception_logger
+
 def all_gather_multigpu(
     output_tensor_lists, input_tensor_list, group=None, async_op=False
 ):
@@ -2279,7 +2279,7 @@ def _tensor_to_object(tensor, tensor_size):
     return _unpickler(io.BytesIO(buf)).load()
 
 
-@_exception_logger
+
 def all_gather_object(object_list, obj, group=None):
     """
     Gathers picklable objects from the whole group into a list. Similar to
@@ -2371,7 +2371,7 @@ def all_gather_object(object_list, obj, group=None):
         object_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-@_exception_logger
+
 def gather_object(obj, object_gather_list=None, dst=0, group=None):
     """
     Gathers picklable objects from the whole group in a single process.
@@ -2481,7 +2481,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-@_exception_logger
+
 def broadcast_object_list(object_list, src=0, group=None, device=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group. Similar
@@ -2586,7 +2586,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
             object_list[i] = _tensor_to_object(obj_view, obj_size)
 
 
-@_exception_logger
+
 def scatter_object_list(
     scatter_object_output_list, scatter_object_input_list, src=0, group=None
 ):
@@ -2695,7 +2695,7 @@ def scatter_object_list(
     scatter_object_output_list[0] = _tensor_to_object(output_tensor, obj_tensor_size)
 
 
-@_exception_logger
+
 def all_gather(tensor_list, tensor, group=None, async_op=False):
     """
     Gathers tensors from the whole group in a list.
@@ -2769,7 +2769,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         work.wait()
 
 
-@_exception_logger
+
 def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=False):
     """
     Gather tensors from all ranks and put them in a single output tensor.
@@ -2858,7 +2858,7 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         work.wait()
 
 
-@_exception_logger
+
 def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     """
     Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
@@ -2888,7 +2888,7 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     return all_gather_into_tensor(output_tensor, input_tensor, group, async_op)
 
 
-@_exception_logger
+
 def all_gather_coalesced(
     output_tensor_lists, input_tensor_list, group=None, async_op=False
 ):
@@ -2988,7 +2988,7 @@ def _validate_output_list_for_rank(my_rank, dst, gather_list):
         )
 
 
-@_exception_logger
+
 def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
     """
     Gathers a list of tensors in a single process.
@@ -3043,7 +3043,7 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
         work.wait()
 
 
-@_exception_logger
+
 def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
     """
     Scatters a list of tensors to all processes in a group.
@@ -3139,7 +3139,7 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         work.wait()
 
 
-@_exception_logger
+
 def reduce_scatter_multigpu(
     output_tensor_list, input_tensor_lists, op=ReduceOp.SUM, group=None, async_op=False
 ):
@@ -3209,7 +3209,7 @@ def reduce_scatter_multigpu(
         work.wait()
 
 
-@_exception_logger
+
 def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces, then scatters a list of tensors to all processes in a group.
@@ -3251,7 +3251,7 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
         work.wait()
 
 
-@_exception_logger
+
 def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces, then scatters a tensor to all ranks in a group.
@@ -3364,7 +3364,7 @@ def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=Fa
     return reduce_scatter_tensor(output, input, op, group, async_op)
 
 
-@_exception_logger
+
 def all_to_all_single(
     output,
     input,
@@ -3495,7 +3495,7 @@ def all_to_all_single(
         work.wait()
 
 
-@_exception_logger
+
 def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False):
     """
     Each process scatters list of input tensors to all processes in a group and
@@ -3614,7 +3614,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
     else:
         work.wait()
 
-@_exception_logger
+
 def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
 
     """
@@ -4248,7 +4248,7 @@ dynamo_unsupported_distributed_c10d_ops = [
     scatter_object_list,
     reduce,
     reduce_scatter_multigpu,
-    all_gather,
+    # all_gather,
     broadcast_multigpu,
     all_gather_multigpu,
     reduce_scatter,

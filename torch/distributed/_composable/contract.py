@@ -7,18 +7,12 @@ import torch.nn as nn
 from torch.distributed._composable_state import _State
 
 
-# use state_slot as key for module.__dict__ to avoid coliding with other
-# properties.
-# TODO: since all composable distributed features can share the same slot.
-class _StateKey(str):
-    # Make _StateKey as str to satisfy the assumption that object.__dict__.keys()
-    # are strings.
-    def __new__(cls, string="__composable_api_state_key"):
-        return super().__new__(cls, f"{string}_{str(uuid.uuid4())}")
+def generate_state_key(string="__composable_api_state_key"):
+    return f"{string}_{str(uuid.uuid4())}"
 
 
-STATE_KEY = _StateKey()
-REGISTRY_KEY = _StateKey()
+STATE_KEY = generate_state_key()
+REGISTRY_KEY = generate_state_key()
 
 
 # TODO: we can add additional info to RegistryItem to share across APIs. E.g.,
@@ -196,5 +190,10 @@ def _get_registry(module: nn.Module) -> Dict[str, RegistryItem]:
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name.
     """
-    default_registry: Dict[str, RegistryItem] = OrderedDict()
-    return module.__dict__.setdefault(REGISTRY_KEY, default_registry)  # type: ignore[call-overload]
+    registry_key = getattr(module, REGISTRY_KEY, None)
+    if registry_key is None:
+        default_registry: Dict[str, RegistryItem] = OrderedDict()
+        setattr(module, REGISTRY_KEY, default_registry)
+        return default_registry
+    else:
+        return registry_key

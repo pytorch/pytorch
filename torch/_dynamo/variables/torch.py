@@ -93,6 +93,7 @@ if torch.distributed.is_available():
 
     from torch.distributed.distributed_c10d import (
         _get_group_tag,
+        _rank_not_in_group,
         get_process_group_ranks,
     )
 
@@ -100,6 +101,7 @@ if torch.distributed.is_available():
         [
             get_process_group_ranks,
             _get_group_tag,
+            _rank_not_in_group,
         ]
     )
 
@@ -161,6 +163,9 @@ class TorchVariable(VariableTracker):
             and value in tensor_dunder_fns_remap
         ):
             value = tensor_dunder_fns_remap[value]
+
+        if isinstance(value, dict):
+            raise RuntimeError("Nope")
 
         self.value = value
 
@@ -546,7 +551,9 @@ class TorchVariable(VariableTracker):
             # We desugar it at trace-time into ranks by directly calling util
             # bake the result into the trace
             assert len(args) == 1, "Expected one arg (pg)"
-            assert isinstance(args[0], ProcessGroupVariable)
+            assert isinstance(
+                args[0], ProcessGroupVariable
+            ), f"Expected PG, got {args[0]}"
             return ConstantVariable(self.value(args[0].as_python_constant()))
         elif self.value == torch.nn.init._calculate_correct_fan:
             return UserFunctionVariable(
@@ -632,6 +639,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
                 if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
                     unimplemented("torch.tensor call with list of unspec")
+            print("INVOKING ", fn_, self)
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -772,6 +780,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         else:
             return handle_ntuple(args[0])
 
+    def call_method(
+        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        print(
+            "CALLING METHOD ON TORCHVARIABLE", self.value, name, args[0].value, kwargs
+        )
+        return super().call_method(tx, name, args, kwargs)
+
 
 def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
     # Will raise if not sound
@@ -792,6 +808,16 @@ def dynamo_enable_grad(tx):
         yield
     finally:
         GradModeVariable.create(tx, org_value)
+
+
+def are_tensors(var):
+    from . import TensorVariable
+
+    if isinstance(var, TensorVariable):
+        return True
+    if isinstance(var, (TupleVariable, ListVariable)):
+        return all(are_tensors(item) for item in var.items)
+    return False
 
 
 # See NOTE [HigherOrderOperator tracing design] for details of the design
@@ -858,21 +884,9 @@ def speculate_subgraph(
                 # Nothing left to do here
                 return output, tx.output.graph, tracer.lifted_freevars
             else:
-                if isinstance(output, (ListVariable, TupleVariable)):
-                    if any(
-                        not isinstance(var, TensorVariable)
-                        for var in output.unpack_var_sequence(tx)
-                    ):
-                        unimplemented(
-                            "HigherOrderOperator body's output must consist of tensors only"
-                        )
-
-                if not isinstance(
-                    output,
-                    (ListVariable, TupleVariable),
-                ) and not isinstance(output, TensorVariable):
+                if not are_tensors(output):
                     unimplemented(
-                        "HigherOrderOperator can't return non-tensor scalar output"
+                        "HigherOrderOperator body's output must consist of tensors only"
                     )
 
                 tx.output.guards.update(output.guards)
@@ -985,6 +999,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                     f"item but got {str(type(args[0]))} "
                     f"with original python type {str(args[0].python_type())}.",
                 )
+            tx.output.guards.update(args[0].guards)
 
             # operands
             if type(args[3]) is not ListVariable:
