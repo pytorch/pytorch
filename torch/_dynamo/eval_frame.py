@@ -1243,7 +1243,6 @@ class TorchPatcher:
         from ..optim import (
             adadelta,
             adagrad,
-            adam,
             adamax,
             adamw,
             asgd,
@@ -1256,7 +1255,6 @@ class TorchPatcher:
         for opt_mod in (
             adadelta,
             adagrad,
-            adam,
             adamax,
             adamw,
             asgd,
