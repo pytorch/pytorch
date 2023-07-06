@@ -340,6 +340,7 @@ option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
+option(DEBUG_CUDA "When compiling DEBUG, also attempt to compile CUDA with debug flags (may cause nvcc to OOM)" OFF)
 option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
 option(USE_PER_OPERATOR_HEADERS "Whether ATen should generate separate headers for each operator" ON)
 cmake_dependent_option(
@@ -722,7 +723,7 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
   "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 
-if(NOT MSVC)
+if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
   string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")
   # CUDA-12.1 crashes when trying to compile with --source-in-ptx
