@@ -346,7 +346,6 @@ class AsyncCollectiveTensor(torch.Tensor):
 """
 Utils and infrastructure for tracing support
 """
-
 def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int]:
     """
     _expand_group desugars the different RANK_TYPES types into a canonical format that is traceable.

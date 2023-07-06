@@ -8,6 +8,8 @@ from typing import List, cast
 """
 Moved eager kernel implementations to a separate file partly for readability and partly as it is currently
 easier in dynamo to set tracing policy on a file-by-file level.
+
+Do not put code in this file that Dynamo is expected to trace into, as dynamo may disallow this whole file.
 """
 
 data_ptr_to_work = dict()
@@ -131,7 +133,7 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
     out_tensor = shard.new_empty(out_size)
     assert out_tensor.is_contiguous()
     # FIXME gloo doesn't support _allgather_base
-    if shard.is_cpu:
+    if dist.get_backend(group) == dist.Backend.GLOO or shard.is_cpu:
         tensor_list = list(torch.chunk(out_tensor, group_size))
         work = dist.all_gather(tensor_list, shard, group=group, async_op=True)
     else:
@@ -158,7 +160,7 @@ def _all_gather_into_tensor_coalesced(self, tag, rankset, group_size):
         output_tensors=out_tensors,
         input_tensors=self,
         group=group,
-        async_op=False)
+        async_op=True)
 
 
     _register_tensor_work(out_tensors, work_list)
@@ -222,8 +224,8 @@ def _all_gather_into_tensor_coalesced_fallback(output_tensors, input_tensors, gr
     # NCCL's PG::all_gather with multiple tensors is broken, it only works for the multi-device setting
     #  and fails if you mix same-size with different-size tensor lists.
     # _coalescing_manager crashed NCCL when used with all_gather_into_tensor.
-    work_list = []
-    if input_tensors[0].is_cpu:
+    if input_tensors[0].is_cpu or not async_op:
+        work_list = []
         out_tensors_sliced = [
             list(torch.chunk(out_tensor, dist.get_world_size(group)))
             for out_tensor in output_tensors
@@ -231,11 +233,12 @@ def _all_gather_into_tensor_coalesced_fallback(output_tensors, input_tensors, gr
         for shard, out_tensor in zip(input_tensors, out_tensors_sliced):
             work = c10d.all_gather(out_tensor, shard, group=group, async_op=async_op)
             work_list.append(work)
+        return work_list
     else:
-        for shard, out_tensor in zip(input_tensors, output_tensors):
-            work = c10d.all_gather_into_tensor(out_tensor, shard, group=group, async_op=async_op)
-            work_list.append(work)
-    return work_list
+        with c10d._coalescing_manager(group=group, async_ops=True) as cm:
+            for in_t, out_t in zip(input_tensors, output_tensors):
+                dist.all_gather_into_tensor(out_t, in_t, group=group, async_op=True)
+        return cm
 
 def _reduce_scatter_tensor_coalesced_fallback(output_tensors, input_tensors, op, group, async_op=False):
     # All the same reasons as the all_gather fallback
