@@ -240,6 +240,20 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(3, 3)
         self._test_wrap_simple(f, (x, y), 3)
 
+    def test_same_freevar_twice(self):
+        free = torch.randn(3)
+
+        def g(x):
+            y = free.sin()
+            z = free.cos()
+            return y, z
+
+        def f(x):
+            return wrap(g, x)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(f, (x,), 3, 3)
+
     def test_capture_value_created_in_subgraph(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
