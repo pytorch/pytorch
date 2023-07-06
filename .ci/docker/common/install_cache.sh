@@ -36,14 +36,11 @@ if [ -n "$ROCM_VERSION" ]; then
   curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
 else
   ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
-  case "$ID" in
-    ubuntu)
-      install_ubuntu
-      ;;
-    *)
-      install_binary
-      ;;
-  esac
+  # TODO: Install the pre-built binary from S3 as building from source
+  # https://github.com/pytorch/sccache has started failing mysteriously
+  # in which sccache server couldn't start with the following error:
+  #   sccache: error: Invalid argument (os error 22)
+  install_binary
 fi
 chmod a+x /opt/cache/bin/sccache
 

@@ -5,8 +5,8 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <cuda_runtime.h>
 #include <type_traits>
 

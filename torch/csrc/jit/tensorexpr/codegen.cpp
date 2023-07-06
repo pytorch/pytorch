@@ -95,7 +95,7 @@ void CodeGen::call_with_numel(void** args, int64_t numel) {
       false, "This codegen backend does not implement call_with_numel");
 }
 
-c10::optional<size_t> bufSize(BufPtr buf) {
+static c10::optional<size_t> bufSize(BufPtr buf) {
   size_t size = elementSize(buf->dtype().scalar_type()) * buf->dtype().lanes();
   for (auto& d : buf->dims()) {
     if (!d->isConstant()) {
@@ -115,7 +115,7 @@ c10::optional<size_t> bufSize(BufPtr buf) {
 // allocations available, we'll create memory for it. Once we are beyond the
 // liveness range of this buffer, we'll mark its corresponding memory allocation
 // as "up for grabs" for future reuse.
-std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
+static std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     const std::unordered_set<BufPtr>& bufs,
     const std::unordered_map<BufPtr, std::tuple<int32_t, int32_t>>& buf_ranges,
     const std::unordered_set<BufPtr>& bufs_external_allocs) {
@@ -150,7 +150,7 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
 
     // Release memory for buffers whose liveness range ends before the creation
     // time of this buf.
-    // TODO: optimize in-place opererations and copy operations
+    // TODO: optimize in-place operations and copy operations
     std::vector<BufPtr> buf_to_release;
     for (auto& mapped : buf_mem_map) {
       auto buf_mapped = mapped.first;
@@ -198,7 +198,7 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
   return buf_allocs;
 }
 
-StmtPtr insertAllocFree(
+static StmtPtr insertAllocFree(
     std::vector<std::pair<BufPtr, BufPtr>>& buf_allocs,
     const std::unordered_set<BufPtr>& bufs_external_allocs,
     StmtPtr stmt) {
@@ -294,7 +294,7 @@ void CodeGen::allocIntermediateBufs() {
     if (!bufs_allocated.count(buf) && !interm_bufs.count(buf)) {
       interm_bufs.insert(buf);
 
-      // Identify the access stmts to each unallocated intermeiate buffer.
+      // Identify the access stmts to each unallocated intermediate buffer.
       auto range = BufLiveRange::liveRange(stmt_, buf);
       interm_buf_ranges.emplace(buf, range);
     }

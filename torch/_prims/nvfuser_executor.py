@@ -6,6 +6,7 @@ from types import MappingProxyType
 from warnings import warn
 
 import torch
+import torch.fx
 import torch.overrides
 from torch._prims_common import (
     _torch_dtype_to_nvfuser_dtype_map,
@@ -19,12 +20,29 @@ from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
-    from nvfuser._C import (  # type: ignore[import]
-        DataType,
-        Fusion,
-        FusionDefinition,
-        Tensor,
-    )
+    try:
+        from nvfuser import (  # type: ignore[attr-defined, import]
+            DataType,
+            FusionDefinition,
+            Tensor,
+        )
+
+        def create_fusion_definition():
+            fd = FusionDefinition()
+            return fd, fd
+
+    except ImportError:
+        from nvfuser._C import (  # type: ignore[import]
+            DataType,
+            Fusion,
+            FusionDefinition,
+            Tensor,
+        )
+
+        def create_fusion_definition():
+            fusion = Fusion()
+            return fusion, FusionDefinition(fusion)
+
 else:
     DataType = None
 
@@ -42,6 +60,7 @@ DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
         "allow_single_op_fusion": False,
     }
 )
+
 
 # nvFuserTensorTemplate and nvFuserScalarTemplate are helper objects
 # for cached construction of the nvFuser's Fusion
@@ -74,9 +93,12 @@ def compute_contiguity(shape, strides):
     Contiguous dimensions are represented by True, strided dimensions
     are represented by False.
     """
-    from nvfuser._C import compute_contiguity
+    try:
+        from nvfuser import compute_contiguity  # type: ignore[attr-defined]
+    except ImportError:
+        from nvfuser._C import compute_contiguity
 
-    return compute_contiguity(shape, strides)
+    return tuple(compute_contiguity(shape, strides))
 
 
 def to_nvfuser_template_args(args):
@@ -148,8 +170,8 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     output_node = next(filter(lambda n: n.op == "output", gm.graph.nodes))
     orig_flat_out, _ = tree_flatten(output_node.args[0])
 
-    fusion = Fusion()
-    with FusionDefinition(fusion) as fd:
+    fusion, fd = create_fusion_definition()
+    with fd:
 
         def _to_nvfuser_constant(arg):
             if isinstance(arg, Number):
@@ -160,24 +182,24 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         class FusionInterpreter(torch.fx.Interpreter):
             def run_node(self, node):
                 # Squeeze requires original shape of args[0]
-                if node.target in [
+                if node.target in (
                     torch.ops.nvprims.squeeze,
                     torch.ops.nvprims.squeeze.default,
-                ]:
+                ):
                     original_shape = list(node.args[0].meta["tensor_meta"].shape)
                     assert len(node.args) == 2
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
-                    args = [args[0], original_shape, args[1]]
+                    args = args[:1] + (original_shape,) + args[1:]
                     return self.call_function(node.target, args, node.kwargs)
 
-                if node.target in [
+                if node.target in (
                     torch.ops.nvprims.native_batch_norm,
                     torch.ops.nvprims.native_batch_norm.default,
-                ]:
+                ):
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     assert len(args) == 8
                     training = args[5]
-                    args6_end = tuple(map(_to_nvfuser_constant, args[6:]))
+                    args6_end = tuple(_to_nvfuser_constant(arg) for arg in args[6:])
                     args = args[:5] + (training,) + args6_end
                     return node.target.impl_nvfuser(fd, *args, **kwargs)
 
@@ -188,7 +210,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 if target == operator.getitem:
                     assert isinstance(args[0], tuple)
                     return target(*args, **kwargs)
-                args = tuple(map(_to_nvfuser_constant, args))
+                args = tuple(_to_nvfuser_constant(arg) for arg in args)
                 target = target.impl_nvfuser
                 args = (fd,) + args
                 return target(*args, **kwargs)
@@ -218,7 +240,9 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 return arg
 
         # Transforms graph to call nvfuser lowerings
-        nv_args = tuple(map(templates_to_nvfuser_inputs, nv_args_templates))
+        nv_args = tuple(
+            templates_to_nvfuser_inputs(nv_arg) for nv_arg in nv_args_templates
+        )
         out = FusionInterpreter(gm).run(*nv_args)
         flat_out, unflatten_spec = tree_flatten(out)
 
@@ -238,7 +262,6 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
         )
         for arg in flat_args
     ):
-
         # Construction of the fusion is expensive and cached based on the GraphModule
         # and symbolic nvFuser args.
         nv_template_args = to_nvfuser_template_args(flat_args)

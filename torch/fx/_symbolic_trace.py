@@ -201,6 +201,18 @@ class PHBase:
 PH = PHBase()
 
 
+@compatibility(is_backward_compatible=False)
+class PHWithMeta(PHBase):
+    """
+    Object representing an input placeholder to `concrete_args`
+    """
+    def __init__(self, ph_key: Optional[str] = None):
+        super().__init__()
+
+        # Provide a hey for user to identify placeholder node during analysis
+        self.ph_key = ph_key
+
+
 @compatibility(is_backward_compatible=True)
 class Tracer(TracerBase):
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -264,7 +276,7 @@ class Tracer(TracerBase):
             for name, value in chain(*[m.__dict__.items() for m in autowrap_modules])
             if not name.startswith("_") and callable(value)
         }
-        self._autowrap_function_ids.update(set([id(f) for f in autowrap_functions]))
+        self._autowrap_function_ids.update({id(f) for f in autowrap_functions})
 
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
@@ -580,7 +592,27 @@ class Tracer(TracerBase):
                     out = self.create_proxy(
                         "placeholder", f"{name}_{str(cnt)}", default, {}
                     )
-                    if x == PH:
+                    if isinstance(x, PHBase):
+                        def transfer_attrs(fr, to):
+                            for attr_name in dir(fr):
+                                attr_val = getattr(fr, attr_name)
+                                if (
+                                    not callable(attr_val)
+                                    and not attr_name.startswith("__")
+                                    and not hasattr(to, attr_name)
+                                ):
+                                    setattr(to, attr_name, attr_val)
+
+                        if x != PH:
+                            # Transfer attrs in the case where you're using a placeholder other
+                            # than the singleton PH (PH has no attributes to transfer).
+                            # Proxies were created out of the placeholders.
+                            # Transfer any metadata (put on the placeholders in the form of
+                            # attributes set by the user) from the placeholder to the
+                            # underlying nodes (the proxy is unwrapped by the user, but
+                            # the metadata should hold).
+                            transfer_attrs(fr=x, to=out.node)
+
                         return out
                     # Union[int, bool] == bool in Python <= 3.6
                     if (
@@ -627,7 +659,7 @@ class Tracer(TracerBase):
                 raise RuntimeError(
                     f"Tracing expected {len(arg_names)} arguments but got {len(concrete_args)} concrete arguments"
                 )
-            concrete_args = {name: val for name, val in zip(arg_names, concrete_args)}
+            concrete_args = dict(zip(arg_names, concrete_args))
         args.extend(proxy_placeholder(names) for names in arg_names)
 
         if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
@@ -709,6 +741,13 @@ class Tracer(TracerBase):
 
             tracer_cls: Optional[Type["Tracer"]] = getattr(self, "__class__", None)
             self.graph = Graph(tracer_cls=tracer_cls)
+            if hasattr(fn, '__code__'):
+                code = fn.__code__
+                self.graph._co_fields = {
+                    'co_name': code.co_name,
+                    'co_filename': code.co_filename,
+                    'co_firstlineno': code.co_firstlineno,
+                }
 
             # When we encounter a Tensor value that's not a parameter, we look if it
             # is some other attribute on the model. Construct a dict mapping Tensor
@@ -849,18 +888,6 @@ def _create_wrapped_func(orig_fn):
             )
             return_proxy.node.meta["is_wrapped"] = True
             return return_proxy
-
-        # import here to avoid circular imports
-        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
-
-        # If there is no input with proxy, see if we are tracing with proxy tensors
-        proxy_mode = get_innermost_proxy_mode()
-        if proxy_mode is not None:
-            # Disable tracing of the interior of the wrapped fn while evaluating
-            with disable_proxy_modes_tracing():
-                out = proxy_call(proxy_mode, orig_fn, args, kwargs)
-            return out
-
         return orig_fn(*args, **kwargs)
 
     return wrapped
@@ -880,18 +907,6 @@ def _create_wrapped_method(cls, name):
         proxy = _find_proxy(args, kwargs)
         if proxy is not None:
             return proxy.tracer.create_proxy("call_method", name, args, kwargs)
-
-        # import here to avoid circular imports
-        from .experimental.proxy_tensor import get_innermost_proxy_mode, proxy_call, disable_proxy_modes_tracing
-
-        # If there is no input with proxy, see if we are tracing with proxy tensors
-        proxy_mode = get_innermost_proxy_mode()
-        if proxy_mode is not None:
-            # Disable tracing of the interior of the wrapped method while evaluating
-            with disable_proxy_modes_tracing():
-                out = proxy_call(proxy_mode, orig_fn, args, kwargs)
-            return out
-
         return orig_fn(*args, **kwargs)
 
     return wrapped
@@ -923,7 +938,7 @@ class _PatchedFnSetAttr(_PatchedFn):
 
 class _Patcher:
     def __init__(self):
-        super(_Patcher, self).__init__()
+        super().__init__()
         self.patches_made: List[_PatchedFn] = []
         self.visited: Set[int] = set()
 
@@ -937,7 +952,7 @@ class _Patcher:
         """
         Replace frame_dict[name] with new_fn until we exit the context manager.
         """
-        setattr(new_fn, "__fx_already_patched", deduplicate)  # noqa: B010
+        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
         if name not in frame_dict and hasattr(builtins, name):
             self.patches_made.append(_PatchedFnDel(frame_dict, name, None))
         elif getattr(frame_dict[name], "__fx_already_patched", False):
@@ -947,7 +962,6 @@ class _Patcher:
                 _PatchedFnSetItem(frame_dict, name, frame_dict[name])
             )
         frame_dict[name] = new_fn
-        assert(getattr(frame_dict[name], "__fx_already_patched", False) == deduplicate)
 
     def patch_method(
         self, cls: type, name: str, new_fn: Callable, deduplicate: bool = True
@@ -955,13 +969,12 @@ class _Patcher:
         """
         Replace object_or_dict.name with new_fn until we exit the context manager.
         """
-        setattr(new_fn, "__fx_already_patched", deduplicate)  # noqa: B010
+        new_fn.__fx_already_patched = deduplicate  # type: ignore[attr-defined]
         orig_fn = getattr(cls, name)
         if getattr(orig_fn, "__fx_already_patched", False):
             return  # already patched, no need to do it again
         self.patches_made.append(_PatchedFnSetAttr(cls, name, orig_fn))
         setattr(cls, name, new_fn)
-        assert(getattr(getattr(cls, name), "__fx_already_patched", False) == deduplicate)
 
     def visit_once(self, thing: Any):
         """Return True on the first call to with thing, otherwise false"""
@@ -1102,7 +1115,7 @@ def symbolic_trace(
 
     FX can typically not trace through this due to the presence of control
     flow. However, we can use `concrete_args` to specialize on the value of
-    `b` to trace through this.
+    `b` to trace through this::
 
         f = fx.symbolic_trace(f, concrete_args={'b': False})
         assert f(3, False)  == 6

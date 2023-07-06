@@ -11,7 +11,7 @@ from functools import partial
 from itertools import product, combinations, permutations
 import warnings
 
-from torch._six import inf, nan
+from torch import inf, nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, integral_types, complex_types, floating_types_and,
@@ -80,7 +80,7 @@ def _reduced_shape(shape, dim=None, keepdim=False):
 
     # Wrap negative dims
     dim = dim if isinstance(dim, Sequence) else [dim]
-    dim = set(i if i >= 0 else len(shape) + i for i in dim)
+    dim = {i if i >= 0 else len(shape) + i for i in dim}
 
     result = []
     for i, size in enumerate(shape):
@@ -504,7 +504,6 @@ class TestReductions(TestCase):
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
 
-    @onlyCPU
     @skipIfNoSciPy
     @dtypes(torch.complex64, torch.complex128)
     def test_logcumsumexp_complex(self, device, dtype):
@@ -1435,7 +1434,7 @@ class TestReductions(TestCase):
         vals = [[True, True], [True, False], [False, False], []]
         for val in vals:
             result = torch.prod(torch.tensor(val, device=device), dtype=torch.bool).item()
-            expect = np.prod(np.array(val), dtype=np.bool)
+            expect = np.prod(np.array(val), dtype=bool)
             self.assertEqual(result, expect)
 
             result = torch.prod(torch.tensor(val, device=device)).item()
@@ -1564,6 +1563,14 @@ class TestReductions(TestCase):
             _, sorted_idx = torch.sort(sequence)
             torch.searchsorted(sequence, values_1d, sorter=sorted_idx.to(torch.float32))
 
+        # invalid sorter value, out of bound (>= innermost size)
+        with self.assertRaisesRegex(RuntimeError, "sorter index out of range"):
+            torch.searchsorted(torch.tensor([1, 2, 3]), 2.5, sorter=torch.tensor([0, 1, 3]))
+
+        # invalid sorter value, out of bound (< 0)
+        with self.assertRaisesRegex(RuntimeError, "sorter index out of range"):
+            torch.searchsorted(torch.tensor([1, 2, 3]), 2.5, sorter=torch.tensor([-1, 1, 2]))
+
         # scalar type bfloat16
         if self.device_type == 'cpu':
             def test_dtype_bfloat16(values_bf16=False, boundaries_bf16=False):
@@ -1682,6 +1689,7 @@ class TestReductions(TestCase):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
 
+    @onlyCPU
     @dtypes(*complex_types())
     def test_nansum_complex(self, device, dtype):
         x = torch.randn((3, 3, 3), device=device, dtype=dtype)

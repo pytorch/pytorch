@@ -26,7 +26,7 @@ struct SmallSizeTPairHash {
 bool conv2dIsSupportedJit(const Node* node);
 // Returns true if the TE fuser supports this conv2d with mkldnn prepacked conv.
 bool mkldnnPrepackedConvIsSupportedJit(const Node* node);
-// Returns true if the the _convolution node is Conv2d.
+// Returns true if the TE _convolution node is Conv2d.
 bool isConv2d(const Node* node);
 // Returns true if the TE fuser supports this matmul.
 bool matmulIsSupported(const Node* node);
@@ -103,7 +103,7 @@ class TORCH_API TensorExprKernel {
     BufPtr buf;
     // Only one of ptr and node is used at a time
     // 1) ptr for the constant tensors
-    // 2) node for the constant custom class ojects
+    // 2) node for the constant custom class objects
     void* ptr = nullptr;
     Node* node = nullptr;
   };

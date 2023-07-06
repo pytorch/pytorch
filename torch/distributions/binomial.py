@@ -50,7 +50,7 @@ class Binomial(Distribution):
 
         self._param = self.probs if probs is not None else self.logits
         batch_shape = self._param.size()
-        super(Binomial, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Binomial, _instance)

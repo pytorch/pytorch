@@ -42,7 +42,7 @@ class SparseDropoutWithReplacement(ModelLayer):
             name='sparse_dropout',
             **kwargs):
 
-        super(SparseDropoutWithReplacement, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
         assert schema.equal_schemas(input_record, IdList), "Incorrect input type"
 
         self.dropout_prob_train = float(dropout_prob_train)

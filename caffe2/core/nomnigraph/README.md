@@ -125,7 +125,7 @@ Iterate through nodes in a NNGraph.
 ```cpp
 auto pairs = dataIterator(nn); // A useful paradigm for iterating through nodes and corresponding data in no particular order.
 auto nodeRefs = nodeIterator(nn); // Iterate through nodes in no particular order.
-// See https://github.com/pytorch/pytorch/blob/master/caffe2/opt/mobile.cc#L106-L109
+// See https://github.com/pytorch/pytorch/blob/main/caffe2/opt/mobile.cc#L106-L109
 ```
 
 

@@ -1,20 +1,19 @@
 import collections
 import functools
 import warnings
+from functools import partial
 from typing import Any, Deque, Dict, List, NamedTuple, Set, Tuple
 
 import torch
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
-from torch.distributed.fsdp._utils import (
-    _contains_batchnorm,
-    _override_batchnorm_mixed_precision,
-)
+from torch.distributed.fsdp._utils import _override_module_mixed_precision
+
 from torch.distributed.fsdp.wrap import (
     _FSDPPolicy,
     _or_policy,
     _recursive_wrap,
-    _wrap_batchnorm_individually,
+    _wrap_module_cls_individually,
 )
 
 
@@ -26,10 +25,6 @@ class FullyShardedModuleState(NamedTuple):
 
     params: List[nn.Parameter]
     buffers: List[torch.Tensor]
-    # Parameter and buffer names are prefixed starting from the submodule,
-    # which is not necessarily the root module
-    param_names: List[str]
-    buffer_names: List[str]
 
 
 def _auto_wrap(
@@ -61,10 +56,21 @@ def _auto_wrap(
                 "if using an `auto_wrap_policy`"
             )
     mixed_precision = fsdp_kwargs["mixed_precision"]
-    if mixed_precision is not None and _contains_batchnorm(root_module):
-        _override_batchnorm_mixed_precision(root_module)
+    if mixed_precision is not None:
+        for mp_module_to_override in mixed_precision._module_classes_to_ignore:
+            # Make modules of this particular type run in fp32 by wrapping them in their own
+            # FSDP unit.
+            _override_module_mixed_precision(root_module, mp_module_to_override)
+
         auto_wrap_policy = functools.partial(
-            _or_policy, policies=[_wrap_batchnorm_individually, auto_wrap_policy]
+            _or_policy,
+            policies=[
+                auto_wrap_policy,
+                partial(
+                    _wrap_module_cls_individually,
+                    module_classes=mixed_precision._module_classes_to_ignore,
+                ),
+            ],
         )
         warnings.warn(
             "Both mixed precision and an `auto_wrap_policy` were specified "
@@ -137,9 +143,7 @@ def _get_fully_sharded_module_to_states(
         deque: Deque[Tuple[nn.Module, str]] = collections.deque()
         deque.append((submodule, ""))
         params: List[nn.Parameter] = []
-        param_names: List[str] = []
         buffers: List[torch.Tensor] = []
-        buffer_names: List[str] = []
         while len(deque) > 0:
             module, prefix = deque.popleft()
             # Reverse `named_children()`, use `appendleft()`, and add to the
@@ -149,18 +153,16 @@ def _get_fully_sharded_module_to_states(
             ):
                 if child_module not in wrapped_modules_set:
                     deque.appendleft((child_module, prefix + child_module_name + "."))
-            for param_name, param in module.named_parameters(recurse=False):
+            for param in module.parameters(recurse=False):
                 if param not in visited_params and not _is_fsdp_flattened(param):
                     params.append(param)
                     visited_params.add(param)
-                    param_names.append(prefix + param_name)
-            for buffer_name, buffer in module.named_buffers(recurse=False):
+            for buffer in module.buffers(recurse=False):
                 if buffer not in visited_buffers:
                     buffers.append(buffer)
                     visited_buffers.add(buffer)
-                    buffer_names.append(prefix + buffer_name)
         fully_sharded_module_to_states[submodule] = FullyShardedModuleState(
-            params, buffers, param_names, buffer_names
+            params, buffers
         )
     return fully_sharded_module_to_states
 

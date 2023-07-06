@@ -2,6 +2,7 @@ from ._ops import OpOverload
 from typing import Set
 import traceback
 import torch
+import weakref
 
 __all__ = ['Library', 'impl', 'define']
 
@@ -24,25 +25,34 @@ class Library:
 
     To create a library to override operators in an existing library (with name ns), set the kind to "IMPL".
     To create a new library (with name ns) to register new operators, set the kind to "DEF".
+    To create a fragment of a possibly existing library to register operators (and bypass
+    the limitation that there is only one library for a given namespace), set the kind to
+    "FRAGMENT".
+
     Args:
         ns: library name
-        kind: "DEF", "IMPL" (default: "IMPL")
+        kind: "DEF", "IMPL" (default: "IMPL"), "FRAGMENT"
         dispatch_key: PyTorch dispatch key (default: "")
     """
     def __init__(self, ns, kind, dispatch_key=""):
-        if kind != "IMPL" and kind != "DEF":
+        if kind not in ('IMPL', 'DEF', 'FRAGMENT'):
             raise ValueError("Unsupported kind: ", kind)
 
-        if ns in _reserved_namespaces and kind == "DEF":
+        if ns in _reserved_namespaces and (kind == "DEF" or kind == 'FRAGMENT'):
             raise ValueError(ns, " is a reserved namespace. Please try creating a library with another name.")
 
         frame = traceback.extract_stack(limit=3)[0]
         filename, lineno = frame.filename, frame.lineno
         self.m = torch._C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
         self.ns = ns
-        self._op_impls = set()
+        self._op_impls: Set[str] = set()
         self.kind = kind
         self.dispatch_key = dispatch_key
+        # Use a finalizer to setup the "destructor" instead of __del__.
+        # Python __del__ can lead to weird things (globals and locals may already
+        # be gone when __del__ actually gets called!). finalizers help the
+        # situation because it lets us capture references and keeps them alive
+        weakref.finalize(self, _del_library, _impls, self._op_impls)
 
     def __repr__(self):
         return "Library(kind={}, ns={}, dispatch_key={})>".format(self.kind, self.ns, self.dispatch_key)
@@ -78,11 +88,10 @@ class Library:
                           the dispatch key that the library was created with.
 
         Example::
-            >>> # xdoctest: +SKIP
             >>> my_lib = Library("aten", "IMPL")
             >>> def div_cpu(self, other):
             >>>     return self * (1 / other)
-            >>> my_lib.impl("div.Tensor", "CPU")
+            >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
         '''
         if not callable(fn):
             raise TypeError("Input function is required to be a callable but found type {}".format(type(fn)))
@@ -128,13 +137,9 @@ class Library:
         _impls.add(key)
         self._op_impls.add(key)
 
-    def __del__(self):
-        # _op_impls might not have been initialized if an error was thrown in __init__
-        _op_impls_ = getattr(self, '_op_impls', None)
-        if _op_impls_:
-            for key in self._op_impls:
-                _impls.remove(key)
-            del self.m
+
+def _del_library(captured_impls, op_impls):
+    captured_impls -= op_impls
 
 
 # decorator to register python functions for library ops

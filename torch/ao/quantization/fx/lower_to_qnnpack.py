@@ -1,6 +1,6 @@
 from ._lower_to_native_backend import _lower_to_native_backend
-from .graph_module import QuantizedGraphModule
 from ..qconfig import QConfigAny
+from torch.fx import GraphModule
 from typing import Dict, Tuple
 
 __all__ = [
@@ -8,10 +8,10 @@ __all__ = [
 ]
 
 def lower_to_qnnpack(
-    model: QuantizedGraphModule,
+    model: GraphModule,
     qconfig_map: Dict[str, QConfigAny],
     node_name_to_scope: Dict[str, Tuple[str, type]]
-) -> QuantizedGraphModule:
+) -> GraphModule:
     """ Lower a quantized reference model (with reference quantized operator patterns)
     to qnnpack
     """

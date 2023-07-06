@@ -1,12 +1,12 @@
 #pragma once
 
-#include <stdint.h>
 #include <mutex>
 #include <deque>
 #include <atomic>
 #include <typeinfo>
 #include <utility>
 #include <cstddef>
+#include <cstdint>
 
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
@@ -93,6 +93,13 @@ struct TORCH_API Generator {
   }
 
   void set_current_seed(uint64_t seed) { impl_->set_current_seed(seed); }
+  // Sets the offset of Generator state to the desired offset. This is currently
+  // supported for only Philox based Generators, i.e., CUDA and MPS.
+  void set_offset(uint64_t offset) { impl_->set_offset(offset); }
+
+  // Returns the offset of Generator state. This is currently supported for only
+  // Philox based Generators, i.e., CUDA and MPS.
+  uint64_t get_offset() const { return impl_->get_offset(); }
 
   uint64_t current_seed() const { return impl_->current_seed(); }
 

@@ -15,13 +15,13 @@ namespace jit {
 
 static const auto countsAttribute = Symbol::attr("none_counts");
 
-bool hasGradSumToSizeUses(Value* v) {
+static bool hasGradSumToSizeUses(Value* v) {
   return std::any_of(v->uses().begin(), v->uses().end(), [](const Use& use) {
     return use.user->kind() == aten::_grad_sum_to_size;
   });
 }
 
-void insertProfileNodesForSpecializeAutogradZero(
+static void insertProfileNodesForSpecializeAutogradZero(
     Block* block,
     ProfilingRecord* pr) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
@@ -302,8 +302,8 @@ struct AutogradZeroSpecializer {
     }
 
     // We've created:
-    // succesful_checks = Guards(...)
-    // if (succesful_checks)
+    // successful_checks = Guards(...)
+    // if (successful_checks)
     // -> optimized graph
     // else:
     // -> fallback graph

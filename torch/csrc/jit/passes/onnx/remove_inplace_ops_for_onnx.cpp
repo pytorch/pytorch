@@ -70,7 +70,7 @@ struct InplaceConverter {
     // Map from aliases to root value.
     // A single value can have multiple aliases throughout the graph,
     // created by inplace operators, and preserved through loop carried
-    // input/output. For each such value, its first occurance will be set as
+    // input/output. For each such value, its first occurrence will be set as
     // root value.
     std::unordered_map<Value*, Value*> alias_to_value_;
 
@@ -515,7 +515,7 @@ void InplaceConverter::ValueTracker::recordSetValue(
   // then the update must be reflected back to outside.
   // Thus it needs to be registered as a subblock output.
   // This step can be skipped if other alias of this value has already been
-  // registered as sublock output.
+  // registered as subblock output.
   if (!registered && from_outer_alias) {
     if (owning_block_nkind == prim::Loop) {
       owning_block->registerOutput(new_v);

@@ -62,7 +62,7 @@ struct NewBlahBatchRuleHelper<F, Func, typelist<A, B, T...>> {
       &fn,\
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
-std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_batch_rule(
+static std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim,
     const Tensor& other, optional<int64_t> other_bdim,
     int64_t self_num_batch_dims) {
@@ -103,7 +103,7 @@ std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_batch_rul
   return std::make_tuple(result, 0);
 }
 
-bool _has_same_storage_numel_batch_rule(const Tensor& a, const Tensor& b) {
+static bool _has_same_storage_numel_batch_rule(const Tensor& a, const Tensor& b) {
   return true;
 }
 

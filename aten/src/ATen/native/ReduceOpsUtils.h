@@ -16,7 +16,7 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 // Maximum and minimum possible scalar values, including infinities
 template <typename scalar_t>
@@ -320,9 +320,33 @@ static C10_UNUSED void zero_numel_tensor_resize(Tensor& result, Tensor& result_i
   at::native::resize_output(result_indices, sizes);
 }
 
-} // native
+inline ScalarType get_dtype_from_self(
+    const Tensor& self,
+    const c10::optional<ScalarType>& dtype,
+    bool promote_integers) {
+  if (dtype.has_value()) {
+    return dtype.value();
+  }
+  ScalarType src_type = self.scalar_type();
+  if (promote_integers && at::isIntegralType(src_type, /*includeBool=*/true)) {
+    return kLong;
+  }
+  return src_type;
+}
 
-namespace meta {
+inline ScalarType get_dtype_from_result(Tensor& result, c10::optional<ScalarType> dtype) {
+  TORCH_CHECK(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
+  if (dtype.has_value()) {
+    return dtype.value();
+  } else {
+    return result.scalar_type();
+  }
+}
+
+
+} // namespace at::native
+
+namespace at::meta {
 
 static C10_UNUSED DimVector get_reduction_shape(
     const Tensor& self,
@@ -419,5 +443,4 @@ static C10_UNUSED TensorIterator make_reduction_from_out_ty(
   return make_reduction(self, result, opt_dims, keepdim, in_dtype);
 }
 
-} // namespace meta
-} // namespace at
+} // namespace at::meta

@@ -100,7 +100,7 @@ class MyShardedModel3(torch.nn.Module):
         self,
         spec: ShardingSpec,
     ) -> None:
-        super(MyShardedModel3, self).__init__()
+        super().__init__()
         self.sharded_tensor: ShardedTensor = sharded_tensor.rand(
             spec, 10, 20, init_rrefs=False
         )
@@ -456,7 +456,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 save_dict = {
                     "sharded": sharded_tensor.rand(save_spec, tensor_size),
                     "replicated": torch.rand(
-                        tensor_size, device=f"cpu:{self.rank}"
+                        tensor_size, device="cpu"
                     ),
                 }
 

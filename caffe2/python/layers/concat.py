@@ -65,7 +65,7 @@ class Concat(ModelLayer):
 
     def __init__(self, model, input_record, axis=1, add_axis=0,
                  name='concat', **kwargs):
-        super(Concat, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
         self.axis = axis
         self.add_axis = add_axis
         assert not (axis == 0 and add_axis == 1), \

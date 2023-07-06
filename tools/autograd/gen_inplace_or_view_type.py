@@ -95,6 +95,7 @@ VIEW_FUNCTIONS = {
     # FIXME: clone indices on construction.
     "sparse_coo_tensor_with_dims_and_tensors": "values",
     "_reshape_alias": "self",
+    "_test_autograd_multiple_dispatch_view": "self",
 }
 
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
@@ -221,6 +222,7 @@ ${assign_return_values} ([&]() {
 
 TMP_VAR = "_tmp"
 
+
 # FIXME: Ideally these functions should be methods on Type class, but we have a
 #        comment in codegen/model.py there saying these concepts are not well defined.
 #        Thus we put a version that commonly used by autograd codegen here.
@@ -321,7 +323,8 @@ def emit_view_call(
 
 def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str:
     """Generate an additional lambda function to recover views in backward when as_strided is not supported.
-    See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details."""
+    See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details.
+    """
     input_base = "input_base"
     replay_view_func = ""
     updated_unpacked_args: List[str] = []
@@ -364,7 +367,7 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
             )
             updated_unpacked_args.append(arg_value)
         elif (
-            arg == "nested_size_" or arg == "nested_strides_"
+            arg == "nested_size_" or arg == "nested_strides_" or arg == "offsets_"
         ) and arg_type == ConstRefCType(BaseCType(tensorT)):
             # [NOTE] [Nested Arg Types]
             # This is temporary. Nested tensors will be migrating to use SymInts and

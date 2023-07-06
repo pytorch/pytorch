@@ -4,7 +4,7 @@
 
 **Pruning** is the technique of removing parameters from a model to reduce the computational cost. The goal of pruning is to improve the performance of the model while maintaining it's accuracy.
 
-### Unstrictured vs. Structured Pruning
+### Unstructured vs. Structured Pruning
 One way to do this is to consider each parameter individually. This gives us the greatest granularity when pruning and is called **unstructured pruning**.
 
 For example, consider a simple linear regression model that is parametrized by a weight tensor W.
@@ -47,7 +47,7 @@ By removing a row from U and a column from W, we can avoid a shape mismatch.
 ![](./images/prune_6.png)
 
 
-One benefit of **structured pruning** is that it uses the same dense kernels that the original model uses, and does not rely on custom sparse kerenel like **unstructured pruning**.
+One benefit of **structured pruning** is that it uses the same dense kernels that the original model uses, and does not rely on custom sparse kernel like **unstructured pruning**.
 However, structured pruning degrades accuracy more than unstructured pruning because of the lack of granularity, so it is not always the right choice.
 
 Generally the structured pruning process looks something like this:
@@ -56,7 +56,7 @@ Generally the structured pruning process looks something like this:
 3. Remove rows by resizing the weight matrices of each layer
 4. Stop if target sparsity level is met.
 
-The accuracy degredation of pruning can be quite large initially. Once we are satisfied with our pruned tensor, we usually retrain the model after pruning in order to restore some of this accuracy loss.
+The accuracy degradation of pruning can be quite large initially. Once we are satisfied with our pruned tensor, we usually retrain the model after pruning in order to restore some of this accuracy loss.
 
 ## Quickstart Guide
 
@@ -76,7 +76,7 @@ Structured pruning works by traversing this graph and looking for specific **pat
 
 Each pattern is tied to a pruning function, which is responsible for structured pruning the graph nodes that match the pattern.
 
-The above [example](#weight-resizing) of two linear layers would match agains a `(nn.Linear, nn.Linear)` pattern. This is how we identify the rows to remove and the columns of the subsequent layer.
+The above [example](#weight-resizing) of two linear layers would match against a `(nn.Linear, nn.Linear)` pattern. This is how we identify the rows to remove and the columns of the subsequent layer.
 
 Structured pruning also works on other patterns other than two adjacent Linear layers,
 
@@ -146,7 +146,7 @@ pruner.step()
 # The output of pruner.prune() is a model with resized weights and the masks / parametrizations removed.
 pruned_model = pruner.prune()
 ```
-Afterwards, by printinting the name and size of each parameter in our model, we can see that it has been pruned.
+Afterwards, by printing the name and size of each parameter in our model, we can see that it has been pruned.
 
 ```
 # original model
@@ -228,7 +228,7 @@ If you're working with linear/conv2d layers, it's very probable that you just ne
 This is because there are many modules, for example **pooling** that behave the same way and do not need to be modified by the pruning code.
 
 ```python
-from torch.ao.pruning._experimental.pruner.prune_functions improt prune_conv2d_activation_conv2d
+from torch.ao.pruning._experimental.pruner.prune_functions import prune_conv2d_activation_conv2d
 
 def prune_conv2d_pool_activation_conv2d(
     c1: nn.Conv2d,

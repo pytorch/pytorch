@@ -5,6 +5,7 @@
 #import <torch/csrc/jit/backends/coreml/objc/PTMCoreMLModelWrapper.h>
 #import <torch/csrc/jit/backends/coreml/objc/PTMCoreMLTensorSpec.h>
 #import <torch/script.h>
+#import <fmt/format.h>
 
 #import <CoreML/CoreML.h>
 
@@ -17,7 +18,7 @@
 // This is a utility macro that can be used to throw an exception when a CoreML
 // API function produces a NSError. The exception will contain a message with
 // useful info extracted from the NSError.
-#define COREML_THROW_IF_ERROR(error, preamble)                                   \
+#define COREML_THROW_IF_ERROR(error, preamble, inputShapesStr)                   \
   do {                                                                           \
     if C10_LIKELY(error) {                                                       \
       throw c10::Error(                                                          \
@@ -28,7 +29,8 @@
               " Localized_description: ", error.localizedDescription.UTF8String, \
               " Domain: ", error.domain.UTF8String,                              \
               " Code: ", error.code,                                             \
-              " User Info: ", error.userInfo.description.UTF8String));           \
+              " User Info: ", error.userInfo.description.UTF8String,             \
+              " Input Shapes: ", inputShapesStr));                               \
     }                                                                            \
   } while (false)
 
@@ -45,6 +47,26 @@ struct CoreMLConfig {
   std::string backend = "CPU";
   bool allow_low_precision = true;
 };
+
+std::string tensorListToShapesStr(GenericList tensors) {
+  std::string str("[");
+  for (const auto featureIdx : c10::irange(tensors.size())) {
+    if (featureIdx > 0) {
+      str = fmt::format("{}, ", str);
+    }
+    str = fmt::format("{}[", str);
+    auto shape = tensors.get(featureIdx).toTensor().sizes();
+    for (const auto shapeIdx : c10::irange(shape.size())) {
+      if (shapeIdx > 0) {
+        str = fmt::format("{}, ", str);
+      }
+      str = fmt::format("{}{}", str, shape[shapeIdx]);
+    }
+    str = fmt::format("{}]", str);
+  }
+  str = fmt::format("{}]", str);
+  return str;
+}
 
 bool type_validity(const std::vector<TensorSpec>& specs) {
   for (const TensorSpec& spec : specs) {
@@ -82,12 +104,17 @@ GenericList pack_outputs(const std::vector<TensorSpec>& output_specs, id<MLFeatu
     for (int i = 0; i < val.multiArrayValue.shape.count; ++i) {
       output_shape.emplace_back(val.multiArrayValue.shape[i].integerValue);
     }
-    auto tensor = at::empty(IntArrayRef(output_shape), spec.dtype);
+    TORCH_CHECK(val.multiArrayValue.dataType == MLMultiArrayDataTypeFloat32, "Core ML backend unexpected output data type");
     int64_t count = val.multiArrayValue.count;
-    memcpy(
-      tensor.data_ptr<float>(),
-      (float*)val.multiArrayValue.dataPointer,
-      count * sizeof(float));
+    float* temp = static_cast<float*>(std::malloc(count * sizeof(float)));
+    if (@available(iOS 15.4, *)) {
+      [val.multiArrayValue getBytesWithHandler:^(const void * _Nonnull bytes, NSInteger size) {
+        memcpy(temp, (float *)bytes, count * sizeof(float));
+      }];
+    } else {
+      memcpy(temp, (float *)val.multiArrayValue.dataPointer, count * sizeof(float));
+    }
+    auto tensor = at::from_blob(temp, output_shape, [&](void* ptr) { std::free(ptr); }, TensorOptions().dtype(at::kFloat));
     outputs.push_back(std::move(tensor));
   }
   if(output_specs.size() > 1){
@@ -105,7 +132,7 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
     const c10::Dict<IValue, IValue> model_dict = processed.toGenericDict();
     const std::string& extra = model_dict.at("extra").toStringRef();
     const std::string& model = model_dict.at("model").toStringRef();
-    const std::string& modelID = model_dict.at("hash").toStringRef();
+    const std::string modelID = std::string(model_dict.at("hash").toStringRef());
 
     CoreMLConfig config;
     std::vector<TensorSpec> input_specs;
@@ -161,18 +188,20 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
   }
 
   GenericList execute(IValue handle, GenericList inputs) override {
-    const auto model_wrapper = c10::static_intrusive_pointer_cast<MLModelWrapper>(handle.toCapsule());
+    @autoreleasepool {
+      const auto model_wrapper = c10::static_intrusive_pointer_cast<MLModelWrapper>(handle.toCapsule());
 
-    PTMCoreMLExecutor *executor = model_wrapper->executor;
-    [executor setInputs:inputs];
+      PTMCoreMLExecutor *executor = model_wrapper->executor;
+      [executor setInputs:inputs];
 
-    NSError *error;
-    id<MLFeatureProvider> outputsProvider = [executor forward:&error];
-    if (!outputsProvider) {
-      COREML_THROW_IF_ERROR(error, "Error running CoreML inference");
+      NSError *error;
+      id<MLFeatureProvider> outputsProvider = [executor forward:&error];
+      if (!outputsProvider) {
+        COREML_THROW_IF_ERROR(error, "Error running CoreML inference", tensorListToShapesStr(inputs));
+      }
+
+      return pack_outputs(model_wrapper->outputs, outputsProvider);
     }
-
-    return pack_outputs(model_wrapper->outputs, outputsProvider);
   }
 
   bool is_available() override {

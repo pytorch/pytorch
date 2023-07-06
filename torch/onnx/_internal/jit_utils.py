@@ -1,4 +1,5 @@
 """Utilities for manipulating the torch.Graph object and the torchscript."""
+from __future__ import annotations
 
 # TODO(justinchuby): Move more of the symbolic helper functions here and expose
 # them to the user.
@@ -99,6 +100,10 @@ class GraphContext:
             **kwargs,
         )
 
+    # NOTE: For backward compatibility with the old symbolic functions.
+    # We are probably going to remove this only after the fx exporter is established.
+    at = aten_op
+
     @_beartype.beartype
     def onnxscript_op(
         self,
@@ -135,7 +140,7 @@ class GraphContext:
         """
         # NOTE(titaiwang): This is using class attributes, and it needs to be updated
         # if onnx-script makes any change on these.
-        symbolic_name = f"{onnx_fn.opset.domain}::{onnx_fn.opname}"
+        symbolic_name = f"{onnx_fn.opset.domain}::{onnx_fn.name}"
         opset_version = onnx_fn.opset.version
 
         registration.custom_onnx_symbolic(symbolic_name, opset_version)(onnx_fn)
@@ -169,7 +174,7 @@ def add_op_with_blocks(
 
     Returns:
         A tuple of (output_values, new_contexts, node) where:
-            output_values: ONe or more output value of this operator
+            output_values: One or more output value of this operator
                 (see the `outputs` keyword argument for multi-return nodes).
             new_contexts: A tuple of new graph contexts for each sub-block.
             node: The node representing the operator.
@@ -305,10 +310,8 @@ def _create_node(
 
 @_beartype.beartype
 def _is_onnx_list(value):
-    return (
-        not isinstance(value, torch._six.string_classes)
-        and not isinstance(value, torch.Tensor)
-        and isinstance(value, Iterable)
+    return isinstance(value, Iterable) and not isinstance(
+        value, (str, bytes, torch.Tensor)
     )
 
 

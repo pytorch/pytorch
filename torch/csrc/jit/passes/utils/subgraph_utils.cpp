@@ -227,7 +227,7 @@ void unmergeSubgraph(Node* subgraphNode) {
   subgraphNode->destroy();
 }
 
-void collectNestedUses(
+static void collectNestedUses(
     std::unordered_set<Value*>& closed_over_values,
     std::unordered_set<Value*>& new_values,
     std::unordered_map<Value*, Value*>& externalValuesMap,
@@ -271,7 +271,7 @@ void collectNestedUses(
   }
 }
 
-std::unordered_set<Value*> closedOverValues(
+static std::unordered_set<Value*> closedOverValues(
     Node* toMerge,
     std::unordered_map<Value*, Value*>& externalValuesMap) {
   std::unordered_set<Value*> closed_over_values;
@@ -602,7 +602,7 @@ void unmergeNode(Node* n, Node* subgraphNode) {
   n->destroy();
 }
 
-std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
+static std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
   if (s.size() <= maxlen) {
     return s;
   }
@@ -610,7 +610,7 @@ std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
   // If hash-string plus '_' can fit into maxlen, then truncate the original
   // string correspondingly so that the final string with the hash included fits
   // into maxlen. If that's not possible, at least truncate the original string
-  // to maxlen (and appen the hash to it).
+  // to maxlen (and append the hash to it).
   size_t trunc_len =
       (maxlen > hash_str.size() + 1) ? (maxlen - hash_str.size() - 1) : maxlen;
   std::stringstream truncated;

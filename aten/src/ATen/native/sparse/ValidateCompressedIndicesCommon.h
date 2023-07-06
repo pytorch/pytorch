@@ -4,6 +4,7 @@
 #include <ATen/Utils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/sparse/Macros.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -191,7 +192,7 @@ template <
     template <typename func_t, typename vec_func_t>
     class vec_kernel_t = EmptyVecKernel,
     template <typename scalar_t> class Vec = DummyVec,
-    int64_t static_shape_max_len = 0>
+    size_t static_shape_max_len = 0>
 void _validate_compressed_sparse_indices_kernel(
     const Tensor& cidx,
     const Tensor& idx,
@@ -239,6 +240,29 @@ void _validate_compressed_sparse_indices_kernel(
   // For TensorIterator's output: no void lambdas.
   const auto dummy = at::empty({1}, cidx.options());
 
+  // Catch integer overflow from large dimensions. Otherwise, the
+  // invariant checks may fail with bogus exceptions or succeed with
+  // false-positive results when int64_t typed dimensions are cast to
+  // index dtype that corresponds to smaller interger type such as
+  // int32_t.
+  {
+    AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [cdim, dim, nnz]() {
+      if (cdim_name == CDimName::CRow) {
+        TORCH_CHECK(static_cast<int64_t>(static_cast<index_t>(dim)) == dim,
+                    sizeof(index_t) * 8, "-bit integer overflow in column dimension = ", dim);
+        TORCH_CHECK(static_cast<int64_t>(static_cast<index_t>(cdim)) == cdim,
+                    sizeof(index_t) * 8, "-bit integer overflow in row dimension = ", cdim);
+      } else {
+        TORCH_CHECK(static_cast<int64_t>(static_cast<index_t>(dim)) == dim,
+                    sizeof(index_t) * 8, "-bit integer overflow in row dimension = ", dim);
+        TORCH_CHECK(static_cast<int64_t>(static_cast<index_t>(cdim)) == cdim,
+                    sizeof(index_t) * 8, "-bit integer overflow in column dimension = ", cdim);
+      }
+      TORCH_CHECK(static_cast<int64_t>(static_cast<index_t>(nnz)) == nnz,
+                  sizeof(index_t) * 8, "-bit integer overflow in nnz = ", nnz);
+    });
+  }
+
   // Invariants 5.4 and 5.5
   {
     auto iter = TensorIteratorConfig()
@@ -271,41 +295,9 @@ void _validate_compressed_sparse_indices_kernel(
 
     const auto idx_ndims = idx.dim();
 
-    // We need an owning object with the Tensor class.
-    const auto idx_sizes_and_strides_storage = [&]() -> auto {
-      if constexpr (static_shape_max_len > 0) {
-        using shape_holder_t = std::array<int64_t, static_shape_max_len>;
-        shape_holder_t idx_sizes, idx_strides;
-        std::copy(idx.sizes().begin(), idx.sizes().end(), idx_sizes.begin());
-        std::copy(idx.strides().begin(), idx.strides().end(), idx_strides.begin());
-        return std::make_tuple(idx_sizes, idx_strides);
-      } else {
-        const auto cpu_options = idx.options().dtype(kLong).device(kCPU);
-        Tensor idx_sizes_and_strides_cpu = at::empty({2, idx_ndims}, cpu_options);
-        idx_sizes_and_strides_cpu.select(0, 0).copy_(
-            at::tensor(idx.sizes(), cpu_options));
-        idx_sizes_and_strides_cpu.select(0, 1).copy_(
-            at::tensor(idx.strides(), cpu_options));
-        const Tensor idx_sizes_and_strides =
-            idx_sizes_and_strides_cpu.to(idx.device());
-        const auto idx_sizes = idx_sizes_and_strides.select(0, 0);
-        const auto idx_strides = idx_sizes_and_strides.select(0, 1);
-        return std::make_tuple(idx_sizes, idx_strides);
-      }
-    }();
-
-    const auto idx_sizes_and_strides_ptrs = [&]() -> auto {
-      if constexpr (static_shape_max_len > 0) {
-        return idx_sizes_and_strides_storage;
-      } else {
-        return std::make_tuple(
-            std::get<0>(idx_sizes_and_strides_storage).template data_ptr<int64_t>(),
-            std::get<1>(idx_sizes_and_strides_storage).template data_ptr<int64_t>());
-      }
-    }();
-
-    const auto idx_sizes = std::get<0>(idx_sizes_and_strides_ptrs);
-    const auto idx_strides = std::get<1>(idx_sizes_and_strides_ptrs);
+    const auto idx_geometry_holder = at::sparse::TensorGeometryHolder<static_shape_max_len>(idx);
+    const auto idx_sizes = std::get<0>(*idx_geometry_holder);
+    const auto idx_strides = std::get<1>(*idx_geometry_holder);
 
     auto iter = TensorIteratorConfig()
                     .set_check_mem_overlap(false)
@@ -374,8 +366,8 @@ void validate_compressed_sparse_indices_kernel(
     const int64_t cdim,
     const int64_t dim,
     const int64_t nnz) {
-  constexpr int64_t idx_max_ndims = 8; // up to 7-dim batch.
-  const int64_t idx_ndims = idx.dim();
+  constexpr size_t idx_max_ndims = 8; // up to 7-dim batch.
+  const size_t idx_ndims = static_cast<size_t>(idx.dim());
 
   if (is_crow) {
     if (idx_ndims <= idx_max_ndims) {

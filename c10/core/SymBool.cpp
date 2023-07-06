@@ -10,6 +10,14 @@ SymNode SymBool::toSymNodeImpl() const {
   return SymNode::reclaim_copy(toSymNodeImplUnowned());
 }
 
+SymNode SymBool::wrap_node(const SymNode& base) const {
+  if (is_symbolic()) {
+    return toSymNodeImpl();
+  } else {
+    return base->wrap_bool(as_bool_unchecked());
+  }
+}
+
 static std::array<SymNode, 2> normalize_symbools(
     const SymBool& a_,
     const SymBool& b_) {
@@ -67,6 +75,13 @@ bool SymBool::guard_bool(const char* file, int64_t line) const {
   }
   SymNode a = toSymNodeImpl();
   return a->guard_bool(file, line);
+}
+
+bool SymBool::has_hint() const {
+  if (!is_symbolic()) {
+    return true;
+  }
+  return toSymNodeImpl()->has_hint();
 }
 
 } // namespace c10

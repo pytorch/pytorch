@@ -29,6 +29,7 @@ set(C10_CUDA_SRCS
     CUDAStream.cpp
     impl/CUDAGuardImpl.cpp
     impl/CUDATest.cpp
+    driver_api.cpp
 )
 set(C10_CUDA_HEADERS
     CUDACachingAllocator.h
@@ -55,6 +56,11 @@ endif()
 
 # ---[ Dependency of c10_cuda
 target_link_libraries(c10_cuda PUBLIC c10 torch::cudart)
+
+if(NOT WIN32)
+target_link_libraries(c10_cuda PRIVATE dl)
+target_compile_options(c10_cuda PRIVATE "-DPYTORCH_C10_DRIVER_API_SUPPORTED")
+endif()
 
 target_include_directories(
     c10_cuda PUBLIC

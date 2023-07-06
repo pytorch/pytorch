@@ -20,22 +20,30 @@ Tensor permute_4d(
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_self = convert(input);
 
+  uint32_t out_channels = out_size.data[1u];
+  uint32_t in_channels = in_size.data[1u];
+
+  uint32_t out_c_aligned = api::utils::align_up(out_channels, 4u);
+  uint32_t in_c_aligned = api::utils::align_up(in_channels, 4u);
+
   const struct Block final {
-    uvec3 size; // output texture size
-    uint32_t fill_0; // dummy
-    uvec3 isize; // input texture size
-    uint32_t fill_1; // dummy
-    uvec4 tensor_size; // output tensor size
-    uvec4 itensor_size; // input tensor size
-    uvec4 dims; // output dims
+    ivec3 out_extents;
+    int32_t fill0;
+    ivec3 in_extents;
+    int32_t fill1;
+    uvec4 out_tensor_size;
+    uvec4 in_tensor_size;
+    uvec4 out_ndims;
+    uvec2 ch_info;
   } block{
-      v_output.extents(),
-      0u,
-      v_self.extents(),
-      0u,
+      api::utils::make_ivec3(v_output.extents()),
+      0,
+      api::utils::make_ivec3(v_self.extents()),
+      0,
       out_size,
       in_size,
       out_dims,
+      {out_c_aligned, in_c_aligned},
   };
 
   api::UniformParamsBuffer params(context, block);

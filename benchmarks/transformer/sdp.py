@@ -193,7 +193,7 @@ def assert_close_tensors(tensor_a, tensor_b):
     # First order sanity check. Not a replacement for rigorous tests.
     if tensor_a.is_nested and tensor_b.is_nested:
         for a, b in zip(tensor_a.unbind(), tensor_b.unbind()):
-            assert torch.allclose(a, b, atol=1e-3, rtol=1e-3)
+            assert torch.allclose(a, b, atol=1e-2, rtol=1e-2)
     else:
         assert torch.allclose(tensor_a, tensor_b, atol=1e-3, rtol=1e-3)
 
@@ -339,7 +339,7 @@ def main(save_path: Optional[Path]):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--save_path", type=str, help="Path to save the results")
+    parser.add_argument("--save-path", "--save_path", type=str, help="Path to save the results")
 
     args = parser.parse_args()
     save_path = Path(args.save_path) if args.save_path else None

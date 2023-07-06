@@ -219,13 +219,13 @@ public:
   }
   Vectorized<float> frac() const;
   Vectorized<float> sin() const {
-    return Vectorized<float>(Sleef_sinf8_u10(values));
+    return Vectorized<float>(Sleef_sinf8_u35(values));
   }
   Vectorized<float> sinh() const {
     return Vectorized<float>(Sleef_sinhf8_u10(values));
   }
   Vectorized<float> cos() const {
-    return Vectorized<float>(Sleef_cosf8_u10(values));
+    return Vectorized<float>(Sleef_cosf8_u35(values));
   }
   Vectorized<float> cosh() const {
     return Vectorized<float>(Sleef_coshf8_u10(values));

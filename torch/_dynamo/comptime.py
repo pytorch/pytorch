@@ -5,8 +5,12 @@
 # The goal of the public API is to give users rope, without actually
 # leaking private implementation details of Dynamo.
 
+import builtins
 import dis
 import traceback
+from typing import Optional, Union
+
+import torch
 
 from .exc import unimplemented
 
@@ -56,6 +60,13 @@ class ComptimeVar:
         WARNING: Do NOT mutate the returned tensor.
         """
         return self.__variable.as_proxy().node.meta["example_value"]
+
+    def size(self, dim: Optional[int] = None) -> Union[int, torch.SymInt]:
+        """
+        Returns the size of the tensor (if dim is None) or the size
+        at the dimension dim.  The returned size may be a SymInt.
+        """
+        return self.as_fake().size(dim)
 
     def python_type(self):
         """
@@ -137,6 +148,9 @@ class ComptimeContext:
             self.__tx.output.graph.python_code("self", verbose=verbose).src, file=file
         )
 
+    def parent(self):
+        return ComptimeContext(self.__tx.parent)
+
     def __get_tx(self, stacklevel):
         tx = self.__tx
         for _ in range(stacklevel):
@@ -214,7 +228,7 @@ class ComptimeContext:
         # TODO: improve print format, current guard format is extremely
         # verbose
         print(
-            "\n".join(f"-{str(guard)}" for guard in sorted(self.__tx.output.guards)),
+            "\n".join(f"{repr(guard)}" for guard in sorted(self.__tx.output.guards)),
             file=file,
         )
 
@@ -287,6 +301,30 @@ def print_guards():
     comptime(lambda ctx: ctx.print_guards())
 
 
+def breakpoint():
+    """
+    Like pdb breakpoint(), but drop into pdb whenever this line
+    of code is compiled by dynamo.  Use it by putting
+    this in your model code::
+
+        from torch._dynamo.comptime import comptime
+        comptime.breakpoint()
+
+    And then, inside pdb, you can access 'ctx' to query things
+    about the compilation context::
+
+        (Pdb) !ctx.print_bt()
+        (Pdb) !ctx.print_locals()
+        (Pdb) p ctx.get_local("attention").as_fake()
+    """
+
+    def inner(inner_ctx):
+        ctx = inner_ctx.parent()
+        builtins.breakpoint()
+
+    comptime(inner)
+
+
 def comptime(fn):
     """fn gets called at compile time in TorchDynamo, does nothing otherwise"""
     return
@@ -300,3 +338,4 @@ comptime.print_value_stack_and_return = print_value_stack_and_return
 comptime.print_locals = print_locals
 comptime.print_bt = print_bt
 comptime.print_guards = print_guards
+comptime.breakpoint = breakpoint

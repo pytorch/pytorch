@@ -208,10 +208,10 @@ DEFAULT_DYNAMIC_SPARSE_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
 
 def no_observer_set() -> Set[Any]:
     r"""These modules cannot have observers inserted by default."""
-    no_observers = set([
+    no_observers = {
         nn.quantizable.LSTM,
         nn.quantizable.MultiheadAttention
-    ])
+    }
     return no_observers
 
 def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:

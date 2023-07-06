@@ -133,6 +133,7 @@ ignores = [
 
 ignores = [os.path.join(proj_dir, ignore) for ignore in ignores]
 
+
 # Check if the compiler is hip-clang.
 def is_hip_clang() -> bool:
     try:

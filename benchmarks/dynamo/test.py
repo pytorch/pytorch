@@ -36,7 +36,7 @@ class TestDynamoBenchmark(unittest.TestCase):
                     "--performance",
                     "--only=BERT_pytorch",
                     "-n1",
-                    "--batch_size=1",
+                    "--batch-size=1",
                 ]
             )
             run(TorchBenchmarkRunner(), args, original_dir)

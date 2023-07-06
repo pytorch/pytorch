@@ -85,7 +85,10 @@ class Tensor(torch._C._TensorBase):
         if not self.is_leaf:
             raise RuntimeError(
                 "Only Tensors created explicitly by the user "
-                "(graph leaves) support the deepcopy protocol at the moment"
+                "(graph leaves) support the deepcopy protocol at the moment.  "
+                "If you were attempting to deepcopy a module, this may be because "
+                "of a torch.nn.utils.weight_norm usage, "
+                "see https://github.com/pytorch/pytorch/pull/103001"
             )
         if id(self) in memo:
             return memo[id(self)]
@@ -97,11 +100,10 @@ class Tensor(torch._C._TensorBase):
             # Update the test in test_serialization if you remove 'meta' from here
             if (
                 self.is_sparse
-                or self.device.type
-                in ["lazy", "xla", "mps", "ort", "meta", "hpu", "ipu"]
+                or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "ipu"]
                 or (
                     not torch._C._has_storage(self)
-                    and self.device.type == "privateuseone"
+                    and self.device.type == torch._C._get_privateuse1_backend_name()
                 )
                 or (type(self) is not Tensor and self.data_ptr() == 0)
             ):
@@ -188,7 +190,7 @@ class Tensor(torch._C._TensorBase):
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
-            if not type(self) is Tensor:
+            if type(self) is not Tensor:
                 if type(new_tensor) is not type(self):
                     raise RuntimeError(
                         "Type of deepcopy result does not match the type of the source tensor. "
@@ -256,8 +258,9 @@ class Tensor(torch._C._TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "ort", "hpu"] or (
-            not torch._C._has_storage(self) and self.device.type == "privateuseone"
+        if self.device.type in ["xla", "ort"] or (
+            not torch._C._has_storage(self)
+            and self.device.type == torch._C._get_privateuse1_backend_name()
         ):
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
@@ -329,7 +332,7 @@ class Tensor(torch._C._TensorBase):
             if self.layout == torch.sparse_coo:
                 args_sparse = (
                     self.layout,
-                    (self._indices(), self._values(), self.size()),
+                    (self._indices(), self._values(), self.size(), self.is_coalesced()),
                 )
             else:
                 raise NotImplementedError(
@@ -429,7 +432,7 @@ class Tensor(torch._C._TensorBase):
     def backward(
         self, gradient=None, retain_graph=None, create_graph=False, inputs=None
     ):
-        r"""Computes the gradient of current tensor w.r.t. graph leaves.
+        r"""Computes the gradient of current tensor wrt graph leaves.
 
         The graph is differentiated using the chain rule. If the tensor is
         non-scalar (i.e. its data has more than one element) and requires
@@ -993,7 +996,9 @@ class Tensor(torch._C._TensorBase):
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__contains__, (self,), self, element)
-        if isinstance(element, (torch.Tensor, Number)):
+        if isinstance(
+            element, (torch.Tensor, Number, torch.SymInt, torch.SymFloat, torch.SymBool)
+        ):
             # type hint doesn't understand the __contains__ result array
             return (element == self).any().item()  # type: ignore[union-attr]
 
@@ -1120,7 +1125,7 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.refine_names, (self,), self, *names)
         names = resolve_ellipsis(names, self.names, "refine_names")
-        return super(Tensor, self).refine_names(names)
+        return super().refine_names(names)
 
     def align_to(self, *names):
         r"""Permutes the dimensions of the :attr:`self` tensor to match the order
@@ -1162,8 +1167,8 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.align_to, (self,), self, *names)
         ellipsis_idx = single_ellipsis_index(names, "align_to")
         if ellipsis_idx is None:
-            return super(Tensor, self).align_to(names)
-        return super(Tensor, self).align_to(
+            return super().align_to(names)
+        return super().align_to(
             [name for name in names if not is_ellipsis(name)], ellipsis_idx
         )
 
@@ -1185,9 +1190,9 @@ class Tensor(torch._C._TensorBase):
             isinstance(sizes, (tuple, list)) and isinstance(sizes[0], (tuple, list))
         ):
             names, sizes = unzip_namedshape(sizes)
-            return super(Tensor, self).unflatten(dim, sizes, names)
+            return super().unflatten(dim, sizes, names)
         else:
-            return super(Tensor, self).unflatten(dim, sizes)
+            return super().unflatten(dim, sizes)
 
     def rename_(self, *names, **rename_map):
         """In-place version of :meth:`~Tensor.rename`."""
@@ -1267,9 +1272,9 @@ class Tensor(torch._C._TensorBase):
 
         # See Note [rename_ / rename API]
         if inplace:
-            return super(Tensor, self).rename_(names)
+            return super().rename_(names)
         else:
-            return super(Tensor, self).rename(names)
+            return super().rename(names)
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -1316,6 +1321,8 @@ class Tensor(torch._C._TensorBase):
             this stream before the capsule is created, and since the capsule
             shares its storage with the tensor this make it safe to access from
             both streams.  If None or -1 is passed then no synchronization is performed.
+            If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
+            synchronization.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
@@ -1340,7 +1347,15 @@ class Tensor(torch._C._TensorBase):
             raise TypeError("stream must be ``int`` or ``none``")
         elif stream is not None and stream != -1:
             if self.device.type == "cuda":
-                stream = torch.cuda.ExternalStream(stream)
+                # NB: This logic handles the special case values for default
+                # streams and must be kept in sync with from_dlpack in
+                # torch/utils/dlpack.py
+                if stream == 1 and torch.version.hip is None:
+                    stream = torch.cuda.default_stream()
+                elif stream == 0 and torch.version.hip is not None:
+                    stream = torch.cuda.default_stream()
+                else:
+                    stream = torch.cuda.ExternalStream(stream)
                 # Only synchronize on different streams
                 sync_stream = torch.cuda.current_stream()
                 if stream != sync_stream:
@@ -1363,6 +1378,8 @@ class Tensor(torch._C._TensorBase):
             device_type = DLDeviceType.kDLGPU
         elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
+        elif self.device.type == "xpu":
+            device_type = DLDeviceType.kDLOneAPI
         else:
             raise ValueError(
                 "Unknown device type {} for Dlpack".format(torch_device_type)

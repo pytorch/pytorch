@@ -55,7 +55,10 @@ inline void Diagnose(
   py::object py_message =
       py_rule.attr("format_message")(**py::cast(messageArgs));
 
-  _PyDiagnostics().attr("diagnose")(py_rule, py_level, py_message);
+  // to use the `_a` literal for arguments
+  using namespace pybind11::literals;
+  _PyDiagnostics().attr("diagnose")(
+      py_rule, py_level, py_message, "cpp_stack"_a = true);
 }
 
 } // namespace diagnostics

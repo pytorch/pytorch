@@ -1,5 +1,5 @@
 import torch
-from torch._six import nan
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.uniform import Uniform
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -47,13 +47,13 @@ class Kumaraswamy(TransformedDistribution):
         transforms = [PowerTransform(exponent=self.concentration0.reciprocal()),
                       AffineTransform(loc=1., scale=-1.),
                       PowerTransform(exponent=self.concentration1.reciprocal())]
-        super(Kumaraswamy, self).__init__(base_dist, transforms, validate_args=validate_args)
+        super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Kumaraswamy, _instance)
         new.concentration1 = self.concentration1.expand(batch_shape)
         new.concentration0 = self.concentration0.expand(batch_shape)
-        return super(Kumaraswamy, self).expand(batch_shape, _instance=new)
+        return super().expand(batch_shape, _instance=new)
 
     @property
     def mean(self):

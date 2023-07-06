@@ -535,7 +535,7 @@ class Task(context.Managed):
         self._num_instances = num_instances
 
     def __enter__(self):
-        super(Task, self).__enter__()
+        super().__enter__()
 
         # temporarily remove from _tasks_to_add to ensure correct order
         if self.group is not None:
@@ -548,7 +548,7 @@ class Task(context.Managed):
         return self
 
     def __exit__(self, type, value, traceback):
-        super(Task, self).__exit__(type, value, traceback)
+        super().__exit__(type, value, traceback)
 
         self._net_builder.__exit__(type, value, traceback)
         if type is None:

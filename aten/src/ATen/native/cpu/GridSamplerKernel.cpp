@@ -511,8 +511,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     auto sw = n * e;
     auto se = n * w;
 
-    auto i_x_w = convert_to_int_of_same_size<scalar_t>(x_w);
-    auto i_y_n = convert_to_int_of_same_size<scalar_t>(y_n);
+    auto i_x_w = convert_to_int_of_same_size(x_w);
+    auto i_y_n = convert_to_int_of_same_size(y_n);
     auto i_x_e = i_x_w + iVec(1);
     auto i_y_s = i_y_n + iVec(1);
 

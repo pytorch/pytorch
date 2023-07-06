@@ -2,11 +2,10 @@
 
 import torch
 import torch.distributed as dist
-from torch.distributed._shard.replicated_tensor import ReplicatedTensor
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
-from torch.distributed.nn.functional import all_gather, all_reduce, reduce_scatter
+from torch.distributed.nn.functional import all_gather, reduce_scatter
 
 from ._common import (
     _all_gather_base_input,
@@ -209,11 +208,8 @@ def _handle_col_wise_sharding(
 
     Returns: final result of lookup.
     """
-    if not isinstance(input, ReplicatedTensor):
-        # allgather the inputs first for non Replicated Tensor.
-        gathered_inputs = all_gather(input, group=pg)
-    else:
-        gathered_inputs = input
+    # allgather the inputs first for non Replicated Tensor.
+    gathered_inputs = all_gather(input, group=pg)
 
     if max_norm is not None:
         # max_norm changes the weight in-place
@@ -261,11 +257,8 @@ def _handle_row_wise_sharding(
 
     Returns: final result of lookup.
     """
-    if not isinstance(input, ReplicatedTensor):
-        # allgather the inputs first for non Replicated Tensor.
-        gather_inp = _all_gather_base_input(input, pg)
-    else:
-        gather_inp = input
+    # allgather the inputs first for non Replicated Tensor.
+    gather_inp = _all_gather_base_input(input, pg)
 
     # Mask the input according to sharding spec.
     lookup_input, padding_idx, padding_row = _handle_row_wise_mask(
@@ -293,12 +286,9 @@ def _handle_row_wise_sharding(
     )
 
     # TODO: Make the result a PartialTensor.
-    if isinstance(input, ReplicatedTensor):
-        return all_reduce(local_input_embeddings, group=pg)
-    else:
-        local_shards = local_input_embeddings.chunk(pg.size())
-        return reduce_scatter(
-            torch.empty_like(local_shards[0]),
-            list(local_shards),
-            group=pg,
-        )
+    local_shards = local_input_embeddings.chunk(pg.size())
+    return reduce_scatter(
+        torch.empty_like(local_shards[0]),
+        list(local_shards),
+        group=pg,
+    )

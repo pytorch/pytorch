@@ -9,6 +9,9 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/FbcodeMaps.h>
+#include <c10/util/intrusive_ptr.h>
+#include <c10/util/string_view.h>
 #include <torch/csrc/Export.h>
 
 namespace torch {
@@ -190,9 +193,7 @@ class TORCH_API Pickler {
       const IValue& ivalue,
       const char* list_name,
       const std::function<void(const IValue&)>& item_pusher);
-  void pushGlobal(
-      const std::string& module_name,
-      const std::string& class_name);
+  void pushGlobal(c10::string_view module_name, c10::string_view class_name);
   // raw string data is appended directly to the byte stream
   void pushBytes(const std::string& string);
   void pushTensorData(const at::Tensor& tensor);
@@ -251,7 +252,7 @@ class TORCH_API Pickler {
 
   // Memoization of IValues that have been written (index in table is used for
   // BINPUT opcodes) to enable shared references
-  std::unordered_map<const void*, uint32_t> memoized_ivalue_map_;
+  c10::FastMap<const void*, uint32_t> memoized_ivalue_map_;
 
   // because we de-dup ivalues based on their raw pointer address in the above
   // map we need to keep all the memoized values alive during the pickle.
@@ -271,11 +272,11 @@ class TORCH_API Pickler {
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
   std::vector<at::Tensor> tensor_data_;
-  std::unordered_map<const void*, uint32_t> memoized_storage_map_;
+  c10::FastMap<const void*, uint32_t> memoized_storage_map_;
 
-  std::unordered_map<std::string, uint32_t> memoized_globals_map_;
-  std::unordered_map<std::string, uint32_t> memoized_strings_map_;
-  std::unordered_map<std::string, uint32_t> memoized_devices_map_;
+  c10::FastMap<std::string, uint32_t> memoized_globals_map_;
+  c10::FastMap<std::string, uint32_t> memoized_strings_map_;
+  c10::FastMap<std::string, uint32_t> memoized_devices_map_;
   // when true, List and Dict objects will be wrapped in a
   // torch.jit._pickle.restore_type_tag call to correctly set the dynamic
   // TorchScript type for the object. When true the thing unpickling must have
@@ -296,8 +297,63 @@ uint64_t getStorageKey(const at::Tensor& tensor);
 // otherwise return false
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 
-// Return a map of Tensor Metadata for serialization.
-// For now, it only takes care of `conj` and `neg` bit.
+// Declare BackendMeta serialization and deserialization function pointer types.
+using BackendMetaPtr = std::function<
+    void(const at::Tensor&, std::unordered_map<std::string, bool>&)>;
+
+// A allowlist of device type, currently available is PrivateUse1
+inline std::unordered_set<c10::DeviceType>& GetBackendMetaAllowlist() {
+  static std::unordered_set<c10::DeviceType> DeviceTypeAllowlist{
+      c10::DeviceType::PrivateUse1};
+  return DeviceTypeAllowlist;
+}
+
+// Dynamically obtain serialization function pairs
+// that require the corresponding backend.
+inline std::array<
+    c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
+    at::COMPILE_TIME_MAX_DEVICE_TYPES>&
+GetBackendMetaSerialization() {
+  // The array to save function pointer for BackendMeta serialization.
+  // key is the DeviceType, value is std::pair obj.
+  // value.first represent get function and value.seconde represent set function
+  static std::array<
+      c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
+      at::COMPILE_TIME_MAX_DEVICE_TYPES>
+      BackendMetaSerialization;
+  return BackendMetaSerialization;
+}
+
+// Register function pointer of Tensor BackendMetadata for serialization.
+TORCH_API inline void TensorBackendMetaRegistry(
+    c10::DeviceType t,
+    BackendMetaPtr get_fptr,
+    BackendMetaPtr set_fptr) {
+  // allowlist verification
+  // Only if the devicetype is in the allowlist,
+  // we allow the serialization extension to be registered for backendmeta data.
+  const auto& DeviceTypeAllowlist = GetBackendMetaAllowlist();
+  TORCH_CHECK(
+      DeviceTypeAllowlist.find(t) != DeviceTypeAllowlist.end(),
+      "It is not allowed to register the serialization method ",
+      "of backendMeta data for PrivateUse1. ",
+      "If you have related serialization requirements, ",
+      "please expand the allowlist");
+  // Register function pointer
+  int device_type = static_cast<int>(t);
+  auto& BackendMetaSerialization = GetBackendMetaSerialization();
+  TORCH_CHECK(
+      !BackendMetaSerialization[device_type].has_value(),
+      "The tensor BackendMeta serialization function pointer for ",
+      t,
+      " has been registered.");
+  BackendMetaSerialization[device_type] =
+      c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>(
+          std::make_pair(get_fptr, set_fptr));
+}
+
+// Return a map of Tensor Metadata which including BackendMetaData for
+// serialization. For now, it only takes care of `conj` and `neg` bit.
 inline std::unordered_map<std::string, bool> getTensorMetadata(
     const at::Tensor& t) {
   // We don't support serializing `ZeroTensor` as it is not public
@@ -315,26 +371,44 @@ inline std::unordered_map<std::string, bool> getTensorMetadata(
   if (t.is_neg()) {
     metadata["neg"] = true;
   }
+  // Only add BackendMetaData for custom backend if the function pointer is
+  // registered.
+  int device_type = static_cast<int>(t.device().type());
+  const auto& BackendMetaSerialization = GetBackendMetaSerialization();
+  if (BackendMetaSerialization[device_type].has_value()) {
+    // Pass the tensor and metadata map references as parameters to the custom
+    // serialization function.
+    BackendMetaPtr fptr = BackendMetaSerialization[device_type].value().first;
+    fptr(t, metadata);
+  }
   return metadata;
 }
 
 // set Tensor Metadata based on the map.
-// Refer: getTensorMathdata
+// Refer: getTensorMetadata
 inline void setTensorMetadata(
     const at::Tensor& t,
     std::unordered_map<std::string, bool> metadata) {
-  for (auto& key_value_pair : metadata) {
-    if (key_value_pair.first == "conj") {
-      t._set_conj(true);
-    } else if (key_value_pair.first == "neg") {
-      t._set_neg(true);
-    } else {
-      TORCH_CHECK(
-          false,
-          "Unexpected key `",
-          key_value_pair.first,
-          "` passed to setTensorMetadata.");
-    }
+  auto iter_end = metadata.end();
+  auto iter_temp = metadata.find("conj");
+  if (iter_temp != iter_end) {
+    t._set_conj(true);
+    metadata.erase(iter_temp);
+  }
+  iter_temp = metadata.find("neg");
+  if (iter_temp != iter_end) {
+    t._set_neg(true);
+    metadata.erase(iter_temp);
+  }
+  // Only set BackendMetaData for custom backend if the function pointer is
+  // registered.
+  int device_type = static_cast<int>(t.device().type());
+  const auto& BackendMetaSerialization = GetBackendMetaSerialization();
+  if (BackendMetaSerialization[device_type].has_value()) {
+    // Pass the tensor and metadata map references as parameters to the custom
+    // deserialization function.
+    BackendMetaPtr fptr = BackendMetaSerialization[device_type].value().second;
+    fptr(t, metadata);
   }
 }
 

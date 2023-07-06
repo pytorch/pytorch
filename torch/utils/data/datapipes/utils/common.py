@@ -1,4 +1,5 @@
 import fnmatch
+import functools
 import inspect
 import os
 import warnings
@@ -61,8 +62,6 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     else:
         input_col_size = 1
 
-    fn_name = str(fn)
-
     pos = []
     var_positional = False
     non_default_kw_only = []
@@ -77,6 +76,11 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
                 non_default_kw_only.append(p)
         else:
             continue
+
+    if isinstance(fn, functools.partial):
+        fn_name = getattr(fn.func, "__name__", repr(fn.func))
+    else:
+        fn_name = getattr(fn, "__name__", repr(fn))
 
     if len(non_default_kw_only) > 0:
         raise ValueError(
@@ -321,7 +325,7 @@ class StreamWrapper:
             if isinstance(v, dict):
                 for kk, vv in v.items():
                     cls.close_streams(vv, depth=depth + 1)
-            elif isinstance(v, list) or isinstance(v, tuple):
+            elif isinstance(v, (list, tuple)):
                 for vv in v:
                     cls.close_streams(vv, depth=depth + 1)
 

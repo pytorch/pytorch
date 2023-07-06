@@ -29,6 +29,7 @@ from ._traverse import (
 from .utils import _element_wise_add
 
 
+# TODO: We need to refactor this code.
 def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
     r"""
     Transforms ``state_dict`` by flattening all nested ShardedTensor instances found.
@@ -46,12 +47,13 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
             set_element(new_state_dict, path, value)
             return
         shards = value.local_shards()
+
         if len(shards) == 0:
             return
         if len(shards) != 1:
-            raise ValueError(
-                f"Cannot handle outer tensor with more than 1 shard {path} -- {len(shards)}"
-            )
+            set_element(new_state_dict, path, value)
+            return
+
         outer_shard = shards[0]
 
         inner_st = outer_shard.tensor

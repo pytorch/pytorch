@@ -3,15 +3,12 @@ from __future__ import annotations
 
 import enum
 import typing
-from typing import Dict, Optional, Union
-
-from typing_extensions import Literal
+from typing import Dict, Literal, Optional, Union
 
 import torch
 from torch._C import _onnx as _C_onnx
 from torch.onnx import errors
 from torch.onnx._internal import _beartype
-
 
 if typing.TYPE_CHECKING:
     # Hack to help mypy to recognize torch._C.Value
@@ -188,8 +185,13 @@ class JitScalarType(enum.IntEnum):
             except RuntimeError:
                 return cls._from_name(str(value.type().getElementType()))
 
-        # value must be a non-list torch._C.Value scalar
-        scalar_type = value.type().scalarType()
+        scalar_type = None
+        if value.node().kind() != "prim::Constant" or not isinstance(
+            value.type(), torch._C.NoneType
+        ):
+            # value must be a non-list torch._C.Value scalar
+            scalar_type = value.type().scalarType()
+
         if scalar_type is not None:
             return cls._from_name(scalar_type)
 

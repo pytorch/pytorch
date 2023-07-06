@@ -1,0 +1,33 @@
+name: unstable-periodic
+
+on:
+  schedule:
+    - cron: 45 0,4,8,12,16,20 * * *
+    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
+  push:
+    tags:
+      - ciflow/unstable/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
+  cancel-in-progress: true
+
+jobs:
+  # There must be at least one job here to satisfy GitHub action workflow syntax
+  introduction:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Introduce PyTorch unstable (periodic) workflow
+        run: |
+          echo "PyTorch unstable workflow is used to host experimental or flaky jobs"
+          echo " that needs to be run periodically, but doesn't impact trunk as part"
+          echo " of the stable periodic workflows."
+          echo
+          echo "In addition, a new label called ciflow/unstable can be attached to the"
+          echo " PR to trigger this workflow. That can be done either manually or"
+          echo " automatically using PyTorch auto-label bot."
+          echo
+          echo "Once the jobs are deemed stable enough (% red signal < 5% and TTS < 3h),"
+          echo " they can graduate and move back to periodic."

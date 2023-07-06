@@ -18,7 +18,7 @@ static __device__ void dstrcpy(char* dst, const char* src) {
   *dst = '\0';
 }
 
-__device__ void dsa_add_new_assertion_failure(
+static __device__ void dsa_add_new_assertion_failure(
     DeviceAssertionsData* assertions_data,
     const char* assertion_msg,
     const char* filename,

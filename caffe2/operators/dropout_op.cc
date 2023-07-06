@@ -98,8 +98,8 @@ prevent overfitting during training.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/dropout_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/dropout_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/dropout_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/dropout_op.cc
 
 
 <details>

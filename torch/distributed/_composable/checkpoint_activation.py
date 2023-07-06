@@ -20,8 +20,6 @@ def _no_hook(module: nn.Module):
     checkpoint.state(module).enable_hook = False
     try:
         yield
-    except Exception:
-        raise
     finally:
         checkpoint.state(module).enable_hook = orig_enable_hook
 
@@ -49,7 +47,7 @@ class _ModuleHookCheckpointFunction(torch.autograd.Function):
         return output
 
     @staticmethod
-    def backward(ctx, output_grads: Tuple[Optional[torch.Tensor]]) -> Any:  # type: ignore[override]
+    def backward(ctx, *output_grads: Tuple[Optional[torch.Tensor]]) -> Any:  # type: ignore[override]
         if not torch.autograd._is_checkpoint_valid():
             raise RuntimeError(
                 "Checkpointing is not compatible with .grad() or when an "
@@ -212,6 +210,7 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
         >>> model(torch.zeros(2, 10)).sum().backward()
 
     """
+    torch._C._log_api_usage_once("torch.distributed.checkpoint")
 
     def forward_pre_hook(module: nn.Module, inputs: Tuple[Any, ...]) -> None:
         if checkpoint.state(module).enable_hook:

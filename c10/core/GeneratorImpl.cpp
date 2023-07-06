@@ -8,6 +8,7 @@
 #ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
+#else
 #include <chrono>
 #endif
 
@@ -63,7 +64,7 @@ static uint64_t readURandomLong() {
  * /dev/urandom or the current time. For CUDA, gets random from
  * std::random_device and adds a transformation on it. For Intel SGX
  * platform use sgx_read_rand as reading from /dev/urandom is
- * prohibited on that platfrom.
+ * prohibited on that platform.
  *
  * FIXME: The behavior in this function is from legacy code
  * (THRandom_seed/THCRandom_seed) and is probably not the right thing to do,

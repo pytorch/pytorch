@@ -29,7 +29,7 @@ class TensorRepr(gdb.Command):  # type: ignore[misc, no-any-unimported]
     Usage: torch-tensor-repr EXP
 
     at::Tensor instances do not have a C++ implementation of a repr method: in
-    pytoch, this is done by pure-Python code. As such, torch-tensor-repr
+    pytorch, this is done by pure-Python code. As such, torch-tensor-repr
     internally creates a Python wrapper for the given tensor and call repr()
     on it.
     """

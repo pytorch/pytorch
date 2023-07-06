@@ -574,7 +574,7 @@ Tensor& slow_conv3d_forward_out_cpu(const Tensor& self,
 
   // TODO: hacky way of deciding the groups
   // Assuming the group size is checked in upstream functions
-  const int64_t groups = self.size(1) / weight.size(1);
+  const int64_t groups = weight.size(1) > 0 ? self.size(1) / weight.size(1) : 0;
 
   slow_conv3d_shape_check(
       self,
@@ -688,7 +688,7 @@ Tensor slow_conv3d_forward_cpu(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(const Tensor& grad_output,
+static std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& self,
     const Tensor& weight,
     IntArrayRef kernel_size,

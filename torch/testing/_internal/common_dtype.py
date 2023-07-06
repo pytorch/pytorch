@@ -118,3 +118,10 @@ def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> List[torch.dt
 
 def get_all_qint_dtypes() -> List[torch.dtype]:
     return [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2, torch.quint2x4]
+
+
+float_to_corresponding_complex_type_map = {
+    torch.float16: torch.complex32,
+    torch.float32: torch.complex64,
+    torch.float64: torch.complex128,
+}

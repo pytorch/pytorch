@@ -119,9 +119,9 @@ def evaluate_metrics(test_dataloader, sparse_model_metadata):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--raw_data_file', type=str)
-    parser.add_argument('--processed_data_file', type=str)
-    parser.add_argument('--sparse_model_metadata', type=str)
+    parser.add_argument('--raw-data-file', '--raw_data_file', type=str)
+    parser.add_argument('--processed-data-file', '--processed_data_file', type=str)
+    parser.add_argument('--sparse-model-metadata', '--sparse_model_metadata', type=str)
 
     args = parser.parse_args()
 

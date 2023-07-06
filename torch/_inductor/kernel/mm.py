@@ -1,6 +1,7 @@
 import logging
 
 import torch
+from .. import config as inductor_config
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -8,7 +9,14 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import use_triton_template
-from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_grid, mm_options
+from .mm_common import (
+    addmm_epilogue,
+    int8_mm_configs,
+    mm_args,
+    mm_configs,
+    mm_grid,
+    mm_options,
+)
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -75,6 +83,8 @@ aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out")
 
+aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
+
 
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
     """
@@ -97,29 +107,67 @@ def tuned_mm(mat1, mat2, *, layout=None):
     # options to tune from
     choices = [aten_mm.bind((mat1, mat2), layout)]
     if use_triton_template(layout):
-        for config in mm_configs():
-            choices.append(
-                mm_template.generate(
-                    (mat1, mat2),
-                    layout,
-                    **mm_options(config, k, layout),
-                )
+        for config in mm_configs(m, n, k):
+            mm_template.maybe_append_choice(
+                choices,
+                (mat1, mat2),
+                layout,
+                **mm_options(config, k, layout),
             )
 
-    return autotune_select_algorithm(choices, [mat1, mat2], layout)
+    return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
+
+
+@register_lowering(aten._int_mm)
+def tuned_int_mm(mat1, mat2, *, layout=None):
+    m, n, k, layout, mat1, mat2 = mm_args(
+        mat1, mat2, layout=layout, out_dtype=torch.int32
+    )
+    choices = [aten__int_mm.bind((mat1, mat2), layout)]
+    if use_triton_template(layout, enable_int32=True):
+        # TODO: Re-enable eager mode implementation once cuBLAS is fixed
+        choices = []
+        for config in int8_mm_configs(m, n, k):
+            mm_template.maybe_append_choice(
+                choices,
+                (mat1, mat2),
+                layout,
+                **mm_options(config, k, layout),
+            )
+    return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
 
 
 @register_lowering(aten.addmm)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
+    ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
+
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     if not use_triton_template(layout):
-        choices = [aten_addmm.bind((inp, mat1, mat2), layout, alpha=alpha, beta=beta)]
-        return autotune_select_algorithm(choices, [inp, mat1, mat2], layout)
+        choices = [
+            aten_addmm.bind(
+                (inp, mat1, mat2),
+                layout,
+                ordered_kwargs_for_cpp_kernel,
+                alpha=alpha,
+                beta=beta,
+            )
+        ]
+        return autotune_select_algorithm("addmm", choices, [inp, mat1, mat2], layout)
 
     choices = [
-        aten_addmm.bind((inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta)
+        aten_addmm.bind(
+            (inp_expanded, mat1, mat2),
+            layout,
+            ordered_kwargs_for_cpp_kernel,
+            alpha=alpha,
+            beta=beta,
+        )
     ]
-    if inp_expanded.get_stride()[0] == 0 and inp_expanded.get_device().type == "cuda":
+    if (
+        inp_expanded.get_stride()[0] == 0
+        and inp_expanded.get_device().type == "cuda"
+        and inductor_config.triton.autotune_cublasLt
+    ):
         # unexpand inp to make sure fused addmm from cublasLt is used
         choices.insert(
             0,
@@ -128,15 +176,16 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             ),
         )
 
-    for config in mm_configs():
-        choices.append(
-            mm_template.generate(
-                (inp_expanded, mat1, mat2),
-                layout,
-                **mm_options(config, k, layout),
-                prefix_args=1,
-                epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
-            )
+    for config in mm_configs(m, n, k):
+        mm_template.maybe_append_choice(
+            choices,
+            (inp_expanded, mat1, mat2),
+            layout,
+            **mm_options(config, k, layout),
+            prefix_args=1,
+            epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
         )
 
-    return autotune_select_algorithm(choices, [inp_expanded, mat1, mat2], layout)
+    return autotune_select_algorithm(
+        "addmm", choices, [inp_expanded, mat1, mat2], layout
+    )

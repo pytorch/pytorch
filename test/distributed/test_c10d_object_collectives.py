@@ -15,7 +15,11 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     TEST_SKIPS
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
 if TEST_WITH_DEV_DBG_ASAN:
     print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
@@ -41,7 +45,7 @@ def with_comms(func=None):
 
 class TestObjectCollectives(MultiProcessTestCase):
     def setUp(self):
-        super(TestObjectCollectives, self).setUp()
+        super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
         os.environ["BACKEND"] = BACKEND
         self._spawn_processes()
@@ -117,6 +121,45 @@ class TestObjectCollectives(MultiProcessTestCase):
 
         self.assertEqual(self.rank, output_list[0])
 
+    # Test Object Collectives With Sub Pg
+
+    def setup_sub_pg(self):
+        rank = dist.get_rank()
+        base_rank = rank - (rank % 2)
+        ranks = [base_rank, base_rank + 1]
+        my_pg = dist.new_group(ranks, use_local_synchronization=True)
+        return rank, ranks, my_pg
+
+    @with_comms()
+    def test_subpg_scatter_object(self):
+        rank, ranks, my_pg = self.setup_sub_pg()
+        out_list = [None]
+        dist.scatter_object_list(out_list, ranks, src=ranks[0], group=my_pg)
+        self.assertEqual(rank, out_list[0])
+
+    @with_comms()
+    def test_subpg_all_gather_object(self):
+        rank, ranks, my_pg = self.setup_sub_pg()
+        out_list = [None] * len(ranks)
+        dist.all_gather_object(out_list, rank, group=my_pg)
+        self.assertEqual(ranks, out_list)
+
+    @with_comms()
+    def test_subpg_gather_object(self):
+        rank, ranks, my_pg = self.setup_sub_pg()
+        out_list = [None] * len(ranks) if rank == ranks[0] else None
+        dist.gather_object(rank, out_list, dst=ranks[0], group=my_pg)
+        if rank == ranks[0]:
+            self.assertEqual(ranks, out_list)
+
+    @with_comms()
+    def test_subpg_broadcast_object(self):
+        rank, ranks, my_pg = self.setup_sub_pg()
+        out_list = [None]
+        if rank == ranks[0]:
+            out_list[0] = rank
+        dist.broadcast_object_list(out_list, src=ranks[0], group=my_pg)
+        self.assertEqual(ranks[0], out_list[0])
 
 if __name__ == "__main__":
     run_tests()

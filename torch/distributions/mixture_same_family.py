@@ -24,7 +24,7 @@ class MixtureSameFamily(Distribution):
         >>> comp = D.Normal(torch.randn(5,), torch.rand(5,))
         >>> gmm = MixtureSameFamily(mix, comp)
 
-        >>> # Construct Gaussian Mixture Modle in 2D consisting of 5 equally
+        >>> # Construct Gaussian Mixture Model in 2D consisting of 5 equally
         >>> # weighted bivariate normal distributions
         >>> mix = D.Categorical(torch.ones(5,))
         >>> comp = D.Independent(D.Normal(
@@ -86,9 +86,7 @@ class MixtureSameFamily(Distribution):
 
         event_shape = self._component_distribution.event_shape
         self._event_ndims = len(event_shape)
-        super(MixtureSameFamily, self).__init__(batch_shape=cdbs,
-                                                event_shape=event_shape,
-                                                validate_args=validate_args)
+        super().__init__(batch_shape=cdbs, event_shape=event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         batch_shape = torch.Size(batch_shape)

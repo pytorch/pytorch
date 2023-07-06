@@ -7,7 +7,7 @@
 namespace torch {
 namespace jit {
 
-bool certainlyThrows(Block* block) {
+static bool certainlyThrows(Block* block) {
   for (Node* n : block->nodes()) {
     if (n->kind() == prim::RaiseException) {
       return true;
@@ -16,7 +16,7 @@ bool certainlyThrows(Block* block) {
   return false;
 }
 
-void EliminateExceptions(Block* block) {
+static void EliminateExceptions(Block* block) {
   auto graph = block->owningGraph();
   Value* false_const = graph->insertConstant(IValue(false));
   Value* true_const = graph->insertConstant(IValue(true));

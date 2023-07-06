@@ -85,7 +85,10 @@ class TestContract(TestCase):
 
         model = ToyModel()
 
-        with self.assertRaisesRegex(RuntimeError, "cannot modify FQNs"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Check parameters, Composable distributed API implementations cannot modify FQNs",
+        ):
             wrap_module(model.seq1)
 
     @skipIfTorchDynamo("Dynamo does not yet capture module hooks")

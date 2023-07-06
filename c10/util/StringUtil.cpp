@@ -8,8 +8,12 @@ namespace c10 {
 namespace detail {
 
 std::string StripBasename(const std::string& full_path) {
-  const char kSeparator = '/';
-  size_t pos = full_path.rfind(kSeparator);
+#ifdef _WIN32
+  const std::string separators("/\\");
+#else
+  const std::string separators("/");
+#endif
+  size_t pos = full_path.find_last_of(separators);
   if (pos != std::string::npos) {
     return full_path.substr(pos + 1, std::string::npos);
   } else {
@@ -46,7 +50,7 @@ size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
   if (from.size() >= to.size()) {
     // If the replacement string is not larger than the original, we
     // can do the replacement in-place without allocating new storage.
-    char* s_data = s.data();
+    char* s_data = &s[0];
 
     while ((cur_pos = s.find(from.data(), last_pos, from.size())) !=
            std::string::npos) {

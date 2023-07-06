@@ -113,7 +113,7 @@ std::ostream& operator<<(std::ostream& stream, DeviceType type) {
 //     It's also totally fine for this to be slow, since it happens exactly once
 //     at import time.
 // (2) Atomic is needed during reading:
-//     Whenever a user prints a privatuse1 device name, they need to read this
+//     Whenever a user prints a privateuse1 device name, they need to read this
 //     variable. Although unlikely, we'll data race if someone else is trying to
 //     set this variable at the same time that another thread is print the
 //     device name. We could re-use the same mutex, but reading the atomic will

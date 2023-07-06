@@ -176,9 +176,6 @@ class dual_level(_DecoratorContextManager):
     Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
     for detailed steps on how to use this API.
     """
-    def __init__(self):
-        super().__init__()
-
     def __enter__(self):
         return enter_dual_level()
 

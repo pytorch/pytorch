@@ -17,7 +17,7 @@ OptionalTypePtr OptionalType::create(TypePtr contained) {
 }
 
 TypePtr OptionalType::ofTensor() {
-  static auto value = TypeFactory::create<OptionalType>(TensorType::get());
+  static auto value = OptionalType::create(TensorType::get());
   return value;
 }
 
@@ -135,7 +135,7 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
 
 }
 
-void sortUnion(std::vector<TypePtr>* types) {
+static void sortUnion(std::vector<TypePtr>* types) {
   // We want the elements to be sorted so we can easily compare two
   // UnionType objects for equality in the future. Note that this order
   // is guaranteed to be stable since we've already coalesced any

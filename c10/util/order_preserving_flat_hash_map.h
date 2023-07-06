@@ -864,7 +864,7 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
   }
 
   void swap_adjacent_nodes(EntryPointer before, EntryPointer after) {
-    // sentinel stays consant, so before->prev cannot equal after
+    // sentinel stays constant, so before->prev cannot equal after
     auto before_prev = before->prev;
     auto after_next = after->next;
 
@@ -938,7 +938,7 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
     // We maintain the invariant that:
     // - result.current_entry contains the new value we're inserting
     //   and is in the LinkedList position of to_insert
-    // - to_insert contains the value that reprseents the position of
+    // - to_insert contains the value that represents the position of
     //   result.current_entry
     swap(to_insert, current_entry->value);
     iterator result = {current_entry};

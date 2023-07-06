@@ -9,7 +9,6 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/register_ops_common_utils.h>

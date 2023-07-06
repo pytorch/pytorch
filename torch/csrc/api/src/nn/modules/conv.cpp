@@ -17,7 +17,7 @@
 
 namespace F = torch::nn::functional;
 
-F::PadFuncOptions::mode_t _get_pad_mode_from_conv_padding_mode(
+static F::PadFuncOptions::mode_t _get_pad_mode_from_conv_padding_mode(
     torch::nn::detail::conv_padding_mode_t conv_padding_mode) {
   F::PadFuncOptions::mode_t pad_mode;
   if (c10::get_if<torch::enumtype::kReflect>(&conv_padding_mode)) {
@@ -178,12 +178,10 @@ std::vector<int64_t> ConvTransposeNdImpl<D, Derived>::_output_padding(
     ret = at::IntArrayRef(this->options.output_padding()).vec();
   } else {
     auto k = input.dim() - 2;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (output_size_.value().size() == k + 2) {
+    if (output_size_.value().size() == static_cast<size_t>(k + 2)) {
       output_size_ = output_size_.value().slice(2);
     }
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (output_size_.value().size() != k) {
+    if (output_size_.value().size() != static_cast<size_t>(k)) {
       TORCH_CHECK(
           false,
           "output_size must have ",

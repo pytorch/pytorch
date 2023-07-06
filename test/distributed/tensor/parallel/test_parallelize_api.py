@@ -20,20 +20,9 @@ from torch.distributed.tensor.parallel.style import (
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    MLPModule,
     with_comms,
 )
-
-
-class MLPModule(torch.nn.Module):
-    def __init__(self, device):
-        super(MLPModule, self).__init__()
-        torch.manual_seed(5)
-        self.net1 = torch.nn.Linear(10, 16, device=device)
-        self.relu = torch.nn.ReLU()
-        self.net2 = torch.nn.Linear(16, 12, device=device)
-
-    def forward(self, x):
-        return self.net2(self.relu(self.net1(x)))
 
 
 class TensorParallelAPITests(DTensorTestBase):
@@ -43,7 +32,7 @@ class TensorParallelAPITests(DTensorTestBase):
         return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
 
     @with_comms
-    def test_creat_1d_device_mesh(self):
+    def test_create_1d_device_mesh(self):
         dim_one_size = 2
         mesh_shape = (
             torch.arange(self.world_size)
@@ -58,19 +47,22 @@ class TensorParallelAPITests(DTensorTestBase):
         one_dimention_mesh_shape = mesh_shape[self.rank // dim_one_size, :]
         pg = mesh.get_dim_groups()[1]
         new_mesh = _create_1d_device_mesh(mesh, 1)
-        expected_mesh = DeviceMesh(self.device_type, one_dimention_mesh_shape, [pg])
-        self.assertEqual(new_mesh.mesh, expected_mesh.mesh)
-        self.assertEqual(new_mesh.device_type, expected_mesh.device_type)
+        expected_mesh = one_dimention_mesh_shape
+
+        self.assertEqual(new_mesh.mesh, expected_mesh)
+        self.assertEqual(new_mesh.device_type, self.device_type)
+        self.assertEqual(new_mesh.get_dim_groups(), [pg])
         # When 1D dim is 0.
         one_dimention_mesh_shape = mesh_shape[:, self.rank % dim_one_size]
         pg = mesh.get_dim_groups()[0]
         new_mesh = _create_1d_device_mesh(mesh, 0)
-        expected_mesh = DeviceMesh(self.device_type, one_dimention_mesh_shape, [pg])
-        self.assertEqual(new_mesh.mesh, expected_mesh.mesh)
-        self.assertEqual(new_mesh.device_type, expected_mesh.device_type)
+        expected_mesh = one_dimention_mesh_shape
+        self.assertEqual(new_mesh.mesh, expected_mesh)
+        self.assertEqual(new_mesh.device_type, self.device_type)
+        self.assertEqual(new_mesh.get_dim_groups(), [pg])
 
     @with_comms
-    def test_creat_1d_device_mesh_error(self):
+    def test_create_1d_device_mesh_error(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         with self.assertRaisesRegex(
             AssertionError,
@@ -123,7 +115,9 @@ class TensorParallelAPITests(DTensorTestBase):
         inp = inp.chunk(self.world_size, dim=-1)[self.rank] if rowwise else inp
         dist_output = dist_module(inp)
         dist_output = (
-            dist_output.to_local() if isinstance(dist_output, DTensor) else dist_output
+            dist_output.redistribute(dist_output.device_mesh, [Replicate()]).to_local()
+            if isinstance(dist_output, DTensor)
+            else dist_output
         )
         self.assertEqual(local_output, dist_output)
 
@@ -171,7 +165,14 @@ class TensorParallelAPITests(DTensorTestBase):
         model_tp = parallelize_module(
             model_tp,
             device_mesh,
-            {"net1": ColwiseParallel(), "net2": ColwiseParallel()},
+            {
+                "net1": ColwiseParallel(
+                    make_input_replicate_1d, make_output_replicate_1d
+                ),
+                "net2": ColwiseParallel(
+                    make_input_replicate_1d, make_output_replicate_1d
+                ),
+            },
         )
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
@@ -205,8 +206,12 @@ class TensorParallelAPITests(DTensorTestBase):
             model_tp,
             device_mesh,
             {
-                "dummy_encoder.net1": ColwiseParallel(),
-                "dummy_encoder.net2": ColwiseParallel(),
+                "dummy_encoder.net1": ColwiseParallel(
+                    make_input_replicate_1d, make_output_replicate_1d
+                ),
+                "dummy_encoder.net2": ColwiseParallel(
+                    make_input_replicate_1d, make_output_replicate_1d
+                ),
             },
         )
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
@@ -253,7 +258,7 @@ class TensorParallelAPITests(DTensorTestBase):
     def test_linear_col_wise_parallel(self):
         # test ColwiseParallel
         inp_size = [8, 10]
-        colwise = ColwiseParallel()
+        colwise = ColwiseParallel(make_input_replicate_1d, make_output_replicate_1d)
 
         torch.manual_seed(5)
         model = torch.nn.Linear(10, 16, device=self.device_type)

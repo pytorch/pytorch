@@ -7,6 +7,7 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 from torch.distributed.pipeline.sync.pipeline import _clock_cycles
+from torch.testing._internal.common_utils import run_tests
 
 
 def test_clock_cycles():
@@ -29,3 +30,7 @@ def test_clock_cycles():
         [(3, 0), (2, 1)],
         [(3, 1)],
     ]
+
+
+if __name__ == "__main__":
+    run_tests()

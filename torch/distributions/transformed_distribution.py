@@ -80,7 +80,7 @@ class TransformedDistribution(Distribution):
         cut = len(forward_shape) - event_dim
         batch_shape = forward_shape[:cut]
         event_shape = forward_shape[cut:]
-        super(TransformedDistribution, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(TransformedDistribution, _instance)

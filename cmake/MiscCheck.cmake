@@ -10,58 +10,25 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
-if(NOT INTERN_BUILD_MOBILE)
-  # ---[ Check that our programs run.  This is different from the native CMake
-  # compiler check, which just tests if the program compiles and links.  This is
-  # important because with ASAN you might need to help the compiled library find
-  # some dynamic libraries.
-  cmake_push_check_state(RESET)
-  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
-    list(APPEND CMAKE_REQUIRED_FLAGS "-arch ${CMAKE_HOST_SYSTEM_PROCESSOR}")
-  endif()
-  if(CMAKE_CROSSCOMPILING)
-    CHECK_C_SOURCE_COMPILES("
-    int main() { return 0; }
-    " COMPILER_WORKS)
-  else()
-    CHECK_C_SOURCE_RUNS("
-    int main() { return 0; }
-    " COMPILER_WORKS)
-  endif()
-  if(NOT COMPILER_WORKS)
-    # Force cmake to retest next time around
-    unset(COMPILER_WORKS CACHE)
-    message(FATAL_ERROR
-        "Could not run a simple program built with your compiler. "
-        "If you are trying to use -fsanitize=address, make sure "
-        "libasan is properly installed on your system (you can confirm "
-        "if the problem is this by attempting to build and run a "
-        "small program.)")
-  endif()
-  cmake_pop_check_state()
-endif()
-
 set(CAFFE2_USE_EXCEPTION_PTR 1)
 
 # ---[ Check if we want to turn off deprecated warning due to glog.
-# Note(jiayq): on ubuntu 14.04, the default glog install uses ext/hash_set that
-# is being deprecated. As a result, we will test if this is the environment we
-# are building under. If yes, we will turn off deprecation warning for a
-# cleaner build output.
-cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_FLAGS "-std=c++14")
-CHECK_CXX_SOURCE_COMPILES(
-    "#include <glog/stl_logging.h>
-    int main(int argc, char** argv) {
-      return 0;
-    }" CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING
-    FAIL_REGEX ".*-Wno-deprecated.*")
+if(USE_GLOG)
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_FLAGS "-std=c++14")
+  CHECK_CXX_SOURCE_COMPILES(
+      "#include <glog/stl_logging.h>
+      int main(int argc, char** argv) {
+        return 0;
+      }" CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING
+      FAIL_REGEX ".*-Wno-deprecated.*")
 
-if(NOT CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING AND NOT MSVC)
-  message(STATUS "Turning off deprecation warning due to glog.")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated")
+  if(NOT CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING AND NOT MSVC)
+    message(STATUS "Turning off deprecation warning due to glog.")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated")
+  endif()
+  cmake_pop_check_state()
 endif()
-cmake_pop_check_state()
 
 # ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
 if(NOT INTERN_BUILD_MOBILE)
@@ -148,29 +115,6 @@ if(IOS AND (${IOS_ARCH} MATCHES "armv7*"))
   add_definitions("-mfpu=neon-fp16")
   add_definitions("-arch" ${IOS_ARCH})
   add_definitions("-Wno-deprecated-declarations")
-endif()
-
-# ---[ If we use asan, turn on the flags.
-# TODO: This only works with new style gcc and clang (not the old -faddress-sanitizer).
-# Change if necessary on old platforms.
-if(USE_ASAN)
-  set(CAFFE2_ASAN_COMPILER_FLAGS "-fsanitize=address -fPIE")
-  set(CAFFE2_ASAN_LINKER_FLAGS "-pie")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_ASAN_COMPILER_FLAGS}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_ASAN_COMPILER_FLAGS}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
-endif()
-
-if(USE_TSAN)
-  set(CAFFE2_TSAN_COMPILER_FLAGS "-fsanitize=thread -fPIE")
-  set(CAFFE2_TSAN_LINKER_FLAGS "-pie")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_TSAN_COMPILER_FLAGS}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_TSAN_COMPILER_FLAGS}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
 endif()
 
 # ---[ Create CAFFE2_BUILD_SHARED_LIBS for macros.h.in usage.

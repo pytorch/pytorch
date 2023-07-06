@@ -74,6 +74,7 @@ runs:
 
     - name: Zip usage log for upload
       if: runner.os == 'Windows' && !inputs.use-gha
+      continue-on-error: true
       shell: powershell
       env:
         FILE_SUFFIX: ${{ inputs.file-suffix }}

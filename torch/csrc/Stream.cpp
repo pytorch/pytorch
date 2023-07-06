@@ -17,7 +17,7 @@ static PyObject* THPStream_pynew(
   int64_t device_index = 0;
   int64_t device_type = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  constexpr char* kwlist[] = {
+  constexpr const char* kwlist[] = {
       "stream_id", "device_index", "device_type", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
@@ -40,6 +40,22 @@ static PyObject* THPStream_pynew(
   self->device_index = device_index;
   self->device_type = device_type;
   return (PyObject*)ptr.release();
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPStream_Wrap(const c10::Stream& stream) {
+  HANDLE_TH_ERRORS
+  auto type = (PyTypeObject*)THPStreamClass;
+  THPObjectPtr ptr(type->tp_alloc(type, 0));
+  if (!ptr) {
+    throw python_error();
+  }
+
+  THPStream* self = (THPStream*)ptr.get();
+  self->stream_id = stream.id();
+  self->device_index = stream.device_index();
+  self->device_type = static_cast<int64_t>(stream.device_type());
+  return ptr.release();
   END_HANDLE_TH_ERRORS
 }
 

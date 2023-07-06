@@ -21,41 +21,11 @@ from typing import (
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input
 # the parameters and evaluate the nn.Module using fixed inputs.
-
-
-def _del_nested_attr(obj: nn.Module, names: List[str]) -> None:
-    """
-    Deletes the attribute specified by the given list of names.
-    For example, to delete the attribute obj.conv.weight,
-    use _del_nested_attr(obj, ['conv', 'weight'])
-    """
-    if len(names) == 1:
-        delattr(obj, names[0])
-    else:
-        _del_nested_attr(getattr(obj, names[0]), names[1:])
-
-
-def _set_nested_attr(obj: nn.Module, names: List[str], value: Tensor) -> None:
-    """
-    Set the attribute specified by the given list of names to value.
-    For example, to set the attribute obj.conv.weight,
-    use _del_nested_attr(obj, ['conv', 'weight'], value)
-    """
-    if len(names) == 1:
-        setattr(obj, names[0], value)
-    else:
-        _set_nested_attr(getattr(obj, names[0]), names[1:], value)
-
-
-def _get_nested_attr(obj: nn.Module, names: List[str]) -> Tensor:
-    if len(names) == 1:
-        return getattr(obj, names[0])
-    else:
-        return _get_nested_attr(getattr(obj, names[0]), names[1:])
 
 
 def raise_parameter_tying_error() -> NoReturn:
@@ -71,14 +41,14 @@ def raise_parameter_tying_error() -> NoReturn:
 def create_names_map(
     named_params: Union[Dict[str, Tensor], Iterable[Tuple[str, Tensor]]],
     tied_named_params: Union[Dict[str, Tensor], Iterable[Tuple[str, Tensor]]],
-) -> Dict[str, List[List[str]]]:
+) -> Dict[str, List[str]]:
     """
     named_params is a dictionary of tensors: {'A': A, 'B': B}
     tied_named_params is another dictionary of tensors {'A': A, 'B': B, 'B_tied': B}
     with potentially tied (or 'duplicated') tensors
 
     This function creates a mapping from the names in named_params to the
-    names in tied_named_params: {'A': [['A']], 'B': [['B'], ['B_tied']]}.
+    names in tied_named_params: {'A': ['A'], 'B': ['B', 'B_tied']}.
     """
     named_params = dict(named_params)
     tied_named_params = dict(tied_named_params)
@@ -87,12 +57,12 @@ def create_names_map(
     tied_tensors_dict_keys = set(tied_named_params.keys())
     assert tensors_dict_keys.issubset(tied_tensors_dict_keys)
 
-    tensor_to_mapping: Dict[Tensor, Tuple[str, List[List[str]]]] = {}
+    tensor_to_mapping: Dict[Tensor, Tuple[str, List[str]]] = {}
     for key, tensor in named_params.items():
         tensor_to_mapping[tensor] = (key, [])
     for key, tensor in tied_named_params.items():
         assert tensor in tensor_to_mapping
-        tensor_to_mapping[tensor][1].append(key.split("."))
+        tensor_to_mapping[tensor][1].append(key)
     return dict(tensor_to_mapping.values())
 
 
@@ -100,18 +70,19 @@ def _extract_members(
     mod: nn.Module,
     named_members: Callable[..., Iterable[Tuple[str, Tensor]]],
     subclass: Callable[[Tensor], Tensor],
-) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[List[str]]]]:
+) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[str]]]:
     all_named_members = tuple(named_members(remove_duplicate=False))
     unique_named_members = tuple(named_members(remove_duplicate=True))
     names_map = create_names_map(unique_named_members, all_named_members)
 
     # Remove all the members in the model
     memo = {}
+    accessor = NamedMemberAccessor(mod)
     for name, p in all_named_members:
         if p not in memo:
             memo[p] = subclass(torch.empty_like(p, device="meta"))
         replacement = memo[p]
-        _set_nested_attr(mod, name.split("."), replacement)
+        accessor.set_tensor(name, replacement)
 
     if len(unique_named_members) == 0:
         names, params = (), ()
@@ -122,7 +93,7 @@ def _extract_members(
 
 def extract_weights(
     mod: nn.Module,
-) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[List[str]]]]:
+) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[str]]]:
     """
     This function removes all the Parameters from the model and
     return them as a tuple as well as their original attribute names.
@@ -136,7 +107,7 @@ def extract_weights(
 
 def extract_buffers(
     mod: nn.Module,
-) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[List[str]]]]:
+) -> Tuple[Tuple[Tensor, ...], Tuple[str, ...], Dict[str, List[str]]]:
     return _extract_members(mod, mod.named_buffers, lambda x: x)
 
 
@@ -151,23 +122,23 @@ def load_weights(
     Note that the `params` are regular Tensors (that can have history) and so are left
     as Tensors. This means that mod.parameters() will still be empty after this call.
     """
-    for name, p in zip(names, params):
-        if as_params:
-            p = nn.Parameter(p)
-        _del_nested_attr(mod, name.split("."))
-        _set_nested_attr(mod, name.split("."), p)
+    accessor = NamedMemberAccessor(mod)
+    if as_params:
+        params = [nn.Parameter(p) for p in params]
+    accessor.set_tensors(names, params)
 
 
 def _swap_state(
-    mod: nn.Module, names_map: Dict[str, List[List[str]]], elems: Iterable[Tensor]
+    mod: nn.Module, names_map: Dict[str, List[str]], elems: Iterable[Tensor]
 ) -> List[Tensor]:
     result: List[Tensor] = []
+    accessor = NamedMemberAccessor(mod)
     for (_, attr_names), elem in zip(names_map.items(), elems):
         for i, attr_name in enumerate(attr_names):
             if i == 0:
-                result.append(_get_nested_attr(mod, attr_name))
-            _del_nested_attr(mod, attr_name)
-            _set_nested_attr(mod, attr_name, elem)
+                result.append(accessor.swap_tensor(attr_name, elem))
+            else:
+                accessor.set_tensor(attr_name, elem)
     return result
 
 
@@ -177,8 +148,8 @@ def load_buffers(
     buffers: Sequence[Tensor],
     as_params: bool = False,
 ) -> None:
-    for name, p in zip(names, buffers):
-        _set_nested_attr(mod, name.split("."), p)
+    accessor = NamedMemberAccessor(mod)
+    accessor.set_tensors(names, buffers)
 
 
 def load_state(
@@ -290,10 +261,10 @@ class FunctionalModuleWithBuffers(nn.Module):
         stateless_model: nn.Module,
         param_names: Tuple[str, ...],
         buffer_names: Tuple[str, ...],
-        param_names_map: Dict[str, List[List[str]]],
-        buffer_names_map: Dict[str, List[List[str]]],
+        param_names_map: Dict[str, List[str]],
+        buffer_names_map: Dict[str, List[str]],
     ) -> None:
-        super(FunctionalModuleWithBuffers, self).__init__()
+        super().__init__()
         self.stateless_model = stateless_model
         self.param_names = param_names
         self.buffer_names = buffer_names
@@ -345,9 +316,9 @@ class FunctionalModule(nn.Module):
         self,
         stateless_model: nn.Module,
         param_names: Tuple[str, ...],
-        names_map: Dict[str, List[List[str]]],
+        names_map: Dict[str, List[str]],
     ) -> None:
-        super(FunctionalModule, self).__init__()
+        super().__init__()
         self.stateless_model = stateless_model
         self.param_names = param_names
         self.names_map = names_map
@@ -567,8 +538,7 @@ def combine_state_for_ensemble(
     model0_typ = type(models[0])
     if not all(type(m) == model0_typ for m in models):
         raise RuntimeError(
-            "combine_state_for_ensemble: Expected all models to "
-            "be of the same class."
+            "combine_state_for_ensemble: Expected all models to be of the same class."
         )
     funcs, params, buffers = zip(
         *[make_functional_with_buffers(model) for model in models]

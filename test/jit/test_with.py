@@ -451,7 +451,7 @@ class TestWith(JitTestCase):
             def __init__(self):
                 self.count = 1
 
-            def __enter__(self, incr: int):
+            def __enter__(self, incr: int):  # noqa: PLE0302
                 self.count += incr
 
             def __exit__(self, type: Any, value: Any, tb: Any):
@@ -469,7 +469,7 @@ class TestWith(JitTestCase):
             def __enter__(self):
                 self.count += 1
 
-            def __exit__(self, type: Any, value: Any):
+            def __exit__(self, type: Any, value: Any):  # noqa: PLE0302
                 pass
 
         @torch.jit.script
@@ -581,9 +581,6 @@ class TestWith(JitTestCase):
         # Check that @torch.jit.ignored functions respect no_grad when it is
         # called in JIT mode.
         class NoGradModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             @torch.jit.ignore
             def adder(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 w = x + y

@@ -37,8 +37,13 @@ Only the latter is supported with function transforms:
   (by calling ``ctx.save_for_backward(*tensors)``), or save non-Tensors
   (by assigning them to the ``ctx`` object).
 
-Any intermediates that need to be saved must be returned as an output from
-:meth:`~Function.forward`.
+Because :meth:`~Function.setup_context` accepts only ``inputs`` and ``output``,
+the only quantities that can be saved are either objects (such as Tensors) in
+the inputs or outputs or quantities (like ``Tensor.shape``) derived from them.
+If you wish to save a non-input intermediate activation from
+:meth:`Function.forward` for backward, then you'll need to return it as an
+output from :meth:`~Function.forward` so that it gets passed to
+:meth:`~Function.setup_context`.
 
 Depending on the transform,
 

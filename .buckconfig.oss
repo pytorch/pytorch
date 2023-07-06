@@ -14,6 +14,7 @@
 
 [cxx]
   cxxflags = -std=c++17
+  ldflags = -Wl,--no-undefined
   should_remap_host_platform = true
   cpp = /usr/bin/clang
   cc = /usr/bin/clang

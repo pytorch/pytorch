@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
@@ -232,7 +231,7 @@ bool equal_quantized_cpu(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.device().type() == kCPU && other.device().type() == kCPU,
       "quantized_equal is implemented only for the QuantizedCPU backend");
-  if (!other.is_quantized()) {
+  if (!self.is_quantized() || !other.is_quantized()) {
     return false;
   }
 
@@ -286,7 +285,7 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
   return std::make_tuple(q_params.scale, q_params.zero_point);
 }
 
-float calculate_quant_loss(
+static float calculate_quant_loss(
     const float* input,
     int numel,
     float xmin,

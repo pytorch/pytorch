@@ -1,10 +1,34 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
 
-
+from torch.ao.pruning import BaseSparsifier
 import torch
 import torch.nn.functional as F
 from torch import nn
+
+class ImplementedSparsifier(BaseSparsifier):
+    def __init__(self, **kwargs):
+        super().__init__(defaults=kwargs)
+
+    def update_mask(self, module, **kwargs):
+        module.parametrizations.weight[0].mask[0] = 0
+        linear_state = self.state['linear1.weight']
+        linear_state['step_count'] = linear_state.get('step_count', 0) + 1
+
+
+class MockSparseLinear(nn.Linear):
+    """
+    This class is a MockSparseLinear class to check convert functionality.
+    It is the same as a normal Linear layer, except with a different type, as
+    well as an additional from_dense method.
+    """
+    @classmethod
+    def from_dense(cls, mod):
+        """
+        """
+        linear = cls(mod.in_features,
+                     mod.out_features)
+        return linear
 
 
 def rows_are_subset(subset_tensor, superset_tensor) -> bool:
@@ -34,8 +58,8 @@ class SimpleLinear(nn.Module):
             nn.Linear(5, 6, bias=False),
             nn.Linear(6, 4, bias=False),
         )
-        self.linear1 = nn.Linear(4, 3, bias=False)
-        self.linear2 = nn.Linear(3, 10, bias=False)
+        self.linear1 = nn.Linear(4, 4, bias=False)
+        self.linear2 = nn.Linear(4, 10, bias=False)
 
     def forward(self, x):
         x = self.seq(x)

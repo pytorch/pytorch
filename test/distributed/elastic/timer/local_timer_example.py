@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     IS_WINDOWS,
     IS_MACOS,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
     TestCase
 )
 
@@ -55,7 +55,7 @@ if not (IS_WINDOWS or IS_MACOS):
         unittest. As of now this will SIGSEGV.
         """
 
-        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
+        @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
         def test_torch_mp_example(self):
             # in practice set the max_interval to a larger value (e.g. 60 seconds)
             mp_queue = mp.get_context("spawn").Queue()
@@ -80,11 +80,11 @@ if not (IS_WINDOWS or IS_MACOS):
 
             server.stop()
 
-        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
+        @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
         def test_example_start_method_spawn(self):
             self._run_example_with(start_method="spawn")
 
-        # @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
+        # @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test is asan incompatible")
         # def test_example_start_method_forkserver(self):
         #     self._run_example_with(start_method="forkserver")
 

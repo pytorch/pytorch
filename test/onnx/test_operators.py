@@ -880,7 +880,7 @@ class TestOperators(common_utils.TestCase):
     #    def test_c2_op(self):
     #        class MyModel(torch.nn.Module):
     #            def __init__(self):
-    #                super(MyModel, self).__init__()
+    #                super().__init__()
     #
     #            def forward(self, scores, bbox_deltas, im_info, anchors):
     #                a, b = torch.ops._caffe2.GenerateProposals(

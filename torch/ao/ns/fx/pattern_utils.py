@@ -97,7 +97,7 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
             results.append((new_pattern, default_base_op_idx))  # type: ignore[arg-type]
 
 
-    # After this point, results countains values such as
+    # After this point, results contains values such as
     # [..., ((torch.nn.Relu, torch.nn.Conv2d), 0), ...]
 
     # Patterns for matching fp16 emulation are not specified in the quantization

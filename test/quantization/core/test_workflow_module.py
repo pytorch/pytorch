@@ -909,7 +909,7 @@ class TestDistributed(QuantizationTestCase):
             # create conv-bn
             class Model(nn.Module):
                 def __init__(self):
-                    super(Model, self).__init__()
+                    super().__init__()
                     self.conv = nn.Conv2d(4, 1, 3, padding=1)
                     self.bn = nn.BatchNorm2d(1)
 
@@ -958,7 +958,7 @@ class TestDistributed(QuantizationTestCase):
         class Model(nn.Module):
 
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(1, 1, 1)
                 self.bn = nn.BatchNorm2d(1)
                 self.relu = nn.ReLU()
@@ -1189,7 +1189,7 @@ class TestFusedObsFakeQuantModule(TestCase):
     def test_embedding_bag_qat_config(self):
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.emb1 = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
                                                   include_last_offset=True, scale_grad_by_freq=False, mode='sum')
                 self.emb2 = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
@@ -1269,7 +1269,7 @@ class TestFusedObsFakeQuantModule(TestCase):
     def test_default_fused_qat_config(self):
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(2, 2)
                 self.relu = nn.ReLU()
 

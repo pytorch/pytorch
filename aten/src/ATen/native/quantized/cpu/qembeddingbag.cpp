@@ -253,7 +253,7 @@ at::Tensor& embedding_bag_nbit_impl(
     } else {
       shape_arr[0] = output_size;
       shape_arr[1] = D;
-      shape = c10::IntArrayRef(shape_arr.data(), 2);
+      shape = c10::IntArrayRef(&shape_arr[0], 2);
     }
     at::native::resize_(output, shape, c10::nullopt);
   }
@@ -423,7 +423,7 @@ at::Tensor& embedding_bag_byte_impl(
     } else {
       shape_arr[0] = output_size;
       shape_arr[1] = D;
-      shape = c10::IntArrayRef(shape_arr.data(), 2);
+      shape = c10::IntArrayRef(&shape_arr[0], 2);
     }
     at::native::resize_(output, shape, c10::nullopt);
   }
@@ -837,7 +837,7 @@ Tensor& embedding_bag_4bit_rowwise_offsets_out(
       false);
 }
 
-Tensor& embedding_bag_2bit_rowwise_offsets_out(
+static Tensor& embedding_bag_2bit_rowwise_offsets_out(
     Tensor& output,
     const Tensor& weight,
     const Tensor& indices,

@@ -44,7 +44,7 @@ class Geometric(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = probs_or_logits.size()
-        super(Geometric, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
         if self._validate_args and probs is not None:
             # Add an extra check beyond unit_interval
             value = self.probs

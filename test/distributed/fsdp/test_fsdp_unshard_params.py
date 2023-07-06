@@ -372,6 +372,18 @@ class TestUnshardParams(TestUnshardParamsBase):
         # Hard code the numel values based on the model
         unsharded_inner_numel = 5 * 5
         unsharded_outer_numel = 5 * 3
+        if use_orig_params:
+            # Account for unsharded padding: since each `FlatParameter` only
+            # has one original parameter, we only need to pad for divisibility
+            # by world size and not address alignment
+            if unsharded_inner_numel % self.world_size:
+                unsharded_inner_numel += self.world_size - (
+                    unsharded_inner_numel % self.world_size
+                )
+            if unsharded_outer_numel % self.world_size:
+                unsharded_outer_numel += self.world_size - (
+                    unsharded_outer_numel % self.world_size
+                )
         # Round up the sharded numel to account for padding
         sharded_inner_numel = int(math.ceil(unsharded_inner_numel / self.world_size))
         sharded_outer_numel = int(math.ceil(unsharded_outer_numel / self.world_size))
@@ -510,7 +522,7 @@ class TestUnshardParams(TestUnshardParamsBase):
 
         def _get_error_context(is_supported: bool):
             return (
-                contextlib.suppress()
+                contextlib.nullcontext()
                 if is_supported
                 else self.assertRaises(NotImplementedError)
             )  # some configs are not implemented yet

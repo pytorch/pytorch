@@ -1,283 +1,20 @@
-import dataclasses
 import functools
 import itertools
 import logging
 import math
-import operator
 from typing import Dict, Iterable, Union
 
 import sympy
 
 import torch
-from .ir import FloorDiv, InterpreterShim, LoopBody, ModularIndexing
-from .utils import sympy_subs
+from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
+from .ir import InterpreterShim, LoopBody
+from .utils import sympy_subs, sympy_symbol
 from .virtualized import V
 
 log = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass(frozen=True)
-class ValueRanges:
-    lower: Union[sympy.Expr, sympy.Number, int, float, bool]
-    upper: Union[sympy.Expr, sympy.Number, int, float, bool]
-
-    def __contains__(self, x):
-        # TODO This needs to be generalised if lower/upper are sympy.Expr
-        assert not isinstance(x, sympy.Expr)
-        return self.lower <= x <= self.upper
-
-    @classmethod
-    def wrap(cls, arg):
-        if isinstance(arg, ValueRanges):
-            return arg
-        assert isinstance(arg, (int, float, bool))
-        return ValueRanges(arg, arg)
-
-    @classmethod
-    def increasing_map(cls, x, fn):
-        """map lower and upper bound with fn"""
-        x = cls.wrap(x)
-        return ValueRanges(fn(x.lower), fn(x.upper))
-
-    @classmethod
-    def decreasing_map(cls, x, fn):
-        """map lower bound to upper bound and upper bound to lower bound"""
-        x = cls.wrap(x)
-        return ValueRanges(fn(x.upper), fn(x.lower))
-
-    @classmethod
-    def monotone_map(cls, x, fn):
-        """check the max and min of computed upper and lower bound for the output"""
-        x = cls.wrap(x)
-        l = fn(x.lower)
-        u = fn(x.upper)
-        return ValueRanges(min(l, u), max(l, u))
-
-    @classmethod
-    def convex_min_zero_map(cls, x, fn):
-        """the max is at one of the ends"""
-        x = ValueRanges.wrap(x)
-        if 0 in x:
-            return ValueRanges(0, max(fn(x.lower), fn(x.upper)))
-        else:
-            return cls.monotone_map(x, fn)
-
-    @classmethod
-    def coordinatewise_increasing_map(cls, x, y, fn):
-        """map upper and lower bounds accessing corresponding values of inputs"""
-        x, y = cls.wrap(x), cls.wrap(y)
-        return ValueRanges(
-            fn(x.lower, y.lower),
-            fn(x.upper, y.upper),
-        )
-
-    @classmethod
-    def coordinatewise_monotone_map(cls, x, y, fn):
-        """compute the product of all lower and upper bounds and take min and max"""
-        x, y = cls.wrap(x), cls.wrap(y)
-        products = [
-            fn(a, b)
-            for a, b in itertools.product([x.lower, x.upper], [y.lower, y.upper])
-        ]
-        return ValueRanges(min(products), max(products))
-
-
-class ValueRangeAnalysis:
-    def __init__(self):
-        self.name = "ValueRangeAnalysis"
-        boolean_operators = (
-            "eq",
-            "ne",
-            "lt",
-            "gt",
-            "le",
-            "ge",
-            "and_",
-            "or_",
-            "xor",
-            "logical_and",
-            "logical_or",
-            "logical_not",
-        )
-        for op in boolean_operators:
-            setattr(self, op, self.bool_handler)
-
-    @staticmethod
-    def bool_handler(*args, **kwargs):
-        # just assuming bools can have both values
-        return ValueRanges(sympy.false, sympy.true)
-
-    @staticmethod
-    def default_handler(*args, **kwargs):
-        # many ops are unlikely to show up in optimizable indexing compute,
-        # so we dont have full coverage
-        return ValueRanges(-math.inf, math.inf)
-
-    def load(self, name: str, index: sympy.Expr):
-        return ValueRanges(-math.inf, math.inf)
-
-    def store(self, name, index, value, mode=None):
-        return
-
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        return ValueRanges(-math.inf, math.inf)
-
-    def index_expr(self, index, dtype):
-        assert isinstance(index, ValueRanges)
-        return index
-
-    @staticmethod
-    def to_dtype(x, dtype: torch.dtype):
-        def is_bool(val):
-            return isinstance(val, bool) or (
-                hasattr(val, "is_Boolean") and val.is_Boolean
-            )
-
-        x = ValueRanges.wrap(x)
-        low, up = x.lower, x.upper
-        if is_bool(low):
-            assert is_bool(up)
-            if dtype.is_floating_point:
-                return ValueRanges(sympy.Float(0.0), sympy.Float(1.0))
-            else:
-                return ValueRanges(sympy.Integer(0), sympy.Integer(1))
-        return ValueRanges.wrap(x)
-
-    @staticmethod
-    def constant(value, dtype):
-        # using nan makes subsequent computation throw, and for the purposes of optimization
-        # returning -math.inf - math.inf is equivalent to giving up
-        if math.isnan(value):
-            return ValueRanges(-math.inf, math.inf)
-        if isinstance(value, int):
-            return ValueRanges(sympy.Integer(value), sympy.Integer(value))
-        else:
-            return ValueRanges(sympy.Float(value), sympy.Float(value))
-
-    @staticmethod
-    def reciprocal(x):
-        x = ValueRanges.wrap(x)
-        if 0 in x:
-            return ValueRanges(-math.inf, math.inf)
-        else:
-            return ValueRanges.decreasing_map(x, lambda y: 1 / y)
-
-    @staticmethod
-    def square(x):
-        return ValueRanges.convex_min_zero_map(x, lambda y: y * y)
-
-    @staticmethod
-    def abs(x):
-        return ValueRanges.convex_min_zero_map(x, abs)
-
-    @staticmethod
-    def neg(x):
-        return ValueRanges.decreasing_map(x, operator.neg)
-
-    @staticmethod
-    def truediv(a, b):
-        b = ValueRanges.wrap(b)
-        if 0 in b:
-            return ValueRanges(-math.inf, math.inf)
-        else:
-            return ValueRangeAnalysis.mul(a, ValueRanges(1 / b.upper, 1 / b.lower))
-
-    @staticmethod
-    def div(a, b):
-        # We think of this as floor(a / b)
-        out = ValueRangeAnalysis.truediv(a, b)
-        return ValueRangeAnalysis.floor(out)
-
-    @staticmethod
-    def add(a, b):
-        return ValueRanges.coordinatewise_increasing_map(a, b, operator.add)
-
-    @staticmethod
-    def mul(a, b):
-        return ValueRanges.coordinatewise_monotone_map(a, b, operator.mul)
-
-    @staticmethod
-    def sub(a, b):
-        b = ValueRanges.wrap(b)
-        return ValueRangeAnalysis.add(a, ValueRanges(-b.upper, -b.lower))
-
-    @staticmethod
-    def exp(x):
-        return ValueRanges.increasing_map(x, sympy.functions.elementary.exponential.exp)
-
-    @staticmethod
-    def log(x):
-        return ValueRanges.increasing_map(
-            x, lambda y: -math.inf if y <= 0 else sympy.log(y)
-        )
-
-    @staticmethod
-    def sqrt(x):
-        return ValueRanges.increasing_map(x, sympy.sqrt)
-
-    @staticmethod
-    def pow(a, b):
-        def is_integer(val):
-            return (
-                isinstance(val, int)
-                or (isinstance(val, float) and val == int(val))
-                or (hasattr(val, "is_integer") and val.is_integer)
-            )
-
-        a = ValueRanges.wrap(a)
-        b = ValueRanges.wrap(b)
-        if a.lower < 0 and not is_integer(b.lower):
-            # The function is not defined
-            return ValueRanges(-math.inf, math.inf)
-        elif 0 in a and b.lower <= 0:
-            return ValueRanges(-math.inf, math.inf)
-        return ValueRanges.coordinatewise_monotone_map(a, b, operator.pow)
-
-    @staticmethod
-    def minimum(a, b):
-        return ValueRanges.coordinatewise_increasing_map(a, b, min)
-
-    @staticmethod
-    def maximum(a, b):
-        return ValueRanges.coordinatewise_increasing_map(a, b, max)
-
-    @staticmethod
-    def where(a, b, c):
-        b = ValueRanges.wrap(b)
-        c = ValueRanges.wrap(c)
-        return ValueRanges(min(b.lower, c.lower), max(b.upper, c.upper))
-
-    @staticmethod
-    def floor(x):
-        return ValueRangeAnalysis.floor_ceil(
-            x, sympy.functions.elementary.integers.floor
-        )
-
-    @staticmethod
-    def ceil(x):
-        return ValueRangeAnalysis.floor_ceil(
-            x, sympy.functions.elementary.integers.ceiling
-        )
-
-    @staticmethod
-    def floor_ceil(x, fn_int):
-        def is_integer(val):
-            return isinstance(val, int) or (
-                hasattr(val, "is_integer") and val.is_integer
-            )
-
-        if is_integer(x):
-            fn = fn_int
-        else:
-
-            def fn(x):
-                return sympy.Float(fn_int(x))
-
-        return ValueRanges.increasing_map(x, fn)
-
-    def __getattr__(self, name):
-        log.warning(f"unhandled ValueRange op {name}")
-        return self.default_handler
 
 
 def dominated_nodes(
@@ -329,6 +66,89 @@ def range_expressable_in_32_bits(range):
     )
 
 
+def get_expr_range(expr, vars_ranges: dict):
+    fs = list(expr.free_symbols)
+    if len(fs) == 0:
+        return ValueRanges(expr, expr)
+
+    vars_ranges = vars_ranges.copy()
+
+    def replace_symbols_for_deriv(expr):
+        cnt = itertools.count()
+
+        # for the purposes of finding local, minimum, maximum, assume smoothness
+        def mod_indexing_rep(x, y, z):
+            if z.is_constant():
+                new_var = sympy_symbol("mod_index" + f"{next(cnt)}")
+                # TODO: check if x / y has a range <= z and return x / y.
+                if z > 0:
+                    vars_ranges[new_var] = ValueRanges(0, z - 1)
+                else:
+                    vars_ranges[new_var] = ValueRanges(z + 1, 0)
+                fs.append(new_var)
+                return new_var
+
+            # never really happens, we'll bail on optimizing
+            return (x / y) % z
+
+        def indexing_div_rep(x, y):
+            return x / y
+
+        return expr.replace(ModularIndexing, mod_indexing_rep).replace(
+            FloorDiv, indexing_div_rep
+        )
+
+    monotonic_increasing = []
+    monotonic_decreasing = []
+    other_symbols = []
+
+    expr_for_deriv = replace_symbols_for_deriv(expr)
+    for symbol in fs:
+        diff = sympy.diff(expr_for_deriv, symbol)
+        if diff.is_positive:
+            monotonic_increasing.append(symbol)
+        elif diff.is_positive is False:  # can return None
+            monotonic_decreasing.append(symbol)
+        else:
+            # If diff_free_symbols only one symbol and it is the same as symbol,
+            # If this symbol's lower and upper bounds are the same, then it is constant.
+            # Add it to monotonic_increasing or monotonic_decreasing is ok.
+            diff_free_symbols = list(diff.free_symbols)
+            if (
+                len(diff_free_symbols) == 1
+                and symbol in diff_free_symbols
+                and symbol in vars_ranges
+                and vars_ranges[symbol].lower == vars_ranges[symbol].upper
+            ):
+                monotonic_increasing.append(symbol)
+            else:
+                other_symbols.append(symbol)
+
+    if not other_symbols:
+        max_val = sympy_subs(
+            expr_for_deriv,
+            {
+                k: (v.upper if k in monotonic_increasing else v.lower)
+                for k, v in vars_ranges.items()
+            },
+        )
+        min_val = sympy_subs(
+            expr_for_deriv,
+            {
+                k: (v.lower if k in monotonic_increasing else v.upper)
+                for k, v in vars_ranges.items()
+            },
+        )
+        if free_symbols(min_val):
+            min_val = -math.inf
+        if free_symbols(max_val):
+            max_val = math.inf
+        return ValueRanges(min_val, max_val)
+    else:
+        # bail on optimizing, have not run into this yet
+        return ValueRanges(-math.inf, math.inf)
+
+
 class OptimizeIndexing:
     """
     Performs Value Range Analysis on LoopBody's fx graph to reduce precision of
@@ -359,6 +179,8 @@ class OptimizeIndexing:
         ]
 
         for k, v in indices_ranges.items():
+            if free_symbols(v):
+                v = math.inf
             self.replace_indirect(k, ValueRanges(0, v))
 
         # avoid computing these values, pessimistically assume that they are unbounded
@@ -454,8 +276,7 @@ class OptimizeIndexing:
     @property
     def all_nodes(self):
         for graph in self.all_graphs:
-            for node in graph.nodes:
-                yield node
+            yield from graph.nodes
 
     def swap_submodules(self, submodules):
         keys = list(submodules.keys())
@@ -504,65 +325,9 @@ class OptimizeIndexing:
 
     def _get_index_impl(self, name):
         expr = self.indexing_exprs[name]
-
-        free_symbols = list(expr.free_symbols)
-
-        if len(free_symbols) == 0:
-            return ValueRanges(expr, expr)
-
         if expr in self.replacement_vals:
             return self.replacement_vals[expr]
-
-        def replace_symbols_for_deriv(expr, ignore_mod=False):
-            # for the purposes of finding local, minimum, maximum, assume smoothness
-            def mod_indexing_rep(x, y, z):
-                if z.is_constant():
-                    return x / y
-
-                # never really happens, we'll bail on optimizing
-                return (x / y) % z
-
-            def indexing_div_rep(x, y):
-                return x / y
-
-            return expr.replace(ModularIndexing, mod_indexing_rep).replace(
-                FloorDiv, indexing_div_rep
-            )
-
-        symbols = expr.free_symbols
-        monotonic_increasing = []
-        monotonic_decreasing = []
-        other_symbols = []
-
-        expr_for_deriv = replace_symbols_for_deriv(expr, True)
-        for symbol in symbols:
-            diff = sympy.diff(expr_for_deriv, symbol)
-            if diff.is_positive:
-                monotonic_increasing.append(symbol)
-            elif diff.is_positive is False:  # can return None
-                monotonic_decreasing.append(symbol)
-            else:
-                other_symbols.append(symbol)
-
-        if not other_symbols:
-            max_val = sympy_subs(
-                expr,
-                {
-                    k: (v.upper if k in monotonic_increasing else v.lower)
-                    for k, v in self.replacement_vals.items()
-                },
-            )
-            min_val = sympy_subs(
-                expr,
-                {
-                    k: (v.lower if k in monotonic_increasing else v.upper)
-                    for k, v in self.replacement_vals.items()
-                },
-            )
-            return ValueRanges(min_val, max_val)
-        else:
-            # bail on optimizing, have not run into this yet
-            return ValueRanges(-math.inf, math.inf)
+        return get_expr_range(expr, self.replacement_vals)
 
 
 def indexing_dtype_strength_reduction(loop_body: LoopBody):

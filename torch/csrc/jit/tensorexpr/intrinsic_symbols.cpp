@@ -156,7 +156,7 @@ c10::ArrayRef<SymbolAddress> getIntrinsicSymbols() {
     {"fmodf", reinterpret_cast<void*>(&fmodf)},
     {"remainderf", reinterpret_cast<void*>(&remainderf)},
 
-    // float -> half & half -> float conversio)ns
+    // float -> half & half -> float conversions
     {"__gnu_h2f_ieee",
      reinterpret_cast<void*>(&c10::detail::fp16_ieee_to_fp32_value)},
     {"__gnu_f2h_ieee",

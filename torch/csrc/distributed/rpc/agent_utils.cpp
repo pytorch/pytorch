@@ -41,7 +41,7 @@ std::unordered_map<std::string, worker_id_t> collectNames(
   return nameToId;
 }
 
-std::vector<std::string> splitString(
+static std::vector<std::string> splitString(
     const std::string& s,
     const std::string& delim) {
   std::vector<std::string> tokens;
@@ -154,7 +154,7 @@ const string storeKeyActiveCallCount = "ACTIVE_CALLS";
 const string storeKeyReady = "READY";
 static std::atomic<int> barrierId(0);
 
-std::tuple<std::string, std::string, std::string> getNextKeyIds() {
+static std::tuple<std::string, std::string, std::string> getNextKeyIds() {
   barrierId++;
   std::string processCountKey =
       fmt::format("{}{}{}", storeKeyProcessCount, storeKeyBarrierId, barrierId);

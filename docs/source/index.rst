@@ -46,17 +46,26 @@ Features described in this documentation are classified by release status:
    :glob:
    :maxdepth: 1
    :caption: torch.compile
-   :hidden:
 
-   dynamo/index
-   dynamo/installation
-   dynamo/get-started
-   dynamo/guards-overview
-   dynamo/custom-backends
-   dynamo/deep-dive
-   dynamo/troubleshooting
-   dynamo/faq
+   compile/index
+   compile/get-started
+   compile/troubleshooting
+   compile/faq
+   compile/technical-overview
+   compile/guards-overview
+   compile/custom-backends
+   compile/fine_grained_apis
+   compile/profiling_torch_compile
+   compile/inductor_profiling
+   compile/deep-dive
+   compile/cudagraph_trees
+   compile/performance-dashboard
+   compile/torchfunc-and-torchcompile
    ir
+   compile/dynamic-shapes
+   compile/fake-tensor
+   logging
+   compile/transformations
 
 .. toctree::
    :maxdepth: 1
@@ -81,7 +90,9 @@ Features described in this documentation are classified by release status:
    torch.autograd <autograd>
    torch.library <library>
    cuda
+   mps
    torch.backends <backends>
+   export
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
@@ -90,7 +101,7 @@ Features described in this documentation are classified by release status:
    torch.distributed.tensor.parallel <distributed.tensor.parallel>
    torch.distributed.checkpoint <distributed.checkpoint>
    torch.distributions <distributions>
-   torch._dynamo <_dynamo>
+   torch.compiler <compiler>
    torch.fft <fft>
    torch.func <func>
    futures
@@ -133,6 +144,7 @@ Features described in this documentation are classified by release status:
    named_tensor
    name_inference
    torch.__config__ <config_mod>
+   logging
 
 .. toctree::
    :maxdepth: 1

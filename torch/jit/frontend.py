@@ -92,11 +92,10 @@ node_start_tokens.update({
     ast.Nonlocal: "nonlocal",
 })
 
-if sys.version_info >= (3, 6):
-    pretty_node_names.update({
-        ast.AnnAssign: "annotated assignments",
-    })
-    # NB: no specific token for AnnAssign
+pretty_node_names.update({
+    ast.AnnAssign: "annotated assignments",
+})
+# NB: no specific token for AnnAssign
 
 
 class FrontendError(Exception):
@@ -126,7 +125,7 @@ class UnsupportedNodeError(NotSupportedError):
                                       offending_node.col_offset + range_len)
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
         msg = "{} {}aren't supported".format(feature_name, reason + ' ' if reason else '')
-        super(UnsupportedNodeError, self).__init__(source_range, msg)
+        super().__init__(source_range, msg)
 
 
 class FrontendTypeError(FrontendError):

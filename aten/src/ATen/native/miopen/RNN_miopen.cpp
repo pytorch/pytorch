@@ -534,7 +534,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
                 y_descs_arr.data(), y.data_ptr(),
                 descs.hy_desc.desc(), hy.data_ptr(),
                 descs.cy_desc.desc(), cy.defined() ? cy.data_ptr() : nullptr,
-                workspace.data_ptr(), workspace_size, reserve.data_ptr(), reserver_size ));
+                workspace.data_ptr(), workspace_size, reserve.mutable_data_ptr(), reserver_size ));
     } else { //Inference.
         reserve = at::empty({0}, input.options().dtype(kByte));
         MIOPEN_CHECK(miopenRNNForwardInference(handle, descs.rnn_desc.desc(), fn.tensors.seq_length,

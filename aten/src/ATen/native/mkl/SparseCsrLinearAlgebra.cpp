@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mkl/SparseCsrLinearAlgebra.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 // Don't compile with MKL for MSVC/macos since linking the sparse MKL routines
 // needs some build fixes.

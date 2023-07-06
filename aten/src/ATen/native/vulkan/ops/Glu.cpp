@@ -15,9 +15,10 @@ Tensor glu(const at::Tensor& input_arg, const int64_t dim = -1) {
       dim == 1,
       "Vulkan glu only supports GLU for dim = 1, but got dim = ",
       dim);
+  // For now, only allow if channels dim is a multiple of 4
   TORCH_CHECK(
-      get_dim<Dim4D::Channel>(input_arg) % 2 == 0,
-      "Vulkan glu expects channel dim to be multiple of 2!");
+      get_dim<Dim4D::Channel>(input_arg) % 4 == 0,
+      "Vulkan glu expects channel dim to be multiple of 4!");
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
@@ -43,8 +44,7 @@ Tensor glu(const at::Tensor& input_arg, const int64_t dim = -1) {
 
   context->submit_compute_job(
       // shader descriptor
-      output_ch_size % 4 == 0 ? VK_KERNEL(glu_channel_mul4)
-                              : VK_KERNEL(glu_channel),
+      VK_KERNEL(glu_channel_mul4),
       // pipeline barrier
       pipeline_barrier,
       // global work group size

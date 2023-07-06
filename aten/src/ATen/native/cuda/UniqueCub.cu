@@ -69,7 +69,7 @@ std::tuple<Tensor, Tensor, Tensor> compute_unique(
     const bool consecutive) {
   int64_t num_inp = sorted.numel();
   auto options = sorted.options().dtype(kLong);
-  auto data = wrap_input_iterator(sorted.data_ptr<scalar_t>());
+  auto data = wrap_input_iterator(sorted.const_data_ptr<scalar_t>());
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   // inverse indices
@@ -80,12 +80,12 @@ std::tuple<Tensor, Tensor, Tensor> compute_unique(
     inverse_indices = at::empty(sorted.sizes(), options);
     Tensor inv_loc = consecutive ? at::empty({num_inp}, options.dtype(kInt))
                                  : inverse_indices;
-    int* inv_loc_ptr = static_cast<int*>(inv_loc.data_ptr());
+    int* inv_loc_ptr = static_cast<int*>(inv_loc.mutable_data_ptr());
     const dim3 block =
         dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), num_inp));
     dim3 grid;
     int curDevice = -1;
-    cudaGetDevice(&curDevice);
+    c10::cuda::GetDevice(&curDevice);
     cuda::getApplyGrid(num_inp, grid, curDevice);
     adjacent_difference_kernel<<<grid, block, 0, stream>>>(
         num_inp, data, inv_loc_ptr);
@@ -95,7 +95,7 @@ std::tuple<Tensor, Tensor, Tensor> compute_unique(
         consecutive ? inverse_indices : at::empty({num_inp}, options);
     at::cuda::cub::inclusive_sum_truncating(
         inv_loc_ptr,
-        inv_loc_out.data_ptr<int64_t>(),
+        inv_loc_out.mutable_data_ptr<int64_t>(),
         num_inp);
 
     if (!consecutive) {
@@ -104,9 +104,9 @@ std::tuple<Tensor, Tensor, Tensor> compute_unique(
           "return_inverse is set to true, but sorted_indices is undefined. Send a bug report!");
       scatter_kernel<<<grid, block, 0, stream>>>(
           num_inp,
-          inv_loc_out.data_ptr<int64_t>(),
-          sorted_indices.data_ptr<int64_t>(),
-          inverse_indices.data_ptr<int64_t>());
+          inv_loc_out.const_data_ptr<int64_t>(),
+          sorted_indices.const_data_ptr<int64_t>(),
+          inverse_indices.mutable_data_ptr<int64_t>());
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
@@ -117,15 +117,15 @@ std::tuple<Tensor, Tensor, Tensor> compute_unique(
   Tensor length = at::empty({1}, options);
   int64_t num_out;
   if (!return_counts) {
-    cuda::cub::unique(data, data_out.data_ptr<scalar_t>(), length.data_ptr<int64_t>(), num_inp);
+    cuda::cub::unique(data, data_out.mutable_data_ptr<scalar_t>(), length.mutable_data_ptr<int64_t>(), num_inp);
     num_out = length.item<int64_t>();
   } else {
     counts.resize_(num_inp);
     at::cuda::cub::run_length_encode(
         data,
-        data_out.data_ptr<scalar_t>(),
-        counts.data_ptr<int64_t>(),
-        length.data_ptr<int64_t>(),
+        data_out.mutable_data_ptr<scalar_t>(),
+        counts.mutable_data_ptr<int64_t>(),
+        length.mutable_data_ptr<int64_t>(),
         num_inp);
     num_out = length.item<int64_t>();
     counts.resize_(num_out);
@@ -158,12 +158,12 @@ struct UniqueCub {
     } else {
       sorted = at::empty(self.sizes(), self.options());
     }
-    scalar_t* sorted_data = sorted.data_ptr<scalar_t>();
+    scalar_t* sorted_data = sorted.mutable_data_ptr<scalar_t>();
 
     Tensor sorted_indices;
     if (!return_inverse) {
       if (!consecutive) {
-        cuda::cub::radix_sort_keys(self.data_ptr<scalar_t>(), sorted_data, num_inp);
+        cuda::cub::radix_sort_keys(self.const_data_ptr<scalar_t>(), sorted_data, num_inp);
       }
     } else {
       if (!consecutive) {
@@ -171,10 +171,10 @@ struct UniqueCub {
         Tensor range = at::arange(0, num_inp, options);
         sorted_indices = at::empty({num_inp}, options);
         cuda::cub::radix_sort_pairs(
-            self.data_ptr<scalar_t>(),
+            self.const_data_ptr<scalar_t>(),
             sorted_data,
-            range.data_ptr<int64_t>(),
-            sorted_indices.data_ptr<int64_t>(),
+            range.const_data_ptr<int64_t>(),
+            sorted_indices.mutable_data_ptr<int64_t>(),
             num_inp);
       }
     }
@@ -255,7 +255,7 @@ struct UniqueCub<bool> {
     auto allocator = at::cuda::getCUDADeviceAllocator();
     c10::DeviceArray<int> tmp_num_true(*allocator, 1);
 
-    const bool* self_data = self.data_ptr<bool>();
+    const bool* self_data = self.const_data_ptr<bool>();
     MapNumberOfTrueValues op;
     NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<int, MapNumberOfTrueValues, const uint8_t*, int>
         data_iter(reinterpret_cast<const uint8_t*>(self_data), op);
@@ -269,8 +269,8 @@ struct UniqueCub<bool> {
     unique_bool_write_output<<<1, 1, 0, stream>>>(
         num_inp,
         tmp_num_true.get(),
-        output.data_ptr<bool>(),
-        counts.data_ptr<int64_t>());
+        output.mutable_data_ptr<bool>(),
+        counts.mutable_data_ptr<int64_t>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     if (return_inverse) {
@@ -282,7 +282,7 @@ struct UniqueCub<bool> {
           num_inp,
           tmp_num_true.get(),
           self_data,
-          return_inverse ? inverse_indices.data_ptr<int64_t>() : nullptr);
+          inverse_indices.mutable_data_ptr<int64_t>());
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 

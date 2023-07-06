@@ -1,15 +1,12 @@
-from typing import List, Any
+from typing import Any, List
 
 import torch
 
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
-from torch.distributed._shard.sharded_tensor.shard import Shard
-
-from torch.distributed._shard.sharding_spec._internals import (
-    _check_shard_metadata_pair_overlap,
-)
+from torch.distributed._tensor import DTensor
+from torch.distributed._tensor._utils import compute_local_shape, compute_local_offset
 
 from .planner import (
     LoadItemType,
@@ -29,20 +26,19 @@ from .metadata import (
     STORAGE_TYPES,
 )
 
-from .resharding import _shards_get_overlap_region_wrt_saved_tensor
+from .resharding import (
+    _shards_get_overlap_region_wrt_saved_tensor,
+    _check_shard_metadata_pair_overlap
+)
 
-__all__: List[str] = []
+__all__: List[str] = ["create_read_items_for_chunk_list"]
 
 
-def _create_shard_metadata(size: torch.Size) -> ShardMetadata:
-    return ShardMetadata(
-        shard_offsets=[0] * len(size),
-        shard_sizes=list(size),
+def _create_chunk_from_tensor(tensor: torch.Tensor) -> ChunkStorageMetadata:
+    return ChunkStorageMetadata(
+        offsets=torch.Size([0] * len(tensor.size())),
+        sizes=tensor.size()
     )
-
-
-def _create_shard_from_tensor(tensor: torch.Tensor) -> Shard:
-    return Shard(tensor=tensor, metadata=_create_shard_metadata(tensor.size()))
 
 
 def _chunk_for_shard(shard_md: ShardMetadata) -> ChunkStorageMetadata:
@@ -59,6 +55,30 @@ def _sharded_tensor_metadata(
         chunk=_chunk_for_shard(shard_md),
         properties=sharded_tensor.metadata().tensor_properties,
         size=sharded_tensor.metadata().size,
+    )
+
+
+def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
+    device_mesh = tensor.device_mesh
+    assert (
+        device_mesh.ndim == 1
+    ), "Only 1D DeviceMeshes can currently be handled."
+
+    sizes = torch.Size(compute_local_shape(tensor.shape, device_mesh, tensor.placements))
+    offsets = torch.Size(compute_local_offset(tensor.shape, device_mesh, tensor.placements))
+
+    return WriteItem(
+        index=MetadataIndex(fqn, offsets),
+        type=WriteItemType.SHARD,
+        tensor_data=TensorWriteData(
+            chunk=ChunkStorageMetadata(
+                offsets=offsets,
+                sizes=sizes,
+            ),
+            # TODO:update this to not use TensorProperties from ST.
+            properties=TensorProperties.create_from_tensor(tensor.to_local()),
+            size=tensor.size(),
+        ),
     )
 
 
@@ -118,24 +138,33 @@ def _create_read_item_for_tensor(
         lengths=torch.Size(lengths),
     )
 
-
-def _create_sharded_read_items(
+def create_read_items_for_chunk_list(
     fqn: str,
     checkpoint_md: TensorStorageMetadata,
-    local_shards: List[Shard],
+    local_chunks: List[ChunkStorageMetadata],
 ) -> List[ReadItem]:
+    """
+    Creates a list of ``ReadItem`` based on the checkpoint and local chunks.
 
+    This applies the resharding algorithm and computes the reads needed
+    to satisfy ``local_chunks`` with a checkpoint described by ``checkpoint_md``.
+
+    Args:
+        fqn (str) : The state_dict FQN to pass to ``ReadItem``.
+        checkpoint_md (TensorStorageMetadata): metadata for a given tensor
+            from a checkpoint.
+        local_chunks (List[ChunkStorageMetadata]): Local chunks that needs to be
+            loaded.
+
+    Returns:
+        A list of ``ReadItem`` that will satisfy all input chunks.
+    """
     read_items = []
     # this is a naive quadratic algo that can be optimized later
-    for idx, shard in enumerate(local_shards):
+    for idx, shard in enumerate(local_chunks):
         for storage_idx, storage_md in enumerate(checkpoint_md.chunks):
-            shard_md_from_storage = ShardMetadata(
-                shard_sizes=list(storage_md.sizes),
-                shard_offsets=list(storage_md.offsets),
-            )
-
             if not _check_shard_metadata_pair_overlap(
-                shard.metadata, shard_md_from_storage
+                shard, storage_md
             ):
                 continue
 
@@ -148,7 +177,7 @@ def _create_sharded_read_items(
                 offset_for_current_tensor,
                 length,
             ) in _shards_get_overlap_region_wrt_saved_tensor(
-                saved_shard=shard_md_from_storage, current_shard=shard.metadata
+                saved_shard=storage_md, current_shard=shard
             ):
                 storage_offsets.append(offset_for_saved_tensor)
                 dest_offsets.append(offset_for_current_tensor)
@@ -157,7 +186,7 @@ def _create_sharded_read_items(
             read_items.append(
                 _create_read_item_for_tensor(
                     dest_index=MetadataIndex(
-                        fqn, shard.metadata.shard_offsets, idx
+                        fqn, shard.offsets, idx
                     ),
                     dest_offsets=dest_offsets,
                     storage_index=MetadataIndex(
@@ -173,7 +202,9 @@ def _create_sharded_read_items(
 def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
     requests = []
     for fqn, obj in state_dict.items():
-        if isinstance(obj, ShardedTensor):
+        if isinstance(obj, DTensor):
+            requests.append(_create_write_items_for_dtensor(fqn, obj))
+        elif isinstance(obj, ShardedTensor):
             for shard_md in obj.metadata().shards_metadata:
                 requests.append(
                     _create_write_item_for_shard(fqn, obj, shard_md)
@@ -186,7 +217,9 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
 
 
 def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
-    if isinstance(object, ShardedTensor):
+    if isinstance(object, DTensor):
+        return [_create_write_items_for_dtensor(fqn, object)]
+    elif isinstance(object, ShardedTensor):
         return [
             _create_write_item_for_shard(fqn, object, shard.metadata)
             for shard in object.local_shards()
@@ -197,8 +230,35 @@ def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
         return [_create_write_item_for_bytesio(fqn, object)]
 
 
+def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
+    device_mesh = tensor.device_mesh
+    assert (
+        device_mesh.ndim == 1
+    ), "Only 1D DeviceMeshes can currently be handled."
+
+    sizes = torch.Size(compute_local_shape(tensor.shape, device_mesh, tensor.placements))
+    offsets = torch.Size(compute_local_offset(tensor.shape, device_mesh, tensor.placements))
+    return ChunkStorageMetadata(
+        offsets=offsets,
+        sizes=sizes,
+    )
+
+
 def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
-    if isinstance(md, BytesStorageMetadata):
+    if not isinstance(md, BytesStorageMetadata):
+        if isinstance(obj, DTensor):
+            local_chunks = [_create_chunk_from_dtensor(obj)]
+        elif isinstance(obj, ShardedTensor):
+            local_chunks = [_chunk_for_shard(shard.metadata) for shard in obj.local_shards()]
+        elif isinstance(obj, torch.Tensor):
+            local_chunks = [_create_chunk_from_tensor(obj)]
+        else:
+            raise ValueError(
+                f"Invalid checkpoint metadata for {fqn}, "
+                + f"expected BytesStorageMetadata but found {type(md)}"
+            )
+        return create_read_items_for_chunk_list(fqn, md, local_chunks)
+    else:
         return [
             _create_read_item_for_byteio(
                 dest_index=MetadataIndex(fqn),
@@ -208,14 +268,3 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
                 length=0,
             )
         ]
-    elif isinstance(obj, ShardedTensor):
-        local_shards = obj.local_shards()
-    elif isinstance(obj, torch.Tensor):
-        local_shards = [_create_shard_from_tensor(obj)]
-    else:
-        raise ValueError(
-            f"Invalid checkpoint metadata for {fqn}, "
-            + f"expected BytesStorageMetadata but found {type(md)}"
-        )
-
-    return _create_sharded_read_items(fqn, md, local_shards)

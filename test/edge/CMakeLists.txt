@@ -9,12 +9,12 @@ file(GLOB_RECURSE all_python "${TORCH_ROOT}/torchgen/*.py")
 set(GEN_COMMAND
         "${PYTHON_EXECUTABLE}" -m torchgen.gen_executorch
         --source-path=${TEST_ROOT}
-        --install_dir=${OUTPUT_DIRECTORY}
+        --install-dir=${OUTPUT_DIRECTORY}
         --tags-path=${TORCH_ROOT}/aten/src/ATen/native/tags.yaml
-        --aten_yaml_path=${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml
-        --use_aten_lib
-        --op_selection_yaml_path=${TEST_ROOT}/selected_operators.yaml
-        --custom_ops_yaml_path=${TEST_ROOT}/custom_ops.yaml
+        --aten-yaml-path=${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml
+        --use-aten-lib
+        --op-selection-yaml-path=${TEST_ROOT}/selected_operators.yaml
+        --custom-ops-yaml-path=${TEST_ROOT}/custom_ops.yaml
         )
 set(GEN_COMMAND_sources
         ${OUTPUT_DIRECTORY}/RegisterCodegenUnboxedKernelsEverything.cpp

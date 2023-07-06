@@ -14,7 +14,7 @@ def _gen_unsupported_methods_properties():
         return x.{op}()
     ''')
 
-    deprecated_apis = set(["volatile", "resize", "reinforce", "new", "name", "map2_", "has_names", "grad_fn", "resize_as"])
+    deprecated_apis = {"volatile", "resize", "reinforce", "new", "name", "map2_", "has_names", "grad_fn", "resize_as"}
     tensor_attrs = tensor_attrs - deprecated_apis
 
     properties = []

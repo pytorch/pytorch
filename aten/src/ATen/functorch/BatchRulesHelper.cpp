@@ -114,8 +114,17 @@ Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x) {
 Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x) {
   src = maybe_wrap_dim(src, x.dim());
   VmapDimVector shape(x.sizes().begin(), x.sizes().end());
-  TORCH_INTERNAL_ASSERT(shape[src] % size1 == 0);
-  int64_t size2 = shape[src] / size1;
+  if (shape[src] != 0) {
+    // NOTE: 0 % 0 leads to FPE
+    TORCH_INTERNAL_ASSERT(shape[src] % size1 == 0);
+  }
+  int64_t size2;
+  // split any size out of `0`-sized dim
+  if (shape[src] == 0) {
+    size2 = 0;
+  } else {
+    size2 = shape[src] / size1;
+  }
   shape[src] = size1;
   shape.insert(shape.begin() + src + 1, size2);
   return at::reshape(x, shape);
@@ -124,8 +133,17 @@ Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x) {
 Tensor reshape_dim_outof_symint(int64_t src, c10::SymInt size1, const Tensor& x) {
   src = maybe_wrap_dim(src, x.dim());
   c10::SymDimVector shape(x.sym_sizes().begin(), x.sym_sizes().end());
-  TORCH_INTERNAL_ASSERT(shape[src] % size1 == 0);
-  auto size2 = shape[src] / size1;
+  if (shape[src] != 0) {
+    // NOTE: 0 % 0 leads to FPE
+    TORCH_INTERNAL_ASSERT(shape[src] % size1 == 0);
+  }
+  c10::SymInt size2;
+  // split any size out of `0`-sized dim
+  if (shape[src] == 0) {
+    size2 = 0;
+  } else {
+    size2 = shape[src] / size1;
+  }
   shape[src] = size1;
   shape.insert(shape.begin() + src + 1, size2);
   return at::reshape_symint(x, shape);

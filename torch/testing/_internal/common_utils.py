@@ -15,6 +15,7 @@ import gc
 import inspect
 import io
 import json
+import logging
 import math
 import operator
 import os
@@ -22,6 +23,7 @@ import platform
 import random
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -61,11 +63,11 @@ import __main__  # type: ignore[import]
 import torch
 import torch.backends.cudnn
 import torch.backends.mkl
+import torch.backends.mps
 import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
-from torch._six import string_classes
 from torch._utils_internal import get_writable_path
 from torch.nn import (
     ModuleDict,
@@ -81,19 +83,18 @@ from torch.onnx import (
 from torch.testing import make_tensor
 from torch.testing._comparison import (
     BooleanPair,
-    ErrorMeta,
     NonePair,
     NumberPair,
     Pair,
     TensorLikePair,
-    UnsupportedInputs,
 )
-from torch.testing._comparison import assert_equal as assert_equal
+from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
 
+log = logging.getLogger(__name__)
 torch.backends.disable_global_flags()
 
 FILE_SCHEMA = "file://"
@@ -115,18 +116,33 @@ DEFAULT_SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 disabled_tests_dict = {}
 slow_tests_dict = {}
 
+def maybe_load_json(filename):
+    if os.path.isfile(filename):
+        with open(filename, 'r') as fp:
+            return json.load(fp)
+    log.warning("Attempted to load json file '%s' but it does not exist.", filename)
+    return {}
+
 # set them here in case the tests are running in a subprocess that doesn't call run_tests
 if os.getenv("SLOW_TESTS_FILE", ""):
-    with open(os.getenv("SLOW_TESTS_FILE"), 'r') as fp:
-        slow_tests_dict = json.load(fp)
-        warnings.warn(f"loaded {len(slow_tests_dict)} slow tests")
+    slow_tests_dict = maybe_load_json(os.getenv("SLOW_TESTS_FILE", ""))
 if os.getenv("DISABLED_TESTS_FILE", ""):
-    with open(os.getenv("DISABLED_TESTS_FILE"), 'r') as fp:
-        disabled_tests_dict = json.load(fp)
-        warnings.warn(f"loaded {len(disabled_tests_dict)} disabled tests")
+    disabled_tests_dict = maybe_load_json(os.getenv("DISABLED_TESTS_FILE", ""))
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
+check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
+IS_JETSON = any(name in platform.platform() for name in check_names)
+
+def gcIfJetson(fn):
+    # Irregular Jetson host/device memory setup requires cleanup to avoid tests being killed
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if IS_JETSON:
+            gc.collect()
+            torch.cuda.empty_cache()
+        fn(*args, **kwargs)
+    return wrapper
 
 class _TestParametrizer:
     """
@@ -137,9 +153,11 @@ class _TestParametrizer:
     The decision of how to parametrize / what to parametrize over is intended to be implemented
     by each derived class.
 
-    In the details, the decorator adds a 'parametrize_fn' property to the test function that is called
-    during device-specific test instantiation performed in instantiate_device_type_tests(). Because of this,
-    there is no need to parametrize over device type, as that is already handled separately.
+    In the details, the decorator adds a 'parametrize_fn' property to the test function. This function
+    is intended to be called later by one of:
+      * Device-specific test instantiation via instantiate_device_type_tests(). Note that for this
+        case there is no need to explicitly parametrize over device type, as that is handled separately.
+      * Device-agnostic parametrized test instantiation via instantiate_parametrized_tests().
 
     If the decorator is applied to a test function that already has a 'parametrize_fn' property, a new
     composite 'parametrize_fn' will be created that generates tests with the product of the parameters
@@ -224,7 +242,8 @@ def instantiate_parametrized_tests(generic_cls):
     """
     Instantiates tests that have been decorated with a parametrize_fn. This is generally performed by a
     decorator subclass of _TestParametrizer. The generic test will be replaced on the test class by
-    parametrized tests with specialized names.
+    parametrized tests with specialized names. This should be used instead of
+    instantiate_device_type_tests() if the test class contains device-agnostic tests.
 
     You can also use it as a class decorator. E.g.
 
@@ -331,6 +350,11 @@ class parametrize(_TestParametrizer):
         def test_baz(self, x, y):
             ...
 
+    To actually instantiate the parametrized tests, one of instantiate_parametrized_tests() or
+    instantiate_device_type_tests() should be called. The former is intended for test classes
+    that contain device-agnostic tests, while the latter should be used for test classes that
+    contain device-specific tests. Both support arbitrary parametrizations using the decorator.
+
     Args:
         arg_str (str): String of arg names separate by commas (e.g. "x,y").
         arg_values (iterable): Iterable of arg values (e.g. range(10)) or
@@ -401,9 +425,7 @@ class parametrize(_TestParametrizer):
                                        'values and {} names for test "{}"'.format(
                                            len(values), len(self.arg_names), test.__name__))
 
-                param_kwargs = {
-                    name: value for name, value in zip(self.arg_names, values)
-                }
+                param_kwargs = dict(zip(self.arg_names, values))
 
                 test_name = self._get_subtest_name(values, explicit_name=maybe_name)
 
@@ -503,9 +525,9 @@ parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
-parser.add_argument('--jit_executor', type=str)
+parser.add_argument('--jit-executor', '--jit_executor', type=str)
 parser.add_argument('--repeat', type=int, default=1)
-parser.add_argument('--test_bailouts', action='store_true')
+parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
 parser.add_argument('--use-pytest', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
@@ -516,6 +538,7 @@ parser.add_argument('--run-parallel', type=int, default=1)
 parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
 parser.add_argument('--rerun-disabled-tests', action='store_true')
+parser.add_argument('--pytest-single-test', type=str, nargs=1)
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
 def run_unittest_help(argv):
@@ -547,6 +570,7 @@ LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
 USE_PYTEST = args.use_pytest
+PYTEST_SINGLE_TEST = args.pytest_single_test
 TEST_DISCOVER = args.discover_tests
 TEST_IN_SUBPROCESS = args.subprocess
 TEST_SAVE_XML = args.save_xml
@@ -562,12 +586,21 @@ CI_TEST_PREFIX = str(Path(os.getcwd()))
 CI_PT_ROOT = str(Path(os.getcwd()).parent)
 CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
 
-def wait_for_process(p):
+def wait_for_process(p, timeout=None):
     try:
-        return p.wait()
+        return p.wait(timeout=timeout)
     except KeyboardInterrupt:
         # Give `p` a chance to handle KeyboardInterrupt. Without this,
         # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
+        exit_status = p.wait(timeout=5)
+        if exit_status is not None:
+            return exit_status
+        else:
+            p.kill()
+            raise
+    except subprocess.TimeoutExpired:
+        # send SIGINT to give pytest a chance to make xml
+        p.send_signal(signal.SIGINT)
         exit_status = p.wait(timeout=5)
         if exit_status is not None:
             return exit_status
@@ -581,7 +614,7 @@ def wait_for_process(p):
         # Always call p.wait() to ensure exit
         p.wait()
 
-def shell(command, cwd=None, env=None, stdout=None, stderr=None):
+def shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None):
     sys.stdout.flush()
     sys.stderr.flush()
     # The following cool snippet is copied from Py3 core library subprocess.call
@@ -591,9 +624,24 @@ def shell(command, cwd=None, env=None, stdout=None, stderr=None):
     #      `p.wait()` in a `final` block for the code to be portable.
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    assert not isinstance(command, str), "Command to shell should be a list or tuple of tokens"
     p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
-    return wait_for_process(p)
+    return wait_for_process(p, timeout=timeout)
+
+
+def retry_shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None, retries=1):
+    assert retries >= 0, f"Expecting non negative number for number of retries, got {retries}"
+    try:
+        exit_code = shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout)
+        if exit_code == 0 or retries == 0:
+            return exit_code
+        print(f"Got exit code {exit_code}, retrying (retries left={retries})", file=stdout, flush=True)
+    except subprocess.TimeoutExpired:
+        if retries == 0:
+            print(f"Command took >{timeout // 60}min, returning 124", file=stdout, flush=True)
+            return 124
+        print(f"Command took >{timeout // 60}min, retrying (retries left={retries})", file=stdout, flush=True)
+    return retry_shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout, retries=retries - 1)
 
 
 def discover_test_cases_recursively(suite_or_case):
@@ -666,11 +714,32 @@ def sanitize_pytest_xml(xml_file: str):
         full_classname = testcase.attrib['classname']
         # The test prefix is optional
         regex_result = re.search(r"^(test\.)?(?P<file>.*)\.(?P<classname>[^\.]*)$", full_classname)
+        if regex_result is None:
+            continue
         classname = regex_result.group("classname")
         file = regex_result.group("file").replace(".", "/")
         testcase.set("classname", classname)
         testcase.set("file", f"{file}.py")
     tree.write(xml_file)
+
+
+def get_pytest_test_cases(argv: List[str]) -> List[str]:
+    class TestCollectorPlugin:
+        def __init__(self):
+            self.tests = []
+
+        def pytest_collection_finish(self, session):
+            for item in session.items:
+                self.tests.append(session.config.cwd_relative_nodeid(item.nodeid))
+
+    test_collector_plugin = TestCollectorPlugin()
+    import pytest
+    pytest.main(
+        [arg for arg in argv if arg != '-vv'] + ['--collect-only', '-qq', '--use-main-module'],
+        plugins=[test_collector_plugin]
+    )
+    return test_collector_plugin.tests
+
 
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
@@ -702,18 +771,36 @@ def run_tests(argv=UNITTEST_ARGS):
         sys.exit(1)
 
     if TEST_IN_SUBPROCESS:
+        other_args = []
+        if DISABLED_TESTS_FILE:
+            other_args.append("--import-disabled-tests")
+        if SLOW_TESTS_FILE:
+            other_args.append("--import-slow-tests")
+        if USE_PYTEST:
+            other_args.append("--use-pytest")
+        if RERUN_DISABLED_TESTS:
+            other_args.append("--rerun-disabled-tests")
+
+        test_cases = (
+            get_pytest_test_cases(argv) if USE_PYTEST else
+            [case.id().split('.', 1)[1] for case in discover_test_cases_recursively(suite)]
+        )
+
         failed_tests = []
-        test_cases = discover_test_cases_recursively(suite)
-        for case in test_cases:
-            test_case_full_name = case.id().split('.', 1)[1]
-            other_args = []
-            if DISABLED_TESTS_FILE:
-                other_args.append('--import-disabled-tests')
-            if SLOW_TESTS_FILE:
-                other_args.append('--import-slow-tests')
-            cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
+
+        for test_case_full_name in test_cases:
+
+            cmd = (
+                [sys.executable] + [argv[0]] + other_args + argv[1:] +
+                (["--pytest-single-test"] if USE_PYTEST else []) +
+                [test_case_full_name]
+            )
             string_cmd = " ".join(cmd)
-            exitcode = shell(cmd)
+
+            timeout = None if RERUN_DISABLED_TESTS else 15 * 60
+
+            exitcode = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
+
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.
                 if 'TestDistBackendWithSpawn' in test_case_full_name:
@@ -725,8 +812,9 @@ def run_tests(argv=UNITTEST_ARGS):
                 print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
-        assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
-            len(failed_tests), '\n\t'.join(failed_tests))
+            assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
+                len(failed_tests), '\n\t'.join(failed_tests))
+
     elif RUN_PARALLEL > 1:
         test_cases = discover_test_cases_recursively(suite)
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
@@ -739,18 +827,19 @@ def run_tests(argv=UNITTEST_ARGS):
             failed |= wait_for_process(p) != 0
         assert not failed, "Some test shards have failed"
     elif USE_PYTEST:
+        pytest_args = argv + ["--use-main-module"]
         if TEST_SAVE_XML:
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
+            pytest_args.append(f'--junit-xml-reruns={test_report_path}')
+        if PYTEST_SINGLE_TEST:
+            pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
 
         import pytest
         os.environ["NO_COLOR"] = "1"
-        os.environ["USING_PYTEST"] = "1"
-        exit_code = pytest.main(args=argv + [f'--junit-xml-reruns={test_report_path}'] if TEST_SAVE_XML else [])
-        del os.environ["USING_PYTEST"]
+        exit_code = pytest.main(args=pytest_args)
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
-        print("If in CI, skip info is located in the xml test reports, please either go to s3 or the hud to download them")
 
         if not RERUN_DISABLED_TESTS:
             # exitcode of 5 means no tests were found, which happens since some test configs don't
@@ -879,6 +968,7 @@ TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
+TEST_MPS = torch.backends.mps.is_available()
 TEST_CUDA = torch.cuda.is_available()
 TEST_NUMBA = _check_module_exists('numba')
 
@@ -898,9 +988,6 @@ TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 
-# TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-# See #64427
-TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -919,6 +1006,10 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 # as we had before.  By default, we don't run these tests.
 TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 
+TEST_CUDA_GRAPH = TEST_CUDA and os.getenv('PYTORCH_TEST_SKIP_CUDAGRAPH', '0') != '1' and (
+    (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 11) or
+    (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
+)
 
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
@@ -943,7 +1034,9 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
 
 # Run PyTorch tests with TorchDynamo
 TEST_WITH_TORCHINDUCTOR = os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
-TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
+# AOT_EAGER not tested in ci, useful for debugging
+TEST_WITH_AOT_EAGER = os.getenv('PYTORCH_TEST_WITH_AOT_EAGER') == '1'
+TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
@@ -997,6 +1090,25 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
         return fn
 
     return decorator
+
+
+# Run PyTorch tests with translation validation on.
+TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
+
+if TEST_WITH_TV:
+    torch._dynamo.config.translation_validation = True
+
+# Some tests take too long when dynamic_shapes is combined with
+# translation_validation. Whenever that happens, we solve that by
+# disabling translation_validation.
+def disable_translation_validation_if_dynamic_shapes(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if torch._dynamo.config.dynamic_shapes:
+            # Turning TV off due to high latency on dynamic shapes.
+            torch._dynamo.config.translation_validation = False
+        return fn(*args, **kwargs)
+    return wrapper
 
 
 # Determine whether to enable cuda memory leak check.
@@ -1067,10 +1179,19 @@ def skipIfRocm(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def runOnRocm(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_ROCM:
+            fn(*args, **kwargs)
+        else:
+            raise unittest.SkipTest("test currently only works on the ROCm stack")
+    return wrapper
+
 def skipIfMps(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if torch.backends.mps.is_available():
+        if TEST_MPS:
             raise unittest.SkipTest("test doesn't currently work with MPS")
         else:
             fn(*args, **kwargs)
@@ -1092,13 +1213,6 @@ def skipIfRocmVersionLessThan(version=None):
         return wrap_fn
     return dec_fn
 
-# Temporary function to simplify adding support to 3.11
-def xfailIfPython311(fn):
-    if sys.version_info < (3, 11):
-        return fn
-    else:
-        return unittest.expectedFailure(fn)
-
 def skipIfNotMiopenSuggestNHWC(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -1107,6 +1221,19 @@ def skipIfNotMiopenSuggestNHWC(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
+
+
+# Reverts the linalg backend back to default to make sure potential failures in one
+# test do not affect other tests
+def setLinalgBackendsToDefaultFinally(fn):
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        try:
+            fn(*args, **kwargs)
+        finally:
+            torch.backends.cuda.preferred_linalg_library('default')
+    return _fn
+
 
 # Context manager for setting deterministic flag and automatically
 # resetting it to its original value
@@ -1126,6 +1253,18 @@ class DeterministicGuard:
         torch.use_deterministic_algorithms(
             self.deterministic_restore,
             warn_only=self.warn_only_restore)
+
+class AlwaysWarnTypedStorageRemoval:
+    def __init__(self, always_warn):
+        assert isinstance(always_warn, bool)
+        self.always_warn = always_warn
+
+    def __enter__(self):
+        self.always_warn_restore = torch.storage._get_always_warn_typed_storage_removal()
+        torch.storage._set_always_warn_typed_storage_removal(self.always_warn)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.storage._set_always_warn_typed_storage_removal(self.always_warn_restore)
 
 # Context manager for setting cuda sync debug mode and reset it
 # to original value
@@ -1369,13 +1508,7 @@ def set_rng_seed(seed):
         np.random.seed(seed)
 
 
-@contextmanager
-def disable_functorch():
-    guard = torch._C._DisableFuncTorch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
+disable_functorch = torch._C._DisableFuncTorch
 
 
 @contextlib.contextmanager
@@ -1554,7 +1687,7 @@ class CudaMemoryLeakCheck():
 
             discrepancy_detected = True
 
-            # Query memory multiple tiems to ensure leak was not transient
+            # Query memory multiple items to ensure leak was not transient
             for n in range(3):
                 caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
                 bytes_free, bytes_total = torch.cuda.mem_get_info(i)
@@ -1618,7 +1751,7 @@ def skip_exception_type(exc_type):
     except exc_type as e:
         raise unittest.SkipTest(f"not implemented: {e}") from e
 
-#  "min_satisfying_examples" setting has been deprecated in hypythesis
+#  "min_satisfying_examples" setting has been deprecated in hypothesis
 #  3.56.0 and removed in hypothesis 4.x
 try:
     import hypothesis
@@ -1678,8 +1811,6 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
 
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
-    if "USING_PYTEST" in os.environ:
-        test_suite = f"__main__.{test_suite.split('.')[1]}"
     raw_test_name = f'{test._testMethodName} ({test_suite})'
     if raw_test_name in slow_tests_dict:
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
@@ -1708,6 +1839,8 @@ def check_if_enable(test: unittest.TestCase):
                         "rocm": TEST_WITH_ROCM,
                         "asan": TEST_WITH_ASAN,
                         "dynamo": TEST_WITH_TORCHDYNAMO,
+                        "inductor": TEST_WITH_TORCHINDUCTOR,
+                        "slow": TEST_WITH_SLOW,
                     }
 
                     invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
@@ -1723,7 +1856,7 @@ def check_if_enable(test: unittest.TestCase):
                         # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
                         platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
 
-                    if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                    if platforms == [] or any(platform_to_conditional[platform] for platform in platforms):
                         should_skip = True
                         skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
                             f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
@@ -1741,13 +1874,13 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest(skip_msg)
 
     if TEST_SKIP_FAST:
-        if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
+        if hasattr(test, test._testMethodName) and not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
 
 # `TestCase.assertEqual` is very permissive and coerced the inputs into a format that could be compared. This is very
 # convenient when writing tests, but not so much while reviewing them. By default, the comparison `Pair` framework of
-# `torch.testing._comparison.assert_equal`, used for example by the public testing function
+# `torch.testing._comparison.are_equal`, used for example by the public testing function
 # `torch.testing.assert_close`, is more strict. In order to use the same framework and thus reduce the divergence
 # between internal and external comparison logic as much as possible, we define some "relaxed" pairs here. They only
 # change the supported inputs, but the comparison logic is the same.
@@ -1770,7 +1903,7 @@ class RelaxedBooleanPair(BooleanPair):
             (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
             or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
         ):
-            raise UnsupportedInputs()
+            self._inputs_not_supported()
 
         return [self._to_bool(input, id=id) for input in (actual, expected)]
 
@@ -1782,11 +1915,11 @@ class RelaxedBooleanPair(BooleanPair):
         elif isinstance(bool_like, (torch.Tensor, np.ndarray)):
             numel = bool_like.numel() if isinstance(bool_like, torch.Tensor) else bool_like.size
             if numel > 1:
-                raise ErrorMeta(
+                self._fail(
                     ValueError,
                     f"Only single element tensor-likes can be compared against a boolean. "
                     f"Got {numel} elements instead.",
-                    id=id,
+                    id=id
                 )
 
             return bool(bool_like.item())
@@ -1827,7 +1960,7 @@ class RelaxedNumberPair(NumberPair):
                 (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
                 or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
         ):
-            raise UnsupportedInputs()
+            self._inputs_not_supported()
 
         return [self._to_number(input, id=id) for input in (actual, expected)]
 
@@ -1835,11 +1968,11 @@ class RelaxedNumberPair(NumberPair):
         if isinstance(number_like, (torch.Tensor, np.ndarray)):
             numel = number_like.numel() if isinstance(number_like, torch.Tensor) else number_like.size
             if numel > 1:
-                raise ErrorMeta(
+                self._fail(
                     ValueError,
                     f"Only single element tensor-likes can be compared against a number. "
                     f"Got {numel} elements instead.",
-                    id=id,
+                    id=id
                 )
             number = number_like.item()
             if isinstance(number, bool):
@@ -1903,7 +2036,7 @@ class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.
 
     To avoid recreating the mismatch messages of :meth:`unittest.TestCase.assertEqual`, this pair simply wraps it in
-    order to use it with the :class:`Pair` "framework" from :func:`assert_equal`.
+    order to use it with the :class:`Pair` "framework" from :func:`are_equal`.
 
     Define the :attr:`UnittestPair.CLS` in a subclass to indicate which class(es) of the inputs the pair should support.
     """
@@ -1923,11 +2056,11 @@ class UnittestPair(Pair):
             msg = str(error)
 
         type_name = self.TYPE_NAME or (self.CLS if isinstance(self.CLS, type) else self.CLS[0]).__name__
-        raise self._make_error_meta(AssertionError, f"{type_name.title()} comparison failed: {msg}")
+        self._fail(AssertionError, f"{type_name.title()} comparison failed: {msg}")
 
 
 class StringPair(UnittestPair):
-    CLS = string_classes
+    CLS = (str, bytes)
     TYPE_NAME = "string"
 
 
@@ -1966,6 +2099,11 @@ def set_warn_always_context(new_val: bool):
         yield
     finally:
         torch.set_warn_always(old_val)
+
+
+class NoTest():
+    # causes pytest to not recognize this class as a test
+    __test__ = False
 
 
 class TestCase(expecttest.TestCase):
@@ -2040,6 +2178,19 @@ class TestCase(expecttest.TestCase):
 
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
+
+    def assertExpectedInline(self, actual, expect, skip=0):
+        return super().assertExpectedInline(actual if isinstance(actual, str) else str(actual), expect, skip + 1)
+
+    def assertLogs(self, logger=None, level=None):
+        if logger is None:
+            logger = logging.getLogger("torch")
+        return super().assertLogs(logger, level)
+
+    def assertNoLogs(self, logger=None, level=None):
+        if logger is None:
+            logger = logging.getLogger("torch")
+        return super().assertNoLogs(logger, level)
 
     def wrap_with_cuda_policy(self, method_name, policy):
         test_method = getattr(self, method_name)
@@ -2134,18 +2285,16 @@ class TestCase(expecttest.TestCase):
             errors_before = 0 if result is None else len(result.errors)
             skipped_before = 0 if result is None else len(result.skipped)
 
-        if TEST_WITH_TORCHDYNAMO:
+        super_run = super().run
+        if TEST_WITH_TORCHINDUCTOR:
+            super_run = torch._dynamo.optimize("inductor")(super_run)
+        elif TEST_WITH_AOT_EAGER:
+            super_run = torch._dynamo.optimize("aot_eager")(super_run)
+        elif TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
-            if TEST_WITH_TORCHINDUCTOR:
-                super_run = torch._dynamo.optimize("inductor")(super().run)
-            else:
-                super_run = torch._dynamo.optimize("eager")(super().run)
-            super_run(result=result)
+            super_run = torch._dynamo.optimize("eager")(super_run)
 
-            # TODO - Reset for each test slows down testing significantly.
-            # torch._dynamo.reset()
-        else:
-            super().run(result=result)
+        super_run(result=result)
 
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
@@ -2302,7 +2451,7 @@ class TestCase(expecttest.TestCase):
         we'll find a maximal window in (n_rows + 1, n_cols + 1)-grid
         that is able to hold a sequence of sawteeth and so-called
         final correction, while the external part of the window is
-        filled with counts to meet the nnz contraint exactly.
+        filled with counts to meet the nnz constraint exactly.
         """
         assert 0 <= nnz <= n_rows * n_cols, (nnz, n_rows, n_cols)
 
@@ -2916,7 +3065,7 @@ class TestCase(expecttest.TestCase):
             x = to_list(x)
             y = to_list(y)
         # When comparing a sequence of numbers to a tensor, we need to convert the sequence to a tensor here.
-        # Otherwise, the pair origination of `assert_equal` will fail, because the sequence is recognized as container
+        # Otherwise, the pair origination of `are_equal` will fail, because the sequence is recognized as container
         # that should be checked elementwise while the tensor is not.
         elif isinstance(x, torch.Tensor) and isinstance(y, Sequence):
             y = torch.as_tensor(y, dtype=x.dtype, device=x.device)
@@ -2930,7 +3079,7 @@ class TestCase(expecttest.TestCase):
         if isinstance(y, torch.Tensor) and y.is_nested:
             y = y.unbind()
 
-        assert_equal(
+        error_metas = not_close_error_metas(
             x,
             y,
             pair_types=(
@@ -2963,11 +3112,16 @@ class TestCase(expecttest.TestCase):
             check_layout=exact_layout,
             check_stride=exact_stride,
             check_is_coalesced=exact_is_coalesced,
-            # This emulates unittest.TestCase's behavior if a custom message passed and
-            # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
-            # is True (default)
-            msg=(lambda generated_msg: f"{generated_msg}\n{msg}") if isinstance(msg, str) and self.longMessage else msg,
         )
+
+        if error_metas:
+            # TODO: compose all metas into one AssertionError
+            raise error_metas[0].to_error(
+                # This emulates unittest.TestCase's behavior if a custom message passed and
+                # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
+                # is True (default)
+                (lambda generated_msg: f"{generated_msg}\n{msg}") if isinstance(msg, str) and self.longMessage else msg
+            )
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
                        atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
@@ -3011,7 +3165,7 @@ class TestCase(expecttest.TestCase):
         # Checks whether the test is instantiated for a device type by testing
         # if the test class has defined the device_type attribute and,
         # if so, tests whether the instantiated device type is native or not
-        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES:  # type: ignore[attr-defined]
+        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES and self.device_type != "mps":  # type: ignore[attr-defined]
             # empty string matches any string
             expected_regex = ''
 
@@ -3021,6 +3175,29 @@ class TestCase(expecttest.TestCase):
             return context.handle('assertRaisesRegex', args, kwargs)  # type: ignore[attr-defined]
         else:
             return super().assertRaisesRegex(expected_exception, expected_regex, *args, **kwargs)
+
+    # Verifies that no unraisable exceptions are raised by callable.  Unlike regular
+    # exceptions, these do not actually propagate to the caller and are
+    # suppressed.  We must test for them specially.
+    def assertNoUnraisable(self, callable, *args, **kwargs):
+        raised = None
+
+        def record_unraisable(unraisable):
+            nonlocal raised
+            raised = unraisable
+
+        # Disable GC when running the callable to prevent spurious flakiness
+        # from unlucky GCs inside the callable
+        prev = gc.isenabled()
+        gc.disable()
+        try:
+            with unittest.mock.patch("sys.unraisablehook", record_unraisable):
+                callable(*args, **kwargs)
+        finally:
+            if prev:
+                gc.enable()
+
+        self.assertIsNone(raised)
 
     # TODO: Support context manager interface
     # NB: The kwargs forwarding to callable robs the 'subname' parameter.
@@ -3063,9 +3240,9 @@ class TestCase(expecttest.TestCase):
                 yield
             if len(ws) == 0:
                 self.fail('no warning caught')
-            self.assertTrue(any([type(w.message) is category for w in ws]))
+            self.assertTrue(any(type(w.message) is category for w in ws))
             self.assertTrue(
-                any([re.match(pattern, str(w.message)) for w in ws]),
+                any(re.match(pattern, str(w.message)) for w in ws),
                 f'{pattern}, {[w.message for w in ws if type(w.message) is category]}')
 
     def assertExpected(self, s, subname=None):
@@ -3611,8 +3788,8 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
     torch = kwargs.get('torch', globals()['torch'])
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
-    data = dict([((i, i), float(i + 1) / matrix_size)
-                 for i in range(matrix_size)])
+    data = {(i, i): float(i + 1) / matrix_size
+            for i in range(matrix_size)}
 
 
     def multiply(data, N, i, j, cs, sn, left=True):
@@ -3887,7 +4064,7 @@ def find_library_location(lib_name: str) -> Path:
     torch_root = Path(__file__).resolve().parent.parent.parent
     return torch_root / 'build' / 'lib' / lib_name
 
-def sandcastle_skip(reason):
+def skip_but_pass_in_sandcastle(reason):
     """
     Similar to unittest.skip, however in the sandcastle environment it just
     "passes" the test instead to avoid creating tasks complaining about tests
@@ -3991,7 +4168,7 @@ def xfail_inherited_tests(tests):
     return deco
 
 
-def sandcastle_skip_if(condition, reason):
+def skip_but_pass_in_sandcastle_if(condition, reason):
     """
     Similar to unittest.skipIf, however in the sandcastle environment it just
     "passes" the test instead to avoid creating tasks complaining about tests
@@ -4110,7 +4287,7 @@ def clone_input_helper(input):
 
 @contextmanager
 def custom_op(opname, symbolic_fn, opset_version):
-    """Context manager/decorator to test ONNX export with custom oeprator"""
+    """Context manager/decorator to test ONNX export with custom operator"""
     try:
         register_custom_op_symbolic(opname, symbolic_fn, opset_version)
         yield
@@ -4272,5 +4449,39 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Op doesn't support autograd for this dtype.")
         if not op.supports_autograd and not op.supports_forward_ad:
             self.skipTest("Skipped! autograd not supported.")
-        if op.name == "cat":
-            self.skipTest("TODO(whc) fix pre-existing bug with cat for newly added opinfo for empty+nonempty")
+
+def make_lazy_class(cls):
+
+    def lazy_init(self, cb):
+        self._cb = cb
+        self._value = None
+
+    cls.__init__ = lazy_init
+
+    for basename in [
+        "add", "sub", "mul", "truediv", "floordiv", "mod", "divmod", "pow",
+        "lshift", "rshift", "and", "or", "xor", "neg", "pos", "abs", "invert",
+        "eq", "ne", "lt", "le", "gt", "ge", "bool", "int", "index",
+    ]:
+        name = f"__{basename}__"
+
+        def inner_wrapper(name):
+            use_operator = basename not in ("bool", "int")
+
+            def wrapped(self, *args, **kwargs):
+                if self._cb is not None:
+                    self._value = self._cb()
+                    self._cb = None
+                if not use_operator:
+                    return getattr(self._value, name)(*args, **kwargs)
+                else:
+                    return getattr(operator, name)(self._value, *args, **kwargs)
+            return wrapped
+
+        setattr(cls, name, inner_wrapper(name))
+
+    return cls
+
+@make_lazy_class
+class LazyVal:
+    pass

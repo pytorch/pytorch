@@ -26,9 +26,37 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
                                        axis:(NSInteger)axis
                                        name:(NSString * _Nullable)name;
 
+- (MPSGraphTensor * _Nonnull) sortWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                               axis:(NSInteger) axis
+                         descending:(BOOL) descending
+                               name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) sortWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                         axisTensor:(MPSGraphTensor * _Nonnull) axisTensor
+                         descending:(BOOL) descending
+                               name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) sortWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                         axisTensor:(MPSGraphTensor * _Nonnull) axisTensor
+                               name:(NSString * _Nullable) name;
+
 - (MPSGraphTensor * _Nonnull)argSortWithTensor:(MPSGraphTensor * _Nonnull)tensor
                                           axis:(NSInteger)axis
                                           name:(NSString * _Nullable)name;
+
+- (MPSGraphTensor * _Nonnull) argSortWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                                  axis:(NSInteger) axis
+                            descending:(BOOL) descending
+                                  name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) argSortWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                           axisTensor:(MPSGraphTensor * _Nonnull) axisTensor
+                           descending:(BOOL) descending
+                                 name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) argSortWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                           axisTensor:(MPSGraphTensor * _Nonnull) axisTensor
+                                 name:(NSString * _Nullable) name;
 
 - (MPSGraphTensor * _Nonnull)inverseOfTensor:(MPSGraphTensor * _Nonnull) inputTensor
                                         name:(NSString * _Nullable)name;
@@ -88,4 +116,29 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
                                              scaleOffsetTensor:(MPSGraphTensor * _Nonnull) scaleOffset
                                                         layout:(MPSGraphTensorNamedDataLayout) layout
                                                           name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) sampleGridWithSourceTensor:(MPSGraphTensor * _Nonnull) source
+                                        coordinateTensor:(MPSGraphTensor * _Nonnull) coordinates
+                                                  layout:(MPSGraphTensorNamedDataLayout) layout
+                                    normalizeCoordinates:(BOOL) normalizeCoordinates
+                                     relativeCoordinates:(BOOL) relativeCoordinates
+                                            alignCorners:(BOOL) alignCorners
+                                             paddingMode:(MPSGraphPaddingMode) paddingMode
+                                            samplingMode:(MPSGraphResizeMode) samplingMode
+                                           constantValue:(double) constantValue
+                                                    name:(NSString * _Nullable) name;
+
+- (MPSGraphTensor * _Nonnull) sampleGridWithSourceTensor:(MPSGraphTensor * _Nonnull) source
+                                        coordinateTensor:(MPSGraphTensor * _Nonnull) coordinates
+                                                  layout:(MPSGraphTensorNamedDataLayout) layout
+                                    normalizeCoordinates:(BOOL) normalizeCoordinates
+                                     relativeCoordinates:(BOOL) relativeCoordinates
+                                            alignCorners:(BOOL) alignCorners
+                                             paddingMode:(MPSGraphPaddingMode) paddingMode
+                                     nearestRoundingMode:(MPSGraphResizeNearestRoundingMode) nearestRoundingMode
+                                           constantValue:(double) constantValue
+                                                    name:(NSString * _Nullable) name;
+- (MPSGraphTensor * _Nonnull) truncateWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                                            name:(NSString * _Nullable) name;
+
 @end

@@ -7,7 +7,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-file")
     parser.add_argument("--output-file")
-    parser.add_argument("--install_dir")
+    parser.add_argument("--install-dir", "--install_dir")
     parser.add_argument("--replace", action="append", nargs=2)
     options = parser.parse_args()
 

@@ -24,7 +24,7 @@ __global__ void rrelu_with_noise_cuda_kernel(
     int numel,
     PhiloxCudaState philox_args,
     scalar_t* output,
-    scalar_t* input,
+    const scalar_t* input,
     scalar_t* noise,
     double lower,
     double upper,
@@ -95,9 +95,9 @@ inline void _rrelu_with_noise_cuda_train(
     rng_engine_inputs = gen->philox_cuda_state(counter_offset);
   }
 
-  scalar_t* input_data = input.data_ptr<scalar_t>();
-  scalar_t* noise_data = noise.data_ptr<scalar_t>();
-  scalar_t* output_data = tmp_output.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
+  scalar_t* noise_data = noise.mutable_data_ptr<scalar_t>();
+  scalar_t* output_data = tmp_output.mutable_data_ptr<scalar_t>();
 
   double lower = lower_.to<double>();
   double upper = upper_.to<double>();

@@ -141,7 +141,7 @@ class Upsample(Module):
     def __init__(self, size: Optional[_size_any_t] = None, scale_factor: Optional[_ratio_any_t] = None,
                  mode: str = 'nearest', align_corners: Optional[bool] = None,
                  recompute_scale_factor: Optional[bool] = None) -> None:
-        super(Upsample, self).__init__()
+        super().__init__()
         self.name = type(self).__name__
         self.size = size
         if isinstance(scale_factor, tuple):
@@ -155,6 +155,12 @@ class Upsample(Module):
     def forward(self, input: Tensor) -> Tensor:
         return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners,
                              recompute_scale_factor=self.recompute_scale_factor)
+
+    def __setstate__(self, state):
+        if 'recompute_scale_factor' not in state:
+            state['recompute_scale_factor'] = True
+
+        super().__setstate__(state)
 
     def extra_repr(self) -> str:
         if self.scale_factor is not None:
@@ -207,7 +213,7 @@ class UpsamplingNearest2d(Upsample):
                   [3., 3., 4., 4.]]]])
     """
     def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
-        super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
+        super().__init__(size, scale_factor, mode='nearest')
 
 
 class UpsamplingBilinear2d(Upsample):
@@ -254,4 +260,4 @@ class UpsamplingBilinear2d(Upsample):
                   [3.0000, 3.3333, 3.6667, 4.0000]]]])
     """
     def __init__(self, size: Optional[_size_2_t] = None, scale_factor: Optional[_ratio_2_t] = None) -> None:
-        super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
+        super().__init__(size, scale_factor, mode='bilinear', align_corners=True)

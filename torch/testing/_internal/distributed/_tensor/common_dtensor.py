@@ -39,7 +39,7 @@ from torch.distributed._tensor import (
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.placement_types import Placement
 
-DEVICE_TYPE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
@@ -48,6 +48,22 @@ if torch.cuda.is_available() and torch.cuda.device_count() > 1:
     NUM_DEVICES = min(NUM_DEVICES, torch.cuda.device_count())
 
 T = TypeVar("T")
+
+
+class MLPModule(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        torch.manual_seed(5)
+        self.net1 = torch.nn.Linear(10, 16, device=device)
+        self.relu = torch.nn.ReLU()
+        self.net2 = torch.nn.Linear(16, 12, device=device)
+
+    def forward(self, x):
+        return self.net2(self.relu(self.net1(x)))
+
+    def reset_parameters(self):
+        self.net1.reset_parameters()
+        self.net2.reset_parameters()
 
 
 def skip_unless_torch_gpu(method: T) -> T:
@@ -120,6 +136,10 @@ class DTensorTestBase(MultiProcessTestCase):
 
     def destroy_pg(self) -> None:
         # Wait for all ranks to reach here before starting shutdown.
+        # FIXME dist.barrier deadlocks with multiple threads and NCCL: https://github.com/pytorch/pytorch/issues/95895
+        # dist.all_reduce(torch.zeros((1,), device="cuda" if torch.cuda.is_available() else "cpu"))
+        # FIXME can't use the above all_reduce as it causes hangs on bionic and focal. It hangs:
+        #  test_dtensor.py  -- DTensorMeshTest.test_dtensor_device_mesh_device_conversion
         dist.barrier()
         dist.destroy_process_group()
 
@@ -167,7 +187,7 @@ def with_comms(func: TestFunc) -> TestFunc:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         self.init_pg(backend=pg_backend)
-        func(self)  # type: ignore[misc]
+        func(self, *args, **kwargs)  # type: ignore[misc]
         self.destroy_pg()
 
     return wrapper
@@ -326,7 +346,9 @@ class DTensorConverter:
                         mesh,
                         placements,
                         size=t.size(),
+                        dtype=torch.bool,
                         requires_grad=t.requires_grad,
+                        stride=t.stride()
                     )
                 else:
                     r = distribute_tensor(t, mesh, placements)

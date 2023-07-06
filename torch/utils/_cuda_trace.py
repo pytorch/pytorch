@@ -1,7 +1,7 @@
 import logging
 from typing import Callable, Generic, List
 
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec  # Python 3.10+
 
 logger = logging.getLogger(__name__)
 P = ParamSpec("P")
@@ -21,7 +21,7 @@ class CallbackRegistry(Generic[P]):
                 cb(*args, **kwargs)
             except Exception as e:
                 logger.exception(
-                    f"Exception in callback for {self.name} registered with CUDA trace"
+                    "Exception in callback for %s registered with CUDA trace", self.name
                 )
 
 

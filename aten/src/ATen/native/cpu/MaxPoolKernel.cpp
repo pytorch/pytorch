@@ -8,10 +8,19 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+#include <type_traits>
 
 namespace at::native {
 
 namespace {
+
+template <typename scalar_t>
+bool is_nan(scalar_t v) {
+  if (std::is_integral<scalar_t>::value || std::is_same<scalar_t, unsigned char>::value) {
+    return false;
+  }
+  return std::isnan(v);
+}
 
 template <typename scalar_t, typename accscalar_t>
 void cpu_max_pool(
@@ -59,12 +68,17 @@ void cpu_max_pool(
 
       // compute local max
       int64_t maxindex = ih0 * input_width + iw0;
-      accscalar_t maxval = -std::numeric_limits<accscalar_t>::infinity();
+      accscalar_t maxval;
+      if (std::numeric_limits<accscalar_t>::has_infinity) {
+        maxval = -std::numeric_limits<accscalar_t>::infinity();
+      } else {
+        maxval = std::numeric_limits<accscalar_t>::min();
+      }
       for (int64_t ih = ih0; ih < ih1; ih += dilationH) {
         for (int64_t iw = iw0; iw < iw1; iw += dilationW) {
           int64_t index = ih * input_width + iw;
           accscalar_t val = accscalar_t(input_ptr[index]);
-          if ((val > maxval) || std::isnan(val)) {
+          if ((val > maxval) || is_nan(static_cast<double>(val))) {
             maxval = val;
             maxindex = index;
           }
@@ -86,6 +100,43 @@ void cpu_max_pool(
   if (!indices_.is_contiguous()) {
     indices_.copy_(indices);
   }
+}
+
+template <typename scalar_t>
+vec::Vectorized<scalar_t> is_nan_vec(vec::Vectorized<scalar_t> vec) {
+  return vec.isnan();
+}
+
+// TODO: use is_integeral/is_same to check the scalar_t and simplify the implementation
+// currently it does not work
+template <>
+vec::Vectorized<unsigned char> is_nan_vec<unsigned char>(vec::Vectorized<unsigned char> vec) {
+  Vectorized<unsigned char> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<signed char> is_nan_vec<signed char>(vec::Vectorized<signed char> vec) {
+  Vectorized<signed char> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<short> is_nan_vec<short>(vec::Vectorized<short> vec) {
+  Vectorized<short> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<int> is_nan_vec<int>(vec::Vectorized<int> vec) {
+  Vectorized<int> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<int64_t> is_nan_vec<int64_t>(vec::Vectorized<int64_t> vec) {
+  Vectorized<int64_t> ret(false);
+  return ret;
 }
 
 template <typename scalar_t>
@@ -173,7 +224,7 @@ void cpu_max_pool_channels_last(
             Vec maxval_vec = Vec::loadu(out + d2);
 
             // true = all ones, false = all zeros
-            Vec mask = (val_vec > maxval_vec) | val_vec.isnan();
+            Vec mask = (val_vec > maxval_vec) | is_nan_vec(val_vec);
             iVec imask = vec::cast<integer_t>(mask);
             Vec out_vec = Vec::blendv(maxval_vec, val_vec, mask);
             iVec ind_vec = iVec::blendv(maxindex_vec, index_vec, imask);
@@ -187,7 +238,7 @@ void cpu_max_pool_channels_last(
             int64_t maxindex = ind[d2];
             scalar_t maxval = out[d2];
 
-            bool mask = (val > maxval) || std::isnan(val);
+            bool mask = (val > maxval) || is_nan(static_cast<double>(val));
             out[d2] = mask ? val : maxval;
             ind[d2] = mask ? index : maxindex;
           }
@@ -299,8 +350,8 @@ void cpu_max_pool_channels_last<BFloat16>(
             fVec maxval_fvec1 = fVec::loadu(max + d2 + fVec::size());
 
             // true = all ones, false = all zeros
-            fVec mask0 = (val_fvec0 > maxval_fvec0) | val_fvec0.isnan();
-            fVec mask1 = (val_fvec1 > maxval_fvec1) | val_fvec1.isnan();
+            fVec mask0 = (val_fvec0 > maxval_fvec0) | is_nan_vec(val_fvec0);
+            fVec mask1 = (val_fvec1 > maxval_fvec1) | is_nan_vec(val_fvec1);
             iVec imask0 = vec::cast<int32_t>(mask0);
             iVec imask1 = vec::cast<int32_t>(mask1);
 
@@ -364,7 +415,7 @@ void cpu_max_pool_backward(
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   int64_t ndim = grad_output.ndimension();
   // treat batch size and channels as one dimension
@@ -412,7 +463,7 @@ void cpu_max_pool_backward_channels_last(
   auto grad_output = grad_output_.contiguous(memory_format);
   auto indices = indices_.contiguous(memory_format);
 
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto indices_data = indices.data_ptr<int64_t>();
 
@@ -461,7 +512,7 @@ void max_pool2d_kernel_impl(
     int dilationW, int dilationH) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d", [&] {
+      AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d", [&] {
         if (input.scalar_type() == ScalarType::BFloat16) {
           cpu_max_pool<BFloat16, /*accscalar_t*/float>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
         } else {
@@ -471,7 +522,7 @@ void max_pool2d_kernel_impl(
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d_channels_last", [&] {
+      AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d_channels_last", [&] {
         cpu_max_pool_channels_last<scalar_t>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
       });
       break;

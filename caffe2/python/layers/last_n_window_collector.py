@@ -15,8 +15,7 @@ class LastNWindowCollector(ModelLayer):
 
     def __init__(self, model, input_record, num_to_collect,
                  name='last_n_window_collector', **kwargs):
-        super(LastNWindowCollector, self).__init__(
-            model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
         assert num_to_collect > 0
         self.num_to_collect = num_to_collect
         assert isinstance(input_record, schema.Scalar), \

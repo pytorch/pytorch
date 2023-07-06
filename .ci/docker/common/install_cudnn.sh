@@ -4,9 +4,9 @@ if [[ ${CUDNN_VERSION} == 8 ]]; then
     # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
     mkdir tmp_cudnn && cd tmp_cudnn
     CUDNN_NAME="cudnn-linux-x86_64-8.3.2.44_cuda11.5-archive"
-    if [[ ${CUDA_VERSION:0:4} == "11.7" ]]; then
-        CUDNN_NAME="cudnn-linux-x86_64-8.5.0.96_cuda11-archive"
-        curl --retry 3 -OLs https://ossci-linux.s3.amazonaws.com/${CUDNN_NAME}.tar.xz
+    if [[ ${CUDA_VERSION:0:4} == "12.1" ]]; then
+        CUDNN_NAME="cudnn-linux-x86_64-8.8.1.3_cuda12-archive"
+        curl --retry 3 -OLs https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/${CUDNN_NAME}.tar.xz
     elif [[ ${CUDA_VERSION:0:4} == "11.8" ]]; then
         CUDNN_NAME="cudnn-linux-x86_64-8.7.0.84_cuda11-archive"
         curl --retry 3 -OLs https://developer.download.nvidia.com/compute/redist/cudnn/v8.7.0/local_installers/11.8/${CUDNN_NAME}.tar.xz
