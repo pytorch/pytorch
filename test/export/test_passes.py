@@ -495,7 +495,7 @@ class TestPasses(TestCase):
         )
         self.assertIn(
             "call_function[target=torch.ops.aten._functional_assert_async.msg]"
-            "(args = (%eq_scalar, assertion error), kwargs = {dep_token: %dep_token1}",
+            "(args = (%eq, assertion error, %_functional_assert_async), kwargs = {})",
             dep_token_node.format_node(),
         )
 
@@ -531,24 +531,24 @@ class TestPasses(TestCase):
         self.assertEqual(
             gs,
             ExportGraphSignature(
-                parameters=["L__self___linear.weight", "L__self___linear.bias"],
-                buffers=["L__self___buf"],
-                user_inputs=["arg3_1"],
-                user_outputs=["add_tensor_1"],
+                parameters=['_param_constant0', '_param_constant1', ],
+                buffers=['_tensor_constant0'],
+                user_inputs=['arg3_1'],
+                user_outputs=['add_1'],
                 inputs_to_parameters={
-                    "arg0_1": "L__self___linear.weight",
-                    "arg1_1": "L__self___linear.bias",
+                    'arg0_1': '_param_constant0',
+                    'arg1_1': '_param_constant1',
                 },
-                inputs_to_buffers={"arg2_1": "L__self___buf"},
-                buffers_to_mutate={"add_tensor": "L__self___buf"},
+                inputs_to_buffers={'arg2_1': '_tensor_constant0'},
+                buffers_to_mutate={'add': '_tensor_constant0'},
                 backward_signature=None,
-                assertion_dep_token={2: "dep_token7"},
+                assertion_dep_token={2: '_functional_assert_async_2'},
             ),
         )
         outputs = next(n for n in ep.graph.nodes if n.op == "output").args[0]
         self.assertEqual(
             [str(o) for o in outputs],
-            ["add_tensor", "add_tensor_1", "dep_token7"],
+            ["add", "add_1", "_functional_assert_async_2"],
         )
         self.assertEqual(
             len(outputs), len(gs.buffers_to_mutate) + len(gs.user_outputs) + 1,
@@ -621,8 +621,8 @@ class TestPasses(TestCase):
         self.assertEqual(
             _to_partition_names(partitions2),
             [
-                {"add_tensor_3", "add_tensor_4"},
-                {"add_tensor_1", "add_tensor_2", "add_tensor"},
+                {"add_3", "add_4"},
+                {"add_1", "add_2", "add"},
             ]
         )
 
@@ -640,7 +640,7 @@ class TestPasses(TestCase):
 
         self.assertEqual(output_names1, ["add_2"])
         # The extra output `add_tensor_1` is consumed by assertion.
-        self.assertEqual(output_names2, ["add_tensor_1", "add_tensor_2"])
+        self.assertEqual(output_names2, ["add_1", "add_2"])
 
 
 if __name__ == '__main__':

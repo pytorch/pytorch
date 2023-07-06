@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-import copy
 import math
 import operator
 import traceback
@@ -12,6 +11,7 @@ import sympy
 import torch
 import torch.fx
 from torch.fx.experimental.symbolic_shapes import SymInt
+from torch.fx.passes.infra.pass_manager import PassManager
 from torch._export.pass_base import ExportPassBase, ProxyValue, PassResult
 from torch._subclasses.fake_tensor import FakeTensor
 
@@ -61,7 +61,6 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
 
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
-        graph_module = copy.deepcopy(graph_module)
         graph = graph_module.graph
 
         insert_loc = None
@@ -203,8 +202,8 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 torch.ops.aten._assert_async.msg, (cmp_tensor_node, assert_msg)
             )
 
-    def call_operator(self, op, args, kwargs, meta) -> ProxyValue:
-        ret = super().call_operator(op, args, kwargs, meta)
+    def call_operator(self, target, args, kwargs, meta) -> ProxyValue:
+        ret = super().call_operator(target, args, kwargs, meta)
         if "val" not in meta:
             return ret
 
@@ -274,3 +273,20 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
             {},
             self._create_dummy_node_metadata(),
         )
+
+def _transform(
+    gm: torch.fx.GraphModule,
+    range_constraints: Dict[sympy.Symbol, RangeConstraint],
+    equality_constraints: List[Tuple[InputDim, InputDim]],
+) -> torch.fx.GraphModule:
+    pm = PassManager(
+        [
+            _AddRuntimeAssertionsForConstraintsPass(
+                range_constraints=range_constraints,
+                equality_constraints=equality_constraints,
+            )
+        ]
+    )
+    res = pm(gm)
+
+    return res.graph_module if res is not None else gm

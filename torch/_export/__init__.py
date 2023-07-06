@@ -3,7 +3,9 @@ import inspect
 import weakref
 import re
 from collections import OrderedDict
-from typing import Any, Callable, List, Tuple, Optional, Dict, Union
+from typing import Any, Callable, List, Tuple, Optional, Dict, Union, Generator
+from torch.fx.experimental.proxy_tensor import make_fx
+from contextlib import contextmanager
 
 import sympy
 
@@ -11,6 +13,9 @@ import torch
 import torch._dynamo
 import torch.fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from .passes.add_runtime_assertions_for_constraints_pass import (
+    _transform as _add_runtime_assertions_transform,
+)
 from .exported_program import (
     CallSpec,
     ExportedProgram,
@@ -21,7 +26,8 @@ from .exported_program import (
 from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
-from torch._functorch.aot_autograd import aot_export_module
+from torch._functorch.aot_autograd import aot_export_module, GraphSignature
+from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
@@ -35,6 +41,7 @@ from torch.fx.experimental.symbolic_shapes import (
 
 from torch._dynamo.exc import UserError, UserErrorType
 from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
+import torch._functorch.config as config
 
 
 
@@ -204,7 +211,47 @@ def export(
             )
 
             gm_torch_level.recompile()
-            gm, graph_signature = aot_export_module(gm_torch_level, fake_args, decompositions=DECOMP_TABLE, trace_joint=False)
+            if _add_runtime_assertions:
+                # Make an extra round of fx tracing to:
+                # - Lower the op to aten op to make it easy for
+                #   `_AddRuntimeAssertionsForConstraintsPass` to handle.
+                # - Populate the `val` in node's meta - this is critical for
+                #   for `_AddRuntimeAssertionsForConstraintsPass` to create
+                #   assertions for intermediate result (symbol).
+                def _graph_with_interpreter(*args):
+                    with torch.fx.traceback.preserve_node_meta():
+                        return torch.fx.Interpreter(gm_torch_level).run(*args)
+
+                with enable_python_dispatcher(), fake_mode:
+                    fx_gm = make_fx(
+                        _graph_with_interpreter,
+                        decomposition_table=DECOMP_TABLE,
+                        _allow_non_fake_inputs=True,
+                        _allow_fake_constant=True,
+                    )(*fake_args)
+                    fx_gm.meta["inline_constraints"] = dict(
+                        fake_mode.shape_env.var_to_range,
+                    )
+                    gm_torch_level = fx_gm
+
+                range_constraints, equality_constraints = _process_constraints(
+                    graph_module=gm_torch_level,
+                    param_buffer_names=list(params_buffers.keys()),
+                    example_inputs=flat_args,
+                )
+                gm_torch_level = _add_runtime_assertions_transform(
+                    gm=gm_torch_level,
+                    range_constraints=range_constraints,
+                    equality_constraints=equality_constraints,
+                )
+
+
+            with _maybe_functionalize_runtime_assertions(
+                functionalize=_add_runtime_assertions and _functionalize_runtime_assertions,
+            ):
+                gm, graph_signature = aot_export_module(
+                    gm_torch_level, fake_args, decompositions=DECOMP_TABLE, trace_joint=False,
+                )
 
             export_backward_signature = ExportBackwardSignature(
                 gradients_to_parameters=graph_signature.backward_signature.gradients_to_parameters,
@@ -220,7 +267,11 @@ def export(
                 inputs_to_parameters=graph_signature.inputs_to_parameters,
                 inputs_to_buffers=graph_signature.inputs_to_buffers,
                 buffers_to_mutate=graph_signature.buffers_to_mutate,
-                backward_signature=export_backward_signature
+                backward_signature=export_backward_signature,
+                assertion_dep_token=_get_assertion_dep_token(
+                    gm=gm,
+                    gs=graph_signature,
+                ),
             )
 
             # TODO unfortunately preserving meta at graph level is not
@@ -238,9 +289,9 @@ def export(
             }
 
             range_constraints, equality_constraints = _process_constraints(
-                gm,
-                export_graph_signature,
-                flat_args,
+                graph_module=gm,
+                param_buffer_names=list(params_buffers.keys()),
+                example_inputs=flat_args,
             )
             assert orig_out_spec is not None
             exported_program = ExportedProgram(
@@ -252,12 +303,6 @@ def export(
                 range_constraints,
                 equality_constraints,
             )
-
-            if _add_runtime_assertions:
-                exported_program = exported_program._add_runtime_assertions(
-                    functionalize=_functionalize_runtime_assertions,
-                )
-
             return exported_program.transform(_ReplaceSymSizeOpPass())
 
         except (ConstraintViolationError, ValueRangeError) as e:
@@ -266,3 +311,25 @@ def export(
             raise UserError(
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using constrain_as_*(). {str(e)}")
+
+@contextmanager
+def _maybe_functionalize_runtime_assertions(
+    functionalize: bool,
+) -> Generator[None, None, None]:
+    curr_functionalize_assertion_ops = config.functionalize_assertion_ops
+    config.functionalize_assertion_ops = functionalize
+    yield
+    config.functionalize_assertion_ops = curr_functionalize_assertion_ops
+
+def _get_assertion_dep_token(
+    gm: torch.fx.GraphModule, gs: GraphSignature,
+) -> Optional[Dict[int, str]]:
+    if gs.asserts_dep_token is None:
+        return None
+
+    output_args = next(n for n in reversed(gm.graph.nodes) if n.op == "output").args[0]
+    return next(
+        {idx: str(arg)}
+        for idx, arg in enumerate(output_args)
+        if str(arg) == gs.asserts_dep_token
+    )

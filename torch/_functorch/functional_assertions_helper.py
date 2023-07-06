@@ -115,6 +115,7 @@ class FunctionalAssertionsHelper:
         assert dep_token_arg.target in (
             aten._make_dep_token.default,
             aten._functional_assert_async.msg,
+            aten._functional_sym_constrain_range.default,
         )
 
         return dep_token_arg.name
@@ -135,10 +136,22 @@ def _register_decomposition(aten_op):
 
 @_register_decomposition(aten._assert_async.msg)
 def _assert_async_msg(val, assert_msg) -> None:
-    dep_token = DepTokenStateTracker.get_dep_token()
-    if dep_token is None:
-        dep_token = aten._make_dep_token()
-
+    dep_token = _get_dep_token()
     DepTokenStateTracker.set_dep_token(
         aten._functional_assert_async.msg(val, assert_msg, dep_token)
     )
+
+@_register_decomposition(aten.sym_constrain_range.default)
+def _sym_constrain_range(size, min, max) -> None:
+    dep_token = _get_dep_token()
+    DepTokenStateTracker.set_dep_token(
+        aten._functional_sym_constrain_range.default(
+            size, min=min, max=max, dep_token=dep_token,
+        )
+    )
+
+def _get_dep_token():
+    dep_token = DepTokenStateTracker.get_dep_token()
+    if dep_token is None:
+        dep_token = aten._make_dep_token()
+    return dep_token
