@@ -1,3 +1,8 @@
+r"""
+This package implements abstractions found in ``torch.cuda``
+to facilitate writing device-agnostic code.
+"""
+
 from typing import Any, Optional, Union
 from contextlib import AbstractContextManager
 from . import amp
