@@ -15,7 +15,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
 from ..source import GetItemSource
-from ..utils import check_constant_args, namedtuple_fields
+from ..utils import check_constant_args, guard_if_dyn, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
@@ -628,7 +628,7 @@ class SliceVariable(BaseListVariable):
         return slice
 
     def as_python_constant(self):
-        return slice(*[x.as_python_constant() for x in self.items])
+        return slice(*[guard_if_dyn(x) for x in self.items])
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
@@ -795,14 +795,8 @@ class SetVariable(VariableTracker):
         assert isinstance(vt, VariableTracker)
 
         if isinstance(vt, TensorVariable):
-            if not vt.source:
-                unimplemented("Sets with non input tensors NYI")
-            scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
-            real_tensor = eval(vt.source.name(), scope)
-            # This is unfortunate. I would much rather store a proxy.
-            # However, we cannot, because this would cause us to invoke operations (like
-            # a __bool__ when checking set membership) on the proxy, which we want to avoid.
-            return SetVariable.SetElement(vt, real_tensor)
+            tensor_node = vt.as_proxy().node
+            return SetVariable.SetElement(vt, tensor_node)
         if isinstance(vt, ConstantVariable):
             return SetVariable.SetElement(vt, vt.value)
 
