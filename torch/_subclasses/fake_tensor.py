@@ -104,6 +104,12 @@ _device_not_kwarg_ops = (
 # this op is never actually used
 _non_kwarg_device_constructors = (aten._list_to_tensor,)
 
+# This function indicates if the backend device
+# supports non-contiguous tensors
+def is_noncontiguous_supported(device):
+    if device.type == "hpu":
+        return False
+    return True
 
 def contains_tensor_types(type):
     tensor_type = torch._C.TensorType.get()
@@ -533,7 +539,7 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     out_device = new_kwargs["input"].device
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
-        if out_device == torch.device("hpu:0"):
+        if not is_noncontiguous_supported(out_device):
             out = out.new_empty(out.shape)
 
     return FakeTensor(fake_mode, out, out_device)
@@ -774,7 +780,7 @@ def make_fast_binary_impl(slow_ref):
         # TODO: is_non-overlapping_and_dense (not bound from Python
         # no inplace, no out, everything defined
 
-        if common_device != torch.device("hpu:0"):
+        if is_noncontiguous_supported(common_device):
             for op in operands:
                 if not isinstance(op, torch.Tensor):
                     continue
@@ -1102,8 +1108,6 @@ class FakeTensor(torch.Tensor):
             has_scalar_only_inputs = True
             common_device = torch.device("cpu")
 
-        assert common_device is not None, f"Could not find common device for {func}"
-
         return common_device, has_scalar_only_inputs
 
     __torch_function__ = torch._C._disabled_torch_function_impl
@@ -1404,12 +1408,15 @@ class FakeTensorMode(TorchDispatchMode):
         # run kernel registered to meta for func, which include
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
         try:
-            device = FakeTensor._find_common_device(func, args, kwargs)
+            common_device = FakeTensor._find_common_device(func, args, kwargs)
             with in_kernel_invocation_manager(self):
                 r = func(*args, **kwargs)
-                if device[0] == torch.device("hpu:0"):
-                    from torch.distributed._tensor.ops.pointwise_ops import pointwise_ops
-                    if (func in pointwise_ops):
+                if common_device is not None and is_noncontiguous_supported(common_device[0]) is False::
+                    from torch.distributed._tensor.ops.pointwise_ops import(
+                        pointwise_ops,
+                    )
+
+                    if func in pointwise_ops:
                         r = r.new_empty(r.shape)
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
@@ -1501,6 +1508,7 @@ class FakeTensorMode(TorchDispatchMode):
                     common_device,
                     has_scalar_only_inputs,
                 ) = FakeTensor._find_common_device(func, args, kwargs)
+                assert common_device is not None, f"Could not find common device for {func}"
 
             if isinstance(e, FakeTensor):
                 torch._check(
