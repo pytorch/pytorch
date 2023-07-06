@@ -20,18 +20,26 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
   TORCH_CHECK(_stream.device_type() == DeviceType::MPS);
   _serialQueue = dispatch_queue_create("metal gpu stream", nullptr);
   _executionDescriptor = [MPSGraphExecutionDescriptor new];
+  _compilationDescriptor = [MPSGraphCompilationDescriptor new];
+
   // disable commitAndContinue if Signpost tracing is enabled
   if (getMPSProfiler().isSignpostTracingEnabled()) {
     _enableCommitAndContinue = false;
   }
   _executionDescriptor.enableCommitAndContinue = _enableCommitAndContinue;
+
+  // Choose level which optimizes for GPU
+  _compilationDescriptor.optimizationLevel = MPSGraphOptimizationLevel0;
+  _executionDescriptor.compilationDescriptor = _compilationDescriptor;
 }
 
 MPSStream::~MPSStream() {
   [_commandQueue release];
   _commandQueue = nil;
   [_executionDescriptor release];
+  [_compilationDescriptor release];
   _executionDescriptor = nil;
+  _compilationDescriptor = nil;
 
   assert(_commandBuffer == nil);
 }
