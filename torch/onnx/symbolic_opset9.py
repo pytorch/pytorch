@@ -5292,6 +5292,10 @@ def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
             input,
         )
 
+    if dim == 0:
+        return symbolic_helper._reshape_helper(g, input, [1])
+    if dim == 1:
+        return g.op("Identity", input)
     # TODO: remove this as onnx opset 11 spec allows negative axes
     if end_dim < 0:
         end_dim = dim + end_dim

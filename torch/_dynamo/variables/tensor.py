@@ -20,6 +20,7 @@ from ..utils import (
     get_custom_getattr,
     get_fake_value,
     get_real_value,
+    guard_if_dyn,
     HAS_NUMPY_TORCH_INTEROP,
     object_has_getattribute,
     product,
@@ -164,8 +165,6 @@ class TensorVariable(VariableTracker):
                     if value.is_contiguous(memory_format=x)
                 ]
             )
-            props["storage_offset"] = value.storage_offset()
-
         return props
 
     def dynamic_getattr(self, tx, name):
@@ -243,10 +242,6 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.is_quantized, **options)
         elif name == "is_sparse" and self.is_sparse is not None:
             result = ConstantVariable(self.is_sparse, **options)
-        elif name == "storage_offset":
-            return variables.LambdaVariable(
-                lambda *args, **kwargs: ConstantVariable(self.storage_offset)
-            ).add_options(self)
         elif name == "shape" and self.size is None:
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
@@ -366,15 +361,7 @@ class TensorVariable(VariableTracker):
             else:
                 assert not args and not kwargs, f"Tensor.{name}() unhandled args/kwargs"
 
-            dim = None
-            if isinstance(dim_var, SymNodeVariable):
-                # This is because SymNodeVariable intentionally doesn't define
-                # as_python_constant to avoid shunting down some codepaths
-                # that expect consts.   In this case, we know we definitely
-                # want to specialize though.
-                dim = dim_var.evaluate_expr()
-            elif dim_var is not None:
-                dim = dim_var.as_python_constant()
+            dim = guard_if_dyn(dim_var)
 
             def make_const_size_variable(x, **options):
                 return SizeVariable(
