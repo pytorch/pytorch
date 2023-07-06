@@ -66,12 +66,21 @@ class AutotuneHint(Enum):
 def autotune_hints_to_configs(
     hints: Set[AutotuneHint], size_hints, block_size
 ) -> List[Config]:
+    """
+    AutotuneHints can be attached to the metadata of triton kernels for providing
+    suggestions about what to try for autotuning. One reason to do this is if there are
+    some configs that are only useful in specific scenarios, in which case we can avoid
+    wasting compile time on autotuning unless we know we are in one of those scenarios.
+
+    Based on those hints, this function will generate a list of additional autotuning
+    configs to try.
+    """
     configs = []
 
     for hint in hints:
         if hint == AutotuneHint.ELEMENTS_PER_WARP_32:
             if len(size_hints) == 1:
-                xyz_options = [(block_size // 4,)]
+                xyz_options = ((block_size // 4,),)
             elif len(size_hints) == 2:
                 xyz_options = ((block_size // 4, 1), (1, block_size // 4))
             elif len(size_hints) == 3:
@@ -621,6 +630,13 @@ def triton_config(
     Construct a pointwise triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
     dimension and will be rounded up to the nearest power of 2.
+
+    num_elements_per_warp is a suggestion for controlling how many warps
+    the triton config should contain. e.g.: if x=16, y=8, z=4 then
+    num_elements = 16*8*4 = 512. Then if we set num_elements_per_warp=128,
+    we'll launch 512 (elem) / 128 (elem/warp) = 4 warps. Note that it's
+    just a suggestion, and sometimes other adjustment heuristics will
+    override the num_elements_per_warp.
     """
     # Ideally we want to read this from some device config
     maxGridSize = [2147483647, 65535, 65535]
