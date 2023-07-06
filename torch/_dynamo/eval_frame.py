@@ -1211,9 +1211,15 @@ class TorchPatcher:
     @staticmethod
     @functools.lru_cache(None)
     def patch():
-        # Disable TorchDynamo on some torch.* compilers generated frames
+        # A better way to disable the following would be decorate the source
+        # functions with @torch._disable_dynamo. However, this causes issues
+        # with torch.deploy internally.
         torch.jit.trace = disable(torch.jit.trace)
-
+        torch.jit.trace_module = disable(torch.jit.trace_module)
+        torch.jit._get_trace_graph = disable(torch.jit._get_trace_graph)
+        torch.fx._symbolic_trace.Tracer.trace = disable(
+            torch.fx._symbolic_trace.Tracer.trace
+        )
         torch.distributions.Distribution.set_default_validate_args(False)
 
         optimizers = [
@@ -1226,7 +1232,6 @@ class TorchPatcher:
         from ..optim import (
             adadelta,
             adagrad,
-            adam,
             adamax,
             adamw,
             asgd,
@@ -1239,7 +1244,6 @@ class TorchPatcher:
         for opt_mod in (
             adadelta,
             adagrad,
-            adam,
             adamax,
             adamw,
             asgd,
@@ -1283,18 +1287,6 @@ class TorchPatcher:
 
             # disable future hooking
             opt.step.hooked = True
-
-        # TorchDynamo does not step inside utils.checkpoint function.  The flow
-        # looks likes this
-        #  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
-        #     speculatively checking if the forward function is safe to trace.
-        #  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
-        #     order op. As a result, TorchDynamo does not look inside utils.checkpoint.
-        #  3) If not, then TorchDynamo falls back to eager by performing a graph
-        #     break. And here, the following disable wrapper ensures that
-        #     TorchDynamo does not trigger again on the frames created by
-        #     utils.checkpoint innards.
-        torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
 
         torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
         torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()
