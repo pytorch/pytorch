@@ -152,9 +152,17 @@ class MetaConverter:
         # Use a Weak Ref to s in order to not leak memory
         swr = StorageWeakRef(s)
         if swr not in self.storage_memo:
-            self.storage_memo[swr] = callback(
-                lambda: torch.empty(s.size(), dtype=torch.uint8, device="meta")
-            ).untyped_storage()
+            if supports_mode_tracing(s):
+                self.storage_memo[swr] = transform_subclass(
+                    s,
+                    lambda inner: callback(
+                        lambda: torch.empty(s.size(), dtype=torch.uint8, device="meta")
+                    ).untyped_storage(),
+                )
+            else:
+                self.storage_memo[swr] = callback(
+                    lambda: torch.empty(s.size(), dtype=torch.uint8, device="meta")
+                ).untyped_storage()
         return self.storage_memo[swr]
 
     # This function assumes that it's possible to do the conversion
@@ -392,11 +400,23 @@ class MetaConverter:
                 else:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides, storage_offset = sym_sizes_strides_storage_offset(t)
-                    r = callback(
-                        lambda: torch.empty_strided(
-                            sizes, strides, dtype=t.dtype, device="meta"
+                    # If we have a subclass that desugars into dense tensors,
+                    # perform our callback on each inner tensor.
+                    if supports_mode_tracing(t):
+                        r = transform_subclass(
+                            t,
+                            lambda inner: callback(
+                                lambda: torch.empty_strided(
+                                    sizes, strides, dtype=t.dtype, device="meta"
+                                )
+                            ),
                         )
-                    )
+                    else:
+                        r = callback(
+                            lambda: torch.empty_strided(
+                                sizes, strides, dtype=t.dtype, device="meta"
+                            )
+                        )
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = t.requires_grad
@@ -499,6 +519,7 @@ class MetaConverter:
             type(t) is torch.Tensor
             or type(t) is torch.nn.Parameter
             or (ignore_subclass and isinstance(t, torch.Tensor))
+            or supports_mode_tracing(t)
             or isinstance(t, FakeTensor)
         ):
             if t.device.type != "xla" and any(
@@ -547,14 +568,6 @@ class MetaConverter:
                     r._is_param = True
                 return r
         elif torch.overrides.is_tensor_like(t):
-            if supports_mode_tracing(t):
-                out = transform_subclass(
-                    t,
-                    lambda t: self.meta_tensor(
-                        t, shape_env=shape_env, callback=callback, source=source
-                    ),
-                )
-                return out
             self.miss += 1
             return NotImplemented
         else:

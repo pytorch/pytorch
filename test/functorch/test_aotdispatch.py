@@ -2585,22 +2585,66 @@ class TestPartitioning(AOTTestCase):
 
 class TestAOTDispatch(AOTTestCase):
 
+    def test_AAA(self):
+        def f(a, b):
+            a.mul_(5)
+            b.mul_(6)
+            return a + b
+
+        b1_ref = torch.ones(3, 3, requires_grad=True)
+        b2_ref = torch.ones(3, 3, requires_grad=True)
+        b_ref = DoubleTensor(b1_ref, b2_ref, requires_grad=True) + 0
+        a_ref = torch.ones(3, 3, requires_grad=True) + 0
+
+        b1_test = b1_ref.clone().detach().requires_grad_(True)
+        b2_test = b2_ref.clone().detach().requires_grad_(True)
+        b_test = DoubleTensor(b1_test, b2_test, requires_grad=True) + 0
+        a_test = a_ref.clone().detach().requires_grad_(True) + 0
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
+
+        self.assertEqual(b_test.a, b_ref.a)
+        self.assertEqual(b_test.b, b_ref.b)
+
+        out_ref.sum().backward()
+        out_test.sum().backward()
+        # Both grad_inputs are DoubleTensors
+        self.assertEqual(a_ref.grad.a, a_test.grad.a)
+        self.assertEqual(a_ref.grad.b, a_test.grad.b)
+        self.assertEqual(b_ref.grad.a, b_test.grad.a)
+        self.assertEqual(b_ref.grad.b, b_test.grad.b)
+
+    # Tests to add cases for (non-exhaustive list, mostly for my notes):
+    # - subclass / mode introduced in the middle of the compiled fn
+    # - various input mutation / intermediate base tests
+    # - input mutation that changes a tensor into a subclass
+    # - metadata mutation? (TBD)
+    # - guard tests (fw guards *and* bw guards)
+    # - subclass test involving _indices_of_inps_to_detach
     def test_aot_dispatch(self):
         # a is a subclass, b is not
         def f(a, b):
-            aa = torch.mul(a, 2)
-            bb = torch.add(b, 3)
-            out_subclass = torch.div(aa, bb)
-            return out_subclass
+            aa = torch.mul(a, 6)
+            bb = torch.div(b, 2)
+            return aa + bb
 
         a1_ref = torch.ones(3, 3, requires_grad=True)
         a2_ref = torch.ones(3, 3, requires_grad=True)
-        a_ref = DoubleTensor(a1_ref, a2_ref)
+        a_ref = DoubleTensor(a1_ref, a2_ref, requires_grad=True)
         b_ref = torch.ones(3, 3, requires_grad=True)
 
         a1_test = a1_ref.clone().detach().requires_grad_(True)
         a2_test = a2_ref.clone().detach().requires_grad_(True)
-        a_test = DoubleTensor(a1_test, a2_test)
+        a_test = DoubleTensor(a1_test, a2_test, requires_grad=True)
         b_test = b_ref.clone().detach().requires_grad_(True)
 
         fw_graph_cell = [None]
@@ -2610,62 +2654,83 @@ class TestAOTDispatch(AOTTestCase):
             f,
             fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
             bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
-            # The default partitioner seems to have some issues where
-            # the order that it returns saved_for_bw tensors as outputs
-            # can change, breaking my expecttests.
-            # We should probably just remove the default partitioner
             partition_fn=min_cut_rematerialization_partition
         )
         out_ref = f(a_ref, b_ref)
         out_test = compiled_f(a_test, b_test)
-        # First out is a DoubleTensor, second is an ordinary tensor
+
+        # Output is a DoubleTensor (check both inner tensors)
         self.assertEqual(out_ref.a, out_test.a)
         self.assertEqual(out_ref.b, out_test.b)
 
         out_ref.sum().backward()
         out_test.sum().backward()
+        # Both grad_inputs are DoubleTensors
         self.assertEqual(a_ref.grad.a, a_test.grad.a)
         self.assertEqual(a_ref.grad.b, a_test.grad.b)
-        self.assertEqual(b_ref.grad, b_test.grad)
+        self.assertEqual(b_ref.grad.a, b_test.grad.a)
+        self.assertEqual(b_ref.grad.b, b_test.grad.b)
 
         # Important pieces of the graph:
         # - mul() and div() show up twice, because we called them on a DoubleTensor
         # - add() shows up once, because we called it on a plain Tensor
-        # - add() shows up once, because we called it on a plain Tensor
-        # - The user forward() fn returns 1 output (the result of div)
-        # - div, div_1 correspond to the two inner dense tensors that will be wrapped
+        # - The user forward() fn returns 1 output (the result of add),
+        #   while the graph itself returns two outputs (add, add_1)
+        # - add, add_1 correspond to the two inner dense tensors that will be wrapped
         # - into a single DoubleTensor output.
         self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3):
-    mul = torch.ops.aten.mul.Tensor(primals_1, 2)
-    mul_1 = torch.ops.aten.mul.Tensor(primals_2, 2)
-    add = torch.ops.aten.add.Tensor(primals_3, 3)
-    div = torch.ops.aten.div.Tensor(mul, add);  mul = None
-    div_1 = torch.ops.aten.div.Tensor(mul_1, add);  mul_1 = add = None
-    return [div, div_1, primals_1, primals_2, primals_3, div, div_1]""")
+    mul = torch.ops.aten.mul.Tensor(primals_1, 6);  primals_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(primals_2, 6);  primals_2 = None
+    div = torch.ops.aten.div.Tensor(primals_3, 2);  primals_3 = None
+    add = torch.ops.aten.add.Tensor(mul, div);  mul = None
+    add_1 = torch.ops.aten.add.Tensor(mul_1, div);  mul_1 = div = None
+    return [add, add_1]""")
 
         # Important pieces of the graph:
         # - 4 total dense outputs.
         #   This corresponds to the fact that each user fwd inpt (a, b)
         #   will get a gradient that is a DoubleTensor subclass,
-        #   so (mul_4, mul_5) will be wrapped into a.grad
-        #   and (mul_2, mul_3) will be wrapped into b.grad
+        #   so (mul_2, mul_3) will be wrapped into a.grad
+        #   and (div_1, div_2) will be wrapped into b.grad
         # - 4 total dense outputs,
         self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
-def forward(self, primals_1, primals_2, primals_3, div, div_1, tangents_1, tangents_2):
-    add = torch.ops.aten.add.Tensor(primals_3, 3);  primals_3 = None
-    neg = torch.ops.aten.neg.default(primals_1)
-    neg_1 = torch.ops.aten.neg.default(primals_2)
-    div_4 = torch.ops.aten.div.Tensor(div, add);  div = None
-    div_5 = torch.ops.aten.div.Tensor(div_1, add);  div_1 = None
-    mul_2 = torch.ops.aten.mul.Tensor(neg, div_4);  neg = div_4 = None
-    mul_3 = torch.ops.aten.mul.Tensor(neg_1, div_5);  neg_1 = div_5 = None
-    div_6 = torch.ops.aten.div.Tensor(primals_1, add);  primals_1 = None
-    div_7 = torch.ops.aten.div.Tensor(primals_2, add);  primals_2 = add = None
-    mul_4 = torch.ops.aten.mul.Tensor(div_6, 2);  div_6 = None
-    mul_5 = torch.ops.aten.mul.Tensor(div_7, 2);  div_7 = None
-    return [mul_4, mul_5, mul_2, mul_3]""")
+def forward(self, tangents_1, tangents_2):
+    div_1 = torch.ops.aten.div.Tensor(tangents_1, 2)
+    div_2 = torch.ops.aten.div.Tensor(tangents_2, 2)
+    mul_2 = torch.ops.aten.mul.Tensor(tangents_1, 6);  tangents_1 = None
+    mul_3 = torch.ops.aten.mul.Tensor(tangents_2, 6);  tangents_2 = None
+    return [mul_2, mul_3, div_1, div_2]""")
 
+    def test_aot_dispatch_inference(self):
+        # a is a subclass, b is not
+        def f(a, b):
+            aa = torch.mul(a, 6)
+            bb = torch.div(b, 2)
+            return aa + bb
+
+        a1_ref = torch.ones(3, 3)
+        a2_ref = torch.ones(3, 3)
+        a_ref = DoubleTensor(a1_ref, a2_ref, requires_grad=False)
+        b_ref = torch.ones(3, 3)
+
+        a1_test = a1_ref.clone()
+        a2_test = a2_ref.clone()
+        a_test = DoubleTensor(a1_test, a2_test, requires_grad=False)
+        b_test = b_ref.clone()
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=min_cut_rematerialization_partition
+        )
+        out_ref = f(a_ref, b_ref)
+        out_test = compiled_f(a_test, b_test)
+
+        # Output is a DoubleTensor (check both inner tensors)
+        self.assertEqual(out_ref.a, out_test.a)
+        self.assertEqual(out_ref.b, out_test.b)
 
     def test_aot_dispatch_incorrect_backward(self):
         # a is a subclass, b is not
@@ -2677,17 +2742,17 @@ def forward(self, primals_1, primals_2, primals_3, div, div_1, tangents_1, tange
             # When creating the joint, we assume that the second grad_out
             # is not a subclass.
             # In the below test case though, we end up being wrong.
-            # This would require recompiling (and maybe repartitioning).
+            # This would require re-tracing and recompiling the backward.
             return out_subclass, out_reg
 
         a1_ref = torch.ones(3, 3, requires_grad=True)
         a2_ref = torch.ones(3, 3, requires_grad=True)
-        a_ref = DoubleTensor(a1_ref, a2_ref)
+        a_ref = DoubleTensor(a1_ref, a2_ref, requires_grad=True)
         b_ref = torch.ones(3, 3, requires_grad=True)
 
         a1_test = a1_ref.clone().detach().requires_grad_(True)
         a2_test = a2_ref.clone().detach().requires_grad_(True)
-        a_test = DoubleTensor(a1_test, a2_test)
+        a_test = DoubleTensor(a1_test, a2_test, requires_grad=True)
         b_test = b_ref.clone().detach().requires_grad_(True)
 
         compiled_f = aot_function(

@@ -79,7 +79,9 @@ THPLayout* getTHPLayout(at::Layout layout) {
   return thp_layout;
 }
 
-PyObject* createPyObject(const at::Storage& storage, bool always_create_storage) {
+PyObject* createPyObject(
+    const at::Storage& storage,
+    bool always_create_storage) {
   if (!always_create_storage && storage.device_type() != at::DeviceType::Meta &&
       storage.data() == nullptr && storage.sym_nbytes() != 0 &&
       // Grabbing storage() from FunctionalTensorWrapper is allowed.
