@@ -554,7 +554,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         #   grad_output = grad_fn(x)
         checkpoint = tx.copy_graphstate()
         graph_checkpoint = tx.output.graph
-        pre_side_effects = tx.output.side_effects.clone()
         grad_args = (args[0], args[1], args[2])
 
         # get arguments
@@ -597,17 +596,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
         )
         body_node = make_attr(tx, body_name)
-        post_side_effects = tx.output.side_effects
-        if post_side_effects.diff(pre_side_effects):
-            diff = (
-                post_side_effects.id_to_variable.keys()
-                - pre_side_effects.id_to_variable.keys()
-            )
-            if len(diff) > 0:
-                unimplemented(
-                    "NYI - torch.func.grad(f) where there are side effects in f"
-                )
-
         grad_proxy_args = (
             body_node,
             *(arg.as_proxy() for arg in grad_args[1:]),
@@ -712,9 +700,8 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         self.check_kwargs(kwargs, ConstantVariable)
 
-        from . import AutogradFunctionVariable, TorchVariable
+        from . import TorchVariable
 
-        pre_side_effects = tx.output.side_effects.clone()
         always_restore = self.value.__name__ == "trampoline_autograd_bwd"
         if (
             self.value.__name__ == "trampoline_autograd_bwd"
@@ -746,19 +733,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             for freevar in body_lifted_freevars.keys():
                 if "saved_tensor_marked" not in freevar.node.meta:
                     unimplemented("NYI - freevars in autograd function.")
-
-        post_side_effects = tx.output.side_effects
-        if post_side_effects.diff(pre_side_effects):
-            diff = (
-                post_side_effects.id_to_variable.keys()
-                - pre_side_effects.id_to_variable.keys()
-            )
-            for d in diff:
-                if not isinstance(
-                    post_side_effects.id_to_variable[d].value,
-                    AutogradFunctionVariable,
-                ):
-                    unimplemented("NYI - side effects in autograd function.")
 
         if always_restore:
             if post_guards - pre_guards:
