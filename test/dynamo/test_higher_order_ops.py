@@ -143,6 +143,44 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 2)
 
+    def test_return_captured_var(self):
+        freevar = torch.randn(3)
+
+        def test(x):
+            return freevar
+
+        def fn(x):
+            return wrap(test, x)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(fn, (x,), 3)
+
+    def test_return_captured_vars(self):
+        freevar1 = torch.randn(3)
+        freevar2 = torch.randn(3)
+
+        def test(x):
+            return freevar1, freevar2, freevar1
+
+        def fn(x):
+            return wrap(test, x)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(fn, (x,), 4, 4)
+
+    def test_return_captured_var_used_multiple_times(self):
+        freevar = torch.randn(3)
+
+        def test(x):
+            y = x + freevar
+            return y, freevar
+
+        def fn(x):
+            return wrap(test, x)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(fn, (x,), 3, 3)
+
     def test_capture_untracked_global(self):
         def f(x):
             return wrap(lambda x: x + global_var, x)
