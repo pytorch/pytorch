@@ -299,7 +299,7 @@ class AutogradFunctionVariable(VariableTracker):
             if jvp_fn is not torch.autograd.Function.jvp:
                 unimplemented("NYI - User defind jvp")
 
-            from .torch import (
+            from .higher_order_ops import (
                 safe_or_raise_always_restore,
                 TorchHigherOrderOperatorVariable,
             )
@@ -331,7 +331,7 @@ class AutogradFunctionVariable(VariableTracker):
             module_source = AttrSource(
                 tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
             )
-            higher_order_autograd_fn = TorchHigherOrderOperatorVariable(
+            higher_order_autograd_fn = TorchHigherOrderOperatorVariable.make(
                 trampoline_autograd_fwd, source=AttrSource(module_source, "forward")
             )
             speculated_fwd_result = higher_order_autograd_fn.call_function(
@@ -343,7 +343,7 @@ class AutogradFunctionVariable(VariableTracker):
                 tx,
                 graph_checkpoint,
                 checkpoint,
-                TorchHigherOrderOperatorVariable(
+                TorchHigherOrderOperatorVariable.make(
                     trampoline_autograd_bwd,
                     source=AttrSource(module_source, "backward"),
                 ),
@@ -352,7 +352,7 @@ class AutogradFunctionVariable(VariableTracker):
             # If fwd and backward are sound, we want apply in the graph.
             # And we don't want backwards for the obvious reasons.
             args = args[1:]
-            return TorchHigherOrderOperatorVariable(
+            return TorchHigherOrderOperatorVariable.make(
                 trampoline_autograd_apply
             ).call_function(tx, args, kwargs)
 
@@ -756,26 +756,6 @@ class SkipFilesVariable(VariableTracker):
                 unimplemented("deque() with more than 1 arg not supported")
             return variables.lists.DequeVariable(
                 items, mutable_local=MutableLocal(), **options
-            )
-        elif (
-            self.value is cast
-            and isinstance(args[0], variables.UserDefinedClassVariable)
-            and isinstance(args[1], variables.UserDefinedObjectVariable)
-        ):
-            new_obj = cast(args[0].value, args[1].value)
-            args[1].mutable_local = MutableLocal()
-            return tx.replace_all(args[1], variables.UserDefinedObjectVariable(new_obj))
-        elif (
-            self.value is cast
-            and isinstance(args[0], variables.UserDefinedClassVariable)
-            and isinstance(args[1], variables.NNModuleVariable)
-        ):
-            new_obj = cast(args[0].value, tx.output.nn_modules[args[1].module_key])
-            args[1].mutable_local = MutableLocal()
-            return tx.replace_all(args[1], variables.UserDefinedObjectVariable(new_obj))
-        elif self.value is cast:
-            unimplemented(
-                f"Cast with {args}",
             )
         else:
             try:
