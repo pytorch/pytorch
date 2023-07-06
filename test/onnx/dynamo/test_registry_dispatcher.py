@@ -13,7 +13,6 @@ import torch.fx
 from onnxscript import BFLOAT16, DOUBLE, FLOAT, FLOAT16  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import ops  # type: ignore[import]
 from onnxscript.onnx_opset import opset15 as op  # type: ignore[import]
-from parameterized import parameterized  # type: ignore[import]
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import onnxfunction_dispatcher, registration
 from torch.testing._internal import common_utils
@@ -24,11 +23,14 @@ TCustomFloat = TypeVar("TCustomFloat", bound=Union[FLOAT16, FLOAT, DOUBLE, BFLOA
 
 class TestRegistration(common_utils.TestCase):
     def setUp(self) -> None:
-        self.registry = registration.OnnxRegistry()
+        self.registry = registration.OnnxRegistry(opset_version=18)
         self.custom_domain = onnxscript.values.Opset(domain="custom", version=1)
 
     def tearDown(self) -> None:
-        self.registry._registry.pop("test::test_op", None)
+        internal_name_class = registration.OpName.from_name_parts(
+            namespace="test", op_name="test_op"
+        )
+        self.registry._registry.pop(internal_name_class, None)
 
     def test_register_custom_op_registers_custom_function(self):
         self.assertFalse(self.registry.is_registered_op("test", "test_op", "default"))
@@ -53,10 +55,13 @@ class TestRegistration(common_utils.TestCase):
             return op.Add(x, y)
 
         # default has to be specified, as we are not using the registration.OpName
-        symbolic_fn = registration.SymbolicFunction(
-            test_original, op_full_name="test::test_op.default"
+        internal_name_class = registration.OpName.from_name_parts(
+            namespace="test", op_name="test_op", overload="default"
         )
-        self.registry._register(symbolic_fn)
+        symbolic_fn = registration.SymbolicFunction(
+            test_original, op_full_name=internal_name_class.qualified_name()
+        )
+        self.registry._register(internal_name_class, symbolic_fn)
         self.assertTrue(self.registry.is_registered_op("test", "test_op"))
 
         @onnxscript.script(self.custom_domain)
@@ -77,7 +82,7 @@ class TestRegistration(common_utils.TestCase):
 @common_utils.instantiate_parametrized_tests
 class TestDispatcher(common_utils.TestCase):
     def setUp(self):
-        self.registry = registration.OnnxRegistry()
+        self.registry = registration.OnnxRegistry(opset_version=18)
         # TODO: remove this once we have a better way to do this
         logger = logging.getLogger("TestDispatcher")
         self.diagnostic_context = infra.DiagnosticContext(
@@ -87,59 +92,66 @@ class TestDispatcher(common_utils.TestCase):
             self.registry, self.diagnostic_context
         )
 
-    @parameterized.expand(
+    @common_utils.parametrize(
+        "node, expected_name",
         [
-            (
-                "get_Opoverload_name",
-                torch.fx.Node(
-                    graph=torch.fx.Graph(),
-                    name="aten::add.Tensor",
-                    op="call_function",
-                    target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
-                    args=(torch.tensor(3), torch.tensor(4)),
-                    kwargs={},
+            common_utils.subtest(
+                (
+                    torch.fx.Node(
+                        graph=torch.fx.Graph(),
+                        name="aten::add.Tensor",
+                        op="call_function",
+                        target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
+                        args=(torch.tensor(3), torch.tensor(4)),
+                        kwargs={},
+                    ),
+                    ("aten", "add", "Tensor"),
                 ),
-                ("aten", "add", "Tensor"),
+                name="get_Opoverload_name",
             ),
-            (
-                "get_Opoverloadpacket_name",
-                torch.fx.Node(
-                    graph=torch.fx.Graph(),
-                    name="aten::sym_size",
-                    op="call_function",
-                    target=torch.ops.aten.sym_size,
-                    args=(),
-                    kwargs={},
+            common_utils.subtest(
+                (
+                    torch.fx.Node(
+                        graph=torch.fx.Graph(),
+                        name="aten::sym_size",
+                        op="call_function",
+                        target=torch.ops.aten.sym_size,
+                        args=(),
+                        kwargs={},
+                    ),
+                    ("aten", "sym_size", None),
                 ),
-                ("aten", "sym_size", None),
+                name="get_Opoverloadpacket_name",
             ),
-            (
-                "get_builtin_op_name",
-                torch.fx.Node(
-                    graph=torch.fx.Graph(),
-                    name="builtin_add",
-                    op="call_function",
-                    target=operator.add,
-                    args=(1, 2),
-                    kwargs={},
+            common_utils.subtest(
+                (
+                    torch.fx.Node(
+                        graph=torch.fx.Graph(),
+                        name="builtin_add",
+                        op="call_function",
+                        target=operator.add,
+                        args=(1, 2),
+                        kwargs={},
+                    ),
+                    ("aten", "add", None),
                 ),
-                ("aten", "add", None),
+                name="get_builtin_op_name",
             ),
-        ]
+        ],
     )
     def test_get_aten_name_on_supported_fx_node(
-        self, _: str, node: torch.fx.Node, expected_name: str
+        self, node: torch.fx.Node, expected_name: str
     ):
-        expected_name_class = registration.OpName.from_string(*expected_name)
+        expected_name_class = registration.OpName.from_name_parts(*expected_name)
         self.assertEqual(
-            self.dispatcher.get_aten_name(node, self.diagnostic_context),
+            self.dispatcher._get_aten_name(node, self.diagnostic_context),
             expected_name_class,
         )
 
-    @parameterized.expand(
+    @common_utils.parametrize(
+        "node",
         [
-            (
-                "unsupported_Opoverloadpacket_name",
+            common_utils.subtest(
                 torch.fx.Node(
                     graph=torch.fx.Graph(),
                     name="aten::add",
@@ -148,9 +160,9 @@ class TestDispatcher(common_utils.TestCase):
                     args=(),
                     kwargs={},
                 ),
+                name="unsupported_Opoverloadpacket_name",
             ),
-            (
-                "unsupported_input_dtypes_for_builtin_op",
+            common_utils.subtest(
                 torch.fx.Node(
                     graph=torch.fx.Graph(),
                     name="builtin_add",
@@ -159,9 +171,9 @@ class TestDispatcher(common_utils.TestCase):
                     args=("A", "B"),
                     kwargs={},
                 ),
+                name="unsupported_input_dtypes_for_builtin_op",
             ),
-            (
-                "unsupported_target_function",
+            common_utils.subtest(
                 torch.fx.Node(
                     graph=torch.fx.Graph(),
                     name="aten::made_up_node",
@@ -170,12 +182,13 @@ class TestDispatcher(common_utils.TestCase):
                     args=(),
                     kwargs={},
                 ),
+                name="unsupported_target_function",
             ),
-        ]
+        ],
     )
-    def test_get_aten_name_on_unsupported_fx_node(self, _: str, node: torch.fx.Node):
+    def test_get_aten_name_on_unsupported_fx_node(self, node: torch.fx.Node):
         with self.assertRaises(RuntimeError):
-            self.dispatcher.get_aten_name(node, self.diagnostic_context)
+            self.dispatcher._get_aten_name(node, self.diagnostic_context)
 
     def test_get_function_overloads_gives_overload_fall_back_default(self):
         # Test fall back to default op name
@@ -191,30 +204,24 @@ class TestDispatcher(common_utils.TestCase):
             graph=torch.fx.Graph(),
             name="aten::add",
             op="call_function",
-            target=torch.ops.aten.add,
+            target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
             args=(),
             kwargs={},
         )
-        internal_opname_class_overload = registration.OpName.from_string(
-            domain="aten", op_name="add", overload="Tensor"
-        )
-        internal_opname_class_overloadpacket = registration.OpName.from_string(
-            domain="aten", op_name="add", overload=None
-        )
+
         self.assertEqual(
             self.dispatcher.get_function_overloads(
-                node_overload, internal_opname_class_overload, self.diagnostic_context
+                node_overload, self.diagnostic_context
             ),
             self.dispatcher.get_function_overloads(
                 node_overloadpacket,
-                internal_opname_class_overloadpacket,
                 self.diagnostic_context,
             ),
         )
 
         # Non-registered op
-        internal_opname_class_unsupported = registration.OpName.from_string(
-            domain="aten", op_name="made_up_node", overload=None
+        internal_opname_class_unsupported = registration.OpName.from_name_parts(
+            namespace="aten", op_name="made_up_node", overload=None
         )
         unsupported_op_node = torch.fx.Node(
             graph=torch.fx.Graph(),
@@ -227,7 +234,6 @@ class TestDispatcher(common_utils.TestCase):
         with self.assertRaises(RuntimeError):
             self.dispatcher.get_function_overloads(
                 unsupported_op_node,
-                internal_opname_class_unsupported,
                 self.diagnostic_context,
             )
 
@@ -242,25 +248,25 @@ class TestDispatcher(common_utils.TestCase):
             args=(torch.tensor(3), torch.tensor(4)),
             kwargs={},
         )
-        internal_opname_class_overload = registration.OpName.from_op_overload(op_overload=op_overload.target)  # type: ignore[attr-defined]
         with self.assertWarnsOnceRegex(
             UserWarning,
-            "A perfect matched Opchema is not found in torchlib for aten::add",
+            "A perfect matched Opchema is not found in torchlib for aten.add.Tensor",
         ):
             function_overloads = self.dispatcher.get_function_overloads(
-                op_overload, internal_opname_class_overload, self.diagnostic_context
+                op_overload, self.diagnostic_context
             )
             self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
-                internal_opname_class_overload,
+                op_overload,
                 function_overloads,
                 op_overload.args,  # type: ignore[attr-defined]
                 op_overload.kwargs,
                 self.diagnostic_context,
             )
 
-    @parameterized.expand(
+    @common_utils.parametrize(
+        "node",
         [
-            (
+            common_utils.subtest(
                 torch.fx.Node(
                     graph=torch.fx.Graph(),
                     name="aten::add.Tensor",
@@ -269,8 +275,9 @@ class TestDispatcher(common_utils.TestCase):
                     args=(torch.tensor(3), torch.tensor(4)),
                     kwargs={},
                 ),
+                name="nearest_match",
             ),
-            (
+            common_utils.subtest(
                 torch.fx.Node(
                     graph=torch.fx.Graph(),
                     name="aten::add.Tensor",
@@ -279,8 +286,9 @@ class TestDispatcher(common_utils.TestCase):
                     args=(torch.tensor(3), torch.tensor(4)),
                     kwargs={"alpha": 1},
                 ),
+                name="perfect_match_with_kwargs",
             ),
-        ]
+        ],
     )
     def test_find_the_perfect_or_nearest_match_onnxfunction_gives_custom_ops_precedence(
         self, node
@@ -305,11 +313,9 @@ class TestDispatcher(common_utils.TestCase):
         function_overloads = [
             registration.SymbolicFunction(test_default_op, op_full_name=op_full_name)
         ] + custom_overloads
-        internal_opname_class_overload = registration.OpName.from_full_name(
-            full_name=op_full_name
-        )
+
         symbolic_fn = self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
-            internal_opname_class_overload,
+            node,
             function_overloads,
             node.args,
             node.kwargs,
@@ -318,101 +324,170 @@ class TestDispatcher(common_utils.TestCase):
         self.assertEqual(symbolic_fn, test_custom_op)
 
 
+@common_utils.instantiate_parametrized_tests
 class TestOpSchemaWrapper(common_utils.TestCase):
     def setUp(self):
         # overload type: optional dtype
         self.onnx_function_new_full = ops.core.aten_new_full
         self.onnx_function_new_full_dtype = ops.core.aten_new_full_dtype
 
-    @parameterized.expand(
+    @common_utils.parametrize(
+        "inputs, attributes, assertion",
         [
-            ([torch.randn(3, 4), torch.randn(3, 4)], {"alpha": 2.0}, True),
-            (["A", "B"], {}, False),
-            ([torch.randn(3, 4), torch.randn(3, 4), torch.randn(3, 4)], {}, False),
-            ([torch.randn(3, 4), torch.randn(3, 4)], {"wrong_kwargs": 2.0}, False),
-        ]
+            common_utils.subtest(
+                ([torch.randn(3, 4), torch.randn(3, 4)], {"alpha": 2.0}, True),
+                name="perfect_match_with_kwargs",
+            ),
+            common_utils.subtest(
+                (["A", "B"], {}, False),
+                name="non_perfect_match_due_to_non_tensor_inputs",
+            ),
+            common_utils.subtest(
+                ([torch.randn(3, 4), torch.randn(3, 4), torch.randn(3, 4)], {}, False),
+                name="non_perfect_match_due_to_too_many_inputs",
+            ),
+            common_utils.subtest(
+                ([torch.randn(3, 4), torch.randn(3, 4)], {"wrong_kwargs": 2.0}, False),
+                name="non_perfect_match_due_to_wrong_kwargs",
+            ),
+        ],
     )
     def test_perfect_match_inputs(self, inputs, attributes, assertion):
         # OnnxFunction with default attributes
         op_schema_wrapper_add = onnxfunction_dispatcher._OpSchemaWrapper(
             ops.core.aten_add.op_schema
         )
+        self.assertEqual(
+            op_schema_wrapper_add.perfect_match_inputs(inputs, attributes), assertion
+        )
 
-        if assertion:
-            self.assertTrue(
-                op_schema_wrapper_add.perfect_match_inputs(inputs, attributes)
-            )
-        else:
-            self.assertFalse(
-                op_schema_wrapper_add.perfect_match_inputs(inputs, attributes)
-            )
-
-    @parameterized.expand(
+    @common_utils.parametrize(
+        "inputs, kwargs, op, score",
         [
-            ([torch.randn(3, 4), torch.randn(3, 4)], {}, ops.core.aten_mul, 2),
-            (
-                [
-                    torch.randint(0, 2, size=(3, 4), dtype=torch.int).bool(),
-                    torch.randint(0, 2, size=(3, 4), dtype=torch.int).bool(),
-                ],
-                {},
-                ops.core.aten_mul,
-                0,
+            common_utils.subtest(
+                ([torch.randn(3, 4), torch.randn(3, 4)], {}, ops.core.aten_mul, 2),
+                name="match_2_inputs",
             ),
-            ([torch.randn(3, 4), torch.randn(3, 4)], {}, ops.core.aten_mul_bool, 0),
-            (
-                [
-                    torch.randint(0, 2, size=(3, 4), dtype=torch.int).bool(),
-                    torch.randint(0, 2, size=(3, 4), dtype=torch.int).bool(),
-                ],
-                {},
-                ops.core.aten_mul_bool,
-                2,
+            common_utils.subtest(
+                (
+                    [
+                        torch.randint(0, 2, size=(3, 4), dtype=torch.int).bool(),
+                        torch.randint(0, 2, size=(3, 4), dtype=torch.int).bool(),
+                    ],
+                    {},
+                    ops.core.aten_mul,
+                    0,
+                ),
+                name="match_0_inputs",
             ),
-        ]
+            common_utils.subtest(
+                ([torch.randn(3, 4), torch.randn(3, 4)], {}, ops.core.aten_mul_bool, 0),
+                name="match_0_inputs_bool",
+            ),
+            common_utils.subtest(
+                (
+                    [
+                        torch.randint(0, 2, size=(3, 4), dtype=torch.int).bool(),
+                        torch.randint(0, 2, size=(3, 4), dtype=torch.int).bool(),
+                    ],
+                    {},
+                    ops.core.aten_mul_bool,
+                    2,
+                ),
+                name="match_2_inputs_bool",
+            ),
+        ],
     )
     def test_matching_score_system_on_overload_dtypes(self, inputs, kwargs, op, score):
         op_schema_wrapper = onnxfunction_dispatcher._OpSchemaWrapper(op.op_schema)
         op_schema_wrapper._record_matching_score(inputs, kwargs)
         self.assertEqual(op_schema_wrapper.match_score, score)
 
-    @parameterized.expand(
+    @common_utils.parametrize(
+        "inputs, kwargs, op, score",
         [
-            ([torch.randn(3, 4), torch.tensor(3)], {}, ops.core.aten_new_full, 2),
-            (
-                [torch.randn(3, 4), torch.tensor(3)],
-                {"dtype": torch.float},
-                ops.core.aten_new_full,
-                1,
+            common_utils.subtest(
+                ([torch.randn(3, 4), torch.tensor(3)], {}, ops.core.aten_new_full, 2),
+                name="match_2_inputs",
             ),
-            ([torch.randn(3, 4), torch.tensor(3)], {}, ops.core.aten_new_full_dtype, 1),
-            (
-                [torch.randn(3, 4), torch.tensor(3)],
-                {"dtype": torch.float},
-                ops.core.aten_new_full_dtype,
-                2,
+            common_utils.subtest(
+                (
+                    [torch.randn(3, 4), torch.tensor(3)],
+                    {"dtype": torch.float},
+                    ops.core.aten_new_full,
+                    1,
+                ),
+                name="match_2_inputs_and_mismatch_1_kwarg",
             ),
-        ]
+            common_utils.subtest(
+                (
+                    [torch.randn(3, 4), torch.tensor(3)],
+                    {},
+                    ops.core.aten_new_full_dtype,
+                    1,
+                ),
+                name="match_2_input_and_mismatch_1_kwargs_optional",
+            ),
+            common_utils.subtest(
+                (
+                    [torch.randn(3, 4), torch.tensor(3)],
+                    {"dtype": torch.float},
+                    ops.core.aten_new_full_dtype,
+                    2,
+                ),
+                name="match_2_input_and_match_1_kwargs_optional",
+            ),
+        ],
     )
     def test_matching_score_system_on_optional_dtypes(self, inputs, kwargs, op, score):
         op_schema_wrapper = onnxfunction_dispatcher._OpSchemaWrapper(op.op_schema)
         op_schema_wrapper._record_matching_score(inputs, kwargs)
         self.assertEqual(op_schema_wrapper.match_score, score)
 
-    @parameterized.expand(
+    @common_utils.parametrize(
+        "value, expected_onnx_str_dtype",
         [
-            (1, {"tensor(int64)", "tensor(int16)", "tensor(int32)"}),
-            (1.0, {"tensor(float)", "tensor(double)", "tensor(float16)"}),
-            (torch.tensor([True]), {"tensor(bool)"}),
-            (torch.tensor([1], dtype=torch.int64), {"tensor(int64)"}),
-            (torch.tensor([1], dtype=torch.int32), {"tensor(int32)"}),
-            (torch.tensor([1], dtype=torch.int16), {"tensor(int16)"}),
-            (torch.tensor([1], dtype=torch.float), {"tensor(float)"}),
-            (torch.tensor([1], dtype=torch.float16), {"tensor(float16)"}),
-            (torch.tensor([1], dtype=torch.double), {"tensor(double)"}),
-            (None, set()),  # None is not type allowed
-            ([], set()),  # Empty list is not type allowed
-        ]
+            common_utils.subtest(
+                (1, {"tensor(int64)", "tensor(int16)", "tensor(int32)"}),
+                name="all_ints",
+            ),
+            common_utils.subtest(
+                (1.0, {"tensor(float)", "tensor(double)", "tensor(float16)"}),
+                name="all_floats",
+            ),
+            common_utils.subtest(
+                (torch.tensor([True]), {"tensor(bool)"}),
+                name="bool",
+            ),
+            common_utils.subtest(
+                (torch.tensor([1], dtype=torch.int64), {"tensor(int64)"}),
+                name="int64",
+            ),
+            common_utils.subtest(
+                (torch.tensor([1], dtype=torch.int32), {"tensor(int32)"}),
+                name="int32",
+            ),
+            common_utils.subtest(
+                (torch.tensor([1], dtype=torch.int16), {"tensor(int16)"}),
+                name="int16",
+            ),
+            common_utils.subtest(
+                (torch.tensor([1], dtype=torch.float), {"tensor(float)"}),
+                name="float",
+            ),
+            common_utils.subtest(
+                (torch.tensor([1], dtype=torch.float16), {"tensor(float16)"}),
+                name="float16",
+            ),
+            common_utils.subtest(
+                (torch.tensor([1], dtype=torch.double), {"tensor(double)"}),
+                name="double",
+            ),
+            common_utils.subtest((None, set()), name="None"),  # None allows no dtype
+            common_utils.subtest(
+                ([], set()), name="empaty_list"
+            ),  # Empty list allows no dtype
+        ],
     )
     def test_find_onnx_data_type(self, value, expected_onnx_str_dtype):
         self.assertEqual(
