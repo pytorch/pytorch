@@ -158,7 +158,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 (
                     False,
                     diagnostics.rules.find_opschema_matched_symbolic_function,
-                    "aten::convolution.default",
+                    "aten.convolution.default",
                 ),
                 name="found_nearest_match",
             ),
@@ -199,7 +199,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             export_output.diagnostic_context,
             diagnostics.rules.find_operator_overloads_in_onnx_registry,
             diagnostics.levels.WARNING,
-            expected_error_node="aten::add.Tensor",
+            expected_error_node="aten.add.Tensor",
         )
 
 

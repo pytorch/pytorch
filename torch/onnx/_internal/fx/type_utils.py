@@ -26,7 +26,7 @@ class TensorLike(Protocol):
 
 
 def is_torch_complex_dtype(tensor_or_dtype: TensorLike | torch.dtype) -> bool:
-    # NOTE: torch.Tensor can use torch.is_complex() to check if it's a complex tensor
+    # NOTE: This is needed as TorchScriptTensor is nor supported by torch.is_complex()
     if isinstance(tensor_or_dtype, torch.dtype):
         return tensor_or_dtype in _COMPLEX_TO_FLOAT
     return tensor_or_dtype.dtype in _COMPLEX_TO_FLOAT

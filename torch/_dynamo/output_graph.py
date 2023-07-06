@@ -95,7 +95,7 @@ class OutputGraphState(NamedTuple):
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
-    tensor_weakref_to_sizes_strides_offset: WeakIdKeyDictionary
+    tensor_weakref_to_sizes_strides: WeakIdKeyDictionary
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
@@ -230,7 +230,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
-        self.tensor_weakref_to_sizes_strides_offset: WeakIdKeyDictionary = {}
+        self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(
@@ -432,7 +432,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
-            dict(self.tensor_weakref_to_sizes_strides_offset),
+            dict(self.tensor_weakref_to_sizes_strides),
         )
         self.timestamp += 1
         return state
@@ -448,7 +448,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.param_name_to_source,
             self.side_effects,
             self.timestamp,
-            self.tensor_weakref_to_sizes_strides_offset,
+            self.tensor_weakref_to_sizes_strides,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
         self.tracing_context.module_context.restore_graphstate(module_state)
