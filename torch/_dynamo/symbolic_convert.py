@@ -608,9 +608,26 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         inline_depth_str = (
             f" (inline depth: {self.inline_depth})" if self.inline_depth > 0 else ""
         )
-        log_str = f"TRACE starts_line {self.f_code.co_name} {self.f_code.co_filename}:{self.lineno}{inline_depth_str}\n"
-        line = linecache.getline(self.f_code.co_filename, self.lineno).rstrip()
-        log_str += f"    {line}"
+        log_str = ""
+        if sys.version_info < (3, 11):
+            log_str += f"TRACE starts_line {self.f_code.co_name} {self.f_code.co_filename}:{self.lineno}{inline_depth_str}\n"
+            line = linecache.getline(self.f_code.co_filename, self.lineno).rstrip()
+            log_str += f"    {line}"
+        else:
+            log_str += "TRACE starts_line\n"
+            inst = self.instructions[self.instruction_pointer]
+            frame_summary = traceback.FrameSummary(
+                self.f_code.co_filename,
+                self.lineno,
+                self.f_code.co_name,
+                end_lineno=inst.positions.end_lineno,
+                colno=inst.positions.col_offset,
+                end_colno=inst.positions.end_col_offset,
+            )
+            line = traceback.StackSummary.from_list([]).format_frame_summary(
+                frame_summary
+            )
+            log_str += textwrap.indent(line, " " * 4)
         trace_source_log.debug(log_str)
 
     def step(self):
