@@ -846,7 +846,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             example_value = node.meta.get("example_value", None)
             if isinstance(example_value, torch._subclasses.FakeTensor):
                 size = example_value.size()
-                graph_sizes_str += f"{node.name}: {size}\n"
+                graph_sizes_str += f"{node.name}: {tuple(size)}\n"
                 concrete_size = []
                 has_symint = False
                 for sz in size:
