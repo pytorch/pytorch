@@ -3681,18 +3681,6 @@ class TestMPS(TestCaseMPS):
 
         [helper(dtype) for dtype in [torch.float32, torch.int16, torch.int32, torch.uint8]]
 
-    def test_cumsum_backward(self):
-        for multiple_derivatives in [False, True]:
-            t = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps", dtype=torch.float).detach().requires_grad_()
-            t_cpu = torch.tensor([1.0, 2.0, 3.0, 4.0], device="cpu", dtype=torch.float).detach().requires_grad_()
-
-            gradient=torch.full_like(t, 2)
-            gradient_cpu=torch.full_like(t_cpu, 2)
-            self.assertEqual(
-                torch.autograd.grad(t.cumsum(0), t, grad_outputs=gradient, create_graph=multiple_derivatives),
-                torch.autograd.grad(t_cpu.cumsum(0), t_cpu, grad_outputs=gradient_cpu, create_graph=multiple_derivatives)
-        )
-
     def test_cumprod_all_dtypes(self):
         def helper(dtype):
             t = torch.tensor([1, 1, 1, 1], device="mps", dtype=dtype)
@@ -3726,6 +3714,18 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(y, cpu_y)
 
         [helper(dtype) for dtype in [torch.float32, torch.int16, torch.int32, torch.uint8]]
+
+    def test_cumprod_backward(self):
+        for multiple_derivatives in [False, True]:
+            t = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps", dtype=torch.float).detach().requires_grad_()
+            t_cpu = torch.tensor([1.0, 2.0, 3.0, 4.0], device="cpu", dtype=torch.float).detach().requires_grad_()
+
+            gradient=torch.full_like(t, 2)
+            gradient_cpu=torch.full_like(t_cpu, 2)
+            self.assertEqual(
+                torch.autograd.grad(t.cumprod(0), t, grad_outputs=gradient, create_graph=multiple_derivatives),
+                torch.autograd.grad(t_cpu.cumprod(0), t_cpu, grad_outputs=gradient_cpu, create_graph=multiple_derivatives)
+        )
 
     def test_median_int16(self):
         def helper(shape, dtype):
