@@ -58,11 +58,11 @@ def _create_onnx_supports_op_overload_table(
                 # NOTE: If the overload is supported in registry or it's default overload is supported in registry,
                 # we add it to the table.
                 if registry.is_registered_op(
-                    domain=internal_op_name.domain,
+                    namespace=internal_op_name.namespace,
                     op_name=internal_op_name.op_name,
                     overload=internal_op_name.overload,
                 ) or registry.is_registered_op(
-                    domain=internal_op_name.domain,
+                    namespace=internal_op_name.namespace,
                     op_name=internal_op_name.op_name,
                     overload=None,
                 ):

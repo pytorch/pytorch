@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
     fn: Callable,
     self,
-    internal_opname: registration.OpName,
+    node: torch.fx.Node,
     default_and_custom_functions: List[registration.SymbolicFunction],
     *args,
     **kwargs,
@@ -48,8 +48,7 @@ def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
         all_function_overload_names += (
             f"ONNX Node: {overload_func.name}[opset={overload_func.opset}]. \n"
         )
-    op_full_name = internal_opname.internal_name()
-    return f"FX Node: {op_full_name}. \n" f"{all_function_overload_names}"
+    return f"FX Node: {node.target}. \n" f"{all_function_overload_names}"
 
 
 @_beartype.beartype
@@ -57,13 +56,11 @@ def _find_operator_overloads_in_onnx_registry_disagnostic_message_formatter(
     fn: Callable,
     self,
     node: torch.fx.Node,
-    internal_opname: registration.OpName,
     *args,
     **kwargs,
 ) -> str:
     """Format the diagnostic message for the nearest match warning."""
-    op_full_name = internal_opname.internal_name()
-    return f"Searching operator overload: '{op_full_name}' in onnx registry...\n"
+    return f"Searching operator overload: '{node.target}' in onnx registry...\n"
 
 
 class OnnxFunctionDispatcher:
@@ -123,16 +120,16 @@ class OnnxFunctionDispatcher:
         Raises:
             RuntimeError: If there are no overloaded functions available for the given FX node.
         """
-        internal_opname_class = self.get_aten_name(node, diagnostic_context)
         # If there are no overloaded functions available for the given FX node, raise an
         # unsupported error
         default_and_custom_functions = self.get_function_overloads(
-            node, internal_opname_class, diagnostic_context
+            node, diagnostic_context
         )
+
         # If there are overloaded functions available, we will find one that perfect or
         # nearest matches the given arguments and keyword arguments
         return self._find_the_perfect_or_nearest_match_onnxfunction(
-            internal_opname_class,
+            node,
             default_and_custom_functions,
             onnx_args,
             onnx_kwargs,
@@ -146,7 +143,7 @@ class OnnxFunctionDispatcher:
     )
     def _find_the_perfect_or_nearest_match_onnxfunction(
         self,
-        internal_opname: registration.OpName,
+        node: torch.fx.Node,
         default_and_custom_functions: List[registration.SymbolicFunction],
         onnx_args: Sequence[
             Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
@@ -157,10 +154,6 @@ class OnnxFunctionDispatcher:
         """Find the perfect/nearest matched OnnxFunction for the given FX node, arguments, and keyword arguments.
 
         Args:
-            node: The TorchFX node to dispatch the function for.
-            domain: The domain of the ONNX node.
-            op_name: The name of the ONNX node.
-            overload: The FX overload of the node. It's None if the node is default overload.
             default_and_custom_functions: The list includes overloaded functions, with
                 custom ones appearing after the default ones.
             onnx_args: The arguments of the ONNX function.
@@ -187,9 +180,8 @@ class OnnxFunctionDispatcher:
             overload_match_ranking[symbolic_function] = function_opschema.match_score
 
         # NOTE: If the perfect match is not found, find the nearest match
-        op_full_name = internal_opname.internal_name()
         warnings.warn(
-            f"A perfect matched Opchema is not found in torchlib for {op_full_name}, but \n"
+            f"A perfect matched Opchema is not found in torchlib for {node.target}, but \n"
             f"a nearest match is found. Please check the ONNX output carefully. \n",
         )
         diagnostic = diagnostic_context.inflight_diagnostic()
@@ -210,7 +202,7 @@ class OnnxFunctionDispatcher:
         return symbolic_function_list[0].onnx_function
 
     @_beartype.beartype
-    def get_aten_name(
+    def _get_aten_name(
         self, node: torch.fx.Node, diagnostic_context: diagnostics.DiagnosticContext
     ) -> registration.OpName:
         """Get the OpName from the target.
@@ -223,7 +215,9 @@ class OnnxFunctionDispatcher:
             The internal op name within dataclass: registration.OpName.
         """
         if node.target == operator.getitem:
-            return registration.OpName.from_string(domain="aten", op_name="getitem")
+            return registration.OpName.from_name_parts(
+                namespace="aten", op_name="getitem"
+            )
         if isinstance(node.target, torch._ops.OpOverloadPacket):
             # aten::sym_size is the only OverloadPacket that we support.
             # schema: aten::sym_size(Tensor self, int dim) -> Tensor
@@ -287,14 +281,12 @@ class OnnxFunctionDispatcher:
     def get_function_overloads(
         self,
         node: torch.fx.Node,
-        internal_opname: registration.OpName,
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> List[registration.SymbolicFunction]:
         """Get the function overloads from the registry.
 
         Args:
             node: The node to get the function overloads for.
-            internal_opname: registration.OpName.
             diagnostic_context: The diagnostic context to use for reporting errors.
 
         Returns:
@@ -302,39 +294,42 @@ class OnnxFunctionDispatcher:
             followed by any custom ones.
         """
 
-        # NOTE: If the ATen/Custom operators are nt registered, the group will be None.
+        internal_opname: registration.OpName = self._get_aten_name(
+            node=node, diagnostic_context=diagnostic_context
+        )
+
+        # NOTE: If the ATen/Custom operators are not registered, the group will be None.
         # And non-registerd ATen/Custom operators will trigger error in the next step.
         function_group: Optional[List[registration.SymbolicFunction]] = None
 
         if self.onnx_registry.is_registered_op(
-            domain=internal_opname.domain,
+            namespace=internal_opname.namespace,
             op_name=internal_opname.op_name,
             overload=internal_opname.overload,
         ):
             function_group = self.onnx_registry.get_functions(
-                domain=internal_opname.domain,
+                namespace=internal_opname.namespace,
                 op_name=internal_opname.op_name,
                 overload=internal_opname.overload,
             )
 
         # NOTE: Fall back to default overload if the ONNX registry doesn't have the overload.
         elif self.onnx_registry.is_registered_op(
-            domain=internal_opname.domain,
+            namespace=internal_opname.namespace,
             op_name=internal_opname.op_name,
             overload=None,
         ):
             function_group = self.onnx_registry.get_functions(
-                domain=internal_opname.domain,
+                namespace=internal_opname.namespace,
                 op_name=internal_opname.op_name,
                 overload=None,
             )
 
-            # NOTE: If the perfect match is not found, find the nearest match
-            op_full_name = internal_opname.internal_name()
-            warnings.warn(
-                f"The operator overload is not found in onnx registry for {op_full_name}, but \n"
-                f"the default overload is found. Please check the ONNX output carefully. \n",
-            )
+            # NOTE: Currently, most of torchlib functions are not registered with overload
+            # in ONNX registry. So we will only log a warning in SARIF if we can't find the overload
+            # to avoid spammy warnings in printout.
+            # TODO: https://github.com/microsoft/onnxscript/issues/828
+            op_full_name = internal_opname.qualified_name()
             diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
                 "### The operator overload is not found in onnx registry!\n"
@@ -347,7 +342,7 @@ class OnnxFunctionDispatcher:
             return function_group
 
         # If we can't find the function group, raise error.
-        op_full_name = internal_opname.internal_name()
+        op_full_name = internal_opname.qualified_name()
         diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
             diagnostics.rules.no_symbolic_function_for_call_function,
             diagnostics.levels.ERROR,

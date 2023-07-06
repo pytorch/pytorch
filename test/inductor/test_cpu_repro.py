@@ -714,6 +714,53 @@ class CPUReproTests(TestCase):
             self.common(channel_shuffle, (x, 2, output_scale, output_zero_point))
             assert metrics.generated_cpp_vec_kernel_count == 2
 
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_dequant_relu_quant_dequant_relu_quant_lowering(self):
+        def fn(x, scale, zero_point, scale2, zero_point2, scale3, zero_point3):
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, scale, zero_point, 0, 255, torch.uint8
+            )
+            x = torch.relu(x)
+            x = torch.ops.quantized_decomposed.quantize_per_tensor(
+                x, scale2, zero_point2, 0, 255, torch.uint8
+            )
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, scale2, zero_point2, 0, 255, torch.uint8
+            )
+            x = torch.relu(x)
+            x = torch.ops.quantized_decomposed.quantize_per_tensor(
+                x, scale3, zero_point3, 0, 255, torch.uint8
+            )
+            return x
+
+        for use_tensor_overload in [True, False]:
+            x = torch.clamp(
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100, 0, 255
+            ).to(torch.uint8)
+            zero_point_list = [100, 101, 102]
+            scale_list = [0.01, 0.02, 0.03]
+            if use_tensor_overload:
+                for i in range(len(zero_point_list)):
+                    zero_point_list[i] = torch.tensor(
+                        zero_point_list[i], dtype=torch.int64
+                    )
+                    scale_list[i] = torch.tensor(scale_list[i])
+            zero_point, zero_point2, zero_point3 = zero_point_list
+            scale, scale2, scale3 = scale_list
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(
+                    fn,
+                    (x, scale, zero_point, scale2, zero_point2, scale3, zero_point3),
+                    rtol=1e-2,
+                    atol=1e-2,
+                )
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
     def test_inplace_add_alpha(self):
         def fn(x, y):
             aten.add_.Tensor(x, y, alpha=0.55)
