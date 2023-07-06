@@ -251,7 +251,6 @@ def save_graph_repro(
     save_dir=None,
     command="run",
     accuracy=None,
-    tracing_mode=None,
 ):
     fd.write(
         generate_compiler_repro_string(
@@ -263,10 +262,9 @@ def save_graph_repro(
     )
     if accuracy is None:
         accuracy = "_accuracy" in compiler_name
-    if tracing_mode is None:
-        tracing_mode = "real"
-        if any(free_symbols(a) for a in args):
-            tracing_mode = "symbolic"
+    tracing_mode = "real"
+    if any(free_symbols(a) for a in args):
+        tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
@@ -322,7 +320,6 @@ def isolate_fails(
     env=None,
     save_dir=None,
     accuracy=None,
-    tracing_mode=None,
 ):
     if env is None:
         env = {}
@@ -339,7 +336,6 @@ def isolate_fails(
             save_dir=save_dir,
             command="minifier-query",
             accuracy=accuracy,
-            tracing_mode=tracing_mode,
         )
     # with open(file_name, "r") as fd:
     #     print(fd.read())
@@ -512,12 +508,11 @@ def repro_minify(options, mod, load_args):
     module_fails: Any
     if options.isolate:
         module_fails = functools.partial(
-            isolate_fails,
+            functools.partial(isolate_fails, accuracy=options.accuracy),
             env=env_variables,
             compiler_name=compiler_name,
             save_dir=options.save_dir,
             accuracy=options.accuracy,
-            tracing_mode=options.tracing_mode,
         )
     else:
         module_fails = ACCURACY_FAILS[options.accuracy]
