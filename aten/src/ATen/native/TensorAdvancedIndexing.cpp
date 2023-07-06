@@ -870,6 +870,8 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
       return;
     }
 
+    dim = maybe_wrap_dim(dim, self.dim());
+
     // When the slice of source or result is noncontiguous,
     // original index_add is slow as it uses add for the sliced tensor,
     // which is serial on index and parallel on sliced tensor to avoid write conflict.
@@ -880,12 +882,9 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     // avoid write conflict. scatter_add only need one parallel and the size of
     // outer dimensions is bigger to do parallel.
 
-    // TODO: When https://github.com/pytorch/pytorch/pull/82703 lands,
-    // using scatter_add will also get obvious speedup for the case dim == 0.
-    if ((result.stride(dim) == 1 || source.stride(dim) == 1) &&
+    if ((dim == 0 || dim == self.dim() - 1) &&
         // Data type of index should be long and alpha should be 1 to use scatter_add.
         alpha.equal(1.0) && index_contig.scalar_type() == ScalarType::Long &&
-        result.numel() > at::internal::GRAIN_SIZE &&
         // scatter_add does not support ComplexHalf
         source.scalar_type() != ScalarType::ComplexHalf &&
         result.scalar_type() != ScalarType::ComplexHalf) {
@@ -897,9 +896,6 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
       // source.select(dim, i) is broadcast for result.select(dim, index_data[i])
       // The broadcast case is not applicable for scatter_add
       auto check_sizes = [&ep_sizes, &ep_strides, &numel](IntArrayRef a, IntArrayRef b, int64_t dim) -> bool {
-        if (a.size() != b.size()) {
-          return false;
-        }
 
         ep_sizes[dim] = numel;
         ep_strides[dim] = 1;
@@ -923,7 +919,6 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
         result.scatter_add_(dim, ep_index, source);
         return;
       }
-
     }
 
     auto selfSlice = result.select(dim, 0);
