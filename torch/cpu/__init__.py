@@ -1,17 +1,20 @@
 from typing import Any, Optional, Union
 from contextlib import AbstractContextManager
 from . import amp
+from .. import device as _device
 import torch
 
 __all__ = [
     "is_available",
     "synchronize",
     "current_stream",
-    "current_stream",
     "stream",
     "device_count",
     "Stream",
+    "StreamContext"
 ]
+
+_device_t = Union[_device, str, int, None]
 
 def _is_cpu_support_vnni() -> bool:
     r"""Returns a bool indicating if CPU supports VNNI."""
@@ -26,7 +29,7 @@ def is_available() -> bool:
     """
     return True
 
-def synchronize(device: Optional[Union[torch.device, int]] = None) -> None:
+def synchronize(device: _device_t = None) -> None:
     r"""Waits for all kernels in all streams on the CPU device to complete.
 
     Args:
@@ -45,7 +48,7 @@ class Stream:
 _default_cpu_stream = Stream()
 _current_stream = _default_cpu_stream
 
-def current_stream(device: Optional[Union[torch.device, int]] = None) -> Stream:
+def current_stream(device: _device_t = None) -> Stream:
     r"""Returns the currently selected :class:`Stream` for a given device.
 
     Args:
@@ -56,7 +59,7 @@ def current_stream(device: Optional[Union[torch.device, int]] = None) -> Stream:
     """
     return _current_stream
 
-class _StreamContext(AbstractContextManager):
+class StreamContext(AbstractContextManager):
     r"""Context-manager that selects a given stream.
 
     N.B. This class only exists to facilitate device-agnostic code
@@ -91,7 +94,7 @@ def stream(stream: Stream) -> AbstractContextManager:
 
     N.B. This function only exists to facilitate device-agnostic code
     """
-    return _StreamContext(stream)
+    return StreamContext(stream)
 
 def device_count() -> int:
     r"""Returns number of CPU devices (not cores). Always 1.
