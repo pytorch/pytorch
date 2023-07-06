@@ -233,7 +233,7 @@ By using this formula, we find that the compression ratio is 56.25% for ``torch.
 Constructing Sparse Semi-Structured Tensors
 -------------------------------------------
 
-You can transform a dense tensor into a sparse semi-structured tensor by simply using the ``SparseSemiStructuredTensor`` constructor.
+You can transform a dense tensor into a sparse semi-structured tensor by simply using the ``torch.to_sparse_semi_structured`` function.
 
 Please also note that we only support CUDA tensors since hardware compatibility for semi-structured sparsity is limited to NVIDIA GPUs.
 
@@ -252,9 +252,9 @@ The following datatypes are supported for semi-structured sparsity. Note that ea
 
 To construct a semi-structured sparse tensor, start by creating a regular dense tensor that adheres to a 2:4 (or semi-structured) sparse format.
 To do this we  tile a small 1x4 strip to create a 16x16 dense float16 tensor.
-Afterwards, we can pass this matrix to the ``SparseSemiStructuredTensor`` constructor to compress it for accelerated inference.
+Afterwards, we can call ``to_sparse_semi_structured`` function to compress it for accelerated inference.
 
-    >>> from torch.sparse import SparseSemiStructuredTensor
+    >>> from torch.sparse import to_sparse_semi_structured
     >>> A = torch.Tensor([0, 0, 1, 1]).tile((128, 32)).half().cuda()
     tensor([[0., 0., 1.,  ..., 0., 1., 1.],
             [0., 0., 1.,  ..., 0., 1., 1.],
@@ -263,7 +263,7 @@ Afterwards, we can pass this matrix to the ``SparseSemiStructuredTensor`` constr
             [0., 0., 1.,  ..., 0., 1., 1.],
             [0., 0., 1.,  ..., 0., 1., 1.],
             [0., 0., 1.,  ..., 0., 1., 1.]], device='cuda:0', dtype=torch.float16)
-    >>> A_sparse = SparseSemiStructuredTensor(A)
+    >>> A_sparse = to_sparse_semi_structured(A)
     SparseSemiStructuredTensor(shape=torch.Size([128, 128]), transposed=False, values=tensor([[1., 1., 1.,  ..., 1., 1., 1.],
             [1., 1., 1.,  ..., 1., 1., 1.],
             [1., 1., 1.,  ..., 1., 1., 1.],
@@ -291,12 +291,12 @@ Currently, the following operations are supported for semi-structured sparse ten
 - aten.t.default(sparse)
 - aten.t.detach(sparse)
 
-To use these ops, simply pass the output of ``SparseSemiStructuredTensor(tensor)``  instead of using ``tensor`` once your tensor has 0s in a semi-structured sparse format, like this:
+To use these ops, simply pass the output of ``to_sparse_semi_structured(tensor)``  instead of using ``tensor`` once your tensor has 0s in a semi-structured sparse format, like this:
 
     >>> a = torch.Tensor([0, 0, 1, 1]).tile((64, 16)).half().cuda()
     >>> b = torch.rand(64, 64).half().cuda()
     >>> c = torch.mm(a, b)
-    >>> a_sparse = SparseSemiStructuredTensor(a)
+    >>> a_sparse = to_sparse_semi_structured(a)
     >>> torch.allclose(c, torch.mm(a_sparse, b))
     True
 
@@ -309,7 +309,7 @@ You can accelerate the linear layers in your model if the weights are already se
     >>> input = torch.rand(64, 64).half().cuda()
     >>> mask = torch.Tensor([0, 0, 1, 1]).tile((64, 16)).cuda().bool()
     >>> linear = nn.Linear(64, 64).half().cuda()
-    >>> linear.weight = nn.Parameter(SparseSemiStructuredTensor(linear.weight.masked_fill(~mask, 0)))
+    >>> linear.weight = nn.Parameter(to_sparse_semi_structured(linear.weight.masked_fill(~mask, 0)))
 
 
 .. _sparse-coo-docs:
