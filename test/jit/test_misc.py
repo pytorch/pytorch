@@ -171,6 +171,39 @@ class TestMisc(JitTestCase):
         torch.index_put_(input1, [index1], value1, accumulate=False)
         self.assertEqual(input, input1)
 
+    def test_unsafe_hacked_twin(self):
+
+        def gen_data():
+            with freeze_rng_state():
+                return torch.randn(10), torch.randint(10, (20,)), torch.randn(20)
+
+        input, index, value, = gen_data()
+        input1, index1, value1, = gen_data()
+        out1 = torch.ops.aten._unsafe_index_put.hacked_twin(input, [index], value, accumulate=False)
+        out2 = torch.index_put(input1, [index1], value1, accumulate=False)
+        self.assertEqual(out1, out2)
+
+        torch.ops.aten._unsafe_index.Tensor_hacked_twin(input, [index])
+        torch.index_put(input1, [index1], value1, accumulate=False)
+        self.assertEqual(input, input1)
+
+        def index_put_fn(input, index, value):
+            return torch.ops.aten._unsafe_index_put(input, [index], value, accumulate=False)
+
+        input2, index2, value2 = gen_data()
+        script_index_put_fn = torch.jit.script(index_put_fn)
+        expect = index_put_fn(input2.clone(), index2, value2)
+        actual = script_index_put_fn(input2.clone(), index2, value2)
+        self.assertEqual(expect, actual)
+
+        def index_fn(input, index, value):
+            return torch.ops.aten._unsafe_index_put(input, [index], value, accumulate=False)
+
+        script_index_fn = torch.jit.script(index_fn)
+        expect = index_fn(input2.clone(), index2, value2)
+        actual = script_index_fn(input2.clone(), index2, value2)
+        self.assertEqual(expect, actual)
+
     def test_export_opnames_interface(self):
 
         @torch.jit.interface
