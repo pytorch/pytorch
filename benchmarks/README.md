@@ -21,8 +21,7 @@ python -c "import torch; print(torch.__version__)"
 
 ## Benchmark List
 
-Please refer to each subfolder to discover each benchmark suite. Links are provided where 
-descriptions exist:
+Please refer to each subfolder to discover each benchmark suite. Links are provided where descriptions exist:
 
 * [Fast RNNs](fastrnns/README.md)
 * [Dynamo](dynamo/README.md)
