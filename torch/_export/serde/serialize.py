@@ -34,6 +34,7 @@ from .schema import (  # type: ignore[attr-defined]
     MemoryFormat,
     NamedArgument,
     Node,
+    OptionalTensorArgument,
     RangeConstraint,
     ScalarType,
     SymBool,
@@ -618,8 +619,19 @@ class GraphModuleSerializer:
                 return Argument.create(
                     as_tensors=[TensorArgument(name=a.name) for a in arg],
                 )
+            elif any(isinstance(a, torch.fx.Node) for a in arg):
+                def serialize_optional_tensor_args(a):
+                    if a is None:
+                        return OptionalTensorArgument.create(as_none=())
+                    elif isinstance(a, torch.fx.Node):
+                        return OptionalTensorArgument.create(as_tensor=a.name)
+                    else:
+                        raise SerializeError(f"Unsupported list/tuple argument: {a}")
+                return Argument.create(
+                    as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
+                )
             else:
-                raise SerializeError(f"Unsupported list/tuple argument type: {type(arg)}")
+                raise SerializeError(f"Unsupported list/tuple argument type: {type(arg[0])}")
         elif isinstance(arg, torch.dtype):
             return Argument.create(as_scalar_type=_TORCH_TO_SERIALIZE_DTYPE[arg])
         elif isinstance(arg, torch.device):
@@ -1010,6 +1022,15 @@ class GraphModuleDeserializer:
                 return list(value)
             elif isinstance(value[0], (SymIntArgument, SymBoolArgument)):
                 return [self.deserialize_sym_argument(arg) for arg in value]
+            elif isinstance(value[0], OptionalTensorArgument):
+                def deserialize_optional_tensor_args(a):
+                    if a.type == "as_none":
+                        return None
+                    elif a.type == "as_tensor":
+                        return self.serialized_name_to_node[a.value]
+                    else:
+                        raise SerializeError(f"Unhandled argument {inp}")
+                return list(map(deserialize_optional_tensor_args, value))
             else:
                 raise SerializeError(f"Unhandled argument {inp}")
         else:
