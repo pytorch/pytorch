@@ -902,10 +902,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_node,
         )
 
-        flat_kwargs = tuple(kwargs[key].as_proxy() for key in sorted(kwargs.keys()))
         lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
 
-        p_args = p_args + flat_kwargs + lifted_args
+        p_args = p_args +  lifted_args
 
         example_value = pytree.tree_map_only(
             torch.fx.Proxy,
