@@ -80,6 +80,7 @@ from .functions import (
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
+    BaseListVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
@@ -1491,6 +1492,9 @@ class SourcelessBuilder:
     """
 
     def __call__(self, tx, value) -> VariableTracker:
+        if isinstance(value, VariableTracker):
+            # This is always valid to call, and useful for recursive calls.
+            return value
         if ConstantVariable.is_literal(value):
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
@@ -1503,6 +1507,14 @@ class SourcelessBuilder:
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
+        elif isinstance(value, dict):
+            return ConstDictVariable(
+                {k: self(tx, v) for k, v in value.items()},
+                dict,
+            )
+        elif isinstance(value, (tuple, list)):
+            cls = BaseListVariable.cls_for(type(value))
+            return cls([self(tx, x) for x in value])
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod
