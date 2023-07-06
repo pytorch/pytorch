@@ -996,7 +996,7 @@ Args:
     {dtype}
     device (:class:`torch.device`, optional): the device of the constructed tensor. If None and data is a tensor
         then the device of data is used. If None and data is not a tensor then
-        the result tensor is constructed on the CPU.
+        the result tensor is constructed on the current device.
 
 
 Example::
@@ -1302,18 +1302,18 @@ Example::
     >>> a.data_ptr() == c.data_ptr()
     False
 
-    >>> a = torch.tensor([1, 2, 3], requires_grad=True).float()
+    >>> a = torch.tensor([1., 2., 3.], requires_grad=True)
     >>> b = a + 2
     >>> b
-    tensor([1., 2., 3.], grad_fn=<AddBackward0>)
+    tensor([3., 4., 5.], grad_fn=<AddBackward0>)
     >>> # Shares memory with tensor 'b', with no grad
     >>> c = torch.asarray(b)
     >>> c
-    tensor([1., 2., 3.])
+    tensor([3., 4., 5.])
     >>> # Shares memory with tensor 'b', retaining autograd history
     >>> d = torch.asarray(b, requires_grad=True)
     >>> d
-    tensor([1., 2., 3.], grad_fn=<AddBackward0>)
+    tensor([3., 4., 5.], grad_fn=<AddBackward0>)
 
     >>> array = numpy.array([1, 2, 3])
     >>> # Shares memory with array 'array'
@@ -1322,7 +1322,7 @@ Example::
     True
     >>> # Copies memory due to dtype mismatch
     >>> t2 = torch.asarray(array, dtype=torch.float32)
-    >>> array.__array_interface__['data'][0] == t1.data_ptr()
+    >>> array.__array_interface__['data'][0] == t2.data_ptr()
     False
 
     >>> scalar = numpy.float64(0.5)
@@ -1678,6 +1678,8 @@ Computes the right arithmetic shift of :attr:`input` by :attr:`other` bits.
 The input tensor must be of integral type. This operator supports
 :ref:`broadcasting to a common shape <broadcasting-semantics>` and
 :ref:`type promotion <type-promotion-doc>`.
+In any case, if the value of the right operand is negative or is greater
+or equal to the number of bits in the promoted left operand, the behavior is undefined.
 
 The operation applied is:
 
@@ -1732,6 +1734,10 @@ stack(tensors, dim=0, *, out=None) -> Tensor
 Concatenates a sequence of tensors along a new dimension.
 
 All tensors need to be of the same size.
+
+.. seealso::
+
+    :func:`torch.cat` concatenates the given sequence along an existing dimension.
 
 Arguments:
     tensors (sequence of Tensors): sequence of tensors to concatenate
@@ -2303,6 +2309,10 @@ dimension) or be empty.
 and :func:`torch.chunk`.
 
 :func:`torch.cat` can be best understood via examples.
+
+.. seealso::
+
+    :func:`torch.stack` concatenates the given sequence along a new dimension.
 
 Args:
     tensors (sequence of Tensors): any python sequence of tensors of the same type.
@@ -9151,7 +9161,7 @@ Keyword args:
 add_docstr(
     torch.randn,
     """
-randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+randn(*size, *, generator=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 pin_memory=False) -> Tensor
 """
     + r"""
@@ -9273,7 +9283,7 @@ Keyword args:
     {dtype}
     device (:class:`torch.device`, optional): the device of the constructed tensor. If None and data is a tensor
         then the device of data is used. If None and data is not a tensor then
-        the result tensor is constructed on the CPU.
+        the result tensor is constructed on the current device.
     {requires_grad}
     {pin_memory}
 
@@ -9576,6 +9586,7 @@ Rounds elements of :attr:`input` to the nearest integer.
 
 For integer inputs, follows the array-api convention of returning a
 copy of the input tensor.
+The return type of output is same as that of input's dtype.
 
 .. note::
     This function implements the "round half to even" to
@@ -11951,13 +11962,15 @@ Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`
 :attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`.
 
 .. math::
-    \text{output} = min(
-        \text{quant\_max},
-        max(
-            \text{quant\_min},
-            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
-        )
-    )
+    \text{output} = (
+        min(
+            \text{quant\_max},
+            max(
+                \text{quant\_min},
+                \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+            )
+        ) - \text{zero\_point}
+    ) \times \text{scale}
 
 Args:
     input (Tensor): the input value(s), ``torch.float32`` tensor
@@ -11977,7 +11990,7 @@ Example::
     >>> torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255)
     tensor([0.1000, 1.0000, 0.4000, 0.0000])
     >>> torch.fake_quantize_per_tensor_affine(x, torch.tensor(0.1), torch.tensor(0), 0, 255)
-    tensor([0.6000, 0.4000, 0.0000, 0.0000])
+    tensor([0.1000, 1.0000, 0.4000, 0.0000])
 """,
 )
 

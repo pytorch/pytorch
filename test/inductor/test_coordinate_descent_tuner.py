@@ -29,7 +29,30 @@ class TestCoordinateDescentTuner(TestCase):
             return abs(config.kwargs["XBLOCK"] - 15)
 
         best_config = tuner.autotune(func, baseline_config)
-        self.assertTrue(best_config.kwargs.get("XBLOCK") == 16)
+        self.assertTrue(best_config.kwargs.get("XBLOCK") == 16, str(best_config))
+
+    def test_no_neighbors(self):
+        """
+        Test the case that there is no available neighbor values for a field.
+        """
+
+        # size hint for x being 1 limits the max XBLOCK we try to be 1
+        tuner = CoordescTuner(size_hints=[1])
+        baseline_config = triton.Config({"XBLOCK": 1}, num_warps=8, num_stages=1)
+
+        def func(config):
+            return abs(config.kwargs["XBLOCK"] - 15)
+
+        best_config = tuner.autotune(func, baseline_config)
+        self.assertTrue(best_config.kwargs.get("XBLOCK") == 1, str(best_config))
+
+    def test_get_neighbour_values(self):
+        tuner = CoordescTuner()
+
+        neighbours = tuner.get_neighbour_values("num_stages", 2, radius=2)
+        self.assertEqual(set(neighbours), {1, 3, 4})
+        neighbours = tuner.get_neighbour_values("num_warps", 2, radius=2)
+        self.assertEqual(set(neighbours), {1, 4, 8})
 
 
 if __name__ == "__main__":

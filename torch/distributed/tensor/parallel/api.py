@@ -3,6 +3,7 @@ from typing import Dict, Union
 
 import torch
 import torch.nn as nn
+import torch.distributed._tensor.random as random
 from torch.distributed._tensor import (
     DeviceMesh,
     DTensor,
@@ -11,6 +12,10 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed._tensor.random import (
+    is_rng_supported_mesh,
+    TensorParallelRNGTracker,
+)
 from torch.distributed._tensor.sharding_prop import _CachingPropagator
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.multihead_attention_tp import (
@@ -18,11 +23,9 @@ from torch.distributed.tensor.parallel.multihead_attention_tp import (
 )
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
-    ColwiseParallelForPairwise,
     PairwiseParallel,
     ParallelStyle,
     RowwiseParallel,
-    RowwiseParallelForPairwise,
 )
 
 
@@ -32,7 +35,7 @@ __all__ = [
 
 # switch the DTensor propagator to use the caching propagator to speed up
 # the TP eager execution time.
-DTensor._propagator = _CachingPropagator(DTensor._propagator.op_to_rules)
+DTensor._propagator = _CachingPropagator(DTensor._propagator)
 
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,
@@ -82,15 +85,27 @@ def parallelize_module(  # type: ignore[return]
         granularity, you need to pass in a dict of module FQN and parallel style instead.
     """
 
+    torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
+
+    # instantiate a TP RNG state tracker if it's not there
+    if (
+        is_rng_supported_mesh(device_mesh) and
+        not isinstance(random._rng_tracker, TensorParallelRNGTracker)
+    ):
+        random._rng_tracker = TensorParallelRNGTracker()
+        # TODO: we should allow user to pass in the default seed from a config
+        random._rng_tracker._manual_seed(device_mesh, base_seed=1234, tp_dim=tp_mesh_dim)
+        # By default we execute random ops in non-tensor-parallel region. If users want
+        # to execute in tensor-parallel region, they can manually set this field to True
+        # after parallelizing the model.
+        random._rng_tracker.distribute_region_enabled = False
+
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
 
     if isinstance(parallelize_plan, ParallelStyle):
         # RowwiseParallel or ColwiseParallel
-        if isinstance(
-            parallelize_plan,
-            (ColwiseParallel, ColwiseParallelForPairwise, RowwiseParallel, RowwiseParallelForPairwise)
-        ):
+        if isinstance(parallelize_plan, (ColwiseParallel, RowwiseParallel)):
             return _parallelize_linear(module, device_mesh, parallelize_plan)
         # PairwiseParallel
         if _is_mha_for_pairwise_parallel(module):
@@ -167,7 +182,7 @@ def _rowwise_parallelize_linear_fn(
 ) -> None:
     """
     This function parallelizes the input :class:`nn.Linear` module in
-    :class:`RowwiseParallel` or `RowwiseParallelForPairwise` style.
+    :class:`RowwiseParallel` style.
 
     Args:
         name (str):
@@ -198,7 +213,7 @@ def _colwise_parallelize_linear_fn(
 ) -> None:
     """
     This function parallelizes the input :class:`nn.Linear` module in
-    :class:`ColwiseParallel` or `ColwiseParallelForPairwise` style.
+    :class:`ColwiseParallel` style.
 
     Args:
         name (str):
@@ -268,7 +283,7 @@ def _parallelize_linear(
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
 
-    if isinstance(parallel_style, (RowwiseParallel, RowwiseParallelForPairwise)):
+    if isinstance(parallel_style, (RowwiseParallel)):
         distribute_module(
             module,
             device_mesh,
@@ -276,7 +291,7 @@ def _parallelize_linear(
             input_fn=parallel_style._prepare_input,  # type: ignore[arg-type, misc] # pyre-ignore[6]
             output_fn=parallel_style._prepare_output,  # type: ignore[arg-type, misc] # pyre-ignore[6]
         )
-    elif isinstance(parallel_style, (ColwiseParallel, ColwiseParallelForPairwise)):
+    elif isinstance(parallel_style, (ColwiseParallel)):
         distribute_module(
             module,
             device_mesh,

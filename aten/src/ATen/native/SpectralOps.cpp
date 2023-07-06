@@ -502,7 +502,7 @@ Tensor& fft_rfftn_symint_out(const Tensor& self,
   return out;
 }
 
-ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
+static ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
     c10::string_view fname, const Tensor& self,
     const at::OptionalSymIntArrayRef& s,
     const at::OptionalIntArrayRef& dims,
@@ -751,7 +751,7 @@ Tensor fft_rfftfreq(int64_t n, double d,
 
 // If an array dim is specified, wraps them according to self.dim().
 // Otherwise returns a vector of all dims.
-DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
+static DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
   DimVector dim;
   if (dim_opt) {
     IntArrayRef dim_unwrapped = *dim_opt;
@@ -1175,7 +1175,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 #undef REPR
 }
 
-Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
+static Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
              const optional<int64_t> win_lengthOpt, const Tensor& window,
              const bool center, const bool normalized, const optional<bool> onesidedOpt,
              const optional<int64_t> lengthOpt) {

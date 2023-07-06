@@ -19,7 +19,7 @@ namespace at { namespace native {
 
 // convenience helper for converting tensors to cpu
 
-std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
+static std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
     // We can't just call at::to_cpu() on the entire list of Tensors
     // Because it will break on undefined tensors. Separate out undefined tensors first.
     std::vector<at::Tensor> cpu_tensors(tensors.size());
@@ -46,7 +46,7 @@ std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
   return cpu_tensors;
 }
 
-c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args, std::vector<c10::List<at::Tensor>> tlist_args) {
+static c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args, std::vector<c10::List<at::Tensor>> tlist_args) {
   // Decide what device to move the output tensor(s) to.
   // The current convention is that we use the first tensor arg to pick the device
   // Barring that, we take the first tensor from a TensorList arg.

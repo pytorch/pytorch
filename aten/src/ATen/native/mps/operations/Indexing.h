@@ -18,9 +18,9 @@ std::string getBitSizeString(ScalarType scalar_type) {
 
 }
 
-std::string getIndexFunctionName(ScalarType scalar_type, bool index_select, bool accumulate) {
+std::string getIndexFunctionName(ScalarType scalar_type, bool index_select, bool accumulate, bool serial=false) {
   std::string indexFunction = index_select ? "index_select_" :
-                      (accumulate && (scalar_type != kBool)) ? "index_put_accumulate_" : "index_put_";
+                      (accumulate && (scalar_type != kBool)) ? "index_put_accumulate_" : (serial ? "index_put_serial_" : "index_put_");
 
   indexFunction += getBitSizeString(scalar_type);
   if (accumulate) {

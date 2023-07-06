@@ -38,6 +38,7 @@ from gitutils import (
     get_git_repo_dir,
     GitRepo,
     patterns_to_regex,
+    retries_decorator,
 )
 from label_utils import (
     gh_add_labels,
@@ -58,6 +59,7 @@ class JobCheckState(NamedTuple):
     status: Optional[str]
     classification: Optional[str]
     job_id: Optional[int]
+    title: Optional[str]
 
 
 JobNameToStateDict = Dict[str, JobCheckState]
@@ -85,6 +87,9 @@ class FlakyRule:
                 capture in job.get("failure_captures", []) for capture in self.captures
             )
         )
+
+    def __repr__(self) -> str:
+        return f"FlakyRule[name='{self.name}', captures={self.captures}]"
 
 
 GH_PR_REVIEWS_FRAGMENT = """
@@ -122,6 +127,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
           conclusion
           detailsUrl
           databaseId
+          title
         }
         pageInfo {
           endCursor
@@ -179,6 +185,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
         nameWithOwner
       }
       baseRefName
+      baseRefOid
       baseRepository {
         nameWithOwner
         isPrivate
@@ -312,6 +319,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_c
                     conclusion
                     detailsUrl
                     databaseId
+                    title
                   }
                   pageInfo {
                     endCursor
@@ -436,6 +444,10 @@ MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 ROCKSET_MERGES_COLLECTION = "merges"
 ROCKSET_MERGES_WORKSPACE = "commons"
 REMOTE_MAIN_BRANCH = "origin/main"
+INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
+HAS_NO_CONNECTED_DIFF_TITLE = (
+    "There is no internal Diff connected, this can be merged now"
+)
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -539,8 +551,9 @@ def add_workflow_conclusions(
                             checkrun_name,
                             checkrun_node["detailsUrl"],
                             checkrun_node["conclusion"],
-                            None,
-                            checkrun_node["databaseId"],
+                            classification=None,
+                            job_id=checkrun_node["databaseId"],
+                            title=checkrun_node["title"],
                         )
 
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
@@ -568,8 +581,9 @@ def add_workflow_conclusions(
                 workflow.name,
                 workflow.url,
                 workflow.status,
-                None,
-                None,
+                classification=None,
+                job_id=None,
+                title=None,
             )
     for job_name, job in no_workflow_obj.jobs.items():
         res[job_name] = job
@@ -691,27 +705,8 @@ class GitHubPR:
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
 
-    def fetch(self, branch_name: Optional[str] = None) -> None:
-        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        if branch_name is None:
-            branch_name = f"__pull-request-{self.pr_num}__init__"
-        try:
-            r = repo._run_git("rev-parse", branch_name)
-            if r.strip() == self.last_commit()["oid"]:
-                return
-        except Exception:
-            pass
-        repo.fetch(f"pull/{self.pr_num}/head", branch_name)
-
     def get_merge_base(self) -> str:
-        if self.merge_base is not None:
-            return self.merge_base
-        self.fetch()
-        gitrepo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.merge_base = gitrepo.get_merge_base(
-            REMOTE_MAIN_BRANCH, self.last_commit()["oid"]
-        )
-        return self.merge_base
+        return cast(str, self.info["baseRefOid"])
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -893,8 +888,9 @@ class GitHubPR:
                     name,
                     status["targetUrl"],
                     status["state"],
-                    None,
-                    None,
+                    classification=None,
+                    job_id=None,
+                    title=None,
                 )
 
         return self.conclusions
@@ -991,13 +987,20 @@ class GitHubPR:
         return rc.group(1) if rc is not None else None
 
     def has_internal_changes(self) -> bool:
-        checkrun_name = "Meta Internal-Only Changes Check"
+        checkrun_name = INTERNAL_CHANGES_CHECKRUN_NAME
         if self.get_diff_revision() is None:
             return False
         checks = self.get_checkrun_conclusions()
         if checks is None or checkrun_name not in checks:
             return False
         return checks[checkrun_name].status != "SUCCESS"
+
+    def has_no_connected_diff(self) -> bool:
+        checkrun_name = INTERNAL_CHANGES_CHECKRUN_NAME
+        checks = self.get_checkrun_conclusions()
+        if checks is None or checkrun_name not in checks:
+            return False
+        return checks[checkrun_name].title == HAS_NO_CONNECTED_DIFF_TITLE
 
     def merge_ghstack_into(
         self,
@@ -1117,7 +1120,7 @@ class GitHubPR:
         if not self.is_ghstack_pr():
             msg = self.gen_commit_message()
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
-            self.fetch(pr_branch_name)
+            repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
             return []
@@ -1190,6 +1193,7 @@ def read_merge_rules(
         return [MergeRule(**x) for x in rc]
 
 
+@lru_cache(maxsize=None)
 def read_flaky_rules() -> List[FlakyRule]:
     # NOTE: This is currently hardcoded, can be extended to do per repo rules
     FLAKY_RULES_URL = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
@@ -1275,9 +1279,9 @@ def find_matching_merge_rule(
                 reject_reason_score = num_matching_files
                 reject_reason = "\n".join(
                     (
-                        f"Not all files match rule `{rule_name}`."
-                        f"{num_matching_files} files matched, but there are still non-matching files:"
-                        f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}"
+                        f"Not all files match rule `{rule_name}`.",
+                        f"{num_matching_files} files matched, but there are still non-matching files:",
+                        f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}",
                     )
                 )
             continue
@@ -1382,16 +1386,12 @@ def checks_to_markdown_bullets(
     ]
 
 
-def _get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
-    try:
-        return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
-    except Exception as e:
-        print(f"Could not download {url} because: {e}.")
-        if num_retries > 0:
-            return _get_flaky_rules(url, num_retries=num_retries - 1)
-        return []
+@retries_decorator(rc=[])
+def _get_flaky_rules(url: str) -> List[FlakyRule]:
+    return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
 
 
+@retries_decorator()
 def save_merge_record(
     collection: str,
     comment_id: int,
@@ -1410,7 +1410,6 @@ def save_merge_record(
     ignore_current: bool = False,
     error: str = "",
     workspace: str = "commons",
-    num_retries: int = 3,
 ) -> None:
     """
     This saves the merge records into Rockset, so we can query them (for fun and profit)
@@ -1456,35 +1455,9 @@ def save_merge_record(
         print("Rockset is missing, no record will be saved")
         return
 
-    except Exception as e:
-        if num_retries > 0:
-            print(f"Could not upload to Rockset ({num_retries - 1} tries left): {e}")
-            return save_merge_record(
-                collection=collection,
-                comment_id=comment_id,
-                pr_num=pr_num,
-                owner=owner,
-                project=project,
-                author=author,
-                pending_checks=pending_checks,
-                failed_checks=failed_checks,
-                last_commit_sha=last_commit_sha,
-                merge_base_sha=merge_base_sha,
-                merge_commit_sha=merge_commit_sha,
-                is_failed=is_failed,
-                dry_run=dry_run,
-                skip_mandatory_checks=skip_mandatory_checks,
-                ignore_current=ignore_current,
-                error=error,
-                workspace=workspace,
-                num_retries=num_retries - 1,
-            )
-        print(f"Could not upload to Rockset ({num_retries} tries left): {e}")
 
-
-def get_rockset_results(
-    head_sha: str, merge_base: str, num_retries: int = 3
-) -> List[Dict[str, Any]]:
+@retries_decorator(rc=[])
+def get_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
     query = f"""
 SELECT
     w.name as workflow_name,
@@ -1510,13 +1483,6 @@ where
         return cast(List[Dict[str, Any]], res.results)
     except ModuleNotFoundError:
         print("Could not use RockSet as rocket dependency is missing")
-        return []
-    except Exception as e:
-        print(f"Could not download rockset data because: {e}.")
-        if num_retries > 0:
-            return get_rockset_results(
-                head_sha, merge_base, num_retries=num_retries - 1
-            )
         return []
 
 
@@ -1558,6 +1524,17 @@ def get_classifications(
                 check.status,
                 "IGNORE_CURRENT_CHECK",
                 check.job_id,
+                check.title,
+            )
+            continue
+        if "unstable" in name:
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "UNSTABLE",
+                check.job_id,
+                check.title,
             )
             continue
         head_sha_job = head_sha_jobs.get(name)
@@ -1569,11 +1546,16 @@ def get_classifications(
             and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
         ):
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "BROKEN_TRUNK", check.job_id
+                check.name,
+                check.url,
+                check.status,
+                "BROKEN_TRUNK",
+                check.job_id,
+                check.title,
             )
         elif any(rule.matches(head_sha_job) for rule in flaky_rules):
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "FLAKY", check.job_id
+                check.name, check.url, check.status, "FLAKY", check.job_id, check.title
             )
     return checks_with_classifications
 
@@ -1608,6 +1590,10 @@ def validate_revert(
             )
         )
     skip_internal_checks = can_skip_internal_checks(pr, comment_id)
+
+    # Ignore associated diff it PR does not have internal changes
+    if pr.has_no_connected_diff():
+        skip_internal_checks = True
 
     # Raises exception if matching rule is not found, but ignores all status checks
     find_matching_merge_rule(
@@ -1682,7 +1668,7 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
     )
     if response["total_count"] != 0:
         for item in response["items"]:
-            if "merge blocking" in item["body"].lower():
+            if "MERGE BLOCKING" in item["body"]:
                 raise RuntimeError(
                     "Not merging any PRs at the moment because there is a "
                     + "merge blocking https://github.com/pytorch/pytorch/labels/ci:%20sev issue open at: \n"
@@ -1729,13 +1715,15 @@ def categorize_checks(
         elif not is_passing_status(check_runs[checkname].status):
             if classification == "IGNORE_CURRENT_CHECK":
                 pass
+            elif classification == "UNSTABLE":
+                pass
             elif classification in ("BROKEN_TRUNK", "FLAKY"):
                 ok_failed_checks.append((checkname, url, job_id))
             else:
                 failed_checks.append((checkname, url, job_id))
 
     if ok_failed_checks:
-        print(
+        warn(
             f"The following {len(ok_failed_checks)} checks failed but were likely due flakiness or broken trunk: "
             + ", ".join([x[0] for x in ok_failed_checks])
             + (

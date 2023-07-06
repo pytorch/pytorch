@@ -13,10 +13,8 @@ from torchgen.gen import LineLoader, parse_native_yaml_struct
 from torchgen.model import (
     Annotation,
     CustomClassType,
-    dispatch_keys,
     DispatchKey,
     NativeFunctionsGroup,
-    rename_dispatch_key_privateuse1,
     Type,
 )
 
@@ -159,28 +157,6 @@ cannot use CUDAFunctorOnSelf on non-binary function""",
         self.assertTrue(isinstance(custom_class_type, CustomClassType))
         self.assertEqual(custom_class_name, custom_class_type.class_name)
         self.assertEqual(custom_class_name_with_prefix, str(custom_class_type))
-
-    def test_rename_dispatch_key_privateuse1(self) -> None:
-        # save the original function ptr
-        dispatch_key_str_func = DispatchKey.__str__
-        dispatch_key_parse_func = DispatchKey.parse
-        custom_device_name = "FOO"
-        rename_dispatch_key_privateuse1(custom_device_name)
-        try:
-            self.assertEqual(str(DispatchKey.PrivateUse1), custom_device_name)
-            self.assertEqual(
-                DispatchKey.parse(custom_device_name), DispatchKey.PrivateUse1
-            )
-        finally:
-            # restores the original function ptr
-            DispatchKey.__str__ = dispatch_key_str_func  # type: ignore[assignment]
-            DispatchKey.parse = dispatch_key_parse_func  # type: ignore[assignment]
-            private_use_one_name = "PrivateUse1"
-            self.assertEqual(str(DispatchKey.PrivateUse1), private_use_one_name)
-            self.assertEqual(
-                DispatchKey.parse(private_use_one_name), DispatchKey.PrivateUse1
-            )
-            dispatch_keys.pop()
 
 
 class TestAnnotation(expecttest.TestCase):

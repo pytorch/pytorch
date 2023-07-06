@@ -2,7 +2,7 @@ name: Upload torch dynamo performance stats
 
 on:
   workflow_run:
-    workflows: [inductor-A100-perf-nightly, inductor-A100-max-autotune-weekly]
+    workflows: [inductor-A100-perf-nightly]
     types:
       - completed
 

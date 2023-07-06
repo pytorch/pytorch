@@ -8,7 +8,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import unsupported
-from torch._dynamo.utils import disable_cache_limit, ifunspec
+from torch._dynamo.utils import ifdynstaticdefault
 
 globalmod = torch.nn.ReLU()
 
@@ -312,10 +312,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = torch.add(unsupported(x, x), 1)
             return a * x + len_(b)
 
-        if config.dynamic_shapes:
-            self._common(fn, 2, 5)
-        else:
-            self._common(fn, 2, 4)
+        self._common(fn, 2, ifdynstaticdefault(4, 5))
 
     def test_restore_range(self):
         def fn(a, b):
@@ -330,7 +327,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # means we fail to unroll the loop.
         # TODO: Consider forcing specialization when we iterate over
         # the loop
-        self._common(fn, 2, ifunspec(1, 4))
+        self._common(fn, 2, ifdynstaticdefault(4, 1))
 
     def test_restore_range_iter(self):
         def fn(a, b):
@@ -353,33 +350,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 2, 6)
 
-    @disable_cache_limit()
-    def test_dynamic_shapes(self):
-        if config.assume_static_by_default:
-            return unittest.skip("Already covered identically in test_dynamic_kwarg")
-
-        def fn(a, b):
-            return a - b * 10
-
-        torch._dynamo.reset()
-        cnt_static = torch._dynamo.testing.CompileCounter()
-        with patch("torch._dynamo.config.dynamic_shapes", False):
-            opt_fn = torch._dynamo.optimize(cnt_static)(fn)
-            for i in range(2, 12):
-                opt_fn(torch.randn(i), torch.randn(i))
-        self.assertEqual(cnt_static.frame_count, 10)
-
-        torch._dynamo.reset()
-        cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        with patch("torch._dynamo.config.dynamic_shapes", True):
-            opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
-            # NB: must not do 0, 1 as they specialized
-            for i in range(2, 12):
-                opt_fn(torch.randn(i), torch.randn(i))
-        # just one graph now rather than 10
-        self.assertEqual(cnt_dynamic.frame_count, 1)
-
-    @patch("torch._dynamo.config.dynamic_shapes", True)
     @patch("torch._dynamo.config.assume_static_by_default", False)
     def test_dynamic_getitem(self):
         def fn(a, b):
@@ -405,12 +375,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         for i in range(start, end):
             opt_fn(torch.randn(i), torch.randn(i))
 
-        if config.assume_static_by_default:
-            # 2 graph breaks - 1 static, 1 made dynamic via automatic
-            self.assertEqual(cnt_dynamic.frame_count, 2)
-        else:
-            # just one graph
-            self.assertEqual(cnt_dynamic.frame_count, 1)
+        self.assertEqual(cnt_dynamic.frame_count, 1)
 
     def test_dynamic_duck_size(self):
         def fn(a, b):
@@ -434,7 +399,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
         x = torch.randn(2)
         y = torch.randn(3)
         self.assertEqual(opt_fn(x, y), fn(x, y))
@@ -470,7 +435,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(cnt_dynamic.frame_count, 2)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_no_graph_break_on_item(self):
         def fn(a, b):
@@ -482,7 +446,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 1, 6)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_graph_break_on_item(self):
         def fn(a, b):
@@ -518,8 +481,8 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                     opt_fn(v1, a, b, c)
 
         # checking here we don't create 2^n graphs
-        self.assertEqual(cnt.frame_count, 7)
-        self.assertEqual(cnt.op_count, 10)
+        self.assertEqual(cnt.frame_count, 12)
+        self.assertEqual(cnt.op_count, 16)
 
     def test_resume_with_no_grad1(self):
         def fn(a, b):
@@ -630,7 +593,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 b = b + x * i
             return b
 
-        self._common(fn, 1, 2)
+        self._common(fn, 1, ifdynstaticdefault(2, 7))
 
 
 if __name__ == "__main__":

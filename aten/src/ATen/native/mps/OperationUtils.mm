@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -11,6 +12,21 @@
 #endif
 
 namespace at::native::mps {
+
+/**
+ * Computes distance from lowest to highest element offset in given tensor.
+ */
+size_t compute_storage_numel_distance(const at::Tensor& t) {
+  size_t rc = 1;
+  if (t.numel() == 0) {
+    return 0;
+  }
+  for (const auto i : c10::irange(t.dim())) {
+    assert(t.size(i) > 0);
+    rc += (t.size(i) - 1) * t.stride(i);
+  }
+  return rc;
+}
 
 void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
   mpsStream->executeMPSGraph(mpsGraph, feeds, results, SyncType::COMMIT_ADAPTIVE);
@@ -473,6 +489,17 @@ string get_mem_format_string(c10::MemoryFormat memory_format) {
 }
 
 MPSGraphCache* MPSGraphCache::_instance_cache = nullptr;
+
+void MPSGraphCache::profileCachedGraph(const CacheEntry& cacheEntry) const {
+  auto& profiler = getMPSProfiler();
+  if (profiler.isOperationProfilingEnabled()) {
+    std::string graphKey = cacheEntry.key_;
+    // for interval-based signpost tracing, we begin the interval here to be able
+    // to measure the time it takes to compile the graphs (if graph newly created),
+    // and also the time potentially spent on gather/scatter of graph's input tensors
+    profiler.beginProfileKernel(cacheEntry.cachedGraph_->graph(), graphKey, true);
+  }
+}
 
 class MPSGraphCacheCallback : public IMpsAllocatorCallback {
  public:

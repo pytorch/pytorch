@@ -37,6 +37,7 @@ class TestMisc(PackageTestCase):
                 ├── .data
                 │   ├── extern_modules
                 │   ├── python_version
+                │   ├── serialization_id
                 │   └── version
                 ├── main
                 │   └── main
@@ -61,6 +62,7 @@ class TestMisc(PackageTestCase):
                 ├── .data
                 │   ├── extern_modules
                 │   ├── python_version
+                │   ├── serialization_id
                 │   └── version
                 ├── main
                 │   └── main

@@ -12,7 +12,7 @@ import numpy as np
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_WITH_TORCHDYNAMO)
+    TestCase, run_tests, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes, skipXLA)
@@ -738,10 +738,7 @@ class TestIndexing(TestCase):
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEqual(len(w), 2)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472"
-    )
+    @skipIfTorchDynamo("This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472")
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
@@ -839,6 +836,7 @@ class TestIndexing(TestCase):
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyCUDA
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_index_put_accumulate_with_optional_tensors(self, device):
         # TODO: replace with a better solution.
         # Currently, here using torchscript to put None into indices.
@@ -935,6 +933,7 @@ class TestIndexing(TestCase):
         r = v[c > 0]
         self.assertEqual(r.shape, (num_ones, 3))
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_jit_indexing(self, device):
         def fn1(x):
             x[x < 50] = 1.0
