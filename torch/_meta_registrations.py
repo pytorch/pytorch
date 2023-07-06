@@ -4599,7 +4599,7 @@ def meta__scaled_dot_product_efficient_backward(
     if attn_bias is not None and attn_bias.requires_grad:
         assert isinstance(attn_bias, TensorLike)
         nominal_sizes = attn_bias.size()
-        last_dim_size = nominal_sizes[-1]
+        last_dim_size = attn_bias.size(-1)
         alignTo = 16
         nominal_sizes[-1] = alignTo * ((last_dim_size + alignTo - 1) / alignTo)
         grad_bias = torch.empty(

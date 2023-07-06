@@ -7897,7 +7897,17 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
         is_causal=is_causal,
         dropout_p=dropout_p
     )
-    samples.append(diff_v_head_dim)
+
+    # Add an attn_mask
+    samples.append(
+        SampleInput(
+            make((batch, num_heads, seq_q, head_dim)),
+            make((batch, num_heads, seq_kv, head_dim)),
+            make((batch, num_heads, seq_kv, head_dim)),
+            attn_mask=make((seq_q, seq_kv)),
+            is_causal=False,
+            dropout_p=0.0)
+    )
 
     yield from samples
 
