@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import collections
+
 import operator
 import warnings
 from typing import (
@@ -10,6 +12,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    OrderedDict,
     Sequence,
     Set,
     TYPE_CHECKING,
@@ -25,7 +28,6 @@ from torch.onnx._internal.fx import (
     registration,
     type_utils as fx_type_utils,
 )
-
 
 if TYPE_CHECKING:
     import onnx.defs  # type: ignore[import]
@@ -173,7 +175,17 @@ class OnnxFunctionDispatcher:
         for symbolic_function in reversed(default_and_custom_functions):
             overload_func = symbolic_function.onnx_function
             function_opschema = _OpSchemaWrapper(overload_func.op_schema)
-            if function_opschema.perfect_match_inputs(onnx_args, onnx_kwargs):
+
+            # NOTE: OnnxFunction does not have the same function signature as the original
+            # PyTorch operator. We need to separate the input attributes from the arguments.
+            function_args, function_kwargs = _separate_input_attributes_from_arguments(
+                overload_func.param_schemas(),
+                onnx_args,
+                onnx_kwargs,
+                fill_defaults=True,
+            )
+
+            if function_opschema.perfect_match_inputs(function_args, function_kwargs):
                 # If the perfect match is found, return the function
                 return overload_func
             # Record the match score for the nearest match if it's not the perfect match
@@ -581,3 +593,59 @@ def _find_onnx_data_type(
         return set()
 
     raise RuntimeError(f"Unknown input type from input: {torch_input}")
+
+
+# NOTE: Referenced from onnxscript internal function.
+# Importing this function makes the code less robust, as it is not a public API.
+@_beartype.beartype
+def _separate_input_attributes_from_arguments(
+    param_schemas: Sequence["onnxscript.values.ParamSchema"],
+    args,
+    kwargs,
+    fill_defaults: bool = True,
+) -> tuple[list[Any], OrderedDict[str, Any]]:
+    """Separate Python args and kwargs into ONNX inputs and attributes.
+
+    Args:
+        param_schemas: The parameter schemas of an Op or a OnnxFunction.
+        args: The Python positional arguments supplied by the caller.
+        kwargs: The Python keyword arguments supplied by the caller.
+        fill_defaults: Whether to fill the default values for attributes.
+
+    Returns:
+        A tuple of two elements:
+        - A list of ONNX inputs.
+        - An ordered dictionary of ONNX attribute names and values.
+
+    Raises:
+        TypeError: When allow_extra_kwargs is False and there are unknown kwargs.
+        TypeError: When a required input is not provided.
+    """
+    # args, kwargs and param_schemas should be all in order
+    # user may not specify all inputs or attributes
+
+    onnx_inputs = []
+    onnx_attributes = collections.OrderedDict()
+
+    for i, param in enumerate(param_schemas):
+        if param.is_variadic_input:
+            # Exhaust all remaining args
+            onnx_inputs.extend(args[i:])
+            args = []
+            continue
+        if i < len(args):
+            if param.is_input:
+                onnx_inputs.append(args[i])
+            else:
+                onnx_attributes[param.name] = args[i]
+        elif param.name in kwargs:
+            if param.is_input:
+                onnx_inputs.append(kwargs[param.name])
+            else:
+                onnx_attributes[param.name] = kwargs[param.name]
+        elif param.is_attribute and param.default is not object():
+            # User did not provide the attribute
+            if fill_defaults:
+                onnx_attributes[param.name] = param.default
+
+    return onnx_inputs, onnx_attributes
