@@ -2,16 +2,8 @@ import torch
 
 import torch._inductor.config as cfg
 
-# Use more agressive TorchInductor optimizations, in order to fuse
-# generated Triton kernels as much as possbile when compiling the
-# functions below.  This line, together with the import line above,
-# may be removed at some later stage, if detected that TorchInductor
-# produces the same code without it.
-cfg.aggressive_fusion = True
-
-
 @torch.compile
-def sparse_semi_structured_from_dense(dense):
+def _sparse_semi_structured_from_dense(dense):
     if dense.dim() != 2:
         raise RuntimeError(
             f"Expected 2-dimensional dense tensor, got {dense.dim()}-dimensional tensor"
@@ -203,7 +195,7 @@ def sparse_semi_structured_from_dense(dense):
 
 
 @torch.compile
-def sparse_semi_structured_to_dense(sparse, meta_reordered):
+def _sparse_semi_structured_to_dense(sparse, meta_reordered):
     if sparse.dim() != 2:
         raise RuntimeError(
             f"Expected 2-dimensional sparse tensor, got {sparse.dim()}-dimensional tensor"
@@ -315,3 +307,25 @@ def sparse_semi_structured_to_dense(sparse, meta_reordered):
     dense.scatter_(0, dense_offsets, sparse.view(-1))
 
     return dense.view(m, 2 * k)
+
+
+def sparse_semi_structured_from_dense(dense):
+    aggressive_fusion_prev = cfg.aggressive_fusion
+    cfg.aggressive_fusion = True
+
+    result = _sparse_semi_structured_from_dense(dense)
+
+    cfg.aggressive_fusion = aggressive_fusion_prev
+
+    return result
+
+
+def sparse_semi_structured_to_dense(sparse, meta_reordered):
+    aggressive_fusion_prev = cfg.aggressive_fusion
+    cfg.aggressive_fusion = True
+
+    result = _sparse_semi_structured_to_dense(sparse, meta_reordered)
+
+    cfg.aggressive_fusion = aggressive_fusion_prev
+
+    return result
