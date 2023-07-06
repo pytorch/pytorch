@@ -47,7 +47,7 @@ class ConstDictVariable(VariableTracker):
             )
         # instructions to build the dict keys and values
         for key in self.items.keys():
-            if istensor(key):
+            if is_valid_global_ref_key(key):
                 codegen.append_output(
                     codegen.create_load_global(global_key_name(key), True, add=True)
                 )
@@ -65,8 +65,8 @@ class ConstDictVariable(VariableTracker):
         else:
             return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
-    def getitem_const(self, arg: VariableTracker):
-        return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)
+    def getitem_const(self, tx, arg: VariableTracker):
+        return self.items[ConstDictVariable.get_key(tx, arg)].add_options(self, arg)
 
     def call_method(
         self,
@@ -81,7 +81,7 @@ class ConstDictVariable(VariableTracker):
         val = self.items
 
         if name == "__getitem__":
-            return self.getitem_const(args[0])
+            return self.getitem_const(tx, args[0])
 
         elif name == "items":
             assert not (args or kwargs)
@@ -129,9 +129,9 @@ class ConstDictVariable(VariableTracker):
             and self.mutable_local
         ):
             assert not kwargs and len(args) == 2
-            k = ConstDictVariable.get_key(args[0])
+            k = ConstDictVariable.get_key(tx, args[0])
 
-            if istensor(k):
+            if is_valid_global_ref_key(k):
                 tx.store_dict_key(global_key_name(k), k)
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
@@ -150,7 +150,7 @@ class ConstDictVariable(VariableTracker):
             name in ("pop", "get")
             and args
             and ConstDictVariable.is_valid_key(args[0])
-            and ConstDictVariable.get_key(args[0]) not in self.items
+            and ConstDictVariable.get_key(tx, args[0]) not in self.items
             and len(args) == 2
         ):
             # missing item, return the default value
@@ -162,7 +162,7 @@ class ConstDictVariable(VariableTracker):
             and self.mutable_local
         ):
             newval = collections.OrderedDict(val)
-            result = newval.pop(ConstDictVariable.get_key(args[0]))
+            result = newval.pop(ConstDictVariable.get_key(tx, args[0]))
             tx.replace_all(self, self.modifed(newval, None, **options))
             return result.add_options(options)
         elif (
@@ -184,16 +184,43 @@ class ConstDictVariable(VariableTracker):
             name in ("get", "__getattr__")
             and args
             and ConstDictVariable.is_valid_key(args[0])
-            and ConstDictVariable.get_key(args[0]) in self.items
+            and ConstDictVariable.get_key(tx, args[0]) in self.items
         ):
-            result = self.items[ConstDictVariable.get_key(args[0])]
+            result = self.items[ConstDictVariable.get_key(tx, args[0])]
             return result.add_options(options)
         elif (
             name == "__contains__" and args and ConstDictVariable.is_valid_key(args[0])
         ):
             return ConstantVariable(
-                ConstDictVariable.get_key(args[0]) in self.items, **options
+                ConstDictVariable.get_key(tx, args[0]) in self.items, **options
             )
+        elif name == "__contains__":
+            content = args[0]
+            if isinstance(args[0], TupleVariable):
+                content = f"tuple({args[0].items})"
+
+            unimplemented(f"NYI - __contains__ with {content}")
+        elif name == "__setitem__" and args and ConstDictVariable.is_valid_key(args[0]):
+            self.mutable_local = MutableLocal()
+            assert not kwargs and len(args) == 2
+            k = ConstDictVariable.get_key(tx, args[0])
+
+            if is_valid_global_ref_key(k):
+                tx.store_dict_key(global_key_name(k), k)
+            newval = collections.OrderedDict(val)
+            newval[k] = args[1]
+
+            new_rec_contains = self.recursively_contains.union(
+                args[1].recursively_contains
+            )
+            if args[1].mutable_local is not None:
+                new_rec_contains.add(args[1].mutable_local)
+
+            return tx.replace_all(
+                self,
+                self.modifed(newval, new_rec_contains, **options),
+            )
+
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -210,9 +237,11 @@ class ConstDictVariable(VariableTracker):
         return result
 
     @classmethod
-    def get_key(cls, arg: VariableTracker):
+    def get_key(cls, tx, arg: VariableTracker):
         if isinstance(arg, TensorVariable) and arg.specialized_value is not None:
             return arg.specialized_value
+        elif isinstance(arg, variables.NNModuleVariable):
+            return tx.output.nn_modules[arg.module_key]
         else:
             return arg.as_python_constant()
 
@@ -224,18 +253,25 @@ class ConstDictVariable(VariableTracker):
             and key.specialized_value is not None
             or isinstance(key, ConstantVariable)
             and key.python_type() is torch.dtype
+            or isinstance(key, variables.NNModuleVariable)
         )
 
     @classmethod
     def _key_to_var(cls, tx, key, **options):
         from .builder import VariableBuilder
 
-        if istensor(key):
+        if is_valid_global_ref_key(key):
             return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(key)))(key)
         else:
             assert ConstantVariable.is_literal(key)
             return ConstantVariable(key, **options)
 
+
+def is_valid_global_ref_key(key):
+    if istensor(key):
+        return True
+    else:
+        return isinstance(key, torch.nn.Module) or isinstance(key, tuple)
 
 class DefaultDictVariable(ConstDictVariable):
     def __init__(self, items, user_cls, default_factory=None, **kwargs):
@@ -267,15 +303,15 @@ class DefaultDictVariable(ConstDictVariable):
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name == "__getitem__":
-            k = ConstDictVariable.get_key(args[0])
+            k = ConstDictVariable.get_key(tx, args[0])
 
             if k in self.items:
-                return self.getitem_const(args[0])
+                return self.getitem_const(tx, args[0])
             else:
                 if self.default_factory is None:
                     raise KeyError(f"{k}")
                 else:
-                    if istensor(k):
+                    if is_valid_global_ref_key(k):
                         tx.store_dict_key(global_key_name(k), k)
                     new_val = collections.OrderedDict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})

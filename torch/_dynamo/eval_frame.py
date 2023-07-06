@@ -423,6 +423,11 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             or skipfiles.check(frame.f_code.co_filename)
             or config.disable
         ):
+            print(
+                "AM I IN THE SKIPS?",
+                frame.f_code.co_name,
+                skipfiles.check(frame.f_code.co_filename),
+            )
             log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
@@ -740,6 +745,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         matched_input_elements_positions: List[int],
         matched_output_elements_positions: List[int],
         example_fake_inputs: List[torch.Tensor],
+        fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
     ):
         super().__init__(m)
 
@@ -747,7 +753,6 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             val: example_fake_inputs[ix]
             for ix, val in enumerate(matched_input_elements_positions)
         }
-        fake_mode = _guards.detect_fake_mode(example_fake_inputs)
 
         self.new_args = []
         for i in range(0, len(flat_args)):
@@ -1032,6 +1037,7 @@ def export(
         matched_input_elements_positions,
         matched_output_elements_positions,
         example_fake_inputs,
+        fake_mode,
     ).transform()
 
     # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
@@ -1316,6 +1322,9 @@ class TorchPatcher:
         #     TorchDynamo does not trigger again on the frames created by
         #     utils.checkpoint innards.
         torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
+        torch.distributed.fsdp._runtime_utils._check_flat_params_on_expected_device._dynamo_marked_constant = (
+            True
+        )
 
         torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
         torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()

@@ -59,6 +59,11 @@ class ConstantVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         try:
             options = VariableTracker.propagate([self])
+            if isinstance(self.value, dict):
+                vt_items = {}
+                for k, v in self.value.items():
+                    vt_items[k] = variables.ConstantVariable(v)
+                return vt_items
             return [ConstantVariable(x, **options) for x in self.as_python_constant()]
         except TypeError as e:
             raise NotImplementedError from e
@@ -84,6 +89,21 @@ class ConstantVariable(VariableTracker):
             # empty tuple constant etc
             return variables.TupleVariable(
                 items=self.unpack_var_sequence(tx), source=self.source, **options
+            ).call_method(tx, name, args, kwargs)
+
+        if istype(self.value, list):
+            # empty tuple constant etc
+            return variables.ListVariable(
+                items=self.unpack_var_sequence(tx), source=self.source, **options
+            ).call_method(tx, name, args, kwargs)
+
+        if istype(self.value, dict):
+            # empty dict constant etc
+            return variables.ConstDictVariable(
+                items=self.unpack_var_sequence(tx),
+                source=self.source,
+                **options,
+                user_cls=dict,
             ).call_method(tx, name, args, kwargs)
 
         if any(isinstance(x, SymNodeVariable) for x in args):
@@ -130,6 +150,15 @@ class ConstantVariable(VariableTracker):
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
+            result = search in self.value
+            return ConstantVariable(result, **options)
+        elif (
+            name == "__contains__"
+            and len(args) == 1
+            or isinstance(args[0], variables.UserDefinedObjectVariable)
+        ):
+            assert not kwargs
+            search = args[0].value
             result = search in self.value
             return ConstantVariable(result, **options)
 

@@ -29,4 +29,7 @@ def _get_module_state(module: nn.Module) -> Optional[_State]:
     if isinstance(module, _State):
         return cast(_State, module)
     else:
-        return _module_state_mapping.get(module, None)
+        if module in _module_state_mapping:
+            return _module_state_mapping[module]
+        else:
+            return None

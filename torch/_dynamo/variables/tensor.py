@@ -7,6 +7,7 @@ import sympy
 
 import torch.fx
 import torch.random
+from torch._dynamo.variables.base import VariableTracker
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables
@@ -19,6 +20,7 @@ from ..utils import (
     get_custom_getattr,
     get_fake_value,
     get_real_value,
+    guard_if_dyn,
     HAS_NUMPY_TORCH_INTEROP,
     object_has_getattribute,
     product,
@@ -86,6 +88,7 @@ class TensorVariable(VariableTracker):
         stride=None,
         is_contiguous=None,
         specialized_value=None,
+        _typed_storage=None,
         storage_offset=None,
         **kwargs,
     ):
@@ -103,6 +106,7 @@ class TensorVariable(VariableTracker):
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.specialized_value = specialized_value
+        self._typed_storage = _typed_storage
         self.storage_offset = storage_offset
 
     def as_proxy(self):
@@ -124,6 +128,14 @@ class TensorVariable(VariableTracker):
         else:
             return check_type(tensor_type)
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        options = VariableTracker.propagate(self)
+        val = self.as_proxy().node.meta['example_value']
+        result = hasattr(val, name)
+        return variables.ConstantVariable(result, **options).add_guard(
+            AttrSource(self.source, name).make_guard(
+                GuardBuilder.HASATTR
+            ))
     @staticmethod
     def specialize(value: torch.Tensor):
         props = {
@@ -135,6 +147,7 @@ class TensorVariable(VariableTracker):
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
             "class_type": type(value),
+            "_typed_storage": value._typed_storage,
         }
         if not free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
@@ -152,8 +165,6 @@ class TensorVariable(VariableTracker):
                     if value.is_contiguous(memory_format=x)
                 ]
             )
-            props["storage_offset"] = value.storage_offset()
-
         return props
 
     def dynamic_getattr(self, tx, name):
@@ -231,10 +242,6 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.is_quantized, **options)
         elif name == "is_sparse" and self.is_sparse is not None:
             result = ConstantVariable(self.is_sparse, **options)
-        elif name == "storage_offset":
-            return variables.LambdaVariable(
-                lambda *args, **kwargs: ConstantVariable(self.storage_offset)
-            ).add_options(self)
         elif name == "shape" and self.size is None:
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
@@ -243,6 +250,10 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "detach", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
+        if name == "_typed_storage":
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: TypedStorageVariable(self._typed_storage())
+            ).add_options(self)
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
@@ -350,15 +361,7 @@ class TensorVariable(VariableTracker):
             else:
                 assert not args and not kwargs, f"Tensor.{name}() unhandled args/kwargs"
 
-            dim = None
-            if isinstance(dim_var, SymNodeVariable):
-                # This is because SymNodeVariable intentionally doesn't define
-                # as_python_constant to avoid shunting down some codepaths
-                # that expect consts.   In this case, we know we definitely
-                # want to specialize though.
-                dim = dim_var.evaluate_expr()
-            elif dim_var is not None:
-                dim = dim_var.as_python_constant()
+            dim = guard_if_dyn(dim_var)
 
             def make_const_size_variable(x, **options):
                 return SizeVariable(
@@ -490,6 +493,8 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif name == "_typed_storage":
+            return TypedStorageVariable(self._typed_storage())
         else:
             constant_result = None
 
@@ -968,3 +973,48 @@ class FakeItemVariable(TensorVariable):
     @classmethod
     def from_tensor_variable(cls, tensor_variable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
+
+
+class TypedStorageVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        self.value = value
+        super().__init__(**kwargs)
+
+    def reconstruct(self, codegen):
+        return super().reconstruct(codegen)
+
+    def as_proxy(self):
+        return self.proxy
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        if name == "_size":
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: self.call_method(tx, name, [], {})
+            ).add_options(self)
+        return super().var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "_data_ptr":
+            return ConstantVariable(self.value._data_ptr())
+        if name == "_size":
+            if free_symbols(self.value._size()):
+                # TODO(voz): should be ez, pass a proxy in, make a symnodevariable
+                unimplemented("Dynamic sizing in typed storage - NYI")
+            if isinstance(self.value._size(), int):
+                return ConstantVariable(self.value._size())
+            sizes = [ConstantVariable(x) for x in self.value._size()]
+            return SizeVariable(sizes)
+        if name == "device":
+            return ConstantVariable(self.value.device)
+        if name == "_resize_":
+            assert len(args) == 1
+            self.value._resize_(args[0].value)
+            return ConstantVariable(None)
+        print("TypedStorageVariable Call method", name, self.value, args)
+        unimplemented(f"typed_storage method calls WIP {name}")
