@@ -38,12 +38,26 @@ from torch._dynamo.test_case import run_tests
 # END= 2000 
 
 
-records = [("op", "status", "exception"),]
-specialized_records = [("op", "specialized size", "graph")]
+records = []
+specialized_records = []
 def print_records():
     from tabulate import tabulate
+    import csv
+    global records, specialized_records
+    records = set(records)
+    specialized_records = set(specialized_records)
     print(tabulate(records))
     print(tabulate(specialized_records))
+    with open("status.csv", "w") as f:
+        writer = csv.writer(f)
+        writer.writerow(("op", "status", "exception"))
+        writer.writerows(records)
+    with open("specialized.csv", "w") as f:
+        writer = csv.writer(f)
+        writer.writerow(("op", "specialized_input"))
+        writer.writerows(specialized_records)
+
+
 
 atexit.register(print_records)
 def clone_preserve_strides(x, device=None):
@@ -95,14 +109,14 @@ def check_model(
                 for sz in size:
                     if isinstance(sz, int) and sz not in (0, 1):
                         # Found a specialization
-                        breakpoint()
-                        specialized_records.append([op.name, sz, gm])
+                        specialized_records.append((op.name, node.meta["grapharg"].source.name()))
+
                         break
             elif node.op == "placeholder" and isinstance(example_value, torch.SymInt):
                 si = node.meta["example_value"]
                 if len(torch.fx.experimental.symbolic_shapes.free_symbols(si)) == 0:
                         # Found a specialization
-                        specialized_records.append([op.name, si, str(node.meta["grapharg"].source)])
+                        specialized_records.append((op.name, node.meta["grapharg"].source.name()))
                         break
 
 
@@ -110,7 +124,6 @@ def check_model(
         detect_specialization(gm, *args)
         nonlocal called
         called = True
-        print(gm)
         return gm.forward
         
     def run(*ex, **kwargs):
