@@ -14,6 +14,7 @@ import torch
 
 import torch._logging
 from torch._prims_common import is_integer_dtype
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path
@@ -536,11 +537,9 @@ class IterationRangesRoot(IterationRanges):
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.statically_known_equals(divisor * length, self.numel):
-            expr = ir.FloorDiv(sympy_symbol(f"{self.prefix}index"), divisor)
+            expr = FloorDiv(sympy_symbol(f"{self.prefix}index"), divisor)
         else:
-            expr = ir.ModularIndexing(
-                sympy_symbol(f"{self.prefix}index"), divisor, length
-            )
+            expr = ModularIndexing(sympy_symbol(f"{self.prefix}index"), divisor, length)
 
         if expr not in self.nodes:
             node = IterationRangesEntry(
@@ -585,12 +584,12 @@ class IterationRangesRoot(IterationRanges):
         for node in nodes:
             if not V.graph.sizevars.statically_known_equals(node.divisor, divisor):
                 # fill in unused index var
-                add(self.lookup(divisor, ir.FloorDiv(node.divisor, divisor)))
+                add(self.lookup(divisor, FloorDiv(node.divisor, divisor)))
                 divisor = node.divisor
             add(node)
         if not V.graph.sizevars.statically_known_equals(self.numel, divisor):
             # fill in unused index var
-            add(self.lookup(divisor, ir.FloorDiv(self.numel, divisor)))
+            add(self.lookup(divisor, FloorDiv(self.numel, divisor)))
 
         return list(reversed(index_vars)), list(reversed(sizes))
 
@@ -683,7 +682,7 @@ class IterationRangesEntry(IterationRanges):
         precomputed_args = []
         if isinstance(self.expr, sympy.Symbol):
             return precomputed_args
-        assert isinstance(self.expr, (ir.FloorDiv, ir.ModularIndexing)), type(self.expr)
+        assert isinstance(self.expr, (FloorDiv, ModularIndexing)), type(self.expr)
         for arg in self.expr.args[1:]:
             if not isinstance(arg, (sympy.Integer, sympy.Symbol)):
                 symbols = arg.free_symbols
@@ -734,10 +733,8 @@ class TritonKernel(Kernel):
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
-        is_rocm = torch.version.hip is not None and torch.cuda.is_available()
         self.no_x_dim = (
-            not is_rocm
-            and self.reduction_hint == ReductionHint.INNER
+            self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
             and len(self.numels) == 2
             and self.numels[-1] >= 256
@@ -844,7 +841,7 @@ class TritonKernel(Kernel):
             if not sv.statically_known_multiple_of(remaining[i], expr):
                 raise CantSplit()
             # guard on the last item out
-            remaining[i] = ir.FloorDiv(remaining[i], expr)
+            remaining[i] = FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
             return next(var_count)
 
@@ -877,7 +874,7 @@ class TritonKernel(Kernel):
                     ):
                         raise CantSplit()
                     size1 = remaining[current_group]
-                    size2 = ir.FloorDiv(size, remaining[current_group])
+                    size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
                         make_combined(
                             size2,
@@ -1294,6 +1291,37 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
+    def bucketize(
+        self,
+        values: CSEVariable,
+        offsets_name: str,
+        offsets_size,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ):
+        """
+        See [Note: Inductor bucketize op]
+        """
+
+        offsets_ptr = self.args.input(offsets_name)
+        block_size = self.dense_size_str()
+
+        if indexing_dtype == torch.int32:
+            triton_dtype = "tl.int32"
+        elif indexing_dtype == torch.int64:
+            triton_dtype = "tl.int64"
+        else:
+            raise NotImplementedError(
+                "Bucketize only supports indexing with int32 and int64"
+            )
+
+        result = self.cse.generate(
+            self.compute,
+            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size}, {block_size})",  # noqa: B950 line too long
+        )
+
+        return result
+
     def reduction_resize(self, value):
         ndims = self.triton_tensor_ndim()
         if ndims == 1:
@@ -1333,6 +1361,7 @@ class TritonKernel(Kernel):
             )
 
         dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
+        acc_type = triton_acc_type(src_dtype)
         result_var = self.cse.newvar()
         result_var.mask_vars = {var for var in masks if var[0] != "r"}
         cond = " & ".join(masks)
@@ -1351,6 +1380,27 @@ class TritonKernel(Kernel):
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
+            elif reduction_type == "var_unnormalized":
+                # For persistent reductions, don't bother with
+                # welford's algorithm since it uses more registers, and
+                # taking two reductions doesn't increase memory usage.
+                sum_ = self.cse.generate(
+                    self.compute,
+                    self.reduction_resize(f"tl.sum({masked_value}, {dim})"),
+                )
+                rnumel = ops.index_expr(self.numels[-1], self.index_dtype)
+                rnumel = self.cse.generate(self.compute, f"{rnumel}.to({acc_type})")
+                mean = ops.div(sum_, rnumel)
+
+                dx = ops.sub(masked_value, mean)
+                dx2 = ops.mul(dx, dx)
+                dx2_masked = self.cse.generate(
+                    self.compute, f"tl.where({cond}, {dx2}, 0.0)"
+                )
+                result_var = self.cse.generate(
+                    self.compute,
+                    self.reduction_resize(f"tl.sum({dx2_masked}, {dim})"),
+                )
             else:
                 result_var = self.cse.generate(
                     self.compute, final_reduction(masked_value)
@@ -1359,7 +1409,7 @@ class TritonKernel(Kernel):
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
             self.body.writeline(
-                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {triton_acc_type(src_dtype)})"
+                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
             )
 
             if reduction_type in {"argmax", "argmin"}:
@@ -1380,6 +1430,36 @@ class TritonKernel(Kernel):
                 """
                 )
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
+            elif reduction_type == "var_unnormalized":
+                accumulator_m2 = f"_{result_var}_m2"
+                accumulator_weight = f"_{result_var}_weight"
+                self.body.writeline(
+                    f"{accumulator_m2} = tl.zeros({self.dense_size_str()}, {acc_type})"
+                )
+                self.body.writeline(
+                    f"{accumulator_weight} = tl.zeros({self.dense_size_str()}, {acc_type})"
+                )
+
+                self.compute.splice(
+                    f"""\
+                {value}_delta = {value} - {accumulator}
+                {accumulator_weight}_next = {accumulator_weight} + ({cond}).to({acc_type})
+                {accumulator}_next = {accumulator} + {value}_delta / {accumulator_weight}_next
+                {accumulator_m2}_next = {accumulator_m2} + {value}_delta * ({value} - {accumulator}_next)
+
+                {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
+                {accumulator_m2} = tl.where({cond}, {accumulator_m2}_next, {accumulator_m2})
+                {accumulator_weight} = tl.where({cond}, {accumulator_weight}_next, {accumulator_weight})
+                """
+                )
+                self.suffix.splice(
+                    f"""\
+                _, {result_var}_tmp, _ = triton_helpers.welford(
+                    {accumulator}, {accumulator_m2}, {accumulator_weight}, {dim}
+                )
+                {result_var} = {self.reduction_resize(f'{result_var}_tmp')}
+                """
+                )
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 updated = combine_fn(accumulator, value)
@@ -2364,7 +2444,7 @@ class TritonScheduling:
                     b0, b1 = ranked_tilings[0]
                 assert V.graph.sizevars.size_hint(a1 - b1) > 0
                 if V.graph.sizevars.statically_known_multiple_of(a1, b1):
-                    tiling = (a0, ir.FloorDiv(a1, b1), b1)
+                    tiling = (a0, FloorDiv(a1, b1), b1)
                     ranked_tilings = [tiling] + ranked_tilings
                     break  # only 1 choice for now
 

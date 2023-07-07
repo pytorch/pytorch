@@ -23,6 +23,7 @@ import sympy
 import torch
 from torch.autograd import DeviceType
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
 from .cuda_properties import current_device, get_device_capability
@@ -383,8 +384,6 @@ def sympy_str(expr: sympy.Expr):
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    from .ir import CleanDiv, FloorDiv, ModularIndexing
-
     if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
@@ -705,6 +704,22 @@ def run_and_get_triton_code(fn, *args, **kwargs):
         len(source_codes) == 1
     ), f"expected exactly one code output got {len(source_codes)}"
     return source_codes[0]
+
+
+@contextlib.contextmanager
+def override_lowering(aten_op, override_fn):
+    """
+    Override the lowering of aten_op with overide_fn.
+    The first argument of override_fn is the original lowering fn.
+    """
+    from torch._inductor import lowering
+
+    orig_fn = lowering.lowerings[aten_op]
+    try:
+        lowering.lowerings[aten_op] = functools.partial(override_fn, orig_fn)
+        yield
+    finally:
+        lowering.lowerings[aten_op] = orig_fn
 
 
 def developer_warning(msg):
