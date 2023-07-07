@@ -1153,7 +1153,8 @@ int THPFunction_set_materialize_grads(
 }
 
 PyObject* THPFunction_get_materialize_non_diff_grads(
-    THPFunction* self, void* _unused) {
+    THPFunction* self,
+    void* _unused) {
   HANDLE_TH_ERRORS
   return self->materialize_non_diff_grads ? Py_True : Py_False;
   END_HANDLE_TH_ERRORS
