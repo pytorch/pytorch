@@ -192,7 +192,7 @@ static int _parseChosenLRUCacheLimit() {
                  " using default LRU cache limit of ", limit, " entries.");
     } catch(std::out_of_range const& e) {
       TORCH_WARN("invalid TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT,",
-                 " using default LRU ache limit of ", limit, " entries.");
+                 " using default LRU cache limit of ", limit, " entries.");
     }
   }
   return limit;
