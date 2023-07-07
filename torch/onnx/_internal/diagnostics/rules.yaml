@@ -313,6 +313,83 @@
     deprecated: false
     tags: []
 
+- id: FXE0013
+  name: op-level-debugging
+  short_description:
+    text: Report any op level validation failure in warnings.
+  full_description:
+    text: "Report any op level validation failure in warnings."
+    markdown: |
+      This warning message indicates that during op level debugging, certain symbolic functions
+      have failed to match the results of torch ops when using real tensors generated from fake
+      tensors. It is important to note that the symbolic functions may not necessarily be
+      incorrect, as the validation process is non-deterministic and should only be used as a
+      reference.
+
+      There are two categories of warnings that can be triggered:
+
+      1. Non-validated operators:
+        If the warnings are caused by the following errors, they can be disregarded by users,
+        as these errors occur due to the non-deterministic nature of the validation. However,
+        it is important to be aware that the operators have not been validated.
+
+        - IndexError: Unsupported input arguments of randomized dimensions/indices(INT64).
+        - RuntimeError: Unsupported input arguments for torch ops are generated.
+        - ValueError: Arguments/keyword arguments do not match the signature of the symbolic function.
+
+      2. Potentially wrong torchlib operators:
+        If the warnings are triggered by the following error, users should be aware that
+        the results from symbolic functions do not match the results of torch ops, suggesting
+        that the symbolic functions may be incorrect in dispatching or implementation. In such cases,
+        it is recommended to report the issue to the PyTorch-ONNX team, or create/register a custom
+        symbolic function to replace the default one.
+
+        - AssertionError: The symbolic function is potentially wrong.
+
+  message_strings:
+    default:
+      text: "FX node: {node} and its onnx function: {symbolic_fn} fails on op level validation."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+- id: FXE0014
+  name: find-opschema-matched-symbolic-function
+  short_description:
+    text: Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas.
+  full_description:
+    text: "Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas.
+      A warning will be issued if the matched OnnxFunction is not an exact match."
+    markdown: |
+      When an ATen/Custom operator is registered and needs to be dispatched to an OnnxFunction, the input
+      dtypes of the ATen/Custom operator are compared with the input dtypes of the OnnxFunction opschemas
+      to find a match. However, if a perfect/exact match is not found, the dispatcher will attempt to find
+      the nearest match with the highest number of input dtypes matching the OnnxFunction opschemas, while
+      issuing a warning.
+
+      There are two types of level that can be triggered in this rule:
+
+      1. NOTE: A perfect match is found, and no warning is issued.
+      2. WARNING: The matched OnnxFunction is not a perfect/exact match.
+
+      Here are some suggestions based on the WARNING situation:
+
+      1. If there are NO errors or mismatches in the results, it is safe to disregard this warning,
+        as the definition of OnnxFunction schema is usually more stringent.
+      2. If there are errors or mismatches in the results, it is recommended to:
+        (a) Enable op_level_debugging to determine if the OnnxFunction might be incorrect.
+        (b) Report the issue to the PyTorch-ONNX team.
+        (c) Create/register a custom symbolic function to replace the default one.
+
+  message_strings:
+    default:
+      text: "The OnnxFunction: {symbolic_fn} is the nearest match of the node {node}."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
 - id: DIAGSYS0001
   name: arg-format-too-verbose
   short_description:
