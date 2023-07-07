@@ -476,7 +476,14 @@ def _flatten_optim_state_dict(
                     len(fqns) == 1
                 ), f"use_orig_params is True but there are multiple FQNs, {fqns}."
                 if optim is not None:  # NamedOptimizer or KeyedOptimizer case.
-                    flat_osd_state[key] = copy.deepcopy(optim.state[param])
+                    state = optim.state.get(param, None)
+                    if state is not None:
+                        flat_osd_state[key] = copy.deepcopy(state)
+                    else:
+                        warnings.warn(
+                            f"optim_state[{key}] is not on rank{fsdp_state.rank}."
+                        )
+
             else:
                 raise RuntimeError(
                     f"The state of {key} is empty. This should happen when "
