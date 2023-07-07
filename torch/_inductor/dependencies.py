@@ -232,8 +232,10 @@ class _RecordLoadStoreInner(V.MockHandler):
         self._writes.add(MemoryDep(name, *self.canonicalize(index)))
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
-    def store_reduction(self, name: str, index, value) -> str:
-        return self.store(name, index, f"store_reduction({value})")
+    def reduction(
+        self, name: str, dtype, src_dtype, reduction_type, index, value
+    ) -> str:
+        return self.store(name, index, f"reduce_{reduction_type})({value})")
 
     def index_expr(self, index: sympy.Expr, dtype) -> str:
         self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
