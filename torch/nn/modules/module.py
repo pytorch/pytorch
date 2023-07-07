@@ -431,7 +431,7 @@ class Module:
     # As JIT does not support Set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_hooks_with_kwargs: Dict[int, bool]
-    # Marks whether the corresponding always_called _forward_hooks have been run
+    # forward hooks that should always be called even if an exception is raised
     _forward_hooks_always_called: Dict[int, bool]
     _forward_pre_hooks: Dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
