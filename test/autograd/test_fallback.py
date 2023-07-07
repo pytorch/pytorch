@@ -259,14 +259,7 @@ class TestAutogradFallback(TestCase):
                 return x
 
             lib.impl("foo", foo_impl, "CPU")
-            op = self.get_op("foo")
-
-            x = torch.randn(3)
-            y = torch.randn(3, requires_grad=True)
-            with self.assertRaisesRegex(RuntimeError, "does not require grad"):
-                z = x.clone()
-                op(z, y)
-                torch.autograd.grad(z, y, torch.ones_like(z), allow_unused=True)
+            foo = self.get_op("foo")
 
             # Incorrect usage of (a!): user doesn't return tensor as-is
             lib.define("bar(Tensor(a!) self, Tensor other) -> Tensor(a!)")
@@ -278,17 +271,9 @@ class TestAutogradFallback(TestCase):
                 return x_d.clone()
 
             lib.impl("bar", bar_impl, "CPU")
-            op = self.get_op("bar")
-
-            x = torch.randn(3)
-            y = torch.randn(3, requires_grad=True)
-            with self.assertRaisesRegex(RuntimeError, "does not require grad"):
-                z = x.clone()
-                result = op(z, y)
-                result.sum().backward()
+            bar = self.get_op("bar")
 
             # User mutated input tensor but didn't return it.
-            # We are unable to do anything here.
             lib.define("baz(Tensor(a!) self, Tensor other) -> ()")
 
             def baz_impl(x, y):
@@ -297,75 +282,25 @@ class TestAutogradFallback(TestCase):
                 x_d.add_(y)
 
             lib.impl("baz", baz_impl, "CPU")
-            op = self.get_op("baz")
+            baz = self.get_op("baz")
 
-            x = torch.randn(3)
-            y = torch.randn(3, requires_grad=True)
-            with self.assertRaisesRegex(RuntimeError, "does not require grad"):
-                z = x.clone()
-                op(z, y)
-                torch.autograd.grad(z, x, torch.ones_like(z), allow_unused=True)
+            # Test in-place on non-view
+            for op in (foo, bar, baz):
+                x = torch.randn(3)
+                y = torch.randn(3, requires_grad=True)
+                with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+                    z = x.clone()
+                    op(z, y)
+                    torch.autograd.grad(z, y, torch.ones_like(z), allow_unused=True)
 
-    @parametrize("mode", ("nothing", "warn"))
-    def test_inplace_on_view_tensor_that_does_not_require_grad(self, mode):
-        # We don't do anything special (that is, we don't rebase history).
-        # See NOTE [autograd fallback and in-place operations] for why
-        with autograd_fallback_mode(mode):
-            lib = Library(self.test_ns, "FRAGMENT")
-
-            # Correct usage of (a!)
-            lib.define("foo(Tensor(a!) self, Tensor other) -> Tensor(a!)")
-
-            def foo_impl(x, y):
-                x_d = x.detach()
-                y = y.detach()
-                x_d.add_(y)
-                return x
-
-            lib.impl("foo", foo_impl, "CPU")
-            op = self.get_op("foo")
-
-            x = torch.randn(3)
-            y = torch.randn(3, requires_grad=True)
-            with self.assertRaisesRegex(RuntimeError, "does not require grad"):
-                z = x[:]
-                op(z, y)
-                torch.autograd.grad(z, y, torch.ones_like(z), allow_unused=True)
-
-            # Incorrect usage of (a!): user never ended up mutating the input Tensor
-            lib.define("bar(Tensor(a!) self, Tensor other) -> Tensor(a!)")
-
-            def bar_impl(x, y):
-                return x.detach()
-
-            lib.impl("bar", bar_impl, "CPU")
-            op = self.get_op("bar")
-
-            x = torch.randn(3)
-            y = torch.randn(3, requires_grad=True)
-            with self.assertRaisesRegex(RuntimeError, "does not require grad"):
-                z = x[:]
-                op(z, y)
-                torch.autograd.grad(z, x, torch.ones_like(z), allow_unused=True)
-
-            # User mutated input tensor but didn't return it.
-            # We are unable to do anything here.
-            lib.define("baz(Tensor(a!) self, Tensor other) -> ()")
-
-            def baz_impl(x, y):
-                x_d = x.detach()
-                y = y.detach()
-                x_d.add_(y)
-
-            lib.impl("baz", baz_impl, "CPU")
-            op = self.get_op("baz")
-
-            x = torch.randn(3)
-            y = torch.randn(3, requires_grad=True)
-            with self.assertRaisesRegex(RuntimeError, "does not require grad"):
-                z = x.clone()
-                op(z, y)
-                torch.autograd.grad(z, x, torch.ones_like(z), allow_unused=True)
+            # Test in-place on view
+            for op in (foo, bar, baz):
+                x = torch.randn(3)
+                y = torch.randn(3, requires_grad=True)
+                with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+                    z = x[:]
+                    op(z, y)
+                    torch.autograd.grad(z, x, torch.ones_like(z), allow_unused=True)
 
     @parametrize("mode", ("nothing", "warn"))
     def test_post_autograd_returns_leaf(self, mode):

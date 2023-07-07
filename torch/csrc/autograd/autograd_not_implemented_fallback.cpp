@@ -128,21 +128,18 @@ static void basicAutogradNotImplementedFallbackImpl(
 
   std::shared_ptr<WarnNotImplemented> grad_fn;
   if (any_input_requires_grad) {
-    std::vector<const at::Tensor*> tensors_requiring_grad_on_stack;
+    std::vector<const at::Tensor*> all_tensors_on_stack;
     _foreach_tensor(
         [&](size_t _, size_t idx_arg, const at::Tensor& t) {
-          if (grad_mode && t.requires_grad()) {
-            tensors_requiring_grad_on_stack.push_back(&t);
-          }
+          all_tensors_on_stack.push_back(&t);
         },
         stack,
         stack_start,
         num_arguments);
     grad_fn = std::shared_ptr<WarnNotImplemented>(
-        new WarnNotImplemented(op_name, tensors_requiring_grad_on_stack.size()),
+        new WarnNotImplemented(op_name, all_tensors_on_stack.size()),
         deleteNode);
-    grad_fn->set_next_edges(
-        collect_next_edges(tensors_requiring_grad_on_stack));
+    grad_fn->set_next_edges(collect_next_edges(all_tensors_on_stack));
   }
 
   op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
