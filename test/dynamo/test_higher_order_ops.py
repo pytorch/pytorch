@@ -696,7 +696,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         def f(x, y):
             return wrap(lambda x, y: x + y, x, y=y)
 
-        x = torch.randn(3,)
+        x = torch.randn(3)
         y = torch.randn(3, 3)
         self._test_wrap_simple(f, (x, y), 3)
 
@@ -704,11 +704,22 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         def f(x, y):
             return wrap(lambda x, y: x + y, x, y=y)
 
-        x = torch.randn(3,)
+        x = torch.randn(3)
         y = 8
-        # int are not passed as argument and directly
-        # baked into the graph.
-        self._test_wrap_simple(f, (x, y), 2)
+
+        # When running with dynamic shapes, `y` is captured as SymNodeVariable,
+        # which is not supported currently.
+        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
+        err_ctx = (
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
+            if check_dynamic_shape_capture()
+            else contextlib.nullcontext()
+        )
+
+        with err_ctx:
+            # int are not passed as argument and directly
+            # baked into the graph.
+            self._test_wrap_simple(f, (x, y), 2)
 
     def test_map_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
