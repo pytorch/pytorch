@@ -128,6 +128,8 @@ static void basicAutogradNotImplementedFallbackImpl(
 
   std::shared_ptr<WarnNotImplemented> grad_fn;
   if (any_input_requires_grad) {
+    // NB: It is standard to collect edges from all tensors
+    // (see generated/VariableTypeEverything.cpp for examples)
     std::vector<const at::Tensor*> all_tensors_on_stack;
     _foreach_tensor(
         [&](size_t _, size_t idx_arg, const at::Tensor& t) {
