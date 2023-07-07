@@ -551,8 +551,10 @@ class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     def store(self, name, index, value, mode=None):
         return self._inner.store(name, self._simplify(index), value, mode=mode)
 
-    def store_reduction(self, name, index, value):
-        return self._inner.store_reduction(name, self._simplify(index), value)
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+        return self._inner.reduction(
+            name, dtype, src_dtype, reduction_type, self._simplify(index), value
+        )
 
     def index_expr(self, index, dtype):
         return self._inner.index_expr(self._simplify(index), dtype)
