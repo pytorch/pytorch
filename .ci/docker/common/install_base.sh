@@ -71,7 +71,9 @@ install_ubuntu() {
     libtool \
     vim \
     unzip \
-    gdb
+    gdb \
+    libxml2-dev \
+    libxslt-dev
 
   # Should resolve issues related to various apt package repository cert issues
   # see: https://github.com/pytorch/pytorch/issues/65931
