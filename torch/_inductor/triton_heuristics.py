@@ -520,6 +520,18 @@ def cached_autotune(
     mutated_arg_names = meta.pop("mutated_arg_names", ())
 
     def decorator(fn):
+        # Remove XBLOCK from config if it's not a function argument.
+        # This way, coordinate descent tuning will not try to tune it.
+        #
+        # Context: When TritonKernel.no_x_dim is True, we hardcode XBLOCK to 1.
+        import inspect
+
+        if "XBLOCK" not in inspect.signature(fn.fn).parameters:
+            for tconfig in configs:
+                if "XBLOCK" in tconfig.kwargs:
+                    assert tconfig.kwargs["XBLOCK"] == 1
+                    tconfig.kwargs.pop("XBLOCK")
+
         if config.profile_bandwidth:
             return DebugAutotuner(
                 fn,
@@ -914,7 +926,7 @@ def grid(xnumel, ynumel=None, znumel=None):
 
     def grid_fn(meta):
         return (
-            get_grid_dim(xnumel, meta.get("XBLOCK", None)),
+            get_grid_dim(xnumel, meta.get("XBLOCK", 1)),
             get_grid_dim(ynumel, meta.get("YBLOCK", None)),
             get_grid_dim(znumel, meta.get("ZBLOCK", None)),
         )
