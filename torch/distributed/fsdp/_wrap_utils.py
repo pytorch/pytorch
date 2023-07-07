@@ -2,7 +2,7 @@ import collections
 import functools
 import warnings
 from functools import partial
-from typing import Any, Deque, Dict, List, NamedTuple, Set, Tuple
+from typing import Any, Deque, Dict, List, NamedTuple, Set, Tuple, Type
 
 import torch
 import torch.nn as nn
@@ -10,10 +10,15 @@ from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
 from torch.distributed.fsdp._utils import _override_module_mixed_precision
 
 from torch.distributed.fsdp.wrap import (
+    _construct_wrap_fn,
     _FSDPPolicy,
     _or_policy,
+    _post_order_apply,
     _recursive_wrap,
+    _run_mixed_precision_override_policy,
+    _run_module_wrap_policy,
     _wrap_module_cls_individually,
+    ModuleWrapPolicy,
 )
 
 
@@ -41,27 +46,47 @@ def _auto_wrap(
     ``_recursive_wrap()``, where ``auto_wrap_policy`` is not ``None``.
     ``fsdp_kwargs`` contains all FSDP arguments except ``module``.
     """
+    root_module = auto_wrap_kwargs["module"]
     auto_wrap_policy = auto_wrap_kwargs["auto_wrap_policy"]
+    ignored_modules = auto_wrap_kwargs["ignored_modules"]
+    mixed_precision = fsdp_kwargs["mixed_precision"]
+    _check_nested_wrapping(root_module, module_wrapper_cls)
+
+    # TODO: Start migration to refactored auto wrapping with `ModuleWrapPolicy`
+    if isinstance(auto_wrap_policy, ModuleWrapPolicy):
+        module_classes = auto_wrap_policy._module_classes
+        fsdp_kwargs["auto_wrap_policy"] = None
+        target_module_to_kwargs = _run_module_wrap_policy(
+            root_module, module_classes, ignored_modules, fsdp_kwargs
+        )
+        if mixed_precision is not None:
+            target_module_to_kwargs = _run_mixed_precision_override_policy(
+                root_module,
+                mixed_precision._module_classes_to_ignore,
+                ignored_modules,
+                fsdp_kwargs,
+                target_module_to_kwargs,
+            )
+            overridden_module_classes = _override_module_mixed_precision(
+                root_module, mixed_precision._module_classes_to_ignore
+            )
+            _warn_on_overridden_mixed_precision(overridden_module_classes)
+        wrap_fn = _construct_wrap_fn(
+            root_module, target_module_to_kwargs, module_wrapper_cls
+        )
+        _post_order_apply(root_module, wrap_fn)
+        return
+
     # Support new way to pass an auto wrap policy
     if isinstance(auto_wrap_policy, _FSDPPolicy):
         auto_wrap_policy = auto_wrap_policy.policy
-    root_module = auto_wrap_kwargs["module"]
     assert auto_wrap_policy is not None
-    # For auto wrapping, submodules should not already be wrapped with FSDP
-    # since double wrapping is not supported
-    for module_name, module in root_module.named_modules():
-        if isinstance(module, module_wrapper_cls):
-            raise ValueError(
-                f"Expected {module_name} to NOT be FullyShardedDataParallel "
-                "if using an `auto_wrap_policy`"
-            )
-    mixed_precision = fsdp_kwargs["mixed_precision"]
     if mixed_precision is not None:
-        for mp_module_to_override in mixed_precision._module_classes_to_ignore:
-            # Make modules of this particular type run in fp32 by wrapping them in their own
-            # FSDP unit.
-            _override_module_mixed_precision(root_module, mp_module_to_override)
-
+        # Wrap modules of the ignored types separately and register forward
+        # hooks to cast to fp32 and back to the original dtype, respectively
+        overridden_module_classes = _override_module_mixed_precision(
+            root_module, mixed_precision._module_classes_to_ignore
+        )
         auto_wrap_policy = functools.partial(
             _or_policy,
             policies=[
@@ -72,15 +97,36 @@ def _auto_wrap(
                 ),
             ],
         )
-        warnings.warn(
-            "Both mixed precision and an `auto_wrap_policy` were specified "
-            "for FSDP, where the wrapped module has batch norm submodules. "
-            "The batch norm submodules will be wrapped as separate FSDP "
-            "instances with mixed precision disabled since some batch norm "
-            "kernels do not support low precision."
-        )
-    auto_wrap_kwargs["auto_wrap_policy"] = auto_wrap_policy
+        auto_wrap_kwargs["auto_wrap_policy"] = auto_wrap_policy
+        _warn_on_overridden_mixed_precision(overridden_module_classes)
     _recursive_wrap(**auto_wrap_kwargs, **fsdp_kwargs)
+
+
+def _check_nested_wrapping(
+    root_module: nn.Module,
+    wrapper_cls: Any,  # e.g. `FullyShardedDataParallel`
+):
+    # For auto wrapping, submodules should not already be wrapped with FSDP
+    # since double wrapping is not supported
+    for module_name, module in root_module.named_modules():
+        if isinstance(module, wrapper_cls):
+            raise ValueError(
+                f"Expected {module_name} to NOT be FullyShardedDataParallel "
+                "if using an `auto_wrap_policy`"
+            )
+
+
+def _warn_on_overridden_mixed_precision(
+    overridden_module_classes: Set[Type[nn.Module]],
+):
+    if len(overridden_module_classes) == 0:
+        return
+    warnings.warn(
+        "Both mixed precision and an auto_wrap_policy were specified to FSDP, "
+        f"where the wrapped module has submodules of type:\n{overridden_module_classes}\n"
+        "These modules will be wrapped as separate FSDP instacnes with mixed "
+        "precision disabled."
+    )
 
 
 def _get_fully_sharded_module_to_states(
