@@ -56,6 +56,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+
 class MyModel(nn.Module):
     def __init__(self):
         super().__init__()
