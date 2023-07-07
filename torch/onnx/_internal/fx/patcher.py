@@ -28,6 +28,12 @@ class ONNXTorchPatcher:
 
     Search for ONNXTorchPatcher in test_fx_to_onnx_with_onnxruntime.py for
     example usage.
+
+    TODO: Should this really be a global patcher? Can we make it a local patcher?
+        A reason for splitting this into several patchers is to patch one part of the code
+        as a collateral damage of patching another part of the code. For example, we
+        for tracing model with torch._dynamo.export, we don't need to patch
+        `torch.fx._symbolic_trace._wrapped_methods_to_patch`
     """
 
     def __init__(self):

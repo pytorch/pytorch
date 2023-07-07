@@ -279,16 +279,24 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         export_output = torch.onnx.dynamo_export(
             model, x, export_options=export_options
         )
-        assert export_output is not None
-        assert export_output.model_proto is not None
+        assert (
+            export_output is not None
+        ), "ExportOutput must be created on successful export"
+        assert (
+            export_output.model_proto is not None
+        ), "A model protobuf must be created on a successful export"
         onnx.checker.check_model(export_output.model_proto, full_check=True)
-        assert len(export_output.model_proto.graph.initializer) == 0
+        assert (
+            len(export_output.model_proto.graph.initializer) == 0
+        ), "Initializers cannot exist when fake mode is enabled"
 
         # Variant 1: Save ONNX proto using Model's state_dict()
         with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
-            model_state_dict = Model().state_dict()  # optional
+            model_state_dict = Model().state_dict()  # Create a state_dict for testing
             export_output.save(tmp_onnx_file.name, model_state_dict=model_state_dict)
-            assert len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
+            assert (
+                len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
+            ), "Initializers must be present after loading it from model_state_dict"
 
         # Variant 2: Save ONNX proto using Model checkpoint file
         with tempfile.NamedTemporaryFile(
@@ -296,11 +304,15 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         ) as tmp_onnx_file, tempfile.NamedTemporaryFile(
             suffix=".pt"
         ) as tmp_checkpoint_file:
-            torch.save(Model().state_dict(), tmp_checkpoint_file.name)  # optional
+            torch.save(
+                Model().state_dict(), tmp_checkpoint_file.name
+            )  # Create checkpoint file for testing
             export_output.save(
                 tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
             )
-            assert len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
+            assert (
+                len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
+            ), "Initializers must be present after loading it from model_state_dict"
 
     def test_fake_tensor_mode_simple_invalid_input(self):
         class Model(torch.nn.Module):

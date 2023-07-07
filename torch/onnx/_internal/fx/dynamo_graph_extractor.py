@@ -194,7 +194,7 @@ class DynamoExport(exporter.FXGraphExtractor):
             *model_args,
             tracing_mode=fx_mode,
             fake_mode=fake_mode,
-            **kwargs,
+            **model_kwargs,
         )
         del graph_guard  # Unused
         torch._dynamo.reset()
