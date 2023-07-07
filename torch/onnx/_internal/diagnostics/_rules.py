@@ -454,6 +454,26 @@ class _FindOpschemaMatchedSymbolicFunction(infra.Rule):
         return self, level, self.format_message(symbolic_fn=symbolic_fn, node=node)
 
 
+class _FxNodeInsertTypePromotion(infra.Rule):
+    """Determine if type promotion is required for the FX node. Insert cast nodes if needed."""
+
+    def format_message(self, target) -> str:  # type: ignore[override]
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'Performing explicit type promotion for node {target}. '
+        """
+        return self.message_default_template.format(target=target)
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, target
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'Performing explicit type promotion for node {target}. '
+        """
+        return self, level, self.format_message(target=target)
+
+
 class _ArgFormatTooVerbose(infra.Rule):
     """The formatted str for argument to display is too verbose."""
 
@@ -933,6 +953,31 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """Find the OnnxFunction that matches the input dtypes by comparing them with their opschemas."""
+
+    fx_node_insert_type_promotion: _FxNodeInsertTypePromotion = dataclasses.field(
+        default=_FxNodeInsertTypePromotion.from_sarif(
+            **{
+                "id": "FXE0015",
+                "name": "fx-node-insert-type-promotion",
+                "short_description": {
+                    "text": "Determine if type promotion is required for the FX node. Insert cast nodes if needed."
+                },
+                "full_description": {
+                    "text": "Determine if type promotion is required for the FX node. Insert cast nodes if needed.",
+                    "markdown": "This diagnostic monitors the node-level type promotion insertion process. In PyTorch, there is an automatic process called implicit type promotion,\nwhere the input types of an operator are promoted to a common type. The determination of the common type is based on the type promotion rule specific to each operator.\nTo learn more about PyTorch's type promotion rules, refer to the [elementwise_dtypes doc](https://github.com/pytorch/pytorch/blob/f044613f78df713fb57f70c608483c9f10ad332e/torch/_prims_common/__init__.py#L1252-L1335)\nand [torch._refs ops](https://github.com/pytorch/pytorch/blob/a475ea4542dfe961c9d097e33ab5041f61c8c17f/torch/_refs/__init__.py#L484).\n\nHowever, implicit type promotion is not supported in ONNX. Therefore, to replicate the PyTorch behavior, we need to explicitly insert cast nodes.\nThis diagnostic tracks the process of node-level type promotion insertion.\n\nThe type promotion rules used by this process can be found in `torch/onnx/_internal/fx/passes/type_promotion.py.`\nTo update or add new type promotion rules, please refer to the [Note: Update type promotion rule] section.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "Performing explicit type promotion for node {target}. "
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Determine if type promotion is required for the FX node. Insert cast nodes if needed."""
 
     arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
         default=_ArgFormatTooVerbose.from_sarif(
