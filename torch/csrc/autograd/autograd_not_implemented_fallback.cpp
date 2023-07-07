@@ -113,22 +113,31 @@ static void basicAutogradNotImplementedFallbackImpl(
   TORCH_INTERNAL_ASSERT(
       getAutogradFallbackMode() == AutogradFallbackMode::Warn);
 
-  // Keep track of these tensors so we can install a grad_fn that points to them
-  std::vector<const at::Tensor*> tensors_requiring_grad_on_stack;
-  _foreach_tensor(
-      [&](size_t _, size_t idx_arg, const at::Tensor& t) {
-        if (grad_mode && t.requires_grad()) {
-          tensors_requiring_grad_on_stack.push_back(&t);
-        }
-      },
-      stack,
-      stack_start,
-      num_arguments);
-
-  const bool any_input_requires_grad = !tensors_requiring_grad_on_stack.empty();
+  bool any_input_requires_grad = false;
+  if (grad_mode) {
+    _foreach_tensor(
+        [&](size_t _, size_t idx_arg, const at::Tensor& t) {
+          if (t.requires_grad()) {
+            any_input_requires_grad = true;
+          }
+        },
+        stack,
+        stack_start,
+        num_arguments);
+  }
 
   std::shared_ptr<WarnNotImplemented> grad_fn;
   if (any_input_requires_grad) {
+    std::vector<const at::Tensor*> tensors_requiring_grad_on_stack;
+    _foreach_tensor(
+        [&](size_t _, size_t idx_arg, const at::Tensor& t) {
+          if (grad_mode && t.requires_grad()) {
+            tensors_requiring_grad_on_stack.push_back(&t);
+          }
+        },
+        stack,
+        stack_start,
+        num_arguments);
     grad_fn = std::shared_ptr<WarnNotImplemented>(
         new WarnNotImplemented(op_name, tensors_requiring_grad_on_stack.size()),
         deleteNode);
@@ -190,8 +199,19 @@ static void basicAutogradNotImplementedFallbackImpl(
           // don't require grad, then we install the WarnNotImplemented grad_fn.
           // This grad_fn warns in backward and returns undefined tensor
           // gradients.
-          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-          set_history(const_cast<at::Tensor&>(t), grad_fn);
+          //
+          // NOTE [autograd fallback and in-place operations]
+          // If the schema says the output is mutable, and the output
+          // is an input, and the input is a view Tensor, then...
+          // we're not sure if set_history is OK to do, so we just skip
+          // adding the grad_fn. Builtin operators do rebase_history here,
+          // but custom operators may have multiple Tensor(a!) returns,
+          // rebase_history assumes single Tensor(a!) return, and in general
+          // custom ops don't have a good in-place story.
+          if (!is_mutable_output) {
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+            set_history(const_cast<at::Tensor&>(t), grad_fn);
+          }
         },
         stack,
         stack->size() - num_returns,

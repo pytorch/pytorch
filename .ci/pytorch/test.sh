@@ -264,6 +264,8 @@ test_dynamo_shard() {
       test_package \
       test_legacy_vmap \
       test_custom_op_testing \
+      # https://github.com/pytorch/pytorch/issues/104719
+      test_content_store \
       export/test_db \
       functorch/test_dims \
       functorch/test_aotdispatch \
