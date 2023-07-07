@@ -1866,6 +1866,24 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
+    def test_grad_fn_with_kwargs(self):
+        def fn(x, y):
+            return (x + y).sum()
+
+        def wrapper_fn(x, y):
+            return torch.func.grad(fn)(x, y=y)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+        actual = wrapper_fn(x, y)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"torch.func.grad: kwargs arguments are currently unsupported.": 2},
+        )
+        self.assertEqual(actual, expected)
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
