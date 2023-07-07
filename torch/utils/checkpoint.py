@@ -180,8 +180,8 @@ def _get_autocast_kwargs(device="cuda"):
 
 def _supports_autocast(device):
     device_module = _get_device_module(device)
-    return (hasattr(device_module, "is_autocast_enabled")
-            and hasattr(device_module, "get_autocast_dtype"))
+    return device == "cuda" or (hasattr(device_module, "is_autocast_enabled")
+                                and hasattr(device_module, "get_autocast_dtype"))
 
 class CheckpointFunction(torch.autograd.Function):
     @staticmethod
