@@ -221,7 +221,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_graphbreak_between_collective_wait_inductor(self):
-        torch._logging.set_logs(output_code=True)
+        import logging
+        torch._logging.set_logs(dynamo=logging.DEBUG)
 
         def func(inp, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(inp, "sum", ranks, tag)
@@ -256,9 +257,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             out = compiled(inputs, **self.get_world_trs())
             print(type(out))
             print(type(correct))
-            # for some reaons output tensors are both the subclass in both
-            # eager and compiled cases - need to fix this
-            # self.assertTrue(same(out, correct))
+            self.assertTrue(same(out, correct))
 
 
 @requires_nccl()
