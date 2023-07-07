@@ -558,38 +558,6 @@ def _init_param_handle_from_params(
         handle.flat_param_to(cpu_device)
 
 
-def _get_state_names_for_states(
-    module: nn.Module,
-    params: List[nn.Parameter],
-    buffers: List[torch.Tensor],
-) -> Tuple[List[str], List[str]]:
-    """
-    Returns the parameter and buffer names of the given ``params`` and
-    ``buffers``, where the names are prefixed starting from ``module``. This
-    function assumes that the parameters and buffers are in the module tree.
-    """
-    param_names: List[str] = []
-    buffer_names: List[str] = []
-    param_to_param_name = {
-        param: param_name
-        for param_name, param in _named_parameters_with_duplicates(module)
-    }
-    buffer_to_buffer_name = {
-        buffer: buffer_name for buffer_name, buffer in module.named_buffers()
-    }
-    for param in params:
-        assert (
-            param in param_to_param_name
-        ), f"Parameter not in the module tree:\n{module}\n{param}"
-        param_names.append(param_to_param_name[param])
-    for buffer in buffers:
-        assert (
-            buffer in buffer_to_buffer_name
-        ), f"Buffer not in the module tree:\n{module}\n{buffer}"
-        buffer_names.append(buffer_to_buffer_name[buffer])
-    return param_names, buffer_names
-
-
 def _get_ignored_modules(
     root_module: nn.Module,
     _ignored_modules: Optional[Iterable[torch.nn.Module]],
