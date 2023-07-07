@@ -202,7 +202,7 @@ class CheckpointFunction(torch.autograd.Function):
             # we have no way to anticipate this will happen before we run the function.)
             ctx.had_device_in_fwd = False
             device_module = _get_device_module(ctx.device)
-            if hasattr(device_module, "_initialized") and device_module._initialized:
+            if getattr(device_module, "_initialized", False):
                 ctx.had_device_in_fwd = True
                 ctx.fwd_devices, ctx.fwd_device_states = get_device_states(*args)
 
@@ -870,7 +870,7 @@ def _checkpoint_without_reentrant(
         # we have no way to anticipate this will happen before we run the function.
         # If they do so, we raise an error.)
         had_device_in_fwd = False
-        if hasattr(device_module, "_initialized") and device_module._initialized:
+        if getattr(device_module, "_initialized", False):
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
@@ -907,7 +907,7 @@ def _checkpoint_without_reentrant(
     with _checkpoint_hook(new_frame), forward_context:
         ret = fn(*args, **kwargs)
 
-    if hasattr(device_module, "_initialized") and device_module._initialized and \
+    if getattr(device_module, "_initialized", False) and \
        preserve_rng_state and not had_device_in_fwd:
         # Device was not initialized before running the forward, so we didn't
         # stash the device state.
