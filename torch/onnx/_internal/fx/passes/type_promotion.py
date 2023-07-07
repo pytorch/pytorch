@@ -1360,11 +1360,9 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         # Update interpreter env state with new output value.
         self.env[node] = out
         node.meta.update(
-            {
-                (k, v)
-                for k, v in fx_traceback.get_current_meta().items()
-                if k not in node.meta
-            }
+            (k, v)
+            for k, v in fx_traceback.get_current_meta().items()
+            if k not in node.meta
         )
         node.meta["val"] = proxy_tensor.extract_val(out)
         return out
