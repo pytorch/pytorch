@@ -40,13 +40,15 @@ class Shard(Placement):
         with_padding: bool = True,
         contiguous: bool = True,
     ) -> Tuple[List[torch.Tensor], List[int]]:
-        # NOTE: For with_padding option, we pad the tensor on each rank before calling
-        # the collectives (i.e. scatter/all_gather, etc.). This is because for gloo
-        # backend, it does not support uneven collectives, nccl supports some, but
-        # it might be slow compared to even size collective, we need to pad tensor
-        # before really calling the collective, and unpad/narrow it afterwards
-        # TODO: consider if we should remove this logic once ProcessGroupGloo
-        # support uneven list, and collective performance on par
+        """
+        This function uses torch.chunk to split a tensor into num_chunks shards along
+        the Shard placement dimension, and return a list of shards with their pad sizes.
+
+        Keyword args:
+            with_padding (bool, optional): when True, we pad the tensor on the last
+            few ranks before calling the collectives (i.e. scatter/all_gather, etc.).
+            This is because collectives usually require equal size tensor inputs
+        """
         assert (
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
@@ -175,7 +177,7 @@ class Shard(Placement):
         self,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
-        reduce_op: c10d.ReduceOp,
+        reduce_op: c10d.ReduceOp.RedOpType,
         mesh_dim: int,
     ) -> torch.Tensor:
         """
@@ -249,15 +251,8 @@ class Shard(Placement):
 
         # Unpad the tensor if the input tensor was padded
         if is_padded:
-            gathered_list = torch.chunk(result, num_chunks, dim=self.dim)
-            gathered_list = [
-                self._unpad_tensor(gathered_tensor, pad_size)  # type: ignore[misc]
-                if pad_size > 0
-                else gathered_tensor
-                for gathered_tensor, pad_size in zip(gathered_list, pad_sizes)
-            ]
-
-            result = torch.cat(gathered_list, dim=self.dim)
+            full_pad_size = sum(pad_sizes)
+            result = self._unpad_tensor(result, full_pad_size)
         return result
 
     def __eq__(self, other: object) -> bool:
@@ -328,15 +323,13 @@ class _Partial(Placement):
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
 
-    def __init__(self, reduce_op: c10d.ReduceOp = c10d.ReduceOp.SUM):  # type: ignore[assignment]
-        self.reduce_op: c10d.ReduceOp = reduce_op
+    def __init__(self, reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM):
+        self.reduce_op: c10d.ReduceOp.RedOpType = reduce_op
 
     def _to_replicate(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        return mesh.all_reduce(
-            tensor, self.reduce_op, mesh_dim=mesh_dim  # type: ignore[call-arg]
-        )
+        return mesh.all_reduce(tensor, self.reduce_op, mesh_dim=mesh_dim)
 
     def _to_shard(
         self,
@@ -347,9 +340,7 @@ class _Partial(Placement):
     ) -> torch.Tensor:
         # by default call reduce_shard_tensor of the shard_spec.
         shard_spec = cast(Shard, shard_spec)
-        return shard_spec._reduce_shard_tensor(
-            tensor, mesh, self.reduce_op, mesh_dim  # type: ignore[call-arg]
-        )
+        return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _Partial):

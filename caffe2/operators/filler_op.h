@@ -49,7 +49,7 @@ class FillerOp : public Operator<Context> {
     }
   }
 
-  virtual ~FillerOp() {}
+  ~FillerOp() override {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {

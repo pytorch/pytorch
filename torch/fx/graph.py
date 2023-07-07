@@ -394,6 +394,10 @@ class CodeGen:
                     qualified_name = _get_qualified_name(type(arg))
                     global_name = add_global(qualified_name, type(arg))
                     return f"{global_name}{repr(tuple(arg))}"
+                elif isinstance(arg, torch._ops.OpOverload):
+                    qualified_name = _get_qualified_name(arg)
+                    global_name = add_global(qualified_name, arg)
+                    return f"{global_name}"
                 return repr(arg)
             args_s = ', '.join(_get_repr(a) for a in args)
             kwargs_s = ', '.join(f'{k} = {_get_repr(v)}' for k, v in kwargs.items())
@@ -726,6 +730,7 @@ class Graph:
         self._tracer_cls = tracer_cls
         self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
+        self._co_fields : Dict[str, Any] = {}
 
     @property
     def owning_module(self):
@@ -1295,6 +1300,8 @@ class Graph:
             print("`print_tabular` relies on the library `tabulate`, "
                   "which could not be found on this machine. Run `pip "
                   "install tabulate` to install the library.")
+            raise
+
         node_specs = [[n.op, n.name, n.target, n.args, n.kwargs]
                       for n in self.nodes]
         print(tabulate(node_specs,

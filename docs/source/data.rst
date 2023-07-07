@@ -424,6 +424,7 @@ Example::
 .. autoclass:: Dataset
 .. autoclass:: IterableDataset
 .. autoclass:: TensorDataset
+.. autoclass:: StackDataset
 .. autoclass:: ConcatDataset
 .. autoclass:: ChainDataset
 .. autoclass:: Subset

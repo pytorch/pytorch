@@ -9,15 +9,138 @@
 
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
-#include <ATen/cpu/vec/functional.h>
-#include <ATen/cpu/vec/vec.h>
-#endif
+#include <ATen/native/BinaryOps.h>
+#include <ATen/native/Math.h>
+
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#define INDUCTOR_USE_VECTOR_TYPES() 1
+#else
+#define INDUCTOR_USE_VECTOR_TYPES() 0
+#endif
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#endif
+
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
+
+template <typename T>
+struct Welford {
+  T mean = T(0);
+  T m2 = T(0);
+  T weight = T(0);
+};
+
+
+template <typename T>
+struct IsVecType: std::false_type {};
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
+#endif
+
+template <typename T>
+Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
+  if constexpr (!IsVecType<T>::value) {
+    if (a.weight == 0) {
+      return b;
+    }
+    if (b.weight == 0) {
+      return a;
+    }
+  }
+  auto delta = b.mean - a.mean;
+  auto new_weight = a.weight + b.weight;
+  auto wb_over_w = b.weight / new_weight;
+  if constexpr (IsVecType<T>::value) {
+    // Guard against division by zero
+    wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
+  }
+  auto result = Welford<T>{
+    a.mean + delta * wb_over_w,
+    a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,
+    new_weight
+  };
+  return result;
+}
+
+template <typename T>
+Welford<T> welford_combine(const Welford<T> &acc, T data) {
+  // Add a single data point
+  auto delta = data - acc.mean;
+  auto new_weight = acc.weight + T(1);
+  auto new_mean = acc.mean + delta / new_weight;
+  auto new_delta = data - new_mean;
+  auto result = Welford<T>{
+    new_mean,
+    acc.m2 + delta * new_delta,
+    new_weight
+  };
+  return result;
+}
+
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename scalar_t>
+inline at::vec::Vectorized<scalar_t> vec_shuffle_down(at::vec::Vectorized<scalar_t> x, size_t n) {
+  using Vec = at::vec::Vectorized<scalar_t>;
+  alignas(alignof(Vec)) scalar_t array[Vec::size()];
+  x.store(array);
+  for (size_t i = 0; i + n < Vec::size(); i += 2 * n) {
+    array[i] = array[i + n];
+  }
+  return Vec::loadu(array);
+}
+
+#ifdef CPU_CAPABILITY_AVX2
+inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x, size_t n) {
+  using vec_t = at::vec::Vectorized<float>;
+#define SHUFFLE_MASK(z, y, x, w) ((z << 6) | (y << 4) | (x << 2) | w)
+  switch (n) {
+  case 1:
+    return vec_t(_mm256_permute_ps(x, SHUFFLE_MASK(1, 1, 3, 3)));
+  case 2:
+    return vec_t(_mm256_permute_ps(x, SHUFFLE_MASK(2, 2, 2, 2)));
+  case 4:
+    return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
+  }
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+}
+#endif
+
+template <typename scalar_t>
+Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
+  using Vec = at::vec::Vectorized<scalar_t>;
+  for (size_t n = 1; n < Vec::size(); n *= 2) {
+    auto shuffled = Welford<Vec>{
+      vec_shuffle_down(acc.mean, n),
+      vec_shuffle_down(acc.m2, n),
+      vec_shuffle_down(acc.weight, n)
+    };
+    acc = welford_combine(acc, shuffled);
+  }
+
+  Welford<scalar_t> result;
+  alignas(alignof(Vec)) scalar_t array[Vec::size()];
+  acc.mean.store(array);
+  result.mean = array[0];
+
+  acc.m2.store(array);
+  result.m2 = array[0];
+
+  acc.weight.store(array);
+  result.weight = array[0];
+
+  return result;
+}
+#endif
+
 
 template <typename T> inline T mod(T a, T b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
@@ -54,8 +177,12 @@ float randn_cpu(uint32_t seed, uint32_t offset) {
   return engine.randn(10);
 }
 
-uint32_t randint_cpu(uint32_t seed, uint32_t offset) {
-  return at::Philox4_32(seed, 0, offset)();
+uint64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
+  auto gen = at::Philox4_32(seed, 0, offset);
+  uint64_t r0 = gen();
+  uint64_t r1 = gen();
+  uint64_t result = r0 | (r1 << 32);
+  return (result % static_cast<uint64_t>(high - low)) + low;
 }
 
 template <typename T> struct AsIntegerType { typedef T type; };
@@ -73,7 +200,9 @@ inline bfloat16 fetch_value<bfloat16>(volatile bfloat16 *addr) {
   return bfloat16(addr->x);
 }
 
-template <typename T> void atomic_add(volatile T *addr, T offset) {
+template <typename T>
+typename std::enable_if<!std::is_integral<T>::value>::type
+atomic_add(volatile T *addr, T offset) {
   typedef typename AsIntegerType<T>::type alt_type;
 
   static_assert(sizeof(std::atomic<alt_type>) == sizeof(T),
@@ -90,6 +219,18 @@ template <typename T> void atomic_add(volatile T *addr, T offset) {
     reinterpret_cast<T *>(&desired)[0] = val + offset;
   } while (!atomic_addr->compare_exchange_weak(expected, desired,
                                                std::memory_order_relaxed));
+}
+
+// Since C++20 float is supported by fetch_add, but the performance may not
+// better than compare_exchange_weak, which can be checked by microbenchmark
+// inductor_cpu_atomic.py
+template <typename T>
+typename std::enable_if<std::is_integral<T>::value>::type
+atomic_add(volatile T *addr, T offset) {
+  static_assert(sizeof(std::atomic<T>) == sizeof(T),
+                "std::atomic issue");
+  std::atomic<T> *atomic_addr = (std::atomic<T> *)addr;
+  atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
 
 // This function is used to convert bool or uint8 to float mask for
@@ -114,17 +255,18 @@ inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
   return at::vec::Vectorized<float>::loadu(dst_tmp);
 }
 
-inline at::vec::Vectorized<float> load_bf16_as_float(const bfloat16* bf16_buf) {
-  at::vec::Vectorized<float> res_vec(0);
-  at::vec::load_fp32_from_bf16(bf16_buf, res_vec);
-  return res_vec;
+inline at::vec::Vectorized<float> cvt_bf16_to_fp32(
+    at::vec::Vectorized<bfloat16> src) {
+  at::vec::Vectorized<float> res_vec1(0);
+  at::vec::Vectorized<float> res_vec2(0);
+  std::tie(res_vec1, res_vec2) = at::vec::convert_bfloat16_float(src);
+  return res_vec1;
 }
 
-inline void store_float_as_bf16(
-    bfloat16* bf16_buf,
-    at::vec::Vectorized<float> src_buf) {
-  auto res = at::vec::convert_float_bfloat16(src_buf, src_buf);
-  res.store(bf16_buf, at::vec::Vectorized<float>::size());
+inline at::vec::Vectorized<bfloat16> cvt_fp32_to_bf16(
+    at::vec::Vectorized<float> src) {
+  auto res = at::vec::convert_float_bfloat16(src, src);
+  return res;
 }
 
 inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<float> src) {

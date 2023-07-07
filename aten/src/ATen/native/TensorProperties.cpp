@@ -18,6 +18,10 @@
 #include <ATen/ops/is_set_to_native.h>
 #include <ATen/ops/size_native.h>
 #include <ATen/ops/stride_native.h>
+#include <ATen/ops/sym_numel_native.h>
+#include <ATen/ops/sym_size_native.h>
+#include <ATen/ops/sym_storage_offset_native.h>
+#include <ATen/ops/sym_stride_native.h>
 #endif
 
 #include <c10/util/irange.h>
@@ -102,7 +106,7 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
-Tensor contiguous(const Tensor & self) {
+static Tensor contiguous(const Tensor & self) {
   return contiguous(self, MemoryFormat::Contiguous);
 }
 

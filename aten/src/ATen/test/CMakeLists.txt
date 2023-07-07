@@ -108,8 +108,11 @@ list(APPEND ATen_VEC_TEST_SRCS
 
 list(APPEND ATen_MPS_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_print.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_allocator.cpp
-  )
+  ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_allocator.cpp)
+if(APPLE AND USE_MPS)
+  list(APPEND ATen_MPS_TEST_SRCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/mps_test_objc_interface.mm)
+endif()
 
 # Caffe2 specific tests
 if(BUILD_CAFFE2)

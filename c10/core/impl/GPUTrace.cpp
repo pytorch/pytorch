@@ -1,5 +1,3 @@
-#include <mutex>
-
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/util/CallOnce.h>
 

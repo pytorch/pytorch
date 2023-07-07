@@ -34,6 +34,8 @@ struct TORCH_API KinetoEvent {
   const c10::ArrayRef<std::vector<int64_t>> shapes() const;
   bool hasTypes() const;
   const c10::ArrayRef<std::string> dtypes() const;
+  bool hasConcreteInputs() const;
+  const c10::ArrayRef<c10::IValue> concreteInputs() const;
   uint64_t flops() const;
   int64_t sequenceNr() const;
   bool hasStack() const;
@@ -55,11 +57,12 @@ struct TORCH_API KinetoEvent {
   std::string backend() const;
   bool isPythonFunction() const;
   int64_t cudaElapsedUs() const;
+  int64_t privateuse1ElapsedUs() const;
   void getPerfEventCounters(torch::profiler::perf_counters_t&) const;
 
  private:
-  torch::profiler::impl::ProfilerEventStub fallbackStart() const;
-  torch::profiler::impl::ProfilerEventStub fallbackEnd() const;
+  torch::profiler::impl::ProfilerVoidEventStub fallbackStart() const;
+  torch::profiler::impl::ProfilerVoidEventStub fallbackEnd() const;
 
   std::shared_ptr<const torch::profiler::impl::Result> result_;
   std::vector<std::string> python_stack_;
@@ -67,6 +70,7 @@ struct TORCH_API KinetoEvent {
   // Copy fields from result so we can return ArrayRefs.
   std::vector<std::vector<int64_t>> shapes_;
   std::vector<std::string> dtypes_;
+  std::vector<c10::IValue> concrete_inputs_;
 };
 
 // Consolidating events returned directly from Kineto

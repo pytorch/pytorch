@@ -14,7 +14,7 @@ MessageFormatterType = Callable[..., str]
 
 @_beartype.beartype
 def format_message_in_text(fn: Callable, *args: Any, **kwargs: Any) -> str:
-    return f"{formatter.display_name(fn)}"
+    return f"{formatter.display_name(fn)}. "
 
 
 @_beartype.beartype
@@ -58,29 +58,13 @@ ModifierCallableType = Callable[
 
 
 @_beartype.beartype
-def modify_diagnostic(
-    diag: infra.Diagnostic,
-    fn: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
-    return_values: Any,
-) -> None:
-    return
-
-
-@_beartype.beartype
 def diagnose_call(
     rule: infra.Rule,
     *,
     level: infra.Level = infra.Level.NONE,
-    exception_report_level: infra.Level = infra.Level.WARNING,
     diagnostic_type: Type[infra.Diagnostic] = infra.Diagnostic,
     format_argument: Callable[[Any], str] = formatter.format_argument,
     diagnostic_message_formatter: MessageFormatterType = format_message_in_text,
-    diagnostic_modifier: ModifierCallableType = modify_diagnostic,
-    report_criterion: Callable[
-        [Callable, Tuple[Any, ...], Dict[str, Any], Any], bool
-    ] = lambda _1, _2, _3, _4: True,
 ) -> Callable:
     def decorator(fn):
         @functools.wraps(fn)
@@ -138,30 +122,24 @@ def diagnose_call(
             ]
 
             return_values: Any = None
-            report_diagnostic: bool = True
             with ctx.add_inflight_diagnostic(diag) as diag:
                 try:
                     return_values = fn(*args, **kwargs)
                     additional_messages.append(
                         format_return_values_in_markdown(return_values, format_argument)
                     )
-                    report_diagnostic = report_criterion(
-                        fn, args, kwargs, return_values
-                    )
                     return return_values
                 except Exception as e:
                     # Record exception.
-                    report_diagnostic = True
-                    diag.level = exception_report_level
+                    diag.level = infra.levels.ERROR
+                    # TODO(bowbao): Message emitting api.
+                    diag.message = diag.message or ""
+                    diag.message += f"Raised from:\n    {type(e).__name__}: {e}"
+                    diag.with_source_exception(e)
                     additional_messages.append(format_exception_in_markdown(e))
-                    raise
                 finally:
-                    if report_diagnostic:
-                        diag.with_additional_message(
-                            "\n".join(additional_messages).strip()
-                        )
-                        diagnostic_modifier(diag, fn, args, kwargs, return_values)
-                        ctx.add_diagnostic(diag)
+                    diag.with_additional_message("\n".join(additional_messages).strip())
+                    ctx.log_and_raise_if_error(diag)
 
         return wrapper
 

@@ -1,13 +1,14 @@
 # Owner(s): ["module: inductor"]
 import functools
 import unittest
+from unittest.mock import patch
 
 import torch
-import torch._dynamo
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.utils
 from torch._dynamo.test_minifier_common import MinifierTestBase
+from torch._inductor import config
 from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
 
 _HAS_TRITON = torch._inductor.utils.has_triton()
@@ -63,6 +64,7 @@ inner(torch.randn(2))
         self._run_full_test(run_code, "aot", "AccuracyError", isolate=False)
 
     @requires_cuda()
+    @patch.object(config, "joint_graph_constant_folding", False)
     def test_rmse_improves_over_atol(self):
         # From https://twitter.com/itsclivetime/status/1651135821045719041?s=20
         run_code = """
@@ -172,12 +174,9 @@ inner(torch.randn(20, 20))
 
 
 if __name__ == "__main__":
-    import sys
-
     from torch._dynamo.test_case import run_tests
 
     # Skip CI tests on mac since CPU inductor does not seem to work due to C++ compile errors,
     # also skip on ASAN due to https://github.com/pytorch/pytorch/issues/98262
-    # also skip on Py 3.11+ since unhandled exceptions can cause segfaults
-    if not IS_MACOS and not TEST_WITH_ASAN and sys.version_info < (3, 11):
+    if not IS_MACOS and not TEST_WITH_ASAN:
         run_tests()

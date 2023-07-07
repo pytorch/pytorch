@@ -1339,12 +1339,6 @@ void assertBasicChecks(F op) {
 
 } // namespace
 
-// These tests trigger an MSVC bug in the internal arvr build
-// Reproduce with: buck build @arvr/mode/win/opt
-// //xplat/caffe2:autograd_libtorch_test_ovrsource It is probably caused by the
-// lambda, see https://github.com/pytorch/pytorch/issues/48763
-#if !defined(_MSC_VER)
-
 TEST(TestAutogradNotImplementedFallback, RetSingleNonTensor) {
   REGISTER_TEST_OP(
       "ret_single_non_tensor",
@@ -1660,8 +1654,6 @@ TEST(TestAutogradNotImplementedFallback, TensorlistOp) {
 
   ASSERT_TRUE(at::allclose(op(a, vec), tensorlist_op(a, vec)));
 }
-
-#endif
 
 // TODO add these tests if needed
 // test_once_differentiable

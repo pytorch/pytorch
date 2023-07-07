@@ -64,6 +64,11 @@ bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
              _fastEqualsForContainer);
 }
 
+std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
+  out << v.qualifiedClassName() << "." << v.name();
+  return out;
+}
+
 bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
   return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
 }
@@ -245,7 +250,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     case Tag::Capsule:
       TORCH_CHECK_TYPE(
           false, "Cannot inspect value of type ", this->tagKind());
-      // Fall through
+      [[fallthrough]];
     default:
       // don't record scalars.
       break;
@@ -763,11 +768,6 @@ IValueComparator getGreaterThanComparator(const IValue& v) {
   };
 }
 
-static std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
-  out << v.qualifiedClassName() << "." << v.name();
-  return out;
-}
-
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
   auto formatter = [&](std::ostream& out, const IValue& v) {
     out << v;
@@ -1099,8 +1099,9 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
         auto tens = sub_value.toTensor();
         if (tens.is_sparse()) {
           // sparse tensors have 2 storages! one for indices one for values
-          weakStorageImpls.emplace_back(tens.coalesce().indices().storage().getWeakStorageImpl());
-          weakStorageImpls.emplace_back(tens.coalesce().values().storage().getWeakStorageImpl());
+          auto coalesced = tens.coalesce();
+          weakStorageImpls.emplace_back(coalesced.indices().storage().getWeakStorageImpl());
+          weakStorageImpls.emplace_back(coalesced.values().storage().getWeakStorageImpl());
         } else {
           weakStorageImpls.emplace_back(tens.storage().getWeakStorageImpl());
         }

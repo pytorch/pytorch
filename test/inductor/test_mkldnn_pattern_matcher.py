@@ -2,13 +2,16 @@
 import itertools
 
 import torch
+
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
+from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
 
+# The dict value is match_nodes
 unary_list = {
     torch.nn.ReLU(): 2,
     torch.nn.Sigmoid(): 2,
@@ -16,6 +19,7 @@ unary_list = {
     torch.nn.Hardswish(): 6,
     torch.nn.LeakyReLU(0.1, inplace=False): 4,
     torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False): 3,
+    torch.nn.Hardtanh(min_val=-0.5, max_val=float("inf"), inplace=False): 3,
     torch.nn.GELU(approximate="none"): 6,
     torch.nn.GELU(approximate="tanh"): 10,
     torch.nn.ReLU6(): 3,
@@ -40,6 +44,7 @@ unary_list = {
     lambda x: x.tanh(): 2,
 }
 
+# The dict value is match_nodes
 unary_list_bf16 = {
     torch.nn.ReLU(): 2,
     torch.nn.Sigmoid(): 2,
@@ -55,17 +60,20 @@ unary_list_bf16 = {
     lambda x: x.tanh(): 2,
 }
 
+
+# The dict value is (match_count, match_nodes, inplace)
 binary_list = {
-    lambda x, y: torch.add(x, y): 2,  # call_function
-    lambda x, y: torch.add(y, x): 2,  # call_function
-    lambda x, y: x.add(y): 2,  # call_method
-    lambda x, y: x.add_(y): 2,  # call_method
-    lambda x, y: torch.sub(x, y): 2,  # call_function
-    lambda x, y: x.sub(y): 2,  # call_method
-    lambda x, y: x.sub_(y): 2,  # call_method
+    lambda x, y: torch.add(x, y): (1, 2, False),  # call_function
+    lambda x, y: torch.add(y, x): (1, 2, False),  # call_function
+    lambda x, y: x.add(y): (1, 2, False),  # call_method
+    lambda x, y: x.add_(y): (1, 2, True),  # call_method
+    lambda x, y: torch.sub(x, y): (1, 2, False),  # call_function
+    lambda x, y: x.sub(y): (1, 2, False),  # call_method
+    lambda x, y: x.sub_(y): (1, 2, True),  # call_method
 }
 
 
+@config.patch({"freezing": True})
 class TestPaternMatcher(TestCase):
     def _clone_inputs(self, inputs):
         def clone(x):
@@ -107,7 +115,7 @@ class TestPaternMatcher(TestCase):
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
 
-    def test_conv2d_unary(self):
+    def test_conv2d_unary_cpu(self):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -142,7 +150,7 @@ class TestPaternMatcher(TestCase):
                 .add(1)
                 .to(memory_format=memory_format)
             )
-            self._test_common(mod, (v,), 1, unary_list[unary_fn])
+            self._test_common(mod, (v,), 2, unary_list[unary_fn] + 1)
 
     def test_linear_unary(self):
         class M(torch.nn.Module):
@@ -175,9 +183,28 @@ class TestPaternMatcher(TestCase):
                 # only fuse for linear when the dtype is bf16
                 mod = mod.to(dtype)
                 v = torch.randn(2, 10).to(dtype)
+                matcher_count = 2
+                matcher_nodes = unary_list_bf16[unary_fn] + 1
                 self._test_common(
-                    mod, (v,), 1, unary_list_bf16[unary_fn], atol=1e-5, rtol=1.6e-2
+                    mod, (v,), matcher_count, matcher_nodes, atol=1e-5, rtol=1.6e-2
                 )
+
+    def test_linear_fp32(self):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 30, bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        for bias in [True, False]:
+            mod = M(bias=bias).eval()
+            v = torch.randn(2, 10)
+            # packing pass.
+            matcher_count = 1
+            matcher_nodes = 1
+            self._test_common(mod, (v,), matcher_count, matcher_nodes)
 
     def test_conv_transpose2d_unary(self):
         class M(torch.nn.Module):
@@ -209,7 +236,7 @@ class TestPaternMatcher(TestCase):
             v = torch.randn(x_shape, dtype=torch.float32).to(
                 memory_format=memory_format
             )
-            self._test_common(mod, (v,), 1, unary_list[unary_fn])
+            self._test_common(mod, (v,), 2, unary_list[unary_fn] + 1)
 
     def test_conv2d_binary(self):
         class M(torch.nn.Module):
@@ -252,10 +279,11 @@ class TestPaternMatcher(TestCase):
                 .add(1)
                 .to(memory_format=memory_format)
             )
-            match_nodes = (
-                binary_list[binary_fn] + 1 if has_relu else binary_list[binary_fn]
-            )
-            self._test_common(mod, (v,), 1, match_nodes)
+            match_count = binary_list[binary_fn][0] + 2
+            match_nodes = binary_list[binary_fn][1]
+            if has_relu:
+                match_nodes += 1
+            self._test_common(mod, (v,), match_count, match_nodes + 2)
 
     def test_linear_binary(self):
         class M(torch.nn.Module):
@@ -268,7 +296,7 @@ class TestPaternMatcher(TestCase):
 
             def forward(self, x, y):
                 x = self.linear(x)
-                x = self.binary_fn(x, y)
+                x = self.binary_fn(x, y.clone())
                 return x
 
         options = itertools.product(binary_list, [[2, 3, 10], [2, 10]], [True, False])
@@ -276,11 +304,20 @@ class TestPaternMatcher(TestCase):
         out_feature = 30
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             for binary_fn, input_shape, bias in options:
+                torch._dynamo.reset()
+                # addmm(mm) + (linear+add)
+                match_count = 2
+                match_nodes = 3
+                if len(input_shape) == 3:
+                    is_inplace = binary_list[binary_fn][2]
+                    # view + linear + view(joint_graph+freeze pass)
+                    match_count = match_count + 5 if is_inplace else match_count + 3
+                    match_nodes = match_nodes + 7 if is_inplace else match_nodes + 5
                 mod = M(binary_fn, input_shape[-1], out_feature, bias).to(dtype).eval()
                 v = torch.randn(input_shape).to(dtype)
                 other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
                 self._test_common(
-                    mod, (v, other), 1, binary_list[binary_fn], rtol=1e-2, atol=1e-2
+                    mod, (v, other), match_count, match_nodes, rtol=1e-2, atol=1e-2
                 )
 
     # https://github.com/pytorch/pytorch/issues/99841.
@@ -301,10 +338,10 @@ class TestPaternMatcher(TestCase):
         # check works for min_value > max_value.
         min_values = [3, torch.randn(1, 32, 28, 28)]
         max_values = [0, torch.randn(1, 32, 28, 28)]
-        mod = Model().eval()
         v = torch.randn(1, 3, 28, 28)
         for min_value, max_value in zip(min_values, max_values):
-            self._test_common(mod, (v, min_value, max_value), 1, 3)
+            mod = Model().eval()
+            self._test_common(mod, (v, min_value, max_value), 2, 4)
 
     def test_leaky_relu_pattern_fallback(self):
         class Model(torch.nn.Module):
@@ -320,10 +357,10 @@ class TestPaternMatcher(TestCase):
 
         negative_slopes = [0.1, torch.randn(1, 32, 28, 28)]
         with torch.no_grad():
-            mod = Model().eval()
             v = torch.randn(1, 3, 28, 28)
             for negative_slope in negative_slopes:
-                self._test_common(mod, (v, negative_slope), 1, 4)
+                mod = Model().eval()
+                self._test_common(mod, (v, negative_slope), 2, 5)
 
     # https://github.com/pytorch/pytorch/issues/99838.
     def test_conv2d_add_scalar(self):
@@ -342,9 +379,11 @@ class TestPaternMatcher(TestCase):
         with torch.no_grad():
             mod = Model().eval()
             v = torch.randn(1, 3, 28, 28)
-            self._test_common(mod, (v,), 0, 0)
+            self._test_common(mod, (v,), 1, 1)
 
-    def test_conv2d_binary_inplace_fusion_pass(self):
+    def test_conv2d_binary_inplace_fusion_pass_cpu(
+        self, include_ops=None, exclude_ops=None
+    ):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -361,11 +400,17 @@ class TestPaternMatcher(TestCase):
             torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
         ]
         mod = Model().to(memory_format=torch.channels_last).eval()
-        include_ops = ["mkldnn._convolution_pointwise_.binary"]
-        exclude_ops = ["mkldnn._convolution_pointwise.binary"]
+
+        if include_ops is None:
+            include_ops = ["mkldnn._convolution_pointwise_.binary"]
+        if exclude_ops is None:
+            exclude_ops = ["mkldnn._convolution_pointwise.binary"]
+
         self._test_code_common(mod, inputs, include_ops, exclude_ops)
 
-    def test_conv2d_binary_inplace_fusion_failed(self):
+    def test_conv2d_binary_inplace_fusion_failed_cpu(
+        self, include_ops=None, exclude_ops=None
+    ):
         # Written buffer is graph input, we can't fuse inplace.
         class Model_v1(torch.nn.Module):
             def __init__(self):
@@ -397,8 +442,12 @@ class TestPaternMatcher(TestCase):
         ]
         mod_v1 = Model_v1().to(memory_format=torch.channels_last).eval()
         mod_v2 = Model_v2().to(memory_format=torch.channels_last).eval()
-        include_ops = ["mkldnn._convolution_pointwise.binary"]
-        exclude_ops = ["mkldnn._convolution_pointwise_.binary"]
+
+        if include_ops is None:
+            include_ops = ["mkldnn._convolution_pointwise.binary"]
+        if exclude_ops is None:
+            exclude_ops = ["mkldnn._convolution_pointwise_.binary"]
+
         for other, mod in zip(others, [mod_v1, mod_v2]):
             self._test_code_common(mod, (input, other), include_ops, exclude_ops)
 
@@ -429,6 +478,21 @@ class TestPaternMatcher(TestCase):
                 out = torch.add(out, out)
                 return out
 
+        # https://github.com/pytorch/pytorch/issues/101374.
+        # we can't do the fusion when add's inputs are mixed dtype.
+        class Model3(torch.nn.Module):
+            def __init__(self):
+                super(Model3, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x):
+                temp = self.conv(x)
+                other = torch.ones(temp.shape, dtype=torch.double)
+                out = torch.add(temp, other)
+                return out
+
         input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
         others = [
             torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
@@ -441,11 +505,14 @@ class TestPaternMatcher(TestCase):
         ]
 
         # case1
-        mod = Model().to(memory_format=torch.channels_last).eval()
         for other, alpha in zip(others, [0.1, 1.0]):
+            mod = Model().to(memory_format=torch.channels_last).eval()
             self._test_code_common(mod, (input, other, alpha), include_ops, exclude_ops)
         # case2:
         mod = Model2().to(memory_format=torch.channels_last).eval()
+        self._test_code_common(mod, (input,), include_ops, exclude_ops)
+        # case3:
+        mod = Model3().to(memory_format=torch.channels_last).eval()
         self._test_code_common(mod, (input,), include_ops, exclude_ops)
 
     def test_reproduce_99842_issue(self):
@@ -466,5 +533,5 @@ class TestPaternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CPU and torch._C.has_mkldnn:
+    if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():
         run_tests()

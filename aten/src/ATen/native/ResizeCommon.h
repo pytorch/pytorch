@@ -1,10 +1,17 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
+#include <ATen/native/TensorFactories.h>
 #include <ATen/NamedTensorUtils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
+
+namespace at::native {
 
 template <typename T>
 inline T storage_size_for(ArrayRef<T> size, ArrayRef<T> stride) {
@@ -44,4 +51,25 @@ inline const Tensor& resize_named_tensor_(
       optional_memory_format.value());
   return self;
 }
-}}
+
+// For deterministic output, fill new elements that were added after a storage
+// resize with NaN or MAX_INT. `old_storage_nbytes` is the size of the storage
+// before the resize happened.
+inline const Tensor& fill_resize_deterministic_(const Tensor& tensor, int64_t old_storage_nbytes) {
+  const at::Storage& storage = tensor.unsafeGetTensorImpl()->unsafe_storage();
+  int64_t new_storage_nbytes = storage.nbytes();
+  int64_t old_storage_numel = old_storage_nbytes / tensor.itemsize();
+  int64_t new_storage_numel = new_storage_nbytes / tensor.itemsize();
+  if (new_storage_numel > old_storage_numel) {
+    at::Tensor tensor_view = at::empty({}, at::TensorOptions().dtype(tensor.scalar_type()).device(tensor.device()));
+    tensor_view.set_(
+      storage,
+      /*storage_offset=*/old_storage_numel,
+      /*size=*/{new_storage_numel - old_storage_numel},
+      /*stride=*/{1});
+    at::native::fill_empty_deterministic_(tensor_view);
+  }
+  return tensor;
+}
+
+} // namespace at::native

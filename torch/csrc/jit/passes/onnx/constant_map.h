@@ -36,6 +36,7 @@ class ConstantValueMap {
   static void SetValue(const std::string& tensorName, const at::Tensor& value);
   static bool HasValue(const std::string& tensorName);
   static c10::optional<at::Tensor> GetValue(const std::string& tensorName);
+  static void EraseValue(const std::string& tensorName);
 
   static std::vector<int64_t> GetCompleteShapeInto1DInt64Vector(
       const c10::SymbolicShape& shape);
