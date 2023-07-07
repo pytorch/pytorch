@@ -250,11 +250,11 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
             {"op_name": "Constant"},
             {"op_name": "Gather", "attributes": [{"name": "axis", "i": 0, "type": 2}]},
             {"op_name": "Constant"},
+            {"op_name": "Constant"},
             {
                 "op_name": "Unsqueeze",
                 "attributes": [{"name": "axes", "i": 0, "type": 7}],
             },
-            {"op_name": "Constant"},
             {"op_name": "Constant"},
             {"op_name": "Slice", "attributes": []},
         ]
