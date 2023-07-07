@@ -242,6 +242,9 @@ try:
         def truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.div(numerator, denominator)
 
+        def floordiv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
+            return self._ops.floordiv(numerator, denominator)
+
         def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.floordiv(numerator, denominator)
 
