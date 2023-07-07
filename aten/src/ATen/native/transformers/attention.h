@@ -37,16 +37,16 @@ TORCH_API Tensor qkv_projection(
     const int64_t embed_dim,
     const Tensor& qkv_weight);
 
-using efficient_attention_fn = void (*)(const Tensor& attn, const Tensor& lse,
+using flash_attention_fn = void (*)(
+    const Tensor& output, const Tensor& logsumexp,
+    const Tensor& cum_seq_q, const Tensor& cum_seq_k,
+    int64_t& max_q, int64_t& max_k, const Tensor& philox_seed,
+    const Tensor& philox_offset, const Tensor& debug_attn_mask,
     const Tensor& query, const Tensor& key, const Tensor& value,
-    bool compute_logsumexp, bool is_causal, c10::optional<double> scale);
+    double dropout_p, bool is_causal, bool return_debug_mask,
+    c10::optional<double> scale);
 
-using efficient_attention_backward_fn = void(*)(const Tensor& grad_q, const Tensor& grad_k, const Tensor& grad_v,
-    const Tensor& grad_out, const Tensor& query, const Tensor& key, const Tensor& value, const Tensor& out,
-    const Tensor& logsumexp, bool is_causal, c10::optional<double> scale);
-
-DECLARE_DISPATCH(efficient_attention_fn, efficient_attention_kernel);
-DECLARE_DISPATCH(efficient_attention_backward_fn, efficient_attention_backward_kernel);
+DECLARE_DISPATCH(flash_attention_fn, flash_attention_kernel);
 
 } // namespace native
 } // namespace at
