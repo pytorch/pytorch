@@ -167,7 +167,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "amin": {f16},
     "angle": {f16, f32, f64},
     "argwhere": {b8, f16, f32, f64, i32, i64},
-    "bernoulli": {f32, f64},
+    "bernoulli": {f16, f32, f64},
     "bincount": {i32, i64},
     "bucketize": {b8, f16, f32, f64, i32, i64},
     "cholesky": {f32, f64},
