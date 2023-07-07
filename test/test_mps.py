@@ -663,7 +663,7 @@ def mps_ops_modifier(ops):
         'rand_like': [torch.float16, torch.float32],
         'randint_like': [torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'randn_like': [torch.float16, torch.float32],
-        'bernoulli': [torch.float32],
+        'bernoulli': [torch.float16, torch.float32],
         'exponential': [torch.float16, torch.float32],
         'nn.functional.feature_alpha_dropoutwith_train': [torch.float32],
         'normal': [torch.float16, torch.float32, torch.float16, torch.float32],
@@ -10516,9 +10516,7 @@ class TestConsistency(TestCaseMPS):
     def test_output_grad_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
         key = op.name + op.variant_test_name
-        use_fp32 = False
-        if "bernoulli" in op.name:
-            use_fp32 =True
+
         run_grad_test = True
 
         def get_samples():
@@ -10536,9 +10534,6 @@ class TestConsistency(TestCaseMPS):
                 lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
             cpu_args = [cpu_sample.input] + list(cpu_sample.args)
-            cpu_fp32_args = []
-            if use_fp32:
-                cpu_fp32_args = [cpu_sample.input.float()] + list(cpu_sample.args)
             cpu_kwargs = cpu_sample.kwargs
             mps_args = [mps_sample.input] + list(mps_sample.args)
             mps_kwargs = mps_sample.kwargs
@@ -10548,9 +10543,6 @@ class TestConsistency(TestCaseMPS):
                 mps_args[1] = cpu_args[1]
 
             cpu_out = op(*cpu_args, **cpu_kwargs)
-            cpu_fp32_out = None
-            if use_fp32:
-                cpu_fp32_out = op(*cpu_fp32_args, **cpu_kwargs)
             mps_out = op(*mps_args, **mps_kwargs)
 
             if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
@@ -10576,16 +10568,7 @@ class TestConsistency(TestCaseMPS):
             else:
                 atol = None
                 rtol = None
-            if use_fp32:
-                print("cpu_args: ", cpu_args)
-                print("mps_args: ", mps_args)
-                print("cpu_fp32_args: ", cpu_fp32_args)
-                print("cpu_kwargs: ", cpu_kwargs)
-                print("mps_kwargs: ", mps_kwargs)
-                print("cpu_out: ", cpu_out)
-                print("mps_out", mps_out)
-                print("cpu_fp32_out", cpu_fp32_out)
-                self.assertEqual(cpu_fp32_args, mps_out, atol=atol, rtol=rtol)
+
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
