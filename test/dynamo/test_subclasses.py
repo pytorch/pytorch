@@ -9,11 +9,10 @@ import torch.utils.checkpoint
 
 
 class MockSubclass(torch.Tensor):
-    def __repr__(self):
-        return f"MockSubclass({self.elem})"
-
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
         return func(*args, **kwargs)
 
 
