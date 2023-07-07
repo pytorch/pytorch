@@ -6530,10 +6530,6 @@ class TestQuantizedConv(TestCase):
         # round(2.5 + 1) is 4 assuming the rounding mode is
         # round-to-nearest, ties-to-even.
 
-        # print("result_ref is: {}".format(result_ref), flush=True)
-        # print("result_ref_q.int_repr().cpu().numpy() is: {}".format(result_ref_q.int_repr().cpu().numpy()), flush=True)
-        # print("Y_q_cpu_tensor.cpu().numpy() is: {}".format(Y_q_cpu_tensor.cpu().numpy()), flush=True)
-
         np.testing.assert_array_almost_equal(
             result_ref_q.int_repr().cpu().numpy(),
             Y_q_cpu_tensor.cpu().numpy(),
