@@ -1189,12 +1189,16 @@ class CppKernel(Kernel):
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
+
+        reduction_key = src_dtype, reduction_type, value
+        if reduction_key in self.reduction_cse.reduction_cache:
+            return self.reduction_cse.reduction_cache[reduction_key]
+
         acc = self.reduction_cse.generate(
-            self.loads, f"reduction {name} {cexpr_index(index)}", write=False
+            self.loads, f"reduction {reduction_key}", write=False
         )
-        index = self.rename_indexing(index)
         self.reduction_var_map[acc] = reduction_type
         if argmax_or_argmin:
             self.reduction_prefix.writelines(
@@ -1233,16 +1237,18 @@ class CppKernel(Kernel):
                 f"{acc} = {reduction_combine(reduction_type, acc, value)};"
             )
 
-        tmpvar = self.cse.generate(
+        result = self.cse.generate(
             self.reduction_suffix, f"{reduction_project(reduction_type, acc)}"
         )
+        self.reduction_cse.reduction_cache[reduction_key] = result
+        return result
 
-        if name not in V.graph.removed_buffers:
-            var = self.args.output(name)
-            self.reduction_suffix.writeline(
-                DeferredLine(name, f"{var}[{cexpr_index(index)}] = {tmpvar};")
-            )
-        self.cse.store_cache[name] = tmpvar
+    def store_reduction(self, name, index, value):
+        index = self.rename_indexing(index)
+        var = self.args.output(name)
+        self.reduction_suffix.writeline(
+            DeferredLine(name, f"{var}[{cexpr_index(index)}] = {value};")
+        )
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
@@ -1498,7 +1504,7 @@ class CppVecKernel(CppKernel):
             )
         self.stores.writeline(DeferredLine(name, line))
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
         assert reduction_type in {
             "max",
             "min",
@@ -1543,12 +1549,15 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                 reduction_type
             ]
 
+        reduction_key = src_dtype, reduction_type, value
+        if reduction_key in self.reduction_cse.reduction_cache:
+            return self.reduction_cse.reduction_cache[reduction_key]
+
         acc = self.reduction_cse.generate(
-            self.loads, f"reduction {name} {cexpr_index(index)}", write=False
+            self.loads, f"reduction {reduction_key}", write=False
         )
         acc_vec = f"{acc}_vec"
 
-        index = self.rename_indexing(index)
         self.reduction_var_map[acc_vec] = reduction_type
         self.reduction_prefix.writeline(
             f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
@@ -1576,50 +1585,53 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             self.reduction_suffix.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, next_value)};"
             )
-            tmpvar = self.cse.generate(
-                self.reduction_suffix, reduction_project(reduction_type, acc)
+            tmpvar = acc
+        else:
+            tmpvar = acc_vec
+
+        result = self.cse.generate(
+            self.reduction_suffix, reduction_project(reduction_type, tmpvar)
+        )
+        self.reduction_cse.reduction_cache[reduction_key] = result
+        return result
+
+    def store_reduction(self, name, index, value):
+        index = self.rename_indexing(index)
+        var = self.args.output(name)
+        out_dtype = V.graph.get_dtype(name)
+        # Only float reductions are vectorized currently
+        dtype = torch.float
+        if self.tiling_idx >= self.reduction_depth:
+            # Horizontal reduction
+            self.reduction_suffix.writeline(
+                DeferredLine(
+                    name,
+                    f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});",
+                )
             )
         else:
-            tmpvar = self.cse.generate(
-                self.reduction_suffix, reduction_project(reduction_type, acc_vec)
-            )
-
-        if name not in V.graph.removed_buffers:
-            var = self.args.output(name)
-            out_dtype = V.graph.get_dtype(name)
-            if self.tiling_idx >= self.reduction_depth:
-                # Horizontal reduction
-                self.reduction_suffix.writeline(
-                    DeferredLine(
-                        name,
-                        f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({tmpvar});",
+            # Vertical reduction
+            store_lines = [
+                DeferredLine(name, f"{value}.store({var} + {cexpr_index(index)});")
+            ]
+            if out_dtype != dtype:
+                if out_dtype == torch.bfloat16 and dtype == torch.float:
+                    bf16_tmpvar = f"bf16_{value}"
+                    store_lines = [
+                        DeferredLine(
+                            name,
+                            f"auto {bf16_tmpvar} = cvt_fp32_to_bf16({value});",
+                        ),
+                        DeferredLine(
+                            name,
+                            f"{bf16_tmpvar}.store({var} + {cexpr_index(index)}, {self.tiling_factor});",
+                        ),
+                    ]
+                else:
+                    raise AssertionError(
+                        f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
                     )
-                )
-            else:
-                # Vertical reduction
-                store_lines = [
-                    DeferredLine(name, f"{tmpvar}.store({var} + {cexpr_index(index)});")
-                ]
-                if out_dtype != dtype:
-                    if out_dtype == torch.bfloat16 and dtype == torch.float:
-                        bf16_tmpvar = f"bf16_{tmpvar}"
-                        store_lines = [
-                            DeferredLine(
-                                name,
-                                f"auto {bf16_tmpvar} = cvt_fp32_to_bf16({tmpvar});",
-                            ),
-                            DeferredLine(
-                                name,
-                                f"{bf16_tmpvar}.store({var} + {cexpr_index(index)}, {self.tiling_factor});",
-                            ),
-                        ]
-                    else:
-                        raise AssertionError(
-                            f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
-                        )
-                self.reduction_suffix.writelines(store_lines)
-
-        self.cse.store_cache[name] = tmpvar
+            self.reduction_suffix.writelines(store_lines)
 
 
 class CppTile2DKernel(CppVecKernel):
@@ -1964,7 +1976,7 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"not a loop: {index}")
             return self.simd_vec
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
         if (
             dtype == torch.float
             and src_dtype == torch.float
@@ -1975,6 +1987,9 @@ class CppVecKernelChecker(CppVecKernel):
             self.disable_vec(
                 f"reduction: dtype {dtype}, src_dtype {src_dtype}, reduction_type {reduction_type}"
             )
+        return self.simd_vec
+
+    def store_reduction(self, name, index, value):
         return self.simd_vec
 
     def is_supported_cmp(self, node: torch.fx.Node):
@@ -2050,10 +2065,12 @@ class CppVecKernelChecker(CppVecKernel):
                 return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(name, dtype, src_dtype, reduction_type, index, value):
-                return self.reduction(
-                    name, dtype, src_dtype, reduction_type, index, value
-                )
+            def reduction(dtype, src_dtype, reduction_type, value):
+                return self.reduction(dtype, src_dtype, reduction_type, value)
+
+            @staticmethod
+            def store_reduction(name, index, value):
+                return self.store_reduction(name, index, value)
 
             @staticmethod
             def constant(val, dtype):
@@ -2341,11 +2358,9 @@ class CppKernelProxy(CppKernel):
                 elif _node.target == "reduction":
                     (
                         ops,
-                        name,
                         dtype,
                         src_dtype,
                         reduction_type,
-                        index,
                         value,
                     ) = _node.args
                     if src_dtype == torch.bfloat16:
@@ -2357,11 +2372,9 @@ class CppKernelProxy(CppKernel):
                         assert dtype in [torch.float, torch.bfloat16, torch.int64]
                         _node.args = (
                             ops,
-                            name,
                             torch.float if dtype == torch.bfloat16 else dtype,
                             torch.float,
                             reduction_type,
-                            index,
                             value,
                         )
                 elif _node.target == "to_dtype" and _node.args[-1] in [torch.bfloat16]:
