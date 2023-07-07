@@ -6,6 +6,7 @@ import torch.nn as nn
 from torch.distributed._composable.contract import contract
 from torch.distributed._composable_state import _get_module_state, _insert_module_state
 from torch.distributed.fsdp._common_utils import _FSDPState
+from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
 
 from torch.distributed.fsdp._init_utils import (
     _init_buffer_state,
@@ -61,6 +62,7 @@ def fully_shard(
     state = fully_shard.state(module)
     state = _init_ignored_module_states(state, module, ignored_modules, ignored_states)
     state = _init_device_handle(state, module, state._ignored_params, device_id)
+    _annotate_modules_for_dynamo(module, state._ignored_modules, True)
     state = _init_process_group_state(
         state, process_group, ShardingStrategy.FULL_SHARD, policy
     )
