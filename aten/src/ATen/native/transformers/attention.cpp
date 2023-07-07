@@ -578,8 +578,7 @@ at::Tensor pad_bias(const at::Tensor& attn_bias) {
     return attn_bias;
   }
   auto pad_count = align_to - (last_dim_size % align_to);
-  c10::SymIntArrayRef padded_shape = {c10::SymInt(0), pad_count};
-  auto padded_bias = at::pad_symint(attn_bias, padded_shape);
+  auto padded_bias = at::pad_symint(attn_bias, {c10::SymInt(0), pad_count});
   return padded_bias.slice_symint(-1, 0, last_dim_size);
 }
 
