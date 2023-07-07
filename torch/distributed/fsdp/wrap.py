@@ -70,9 +70,9 @@ def _post_order_apply(
                 "Non-root modules should have their module name set but got "
                 f"an empty module name for {module}"
             )
-            assert isinstance(optional_module, nn.Module), (
-                f"fn should return None or an nn.Module but got {optional_module}"
-            )
+            assert isinstance(
+                optional_module, nn.Module
+            ), f"fn should return None or an nn.Module but got {optional_module}"
             setattr(parent_module, module_name, optional_module)
 
     _post_order_apply_inner(root_module, "", None)
