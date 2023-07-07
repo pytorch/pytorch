@@ -105,7 +105,10 @@ def _default_to_fused_or_foreach(params: List[torch.Tensor],
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use
             foreach over the for-loop implementation on CUDA, since it is usually
-            significantly more performant. (default: None)"""
+            significantly more performant. Note that the foreach implementation uses
+            ~ sizeof(params) more peak memory than the for-loop version due to the intermediates
+            being a tensorlist vs just one tensor. If memory is prohibitive, batch fewer
+            parameters through the optimizer at a time or switch this flag to False (default: None)"""
 
 _fused_doc = r"""fused (bool, optional): whether the fused implementation (CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
@@ -252,9 +255,15 @@ class Optimizer:
 
     # Currently needed by Adam and AdamW
     def _cuda_graph_capture_health_check(self):
-        # If we are compiling, we take the capturable path automatically
-        # One caveat here is that if we are compiling, we *permit* step/param tensors to be on CPU
-        # so we do not explicitly enable the capturable flag. Inductor will decide whether cudagraphs
+        # Note [torch.compile x capturable]
+        # If we are compiling, we try to take the capturable path automatically by
+        # setting the flag to True during tracing. Due to this, we skip all the checks
+        # normally required for determining whether we can use CUDA graphs and
+        # shunt the responsibility to torch.inductor. This saves time during tracing
+        # since the checks are slow without sacrificing UX since inductor will warn
+        # later if CUDA graphs cannot be enabled, e.g.,
+        # https://github.com/pytorch/pytorch/blob/d3ba8901d8640eb16f88b2bfef9df7fa383d4b47/torch/_inductor/compile_fx.py#L390.
+        # Thus, when compiling, inductor will determine if cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
         if not is_compiling() and torch.backends.cuda.is_built() and torch.cuda.is_available():
             capturing = torch.cuda.is_current_stream_capturing()
@@ -376,6 +385,7 @@ class Optimizer:
         self._optimizer_step_post_hooks[handle.id] = hook
         return handle
 
+    @torch._disable_dynamo
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
 
@@ -422,12 +432,18 @@ class Optimizer:
                 capturable = pg["capturable"] if "capturable" in pg else False
                 break
 
-        if key != "step" or capturable or fused:
+        if key == 'step':
+            if capturable or fused:
+                return value.to(dtype=torch.float32, device=param.device)
+            else:
+                return value
+        else:
             if param.is_floating_point():
                 return value.to(dtype=param.dtype, device=param.device)
-            return value.to(device=param.device)
-        return value
+            else:
+                return value.to(device=param.device)
 
+    @torch._disable_dynamo
     def load_state_dict(self, state_dict):
         r"""Loads the optimizer state.
 
@@ -484,6 +500,7 @@ class Optimizer:
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
+    @torch._disable_dynamo
     def zero_grad(self, set_to_none: bool = True):
         r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
 
@@ -538,6 +555,7 @@ class Optimizer:
         """
         raise NotImplementedError
 
+    @torch._disable_dynamo
     def add_param_group(self, param_group):
         r"""Add a param group to the :class:`Optimizer` s `param_groups`.
 

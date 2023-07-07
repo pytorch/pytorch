@@ -279,7 +279,9 @@ def adam(params: List[Tensor],
     if foreach is None:
         foreach = False
 
-    if not all(isinstance(t, torch.Tensor) for t in state_steps):
+    # this check is slow during compilation, so we skip it
+    # if it's strictly needed we can add this check back in dynamo
+    if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     if foreach and torch.jit.is_scripting():
@@ -339,7 +341,8 @@ def _single_tensor_adam(params: List[Tensor],
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
-        if capturable:
+        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+        if not torch._utils.is_compiling() and capturable:
             assert param.is_cuda and step_t.is_cuda, "If capturable=True, params and state_steps must be CUDA tensors."
 
         # update step
@@ -428,7 +431,8 @@ def _multi_tensor_adam(params: List[Tensor],
     if len(params) == 0:
         return
 
-    if capturable:
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
         assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
             "If capturable=True, params and state_steps must be CUDA tensors."
 
@@ -462,7 +466,7 @@ def _multi_tensor_adam(params: List[Tensor],
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize
             if maximize:
-                device_grads = torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+                torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
                 device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
@@ -482,32 +486,41 @@ def _multi_tensor_adam(params: List[Tensor],
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_correction1, 1)
             torch._foreach_sub_(bias_correction2, 1)
-            torch._foreach_neg_(bias_correction1)
+            # we do not negate bias_correction1 as it'll need to be negated later anyway
             torch._foreach_neg_(bias_correction2)
 
             # foreach_div doesn't allow a scalar as the first arg
             torch._foreach_div_(bias_correction1, lr)
             torch._foreach_reciprocal_(bias_correction1)
-            torch._foreach_neg_(bias_correction1)
 
             torch._foreach_sqrt_(bias_correction2)
+
+            # Re-assign for clarity as we maintain minimal intermediates: we'll have 
+            # step_size = - lr / (1 - beta1 ^ t) where t = num_steps
+            # bias_correction2 = 1 - beta2 ^ t
+            step_size = bias_correction1
+            bias_correction2_sqrt = bias_correction2
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
                 torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)  # type: ignore[assignment]
 
-                # Use the max. for normalizing running avg. of gradient
+                # Set intermediate to the max. for normalizing running avg. of gradient when amsgrad
                 exp_avg_sq_sqrt = torch._foreach_sqrt(device_max_exp_avg_sqs)
             else:
                 exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
 
             # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
             # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
-            torch._foreach_mul_(bias_correction2, bias_correction1)
-            torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2)
-            torch._foreach_div_(bias_correction1, eps)
-            torch._foreach_reciprocal_(bias_correction1)
-            torch._foreach_add_(exp_avg_sq_sqrt, bias_correction1)
+            torch._foreach_mul_(bias_correction2_sqrt, step_size)
+            torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
+
+            # now exp_avg_sq_sqrt = sqrt(exp_avg_sq_sqrt / 1 - beta2 ^ t) * - (1 - beta1 ^ t) / lr
+            torch._foreach_div_(step_size, eps)
+            torch._foreach_reciprocal_(step_size)
+
+            # now step_size = eps * - (1 - beta1 ^ t) / lr
+            torch._foreach_add_(exp_avg_sq_sqrt, step_size)
             torch._foreach_addcdiv_(device_params, device_exp_avgs, exp_avg_sq_sqrt)
         else:
             bias_correction1 = [1 - beta1 ** _get_value(step) for step in device_state_steps]
