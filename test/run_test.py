@@ -38,7 +38,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 try:
     # using tools/ to optimize test run.
-    sys.path.append(str(REPO_ROOT))
+    sys.path.insert(0, str(REPO_ROOT))
     from tools.stats.export_test_times import TEST_TIMES_FILE
     from tools.testing.test_selections import (
         calculate_shards,
@@ -61,6 +61,9 @@ except ImportError as e:
     print(
         f"Unable to import test_selections from tools/testing. Running without test selection stats.... Reason: {e}"
     )
+finally:
+    # Make sure to remove REPO_ROOT after import is done
+    sys.path.remove(str(REPO_ROOT))
 
 
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
@@ -187,7 +190,6 @@ TESTS = discover_tests(
         "test_jit_string",
         "test_kernel_launch_checks",
         "test_nnapi",
-        "test_segment_reductions",
         "test_static_runtime",
         "test_throughput_benchmark",
         "test_typing",
@@ -1202,6 +1204,11 @@ def parse_args():
             "doctest to run"
         ),
     )
+    parser.add_argument(
+        "--no-translation-validation",
+        action="store_false",
+        help="Run tests without translation validation.",
+    )
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -1632,6 +1639,9 @@ def main():
         os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
     elif options.inductor:
         os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
+
+    if not options.no_translation_validation:
+        os.environ["PYTORCH_TEST_WITH_TV"] = "1"
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
