@@ -81,6 +81,12 @@ test_failures_cpp_wrapper = {
     ),
 }
 
+test_failures_cuda_wrapper = {
+    "test_custom_op_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",), is_skip=True
+    ),
+}
+
 
 def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=None):
     test_name = f"{name}_{device}" if device else name
@@ -286,6 +292,7 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperTemplate,
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
+        test_failures_cuda_wrapper,
         xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
