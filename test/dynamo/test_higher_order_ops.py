@@ -709,9 +709,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         # When running with dynamic shapes, `y` is captured as SymNodeVariable,
         # which is not supported currently.
-        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
+        err_msg = "only constant kwargs are supported"
         err_ctx = (
-            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
+            self.assertRaisesRegex(AssertionError, err_msg)
             if check_dynamic_shape_capture()
             else contextlib.nullcontext()
         )
