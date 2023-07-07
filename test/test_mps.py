@@ -10516,7 +10516,9 @@ class TestConsistency(TestCaseMPS):
     def test_output_grad_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
         key = op.name + op.variant_test_name
-
+        use_fp32 = False
+        if "bernoulli" in op.name:
+            use_fp32 =True
         run_grad_test = True
 
         def get_samples():
@@ -10534,6 +10536,9 @@ class TestConsistency(TestCaseMPS):
                 lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
             cpu_args = [cpu_sample.input] + list(cpu_sample.args)
+            cpu_fp32_args = []
+            if use_fp32:
+                cpu_fp32_args = [cpu_sample.input.float()] + list(cpu_sample.args)
             cpu_kwargs = cpu_sample.kwargs
             mps_args = [mps_sample.input] + list(mps_sample.args)
             mps_kwargs = mps_sample.kwargs
@@ -10568,7 +10573,11 @@ class TestConsistency(TestCaseMPS):
             else:
                 atol = None
                 rtol = None
-
+            if use_fp32:
+                print(cpu_fp32_args)
+                print(cpu_out)
+                print(mps_out)
+                self.assertEqual(cpu_fp32_args, mps_out, atol=atol, rtol=rtol)
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
