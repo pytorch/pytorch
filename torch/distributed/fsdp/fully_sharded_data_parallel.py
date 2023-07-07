@@ -405,14 +405,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             self, process_group, sharding_strategy, auto_wrap_policy
         )
         if auto_wrap_policy is not None:
-            auto_wrap_kwargs = {
-                "module": module,
-                "auto_wrap_policy": auto_wrap_policy,
-                "wrapper_cls": FullyShardedDataParallel,
-                "ignored_modules": self._ignored_modules,
-                "ignored_params": self._ignored_params,
-                "only_wrap_children": True,  # avoid double wrapping the root
-            }
             fsdp_kwargs = {
                 "process_group": process_group,
                 "sharding_strategy": sharding_strategy,
@@ -432,7 +424,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 # process groups.
                 fsdp_kwargs["process_group"] = (self.process_group, self._inter_node_pg)
 
-            _auto_wrap(auto_wrap_kwargs, fsdp_kwargs, FullyShardedDataParallel)
+            _auto_wrap(
+                module,
+                auto_wrap_policy,
+                self._ignored_modules,
+                self._ignored_params,
+                fsdp_kwargs,
+                FullyShardedDataParallel,
+            )
 
         backward_prefetch_limit = 1
         forward_prefetch_limit = 1
