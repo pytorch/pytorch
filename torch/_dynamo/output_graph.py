@@ -64,6 +64,7 @@ from .utils import (
     count_calls,
     counters,
     dynamo_timed,
+    get_instruction_source_311,
     graph_break_reasons,
     lazy_format_graph_code,
     lazy_format_graph_tabular,
@@ -85,6 +86,7 @@ log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
+trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
 
 class OutputGraphState(NamedTuple):
@@ -1080,6 +1082,7 @@ class SubgraphTracer(fx.Tracer):
         # so that we can maintain the order of args for the HigherOrderOperator
         # call. The values are None.
         self.lifted_freevars = collections.OrderedDict()
+        self.prev_inst = None
 
     def create_proxy(
         self,
@@ -1152,6 +1155,21 @@ class SubgraphTracer(fx.Tracer):
 
         # append stack trace to fx node
         tx = self.output_graph.current_tx
+
+        # log detailed location of line of code in 3.11
+        if (
+            torch._logging._internal.log_state.is_artifact_enabled("trace_call")
+            and sys.version_info >= (3, 11)
+            and kind in ("call_function", "call_method", "call_module")
+        ):
+            cur_inst = tx.current_instruction
+            if cur_inst is not self.prev_inst and cur_inst.positions.lineno is not None:
+                line = get_instruction_source_311(tx.f_code, cur_inst).rstrip()
+                header = tx.get_line_of_code_header(lineno=cur_inst.positions.lineno)
+                trace_call_log.debug(
+                    "TRACE call %s from %s\n%s", rv.node.name, header, line
+                )
+                self.prev_inst = cur_inst
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:

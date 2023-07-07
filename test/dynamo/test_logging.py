@@ -367,6 +367,10 @@ class LoggingTests(LoggingTestCase):
             if "concrete" in line:
                 self.assertIsNotNone(re.search(r"\(concrete\): \(\d+, \d+\)", line))
 
+    @make_logging_test(trace_call=True)
+    def test_trace_call(self, records):
+        pass
+
 
 # single record tests
 exclusions = {
@@ -380,6 +384,7 @@ exclusions = {
     "perf_hints",
     "not_implemented",
     "trace_source",
+    "trace_call",
     "custom_format_test_artifact",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
