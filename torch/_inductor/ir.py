@@ -4255,8 +4255,8 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             w_scale, w_zp = args[-2], args[-1]
             const_args = []
             const_args.extend(self.codegen_const_args())
-            # const_args is: [stride, padding, dilation, groups, x_scale, x_zp, w_axis, o_inv_scale, o_zp, o_dtype, fp32_output
-            # binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
+            # const_args is: [stride, padding, dilation, groups, x_scale, x_zp, w_axis, o_inv_scale, o_zp, o_dtype,
+            # fp32_output, unary_attr, unary_scalars, unary_algorithm]
             stride = const_args[0]
             padding = const_args[1]
             dilation = const_args[2]
@@ -4280,7 +4280,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             const_args = []
             const_args.extend(self.codegen_const_args())
             # const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, w_axis, o_inv_scale, o_zp, o_dtype,
-            # fp32_output, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
+            # fp32_output, unary_attr, unary_scalars, unary_algorithm]
             bias = const_args[0]
             stride = const_args[1]
             padding = const_args[2]
