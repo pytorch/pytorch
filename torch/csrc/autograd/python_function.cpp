@@ -1156,7 +1156,11 @@ PyObject* THPFunction_get_materialize_non_diff_grads(
     THPFunction* self,
     void* _unused) {
   HANDLE_TH_ERRORS
-  return self->materialize_non_diff_grads ? Py_True : Py_False;
+  if (self->materialize_non_diff_grads) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -1415,7 +1419,6 @@ static struct PyGetSetDef THPFunction_properties[] = {
      (setter)THPFunction_set_materialize_non_diff_grads,
      nullptr,
      nullptr},
-    {nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)

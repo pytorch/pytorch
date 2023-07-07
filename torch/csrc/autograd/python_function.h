@@ -93,7 +93,7 @@ struct THPFunction {
   // Default is true.
   bool materialize_grads;
 
-  // boolean indicating whther to materialize output grad tensors
+  // boolean indicating whether to materialize output grad tensors
   // corresponding to non-differentiable outputs. Normally, someone would
   // already get this behavior by switching off materialize_grads,
   // but there are certain use cases where that is not feasible:

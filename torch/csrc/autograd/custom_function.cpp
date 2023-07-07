@@ -363,9 +363,8 @@ static optional_variable_list _process_backward_mode_ad(
   int num_diff_outputs = 0;
 
   for (const auto i : c10::irange(num_outputs)) {
-    // For outputs that are not tensors put a placeholder undefined input.
-    // Note that below, we also put a placeholder undefined inputs for when
-    // the output tensor is not differentiable
+    // We put a undefined_input placeholder for outputs that are not tensor and
+    // for when the output tensor is not differentiable (see below)
     if (!raw_outputs[i].has_value()) {
       if (cdata) {
         auto output_nr = cdata->add_input_metadata(Node::undefined_input());
