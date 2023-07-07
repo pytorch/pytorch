@@ -578,7 +578,7 @@ at::Tensor pad_bias(const at::Tensor& attn_bias) {
     return attn_bias;
   }
   auto pad_count = align_to - (last_dim_size % align_to);
-  c10::SymIntArrayRef padded_shape = {0, pad_count};
+  c10::SymIntArrayRef padded_shape = {c10::SymInt(0), pad_count};
   auto padded_bias = at::pad_symint(attn_bias, padded_shape);
   return padded_bias.slice_symint(-1, 0, last_dim_size);
 }
@@ -640,13 +640,13 @@ Tensor scaled_dot_product_attention(
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
       if (attn_mask.has_value()) {
-        attn_mask = pad_bias(attn_mask.value());
         // Expand to 4d case
         attn_mask = attn_mask.value().expand_symint(
             {query_.sym_size(0),
              query_.sym_size(1),
              query_.sym_size(2),
              key.sym_size(2)});
+        attn_mask = pad_bias(attn_mask.value());
       }
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
