@@ -320,6 +320,35 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
+    def test_function_with_bound_free_variable(self):
+        class LowerBound(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inputs, bound):
+                ctx.save_for_backward(inputs, inputs.new_ones(1) * bound)
+                return inputs.clamp(min=bound)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                inputs, bound = ctx.saved_tensors
+                return (inputs >= bound) * grad_output, None
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+                self.gamma = torch.nn.Parameter(torch.rand([4, 128, 32, 32]))
+
+            def forward(self, x):
+                gamma = LowerBound.apply(self.gamma, 1)
+                return x + gamma
+
+        mod = MyMod()
+        args, kwargs = ([torch.rand([4, 128, 32, 32])], {})
+        before = mod(*args, **kwargs)
+
+        compiled_model = torch._dynamo.optimize("eager")(mod)
+        after = compiled_model(*args, **kwargs)
+        self.assertEqual(before, after)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
