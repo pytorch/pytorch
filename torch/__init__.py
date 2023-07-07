@@ -1513,10 +1513,10 @@ class _TorchCompileInductorWrapper:
             from torch._inductor import list_mode_options
             if mode == "reduce-overhead" and self.dynamic:
                 raise RuntimeError(
-                        "mode=reduce-overhead cannot be used together with dynamic=True! "
-                        "reduce-overhead enables cudagraph. dynamic=True forces recompiliation "
-                        "for each new shape, which defeats the purpose of cudagraph. "
-                        "Please only enable one of them."
+                    "mode=reduce-overhead cannot be used together with dynamic=True! "
+                    "reduce-overhead enables cudagraph. dynamic=True forces recompiliation "
+                    "for each new shape, which defeats the purpose of cudagraph. "
+                    "Please only enable one of them."
                 )
             self.apply_options(list_mode_options(mode, self.dynamic))
         else:
