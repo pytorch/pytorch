@@ -264,6 +264,10 @@ class TestPublicBindings(TestCase):
             "vitals_enabled",
             "wait",
             "Tag",
+            "set_autocast_xla_enabled",
+            "set_autocast_xla_dtype",
+            "get_autocast_xla_dtype",
+            "is_autocast_xla_enabled",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 

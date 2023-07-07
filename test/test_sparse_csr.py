@@ -3487,8 +3487,9 @@ class TestSparseCompressedTritonKernels(TestCase):
             if bsr.dim() == 2 and dtype != torch.float:
                 # Test against linear to check dispatch
                 # which takes place for torch.half and torch.bfloat16.
-                res_tri = torch.nn.functional.linear(dense, bsr)
                 res_dense = torch.nn.functional.linear(dense, bsr.to_dense())
+                res_tri_out = torch.empty_like(res_dense)
+                res_tri = torch.nn.functional.linear(dense, bsr, out=res_tri_out)
 
                 # Check dispatch worked with non-trivial outputs
                 if m > 0 and n > 0 and k > 0:
@@ -3500,7 +3501,8 @@ class TestSparseCompressedTritonKernels(TestCase):
                 res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
                 res_tri_out = torch.empty_like(res_dense)
                 res_tri = kernel(bsr, dense.transpose(-2, -1), out=res_tri_out)
-                self.assertTrue(res_tri is res_tri_out)
+
+            self.assertTrue(res_tri is res_tri_out)
             self.assertEqual(res_tri, res_dense)
 
             res_dense = bsr.to_dense() @ dense.transpose(-2, -1)

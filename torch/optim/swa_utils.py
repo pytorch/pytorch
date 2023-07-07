@@ -252,8 +252,7 @@ def update_bn(loader, model, device=None):
     momenta = {}
     for module in model.modules():
         if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
-            module.running_mean = torch.zeros_like(module.running_mean)
-            module.running_var = torch.ones_like(module.running_var)
+            module.reset_running_stats()
             momenta[module] = module.momentum
 
     if not momenta:
@@ -263,7 +262,6 @@ def update_bn(loader, model, device=None):
     model.train()
     for module in momenta.keys():
         module.momentum = None
-        module.num_batches_tracked *= 0
 
     for input in loader:
         if isinstance(input, (list, tuple)):
