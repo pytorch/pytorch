@@ -7,8 +7,11 @@ import torch
 from torch._guards import Source
 from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    transform_subclass,
+)
 from torch.utils.weak import WeakIdRef
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass, transform_subclass
 
 DimList = List
 
@@ -553,7 +556,12 @@ class MetaConverter:
             # support meta.  Trying to YOLO this is more trouble than it's
             # worth.
             if is_traceable_wrapper_subclass(t):
-                out = transform_subclass(t, lambda t: self.meta_tensor(t, shape_env=shape_env, callback=callback, source=source))
+                out = transform_subclass(
+                    t,
+                    lambda t: self.meta_tensor(
+                        t, shape_env=shape_env, callback=callback, source=source
+                    ),
+                )
                 return out
 
             self.miss += 1

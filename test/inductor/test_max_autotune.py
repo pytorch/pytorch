@@ -13,7 +13,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TEST_WITH_ROCM,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -114,6 +114,7 @@ class TestDoBench(TestCase):
             child.join()
             self.assertNotEqual(0, child.exitcode)
 
+    @skipIfRocm
     @parametrize("autotune_in_subproc", (True, False))
     def test_max_autotune_mm_plus_mm(self, autotune_in_subproc):
         """
@@ -166,5 +167,5 @@ class TestDoBench(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA and not TEST_WITH_ROCM:
+    if HAS_CUDA:
         run_tests()

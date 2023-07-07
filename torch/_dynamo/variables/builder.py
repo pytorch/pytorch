@@ -22,8 +22,8 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
-from torch.utils.weak import TensorWeakRef, WeakIdRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
@@ -43,6 +43,7 @@ from ..source import (
     TupleIteratorGetItemSource,
 )
 from ..utils import (
+    build_checkpoint_variable,
     clone_input,
     get_fake_value,
     getfile,
@@ -50,11 +51,11 @@ from ..utils import (
     HAS_NUMPY,
     is_namedtuple,
     is_typing,
+    is_utils_checkpoint,
     istype,
     np,
     odict_values,
     preserve_rng_state,
-    requires_higher_order_op,
     tensor_always_has_static_shape,
     tuple_iterator,
     tuple_iterator_getitem,
@@ -289,7 +290,7 @@ class VariableBuilder:
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
             (
-                (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor, torch.distributed._tensor.DTensor),
+                (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
                 cls.wrap_tensor,
             ),
             ((tuple, list, odict_values), cls.wrap_listlike),
@@ -460,6 +461,8 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.BUILTIN_MATCH),
             )
+        elif is_utils_checkpoint(value):
+            return build_checkpoint_variable(source=self.source)
         elif is_allowed(value):
             return TorchVariable(
                 value,
@@ -487,7 +490,6 @@ class VariableBuilder:
             istype(value, (type, types.FunctionType))
             and skipfiles.check(getfile(value), allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
-            and not requires_higher_order_op(value)
         ):
             return SkipFilesVariable(
                 value,
@@ -870,7 +872,11 @@ class VariableBuilder:
             # a later point in time.
             ignore_subclass = True
         else:
-            assert type(value) in (torch.Tensor, torch.nn.Parameter, torch._subclasses.fake_tensor.FakeTensor) or is_traceable_wrapper_subclass(value), type(value)
+            assert type(value) in (
+                torch.Tensor,
+                torch.nn.Parameter,
+                torch._subclasses.fake_tensor.FakeTensor,
+            ) or is_traceable_wrapper_subclass(value), type(value)
             ignore_subclass = False
 
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
@@ -1036,6 +1042,7 @@ class VariableBuilder:
                         constraint_dim=None,
                     ),
                     hint=value,
+                    source=self.source,
                 )
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
@@ -1429,8 +1436,10 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
-    if type(e) in (torch.Tensor, torch.nn.Parameter, torch.distributed._tensor.DTensor) or (
-        ignore_subclass and isinstance(e, torch.Tensor)
+    if (
+        type(e) in (torch.Tensor, torch.nn.Parameter)
+        or (ignore_subclass and isinstance(e, torch.Tensor))
+        or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(

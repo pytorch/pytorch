@@ -22,7 +22,12 @@ from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented, Unsupported, UserError, UserErrorType
 from ..guards import GuardBuilder
-from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
+from ..source import (
+    FSDPNNModuleSource,
+    GeneratorStateSource,
+    GetItemSource,
+    NNModuleSource,
+)
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -543,10 +548,70 @@ class TorchVariable(VariableTracker):
             assert len(args) == 1, "Expected one arg (pg)"
             assert isinstance(args[0], ProcessGroupVariable)
             return ConstantVariable(self.value(args[0].as_python_constant()))
+        elif (
+            inspect.isfunction(self.value)
+            and torch.distributed.is_available()
+            and self.value is torch.distributed._tensor.api.DTensor.from_local
+        ):
+
+            def as_value(v):
+                if isinstance(v, list):
+                    return [as_value(x) for x in v]
+                if isinstance(v, UserDefinedObjectVariable):
+                    from torch.distributed._tensor.placement_types import Shard
+
+                    placement_val = v.value
+                    # XXX: nasty hack in order to get the real object from UserDefinedObject with attributes
+                    if isinstance(
+                        placement_val, Shard
+                    ) and tx.output.side_effects.is_attribute_mutation(v):
+                        placement_val.dim = tx.output.side_effects.load_attr(
+                            v, "dim"
+                        ).value
+                    return placement_val
+                elif isinstance(v, variables.BaseListVariable):
+                    return v.python_type()([as_value(x) for x in v.items])
+                else:
+                    unimplemented("as_value only supports UDO and BaseListVariable")
+
+            # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
+            # and rewrite args to have only proxyable args, then insert call_function
+            args_as_value = as_value(args[1:])
+
+            def fn_with_prim_types(x, **kwargs):
+                return self.value(x, *args_as_value, **kwargs)
+
+            # attach the same function name for better debugging
+            fn_with_prim_types.__name__ = "prim " + self.value.__name__
+
+            tensor_variable = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    fn_with_prim_types,
+                    *proxy_args_kwargs([args[0]], kwargs),
+                ),
+                **options,
+            )
+            return tensor_variable
+
         elif self.value == torch.nn.init._calculate_correct_fan:
             return UserFunctionVariable(
                 torch.nn.init._calculate_correct_fan, **options
             ).call_function(tx, args, {})
+        elif self.value == torch.utils._pytree.tree_flatten:
+            if len(args) != 1:
+                unimplemented("Unsupported flatten with len(args) != 1")
+
+            flattened, spec = torch.utils._pytree.tree_flatten(args[0])
+            return TupleVariable(
+                [ListVariable(flattened), ConstantVariable(spec)], **options
+            )
+        elif self.value == torch.utils._pytree.tree_unflatten:
+            if len(args) != 2:
+                unimplemented("Unsupported unflatten with len(args) != 2")
+
+            return torch.utils._pytree.tree_unflatten(args[0], args[1].value)
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
@@ -776,6 +841,16 @@ def dynamo_enable_grad(tx):
         GradModeVariable.create(tx, org_value)
 
 
+def are_tensors(var):
+    from . import TensorVariable
+
+    if isinstance(var, TensorVariable):
+        return True
+    if isinstance(var, (TupleVariable, ListVariable)):
+        return all(are_tensors(item) for item in var.items)
+    return False
+
+
 # See NOTE [HigherOrderOperator tracing design] for details of the design
 def speculate_subgraph(
     tx,
@@ -840,21 +915,9 @@ def speculate_subgraph(
                 # Nothing left to do here
                 return output, tx.output.graph, tracer.lifted_freevars
             else:
-                if isinstance(output, (ListVariable, TupleVariable)):
-                    if any(
-                        not isinstance(var, TensorVariable)
-                        for var in output.unpack_var_sequence(tx)
-                    ):
-                        unimplemented(
-                            "HigherOrderOperator body's output must consist of tensors only"
-                        )
-
-                if not isinstance(
-                    output,
-                    (ListVariable, TupleVariable),
-                ) and not isinstance(output, TensorVariable):
+                if not are_tensors(output):
                     unimplemented(
-                        "HigherOrderOperator can't return non-tensor scalar output"
+                        "HigherOrderOperator body's output must consist of tensors only"
                     )
 
                 tx.output.guards.update(output.guards)
@@ -928,7 +991,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                     next_name = candidate
 
             gm.__name__ = next_name
-            src = NNModuleSource(GetItemSource(self.source, next_name))
+            if self.source.guard_source().is_fsdp_module():
+                src = FSDPNNModuleSource(GetItemSource(self.source, next_name))
+            else:
+                src = NNModuleSource(GetItemSource(self.source, next_name))
             gm.torchdynamo_force_dynamic = False
             tx.output.register_attr_or_module(gm, next_name, source=src)
             return next_name
@@ -964,6 +1030,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                     f"item but got {str(type(args[0]))} "
                     f"with original python type {str(args[0].python_type())}.",
                 )
+            tx.output.guards.update(args[0].guards)
 
             # operands
             if type(args[3]) is not ListVariable:
@@ -1162,7 +1229,11 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
 
             p_args = (lowered_node,) + p_args
-        elif self.value.__name__ in ("wrap", "wrap_activation_checkpoint"):
+        elif self.value.__name__ in (
+            "wrap",
+            "wrap_activation_checkpoint",
+            "tag_activation_checkpoint",
+        ):
             # See NOTE [HigherOrderOperator tracing design] for more details
             checkpoint = tx.copy_graphstate()
             graph_checkpoint = tx.output.graph

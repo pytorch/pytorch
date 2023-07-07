@@ -9,7 +9,7 @@ from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -76,6 +76,7 @@ class TestPaternMatcher(TestCase):
             (4, torch.randn(16, 16, device="cuda"), torch.randn(16, 16, device="cuda")),
         ]
         for args in args_list:
+            torch._dynamo.reset()
             counters.clear()
             e1, e2 = fn(*args)
             a1, a2 = torch.compile(fn)(*args)
@@ -367,5 +368,5 @@ class TestPaternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
+    if IS_LINUX and HAS_CUDA:
         run_tests()

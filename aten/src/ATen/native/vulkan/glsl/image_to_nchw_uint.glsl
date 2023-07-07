@@ -23,6 +23,9 @@ layout(set = 0, binding = 2) uniform PRECISION restrict Block {
   // xyz contain the extents of the input texture, w contains HxW to help
   // calculate buffer offsets
   ivec4 in_extents;
+  // x: number of texels spanned by one batch
+  // y: number of channels
+  ivec2 c_info;
 }
 uBlock;
 
@@ -43,24 +46,32 @@ void main() {
     // input in nchw format. input_pos contains the positions of these four
     // elements from the input in nchw format.
 
-  ivec4 nc_pos = input_pos / uBlock.in_extents.w;
-    // we divide by HxW (uBlock.in_extents.w), to find the position along the
-    // batch/channel axis of these four elements.
+  ivec4 n_index = input_pos / (uBlock.c_info.y * uBlock.in_extents.w);
+    // we divide by CxHxW (uBlock.c_info.y * uBlock.in_extents.w), to find the
+    // index along the batch axis
 
-  ivec4 w_pos = input_pos % uBlock.in_extents.w;
+  ivec4 pos_in_batch = input_pos % (uBlock.c_info.y * uBlock.in_extents.w);
+    // we compute the reminder mod CxHxW, to find the positions in the flatten
+    // out CxHxW plane.
+
+  ivec4 c_index = pos_in_batch / uBlock.in_extents.w;
+    // we devide pos_in_batch by HxW, to compute the channel index
+
+  ivec4 pos_in_hw = pos_in_batch % uBlock.in_extents.w;
     // we compute the reminder mod HxW, to find the positions in the flatten
     // out HxW plane.
 
-  ivec4 x_pos = w_pos % uBlock.in_extents.x;
-  ivec4 y_pos = w_pos / uBlock.in_extents.x;
-    // we divide this "flatten out position" by H, to find the positions along
-    // the y-axis (height) and we compute its reminder mod H, to find the
+  ivec4 y_pos = pos_in_hw / uBlock.in_extents.x;
+  ivec4 x_pos = pos_in_hw % uBlock.in_extents.x;
+    // we divide this "flatten out position" by W, to find the positions along
+    // the y-axis (height) and we compute its reminder mod W, to find the
     // position along the x-axis (width).
 
-  ivec4 z_pos = nc_pos / 4;
-  ivec4 ix = nc_pos % 4;
-    // z_pos contains the texel positions along the z-axis, and ix the
-    // indices inside each texel.
+  ivec4 z_pos = n_index * ((uBlock.c_info.y + 3) / 4) + c_index / 4;
+  ivec4 ix = c_index % 4;
+    // z_pos contains the texel positions along the z-axis under the consideration
+    // of channel padding where (uBlock.c_info.y + 3) / 4 is equivalent as
+    // div_up(uBlock.c_info.y, 4), and ix the indices inside each texel.
 
   // now we fetch each uint8 element from the input, and we write out a uint32
   // whose binary representation is equal to: tex3 tex2 tex1 tex0

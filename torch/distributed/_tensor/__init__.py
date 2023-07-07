@@ -246,3 +246,6 @@ def zeros(
         device_mesh=device_mesh,
         placements=placements,
     )
+
+
+import torch.distributed._tensor._dynamo_utils

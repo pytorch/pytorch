@@ -32,6 +32,7 @@ import weakref
 
 import torch
 import torch._inductor.test_operators
+import torch.distributed
 import torch.utils._content_store
 
 from . import comptime, config, external_utils
@@ -115,6 +116,14 @@ FILENAME_ALLOWLIST = {
     comptime.__file__,  # Want to inline these helpers
 }
 
+if torch.distributed.is_available():
+    # Inline the checkpoint code from distributed
+    import torch.distributed.algorithms._checkpoint.checkpoint_wrapper
+
+    FILENAME_ALLOWLIST |= {
+        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__,
+    }
+
 # Include optimizer code for tracing
 FILENAME_ALLOWLIST |= {
     inspect.getfile(obj)
@@ -132,6 +141,7 @@ FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "ao/quantization/_pt2e/qat_utils.py",
     _module_dir(torch) + "ao/quantization/_pt2e/quantizer/qnnpack_quantizer.py",
+    _module_dir(torch) + "ao/quantization/_pt2e/representation/rewrite.py",
 }
 
 # TODO (zhxchen17) Make exportdb importable here.
@@ -179,7 +189,6 @@ def add(import_name: str):
 
 def check(filename, allow_torch=False):
     """Should skip this file?"""
-    print(f">>>>>> should skip this file: {filename}, torch file: {torch.distributed._tensor.api.__file__}")
     if filename is None:
         return True
     if filename in FILENAME_ALLOWLIST:
@@ -220,6 +229,12 @@ _recompile_re()
 
 
 def is_torch_inline_allowed(filename):
+    # XXX: figure out a better way to allow inlining the placement types
+    if torch.distributed.is_available() and filename.startswith(
+        _module_dir(torch.distributed._tensor.placement_types)
+    ):
+        return True
+
     return any(
         filename.startswith(_module_dir(mod))
         for mod in config.skipfiles_inline_module_allowlist
