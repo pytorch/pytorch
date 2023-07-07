@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 import warnings
 from contextlib import closing, contextmanager
+from enum import Enum
 from ._utils import _import_dotted_name
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
@@ -48,6 +49,9 @@ __all__ = [
     'save',
     'load',
     'StorageType',
+    'LoadEndianness',
+    'get_default_load_endianness',
+    'set_default_load_endianness',
 ]
 
 
@@ -66,6 +70,41 @@ def mkdtemp():
 
 _package_registry = []
 
+class LoadEndianness(Enum):
+    NATIVE = 1
+    LITTLE = 2
+    BIG = 3
+
+_default_load_endian: Optional[LoadEndianness] = None
+
+def get_default_load_endianness() -> Optional[LoadEndianness]:
+    '''
+    Get fallback byte order for loading files
+
+    If byteorder mark is not present in saved checkpoint,
+    this byte order is used as fallback.
+    By default, it's "native" byte order.
+
+    Returns:
+        default_load_endian: Optional[LoadEndianness]
+    '''
+    return _default_load_endian
+
+def set_default_load_endianness(endianness):
+    '''
+    Set fallback byte order for loading files
+
+    If byteorder mark is not present in saved checkpoint,
+    this byte order is used as fallback.
+    By default, it's "native" byte order.
+
+    Args:
+        endianness: the new fallback byte order
+    '''
+    global _default_load_endian
+    if not isinstance(endianness, LoadEndianness) and endianness is not None:
+        raise TypeError("Invalid argument type in function set_default_load_endianness")
+    _default_load_endian = endianness
 
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().
@@ -1289,6 +1328,27 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
         byteorderdata = zip_file.get_record(byteordername)
         if byteorderdata not in [b'little', b'big']:
             raise ValueError('Unknown endianness type: ' + byteorderdata.decode())
+    elif get_default_load_endianness() == LoadEndianness.LITTLE:
+        byteorderdata = b'little'
+    elif get_default_load_endianness() == LoadEndianness.BIG:
+        byteorderdata = b'big'
+    elif get_default_load_endianness() == LoadEndianness.NATIVE or \
+            get_default_load_endianness() is None:
+        pass
+    else:
+        raise ValueError('Invalid load endianness type')
+
+    if not zip_file.has_record(byteordername) and \
+            get_default_load_endianness() is None and \
+            sys.byteorder == 'big':
+        # Default behaviour should be changed in future
+        # See https://github.com/pytorch/pytorch/issues/101688
+        warnings.warn("The default load endianness for checkpoints without a byteorder mark "
+                      "on big endian machines will be changed from 'native' to 'little' endian "
+                      "in a future release, to avoid this behavior please use "
+                      "torch.serialization.set_default_load_endianness to set "
+                      "the desired default load endianness",
+                      DeprecationWarning)
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'

@@ -10,6 +10,7 @@ from torch._decomp import (
     global_decomposition_table,
     meta_table,
 )
+from torch._decomp.decompositions import Reduction
 from torch._ops import OpOverload
 from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
@@ -19,6 +20,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
     make_contiguous_strides_for,
+    NumberType,
     TensorLike,
 )
 
@@ -314,6 +316,137 @@ def meta_index_select(self, dim, index):
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
+
+
+def _multi_margin_loss_shape_check(ndims, input, target):
+    valid_inputs = (
+        (ndims == 2 and input.size(1) != 0)
+        or (ndims == 1 and input.size(0) != 0)
+        or ndims == 0
+    )
+    if ndims <= 1:
+        nframe = 1
+        dim = 1 if ndims == 0 else input.size(0)
+    else:
+        nframe = input.size(0)
+        dim = input.size(1)
+    torch._check(
+        valid_inputs,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+    )
+    torch._check(
+        valid_inputs and target.ndim <= 1 and target.numel() == nframe,
+        lambda: f"inconsistent target size, got: {target.shape}",
+    )
+    return nframe, dim
+
+
+@register_meta(aten.multi_margin_loss)
+@out_wrapper()
+def meta_multi_margin_loss(
+    input: Tensor,
+    target: Tensor,
+    p: NumberType = 1,
+    margin: NumberType = 1,
+    weight: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    ndims = input.ndim
+    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
+    nframe, _ = _multi_margin_loss_shape_check(ndims, input, target)
+    if reduction == Reduction.NONE.value and target.ndim > 0:
+        return input.new_empty(nframe)
+    else:
+        return input.new_empty(())
+
+
+@register_meta(aten.multi_margin_loss_backward)
+@out_wrapper()
+def meta_multi_margin_loss_backward(
+    grad_output: Tensor,
+    input: Tensor,
+    target: Tensor,
+    p: NumberType,
+    margin: NumberType,
+    weight: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    ndims = input.ndim
+    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
+    _multi_margin_loss_shape_check(ndims, input, target)
+    return input.new_empty(input.shape)
+
+
+def _multilabel_margin_loss_shape_check(ndims, target_arg, input, target):
+    valid_inputs = (
+        (ndims == 2 and input.size(1) != 0)
+        or (ndims == 1 and input.size(0) != 0)
+        or ndims == 0
+    )
+    torch._check(
+        valid_inputs,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+    )
+    if ndims <= 1:
+        nframe = 1
+        dim = 1 if ndims == 0 else input.size(0)
+        torch._check(
+            valid_inputs and target.ndim <= 1 and target.numel() == dim,
+            lambda: f"inconsistent size {target.shape} for {target_arg}",
+        )
+    else:
+        nframe = input.size(0)
+        dim = input.size(1)
+        torch._check(
+            valid_inputs
+            and target.ndim == 2
+            and target.size(0) == nframe
+            and target.size(1) == dim,
+            lambda: f"inconsistent size {target.shape} for {target_arg}",
+        )
+    return nframe, dim
+
+
+@register_meta(aten.multilabel_margin_loss_forward)
+@out_wrapper("output", "is_target")
+def meta_multilabel_margin_loss_forward(
+    input: Tensor,
+    target: Tensor,
+    reduction: int,
+) -> Tuple[Tensor, Tensor]:
+    target_arg = "argument #2 'target'"
+    ndims = input.ndim
+    nframe, _ = _multilabel_margin_loss_shape_check(ndims, target_arg, input, target)
+    if reduction != Reduction.NONE.value or target.ndim <= 1:
+        output = input.new_empty(())
+    else:
+        output = input.new_empty(nframe)
+    is_target = input.new_empty(target.shape)
+    return output, is_target
+
+
+@register_meta(aten.multilabel_margin_loss_backward)
+@out_wrapper()
+def meta_multilabel_margin_loss_backward(
+    grad_output: Tensor,
+    input: Tensor,
+    target: Tensor,
+    reduction: int,
+    is_target: Tensor,
+) -> Tensor:
+    target_arg = "argument #3 'target'"
+    is_target_arg = "argument #5 'is_target'"
+    ndims = input.ndim
+    _multilabel_margin_loss_shape_check(ndims, target_arg, input, target)
+    torch._check(
+        target.shape == is_target.shape,
+        lambda: (
+            f"Expected tensor for {target_arg} to have same size as tensor for {is_target_arg}"
+            f"; but {target.shape} does not equal {is_target.shape}"
+            f" (while checking arguments for multilabel_margin_loss_backward)"
+        ),
+    )
+    return input.new_empty(input.shape)
 
 
 @register_meta([aten.max.default, aten.max.unary_out])

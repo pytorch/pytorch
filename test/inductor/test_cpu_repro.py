@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import itertools
+import math
 import sys
 import unittest
 from typing import Callable
@@ -424,6 +425,19 @@ class CPUReproTests(TestCase):
             fn,
             (torch.randn(2, 3, 4, 4),),
         )
+
+    def test_load_inf_bf16(self):
+        def fn1(x):
+            return torch.where(x > 0, x, math.inf)
+
+        def fn2(x):
+            return torch.where(x > 0, x, -math.inf)
+
+        for fn in [fn1, fn2]:
+            self.common(
+                fn,
+                (torch.randn(1, 3, 16, 16),),
+            )
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_fp32_load_with_to_bf16(self):

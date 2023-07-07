@@ -1,6 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
+from functools import wraps, partial
+
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
@@ -15,9 +18,13 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import (
+    MultiThreadedTestCase,
+    MultiProcessTestCase,
+    requires_nccl,
     skip_if_lt_x_gpu,
-    MultiThreadedTestCase
+    TEST_SKIPS
 )
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -253,15 +260,19 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(torch.ones([4 * dist.get_world_size()], device=device), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()], device=device) + 1, res[1])
 
-    @skip_if_lt_x_gpu(1)
-    def test_reduce_scatter_into_tensor_coalesced_cuda(self):
-        tensors = [torch.ones([4], dtype=torch.int64, device="cuda:0"), torch.ones([4], dtype=torch.int64, device="cuda:0") + 1]
-        mesh = dt.DeviceMesh("cuda", torch.arange(4))
+    @parametrize("device", ["cpu", "cuda"])
+    def test_reduce_scatter_into_tensor_coalesced(self, device):
+        if device == "cuda":
+            if torch.cuda.device_count() < self.world_size:
+                self.skipTest("Not enough CUDA devices")
+            torch.cuda.set_device(dist.get_rank())
+        tensors = [torch.ones([4], dtype=torch.int64, device=device), torch.ones([4], dtype=torch.int64, device=device) + 1]
+        mesh = dt.DeviceMesh(device, torch.arange(4))
 
         res = ft_c.reduce_scatter_tensor_coalesced(tensors, "sum", [0, 0], mesh)
         self.assertEqual(2, len(res))
-        self.assertEqual(torch.tensor([4], device="cuda:0"), res[0])
-        self.assertEqual(torch.tensor([8], device="cuda:0"), res[1])
+        self.assertEqual(torch.tensor([4], device=device), res[0])
+        self.assertEqual(torch.tensor([8], device=device), res[1])
 
 
 class TestMetaCollectives(TestCase):
@@ -323,6 +334,73 @@ class TestMakeFx(MultiThreadedTestCase):
             .check("wait_tensor").run(str(mesh_dim_graph.graph))
 
 instantiate_parametrized_tests(TestTraceableCollectives)
+
+BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
+WORLD_SIZE = 2
+
+def with_comms(func=None):
+    if func is None:
+        return partial(
+            with_comms,
+        )
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        self.dist_init()
+        func(self)
+        self.destroy_comms()
+    return wrapper
+
+
+class TestCollectivesWithNCCL(MultiProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        os.environ["WORLD_SIZE"] = str(self.world_size)
+        os.environ["BACKEND"] = dist.Backend.NCCL
+        self._spawn_processes()
+
+    @property
+    def device(self):
+        return torch.device(self.rank)
+
+    @property
+    def world_size(self):
+        return WORLD_SIZE
+
+    @property
+    def process_group(self):
+        return dist.group.WORLD
+
+    def dist_init(self):
+        dist.init_process_group(
+            backend=BACKEND,
+            world_size=self.world_size,
+            rank=self.rank,
+            init_method=f"file://{self.file_name}",
+        )
+
+        # set device for nccl pg for collectives
+        if BACKEND == "nccl":
+            torch.cuda.set_device(self.rank)
+
+    def destroy_comms(self):
+        # Wait for all ranks to reach here before starting shutdown.
+        dist.barrier()
+        dist.destroy_process_group()
+
+    @skip_if_lt_x_gpu(WORLD_SIZE)
+    @requires_nccl()
+    @with_comms()
+    def test_all_gather_into_tensor_coalesced(self):
+        tensors = [torch.ones([4], device=f"cuda:{self.rank}"), torch.ones([4], device=f"cuda:{self.rank}") + 1]
+        mesh = dt.DeviceMesh(f"cuda:{self.rank}", torch.arange(self.world_size))
+
+        res = ft_c.all_gather_into_tensor_coalesced(tensors, mesh)
+        self.assertEqual(2, len(res))
+        self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
+        self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
 
 if __name__ == "__main__":
     run_tests()
