@@ -79,7 +79,7 @@ class TestSaliencyPruner(TestCase):
         model = SimpleLinear()
         with torch.no_grad():
             model.linear1.weight = nn.Parameter(
-                torch.Tensor([[1, 1, 1, 1], [2, 2, 2, 2], [3, 3, 3, 3]])
+                torch.Tensor([[1, 1, 1, 1], [2, 2, 2, 2], [3, 3, 3, 3], [4, 4, 4, 4]])
             )
         pruning_config = [{"tensor_fqn": "linear1.weight", "sparsity_level": 0.5}]
         pruner = SaliencyPruner({})
@@ -89,7 +89,7 @@ class TestSaliencyPruner(TestCase):
         pruner.step()
         pruned_model = pruner.prune()
 
-        expected = torch.Tensor([[2, 2, 2, 2], [3, 3, 3, 3]])
+        expected = torch.Tensor([[3, 3, 3, 3], [4, 4, 4, 4]])
         pruned = pruned_model.linear1.weight
 
         assert expected.shape == pruned.shape

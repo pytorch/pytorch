@@ -4,7 +4,6 @@ from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
                         _default_to_fused_or_foreach, _differentiable_doc, _maximize_doc, _foreach_doc)
 from typing import List, Optional
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ["Adamax", "adamax"]
 
@@ -206,8 +205,7 @@ def adamax(
         )
 
     if foreach is None:
-        _, foreach = _default_to_fused_or_foreach([params, grads, exp_avgs, exp_infs, state_steps],
-                                                  differentiable, use_fused=False)
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -306,8 +304,8 @@ def _multi_tensor_adamax(
     if len(params) == 0:
         return
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_infs, state_steps])
-    for grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs, grouped_state_steps in grouped_tensors.values():
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_infs, state_steps])
+    for ((grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs, grouped_state_steps), _) in grouped_tensors.values():
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 

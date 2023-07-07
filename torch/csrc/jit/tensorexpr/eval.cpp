@@ -688,7 +688,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           throw malformed_input(
               "Number of dimensions did not match number of strides", buf);
         }
-        size_t buf_size = 1;
+        int64_t buf_size = 1;
         if (!dims.empty()) {
           ExprHandle buf_size_expr = ExprHandle(immLike(dims[0], 1));
           ExprHandle negative_one = ExprHandle(immLike(dims[0], -1));

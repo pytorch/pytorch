@@ -55,7 +55,7 @@ torch::jit::Function* ClassType::findForwardHook(const std::string& name) const 
   return nullptr;
 }
 
-std::string getSchemaInputTypesString(const FunctionSchema& schema) {
+static std::string getSchemaInputTypesString(const FunctionSchema& schema) {
   std::stringstream input_types;
   const std::vector<Argument>& forward_args = schema.arguments();
   for (const auto i : c10::irange(1, forward_args.size())) {
@@ -131,7 +131,7 @@ bool ClassType::isUnresolvedClassAttribute(const std::string& name) const {
       name) != unresolved_class_attributes_.end();
 }
 
-void checkForwardHookInputArguments(
+static void checkForwardHookInputArguments(
     const FunctionSchema& forward_schema,
     const FunctionSchema& hook_schema,
     const std::string& hook_id,

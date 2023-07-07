@@ -5,6 +5,7 @@
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
 #include <ATen/native/cuda/LaunchUtils.h>
@@ -48,12 +49,13 @@ namespace {
    *    this function adaptively average pools an input 4D tensor along dimensions 2 and 3
    *    4D input, 4D output
    */
-   template <typename T>
-  __global__ void adaptive_average_pool(T *input, T *output,
+   template <typename scalar_t>
+  __global__ void adaptive_average_pool(const scalar_t *input, scalar_t *output,
                           int isizeH, int isizeW,
                           int osizeH, int osizeW,
                           int64_t istrideD, int64_t istrideH, int64_t istrideW)
   {
+    using opmath_t = at::opmath_type<scalar_t>;
     // iterators on output pixels
     int oh, ow;
 
@@ -86,13 +88,13 @@ namespace {
         int kW = iendW - istartW;
 
         // Compute the average pooling over corresponding input pixels
-        T *ptr_input = input + istartH*istrideH + istartW*istrideW;
-        T *ptr_output = output + oh*osizeW + ow;
-        T sum = static_cast<T>(0);
+        const scalar_t *ptr_input = input + istartH*istrideH + istartW*istrideW;
+        scalar_t *ptr_output = output + oh*osizeW + ow;
+        opmath_t sum = static_cast<opmath_t>(0);
         int ih, iw;
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
-            T val = ptr_input[iw*istrideW];
+            scalar_t val = ptr_input[iw*istrideW];
             sum += val;
           }
           ptr_input += istrideH; // next input line
@@ -109,7 +111,7 @@ namespace {
    */
    template <typename T>
   __global__ void adaptive_average_gradinput(
-    T *gradInput, T *gradOutput,
+    T *gradInput, const T *gradOutput,
     int isizeH, int isizeW, int osizeH, int osizeW
   )
   {
@@ -165,7 +167,7 @@ namespace {
    */
    template <typename T>
   __global__ void atomic_adaptive_average_gradinput(
-    T *gradInput, T *gradOutput,
+    T *gradInput, const T *gradOutput,
     int isizeH, int isizeW, int osizeH, int osizeW
   )
   {
@@ -202,7 +204,7 @@ namespace {
 
         // Compute the gradients for over corresponding input pixels
         T *ptr_gradInput = gradInput + istartH*isizeW + istartW;
-        T *ptr_gradOutput = gradOutput + oh*osizeW + ow;
+        const T *ptr_gradOutput = gradOutput + oh*osizeW + ow;
         T grad_delta = *ptr_gradOutput / kW / kH;
 
         int ih, iw;
@@ -233,8 +235,9 @@ namespace {
                           index_t istrideB, index_t istrideC,
                           index_t istrideH, index_t istrideW)
   {
+    using opmath_t = at::opmath_type<scalar_t>;
     extern __shared__ int smem[];
-    scalar_t *out_cached = reinterpret_cast<scalar_t*>(smem);
+    opmath_t *out_cached = reinterpret_cast<opmath_t*>(smem);
 
     // flattening cta for pre-computation & smem initialization;
     int thread_id = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z);
@@ -243,7 +246,7 @@ namespace {
     // use shared memory to store temporary output value. This is simply to
     // reduce register usage.
     for (index_t i = thread_id; i < kernel_size_C*blockDim.x*blockDim.y*blockDim.z; i+= block_size) {
-      out_cached[i] = scalar_t(0.0);
+      out_cached[i] = opmath_t(0.0);
     }
 
     __syncthreads();
@@ -306,7 +309,7 @@ namespace {
           // switch to could verify the correctness;
           // output[c] = out_cached[c] / (iendH-istartH) / (iendW-istartW);
           ptr_output[c] = out_cached[cached_index] * factor;
-          out_cached[cached_index] = scalar_t(0.0);
+          out_cached[cached_index] = opmath_t(0.0);
           cached_index += blockDim.x;
         }
         // no need to __syncthreads() since out_cached is not shared.
@@ -529,11 +532,12 @@ namespace {
         AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
         AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input_.scalar_type(), "adaptive_avg_pool2d_nhwc_cuda", [&] {
-              size_t shmem_size = (kernel_size_C * block_x * block_y * block_z) * sizeof(scalar_t);
+              using opmath_t = at::opmath_type<scalar_t>;
+              size_t shmem_size = (kernel_size_C * block_x * block_y * block_z) * sizeof(opmath_t);
               AT_ASSERT(shmem_size <= sharedMemPerBlock);
               adaptive_average_pool_nhwc<int32_t><<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>> (
-                input_.data_ptr<scalar_t>(),
-                output.data_ptr<scalar_t>(),
+                input_.const_data_ptr<scalar_t>(),
+                output.mutable_data_ptr<scalar_t>(),
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
                 kernel_stride_C, kernel_size_C,
                 istrideB, istrideC, istrideH, istrideW);
@@ -569,8 +573,8 @@ namespace {
 
         AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input_.scalar_type(), "adaptive_avg_pool2d_cuda", [&] {
-              scalar_t *input_data = input_.data_ptr<scalar_t>();
-              scalar_t *output_data = output.data_ptr<scalar_t>();
+              const scalar_t *input_data = input_.const_data_ptr<scalar_t>();
+              scalar_t *output_data = output.mutable_data_ptr<scalar_t>();
 
               // cuda blocks & threads:
               int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
@@ -682,8 +686,8 @@ namespace {
               size_t shmem_size = (kernel_size_C * block_x * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t);
               AT_ASSERT(shmem_size <= sharedMemPerBlock);
               adaptive_average_gradinput_nhwc<int32_t><<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>> (
-                gradInput.data_ptr<scalar_t>(),
-                gradOutput.data_ptr<scalar_t>(),
+                gradInput.mutable_data_ptr<scalar_t>(),
+                gradOutput.const_data_ptr<scalar_t>(),
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
                 kernel_stride_C, kernel_size_C,
                 ostrideB, ostrideC, ostrideH, ostrideW);
@@ -710,8 +714,8 @@ namespace {
           //bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0);
         AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input.scalar_type(), "adaptive_avg_pool2d_backward_cuda", [&] {
-              scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-              scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+              const scalar_t *gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
+              scalar_t *gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
 
               // cuda blocks & threads:
               int blocksH = std::max((int)(16L / sizeD), 1);

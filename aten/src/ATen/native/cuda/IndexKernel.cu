@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/cuda/IndexKernel.h>
 #include <ATen/native/IndexKernel.h>
+#include <c10/cuda/CUDADeviceAssertion.h>
 
 #include <type_traits>
 #include <ATen/core/TensorBase.h>
@@ -53,7 +54,7 @@ static void launch_kernel(int64_t N, const func_t& f) {
 template <typename func_t>
 void gpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
   int num_indices = index_size.size();
-  AT_ASSERT(num_indices == index_stride.size());
+  AT_ASSERT(static_cast<size_t>(num_indices) == index_stride.size());
   AT_ASSERT(num_indices == iter.ntensors() - 2);
 
   if (iter.numel() == 0) {
@@ -344,15 +345,19 @@ void take_kernel(
 
 namespace {
 
-template <typename mask_t>
-__global__ void masked_scatter_size_check(int64_t *mask_exclusive_sum, mask_t *mask, int64_t srcSize) {
+__global__ void masked_scatter_size_check(
+  const int64_t *mask_exclusive_sum,
+  const bool *mask,
+  const int64_t srcSize,
+  TORCH_DSA_KERNEL_ARGS) {
   // Convert exclusive sum to inclusive sum
   auto totalElements = *mask_exclusive_sum + *mask;
-  CUDA_KERNEL_ASSERT(totalElements <= srcSize);
+  CUDA_KERNEL_ASSERT2(totalElements <= srcSize);
 }
 
-template <typename mask_t>
-void masked_scatter_cuda_impl(
+} // anonymous namespace
+
+void launch_masked_scatter_kernel(
     const TensorBase &self, const TensorBase &mask,
     const TensorBase &maskPrefixSum, const TensorBase &source) {
   auto srcSize = source.numel();
@@ -360,17 +365,23 @@ void masked_scatter_cuda_impl(
   auto mask_numel = mask.numel();
 
   // Use a prefix sum to determine the output locations of the masked elements
-  auto maskPrefixSum_data = maskPrefixSum.data_ptr<int64_t>();
-  auto mask_data = mask_cont.data_ptr<mask_t>();
+  auto maskPrefixSum_data = maskPrefixSum.mutable_data_ptr<int64_t>();
+  auto mask_data = mask_cont.const_data_ptr<bool>();
 
   at::cuda::cub::mask_exclusive_sum(
       mask_data, maskPrefixSum_data, mask_numel);
 
   // Asynchronously check that the number of `1` elements present in the mask
   // must be <= the number of elements available in `src`.
-  masked_scatter_size_check<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-      &maskPrefixSum_data[mask_numel - 1], &mask_data[mask_numel - 1], srcSize);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  TORCH_DSA_KERNEL_LAUNCH(
+      masked_scatter_size_check,
+      1,
+      1,
+      0,
+      at::cuda::getCurrentCUDAStream(),
+      &maskPrefixSum_data[mask_numel - 1],
+      &mask_data[mask_numel - 1],
+      srcSize);
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too
@@ -393,28 +404,16 @@ void masked_scatter_cuda_impl(
       self.scalar_type(),
       "masked_scatter_",
       [&]() {
-        auto source_ptr = source_contig.data_ptr<scalar_t>();
+        auto source_ptr = source_contig.const_data_ptr<scalar_t>();
         gpu_kernel(
-            iter, [=] GPU_LAMBDA(scalar_t a, mask_t mask, int64_t maskPrefixSum) -> scalar_t {
+            iter, [=] GPU_LAMBDA(scalar_t a, bool mask, int64_t maskPrefixSum) -> scalar_t {
               if (mask) {
                 return source_ptr[maskPrefixSum];
               }
               return a;
             });
-        cudaGetLastError();
+        AT_CUDA_CHECK(cudaGetLastError());
       });
-}
-
-} // anonymous namespace
-
-void launch_masked_scatter_kernel(
-    const TensorBase &self, const TensorBase &mask,
-    const TensorBase &maskPrefixSum, const TensorBase &source) {
-  if (mask.scalar_type() == kBool) {
-    masked_scatter_cuda_impl<bool>(self, mask, maskPrefixSum, source);
-  } else {
-    masked_scatter_cuda_impl<uint8_t>(self, mask, maskPrefixSum, source);
-  }
 }
 
 template <typename scalar_t>

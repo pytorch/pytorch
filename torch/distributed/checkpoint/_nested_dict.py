@@ -31,7 +31,7 @@ def flatten_state_dict(
     Flatten ``state_dict`` made of nested dicts and lists into a top level dictionary.
     Use ``unflatten_state_dict`` to revert this process.
     Returns:
-        A tuple with the flaten state_dict and a mapping from original to new state_dict.
+        A tuple with the flatten state_dict and a mapping from original to new state_dict.
     N.B. The new keys are derived from the object paths, joined by dot.
         For example: ``{ 'a': {'b':...}}`` results in the key `a.b`.
     """

@@ -1,5 +1,6 @@
 #pragma once
 #include <c10/macros/Macros.h>
+#include <type_traits>
 
 namespace at {
 

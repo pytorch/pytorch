@@ -917,7 +917,7 @@ def verify_aten_graph(
     graph_inputs = list(graph.inputs())
     jit_inputs = tuple([arg for arg in input_args if arg is not None])
     weights = [params_dict[v.debugName()] for v in graph_inputs[len(jit_inputs) :]]
-    assert all([w is not None for w in weights])
+    assert all(w is not None for w in weights)
     # TODO: Only copy the argument if mutation is detected in Graph.
     jit_inputs = copy.deepcopy(jit_inputs)
     jit_input_and_parameters = jit_inputs + tuple(weights)

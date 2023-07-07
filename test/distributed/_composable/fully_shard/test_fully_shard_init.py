@@ -120,7 +120,7 @@ class TestInitialization(FSDPTest):
         composable_handles = traversal_utils._get_fsdp_handles(composable_module)
         fsdp_wrapped_handles = traversal_utils._get_fsdp_handles(fsdp_wrapped_model)
         self.assertEqual(len(composable_handles), len(fsdp_wrapped_handles))
-        for (composable_handle, fsdp_wrapped_handle) in zip(
+        for composable_handle, fsdp_wrapped_handle in zip(
             composable_handles, fsdp_wrapped_handles
         ):
             self.assertEqual(
@@ -179,7 +179,7 @@ class TestInitialization(FSDPTest):
             policy=policy,
             sync_module_states=True,
         )
-        for (composable_param, fsdp_wrapped_param) in zip(
+        for composable_param, fsdp_wrapped_param in zip(
             composable_module.parameters(),
             fsdp_wrapped_model.parameters(),
         ):
@@ -267,7 +267,7 @@ class TestInitialization(FSDPTest):
         # NOTE: This check only requires that the data structure state is
         # shared. Namely, sharing the FSDP state object itself is sufficient
         # but not necessary.
-        data_structure_names = ["_streams", "_exec_order_data", "_free_event_queue"]
+        data_structure_names = ["_exec_order_data", "_free_event_queue"]
         for data_structure_name in data_structure_names:
             all_structures = set()
             for module in (

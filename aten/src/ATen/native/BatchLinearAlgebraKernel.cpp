@@ -170,7 +170,7 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
   if (input.is_complex()) {
     ScalarType real_dtype = toRealValueType(input.scalar_type());
     rwork = at::empty({lda * 2}, input.options().dtype(real_dtype));
-    rwork_data = rwork.data_ptr<value_t>();
+    rwork_data = rwork.mutable_data_ptr<value_t>();
   }
 
   // call lapackEig once to get the optimal size for work data
@@ -180,7 +180,7 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
 
   int lwork = std::max<int>(1, static_cast<int>(real_impl<scalar_t, value_t>(work_query)));
   Tensor work = at::empty({lwork}, input.dtype());
-  auto work_data = work.data_ptr<scalar_t>();
+  auto work_data = work.mutable_data_ptr<scalar_t>();
 
   for (const auto i : c10::irange(batch_size)) {
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
@@ -259,18 +259,18 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
 
   lwork = std::max<int>(1, real_impl<scalar_t, value_t>(lwork_query));
   Tensor work = at::empty({lwork}, vectors.options());
-  auto work_data = work.data_ptr<scalar_t>();
+  auto work_data = work.mutable_data_ptr<scalar_t>();
 
   liwork = std::max<int>(1, iwork_query);
   Tensor iwork = at::empty({liwork}, vectors.options().dtype(at::kInt));
-  auto iwork_data = iwork.data_ptr<int>();
+  auto iwork_data = iwork.mutable_data_ptr<int>();
 
   Tensor rwork;
   value_t* rwork_data = nullptr;
   if (vectors.is_complex()) {
     lrwork = std::max<int>(1, rwork_query);
     rwork = at::empty({lrwork}, values.options());
-    rwork_data = rwork.data_ptr<value_t>();
+    rwork_data = rwork.mutable_data_ptr<value_t>();
   }
 
   // Now call lapackSyevd for each matrix in the batched input
@@ -524,7 +524,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   int* jpvt_data = nullptr;
   if (driver_t::Gelsy == driver_type) {
     jpvt = at::empty({std::max<int64_t>(1, n)}, A.options().dtype(at::kInt));
-    jpvt_data = jpvt.data_ptr<int>();
+    jpvt_data = jpvt.mutable_data_ptr<int>();
   }
 
   // Run once the driver, first to get the optimal workspace size
@@ -546,7 +546,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
 
   lwork = std::max<int>(1, real_impl<scalar_t, value_t>(work_opt));
   Tensor work = at::empty({lwork}, A.options());
-  scalar_t* work_data = work.data_ptr<scalar_t>();
+  scalar_t* work_data = work.mutable_data_ptr<scalar_t>();
 
   // 'rwork' only used for complex inputs and 'gelsy', 'gelsd' and 'gelss' drivers
   Tensor rwork;
@@ -565,7 +565,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
         rwork_len = std::max<int64_t>(1, rwork_opt);
     }
     rwork = at::empty({rwork_len}, A.options().dtype(c10::toRealValueType(A.scalar_type())));
-    rwork_data = rwork.data_ptr<value_t>();
+    rwork_data = rwork.mutable_data_ptr<value_t>();
   }
 
   // 'iwork' workspace array is relevant only for 'gelsd'
@@ -573,7 +573,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   int* iwork_data;
   if (driver_t::Gelsd == driver_type) {
     iwork = at::empty({std::max<int>(1, iwork_opt)}, A.options().dtype(at::kInt));
-    iwork_data = iwork.data_ptr<int>();
+    iwork_data = iwork.mutable_data_ptr<int>();
   }
 
   at::native::batch_iterator_with_broadcasting<scalar_t>(A, B,
@@ -784,7 +784,7 @@ void apply_ldl_factor(
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   int lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, A.dtype());
-  auto work_data = work.data_ptr<scalar_t>();
+  auto work_data = work.mutable_data_ptr<scalar_t>();
 
   for (const auto i : c10::irange(batch_size)) {
     scalar_t* a_working_ptr = &a_data[i * a_stride];

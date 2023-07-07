@@ -102,8 +102,13 @@ __host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::comple
 }
 
 void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-      ScalarType::Half, ScalarType::BFloat16,
+// Compile time for CUDA-11.4 is 3x slower than with CUDA-11.6+, specifically for complex numbers
+#if defined(FBCODE_CAFFE2) || defined(OVRSOURCE)
+#define _LCME_DISPATCH AT_DISPATCH_FLOATING_TYPES_AND2
+#else
+#define _LCME_DISPATCH AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2
+#endif
+  _LCME_DISPATCH(ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "logcumsumexp_cuda",
       [&]() {
         using opmath_t = at::opmath_type<scalar_t>;

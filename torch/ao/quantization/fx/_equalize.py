@@ -11,8 +11,6 @@ from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.ao.quantization.fx.graph_module import _get_observed_graph_module_attr
 
-from torch.ao.quantization.backend_config import get_native_backend_config
-
 from ..observer import _with_args, ObserverBase, PerChannelMinMaxObserver
 from ..utils import _parent_name, check_min_max_valid
 
@@ -282,11 +280,11 @@ def get_op_node_and_weight_eq_obs(
     """ Gets the following weight equalization observer. There should always
     exist a weight equalization observer after an input equalization observer.
 
-    Returns the operation node that follows the input equalizatoin observer node
+    Returns the operation node that follows the input equalization observer node
     and the weight equalization observer
     """
 
-    # Find the op node that comes directly after the input equaliation observer
+    # Find the op node that comes directly after the input equalization observer
     op_node = None
     for user in input_eq_obs_node.users.keys():
         if node_supports_equalization(user, modules):
@@ -319,10 +317,8 @@ def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -
     """ Gets the weight equalization observer node if it exists.
     """
     assert(op_node.op == 'call_function')
-    # TODO: Pass in backend_config into this function and parent functions.
-    backend_config = get_native_backend_config()
     for node_arg in op_node.args:
-        if node_arg_is_weight(op_node, node_arg, backend_config):
+        if node_arg_is_weight(op_node, node_arg):
             assert(isinstance(node_arg, Node) and node_arg.op == 'call_module' and
                    isinstance(modules[str(node_arg.target)], _WeightEqualizationObserver))
             return node_arg

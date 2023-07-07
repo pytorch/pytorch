@@ -16,7 +16,7 @@ import torch.distributed.launch as launch
 from torch.distributed.elastic.utils import get_socket_with_port
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
 )
 
 
@@ -35,7 +35,7 @@ class LaunchTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.test_dir)
 
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
     def test_launch_without_env(self):
@@ -57,7 +57,7 @@ class LaunchTest(unittest.TestCase):
         ]
         launch.main(args)
 
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
     def test_launch_with_env(self):

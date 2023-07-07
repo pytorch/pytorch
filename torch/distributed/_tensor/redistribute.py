@@ -38,7 +38,7 @@ def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
           (Shard(0), Shard(0)) -> (Replicate(), Shard(0))
           Here the Shard(0) -> Shard(0) for mesh dimension 2 is actually
           a reshard, because in the first case it's a sub-sharding of an already tensor dimension 0,
-          and in the second case, it's the first sharding on tensor dimesnion 0.
+          and in the second case, it's the first sharding on tensor dimension 0.
     """
     # detect mis-aligned repeated shardings
     from collections import defaultdict
@@ -88,11 +88,11 @@ def _redistribute_with_local_tensor(
     for i, (current, target) in sorted_placements:
         my_coordinate = device_mesh.get_coordinate()
         num_chunks = device_mesh.size(dim=i)
-        # TODO: what should happen if rank is not in the mesh?
-        # see issue https://github.com/pytorch/tau/pull/492
-        assert (
-            my_coordinate is not None
-        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return local_tensor,
+            # which should be an empty tensor
+            return local_tensor
 
         if current == target:
             # short cut, just use the original local tensor
@@ -191,7 +191,7 @@ def redistribute_dtensor(
         shape=input.size(),
         dtype=input.dtype,
         requires_grad=local_tensor.requires_grad,
-        stride=input.stride()
+        stride=input.stride(),
     )
 
 
@@ -219,7 +219,7 @@ class Redistribute(torch.autograd.Function):
         # In this case we keep the grad as replicate, this is because we don't
         # want to convert the replicated gradients back to partial, although
         # that's logically conform with the same layout, converting the gradients
-        # back to partial is acutally useless as you would have to do reduce later
+        # back to partial is actually useless as you would have to do reduce later
         # which would be more expensive than keeping it replicate! For this reason,
         # we keep the replicate grad here.
         # TODO: see if this make sense for all cases.

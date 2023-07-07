@@ -1,3 +1,9 @@
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_adam in OptimizerTests)
+"""
+import functools
+
 # Owner(s): ["module: dynamo"]
 
 import inspect
@@ -7,29 +13,40 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
+from torch.nn import Parameter
 
 input = torch.ones([10, 10])
 model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
 model(input).sum().backward()
 
 
-def make_test(optim_cls, exp_graph_count=1, closure=None, **kwargs):
+def make_test(optim_cls, closure=None, **kwargs):
     opt = optim_cls(model.parameters(), **kwargs)
 
     def test_fn(self):
         nonlocal opt
+
+        # run the patcher so that step has the expected structure
+        torch._dynamo.eval_frame.TorchPatcher.patch()
+
+        # unwrap step to avoid a deliberate graph break due to
+        # a limitation of functionalization/no_grad detection
+        # see the [Note on graph break] in optimizer.py
+        # This ignores the outer _use_grad_if_differentiable wrapper, which is fine for now
+        # as dynamo does not support differentiable optimizers anyway
+        step_fn = opt.step.__wrapped__
         if closure is not None:
 
             def fn():
-                opt.step(closure)
+                step_fn(opt, closure)
 
         else:
-            fn = opt.step
 
-        _, _, graphs, _, _, _ = torch._dynamo.explain(fn)
+            def fn():
+                step_fn(opt)
 
-        self.assertEqual(exp_graph_count, len(graphs))
+        with torch.set_grad_enabled(False):
+            torch.compile(fn, backend="eager", fullgraph=True)()
 
     return test_fn
 
@@ -48,9 +65,9 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
     # furthermore, the break is inside a for loop, so we bail on the frame
     # entirely.  This is basically an xfail; if the frame count goes up
     # you done good
-    test_radam = torch._dynamo.testing.skip_if_pytest(
-        make_test(torch.optim.RAdam, exp_graph_count=0)
-    )
+    # test_radam = unittest.skipIf(IS_FBCODE, "TypeError: _use_grad() missing")(
+    #    make_test(torch.optim.RAdam, exp_graph_count=0)
+    # )
 
 
 # exclude SparseAdam because other areas of the stack don't support it yet
@@ -105,6 +122,27 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
         for _ in range(2):
             opt_training_iter_fn(batch, net, optimizer)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_state_dict(self):
+        @torch.compile(backend="eager")
+        def _test_state_dict(weight, bias, input):
+            def fn_base(optimizer, weight, bias):
+                optimizer.zero_grad()
+                i = input
+                loss = (weight.mv(i) + bias).pow(2).sum()
+                loss.backward()
+                return loss
+
+            optimizer = torch.optim.Adagrad([weight, bias])
+            fn = functools.partial(fn_base, optimizer, weight, bias)
+            return optimizer, fn
+
+        optimizer, fn = _test_state_dict(
+            Parameter(torch.randn(10, 5)),
+            Parameter(torch.randn(10)),
+            torch.randn(5, requires_grad=True),
+        )
+        optimizer.step(fn)
 
 
 if __name__ == "__main__":

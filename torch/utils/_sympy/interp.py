@@ -14,6 +14,7 @@ import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
+from torch.utils._sympy.functions import CleanDiv, FloorDiv
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -21,7 +22,9 @@ import torch
 
 @functools.lru_cache(None)
 def handlers():
-    from torch.fx.experimental.symbolic_shapes import FloorDiv, Pow, TrueDiv
+    from torch.fx.experimental.symbolic_shapes import Pow, TrueDiv
+
+    # TODO: CeilDiv, ModularIndexing
 
     HANDLERS = {
         sympy.Or: "or_",
@@ -35,6 +38,7 @@ def handlers():
         sympy.Not: "not_",
         TrueDiv: "truediv",
         FloorDiv: "div",
+        CleanDiv: "div",
         sympy.Add: "add",
         sympy.Mul: "mul",
         Pow: "pow",

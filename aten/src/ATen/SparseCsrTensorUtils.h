@@ -2,7 +2,6 @@
 
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/core/Tensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

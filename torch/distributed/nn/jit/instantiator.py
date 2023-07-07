@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 _FILE_PREFIX = "_remote_module_"
 _TEMP_DIR = tempfile.TemporaryDirectory()
 INSTANTIATED_TEMPLATE_DIR_PATH = _TEMP_DIR.name
-logger.info(f"Created a temporary directory at {INSTANTIATED_TEMPLATE_DIR_PATH}")
+logger.info("Created a temporary directory at %s", INSTANTIATED_TEMPLATE_DIR_PATH)
 sys.path.append(INSTANTIATED_TEMPLATE_DIR_PATH)
 
 
@@ -73,10 +73,10 @@ def _write(out_path, text):
         old_text = None
     if old_text != text:
         with open(out_path, "w") as f:
-            logger.info("Writing {}".format(out_path))
+            logger.info("Writing %s", out_path)
             f.write(text)
     else:
-        logger.info("Skipped writing {}".format(out_path))
+        logger.info("Skipped writing %s", out_path)
 
 
 def _do_instantiate_remote_module_template(

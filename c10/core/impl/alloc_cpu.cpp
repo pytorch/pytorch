@@ -6,6 +6,10 @@
 #include <c10/util/irange.h>
 #include <c10/util/numa.h>
 
+#ifdef USE_MIMALLOC
+#include <mimalloc.h>
+#endif
+
 // TODO: rename flags to C10
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,
@@ -41,38 +45,6 @@ void memset_junk(void* data, size_t num) {
   }
 }
 
-static inline bool is_thp_alloc_enabled() {
-  static bool value = [&](const char* pt) {
-    if (pt != nullptr) {
-      return std::atoi(pt);
-    } else {
-      return 0;
-    }
-  }(std::getenv("THP_MEM_ALLOC_ENABLE"));
-  return value;
-}
-
-#ifdef __linux__
-inline size_t c10_compute_alignment(size_t nbytes) {
-  static const auto pagesize = sysconf(_SC_PAGESIZE);
-  // for kernels that don't provide page size, default it to 4K
-  const size_t thp_alignment = (gPagesize < 0 ? gPagesize : pagesize);
-  return (is_thp_alloc_enabled() ? thp_alignment : gAlignment);
-}
-
-inline bool is_thp_alloc(size_t nbytes) {
-  // enable thp (transparent huge pages) for larger buffers
-  return (is_thp_alloc_enabled() && (nbytes >= gAlloc_threshold_thp));
-}
-#else
-constexpr size_t c10_compute_alignment(C10_UNUSED size_t nbytes) {
-  return gAlignment;
-}
-
-constexpr bool is_thp_alloc(C10_UNUSED size_t nbytes) {
-  return false;
-}
-#endif
 } // namespace
 
 void* alloc_cpu(size_t nbytes) {
@@ -96,14 +68,18 @@ void* alloc_cpu(size_t nbytes) {
       nbytes,
       " bytes.");
 #elif defined(_MSC_VER)
+#ifdef USE_MIMALLOC
+  data = mi_malloc_aligned(nbytes, gAlignment);
+#else
   data = _aligned_malloc(nbytes, gAlignment);
+#endif
   CAFFE_ENFORCE(
       data,
       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
       nbytes,
       " bytes.");
 #else
-  int err = posix_memalign(&data, c10_compute_alignment(nbytes), nbytes);
+  int err = posix_memalign(&data, gAlignment, nbytes);
   CAFFE_ENFORCE(
       err == 0,
       "DefaultCPUAllocator: can't allocate memory: you tried to allocate ",
@@ -113,16 +89,6 @@ void* alloc_cpu(size_t nbytes) {
       " (",
       strerror(err),
       ")");
-#ifdef __linux__
-  // MADV_HUGEPAGE advise is available only for linux.
-  // general posix compliant systems can check POSIX_MADV_SEQUENTIAL advise.
-  if (is_thp_alloc(nbytes)) {
-    int ret = madvise(data, nbytes, MADV_HUGEPAGE);
-    if (ret != 0) {
-      TORCH_WARN_ONCE("thp madvise for HUGEPAGE failed with ", strerror(errno));
-    }
-  }
-#endif
 #endif
 
   // move data to a thread's NUMA node
@@ -142,7 +108,11 @@ void* alloc_cpu(size_t nbytes) {
 
 void free_cpu(void* data) {
 #ifdef _MSC_VER
+#ifdef USE_MIMALLOC
+  mi_free(data);
+#else
   _aligned_free(data);
+#endif
 #else
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(data);

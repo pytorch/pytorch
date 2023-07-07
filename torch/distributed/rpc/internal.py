@@ -103,8 +103,8 @@ class _InternalRPCPickler:
         # user picklers could have different initialization function from _InternalRPCPickler,
         # but all the user picklers should call serialize() and use _rref_reducer to pickle rref
         # in python. also, when _internal_rpc_pickler is imported to rpc/api.py, rpc.RRef is not
-        # compiled yet, it is not good place to acces rpc.RRef inside _InternalRPCPickler constructor,
-        # so puting rref's dispatch table here
+        # compiled yet, it is not good place to access rpc.RRef inside _InternalRPCPickler constructor,
+        # so putting rref's dispatch table here
         #
         # The return value of a `rpc.remote(..)` call is type of `rpc.PyRRef`.
         # The deserialized RRef object on an RPC receiver side is type of `rpc.PyRRef`.

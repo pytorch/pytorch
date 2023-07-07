@@ -1,24 +1,32 @@
 # Owner(s): ["module: onnx"]
+from __future__ import annotations
 
 import contextlib
 import dataclasses
 import io
+import logging
 import typing
 import unittest
-from typing import AbstractSet, Tuple
+from typing import AbstractSet, Protocol, Tuple
 
 import torch
 from torch.onnx import errors
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
+from torch.onnx._internal.diagnostics.infra import sarif
 from torch.testing._internal import common_utils
 
 
+class _SarifLogBuilder(Protocol):
+    def sarif_log(self) -> sarif.SarifLog:
+        ...
+
+
 def _assert_has_diagnostics(
-    engine: infra.DiagnosticEngine,
+    sarif_log_builder: _SarifLogBuilder,
     rule_level_pairs: AbstractSet[Tuple[infra.Rule, infra.Level]],
 ):
-    sarif_log = engine.sarif_log()
+    sarif_log = sarif_log_builder.sarif_log()
     unseen_pairs = {(rule.id, level.name.lower()) for rule, level in rule_level_pairs}
     actual_results = []
     for run in sarif_log.runs:
@@ -39,7 +47,7 @@ def _assert_has_diagnostics(
 @contextlib.contextmanager
 def assert_all_diagnostics(
     test_suite: unittest.TestCase,
-    engine: infra.DiagnosticEngine,
+    sarif_log_builder: _SarifLogBuilder,
     rule_level_pairs: AbstractSet[Tuple[infra.Rule, infra.Level]],
 ):
     """Context manager to assert that all diagnostics are emitted.
@@ -54,7 +62,7 @@ def assert_all_diagnostics(
 
     Args:
         test_suite: The test suite instance.
-        engine: The diagnostic engine.
+        sarif_log_builder: The SARIF log builder.
         rule_level_pairs: A set of rule and level pairs to assert.
 
     Returns:
@@ -69,12 +77,12 @@ def assert_all_diagnostics(
     except errors.OnnxExporterError:
         test_suite.assertIn(infra.Level.ERROR, {level for _, level in rule_level_pairs})
     finally:
-        _assert_has_diagnostics(engine, rule_level_pairs)
+        _assert_has_diagnostics(sarif_log_builder, rule_level_pairs)
 
 
 def assert_diagnostic(
     test_suite: unittest.TestCase,
-    engine: infra.DiagnosticEngine,
+    sarif_log_builder: _SarifLogBuilder,
     rule: infra.Rule,
     level: infra.Level,
 ):
@@ -91,7 +99,7 @@ def assert_diagnostic(
 
     Args:
         test_suite: The test suite instance.
-        engine: The diagnostic engine.
+        sarif_log_builder: The SARIF log builder.
         rule: The rule to assert.
         level: The level to assert.
 
@@ -102,7 +110,7 @@ def assert_diagnostic(
         AssertionError: If the diagnostic is not emitted.
     """
 
-    return assert_all_diagnostics(test_suite, engine, {(rule, level)})
+    return assert_all_diagnostics(test_suite, sarif_log_builder, {(rule, level)})
 
 
 class TestOnnxDiagnostics(common_utils.TestCase):
@@ -192,7 +200,8 @@ class TestOnnxDiagnostics(common_utils.TestCase):
             self._sample_rule,
             sample_level,
         ):
-            diagnostics.export_context().diagnose(self._sample_rule, sample_level)
+            diagnostic = infra.Diagnostic(self._sample_rule, sample_level)
+            diagnostics.export_context().log(diagnostic)
 
     def test_diagnostics_records_python_call_stack(self):
         diagnostic = diagnostics.ExportDiagnostic(self._sample_rule, diagnostics.levels.NOTE)  # fmt: skip
@@ -239,29 +248,11 @@ class TestDiagnosticsInfra(common_utils.TestCase):
     """Test cases for diagnostics infra."""
 
     def setUp(self):
-        self.engine = infra.DiagnosticEngine()
         self.rules = _RuleCollectionForTest()
         with contextlib.ExitStack() as stack:
-            self.context = stack.enter_context(
-                self.engine.create_diagnostic_context("test", "1.0.0")
-            )
+            self.context = stack.enter_context(infra.DiagnosticContext("test", "1.0.0"))
             self.addCleanup(stack.pop_all().close)
         return super().setUp()
-
-    def test_diagnostics_engine_records_diagnosis_reported_in_nested_contexts(
-        self,
-    ):
-        with self.engine.create_diagnostic_context("inner_test", "1.0.1") as context:
-            context.diagnose(self.rules.rule_without_message_args, infra.Level.WARNING)
-            sarif_log = self.engine.sarif_log()
-            self.assertEqual(len(sarif_log.runs), 2)
-            self.assertEqual(len(sarif_log.runs[0].results), 0)
-            self.assertEqual(len(sarif_log.runs[1].results), 1)
-        self.context.diagnose(self.rules.rule_without_message_args, infra.Level.ERROR)
-        sarif_log = self.engine.sarif_log()
-        self.assertEqual(len(sarif_log.runs), 2)
-        self.assertEqual(len(sarif_log.runs[0].results), 1)
-        self.assertEqual(len(sarif_log.runs[1].results), 1)
 
     def test_diagnostics_engine_records_diagnosis_with_custom_rules(self):
         custom_rules = infra.RuleCollection.custom_collection_from_list(
@@ -280,23 +271,53 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             ],
         )
 
-        with self.engine.create_diagnostic_context(
-            "custom_rules", "1.0"
-        ) as diagnostic_context:
-            with assert_all_diagnostics(
-                self,
-                self.engine,
-                {
-                    (custom_rules.custom_rule, infra.Level.WARNING),  # type: ignore[attr-defined]
-                    (custom_rules.custom_rule_2, infra.Level.ERROR),  # type: ignore[attr-defined]
-                },
-            ):
-                diagnostic_context.diagnose(
-                    custom_rules.custom_rule, infra.Level.WARNING  # type: ignore[attr-defined]
+        with assert_all_diagnostics(
+            self,
+            self.context,
+            {
+                (custom_rules.custom_rule, infra.Level.WARNING),  # type: ignore[attr-defined]
+                (custom_rules.custom_rule_2, infra.Level.ERROR),  # type: ignore[attr-defined]
+            },
+        ):
+            diagnostic1 = infra.Diagnostic(
+                custom_rules.custom_rule, infra.Level.WARNING  # type: ignore[attr-defined]
+            )
+            self.context.log(diagnostic1)
+
+            diagnostic2 = infra.Diagnostic(
+                custom_rules.custom_rule_2, infra.Level.ERROR  # type: ignore[attr-defined]
+            )
+            self.context.log(diagnostic2)
+
+    def test_diagnostic_context_logs_with_correct_logger_level_based_on_diagnostic_level(
+        self,
+    ):
+        diagnostic_logging_level_pairs = [
+            (infra.Level.NONE, logging.DEBUG),
+            (infra.Level.NOTE, logging.INFO),
+            (infra.Level.WARNING, logging.WARNING),
+            (infra.Level.ERROR, logging.ERROR),
+        ]
+
+        for diagnostic_level, expected_logger_level in diagnostic_logging_level_pairs:
+            with self.assertLogs(
+                self.context.logger, level=expected_logger_level
+            ) as assert_log_context:
+                self.context.log(
+                    infra.Diagnostic(
+                        self.rules.rule_without_message_args, diagnostic_level
+                    )
                 )
-                diagnostic_context.diagnose(
-                    custom_rules.custom_rule_2, infra.Level.ERROR  # type: ignore[attr-defined]
+                for record in assert_log_context.records:
+                    self.assertEqual(record.levelno, expected_logger_level)
+
+    def test_diagnostic_context_raises_if_diagnostic_is_error(self):
+        with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
+            self.context.log_and_raise_if_error(
+                infra.Diagnostic(
+                    self.rules.rule_without_message_args, infra.Level.ERROR
                 )
+            )
 
 
 if __name__ == "__main__":

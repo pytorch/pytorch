@@ -187,7 +187,7 @@ def get_attr_inference_rule(n: Node, traced):
 @register_inference_rule(torch.transpose)
 def transpose_inference_rule(n: Node):
     """
-    We check that dimentions for the transpose operations
+    We check that dimensions for the transpose operations
     are within range of the tensor type of the node
     """
     if n.target == torch.transpose:
@@ -502,7 +502,7 @@ def flatten_check(tensor_type, start_dim, end_dim):
         new_type_list = lhs + mid + rhs
         return TensorType(tuple(new_type_list))
     else:
-        raise TypeError(f'Incompatable dimensions {start_dim}, {end_dim - 1} in type {tensor_type}')
+        raise TypeError(f'Incompatible dimensions {start_dim}, {end_dim - 1} in type {tensor_type}')
 
 @register_inference_rule(torch.flatten)
 def flatten_inference_rule(n: Node):

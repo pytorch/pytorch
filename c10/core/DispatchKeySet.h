@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/llvmMathExtras.h>
+#include <array>
 #include <ostream>
 
 namespace c10 {
@@ -642,7 +643,10 @@ constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
     DispatchKey::AutocastXPU,
+    DispatchKey::AutocastIPU,
     DispatchKey::AutocastHPU,
+    DispatchKey::AutocastXLA,
+    DispatchKey::AutocastPrivateUse1,
 });
 
 // See Note [TLS Initialization]
@@ -655,7 +659,10 @@ constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
     DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
     DispatchKey::AutocastXPU,
+    DispatchKey::AutocastIPU,
     DispatchKey::AutocastHPU,
+    DispatchKey::AutocastXLA,
+    DispatchKey::AutocastPrivateUse1,
 });
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
@@ -748,7 +755,7 @@ constexpr auto autograd_privateuse3_ks =
 constexpr auto autograd_other_ks = DispatchKeySet(DispatchKey::AutogradOther);
 constexpr auto autograd_nested =
     DispatchKeySet(DispatchKey::AutogradNestedTensor);
-// keyset correpsonding to functorch keys that have their own dedicated
+// keyset corresponding to functorch keys that have their own dedicated
 // TensorImpl subclass.
 constexpr auto functorch_transforms_ks = DispatchKeySet(
     {DispatchKey::FuncTorchBatched,
@@ -837,18 +844,27 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
 inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_cpu_ks = DispatchKeySet(DispatchKey::AutocastCPU);
   constexpr auto autocast_xpu_ks = DispatchKeySet(DispatchKey::AutocastXPU);
+  constexpr auto autocast_ipu_ks = DispatchKeySet(DispatchKey::AutocastIPU);
   constexpr auto autocast_hpu_ks = DispatchKeySet(DispatchKey::AutocastHPU);
   constexpr auto autocast_cuda_ks = DispatchKeySet(DispatchKey::AutocastCUDA);
+  constexpr auto autocast_xla_ks = DispatchKeySet(DispatchKey::AutocastXLA);
+  constexpr auto autocast_privateuse1_ks =
+      DispatchKeySet(DispatchKey::AutocastPrivateUse1);
   switch (t) {
     case BackendComponent::CPUBit:
       return autocast_cpu_ks;
     case BackendComponent::XPUBit:
       return autocast_xpu_ks;
+    case BackendComponent::IPUBit:
+      return autocast_ipu_ks;
     case BackendComponent::HPUBit:
       return autocast_hpu_ks;
     case BackendComponent::CUDABit:
-    case BackendComponent::XLABit:
       return autocast_cuda_ks;
+    case BackendComponent::XLABit:
+      return autocast_xla_ks;
+    case BackendComponent::PrivateUse1Bit:
+      return autocast_privateuse1_ks;
     default:
       return DispatchKeySet();
   }

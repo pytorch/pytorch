@@ -16,7 +16,7 @@ namespace at { namespace functorch {
 // PyTorch's convolution is different from JAX's conv_general_dilated:
 // we do not support batch_group_count (which is needed for convolution backwards).
 // Instead, there's a convolution_backward op that needs a batching rule.
-std::tuple<Tensor,optional<int64_t>>
+static std::tuple<Tensor,optional<int64_t>>
 convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor& rhs, optional<int64_t> rhs_bdim, const optional<Tensor>& bias, optional<int64_t> bias_bdim, IntArrayRef stride, c10::SymIntArrayRef padding, IntArrayRef dilation, bool transposed, c10::SymIntArrayRef output_padding, int64_t groups) {
   DimVector lhs_spec(stride.size() + 2);
   std::iota(lhs_spec.begin(), lhs_spec.end(), 0);
@@ -123,7 +123,7 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
   }
 }
 
-Tensor _convolution_decomp(
+static Tensor _convolution_decomp(
     const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_r_opt,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
@@ -226,7 +226,7 @@ static Tensor compute_grad_bias(
 }
 
 // reshapes the batch_size into dim
-Tensor make_dummy(
+static Tensor make_dummy(
     const Tensor& tensor, optional<int64_t> tensor_bdim,
     int64_t dim, int64_t batch_size) {
   auto tensor_ = tensor_bdim ? tensor.select(*tensor_bdim, 0) : tensor;
@@ -239,7 +239,7 @@ Tensor make_dummy(
   return tensor_.new_empty({}).expand(expand_shape);
 }
 
-std::tuple<Tensor,optional<int64_t>>
+static std::tuple<Tensor,optional<int64_t>>
 convolution_backward_input_batch_rule(
     const Tensor& grad_output, optional<int64_t> grad_output_bdim,
     const Tensor& input, optional<int64_t> input_bdim,
@@ -320,7 +320,7 @@ convolution_backward_input_batch_rule(
     return std::make_tuple(std::get<0>(result), nullopt);
   }
 }
-std::tuple<Tensor,optional<int64_t>>
+static std::tuple<Tensor,optional<int64_t>>
 convolution_backward_weight_batch_rule(
     const Tensor& grad_output, optional<int64_t> grad_output_bdim,
     const Tensor& input, optional<int64_t> input_bdim,
@@ -433,7 +433,7 @@ convolution_backward_weight_batch_rule(
   }
 }
 
-std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
+static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
     const Tensor& grad_output_, const Tensor& input_, const Tensor& weight_,
     const c10::OptionalArrayRef<SymInt> bias_sizes_opt,
     IntArrayRef stride, c10::SymIntArrayRef padding, IntArrayRef dilation, bool transposed,

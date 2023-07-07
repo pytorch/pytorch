@@ -1217,3 +1217,44 @@ TEST(TensorTest, ReshapeAlias) {
   torch::_reshape_alias((z * z), {9}, {1}).mean().backward();
   ASSERT_TRUE(torch::equal(y.grad(), z.grad()));
 }
+
+TEST(TensorTest, BackendMetadata) {
+  // Tests ability to assign custom backend metadata to tensor.
+
+  struct CustomBackendMetadata : public c10::BackendMeta {
+    mutable bool cloned_{false}; // for testing this field will mutate when
+                                 // clone() is called by shallow_copy_from.
+    c10::intrusive_ptr<c10::BackendMeta> clone(
+        const c10::intrusive_ptr<c10::BackendMeta>& ptr) const override {
+      cloned_ = true;
+      return c10::BackendMeta::clone(ptr);
+    }
+  };
+
+  at::Tensor y;
+  c10::intrusive_ptr<c10::BackendMeta> tmeta{};
+  CustomBackendMetadata* custom_tmeta{nullptr};
+
+  {
+    auto x = torch::ones({3, 3});
+    auto impl{x.unsafeGetTensorImpl()};
+    ASSERT_TRUE(impl != nullptr);
+
+    tmeta = impl->get_backend_meta_intrusive_ptr();
+    ASSERT_TRUE(tmeta == nullptr);
+    c10::intrusive_ptr<c10::BackendMeta> new_tmeta{
+        std::unique_ptr<c10::BackendMeta>(new CustomBackendMetadata())};
+    impl->set_backend_meta(new_tmeta);
+    tmeta = impl->get_backend_meta_intrusive_ptr();
+    ASSERT_TRUE(tmeta == new_tmeta);
+    custom_tmeta = dynamic_cast<CustomBackendMetadata*>(tmeta.get());
+    ASSERT_TRUE(custom_tmeta != nullptr);
+    ASSERT_TRUE(custom_tmeta->cloned_ == false);
+    y.unsafeGetTensorImpl()->shallow_copy_from(x.getIntrusivePtr());
+  }
+
+  ASSERT_TRUE(
+      tmeta == y.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr());
+  ASSERT_TRUE(tmeta.get() == y.unsafeGetTensorImpl()->get_backend_meta());
+  ASSERT_TRUE(custom_tmeta->cloned_ == true);
+}

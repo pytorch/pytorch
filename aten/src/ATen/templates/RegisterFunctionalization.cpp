@@ -5,6 +5,7 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/FunctionalInverses.h>
+#include <ATen/MemoryOverlap.h>
 #include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -36,6 +37,18 @@ constexpr auto exclude_keys_for_meta_dispatch =
         c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
         c10::DispatchKey::Python
     });
+
+// Helper around at::has_internal_overlap.
+// The ATen util is used in hot-path eager mode: it's always fast,
+// but might return TOO_HARD sometimes.
+// During functionalization, we're ok taking a bit longer
+// to detect memory overlap.
+inline bool has_internal_overlap_helper(const at::Tensor t) {
+  auto has_overlap = at::has_internal_overlap(t);
+  if (has_overlap == at::MemOverlap::Yes) return true;
+  if (has_overlap == at::MemOverlap::No) return false;
+  return false;
+}
 
 
 inline Tensor to_meta(const Tensor& t) {

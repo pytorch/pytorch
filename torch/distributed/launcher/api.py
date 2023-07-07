@@ -22,7 +22,7 @@ from torch.distributed.elastic.utils.logging import get_logger
 
 __all__ = ['LaunchConfig', 'elastic_launch', 'launch_agent']
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -137,8 +137,8 @@ class elastic_launch:
 def _get_entrypoint_name(
     entrypoint: Union[Callable, str, None], args: List[Any]
 ) -> str:
-    """Retrive entrypoint name with the rule:
-    1. If entrypoint is a function, use ``entrypont.__qualname__``.
+    """Retrieve entrypoint name with the rule:
+    1. If entrypoint is a function, use ``entrypoint.__qualname__``.
     2. If entrypoint is a string, check its value:
         2.1 if entrypoint equals to ``sys.executable`` (like "python"), use the first element from ``args``
             which does not start with hifen letter (for example, "-u" will be skipped).
@@ -182,25 +182,39 @@ def launch_agent(
 ) -> Dict[int, Any]:
     if not config.run_id:
         run_id = str(uuid.uuid4().int)
-        logger.warning(f"config has no run_id, generated a random run_id: {run_id}")
+        logger.warning("config has no run_id, generated a random run_id: %s", run_id)
         config.run_id = run_id
 
     entrypoint_name = _get_entrypoint_name(entrypoint, args)
 
     logger.info(
-        f"Starting elastic_operator with launch configs:\n"
-        f"  entrypoint       : {entrypoint_name}\n"
-        f"  min_nodes        : {config.min_nodes}\n"
-        f"  max_nodes        : {config.max_nodes}\n"
-        f"  nproc_per_node   : {config.nproc_per_node}\n"
-        f"  run_id           : {config.run_id}\n"
-        f"  rdzv_backend     : {config.rdzv_backend}\n"
-        f"  rdzv_endpoint    : {config.rdzv_endpoint}\n"
-        f"  rdzv_configs     : {config.rdzv_configs}\n"
-        f"  max_restarts     : {config.max_restarts}\n"
-        f"  monitor_interval : {config.monitor_interval}\n"
-        f"  log_dir          : {config.log_dir}\n"
-        f"  metrics_cfg      : {config.metrics_cfg}\n"
+        "Starting elastic_operator with launch configs:\n"
+        "  entrypoint       : %(entrypoint)s\n"
+        "  min_nodes        : %(min_nodes)s\n"
+        "  max_nodes        : %(max_nodes)s\n"
+        "  nproc_per_node   : %(nproc_per_node)s\n"
+        "  run_id           : %(run_id)s\n"
+        "  rdzv_backend     : %(rdzv_backend)s\n"
+        "  rdzv_endpoint    : %(rdzv_endpoint)s\n"
+        "  rdzv_configs     : %(rdzv_configs)s\n"
+        "  max_restarts     : %(max_restarts)s\n"
+        "  monitor_interval : %(monitor_interval)s\n"
+        "  log_dir          : %(log_dir)s\n"
+        "  metrics_cfg      : %(metrics_cfg)s\n",
+        {
+            "entrypoint": entrypoint_name,
+            "min_nodes": config.min_nodes,
+            "max_nodes": config.max_nodes,
+            "nproc_per_node": config.nproc_per_node,
+            "run_id": config.run_id,
+            "rdzv_backend": config.rdzv_backend,
+            "rdzv_endpoint": config.rdzv_endpoint,
+            "rdzv_configs": config.rdzv_configs,
+            "max_restarts": config.max_restarts,
+            "monitor_interval": config.monitor_interval,
+            "log_dir": config.log_dir,
+            "metrics_cfg": config.metrics_cfg
+        }
     )
 
     rdzv_parameters = RendezvousParameters(

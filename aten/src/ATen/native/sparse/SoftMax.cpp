@@ -4,8 +4,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/sparse/ParamUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/Parallel.h>
-#include <ATen/SparseTensorUtils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
@@ -28,8 +28,7 @@
 
 #include <map>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 int64_t get_nvalues(const IntArrayRef& sizes, int64_t sparse_dim) {
@@ -535,11 +534,12 @@ void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& gra
 
 Tensor softmax_sparse_cpu(
     const Tensor& input_,
-    const int64_t dim,
+    const int64_t dim_,
     const bool half_to_float) {
   Tensor input, output;
-  std::tie(input, output) = softmax_sparse_input_preprocessing(
-      input_, dim, half_to_float, "softmax");
+  int64_t dim;
+  std::tie(input, output, dim) = softmax_sparse_input_preprocessing(
+      input_, dim_, half_to_float, "softmax");
   if (input.numel() == 0) {
     return output;
   }
@@ -551,11 +551,12 @@ Tensor softmax_sparse_cpu(
 
 Tensor log_softmax_sparse_cpu(
     const Tensor& input_,
-    const int64_t dim,
+    const int64_t dim_,
     const bool half_to_float) {
   Tensor input, output;
-  std::tie(input, output) = softmax_sparse_input_preprocessing(
-      input_, dim, half_to_float, "log_softmax");
+  int64_t dim;
+  std::tie(input, output, dim) = softmax_sparse_input_preprocessing(
+      input_, dim_, half_to_float, "log_softmax");
   if (input.numel() == 0) {
     return output;
   }
@@ -571,7 +572,8 @@ Tensor softmax_backward_sparse_cpu(
     int64_t dim_,
     const Tensor& input_) {
   Tensor grad_input, grad, output;
-  std::tie(grad_input, grad, output) =
+  int64_t dim;
+  std::tie(grad_input, grad, output, dim) =
       softmax_backward_sparse_input_preprocessing(
           grad_, output_, dim_, input_, "softmax_backward");
   if (output.numel() == 0) {
@@ -590,7 +592,8 @@ Tensor log_softmax_backward_sparse_cpu(
     int64_t dim_,
     const Tensor& input_) {
   Tensor grad_input, grad, output;
-  std::tie(grad_input, grad, output) =
+  int64_t dim;
+  std::tie(grad_input, grad, output, dim) =
       softmax_backward_sparse_input_preprocessing(
           grad_, output_, dim_, input_, "log_softmax_backward");
   if (output.numel() == 0) {
@@ -603,7 +606,7 @@ Tensor log_softmax_backward_sparse_cpu(
   return grad_input;
 }
 
-Tensor _sparse_softmax(const Tensor& input_, const int64_t dim_) {
+static Tensor _sparse_softmax(const Tensor& input_, const int64_t dim_) {
   auto result = [&]() {
     NoNamesGuard guard;
     return at::_sparse_softmax(input_, dim_, false);
@@ -630,7 +633,7 @@ Tensor _sparse_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dty
   return at::_sparse_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_) {
+static Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_) {
   auto result = [&]() {
     NoNamesGuard guard;
     return at::_sparse_log_softmax(input_, dim_, false);
@@ -657,5 +660,4 @@ Tensor _sparse_log_softmax(const Tensor& self, Dimname dim, optional<ScalarType>
   return at::_sparse_log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-}
-}
+} // namespace at::native

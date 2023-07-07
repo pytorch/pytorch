@@ -1,10 +1,28 @@
+import contextlib
+
 import dataclasses
 import enum
+import functools
 import logging
+import traceback
+import unittest.mock
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+)
+
+import torch
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +44,8 @@ class GuardSource(enum.Enum):
     CONSTANT = 4
     RANDOM_VALUE = 5
     SHAPE_ENV = 6
+    LOCAL_FSDP_MODULE = 7
+    GLOBAL_FSDP_MODULE = 8
 
     def select(self, locals_, globals_):
         # SHAPE_ENV counts as locals, because the guard expressions
@@ -37,19 +57,38 @@ class GuardSource(enum.Enum):
         if self in (
             GuardSource.LOCAL,
             GuardSource.LOCAL_NN_MODULE,
+            GuardSource.LOCAL_FSDP_MODULE,
             GuardSource.SHAPE_ENV,
             GuardSource.RANDOM_VALUE,
         ):
             return locals_
-        if self in (GuardSource.GLOBAL, GuardSource.GLOBAL_NN_MODULE):
+        if self in (
+            GuardSource.GLOBAL,
+            GuardSource.GLOBAL_NN_MODULE,
+            GuardSource.GLOBAL_FSDP_MODULE,
+        ):
             return globals_
         raise NotImplementedError(str(self))
 
+    def is_fsdp_module(self) -> bool:
+        return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
+
     def is_nn_module(self) -> bool:
-        return self in (GuardSource.GLOBAL_NN_MODULE, GuardSource.LOCAL_NN_MODULE)
+        return (
+            self
+            in (
+                GuardSource.GLOBAL_NN_MODULE,
+                GuardSource.LOCAL_NN_MODULE,
+            )
+            or self.is_fsdp_module()
+        )
 
     def is_local(self):
-        return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
+        return self in (
+            GuardSource.LOCAL,
+            GuardSource.LOCAL_NN_MODULE,
+            GuardSource.LOCAL_FSDP_MODULE,
+        )
 
 
 """
@@ -72,6 +111,7 @@ class GuardBuilderBase:
 
 class ShapeGuard(NamedTuple):
     expr: sympy.Expr
+    # TODO: store this in slightly less formatted form
     stack: str
 
 
@@ -111,11 +151,17 @@ class Guard:
             self.source.value if self.source else -1,
             len(self.name),
             self.name,
-            self.create_fn.__code__.co_firstlineno,
+            self.inner_create_fn().__code__.co_firstlineno,
         )
 
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
+
+    def inner_create_fn(self):
+        if isinstance(self.create_fn, functools.partial):
+            return self.create_fn.func
+        else:
+            return self.create_fn
 
     @staticmethod
     def weakref_to_str(obj_weakref):
@@ -142,23 +188,37 @@ class Guard:
         else:
             return str(obj_weakref)
 
-    def __str__(self):
+    def __repr__(self):
         s = f"""
-            {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
-            {{
-                'guard_types': {self.guard_types},
-                'code': {self.code_list},
-                'obj_weakref': {self.weakref_to_str(self.obj_weakref)}
-                'guarded_class': {self.guarded_class_weakref}
-            }}
-            """
+        {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.inner_create_fn().__name__}
+        {{
+            'guard_types': {self.guard_types},
+            'code': {self.code_list},
+            'obj_weakref': {self.weakref_to_str(self.obj_weakref)}
+            'guarded_class': {self.guarded_class_weakref}
+        }}
+        """
         return s
+
+    def __str__(self):
+        output = f"Name: {repr(self.name)}\n"
+        source = self.source.name.lower() if self.source else ""
+        output += f"    Source: {source}\n"
+        output += f"    Create Function: {self.inner_create_fn().__name__}\n"
+        output += f"    Guard Types: {self.guard_types}\n"
+        output += f"    Code List: {self.code_list}\n"
+        output += f"    Object Weakref: {self.weakref_to_str(self.obj_weakref)}\n"
+        output += f"    Guarded Class Weakref: {self.guarded_class_weakref}\n"
+        return output
 
     def create(self, local_builder: GuardBuilderBase, global_builder: GuardBuilderBase):
         return self.create_fn(self.source.select(local_builder, global_builder), self)
 
     def is_nn_module(self):
         return self.source.is_nn_module()
+
+    def is_fsdp_module(self):
+        return self.source.is_fsdp_module()
 
     def is_local(self):
         return self.source.is_local()
@@ -210,11 +270,11 @@ input_pos_a and input_pos_b are input positions we have deduped.
 
 @dataclasses.dataclass
 class DuplicateInputs(GuardEnvExpr):
-    input_pos_a: int
-    input_pos_b: int
+    input_source_a: "Source"
+    input_source_b: "Source"
 
     def __post_init__(self):
-        assert self.input_pos_a != self.input_pos_b
+        assert self.input_source_a != self.input_source_b
 
 
 """
@@ -268,6 +328,96 @@ class GuardsCheckpointState:
         return self.diff(other) is None
 
 
+class ModuleContextCheckpointState:
+    nn_modules: Dict[str, torch.nn.Module] = {}
+
+    def __init__(self, nn_modules):
+        self.nn_modules = nn_modules
+
+    """
+    Produces a delta against another ModuleContextCheckpointState.
+
+    Returns None if no delta is found, otherwise, return a set() of mismatched
+    module key names.
+    """
+
+    def diff(self, other):
+        r = set(self.nn_modules.keys()).difference(set(other.nn_modules.keys()))
+        if len(r) == 0:
+            return None
+        return r
+
+    def __eq__(self, other):
+        return self.diff(other) is None
+
+
+class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
+    def __init__(self):
+        self.nn_modules: Dict[str, torch.nn.Module] = {}
+
+    def copy_graphstate(self):
+        return ModuleContextCheckpointState(dict(self.nn_modules))
+
+    def restore_graphstate(self, state):
+        assert isinstance(state, ModuleContextCheckpointState)
+        self.nn_modules = state.nn_modules
+
+
+class GlobalContextCheckpointState:
+    global_state: Dict[str, Tuple[Callable, ...]] = {}
+
+    def __init__(self, global_states):
+        self.global_state = global_states
+
+    """
+    Produces a delta against another GlobalContextCheckpointState.
+
+    Returns None if no delta is found, otherwise, return a set() of mismatched
+    global key names.
+    """
+
+    def diff(self, other):
+        r = set(self.global_state.keys()).difference(set(other.global_state.keys()))
+        if len(r) == 0:
+            return None
+        return r
+
+    def __eq__(self, other):
+        return self.diff(other) is None
+
+
+class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
+    """
+    This keeps track of the global torch state during tracing of a function.
+    For example, torch.is_grad_enabled.
+    """
+
+    _supported_global_states = {
+        "grad_enabled",
+        "autocast_enabled",
+        "autocast_cpu_enabled",
+        "autocast_gpu_dtype",
+        "autocast_cpu_dtype",
+        "autocast_cache_enabled",
+    }
+
+    def __init__(self):
+        self.global_state: Dict[str, Tuple[Callable, ...]] = {}
+
+    def copy_graphstate(self):
+        return GlobalContextCheckpointState(dict(self.global_state))
+
+    def restore_graphstate(self, state):
+        assert isinstance(state, GlobalContextCheckpointState)
+        self.global_state = state.global_state
+        assert (
+            len(self.global_state) == len(self._supported_global_states)
+            and set(self.global_state.keys()) == self._supported_global_states
+        ), "Global state mismatch"
+        for func, args in self.global_state.values():
+            func(args)
+
+
 """
 A GuardsContext is a checkpointable representation of all the guards in the current tracing
 context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
@@ -306,7 +456,7 @@ having to plumb complex subsystems across multiple verticals.
 Ex: A common example is guard accumulation between dynamo, shape_env, aot_autograd, and inductor.
 Accessing the current tracing context via
 TracingContext.get() allows users to accumulate their own guards for processing, without needing to know how
-to plumb objects back up to where frame interpretation happend.
+to plumb objects back up to where frame interpretation happened.
 """
 
 
@@ -315,7 +465,7 @@ class TracingContext:
     Provides the currently installed TracingContext, or None.
 
     Note that it is a staticmethod, and invocations outside of `with tracing()` (see below), are valid but
-    will return NoNe.
+    will return None.
     """
 
     @staticmethod
@@ -324,7 +474,59 @@ class TracingContext:
 
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
+        self.module_context = ModuleContext()
+        self.global_context = GlobalContext()
         self.fake_mode = fake_mode
+        self.frame_summary_stack = []
+        self.loc_in_frame = None
+        # this is only set after aot_autograd
+        self.fw_metadata = None
+        self.params_flat = None
+
+    @staticmethod
+    def extract_stack():
+        self = TracingContext.get()
+        if self is None:
+            return traceback.StackSummary()
+        stack = list(self.frame_summary_stack)
+        if self.loc_in_frame is not None:
+            stack.append(self.loc_in_frame)
+        return traceback.StackSummary.from_list(stack)
+
+    # Call this when you want to call into some code that isn't necessarily
+    # associated with the current frame state
+    @staticmethod
+    @contextlib.contextmanager
+    def clear_frame():
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "Frame context manager must be called within an ongoing trace."
+        with unittest.mock.patch.object(
+            tc, "frame_summary_stack", []
+        ), unittest.mock.patch.object(tc, "loc_in_frame", None):
+            yield
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_frame(frame_summary):
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "Frame context manager must be called within an ongoing trace."
+        tc.frame_summary_stack.append(frame_summary)
+        try:
+            yield
+        finally:
+            tc.frame_summary_stack.pop()
+
+    @staticmethod
+    def set_current_loc(filename, lineno, frame_name):
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "Loc context manager must be called within an ongoing trace."
+        tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
 
 
 """
@@ -346,7 +548,8 @@ def tracing(context: TracingContext):
 
 
 # Subclasses can be found in torch/_dynamo/source.py
-@dataclasses.dataclass
+# TODO(voz): Consider a toplevel torch/_source.py
+@dataclasses.dataclass(frozen=True)
 class Source:
     def reconstruct(self, codegen):
         raise NotImplementedError()
@@ -364,3 +567,69 @@ class Source:
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
+
+
+# Subclasses can be found in torch/_dynamo/source.py
+# Note - there is an odd exception to this invariant of a single base,
+# see class SuperSource
+@dataclasses.dataclass(frozen=True)
+class ChainedSource(Source):
+    base: Source
+
+
+def detect_fake_mode(inputs: Any = None):
+    """
+    Attempts to "detect" what the current fake mode is.  If there is one ambiently
+    available from TracingContext, we preferentially use that.  Otherwise, we
+    heuristically detect the fake mode via the following sources, in order of
+    priority:
+
+        - Currently active fake mode on stack
+        - Fake mode associated with passed in tensors (inputs does not
+          have to be flattened)
+    """
+    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch.utils._pytree import tree_flatten
+
+    fake_modes = []
+
+    context = TracingContext.get()
+    if context is not None:
+        fake_mode = context.fake_mode
+        if fake_mode is not None:
+            fake_modes.append((fake_mode, "tracing context", 0))
+
+    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+
+    for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
+        if isinstance(m, FakeTensorMode):
+            fake_modes.append((m, "active fake mode", i))
+
+    flat_inputs, _ = tree_flatten(inputs)
+    for i, flat_input in enumerate(flat_inputs):
+        if isinstance(flat_input, FakeTensor):
+            fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
+
+    if fake_modes:
+        fake_mode, desc1, i1 = fake_modes[0]
+        for m, desc2, i2 in fake_modes[1:]:
+            assert (
+                fake_mode is m
+            ), f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}"
+        return fake_mode
+    else:
+        return None
+
+
+EXPORT_FAKE_MODE = None
+
+
+@contextlib.contextmanager
+def export_fake_mode(fake_mode):
+    global EXPORT_FAKE_MODE
+    assert EXPORT_FAKE_MODE is None
+    EXPORT_FAKE_MODE = fake_mode
+    try:
+        yield
+    finally:
+        EXPORT_FAKE_MODE = None

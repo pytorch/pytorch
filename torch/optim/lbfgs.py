@@ -205,7 +205,7 @@ class LBFGS(Optimizer):
         max_eval (int): maximal number of function evaluations per optimization
             step (default: max_iter * 1.25).
         tolerance_grad (float): termination tolerance on first order optimality
-            (default: 1e-5).
+            (default: 1e-7).
         tolerance_change (float): termination tolerance on function
             value/parameter changes (default: 1e-9).
         history_size (int): update history size (default: 100).

@@ -2,15 +2,18 @@
 
 import argparse
 import sys
-import yaml
 
 from pathlib import Path
+
+import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
-EXPECTED_GROUP = "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}" \
+EXPECTED_GROUP = (
+    "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}"
     "-${{ github.event_name == 'workflow_dispatch' }}"
+)
 
 
 def should_check(filename: Path) -> bool:

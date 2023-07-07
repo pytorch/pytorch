@@ -45,8 +45,12 @@ C10_EXPORT void share_memory_(TensorBase& t) {
   }
   at::Storage newStorage(new_shm_fd_storage(origStorage.nbytes()));
   storage_copy(newStorage, origStorage);
-  std::swap(
-      *origStorage.unsafeGetStorageImpl(), *newStorage.unsafeGetStorageImpl());
+
+  // Replace the old data_ptr and allocator with the new ones
+  c10::StorageImpl* origStorageImpl = origStorage.unsafeGetStorageImpl();
+  c10::StorageImpl* newStorageImpl = newStorage.unsafeGetStorageImpl();
+  origStorageImpl->set_data_ptr(std::move(newStorageImpl->mutable_data_ptr()));
+  origStorageImpl->set_allocator(newStorageImpl->allocator());
 }
 
 } // namespace at

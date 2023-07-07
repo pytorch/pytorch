@@ -2,12 +2,12 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/sparse/ParamUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
@@ -596,11 +596,12 @@ void cuda_sparse_coo_softmax_backward(
 
 Tensor softmax_sparse_cuda(
     const Tensor& input_,
-    const int64_t dim,
+    const int64_t dim_,
     const bool half_to_float) {
   Tensor input, output;
-  std::tie(input, output) = softmax_sparse_input_preprocessing(
-      input_, dim, half_to_float, "softmax");
+  int64_t dim;
+  std::tie(input, output, dim) = softmax_sparse_input_preprocessing(
+      input_, dim_, half_to_float, "softmax");
   if (input.numel() == 0) {
     return output;
   }
@@ -612,11 +613,12 @@ Tensor softmax_sparse_cuda(
 
 Tensor log_softmax_sparse_cuda(
     const Tensor& input_,
-    const int64_t dim,
+    const int64_t dim_,
     const bool half_to_float) {
   Tensor input, output;
-  std::tie(input, output) = softmax_sparse_input_preprocessing(
-      input_, dim, half_to_float, "log_softmax");
+  int64_t dim;
+  std::tie(input, output, dim) = softmax_sparse_input_preprocessing(
+      input_, dim_, half_to_float, "log_softmax");
   if (input.numel() == 0) {
     return output;
   }
@@ -632,7 +634,8 @@ Tensor softmax_backward_sparse_cuda(
     int64_t dim_,
     const Tensor& input_) {
   Tensor grad_input, grad, output;
-  std::tie(grad_input, grad, output) =
+  int64_t dim;
+  std::tie(grad_input, grad, output, dim) =
       softmax_backward_sparse_input_preprocessing(
           grad_, output_, dim_, input_, "softmax_backward");
   if (output.numel() == 0) {
@@ -651,7 +654,8 @@ Tensor log_softmax_backward_sparse_cuda(
     int64_t dim_,
     const Tensor& input_) {
   Tensor grad_input, grad, output;
-  std::tie(grad_input, grad, output) =
+  int64_t dim;
+  std::tie(grad_input, grad, output, dim) =
       softmax_backward_sparse_input_preprocessing(
           grad_, output_, dim_, input_, "log_softmax_backward");
   if (output.numel() == 0) {

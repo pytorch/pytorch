@@ -103,7 +103,6 @@ class PythonRefInfo(OpInfo):
         supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
-
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo_variant_name = torch_opinfo_variant_name
         self.torch_opinfo = _find_referenced_opinfo(
@@ -134,7 +133,6 @@ class ReductionPythonRefInfo(ReductionOpInfo):
         supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
-
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo_variant_name = torch_opinfo_variant_name
         self.torch_opinfo = _find_referenced_opinfo(
@@ -169,7 +167,6 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
         supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
-
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo_variant_name = torch_opinfo_variant_name
         self.torch_opinfo = _find_referenced_opinfo(
@@ -201,7 +198,6 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
         supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
-
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo_variant_name = torch_opinfo_variant_name
         self.torch_opinfo = _find_referenced_opinfo(

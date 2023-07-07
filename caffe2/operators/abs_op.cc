@@ -44,7 +44,7 @@ Calculates the absolute value of the given input tensor, element-wise.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/abs_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/abs_op.cc
 
 <details>
 

@@ -32,7 +32,6 @@ PackBMatrix::PackBMatrix(
 
   const uint32_t n_stride = (output_channels + (nr - 1)) & -nr;
   const uint32_t k_stride = (input_channels + (kr - 1)) & -kr;
-
   input_channels_ = input_channels;
   output_channels_ = output_channels;
   packed_weights_ =

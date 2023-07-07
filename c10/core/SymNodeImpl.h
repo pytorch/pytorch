@@ -1,10 +1,9 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
-#include <memory>
 
 namespace c10 {
 
@@ -14,6 +13,7 @@ using SymNode = c10::intrusive_ptr<SymNodeImpl>;
 // When you add a method, you also need to edit
 // torch/csrc/jit/python/init.cpp
 // torch/csrc/utils/python_symnode.h
+// c10/core/ConstantSymNodeImpl.h
 class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
  public:
   ~SymNodeImpl() override = default;
@@ -163,6 +163,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
+  virtual int64_t large_negative_int() {
+    return 0; // not a large negative int!
+  }
   std::ostream& operator<<(std::ostream& os) {
     os << str();
     return os;

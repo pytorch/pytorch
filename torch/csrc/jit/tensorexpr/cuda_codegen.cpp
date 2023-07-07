@@ -119,9 +119,8 @@ void CudaAnalysis::visit(ForPtr v) {
       throw std::runtime_error("support only 3D gpu_block_index");
     }
     ExprPtr prev = nullptr;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (gpu_block_extents_.size() <= gpu_block_index) {
+    if (gpu_block_extents_.size() <= static_cast<size_t>(gpu_block_index)) {
       gpu_block_extents_.resize(gpu_block_index + 1);
     } else {
       prev = gpu_block_extents_[gpu_block_index];
@@ -149,9 +148,8 @@ void CudaAnalysis::visit(ForPtr v) {
       throw std::runtime_error("support only 3D gpu_thread_index");
     }
     ExprPtr prev = nullptr;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (gpu_thread_extents_.size() <= gpu_thread_index) {
+    if (gpu_thread_extents_.size() <= static_cast<size_t>(gpu_thread_index)) {
       gpu_thread_extents_.resize(gpu_thread_index + 1);
     } else {
       prev = gpu_thread_extents_[gpu_thread_index];
@@ -503,8 +501,7 @@ class PrioritizeLoad : public IRMutator {
           v->indices().size() == nested_store_->indices().size()) {
         // also check indices
         bool same = true;
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        for (int i = 0; i < v->indices().size(); ++i) {
+        for (const auto i : c10::irange(v->indices().size())) {
           if (!exprEquals(v->indices()[i], nested_store_->indices()[i])) {
             same = false;
             break;
@@ -1322,7 +1319,7 @@ void CudaCodeGen::CompileToNVRTC(
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
       // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
       // which gives better backwards compatibility to work on older driver,
-      // (since older driver doesn't necessrily recognize PTX emitted by new
+      // (since older driver doesn't necessarily recognize PTX emitted by new
       // toolkit);
       // Meanwhile, for forward compatibility (future device with
       // `compile_to_sass==false`), since SASS are not necessarily compatible,

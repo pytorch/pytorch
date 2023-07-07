@@ -27,7 +27,7 @@ using CuSparsePoolType = DeviceThreadHandlePool<cusparseHandle_t, createCusparse
 
 cusparseHandle_t getCurrentCUDASparseHandle() {
   int device;
-  AT_CUDA_CHECK(cudaGetDevice(&device));
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized
   // to avoid initialization issues that caused hangs on Windows.

@@ -1,13 +1,8 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 
 #include <cstddef>
-
-#ifdef __linux__
-#include <sys/mman.h>
-#include <unistd.h>
-#endif
 
 namespace c10 {
 

@@ -236,7 +236,7 @@ struct Arena {
         ar_tensors_.append(*this, ref);
         return ref;
     }
-    py::handle autorelease(py::object obj) {
+    mpy::handle autorelease(mpy::object obj) {
         ar_objects_.append(*this, obj);
         obj.release();
         return ar_objects_.back();
@@ -245,15 +245,15 @@ struct Arena {
         for(TensorRef t: ar_tensors_) {
             c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(t->unsafeGetTensorImpl());
         }
-        for(py::handle h: ar_objects_) {
-            py::object::steal(h);
+        for(mpy::handle h: ar_objects_) {
+            mpy::object::steal(h);
         }
     }
 private:
     int64_t allocated_;
     char buffer_[ARENA_MAX_SIZE];
     Slice<TensorRef> ar_tensors_;
-    Slice<py::handle> ar_objects_;
+    Slice<mpy::handle> ar_objects_;
     std::vector<std::unique_ptr<char[]>> overflow_;
 };
 

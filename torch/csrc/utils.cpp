@@ -1,3 +1,4 @@
+#include <fmt/core.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/variable.h>
@@ -282,7 +283,7 @@ char* tensor_repr(at::Tensor tensor) {
   result =
       static_cast<char*>(malloc(bufsize + 1)); // account for the trailing \0
   if (!result) {
-    fprintf(stderr, "cannot allocate memory for the result\n");
+    fmt::print(stderr, "cannot allocate memory for the result\n");
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;
   }
@@ -303,6 +304,18 @@ error:
   free(result);
   PyGILState_Release(gil);
   return nullptr;
+}
+
+std::string int_array_ref_string(at::IntArrayRef sizes) {
+  std::stringstream ss;
+  ss << sizes;
+  return ss.str();
+}
+
+std::string dispatch_keyset_string(c10::DispatchKeySet keyset) {
+  std::stringstream ss;
+  ss << keyset;
+  return ss.str();
 }
 
 } // namespace gdb

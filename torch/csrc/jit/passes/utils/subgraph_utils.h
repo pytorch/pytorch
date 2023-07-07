@@ -21,7 +21,7 @@ namespace SubgraphUtils {
 // Returns the new subgraph node.
 TORCH_API Node* createSingletonSubgraph(Node* n, Symbol subgraphKind);
 
-// Creates a new subgraph that only contains `n`, amd udpates the new outputs
+// Creates a new subgraph that only contains `n`, amd updates the new outputs
 // of the subgraph to have the aliasing properties of the original `n` outputs
 TORCH_API Node* createSingletonSubgraphAndUpdateAliasing(
     Node* to_merge,

@@ -31,7 +31,7 @@ def init_lists():
     path_to_script = pathlib.Path(os.path.abspath(os.path.dirname(__file__)))
     TS_NATIVE_FUNCTIONS_PATH = path_to_script.parent.parent / "aten/src/ATen/native/ts_native_functions.yaml"
     with open(TS_NATIVE_FUNCTIONS_PATH) as f:
-        yaml_ts = yaml.load(f, yaml.Loader)
+        yaml_ts = yaml.load(f, yaml.SafeLoader)
     LAZY_OPS_LIST = set(remove_suffixes(itertools.chain(yaml_ts["full_codegen"], yaml_ts["supported"], yaml_ts["autograd"])))
     HAS_SYMINT_SUFFIX = yaml_ts["symint"]
     FALLBACK_LIST = {"clamp"}

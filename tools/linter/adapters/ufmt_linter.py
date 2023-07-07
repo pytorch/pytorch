@@ -8,7 +8,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, List, NamedTuple, Optional
 
-from ufmt.core import make_black_config, ufmt_string
+from ufmt.core import ufmt_string
+from ufmt.util import make_black_config
 from usort import Config as UsortConfig
 
 

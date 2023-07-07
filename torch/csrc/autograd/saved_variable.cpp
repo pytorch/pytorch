@@ -196,7 +196,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   }
 
   // The version counter is correct.
-  // Additionnally, if we deal with a non-leaf variable, we have its correct
+  // Additionally, if we deal with a non-leaf variable, we have its correct
   // grad_fn.
 
   // If we have the original variable, we simply return it
@@ -217,15 +217,6 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   }
 
   impl::set_version_counter(var, version_counter_);
-
-  // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
-  // should have saved the grad accumulator. Even if the Variable is no longer
-  // alive, the accumulator should be kept alive by the references in the
-  // graph.
-  if (is_leaf_ && requires_grad_) {
-    TORCH_INTERNAL_ASSERT(
-        !grad_accumulator_.expired(), "No grad accumulator for a saved leaf");
-  }
   impl::set_grad_accumulator(var, grad_accumulator_);
 
   // NB: var here is never a view so there is no need to make anything special

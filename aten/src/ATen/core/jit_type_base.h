@@ -9,6 +9,7 @@
 #include <ATen/core/type_ptr.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymFloat.h>
+#include <c10/core/SymBool.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -56,6 +57,7 @@ namespace c10 {
   _(AnyClassType)           \
   _(SymIntType)             \
   _(SymFloatType)           \
+  _(SymBoolType)            \
   _(UnionType)              \
   _(DynamicType)
 

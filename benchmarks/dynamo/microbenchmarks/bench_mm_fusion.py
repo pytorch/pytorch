@@ -56,7 +56,6 @@ def bench(shape, layer_id, p, fusion_types=[""]):
 
     row = [layer_id]
     for fusion_type in fusion_types:
-
         if fusion_type == "":
             fn_mm = getattr(Func, "mm")
         else:

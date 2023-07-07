@@ -86,7 +86,7 @@ class ConstantVariable(VariableTracker):
                 items=self.unpack_var_sequence(tx), source=self.source, **options
             ).call_method(tx, name, args, kwargs)
 
-        if any([isinstance(x, SymNodeVariable) for x in args]):
+        if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
             return variables.SymNodeVariable(self.as_proxy(), self.value).call_method(
                 tx, name, args, kwargs
@@ -134,6 +134,10 @@ class ConstantVariable(VariableTracker):
             return ConstantVariable(result, **options)
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        result = hasattr(self.value, name)
+        return variables.ConstantVariable(result).add_options(self)
 
 
 class EnumVariable(VariableTracker):

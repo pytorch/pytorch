@@ -476,7 +476,7 @@ Note that you can use ``torch.profiler`` (recommended, only available after 1.8.
         tensor = torch.randn(20, 10)
         dist.all_reduce(tensor)
 
-Please refer to the `profiler documentation <https://pytorch.org/docs/master/profiler.html>`__ for a full overview of profiler features.
+Please refer to the `profiler documentation <https://pytorch.org/docs/main/profiler.html>`__ for a full overview of profiler features.
 
 
 Multi-GPU collective functions

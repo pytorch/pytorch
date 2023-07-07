@@ -2,6 +2,8 @@
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <ATen/cuda/Exceptions.h>
+
 namespace at { namespace native {
 namespace {
 
@@ -33,7 +35,7 @@ using CudnnPoolType = at::cuda::DeviceThreadHandlePool<cudnnHandle_t, createCuDN
 
 cudnnHandle_t getCudnnHandle() {
   int device;
-  AT_CUDA_CHECK(cudaGetDevice(&device));
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized
   // to avoid initialization issues that caused hangs on Windows.

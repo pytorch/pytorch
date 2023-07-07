@@ -6,6 +6,8 @@
 
 #include <ATen/TensorUtils.h>
 #include <ATen/Dispatch.h>
+#include <c10/core/GradMode.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -163,7 +165,7 @@ struct RNNParams {
   }
 };
 
-std::vector<int64_t> _hidden_size(const RNNParams& rnn) {
+static std::vector<int64_t> _hidden_size(const RNNParams& rnn) {
   return {rnn.num_layers * rnn.num_directions, rnn.mini_batch, rnn.hidden_size};
 }
 
@@ -194,7 +196,7 @@ std::vector<int64_t> _output_size(const RNNParams& rnn) {
 //                           |   nt2   |
 //                           +---------+
 //
-Tensor _shuffle_weight(const Tensor& weight, int64_t fn_mode) {
+static Tensor _shuffle_weight(const Tensor& weight, int64_t fn_mode) {
   auto weight_t = weight.contiguous();
   if (static_cast<ideep::rnn_kind>(fn_mode) == ideep::rnn_kind::GRU) {
     std::vector<Tensor> gates = weight_t.chunk(3, /*gates*/0);
@@ -203,7 +205,7 @@ Tensor _shuffle_weight(const Tensor& weight, int64_t fn_mode) {
   return weight_t;
 }
 
-Tensor _shuffle_bias(const Tensor& bias_ih, const Tensor& bias_hh, int64_t fn_mode) {
+static Tensor _shuffle_bias(const Tensor& bias_ih, const Tensor& bias_hh, int64_t fn_mode) {
   if (static_cast<ideep::rnn_kind>(fn_mode) == ideep::rnn_kind::GRU) {
     std::vector<Tensor> b1 = bias_ih.chunk(3, /*output_channels*/0);
     std::vector<Tensor> b2 = bias_hh.chunk(3, /*output_channels*/0);
@@ -288,15 +290,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   auto w1_ = get_mkldnn_tensor(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
   auto w2_ = get_mkldnn_tensor(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
 
-  auto pd = ideep::lstm_forward_training::prepare(
-      x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
-  auto workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
-  ideep::tensor mkldnn_workspace;
-  mkldnn_workspace.init(
-      pd.workspace_desc(), workspace.data_ptr<uint8_t>());
-  ideep::lstm_forward_training::compute(
-      pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
-  return std::make_tuple(output, hy_, cy_, workspace);
+  if (at::GradMode::is_enabled()) {
+    Tensor workspace = Tensor();
+    auto pd = ideep::lstm_forward_training::prepare(
+        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
+    workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
+    ideep::tensor mkldnn_workspace;
+    mkldnn_workspace.init(
+        pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
+    ideep::lstm_forward_training::compute(
+        pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
+    return std::make_tuple(output, hy_, cy_, workspace);
+  } else {
+    ideep::lstm_forward_inference::compute(
+        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, ideep::prop_kind::forward_inference);
+    return std::make_tuple(output, hy_, cy_, Tensor());
+  }
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_backward(
@@ -459,7 +468,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
 //   b. padded sequence input support
 //
 
-std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
+static std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
     const Tensor& input_, TensorList weight, int64_t weight_stride0,
     const Tensor& hx_, const Tensor& cx_,
     int64_t mode, int64_t hidden_size,
@@ -557,8 +566,6 @@ std::pair<Tensor, hidden_type> mkldnn_impl(
           pack_hidden<hidden_type>(std::get<1>(mkldnn_output), std::get<2>(mkldnn_output))};
 }
 
-} // anonymous namespace
-
 void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
     const Tensor& input, TensorList hx, TensorList params, bool has_biases,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
@@ -568,6 +575,7 @@ void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
   hy = std::get<0>(result.second);
   cy = std::get<1>(result.second);
 }
+} // anonymous namespace
 
 REGISTER_ALL_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn);
 

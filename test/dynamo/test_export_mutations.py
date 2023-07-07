@@ -1,7 +1,10 @@
 # Owner(s): ["module: dynamo"]
+import unittest
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import IS_FBCODE
 
 
 class MutationExportTests(torch._dynamo.test_case.TestCase):
@@ -106,6 +109,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
 
         self.check_same_with_export(Foo(), torch.Tensor(3, 2))
 
+    @unittest.skipIf(IS_FBCODE, "Broken in fbcode")
     def test_module_attribute_mutation_violation_negative_4(self):
         # Mutating attribute with a Tensor type
         # But not exporting but using eager mode as well as dynamo optimize mode

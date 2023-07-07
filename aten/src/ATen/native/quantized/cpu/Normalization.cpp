@@ -88,7 +88,7 @@ Tensor q_batch_norm1d_impl(
 
   Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  float* alpha_data = alpha.data_ptr<float>();
+  float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
   const float* mean_data = mean.template data_ptr<float>();
@@ -197,7 +197,7 @@ Tensor q_batch_norm2d_impl(
 
   Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  float* alpha_data = alpha.data_ptr<float>();
+  float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
   const float* mean_data = mean.template data_ptr<float>();
@@ -293,7 +293,7 @@ Tensor q_batch_norm3d_impl(
 
   Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  float* alpha_data = alpha.data_ptr<float>();
+  float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
   const float* mean_data = mean.template data_ptr<float>();

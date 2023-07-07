@@ -340,7 +340,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
 
         auto idata = grad_input.packed_accessor64<scalar_t, 5>();
         auto odata = grad_output.packed_accessor64<scalar_t, 5>();
-        scalar_t* idata_ptr = grad_input.data_ptr<scalar_t>();
+        scalar_t* idata_ptr = grad_input.mutable_data_ptr<scalar_t>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
             input_depth, output_depth, align_corners, scales_d);

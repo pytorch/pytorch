@@ -2,7 +2,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
-import torch._C_flatbuffer
+import torch._C
 
 from torch.ao.quantization import (
     default_dynamic_qconfig,
@@ -443,8 +443,8 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
 
             # Now serialize to flabuffer and load from fb and check
             dict: Dict[str, str] = {}
-            bytes = torch._C_flatbuffer._save_mobile_module_to_bytes(m._c, dict)
-            m = LiteScriptModule(torch._C_flatbuffer._load_mobile_module_from_bytes(bytes))
+            bytes = torch._C._save_mobile_module_to_bytes(m._c, dict)
+            m = LiteScriptModule(torch._C._load_mobile_module_from_bytes(bytes))
             fb_output = m(*inputs)
             self.assertTrue(torch.allclose(ref_output, fb_output))
 

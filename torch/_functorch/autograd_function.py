@@ -1,5 +1,5 @@
 import torch
-from torch._ops import PyOperator
+from torch._ops import HigherOrderOperator
 from torch._C._functorch import TransformType
 from torch._functorch.utils import enable_single_level_autograd_function
 import torch.utils._pytree as pytree
@@ -24,9 +24,9 @@ from typing import Any, NamedTuple, Tuple
 # work with it. One day we might decide to change this, but until then,
 # we need to give the illusion that autograd.Function runs before those things.
 #
-# We do this by using creating a custom PyOperator that only functorch
+# We do this by using creating a custom HigherOrderOperator that only functorch
 # dispatches specially.
-class CustomFunctionPyOperator(PyOperator):
+class CustomFunctionHigherOrderOperator(HigherOrderOperator):
     def __init__(self):
         super().__init__('custom_function_call')
 
@@ -50,9 +50,9 @@ class CustomFunctionPyOperator(PyOperator):
 # "custom_function_call"
 # This is the mechanism for an autograd.Function that works with functorch transforms.
 # It wraps an autograd.Function; interactions with functorch transforms are defined
-# via PyDispatcher and PyOperator rather than through the traditional PyTorch
+# via PyDispatcher and HigherOrderOperator rather than through the traditional PyTorch
 # dispatcher.
-custom_function_call = CustomFunctionPyOperator()
+custom_function_call = CustomFunctionHigherOrderOperator()
 
 
 # The grad rule for custom_function_call is to construct a new _SingleLevelFunction
@@ -500,7 +500,7 @@ def get_tangents_in_dims(input_dims, tangents):
 # def backward_no_context(gy):
 #     return gy.expand([B, 4])
 #
-# gx = vmap(backward_no_context, dims)(gy: “Tensor[B]”)
+# gx = vmap(backward_no_context, dims)(gy: "Tensor[B]")
 #
 # This gives us the wrong result (gx has shape [B, B, 4], but it should
 # have shape [4]). Performing vmap over setup_context means the shape

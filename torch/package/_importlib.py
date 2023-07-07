@@ -16,6 +16,7 @@ _zip_searchorder = (
     (".py", False),
 )
 
+
 # Replace any occurrences of '\r\n?' in the input string with '\n'.
 # This converts DOS and Mac line endings to Unix line endings.
 def _normalize_line_endings(source):
@@ -62,7 +63,7 @@ def _calc___package__(globals):
     if package is not None:
         if spec is not None and package != spec.parent:
             _warnings.warn(  # noqa: G010
-                "__package__ != __spec__.parent " f"({package!r} != {spec.parent!r})",
+                f"__package__ != __spec__.parent ({package!r} != {spec.parent!r})",  # noqa: G004
                 ImportWarning,
                 stacklevel=3,
             )

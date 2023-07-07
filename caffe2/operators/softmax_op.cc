@@ -116,8 +116,8 @@ dimensions must be matched correctly, or else the operator will throw errors.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/softmax_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/softmax_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/softmax_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/softmax_op.cc
 
 
 <details>

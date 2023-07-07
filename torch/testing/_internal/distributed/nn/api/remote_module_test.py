@@ -482,7 +482,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
         dst_worker1_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
         dst_worker2_name = dist_utils.worker_name((self.rank + 2) % self.world_size)
 
-        # Unpickled attribtes include both the inherent attributes of RemoteModule
+        # Unpickled attributes include both the inherent attributes of RemoteModule
         # (not inherited from the superclass) and two installed methods.
         expected_unpickled_attrs = list(_REMOTE_MODULE_PICKLED_ATTRIBUTES)
         expected_unpickled_attrs.append("forward_async")
@@ -520,7 +520,7 @@ class ThreeWorkersRemoteModuleTest(CommonRemoteModuleTest):
         dst_worker1_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
         dst_worker2_name = dist_utils.worker_name((self.rank + 2) % self.world_size)
 
-        # Unpickled attribtes include both the inherent attributes of RemoteModule
+        # Unpickled attributes include both the inherent attributes of RemoteModule
         # (not inherited from the superclass) and two installed methods.
         expected_unpickled_attrs = list(_REMOTE_MODULE_PICKLED_ATTRIBUTES)
         expected_unpickled_attrs.append("forward_async")

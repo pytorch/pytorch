@@ -50,7 +50,7 @@ def as_nested_tensor(
         tensor([0., 0., 0., 0., 0.])
     """
     if not isinstance(tensor_list, list) or any(
-        [not torch.is_tensor(t) for t in tensor_list]
+        not isinstance(t, Tensor) for t in tensor_list
     ):
         raise TypeError(
             "nested_tensor(): Expected first argument to be a list of tensors "

@@ -1,20 +1,28 @@
 [flake8]
+# NOTE: **Mirror any changes** to this file the [tool.ruff] config in pyproject.toml
+# before we can fully move to use ruff
 enable-extensions = G
-select = B,C,E,F,G,P,T4,W,B9
+select = B,C,E,F,G,P,SIM1,T4,W,B9
 max-line-length = 120
 # C408 ignored because we like the dict keyword argument syntax
 # E501 is not flexible enough, we're using B950 instead
 ignore =
     E203,E305,E402,E501,E721,E741,F405,F821,F841,F999,W503,W504,C408,E302,W291,E303,
+    # fix these lints in the future
+    E275,
     # shebang has extra meaning in fbcode lints, so I think it's not worth trying
     # to line this up with executable bit
     EXE001,
     # these ignores are from flake8-bugbear; please fix!
-    B007,B008,
+    B007,B008,B017,B019,B020,B023,B024,B026,B028,B903,B904,B905,B906,B907
     # these ignores are from flake8-comprehensions; please fix!
-    C407
+    C407,
     # these ignores are from flake8-logging-format; please fix!
-    G001,G002,G003,G004,G100,G101,G200,G201,G202
+    G100,G101,G200,G201,G202
+    # these ignores are from flake8-simplify. please fix or ignore with commented reason
+    SIM105,SIM108,SIM110,SIM111,SIM113,SIM114,SIM115,SIM116,SIM117,SIM118,SIM119,SIM12,
+    # flake8-simplify code styles
+    SIM102,SIM103,SIM106,SIM112,
 per-file-ignores =
     __init__.py: F401
     torch/utils/cpp_extension.py: B950

@@ -25,8 +25,6 @@ from torch.testing._internal.jit_utils import clone_inputs, get_traced_sample_va
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
 from torch.testing import FileCheck
 
-from jit.test_fuser_common import TestFuserCommon  # noqa: F401
-
 import itertools
 import numpy as np
 import math

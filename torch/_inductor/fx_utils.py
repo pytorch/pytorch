@@ -1,5 +1,6 @@
 import torch
 
+
 # Check the pattern: (nn.module, F.function/torch.Tensor.method) matched.
 # Works for length 2 patterns with 1 module and 1 function/method.
 def matches_module_function_pattern(pattern, node, modules):

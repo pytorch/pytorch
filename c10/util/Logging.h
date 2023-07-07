@@ -2,7 +2,6 @@
 #define C10_UTIL_LOGGING_H_
 
 #include <climits>
-#include <cstring>
 #include <exception>
 #include <functional>
 #include <limits>
@@ -284,6 +283,14 @@ void enforceThatImpl(
 // API usage logging capabilities
 C10_API void SetAPIUsageLogger(std::function<void(const std::string&)> logger);
 C10_API void LogAPIUsage(const std::string& context);
+
+C10_API void SetAPIUsageMetadataLogger(
+    std::function<void(
+        const std::string&,
+        const std::map<std::string, std::string>& metadata_map)> logger);
+C10_API void LogAPIUsageMetadata(
+    const std::string& context,
+    const std::map<std::string, std::string>& metadata_map);
 
 // PyTorch ddp usage logging capabilities
 // DDPLoggingData holds data that can be logged in applications

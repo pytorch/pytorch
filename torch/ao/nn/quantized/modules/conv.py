@@ -730,7 +730,7 @@ class ConvTranspose1d(_ConvTransposeNd):
             True, output_padding, groups, bias, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedConvTranpose1d'
+        return 'QuantizedConvTranspose1d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose1d_prepack(
@@ -821,7 +821,7 @@ class ConvTranspose2d(_ConvTransposeNd):
             True, output_padding, groups, bias, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedConvTranpose2d'
+        return 'QuantizedConvTranspose2d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose2d_prepack(
@@ -914,7 +914,7 @@ class ConvTranspose3d(_ConvTransposeNd):
             True, output_padding, groups, bias, padding_mode, **factory_kwargs)
 
     def _get_name(self):
-        return 'QuantizedConvTranpose3d'
+        return 'QuantizedConvTranspose3d'
 
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose3d_prepack(

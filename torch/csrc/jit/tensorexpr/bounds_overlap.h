@@ -78,7 +78,7 @@ enum class CmpEvalResult { True, False, NotDetermined };
 OverlapKind TORCH_API boundOverlap(Bound A, Bound B);
 
 // The comparison is conservative and the compare result is deterministic.
-// It means that every element of the Bound to be compared needs to satisfiy
+// It means that every element of the Bound to be compared needs to satisfy
 // the given comparison operator.
 CmpEvalResult TORCH_API compareBound(
     const Bound& a,

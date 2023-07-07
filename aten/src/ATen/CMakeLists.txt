@@ -439,25 +439,33 @@ if(USE_CUDA AND NOT USE_ROCM)
   if($ENV{ATEN_STATIC_CUDA})
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
-      )
+      CUDA::cusparse_static
+      CUDA::curand_static
+      CUDA::cufft_static_nocallback
+    )
    if(NOT BUILD_LAZY_CUDA_LINALG)
-     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
-       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
+     if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
+       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+         CUDA::cusolver_static
+         ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
        )
+     elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
+       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+         CUDA::cusolver_static
+         ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+       )
+     endif()
    endif()
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
-      ${CUDA_cusparse_LIBRARY}
-      ${CUDA_curand_LIBRARY}
-      )
+      CUDA::cusparse
+      CUDA::curand
+      CUDA::cufft
+    )
    if(NOT BUILD_LAZY_CUDA_LINALG)
      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-       ${CUDA_cusolver_LIBRARY}
+       CUDA::cusolver
      )
    endif()
   endif()
@@ -466,8 +474,10 @@ if(USE_CUDA AND NOT USE_ROCM)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
   endif()
   if($ENV{ATEN_STATIC_CUDA})
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+      CUDA::culibos
+      CUDA::cudart_static
+    )
   endif($ENV{ATEN_STATIC_CUDA})
 endif()
 
@@ -534,7 +544,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${miopen_h})
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${mps_h} ${native_mps_h} ${miopen_h})
   # Metal
   if(USE_PYTORCH_METAL_EXPORT)
     # Add files needed from exporting metal models(optimized_for_mobile)

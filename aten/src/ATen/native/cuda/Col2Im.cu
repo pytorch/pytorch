@@ -115,7 +115,7 @@ void col2im_out_cuda_template(
 
     col2im_batched(
         at::cuda::getCurrentCUDAStream(),
-        input.data_ptr<scalar_t>(),
+        input.const_data_ptr<scalar_t>(),
         input_batch_stride,
         batch_size,
         n_output_plane,
@@ -131,7 +131,7 @@ void col2im_out_cuda_template(
         stride_width,
         dilation_height,
         dilation_width,
-        output.data_ptr<scalar_t>(),
+        output.mutable_data_ptr<scalar_t>(),
         output_batch_stride);
 
     if (!batched_input) {

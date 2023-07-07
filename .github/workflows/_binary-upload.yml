@@ -10,7 +10,7 @@ on:
       use_s3:
         type: boolean
         default: true
-        description: If true, will download artifacts from s3. Otherwise will use the default github artifact download action
+        description: If true, will download artifacts from s3. Otherwise will use the default GitHub artifact download action
       PYTORCH_ROOT:
         required: false
         type: string
@@ -26,7 +26,7 @@ on:
       DESIRED_CUDA:
         required: true
         type: string
-        description: Desired Cuda version
+        description: Desired CUDA version
       GPU_ARCH_VERSION:
         required: false
         type: string
@@ -96,11 +96,15 @@ jobs:
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
 
       - name: Download Build Artifacts
+        id: download-artifacts
+        # NB: When the previous build job is skipped, there won't be any artifacts and
+        # this step will fail. Binary build jobs can only be skipped on CI, not nightly
+        continue-on-error: true
         uses: actions/download-artifact@v3
         with:
           name: ${{ inputs.build_name }}
@@ -110,6 +114,7 @@ jobs:
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         shell: bash -e -l {0}
@@ -118,7 +123,9 @@ jobs:
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
+
       - name: Upload binaries
+        if: steps.download-artifacts.outcome && steps.download-artifacts.outcome == 'success'
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"

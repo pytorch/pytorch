@@ -89,6 +89,37 @@ class TestSubgraphRewriter(JitTestCase):
         test_output = traced.forward(x)
         self.assertEqual(ref_output, test_output)
 
+    def test_subgraph_rewriter_with_trivial_replacement(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                val = torch.neg(x)
+                val = torch.add(val, val)
+                return torch.add(val, val)
+
+        def pattern(x):
+            return torch.add(x, x)
+
+        def replacement(x):
+            return x
+
+        def comparison(x):
+            return torch.neg(x)
+
+        traced = symbolic_trace(M())
+        comparison_fn = symbolic_trace(comparison)
+
+        x = torch.randn(1, 5)
+
+        matches = subgraph_rewriter.replace_pattern_with_filters(traced, pattern, replacement, [])
+
+        traced.graph.lint()
+
+        ref_output = comparison_fn(x)
+        test_output = traced.forward(x)
+        no_replacements = len(matches) == 2 and len(matches[1].replacements) == 0
+        self.assertEqual(ref_output, test_output)
+        self.assertTrue(no_replacements)
+
     def test_subgraph_rewriter_single_pattern_match(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -863,3 +894,70 @@ class TestSubgraphRewriter(JitTestCase):
 def forward(self, x):
     _reshape_alias_copy_default_1 = torch.ops.aten._reshape_alias_copy.default(x, [3, 4], [1, 2]);  x = None
     return _reshape_alias_copy_default_1""")  # noqa: B950
+
+    def test_replacement_with_attrs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor([1])
+                self.b = torch.tensor([2])
+
+            def forward(self, x):
+                return x + self.a - self.b
+
+        class Pattern(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor([1])
+
+            def forward(self, x):
+                return x + self.a
+
+        class Replacement(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = torch.tensor([3])
+
+            def forward(self, x):
+                return x - self.c
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(traced, Pattern(), Replacement())
+        self.assertEqual(len(matches), 1)
+
+    def test_matching_variable_arguments(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.max_pool2d_with_indices.default(x, [2, 2], stride=[2, 2])
+
+        def pattern(x, kernel_size, stride):
+            # default padding is [0, 0]
+            return torch.ops.aten.max_pool2d_with_indices.default(x, kernel_size, stride, padding=[0, 0])
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(traced, pattern, pattern)
+
+        self.assertEqual(len(matches), 1)
+
+    def test_replaced_nodes(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.add(x, y)
+
+        def pattern(x, y):
+            return torch.add(x, y)
+
+        def replacement(x, y):
+            return torch.sub(torch.mul(x, y), y)
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern_with_filters(traced, pattern, replacement)
+
+        def check_replacement_nodes(self, traced, matches):
+            replacement_nodes_in_graph = [node for node in traced.graph.nodes if node.target in {torch.sub, torch.mul}]
+            replacement_nodes_in_res = [r for m in matches for r in m.replacements]
+            self.assertEqual(len(replacement_nodes_in_graph), len(replacement_nodes_in_res))
+            self.assertEqual(replacement_nodes_in_graph, replacement_nodes_in_res)
+            return len(replacement_nodes_in_graph)
+
+        self.assertEqual(check_replacement_nodes(self, traced, matches), 2)

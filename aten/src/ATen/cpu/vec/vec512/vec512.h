@@ -14,7 +14,6 @@
 #include <ATen/cpu/vec/vec512/vec512_complex_float.h>
 #include <ATen/cpu/vec/vec512/vec512_complex_double.h>
 
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>

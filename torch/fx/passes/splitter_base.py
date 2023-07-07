@@ -747,7 +747,7 @@ class _SplitterBase:
 
         # Determine which subgraph to start from based on which subgraph has
         # 0-dep node
-        acc_subgraph: bool = not any([len(self.deps[n]) == 0 for n in current_cpu_nodes])
+        acc_subgraph: bool = not any(len(self.deps[n]) == 0 for n in current_cpu_nodes)
 
         current_subgraph_nodes: NodeList = []
 

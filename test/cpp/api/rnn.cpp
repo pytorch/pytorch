@@ -190,7 +190,7 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   LSTM model(2, 2);
   for (auto& v : model->parameters()) {
     float size = v.numel();
-    auto p = static_cast<float*>(v.storage().data());
+    auto p = static_cast<float*>(v.storage().mutable_data());
     for (size_t i = 0; i < size; i++) {
       p[i] = i / size;
     }
@@ -198,7 +198,7 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
 
   auto x = torch::empty({3, 4, 2}, torch::requires_grad());
   float size = x.numel();
-  auto p = static_cast<float*>(x.storage().data());
+  auto p = static_cast<float*>(x.storage().mutable_data());
   for (size_t i = 0; i < size; i++) {
     p[i] = (size - i) / size;
   }

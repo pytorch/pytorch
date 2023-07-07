@@ -50,7 +50,7 @@ class ContinuousBernoulli(ExponentialFamily):
             # validate 'probs' here if necessary as it is later clamped for numerical stability
             # close to 0 and 1, later on; otherwise the clamped 'probs' would always pass
             if validate_args is not None:
-                if not self.arg_constraints['probs'].check(getattr(self, 'probs')).all():
+                if not self.arg_constraints['probs'].check(self.probs).all():
                     raise ValueError("The parameter {} has invalid values".format('probs'))
             self.probs = clamp_probs(self.probs)
         else:

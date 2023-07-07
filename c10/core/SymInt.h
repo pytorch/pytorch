@@ -4,8 +4,10 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 #include <numeric>
+#include <type_traits>
 
 namespace c10 {
 
@@ -32,10 +34,10 @@ class C10_API SymInt {
   };
 
   /*implicit*/ SymInt(int64_t d) : data_(d) {
-    // NB: this relies on exception in constructor inhibiting
-    // destructor; otherwise we would attempt to deallocate
-    // the garbage data!
-    TORCH_CHECK(!is_symbolic());
+    if (is_heap_allocated()) {
+      // Large negative number, heap allocate it
+      promote_to_negative();
+    }
   };
   SymInt() : data_(0) {}
   SymInt(SymNode n);
@@ -49,8 +51,8 @@ class C10_API SymInt {
   // TODO: these implementations are not optimal because they allocate a
   // temporary and then use the move constructor/assignment
   SymInt(const SymInt& s) : data_(0) {
-    if (s.is_symbolic()) {
-      *this = SymInt(s.toSymNodeImpl());
+    if (s.is_heap_allocated()) {
+      *this = SymInt(s.toSymNode());
     } else {
       data_ = s.data_;
     }
@@ -61,8 +63,8 @@ class C10_API SymInt {
 
   SymInt& operator=(const SymInt& s) {
     if (this != &s) {
-      if (s.is_symbolic()) {
-        *this = SymInt(s.toSymNodeImpl());
+      if (s.is_heap_allocated()) {
+        *this = SymInt(s.toSymNode());
       } else {
         data_ = s.data_;
       }
@@ -73,21 +75,14 @@ class C10_API SymInt {
     if (this != &s) {
       release_(); // release the current SymNode if any
       data_ = s.data_;
-      if (s.is_symbolic())
+      if (s.is_heap_allocated())
         s.data_ = 0;
     };
     return *this;
   }
 
-  SymInt clone() const {
-    if (is_symbolic()) {
-      return SymInt(toSymNodeImplUnowned()->clone());
-    }
-    return *this;
-  }
-
   SymNodeImpl* toSymNodeImplUnowned() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(is_symbolic());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(is_heap_allocated());
     uint64_t unextended_bits = static_cast<uint64_t>(data_) & ~MASK;
     uint64_t sign_bit_mask = 1ULL << (62 - 1);
     // https://stackoverflow.com/questions/42534749/signed-extension-from-24-bit-to-32-bit-in-c
@@ -97,14 +92,14 @@ class C10_API SymInt {
   }
 
   void release_() {
-    if (is_symbolic()) {
+    if (is_heap_allocated()) {
       SymNode::reclaim(toSymNodeImplUnowned()); // steal
     }
   }
 
   SymNodeImpl* release() && {
 #ifndef C10_MOBILE
-    TORCH_INTERNAL_ASSERT(is_symbolic());
+    TORCH_INTERNAL_ASSERT(is_heap_allocated());
     auto* r = toSymNodeImplUnowned();
     data_ = 0; // transfer ownership
     return r;
@@ -113,8 +108,8 @@ class C10_API SymInt {
 #endif
   }
 
-  // Only valid if is_symbolic()
-  SymNode toSymNodeImpl() const;
+  // Only valid if is_heap_allocated()
+  SymNode toSymNode() const;
 
   // Guaranteed to return a SymNode, wrapping using base if necessary
   SymNode wrap_node(const SymNode& base) const;
@@ -128,8 +123,10 @@ class C10_API SymInt {
   // shapes, and you don't have time to fix it immediately, as if we
   // try to trigger the path in C++ you'll appropriately get an error
   int64_t expect_int() const {
-    TORCH_CHECK(!is_symbolic());
-    return data_;
+    if (auto r = maybe_as_int()) {
+      return *r;
+    }
+    TORCH_CHECK(false, "expected int but got ", *this);
   }
 
   // Test if we have a hint for this int (e.g., guard_int would work).
@@ -150,8 +147,8 @@ class C10_API SymInt {
 
   // N.B. It's important to keep this definition in the header
   // as we expect if checks to be folded for mobile builds
-  // where `is_symbolic` is always false and optimize dead code paths
-  C10_ALWAYS_INLINE bool is_symbolic() const {
+  // where `is_heap_allocated` is always false and optimize dead code paths
+  C10_ALWAYS_INLINE bool is_heap_allocated() const {
 #ifdef C10_MOBILE
     return false;
 #else
@@ -167,6 +164,8 @@ class C10_API SymInt {
   void operator*=(const SymInt& sci);
   void operator+=(const SymInt& sci);
   void operator/=(const SymInt& sci);
+
+  SymInt clone() const;
 
   SymBool sym_eq(const SymInt&) const;
   SymBool sym_ne(const SymInt&) const;
@@ -197,32 +196,44 @@ class C10_API SymInt {
   SymInt min(const SymInt& sci) const;
   SymInt max(const SymInt& sci) const;
 
-  SymInt operator*(int64_t sci) const;
-  bool operator<(int64_t sci) const;
-  bool operator==(int64_t sci) const;
-  bool operator!=(int64_t sci) const;
-  bool operator<=(int64_t sci) const;
-  bool operator>(int64_t sci) const;
-  bool operator>=(int64_t sci) const;
-
   operator SymFloat() const;
 
+  // Don't use this.  Prefer maybe_as_int instead
   int64_t as_int_unchecked() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!is_symbolic());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!is_heap_allocated());
     return data_;
   }
 
-  // Return whether the integer is representable as a SymInt.
+  c10::optional<int64_t> maybe_as_int() const {
+    if (!is_heap_allocated()) {
+      return c10::make_optional(data_);
+    }
+    int64_t c = toSymNodeImplUnowned()->large_negative_int();
+    if (c != 0) {
+      return c10::make_optional(c);
+    }
+    return c10::nullopt;
+  }
+
+  // Return whether the integer is directly coercible to a SymInt
+  // without requiring heap allocation.  You don't need to use this
+  // to check if you can pass an integer to SymInt; this is guaranteed
+  // to work (it just might heap allocate!)
   static bool check_range(int64_t i) {
     return i > MAX_UNREPRESENTABLE_INT;
   }
 
-  // Return the min represetable integer as a SymInt
+  // Return the min representable integer as a SymInt without
+  // heap allocation.  For quantities that count bytes (or larger),
+  // this is still much larger than you need, so you may consider
+  // using this as a more efficient version of MIN_INT
   static constexpr int64_t min_representable_int() {
     return MAX_UNREPRESENTABLE_INT + 1;
   }
 
  private:
+  void promote_to_negative();
+
   // Constraints on the internal representation:
   //
   // - Should represent positive and small negative ints
@@ -231,10 +242,10 @@ class C10_API SymInt {
   // - Is symbolic test should be FAST (two arithmetic instructions is too
   // much).
   //   This code being a hotpath is based on Strobelight profiles of
-  //   is_symbolic().  FB only: https://fburl.com/strobelight/5l50ncxd
+  //   is_heap_allocated().  FB only: https://fburl.com/strobelight/5l50ncxd
   //   (you will need to change the time window).
   //
-  // So, the scheme is to reserve large negative numbers (asssuming
+  // So, the scheme is to reserve large negative numbers (assuming
   // two's complement):
   //
   // - 0b0.... means we are a positive int
@@ -280,39 +291,51 @@ inline c10::SymInt multiply_integers(Iter begin, Iter end) {
       [](const c10::SymInt& a, const c10::SymInt& b) { return a * b; });
 }
 
-inline SymInt operator+(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) + b;
-}
-inline SymInt operator-(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) - b;
-}
-inline SymInt operator*(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) * b;
-}
-inline SymInt operator/(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) / b;
-}
-inline SymInt operator%(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) % b;
-}
-inline bool operator==(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) == b;
-}
-inline bool operator!=(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) != b;
-}
-inline bool operator<(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) < b;
-}
-inline bool operator<=(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) <= b;
-}
-inline bool operator>(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) > b;
-}
-inline bool operator>=(int64_t a, const SymInt& b) {
-  return c10::SymInt(a) >= b;
-}
+#define DECLARE_SYMINT_OP_INTONLY(scalar_t, RetTy)      \
+  C10_API RetTy operator%(const SymInt& a, scalar_t b); \
+  C10_API RetTy operator%(scalar_t a, const SymInt& b);
+
+#define DECLARE_SYMINT_OP(scalar_t, RetTy)              \
+  C10_API RetTy operator+(const SymInt& a, scalar_t b); \
+  C10_API RetTy operator-(const SymInt& a, scalar_t b); \
+  C10_API RetTy operator*(const SymInt& a, scalar_t b); \
+  C10_API RetTy operator/(const SymInt& a, scalar_t b); \
+  C10_API RetTy operator+(scalar_t a, const SymInt& b); \
+  C10_API RetTy operator-(scalar_t a, const SymInt& b); \
+  C10_API RetTy operator*(scalar_t a, const SymInt& b); \
+  C10_API RetTy operator/(scalar_t a, const SymInt& b); \
+  C10_API bool operator==(const SymInt& a, scalar_t b); \
+  C10_API bool operator!=(const SymInt& a, scalar_t b); \
+  C10_API bool operator<(const SymInt& a, scalar_t b);  \
+  C10_API bool operator<=(const SymInt& a, scalar_t b); \
+  C10_API bool operator>(const SymInt& a, scalar_t b);  \
+  C10_API bool operator>=(const SymInt& a, scalar_t b); \
+  C10_API bool operator==(scalar_t a, const SymInt& b); \
+  C10_API bool operator!=(scalar_t a, const SymInt& b); \
+  C10_API bool operator<(scalar_t a, const SymInt& b);  \
+  C10_API bool operator<=(scalar_t a, const SymInt& b); \
+  C10_API bool operator>(scalar_t a, const SymInt& b);  \
+  C10_API bool operator>=(scalar_t a, const SymInt& b);
+
+DECLARE_SYMINT_OP_INTONLY(int64_t, SymInt)
+DECLARE_SYMINT_OP_INTONLY(int32_t, SymInt)
+DECLARE_SYMINT_OP_INTONLY(uint64_t, SymInt)
+DECLARE_SYMINT_OP_INTONLY(uint32_t, SymInt)
+DECLARE_SYMINT_OP(int64_t, SymInt)
+DECLARE_SYMINT_OP(int32_t, SymInt) // make sure constants work
+DECLARE_SYMINT_OP(uint64_t, SymInt)
+DECLARE_SYMINT_OP(uint32_t, SymInt)
+DECLARE_SYMINT_OP(double, SymFloat)
+DECLARE_SYMINT_OP(float, SymFloat) // just for completeness
+
+// On OSX size_t is different than uint64_t so we have to
+// define it separately
+#if defined(__APPLE__)
+DECLARE_SYMINT_OP_INTONLY(size_t, SymInt)
+DECLARE_SYMINT_OP(size_t, SymInt)
+#endif
+
+#undef DECLARE_SYMINT_OP
 
 C10_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
 C10_API SymInt operator-(const SymInt& s);

@@ -31,6 +31,7 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_onednn,
 )
+import torch.fx
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -202,7 +203,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         for name, module in loaded_from_package.named_modules():
             # noop, just make sure attribute "_modules" is restored correctly during torch.package import
-            assert(name is not None)
+            assert(name is not None)  # noqa: E275
 
         # Test copy and deepcopy
         copied_linear = copy.copy(qlinear)
@@ -1313,29 +1314,38 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                                              offsets, set_qconfig, is_emb_bag=True, dtype=qdtype)
 
     def test_prelu(self):
-        x = torch.randn((4, 4, 4, 4), dtype=torch.float)
-        qx = torch.quantize_per_tensor(x, 1.0, 0, dtype=torch.quint8)
+        for num_parameters in range(1, 10):
+            x = torch.randn(4, num_parameters, 4)
+            qx = torch.quantize_per_tensor_dynamic(x, dtype=torch.quint8, reduce_range=False)
 
-        # num_parameters = 1
-        prelu_module = nnq.PReLU(output_scale=1.0, output_zero_point=0, num_parameters=1)
-        w = torch.randn(1, dtype=torch.float)
-        qw = torch.quantize_per_tensor(w, 1.0, 0, dtype=torch.quint8)
-        prelu_module.set_weight(qw)
-        qy = prelu_module(qx)
-        qy_ref = torch.prelu(qx, qw)
 
-        self.assertEqual(qy_ref, qy,
-                         msg="PReLU module API failed")
+            f_prelu = torch.nn.PReLU(num_parameters=num_parameters)
+            f_prelu.weight = torch.nn.Parameter(torch.randn(num_parameters).abs())
+            f_prelu.qconfig = torch.ao.quantization.QConfig(
+                activation=torch.ao.quantization.default_observer,
+                weight=torch.ao.quantization.default_observer,)
+            f_prelu.activation_post_process = f_prelu.qconfig.activation()
+            f_prelu.activation_post_process(f_prelu(x))
+            q_prelu = nnq.PReLU.from_float(f_prelu)
+            w_obs = f_prelu.qconfig.weight()
+            w_obs(f_prelu.weight)
+            w_scale, w_zp = w_obs.calculate_qparams()
+            q_prelu_weight = torch.quantize_per_tensor(
+                f_prelu.weight,
+                dtype=torch.quint8,
+                scale=w_scale,
+                zero_point=w_zp
+            ).dequantize()
 
-        # num_parameters = num_channels
-        prelu_module = nnq.PReLU(output_scale=1.0, output_zero_point=0, num_parameters=4)
-        w = torch.randn(4, dtype=torch.float)
-        qw = torch.quantize_per_tensor(w, 1.0, 0, dtype=torch.quint8)
-        prelu_module.set_weight(qw)
-        qy = prelu_module(qx)
-        qy_ref = torch.prelu(qx, qw)
-        self.assertEqual(qy_ref, qy,
-                         msg="PReLU module API failed")
+            # check that the weight makes sense
+            self.assertEqual(q_prelu.weight.dequantize(), q_prelu_weight)
+            f_prelu.weight = torch.nn.Parameter(q_prelu.weight.dequantize())
+            qy = q_prelu(qx)
+            qy_ref = torch.quantize_per_tensor(
+                f_prelu(qx.dequantize()), q_prelu.scale, q_prelu.zero_point, dtype=torch.quint8
+            )
+            # check that the output makes sense
+            self.assertEqual(qy, qy_ref, atol=.1, rtol=.1)
 
     def test_channel_shuffle(self):
         """Tests the correctness of the ChannelShuffle module.
@@ -2053,3 +2063,33 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
             fp32_res = fp32_embedding(*args)
             ref_res = ref_embedding(*args)
             self.assertEqual(fp32_res, ref_res)
+
+    def test_linear_decomposed_weight_custom_qmin_qmax(self):
+        """Verify that reference Linear respects custom qmin/qmax for weight
+        """
+        linear_fp32 = torch.nn.Linear(2, 2)
+        qconfig = torch.ao.quantization.default_symmetric_qnnpack_qconfig
+        w_obs = qconfig.weight()
+        self.assertTrue(w_obs.quant_min == -127)
+        self.assertTrue(w_obs.quant_max == 127)
+        w_obs(linear_fp32.weight)
+        weight_qparams = torch.ao.quantization.utils.get_qparam_dict(w_obs)
+        weight_qparams["is_decomposed"] = True
+        linear_ref = nnqr.Linear.from_float(linear_fp32, weight_qparams)
+        linear_ref_traced = torch.fx.symbolic_trace(linear_ref)
+
+        # verify that the qmin/qmax arguments for weight q/dq are correctly
+        # taken from the observer
+        found = 0
+        for n in linear_ref_traced.graph.nodes:
+            if n.op != 'call_function':
+                continue
+            if n.target in (
+                torch.ops.quantized_decomposed.quantize_per_tensor,
+                torch.ops.quantized_decomposed.dequantize_per_tensor,
+            ):
+                _0, _1, _2, qmin, qmax, _5 = n.args
+                self.assertTrue(qmin == -127)
+                self.assertTrue(qmax == 127)
+                found += 1
+        self.assertTrue(found == 2)

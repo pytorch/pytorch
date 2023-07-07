@@ -23,7 +23,7 @@ class detect_anomaly:
 
     Example:
 
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ANOMOLY)
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ANOMALY)
         >>> import torch
         >>> from torch import autograd
         >>> class MyFunc(autograd.Function):

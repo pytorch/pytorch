@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOW
                                                   load_tests, slowTest, TEST_WITH_TSAN, TEST_WITH_TORCHDYNAMO,
                                                   TEST_WITH_ROCM, IS_MACOS)
 
+
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -30,6 +31,9 @@ TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.platform != 'win32' and \
     not TEST_WITH_ROCM  # https://github.com/pytorch/pytorch/issues/90940
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
+
+if TEST_CUDA_IPC:
+    torch.cuda.memory._set_allocator_settings('expandable_segments:False')
 
 
 class SubProcess(mp.Process):
@@ -819,6 +823,8 @@ if __name__ == "__main__":
         time.sleep(5)
         p.join()
 
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "non-deterministically hangs with ASAN https://github.com/pytorch/pytorch/issues/94024")
     def test_variable_sharing(self):
         for requires_grad in [True, False]:
             var = torch.arange(1., 26).view(5, 5).requires_grad_(requires_grad)

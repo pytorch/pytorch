@@ -140,7 +140,7 @@ def transform_get_item_tensor(constraint, counter):
     When the index is a tuple, then the output will be a tensor
     TODO: we have to check if this is the case for all HF models
 
-    The cases we are covrering here are a tuple with one of:
+    The cases we are covering here are a tuple with one of:
      - slice with default argument
      - None
 
@@ -207,7 +207,7 @@ def generate_binconstraint_t(constraint, counter):
         if constraint.lhs == Dyn:
             return T(), counter
         elif isinstance(constraint.lhs, TensorType):
-            is_fully_static = all([d != Dyn for d in constraint.lhs.__args__])
+            is_fully_static = all(d != Dyn for d in constraint.lhs.__args__)
             if is_fully_static:
                 return BinConstraintT(constraint.lhs, constraint.rhs, op_eq), counter
             else:
@@ -403,7 +403,7 @@ def generate_calc_product(constraint, counter):
     for p in all_possibilities:
         p = list(p)
         # this tells us there is a dynamic variable
-        contains_dyn = not(all([constraint.op == op_neq for constraint in p]))
+        contains_dyn = not(all(constraint.op == op_neq for constraint in p))
         if contains_dyn:
             mid_var = [Dyn]
             total_constraints = lhs + mid_var + rhs
@@ -438,7 +438,7 @@ def generate_reshape(constraint, counter):
 
     target = constraint.target.__args__
 
-    is_fully_static = all([d != Dyn for d in target])
+    is_fully_static = all(d != Dyn for d in target)
 
     # dynamic tensor
     c1_dyn = BinConstraintT(constraint.src, Dyn, op_eq)
@@ -700,7 +700,7 @@ def gen_all_reshape_possibilities(list_of_dims, target):
         list_of_dims: The input list of dimensions
         target: The tensor we want to reshape to
 
-    Returns: A disjuncition of transformed reshape constraints
+    Returns: A disjunction of transformed reshape constraints
 
     """
     all_possibilities = generate_all_int_dyn_dim_possibilities(list_of_dims)
@@ -830,8 +830,8 @@ def no_broadcast_dim_with_index(d1: List[DVar],
                                 i: int):
     """
     Args:
-        d1: inpput 1
-        d2: inpput 2
+        d1: input 1
+        d2: input 2
         d3: simulated broadcasting for input 1
         d4: simulated broadcasting for input 2
         i: the rank of the resulting tensor addition
@@ -971,7 +971,7 @@ def gen_greatest_upper_bound(constraint: TGreatestUpperBound, counter: int):
 def generate_all_broadcasting_possibilities_no_padding(d1: List[DVar], d2: List[DVar], d11: List[DVar], d12: List[DVar]):
     """
     Generate broadcasting constraints assuming no padding. Broadcasting can happen at any dimension.
-    We look at all combinations for all dimendions in d1 and d2
+    We look at all combinations for all dimensions in d1 and d2
     Args:
         d1: input1 dimensions
         d2: input2 dimensions

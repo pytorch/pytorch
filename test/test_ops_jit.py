@@ -158,7 +158,7 @@ class TestJit(JitCommonTestCase):
 
                     # right now, tuple of outputs and tensor output supported
                     # TODO: list of tensor outputs
-                    tuple_of_tensors = isinstance(out, tuple) and all([isinstance(elem, torch.Tensor) for elem in out])
+                    tuple_of_tensors = isinstance(out, tuple) and all(isinstance(elem, torch.Tensor) for elem in out)
 
                     if isinstance(out, torch.Tensor) or tuple_of_tensors:
                         if tuple_of_tensors:

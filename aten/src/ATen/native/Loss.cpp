@@ -282,6 +282,10 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
                     (input_val >= 0) && (input_val <= 1),
                     "all elements of input should be between 0 and 1"
                 );
+                TORCH_CHECK(
+                    (target_val >= 0) && (target_val <= 1),
+                    "all elements of target should be between 0 and 1"
+                );
 
                 // Binary cross entropy tensor is defined by the equation:
                 // L = -w (y ln(x) + (1-y) ln(1-x))

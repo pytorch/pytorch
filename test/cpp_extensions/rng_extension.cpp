@@ -20,6 +20,8 @@ struct TestCPUGenerator : public c10::GeneratorImpl {
   uint32_t random() { return static_cast<uint32_t>(value_); }
   uint64_t random64() { return value_; }
   void set_current_seed(uint64_t seed) override { throw std::runtime_error("not implemented"); }
+  void set_offset(uint64_t offset) override { throw std::runtime_error("not implemented"); }
+  uint64_t get_offset() const override { throw std::runtime_error("not implemented"); }
   uint64_t current_seed() const override { throw std::runtime_error("not implemented"); }
   uint64_t seed() override { throw std::runtime_error("not implemented"); }
   void set_state(const c10::TensorImpl& new_state) override { throw std::runtime_error("not implemented"); }

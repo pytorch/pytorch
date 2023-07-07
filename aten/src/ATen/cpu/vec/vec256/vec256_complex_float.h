@@ -157,7 +157,9 @@ public:
     return _mm256_permute_ps(ret, 0xD8);
   }
   __m256 abs_() const {
-    return _mm256_sqrt_ps(abs_2_());                // abs     abs
+    auto real = _mm256_moveldup_ps(values);   // real real
+    auto imag = _mm256_movehdup_ps(values);   // imag imag
+    return Sleef_hypotf8_u05(real, imag);     // abs  abs
   }
   Vectorized<c10::complex<float>> abs() const {
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
@@ -179,10 +181,7 @@ public:
     auto abs = abs_();
     auto zero = _mm256_setzero_ps();
     auto mask = _mm256_cmp_ps(abs, zero, _CMP_EQ_OQ);
-    auto abs_val = Vectorized(abs);
-
-    auto div = values / abs_val.values;       // x / abs(x)
-
+    auto div = values / abs;
     return _mm256_blendv_ps(div, zero, mask);
   }
   __m256 real_() const {
@@ -275,7 +274,7 @@ public:
     return scaled_values.exp();
   }
   Vectorized<c10::complex<float>> expm1() const {
-    AT_ERROR("not supported for complex numbers");
+    return map(std::expm1);
   }
   Vectorized<c10::complex<float>> sin() const {
     return map(std::sin);
@@ -483,12 +482,16 @@ Vectorized<c10::complex<float>> inline operator^(const Vectorized<c10::complex<f
 
 inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::eq(
     const Vectorized<c10::complex<float>>& other) const {
-  return (*this == other) & Vectorized<c10::complex<float>>(_mm256_set1_ps(1.0f));
+  auto eq = (*this == other);  // compares real and imag individually
+  // If both real numbers and imag numbers are equal, then the complex numbers are equal
+  return (eq.real() & eq.imag()) & Vectorized<c10::complex<float>>(_mm256_set1_ps(1.0f));
 }
 
 inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::ne(
     const Vectorized<c10::complex<float>>& other) const {
-  return (*this != other) & Vectorized<c10::complex<float>>(_mm256_set1_ps(1.0f));
+  auto ne = (*this != other);  // compares real and imag individually
+  // If either real numbers or imag numbers are not equal, then the complex numbers are not equal
+  return (ne.real() | ne.imag()) & Vectorized<c10::complex<float>>(_mm256_set1_ps(1.0f));
 }
 
 #endif

@@ -1,5 +1,5 @@
 /***************************************************************************************************
- * Copyright (c) 2017 - 2022 NVIDIA CORPORATION & AFFILIATES. All rights
+ * Copyright (c) 2017 - 2023 NVIDIA CORPORATION & AFFILIATES. All rights
  *reserved. SPDX-License-Identifier: BSD-3-Clause
  *
  * Redistribution and use in source and binary forms, with or without
@@ -47,7 +47,6 @@
 
 #include <ATen/native/transformers/cuda/mem_eff_attention/gemm/custom_mma_base.h>
 
-
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 namespace cutlass {
@@ -90,7 +89,7 @@ template <
     /// Use zfill or predicate for out-of-bound cp.async
     SharedMemoryClearOption SharedMemoryClear = SharedMemoryClearOption::kNone,
     /// Upper boundon the K dimension
-    int kMaxK = std::numeric_limits<int>::max(),
+    int kMaxK = cutlass::platform::numeric_limits<int>::max(),
     /// Used for partial specialization
     typename Enable = bool>
 class CustomMmaMultistage : public CustomMmaBase<Shape_, Policy_, Stages> {
@@ -751,7 +750,7 @@ class CustomMmaMultistage : public CustomMmaBase<Shape_, Policy_, Stages> {
     }
 
     if (SharedMemoryClear == SharedMemoryClearOption::kZfill) {
-      // commit and drain all pending and predicated LDGSTS pnz from the GEMM
+      // commit and drain all pending and predicated cp.async pnz from the GEMM
       // mainloop
       cutlass::arch::cp_async_fence();
       cutlass::arch::cp_async_wait<0>();

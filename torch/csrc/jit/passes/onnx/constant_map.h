@@ -3,7 +3,9 @@
 #include <c10/macros/Macros.h>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wnewline-eof")
 #include <onnx/shape_inference/implementation.h>
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
 #include <torch/csrc/jit/ir/ir.h>
@@ -34,6 +36,7 @@ class ConstantValueMap {
   static void SetValue(const std::string& tensorName, const at::Tensor& value);
   static bool HasValue(const std::string& tensorName);
   static c10::optional<at::Tensor> GetValue(const std::string& tensorName);
+  static void EraseValue(const std::string& tensorName);
 
   static std::vector<int64_t> GetCompleteShapeInto1DInt64Vector(
       const c10::SymbolicShape& shape);

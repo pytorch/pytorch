@@ -4,7 +4,7 @@
 
 #include <utility>
 
-// SHAPE CACHINHG CODE
+// SHAPE CACHING CODE
 namespace torch {
 namespace jit {
 namespace {

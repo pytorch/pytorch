@@ -158,7 +158,9 @@ TORCH_LIBRARY_IMPL(aten, Tracer, m) {
 
 namespace torch {
 namespace jit {
-void general_trace_function(const c10::OperatorHandle& op, Stack* stack) {
+static void general_trace_function(
+    const c10::OperatorHandle& op,
+    Stack* stack) {
   const auto input_size = op.schema().arguments().size();
   const auto output_size = op.schema().returns().size();
 

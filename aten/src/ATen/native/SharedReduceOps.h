@@ -158,19 +158,19 @@ struct WelfordOps {
       : correction(correction), take_sqrt(take_sqrt) {}
 };
 
-template <typename acc_t, typename factor_t>
+template <typename scalar_t, typename acc_t=scalar_t, typename factor_t=acc_t, typename out_t = acc_t>
 struct MeanOps {
   factor_t factor;
 
-  inline C10_DEVICE acc_t reduce(acc_t a, acc_t b, int64_t /*idx*/) const {
-    return combine(a, b);
+  inline C10_DEVICE acc_t reduce(acc_t a, scalar_t b, int64_t /*idx*/) const {
+    return combine(a, static_cast<acc_t>(b));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
+  inline C10_DEVICE out_t project(acc_t a) const {
     return a * factor;
   }
 

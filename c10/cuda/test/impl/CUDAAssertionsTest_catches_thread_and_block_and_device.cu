@@ -33,8 +33,8 @@ __global__ void cuda_device_assertions_fail_on_thread_block_kernel(
 /**
  * TEST: Triggering device side assertion on only 1 thread from <<<1024,128>>>
  * grid. kernel used is unique, it take 2 parameters to tell which particular
- * block and thread it should assert, all the other theads of the kernel will be
- * basically no-op.
+ * block and thread it should assert, all the other threads of the kernel will
+ * be basically no-op.
  */
 void cuda_device_assertions_catches_thread_and_block_and_device() {
   const auto stream = c10::cuda::getStreamFromPool();

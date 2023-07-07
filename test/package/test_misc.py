@@ -37,6 +37,7 @@ class TestMisc(PackageTestCase):
                 ├── .data
                 │   ├── extern_modules
                 │   ├── python_version
+                │   ├── serialization_id
                 │   └── version
                 ├── main
                 │   └── main
@@ -45,6 +46,7 @@ class TestMisc(PackageTestCase):
                 ├── package_a
                 │   ├── __init__.py
                 │   └── subpackage.py
+                ├── byteorder
                 └── module_a.py
             """
         )
@@ -61,6 +63,7 @@ class TestMisc(PackageTestCase):
                 ├── .data
                 │   ├── extern_modules
                 │   ├── python_version
+                │   ├── serialization_id
                 │   └── version
                 ├── main
                 │   └── main
@@ -69,6 +72,7 @@ class TestMisc(PackageTestCase):
                 ├── package_a
                 │   ├── __init__.py
                 │   └── subpackage.py
+                ├── byteorder
                 └── module_a.py
             """
         )

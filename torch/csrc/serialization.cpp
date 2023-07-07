@@ -231,11 +231,14 @@ void THPStorage_writeFileRaw(
   int64_t size_bytes = self->nbytes();
   int64_t numel = size_bytes / element_size;
   if (self->device_type() == at::kCPU) {
-    data = self->data<uint8_t>();
+    // We are using a mutable pointer here because we're ultimately
+    // calling into a Python API that requires that, even though it
+    // won't mutate the data.
+    data = static_cast<uint8_t*>(self->mutable_data());
   } else {
     // Here we use a tensor.to() to impl D2H for all non-CPU device.
     auto device_tensor = at::from_blob(
-        self->data<void>(),
+        self->mutable_data(),
         {size_bytes},
         {1},
         NULL,
@@ -320,8 +323,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
   if (torch::utils::THP_nativeByteOrder() ==
       torch::utils::THPByteOrder::THP_BIG_ENDIAN) {
     int64_t tsize = size; // convert little endian storage to big endian cpu
-    torch::utils::THP_decodeInt64Buffer(
-        &size, (const uint8_t*)&tsize, torch::utils::THP_nativeByteOrder(), 1);
+    torch::utils::THP_decodeInt64Buffer(&size, (const uint8_t*)&tsize, true, 1);
   }
   int64_t nbytes = element_size * size;
   if (!storage.defined()) {
@@ -343,7 +345,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
 
   uint8_t* data{};
   if (storage->device_type() == at::kCPU) {
-    data = storage->data<uint8_t>();
+    data = static_cast<uint8_t*>(storage->mutable_data());
   } else {
     cpu_data = std::unique_ptr<char[]>(new char[nbytes]);
     data = (uint8_t*)cpu_data.get();
@@ -367,22 +369,13 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
       // NOLINTNEXTLINE(bugprone-branch-clone)
       if (element_size == 2) {
         torch::utils::THP_decodeInt16Buffer(
-            (int16_t*)data + i,
-            le_buffer.get(),
-            torch::utils::THP_nativeByteOrder(),
-            to_convert);
+            (int16_t*)data + i, le_buffer.get(), true, to_convert);
       } else if (element_size == 4) {
         torch::utils::THP_decodeInt32Buffer(
-            (int32_t*)data + i,
-            le_buffer.get(),
-            torch::utils::THP_nativeByteOrder(),
-            to_convert);
+            (int32_t*)data + i, le_buffer.get(), true, to_convert);
       } else if (element_size == 8) {
         torch::utils::THP_decodeInt64Buffer(
-            (int64_t*)data + i,
-            le_buffer.get(),
-            torch::utils::THP_nativeByteOrder(),
-            to_convert);
+            (int64_t*)data + i, le_buffer.get(), true, to_convert);
       }
     }
   }
@@ -392,7 +385,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     auto cpu_tensor = at::from_blob(
         (void*)data, {nbytes}, at::device(at::kCPU).dtype(c10::kByte));
     auto device_tensor = at::from_blob(
-        storage->data<void>(),
+        storage->mutable_data(),
         {nbytes},
         {1},
         NULL,
