@@ -1052,7 +1052,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         result.writeline("'''\n)")
         # get the hash of the wrapper code to name the extension
-        wrapper_call_hash = codecache.code_hash(self.wrapper_call.getvalue())
+        wrapper_call_hash = codecache.code_hash(result.getvalue())
         result.splice(
             f"""
             module = CppWrapperCodeCache.load(cpp_wrapper_src, '{self.call_func_name}', '{wrapper_call_hash}', {self.cuda})
