@@ -236,10 +236,21 @@ def deserialize_metadata(metadata) -> Dict[str, str]:
             key = kv[:key_idx]
             assert kv[key_idx + 1] == "("
             assert kv[-1] == ")"
-            values = kv[key_idx + 2: -1].split(",")
-            assert len(values) == 2
-            module = deserialize_meta_func(values[1])
-            nn_module_stack[key] = (values[0], module)
+
+            paren = 0
+            comma_idx = None
+            for i, c in enumerate(kv[key_idx + 2:-1]):
+                if c == "," and paren == 0:
+                    assert comma_idx is None
+                    comma_idx = i + key_idx + 2
+                elif c == "(":
+                    paren += 1
+                elif c == ")":
+                    paren -= 1
+
+            assert comma_idx is not None
+            module = deserialize_meta_func(kv[comma_idx + 1:-1])
+            nn_module_stack[key] = (kv[key_idx + 2:comma_idx], module)
         ret["nn_module_stack"] = nn_module_stack
 
     if source_fn_str := metadata.get("source_fn"):
