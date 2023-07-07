@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import operator
 import os
@@ -177,6 +178,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
+        self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
         self.mutated_buffers: Set[str] = set()
@@ -467,6 +469,9 @@ class GraphLowering(torch.fx.Interpreter):
                     return name
             name = f"constant{len(self.constants)}"
             self.constants[name] = data
+            self.constant_reprs[name] = hashlib.sha256(
+                repr(data).encode("utf-8")
+            ).hexdigest()
             return name
 
         return TensorBox.create(

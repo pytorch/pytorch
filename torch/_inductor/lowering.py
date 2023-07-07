@@ -523,30 +523,6 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
-@register_lowering(aten.view.dtype, type_promotion_kind=None)
-def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
-    if x.get_dtype() == dtype:
-        return x
-
-    def _get_primitive_bitwidth(dtype):
-        if dtype.is_floating_point:
-            return torch.finfo(dtype).bits
-        else:
-            return torch.iinfo(dtype).bits
-
-    src_bits = _get_primitive_bitwidth(x.get_dtype())
-    dst_bits = _get_primitive_bitwidth(dtype)
-    if src_bits != dst_bits:
-        raise NotImplementedError(
-            f"bitcast {x.get_dtype()} to different bitwidth type {dtype} is not supported yet."
-        )
-
-    def _to_dtype_bitcast(x):
-        return ops.to_dtype_bitcast(x, dtype)
-
-    return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
-
-
 @register_lowering(prims.device_put, type_promotion_kind=None)
 def to_device(x: TensorBox, device: torch.device):
     device = decode_device(device)
@@ -1359,6 +1335,37 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     if layout_constraint is not None:
         add_layout_constraint(kernel, layout_constraint)
     return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
+
+
+fallback_view_dtype = fallback_handler(aten.view.dtype)
+
+
+@register_lowering(aten.view.dtype, type_promotion_kind=None)
+def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
+    # Triton doesn't handle fp16 -> int16 conversions.
+    if x.get_dtype() == torch.float16 and dtype == torch.int16:
+        return fallback_view_dtype(x, dtype)
+
+    if x.get_dtype() == dtype:
+        return x
+
+    def _get_primitive_bitwidth(dtype):
+        if dtype.is_floating_point:
+            return torch.finfo(dtype).bits
+        else:
+            return torch.iinfo(dtype).bits
+
+    src_bits = _get_primitive_bitwidth(x.get_dtype())
+    dst_bits = _get_primitive_bitwidth(dtype)
+    if src_bits != dst_bits:
+        raise NotImplementedError(
+            f"bitcast {x.get_dtype()} to different bitwidth type {dtype} is not supported yet."
+        )
+
+    def _to_dtype_bitcast(x):
+        return ops.to_dtype_bitcast(x, dtype)
+
+    return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
 
 
 def philox_rand_offset(shape):
@@ -3832,66 +3839,56 @@ def _validate_reduction_axis(x, axis):
     return axis
 
 
-def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
-    if dtype is not None:
-        x = to_dtype(x, dtype)
-    size = x.get_size()
-    axis = set(_validate_reduction_axis(x, axis))
-
-    kept_sizes = []
-    kept_idx = []
-    reduced_sizes = []
-    reduced_idx = []
-    for i in range(len(size)):
-        if i in axis:
-            reduced_idx.append(i)
-            reduced_sizes.append(size[i])
-        else:
-            kept_idx.append(i)
-            kept_sizes.append(size[i])
-
-    def loader(index, reduction_index):
-        assert len(reduction_index) == len(reduced_idx)
-        if keepdims:
-            assert len(index) == len(size)
-            assert all(index[i] == 0 for i in reduced_idx)
-            index = [index[i] for i in kept_idx]
-        assert len(index) == len(kept_idx)
-        new_index = [None] * (len(index) + len(reduction_index))
-        for idx, var in itertools.chain(
-            zip(kept_idx, index), zip(reduced_idx, reduction_index)
-        ):
-            new_index[idx] = var
-        return inner_loader(new_index)
-
-    if keepdims:
-        new_size = list(size)
-        for i in reduced_idx:
-            new_size[i] = sympy.Integer(1)
-    else:
-        new_size = kept_sizes
-
-    inner_loader = x.make_loader()
-    return dict(
-        device=x.get_device(),
-        dst_dtype=override_return_dtype or x.get_dtype(),
-        src_dtype=x.get_dtype(),
-        inner_fn=loader,
-        ranges=new_size,
-        reduction_ranges=reduced_sizes,
-    )
-
-
 def make_reduction(reduction_type: str, override_return_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
-        kwargs = _make_reduction_inner(
-            x,
-            axis=axis,
-            keepdims=keepdims,
-            dtype=dtype,
-            override_return_dtype=override_return_dtype,
+        if dtype is not None:
+            x = to_dtype(x, dtype)
+        size = x.get_size()
+        axis = set(_validate_reduction_axis(x, axis))
+
+        kept_sizes = []
+        kept_idx = []
+        reduced_sizes = []
+        reduced_idx = []
+        for i in range(len(size)):
+            if i in axis:
+                reduced_idx.append(i)
+                reduced_sizes.append(size[i])
+            else:
+                kept_idx.append(i)
+                kept_sizes.append(size[i])
+
+        def loader(index, reduction_index):
+            assert len(reduction_index) == len(reduced_idx)
+            if keepdims:
+                assert len(index) == len(size)
+                assert all(index[i] == 0 for i in reduced_idx)
+                index = [index[i] for i in kept_idx]
+            assert len(index) == len(kept_idx)
+            new_index = [None] * (len(index) + len(reduction_index))
+            for idx, var in itertools.chain(
+                zip(kept_idx, index), zip(reduced_idx, reduction_index)
+            ):
+                new_index[idx] = var
+            return inner_loader(new_index)
+
+        if keepdims:
+            new_size = list(size)
+            for i in reduced_idx:
+                new_size[i] = sympy.Integer(1)
+        else:
+            new_size = kept_sizes
+
+        inner_loader = x.make_loader()
+        result = Reduction.create(
+            device=x.get_device(),
+            dst_dtype=override_return_dtype or x.get_dtype(),
+            src_dtype=x.get_dtype(),
+            inner_fn=loader,
+            ranges=new_size,
+            reduction_ranges=reduced_sizes,
+            reduction_type=reduction_type,
         )
-        result = Reduction.create(reduction_type=reduction_type, **kwargs)
         if isinstance(
             result.data.data, Reduction
         ):  # Only realize if reduction isn't unrolled
@@ -3918,7 +3915,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
     return to_dtype(div(sum_result, denom), output_dtype)
 
 
-def var_mean_sum_(x, axis, correction, keepdim, return_mean):
+def var_mean_(x, axis, correction, keepdim, return_mean):
     if correction is None:
         correction = 1
 
@@ -3944,73 +3941,17 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     return x_var, x_mean
 
 
-def use_two_step_variance(x, axis, keepdim):
-    # triton-rocm currently doesn't support tl.reduce
-    device = x.get_device()
-    if device.type == "cuda" and torch.version.hip is not None:
-        return True
-
-    # Single pass variance cannot be split, so use sum based var-mean if it
-    # would be split
-    kwargs = _make_reduction_inner(
-        x,
-        axis=axis,
-        keepdims=keepdim,
-        dtype=x.get_dtype(),
-        override_return_dtype=None,
-    )
-    _, split = ir.Reduction.num_splits(
-        reduction_numel=sympy_product(kwargs["reduction_ranges"]),
-        reduction_type="sum",
-        **kwargs,
-    )
-    return split > 1
-
-
-def var_welford_(x, axis, *, correction, keepdim):
-    if correction is None:
-        correction = 1
-
-    sum_dx2 = make_reduction("var_unnormalized")(x, axis=axis, keepdims=keepdim)
-
-    dtype = sum_dx2.get_dtype()
-    size = x.get_size()
-    axis = _validate_reduction_axis(x, axis)
-    rnumel = sympy_product(size[i] for i in axis)
-
-    def get_constant_or_index_expr(x, dtype):
-        if isinstance(x, sympy.Expr) and not x.is_constant():
-            return ops.to_dtype(ops.index_expr(x, torch.int64), dtype)
-        return ops.constant(x, dtype)
-
-    def scale_fn(data):
-        c = get_constant_or_index_expr(correction, dtype)
-        N = get_constant_or_index_expr(rnumel, dtype)
-        return data / (N - c)
-
-    return make_pointwise(scale_fn)(sum_dx2)
-
-
 @register_lowering([aten.var, prims.var])
 def var_(x, axis=None, *, correction=None, keepdim=False):
-    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
-        return var_mean_sum_(
-            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
-        )
-
-    return var_welford_(x, axis=axis, correction=correction, keepdim=keepdim)
+    return var_mean_(
+        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
+    )
 
 
 @register_lowering(aten.var_mean)
 def var_mean(x, axis=None, *, correction=None, keepdim=False):
-    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
-        return var_mean_sum_(
-            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
-        )
-
-    return (
-        var_welford_(x, axis=axis, correction=correction, keepdim=keepdim),
-        mean(x, axis=axis, keepdim=keepdim),
+    return var_mean_(
+        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
     )
 
 
