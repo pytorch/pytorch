@@ -12,7 +12,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Math.h>
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)  || defined(CPU_CAPABILITY_ZVECTOR)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
@@ -123,7 +123,7 @@ inline float flag_to_float_scalar(T src) {
   return ret;
 }
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
 
 template <typename T>
 inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
@@ -172,6 +172,12 @@ inline at::vec::Vectorized<float> vec_convert_to_mask(at::vec::Vectorized<SRC> s
   return res_vec.loadu(dst_tmp);
 }
 
+#ifdef CPU_CAPABILITY_ZVECTOR
+template <typename SRC>
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
+  return at::vec::cast_zvector(src);
+}
+#else
 template <typename SRC>
 inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
   return vec_convert_to_mask(src);
@@ -190,4 +196,5 @@ template <>
 inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<float> src) {
   return src;
 }
+#endif
 #endif
