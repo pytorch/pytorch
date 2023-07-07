@@ -213,6 +213,54 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_error_node="aten.add.Tensor",
         )
 
+    def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=False)
+                self.fc1 = nn.Linear(9216, 128, bias=False)
+                self.register_buffer("buffer", torch.randn(1, 128))
+
+            def forward(self, tensor_x: torch.Tensor):
+                tensor_x = self.conv2(tensor_x)
+                tensor_x = F.sigmoid(tensor_x)
+                tensor_x = F.max_pool2d(tensor_x, 2)
+                tensor_x = torch.flatten(tensor_x, 1)
+                tensor_x = self.fc1(tensor_x)
+                tensor_x = tensor_x + self.buffer
+                tensor_x = F.sigmoid(tensor_x)
+                return tensor_x
+
+        class MNISTModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=False)
+                self.submodule = SubModule()
+                self.fc2 = nn.Linear(128, 10, bias=False)
+
+            def forward(self, tensor_x: torch.Tensor):
+                tensor_x = self.conv1(tensor_x)
+                tensor_x = F.sigmoid(tensor_x)
+                tensor_x = self.submodule(tensor_x)
+                tensor_x = self.fc2(tensor_x)
+                output = F.log_softmax(tensor_x, dim=1)
+                return output
+
+        tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
+
+        model = MNISTModel()
+        export_output = torch.onnx.dynamo_export(model, tensor_x)
+        model_proto = export_output.model_proto
+        self.assertEqual(
+            {
+                # TODO(bowbao): remove this once we correctly name the ONNX initializer.
+                # #104670
+                initializer.name.replace("_", ".")
+                for initializer in model_proto.graph.initializer
+            },
+            {*model.state_dict().keys()},
+        )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
