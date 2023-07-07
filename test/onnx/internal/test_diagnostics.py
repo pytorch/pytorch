@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import io
+import logging
 import typing
 import unittest
 from typing import AbstractSet, Protocol, Tuple
@@ -199,7 +200,8 @@ class TestOnnxDiagnostics(common_utils.TestCase):
             self._sample_rule,
             sample_level,
         ):
-            diagnostics.export_context().diagnose(self._sample_rule, sample_level)
+            diagnostic = infra.Diagnostic(self._sample_rule, sample_level)
+            diagnostics.export_context().log(diagnostic)
 
     def test_diagnostics_records_python_call_stack(self):
         diagnostic = diagnostics.ExportDiagnostic(self._sample_rule, diagnostics.levels.NOTE)  # fmt: skip
@@ -277,11 +279,44 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 (custom_rules.custom_rule_2, infra.Level.ERROR),  # type: ignore[attr-defined]
             },
         ):
-            self.context.diagnose(
+            diagnostic1 = infra.Diagnostic(
                 custom_rules.custom_rule, infra.Level.WARNING  # type: ignore[attr-defined]
             )
-            self.context.diagnose(
+            self.context.log(diagnostic1)
+
+            diagnostic2 = infra.Diagnostic(
                 custom_rules.custom_rule_2, infra.Level.ERROR  # type: ignore[attr-defined]
+            )
+            self.context.log(diagnostic2)
+
+    def test_diagnostic_context_logs_with_correct_logger_level_based_on_diagnostic_level(
+        self,
+    ):
+        diagnostic_logging_level_pairs = [
+            (infra.Level.NONE, logging.DEBUG),
+            (infra.Level.NOTE, logging.INFO),
+            (infra.Level.WARNING, logging.WARNING),
+            (infra.Level.ERROR, logging.ERROR),
+        ]
+
+        for diagnostic_level, expected_logger_level in diagnostic_logging_level_pairs:
+            with self.assertLogs(
+                self.context.logger, level=expected_logger_level
+            ) as assert_log_context:
+                self.context.log(
+                    infra.Diagnostic(
+                        self.rules.rule_without_message_args, diagnostic_level
+                    )
+                )
+                for record in assert_log_context.records:
+                    self.assertEqual(record.levelno, expected_logger_level)
+
+    def test_diagnostic_context_raises_if_diagnostic_is_error(self):
+        with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
+            self.context.log_and_raise_if_error(
+                infra.Diagnostic(
+                    self.rules.rule_without_message_args, infra.Level.ERROR
+                )
             )
 
 

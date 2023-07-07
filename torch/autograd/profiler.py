@@ -6,6 +6,7 @@ import torch
 
 import torch.cuda
 from torch._C._profiler import _ExperimentalConfig
+from torch._C import _get_privateuse1_backend_name
 
 from torch.autograd import (
     _disable_profiler,
@@ -170,6 +171,7 @@ class profile:
             enabled=True,
             *,
             use_cuda=False,
+            use_device=None,
             record_shapes=False,
             with_flops=False,
             profile_memory=False,
@@ -177,11 +179,13 @@ class profile:
             with_modules=False,
             use_kineto=False,
             use_cpu=True,
+            use_mtia=False,
             experimental_config=None):
         self.enabled: bool = enabled
         if not self.enabled:
             return
         self.use_cuda = use_cuda
+        self.use_device = use_device
         self.function_events: Optional[EventList] = None
         self.entered = False
         self.record_shapes = record_shapes
@@ -191,6 +195,7 @@ class profile:
         self.with_stack = with_stack
         self.with_modules = with_modules
         self.use_cpu = use_cpu
+        self.use_mtia = use_mtia
         if experimental_config is None:
             experimental_config = _ExperimentalConfig()
         self.experimental_config = experimental_config
@@ -207,6 +212,8 @@ class profile:
         self.kineto_activities = set()
         if self.use_cpu:
             self.kineto_activities.add(ProfilerActivity.CPU)
+        if self.use_mtia:
+            self.kineto_activities.add(ProfilerActivity.MTIA)
 
         self.profiler_kind = ProfilerState.KINETO
         if self.use_cuda:
@@ -216,6 +223,22 @@ class profile:
                 self.profiler_kind = ProfilerState.KINETO_GPU_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.CUDA)
+
+        if self.use_device:
+            if self.use_device == 'cuda':
+                # TODO:using 'use_device' instead of 'use_cuda' facilitates access by other devices
+                # and integrate it in subsequent pr.
+                pass
+            elif self.use_device == _get_privateuse1_backend_name():
+                if not use_kineto:
+                    assert self.use_cpu, "Legacy custombackend profiling requires use_cpu=True"
+                    self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
+                else:
+                    raise AssertionError(
+                        "Now, custombackend events does not support Kineto (use_kineto=False)"
+                    )
+            else:
+                raise AssertionError(f"{self.use_device} doesn't support profile.")
 
         assert len(self.kineto_activities) > 0, \
             "No activities specified for the profiler"
@@ -337,7 +360,7 @@ class profile:
         assert self.function_events is not None
         return self.function_events.self_cpu_time_total
 
-    def _parse_kineto_results(self, result):
+    def _parse_kineto_results(self, result: _ProfilerResult):
         # result.events() has most of the events - PyTorch op-level and device-level events
 
         trace_start_us = result.trace_start_us()
@@ -388,6 +411,7 @@ class profile:
                 end_us=rel_end_us,
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
+                concrete_inputs=kineto_event.concrete_inputs(),
                 stack=[entry for entry in kineto_event.stack() if _filter_stack_entry(entry)],
                 scope=kineto_event.scope(),
                 cpu_memory_usage=cpu_memory_usage,

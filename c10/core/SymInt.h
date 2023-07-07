@@ -7,6 +7,7 @@
 #include <c10/util/Optional.h>
 
 #include <numeric>
+#include <type_traits>
 
 namespace c10 {
 

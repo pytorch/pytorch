@@ -12,6 +12,7 @@ from torch._C._distributed_c10d import (
     AllgatherOptions,
     AllreduceOptions,
     AllToAllOptions,
+    BarrierOptions,
     BroadcastOptions,
     ReduceScatterOptions,
     ScatterOptions,
@@ -105,6 +106,7 @@ class AllGather:
             for dest in data:
                 dest_tensor = dest[0][0][src_rank]
                 dest_tensor.copy_(src_tensor)
+
 
 class Scatter:
     def __init__(self, src):
@@ -298,6 +300,9 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
+    def barrier(self, opts=BarrierOptions()):
+        return self.allreduce(tensor_list=[torch.ones(1)])
+
     def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
         coll = ProcessLocalGroup._start_coll(AllGather(), self)
         res = coll.join(self._rank, (output_tensors, input_tensor))
@@ -335,6 +340,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
     def _reduce_scatter_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
         tensor_list = list(torch.chunk(input_tensor, self._world_size))
         return self.reduce_scatter([output_tensor], [tensor_list], opts)
+
+    def allgather_into_tensor_coalesced(self, output_tensor_list, input_tensor_list):
+        res = None
+        for o_t, i_t in zip(output_tensor_list, input_tensor_list):
+            res = self._allgather_base(o_t, i_t)
+        return res
 
     def __init__(self, rank, world_size):
         super().__init__(rank, world_size)
@@ -381,7 +392,7 @@ class WorldData:
     tags_to_pg: Dict[str, List[dist.ProcessGroup]]
     pg_to_tag: Dict[dist.ProcessGroup, str]
     pg_coalesce_state: Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]
-    pg_object_coll_device: Dict[dist.ProcessGroup, torch.device]
+    pg_default_device: Dict[dist.ProcessGroup, torch.device]
 
 
 class ThreadLocalWorld:
@@ -437,8 +448,8 @@ class ThreadLocalWorld:
         return self._get_world().pg_coalesce_state
 
     @property
-    def pg_object_coll_device(self) -> Dict[dist.ProcessGroup, torch.device]:
-        return self._get_world().pg_object_coll_device
+    def pg_default_device(self) -> Dict[dist.ProcessGroup, torch.device]:
+        return self._get_world().pg_default_device
 
 
 _old_pg_world = None

@@ -1,10 +1,9 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
-#include <memory>
 
 namespace c10 {
 

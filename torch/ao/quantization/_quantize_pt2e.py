@@ -11,6 +11,7 @@ from ._pt2e.utils import (
     _fuse_conv_bn_,
     _rearrange_weight_observer_for_decomposed_linear,
 )
+from ._pt2e.representation import reference_representation_rewrite
 from .fx.prepare import prepare as fx_prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
 from torch.ao.quantization import QConfigMapping
@@ -24,7 +25,7 @@ def prepare_pt2e(
     qconfig_mapping: QConfigMapping,
     example_inputs: Tuple[Any, ...],
     backend_config: BackendConfig,
-):
+) -> GraphModule:
     node_name_to_scope = _get_node_name_to_scope(model)
 
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
@@ -50,7 +51,7 @@ def prepare_pt2e(
 def prepare_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
-):
+) -> GraphModule:
     node_name_to_scope = _get_node_name_to_scope(model)
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
     # to be quantized before fusion
@@ -66,7 +67,7 @@ def prepare_pt2e_quantizer(
 def prepare_qat_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
-):
+) -> GraphModule:
     node_name_to_scope = _get_node_name_to_scope(model)
     quantizer.annotate(model)
     quantizer.validate(model)
@@ -82,8 +83,11 @@ def prepare_qat_pt2e_quantizer(
     return model
 
 def convert_pt2e(
-    model: GraphModule
-):
-    model = _convert_to_reference_decomposed_fx(model)  # type: ignore[assignment]
+    model: GraphModule,
+    use_reference_representation: bool = False,
+) -> GraphModule:
+    model = _convert_to_reference_decomposed_fx(model)
     model = _fold_conv_bn_qat(model)
+    if use_reference_representation:
+        model = reference_representation_rewrite(model)
     return model

@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
     NATIVE_DEVICES, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
-    TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC
+    TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC, _get_torch_rocm_version
 from torch.testing._internal.common_dtype import get_all_dtypes
 
 try:
@@ -564,6 +564,32 @@ class MPSTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+class PrivateUse1TestBase(DeviceTypeTestBase):
+    primary_device: ClassVar[str]
+    device_mod = None
+    device_type = 'privateuse1'
+
+    @classmethod
+    def get_primary_device(cls):
+        return cls.primary_device
+
+    @classmethod
+    def get_all_devices(cls):
+        primary_device_idx = int(cls.get_primary_device().split(':')[1])
+        num_devices = cls.device_mod.device_count()
+        prim_device = cls.get_primary_device()
+        device_str = f'{cls.device_type}:{{0}}'
+        non_primary_devices = [device_str.format(idx) for idx in range(num_devices) if idx != primary_device_idx]
+        return [prim_device] + non_primary_devices
+
+    @classmethod
+    def setUpClass(cls):
+        cls.device_type = torch._C._get_privateuse1_backend_name()
+        cls.device_mod = getattr(torch, cls.device_type, None)
+        assert cls.device_mod is not None, f'''torch has no module of `{cls.device_type}`, you should register
+                                            a module by `torch._register_device_module`.'''
+        cls.primary_device = '{device_type}:{id}'.format(device_type=cls.device_type, id=cls.device_mod.current_device())
+
 # Adds available device-type-specific test base classes
 def get_device_type_test_bases():
     # set type to List[Any] due to mypy list-of-union issue:
@@ -581,6 +607,10 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
+        device_type = torch._C._get_privateuse1_backend_name()
+        device_mod = getattr(torch, device_type, None)
+        if hasattr(device_mod, "is_available") and device_mod.is_available():
+            test_bases.append(PrivateUse1TestBase)
         # Disable MPS testing in generic device testing temporarily while we're
         # ramping up support.
         # elif torch.backends.mps.is_available():
@@ -943,6 +973,11 @@ class skipXLAIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='xla')
 
+class skipPRIVATEUSE1If(skipIf):
+
+    def __init__(self, dep, reason):
+        device_type = torch._C._get_privateuse1_backend_name()
+        super().__init__(dep, reason, device_type=device_type)
 
 def _has_sufficient_memory(device, size):
     if torch.device(device).type == 'cuda':
@@ -1201,6 +1236,13 @@ def onlyCUDA(fn):
 def onlyMPS(fn):
     return onlyOn('mps')(fn)
 
+def onlyPRIVATEUSE1(fn):
+    device_type = torch._C._get_privateuse1_backend_name()
+    device_mod = getattr(torch, device_type, None)
+    if device_mod is None:
+        reason = "Skip as torch has no module of {0}".format(device_type)
+        return unittest.skip(reason)(fn)
+    return onlyOn(device_type)(fn)
 
 def disablecuDNN(fn):
 
@@ -1266,13 +1308,27 @@ def skipCUDAIfNoMagma(fn):
 def has_cusolver():
     return not TEST_WITH_ROCM
 
-# Skips a test on CUDA if cuSOLVER is not available
+def has_hipsolver():
+    rocm_version = _get_torch_rocm_version()
+    # hipSOLVER is disabled on ROCM < 5.3
+    return rocm_version >= (5, 3)
+
+# Skips a test on CUDA/ROCM if cuSOLVER/hipSOLVER is not available
 def skipCUDAIfNoCusolver(fn):
-    return skipCUDAIf(not has_cusolver(), "cuSOLVER not available")(fn)
+    return skipCUDAIf(not has_cusolver() and not has_hipsolver(), "cuSOLVER not available")(fn)
+
 
 # Skips a test if both cuSOLVER and MAGMA are not available
 def skipCUDAIfNoMagmaAndNoCusolver(fn):
     if has_cusolver():
+        return fn
+    else:
+        # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
+        return skipCUDAIfNoMagma(fn)
+
+# Skips a test if both cuSOLVER/hipSOLVER and MAGMA are not available
+def skipCUDAIfNoMagmaAndNoLinalgsolver(fn):
+    if has_cusolver() or has_hipsolver():
         return fn
     else:
         # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
@@ -1296,9 +1352,7 @@ def skipCUDAIfRocmVersionLessThan(version=None):
                 if not TEST_WITH_ROCM:
                     reason = "ROCm not available"
                     raise unittest.SkipTest(reason)
-                rocm_version = str(torch.version.hip)
-                rocm_version = rocm_version.split("-")[0]    # ignore git sha
-                rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+                rocm_version_tuple = _get_torch_rocm_version()
                 if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
                     reason = "ROCm {0} is available but {1} required".format(rocm_version_tuple, version)
                     raise unittest.SkipTest(reason)
@@ -1386,6 +1440,9 @@ def skipXLA(fn):
 
 def skipMPS(fn):
     return skipMPSIf(True, "test doesn't work on MPS backend")(fn)
+
+def skipPRIVATEUSE1(fn):
+    return skipPRIVATEUSE1If(True, "test doesn't work on privateuse1 backend")(fn)
 
 # TODO: the "all" in the name isn't true anymore for quite some time as we have also have for example XLA and MPS now.
 #  This should probably enumerate all available device type test base classes.

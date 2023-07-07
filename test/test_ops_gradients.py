@@ -5,6 +5,8 @@ import torch
 
 from torch.testing._internal.common_utils import TestGradients, run_tests
 from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
+from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, OpDTypes)
 
@@ -17,7 +19,7 @@ _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
 
 class TestBwdGradients(TestGradients):
     # Tests that gradients are computed correctly
-    @_gradcheck_ops(op_db)
+    @_gradcheck_ops(op_db + control_flow_opinfo_db + custom_op_db)
     def test_fn_grad(self, device, dtype, op):
         # This is verified by test_dtypes in test_ops.py
         if dtype not in op.supported_backward_dtypes(torch.device(device).type):
@@ -32,7 +34,7 @@ class TestBwdGradients(TestGradients):
     #     self._skip_helper(op, device, dtype)
     #     self._grad_test_helper(device, dtype, op, op.get_method())
 
-    @_gradcheck_ops(op_db)
+    @_gradcheck_ops(op_db + custom_op_db)
     def test_inplace_grad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if not op.inplace_variant:
@@ -51,7 +53,7 @@ class TestBwdGradients(TestGradients):
             self._grad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
     # Test that gradients of gradients are computed correctly
-    @_gradcheck_ops(op_db)
+    @_gradcheck_ops(op_db + control_flow_opinfo_db + custom_op_db)
     def test_fn_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if not op.supports_gradgrad:
@@ -60,7 +62,7 @@ class TestBwdGradients(TestGradients):
             self._check_helper(device, dtype, op, op.get_op(), 'bwgrad_bwgrad')
 
     # Test that gradients of gradients are properly raising
-    @_gradcheck_ops(op_db)
+    @_gradcheck_ops(op_db + custom_op_db)
     def test_fn_fail_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
         if op.supports_gradgrad:
