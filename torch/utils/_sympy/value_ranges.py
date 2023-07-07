@@ -174,6 +174,7 @@ class SymPyValueRangeAnalysis:
 
         return ValueRanges.wrap(value)
 
+    @staticmethod
     def not_(a):
         a = ValueRanges.wrap(a)
         assert a.is_bool
