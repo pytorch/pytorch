@@ -51,6 +51,7 @@ import importlib
 import torch
 import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
+import torch.utils.checkpoint
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
@@ -1694,16 +1695,25 @@ def defake(x):
     return y
 
 
-def is_utils_checkpoint(obj):
-    # Lazy import to avoid circular dependenices
-    import torch.utils.checkpoint
+# NB: The check of utils.checkpoipt is done lazily after TorchPatcher is called so
+# that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
+# sitting in a separate function.
+# We also need the original untouched/ not disabled torch utils checkpoint
+# becuase distributed checkpointed wrappers import these utils before
+# TorchDynamo TorchPatcher runs.
+untouched_torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
 
-    return obj is torch.utils.checkpoint.checkpoint
+
+def is_utils_checkpoint(obj):
+    return (
+        obj is torch.utils.checkpoint.checkpoint
+        or obj is untouched_torch_utils_checkpoint
+    )
 
 
 def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
-    from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
+    from .variables.torch import TorchHigherOrderOperatorVariable
 
     # TODO - This is a temporary sitaution where we have two versions of
     # checkpointing implemetation. We will converge on one and remove the other.
@@ -1711,7 +1721,7 @@ def build_checkpoint_variable(**options):
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
 
-    return TorchHigherOrderOperatorVariable.make(
+    return TorchHigherOrderOperatorVariable(
         activation_checkpoint_op,
         **options,
     )
