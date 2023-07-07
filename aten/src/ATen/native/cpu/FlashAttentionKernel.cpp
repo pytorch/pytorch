@@ -512,7 +512,6 @@ void cpu_flash_attention_backward(
     for (const auto x : c10::irange(begin, end)) {
       (void)x; // Suppress unused variable
       // rowsum of grad_out * out
-      scalar_t dsum[qSplitSize];
       for (int64_t m = 0; m < qSize; m += qSplitSize) {
         int64_t qBlockSize = std::min(qSplitSize, qSize - m);
         // dsum <- rowsum(grad_out * out)
