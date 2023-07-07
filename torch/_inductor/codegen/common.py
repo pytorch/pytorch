@@ -130,13 +130,13 @@ class DataTypePropagation:
         if node.target in (
             "load",
             "store",
-            "store_reduction",
         ):
             buf_name = node.args[1]
             return V.graph.get_dtype(buf_name)
 
         if node.target == "reduction":
-            return node.args[1]
+            _, _, dtype, _, _, _, _ = node.args
+            return dtype
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
@@ -776,13 +776,10 @@ class Kernel(CodeGen):
         finally:
             self.loads = prior
 
-    def store_reduction(self, name, index, value):
-        raise NotImplementedError()
-
     def store(self, name, index, value, mode=None):
         raise NotImplementedError()
 
-    def reduction(self, dtype, src_dtype, reduction_type, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         raise NotImplementedError()
 
     def bucketize(
@@ -843,19 +840,11 @@ class Kernel(CodeGen):
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def store_reduction(name, index, value):
+            def reduction(name, dtype, src_dtype, reduction_type, index, value):
                 self.store_buffer_names.add(name)
-                self.cse.store_cache[name] = value
-                if self.current_node:
-                    for other_name in self.current_node.get_mutations():
-                        self.cse.store_cache[other_name] = value
-
-                if name not in V.graph.removed_buffers:
-                    return self.store_reduction(name, index, value)
-
-            @staticmethod
-            def reduction(dtype, src_dtype, reduction_type, value):
-                return self.reduction(dtype, src_dtype, reduction_type, value)
+                return self.reduction(
+                    name, dtype, src_dtype, reduction_type, index, value
+                )
 
             @staticmethod
             def bucketize(
