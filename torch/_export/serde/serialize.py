@@ -1037,7 +1037,11 @@ class GraphModuleDeserializer:
             raise SerializeError(f"Unhandled argument {inp}")
 
     def deserialize_sym_argument(self, sym_int_arg):
-        return self.serialized_name_to_node[sym_int_arg.as_name]
+        if sym_int_arg.type == "as_int":
+            return sym_int_arg.as_int
+        else:
+            assert sym_int_arg.type == "as_name"
+            return self.serialized_name_to_node[sym_int_arg.as_name]
 
     def deserialize_sym_op_outputs(self, serialized_node: Node, fx_node: torch.fx.Node):
         self.sync_fx_node(serialized_node.outputs[0].value.as_name, fx_node)
