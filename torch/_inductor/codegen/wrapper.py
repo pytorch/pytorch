@@ -539,6 +539,9 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
 
     def generate_stream_creation(self):
+        # ignore cpp_wrapper
+        if V.graph.cpp_wrapper:
+            return
         self.write_triton_header_once()
         self.header.writeline(f"")
         if config.multiple_streams:
