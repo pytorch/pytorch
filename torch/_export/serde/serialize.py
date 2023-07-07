@@ -751,11 +751,9 @@ class GraphModuleSerializer:
 
 class ExportedProgramSerializer:
     def __init__(self, opset_version: Optional[Dict[str, int]] = None):
-        self.opset_version: Dict[str, int] = {}
-        if opset_version:
-            self.opset_version.update(opset_version)
-        if "aten" not in self.opset_version:
-            self.opset_version["aten"] = torch._C._get_max_operator_version()
+        self.opset_version: Dict[str, int] = (
+            {} if opset_version is None else opset_version
+        )
 
     def serialize(self, exported_program: ep.ExportedProgram) -> Tuple[ExportedProgram, bytes]:
         serialized_graph_module = (
@@ -1070,11 +1068,9 @@ class GraphModuleDeserializer:
 
 class ExportedProgramDeserializer:
     def __init__(self, expected_opset_version: Optional[Dict[str, int]] = None):
-        self.expected_opset_version: Dict[str, int] = {}
-        if expected_opset_version:
-            self.expected_opset_version.update(expected_opset_version)
-        if "aten" not in self.expected_opset_version:
-            self.expected_opset_version["aten"] = torch._C._get_max_operator_version()
+        self.expected_opset_version: Dict[str, int] = (
+            {} if expected_opset_version is None else expected_opset_version
+        )
 
     def deserialize_range_constraints(
         self,
