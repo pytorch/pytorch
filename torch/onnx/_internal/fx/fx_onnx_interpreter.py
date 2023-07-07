@@ -657,10 +657,6 @@ class FxOnnxInterpreter:
         ],
         fx_graph_module: torch.fx.GraphModule,
     ):
-        if not isinstance(node.target, str):
-            raise TypeError(
-                f"node.target must be a str, not {type(node.target)}. Found for node {node}."
-            )
         assert isinstance(node.target, str), f"node.target {node.target} is not a str."
         attr_tensor = getattr(fx_graph_module, node.target)
         assert isinstance(attr_tensor, torch.Tensor), f"{attr_tensor} is not a tensor."
