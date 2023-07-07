@@ -434,6 +434,10 @@ class TestModuleHooks(TestCase):
         def ctx_shutdown_hook(m, i, o):
             ctx.__exit__()
 
+        def ctx_shutdown_failure_hook(m, i, o):
+            ctx.__exit__()
+            raise RuntimeError("failing in ctx shutdown")
+
         def throw_hook(m, i, o):
             raise RuntimeError("failing in throw")
 
@@ -468,24 +472,32 @@ class TestModuleHooks(TestCase):
             model(x, fail=False)
         self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1])
 
-        # make sure that always forward hooks are properly removed
+        # make sure that always called forward hooks are properly removed
         forward_hook_handle.remove()
         forward_hook_handle2.remove()
         self.assertTrue(len(model._forward_hooks_always_called) == 0)
+
+        # make sure that always called forward hook is not run twice if it fails while running
+        forward_hook_handle3 = model.register_forward_hook(ctx_shutdown_failure_hook, always_call=True)
+        with self.assertRaisesRegex(RuntimeError, "failing in ctx setup"):
+            model(x, fail=False)
+        self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1, 2, -1])
+
+        forward_hook_handle3.remove()
 
         global_forward_hook_handle = nn.modules.module.register_module_forward_hook(ctx_shutdown_hook, always_call=True)
         self.assertTrue(len(nn.modules.module._global_forward_hooks_always_called) == 1)
         # make sure global forward hook runs when forward pre hook raises RuntimeError
         with self.assertRaisesRegex(RuntimeError, "failing in ctx setup"):
             model(x, fail=False)
-        self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1, 2, -1])
+        self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1, 2, -1, 2, -1])
 
         # make sure forced global forward hook is properly removed
         global_forward_hook_handle.remove()
         self.assertTrue(len(nn.modules.module._global_forward_hooks_always_called) == 0)
         with self.assertRaisesRegex(RuntimeError, "failing in ctx setup"):
             model(x)
-        self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1, 2, -1, 2])
+        self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1, 2, -1, 2, -1, 2])
 
     @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_bw_hook_warning_for_non_tensor_or_tuple(self):
