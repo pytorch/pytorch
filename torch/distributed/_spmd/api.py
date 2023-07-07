@@ -271,6 +271,9 @@ SPMD_DECOMP_TABLE = {
     aten._foreach_mul_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_mul.Scalar
     ),
+    aten._foreach_div_.Scalar: partial(
+        _foreach_binop_scalar_decomp, aten._foreach_div.Scalar
+    ),
     aten._foreach_neg_.default: partial(
         _foreach_unaop_decomp, aten._foreach_neg.default
     ),
