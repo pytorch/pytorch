@@ -8,18 +8,7 @@
 #include <cpuinfo.h>
 
 #include <c10/util/CallOnce.h>
-#endif // #if AT_MKLDNN_ENABLED()
 
-enum PostOps {
-  NoPostOp,
-  Relu,
-  LeakyRelu,
-  Tanh,
-  Add,
-  AddRelu,
-};
-
-#if AT_MKLDNN_ENABLED()
 using PrimitiveCacheKey = std::tuple<
     double, // input_scale
     int64_t, // input_zero_point
@@ -116,6 +105,13 @@ struct DeconvPrimitiveCache : PrimitiveCache {
   DeconvParams& get_params() {
     return params;
   }
+};
+
+enum PostOps {
+  NoPostOp,
+  Relu,
+  LeakyRelu,
+  Tanh,
 };
 
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
@@ -394,7 +390,6 @@ at::Tensor _qconv_prepack_pt2e(
     torch::List<int64_t> dilation,
     int64_t groups);
 
-template <PostOps postOpFused>
 static at::Tensor _quantized_convolution_pt2e(
     at::Tensor act, // contains quantized values but not QTensor
     double act_scale,
@@ -414,6 +409,10 @@ static at::Tensor _quantized_convolution_pt2e(
     double accum_scale=1.0,
     int64_t accum_zero_point=0,
     bool fp32_output=false,
-    const c10::optional<c10::ArrayRef<c10::IValue>>& post_op_args=c10::nullopt);
+    c10::optional<c10::string_view> binary_attr=c10::nullopt,
+    c10::optional<at::Scalar> binary_alpha=c10::nullopt,
+    c10::optional<c10::string_view> unary_attr=c10::nullopt,
+    torch::List<c10::optional<at::Scalar>> unary_scalars=torch::List<c10::optional<at::Scalar>>(),
+    c10::optional<c10::string_view> unary_algorithm=c10::nullopt);
 
 #endif // #if AT_MKLDNN_ENABLED()

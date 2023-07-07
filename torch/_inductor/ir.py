@@ -4184,7 +4184,7 @@ class QConv(ExternKernelAlloc):
         )
 
 
-class QConvPT2E(ExternKernelAlloc):
+class QConvPointWisePT2E(ExternKernelAlloc):
     def __init__(
         self,
         layout,
@@ -4195,6 +4195,10 @@ class QConvPT2E(ExternKernelAlloc):
         constant_args=(),
         dim=2,
         has_bias=False,
+        fp32_output=False,
+        unary_attr="none",
+        unary_scalars=(),
+        unary_algorithm="",
     ):
         """
         Needs input/weight/output qparams
@@ -4231,6 +4235,10 @@ class QConvPT2E(ExternKernelAlloc):
                 output_qparams[0],
                 output_qparams[1],
                 output_qparams[2],
+                fp32_output,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
             ]
         )
 
@@ -4247,15 +4255,22 @@ class QConvPT2E(ExternKernelAlloc):
             w_scale, w_zp = args[-2], args[-1]
             const_args = []
             const_args.extend(self.codegen_const_args())
-            # const_args is: [stride, padding, dilation, groups, x_scale, x_zp, w_axis, o_inv_scale, o_zp, o_dtype]
-            o_dtype = const_args[-1]
-            o_inv_scale, o_zp = const_args[-3], const_args[-2]
-            w_axis = const_args[-4]
-            x_scale, x_zp = const_args[-6], const_args[-5]
+            # const_args is: [stride, padding, dilation, groups, x_scale, x_zp, w_axis, o_inv_scale, o_zp, o_dtype, fp32_output
+            # binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
             stride = const_args[0]
             padding = const_args[1]
             dilation = const_args[2]
             groups = const_args[3]
+            x_scale, x_zp = const_args[4], const_args[5]
+            w_axis = const_args[6]
+            o_inv_scale, o_zp = const_args[7], const_args[8]
+            o_dtype = const_args[9]
+            fp32_output = const_args[10]
+            unary_attr, unary_scalars, unary_algorithm = (
+                const_args[11],
+                const_args[12],
+                const_args[13],
+            )
         else:
             # If bias is None, bias will be the first element of const_args
             args = [x.codegen_reference() for x in self.inputs]
@@ -4264,18 +4279,25 @@ class QConvPT2E(ExternKernelAlloc):
             w_scale, w_zp = args[-2], args[-1]
             const_args = []
             const_args.extend(self.codegen_const_args())
-            # const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, w_axis, o_inv_scale, o_zp, o_dtype]
-            o_dtype = const_args[-1]
-            o_inv_scale, o_zp = const_args[-3], const_args[-2]
-            w_axis = const_args[-4]
-            x_scale, x_zp = const_args[-6], const_args[-5]
+            # const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, w_axis, o_inv_scale, o_zp, o_dtype,
+            # fp32_output, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
             bias = const_args[0]
             stride = const_args[1]
             padding = const_args[2]
             dilation = const_args[3]
             groups = const_args[4]
+            x_scale, x_zp = const_args[5], const_args[6]
+            w_axis = const_args[7]
+            o_inv_scale, o_zp = const_args[8], const_args[9]
+            o_dtype = const_args[10]
+            fp32_output = const_args[11]
+            unary_attr, unary_scalars, unary_algorithm = (
+                const_args[12],
+                const_args[13],
+                const_args[14],
+            )
 
-        self.kernel = "torch.ops.quantized.qconv2d_pt2e"
+        self.kernel = "torch.ops.quantized.qconv2d_pointwise_pt2e"
         conv_args = (
             "{}".format(args[0])
             + ", {}".format(x_scale)
@@ -4290,6 +4312,10 @@ class QConvPT2E(ExternKernelAlloc):
             + ", {}".format(groups)
             + ", {}".format(o_inv_scale)
             + ", {}".format(o_zp)
+            + ", {}".format(fp32_output)  # not fp32 output
+            + ", {}".format(unary_attr)  # no unary postop
+            + ", {}".format(unary_scalars)  # unary postop scalars
+            + ", {}".format(unary_algorithm)  # unary postop algorithm
         )
         wrapper.writeline(f"{self.get_name()} = {self.kernel}({conv_args})")
         if isinstance(self.layout, Layout):
@@ -4314,6 +4340,10 @@ class QConvPT2E(ExternKernelAlloc):
         o_inv_scale: "TensorBox",
         output_zero_point: "TensorBox",
         output_dtype,
+        fp32_output,
+        unary_attr,
+        unary_scalars,
+        unary_algorithm,
     ):
         transposed = False
         output_padding = None
@@ -4338,7 +4368,7 @@ class QConvPT2E(ExternKernelAlloc):
         input_qparams = [x_scale, x_zp]
         weight_qparams = [w_scale, w_zp, w_axis]
         output_qparams = [o_inv_scale, output_zero_point, output_dtype]
-        return QConvPT2E(
+        return QConvPointWisePT2E(
             layout=kernel_layout,
             inputs=inputs,
             input_qparams=input_qparams,
@@ -4347,6 +4377,10 @@ class QConvPT2E(ExternKernelAlloc):
             constant_args=constant_args,
             dim=dim,
             has_bias=(bias is not None),
+            fp32_output=fp32_output,
+            unary_attr=unary_attr,
+            unary_scalars=unary_scalars,
+            unary_algorithm=unary_algorithm,
         )
 
 
