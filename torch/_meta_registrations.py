@@ -4567,6 +4567,7 @@ def meta__scaled_dot_product_efficient_backward(
     philox_seed: Tensor,
     philox_offset: Tensor,
     dropout_p: float,
+    grad_input_mask: List[bool],
     is_causal: bool = False,
     scale: Optional[float] = None,
 ):
@@ -4596,18 +4597,13 @@ def meta__scaled_dot_product_efficient_backward(
         device=value.device,
     )
     grad_bias = None
-    # if attn_bias is not None and attn_bias.requires_grad:
-    if attn_bias is not None:
-        grad_bias = torch.empty_like(attn_bias)
-        # assert isinstance(attn_bias, TensorLike)
-        # last_dim_size = attn_bias.size(-1)
-        # alignTo = 16
-        # rounded_last_dim_size = alignTo * ((last_dim_size + alignTo - 1) / alignTo)
-        # grad_bias = torch.empty(
-        #     (attn_bias.size(0),attn_bias.size(1), attn_bias.size(2), rounded_last_dim_size),
-        #     dtype=attn_bias.dtype,
-        #     device=attn_bias.device,
-        # )[:, :, :, :last_dim_size]
+    if attn_bias is not None and grad_input_mask[3]:
+        grad_bias = torch.empty_strided(
+            attn_bias.size(),
+            attn_bias.stride(),
+            dtype=attn_bias.dtype,
+            device=attn_bias.device,
+        )
 
     return grad_q, grad_k, grad_v, grad_bias
 
