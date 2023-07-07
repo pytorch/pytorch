@@ -782,7 +782,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # loss
         common_ops = fwd_seq_nr_set.intersection(bwd_seq_nr_set)
         self.assertTrue(
-            len(fwd_seq_nr_set) > 0 and len(bwd_seq_nr_set) > 0 and len(common_ops) >= 10
+            len(fwd_seq_nr_set) > 0
+            and len(bwd_seq_nr_set) > 0
+            and len(common_ops) >= 10
         )
 
 

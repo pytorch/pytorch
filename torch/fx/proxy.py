@@ -109,7 +109,7 @@ class TracerBase:
     node_name_to_scope: Dict[str, Tuple[str, type]]
 
     # Keep track of max observed seq_nr to determine whether in fwd pass or not
-    max_seq_nr: int = 0
+    _max_seq_nr: int = 0
 
     @compatibility(is_backward_compatible=True)
     def create_node(self, kind : str, target : Target,
@@ -146,18 +146,18 @@ class TracerBase:
                 if field in current_meta:
                     node.meta[field] = current_meta[field]
 
-            # The op in question has already executed and caused the
-            # sequence_nr to increment. Here we decrement to account
-            # for the sequence_nr just being incremented while tracing
-            # this op.
+            # Here we decrement to account for the sequence_nr having
+            # just been incremented while tracing this lowered aten op.
             new_seq = torch.autograd.get_sequence_nr() - 1
-            # In the FWD pass the new_seq number keeps increasing
-            # It is decreasing during the bwd pass
-            # It shouldn't stay same as max
+            # In the FWD pass the new_seq number maintained by
+            # torch.autograd.get_sequence_nr() keeps increasing.
+            # During the bwd pass it should stay the same value as
+            # the max_seq_nr. The seq_nr for bwd ops is maintained
+            # in the torch::autograd::Node class see NOTE [ Sequence Number ].
             # Reset node.meta["seq_nr"] to take the new_seq due to
             # a fwd pass aten op triggered by a call_module aten op
-            if new_seq > self.max_seq_nr:
-                self.max_seq_nr = new_seq
+            if new_seq > self._max_seq_nr:
+                self._max_seq_nr = new_seq
                 node.meta["seq_nr"] = new_seq
 
         elif self.module_stack:
