@@ -640,6 +640,51 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             for p_id in b.param_ids:
                 self.assertFalse(p_id in parameter_ids_to_ignore)
 
+    @patch.object(config, "optimize_ddp", True)
+    def test_higher_order_op(self):
+        from torch.utils.checkpoint import checkpoint
+
+        N = 1000
+
+        class InnerModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(N, N)
+                self.linear2 = torch.nn.Linear(N, N)
+
+            def forward(self, x):
+                a = self.linear1(x)
+                a = self.linear2(a)
+                return a
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner_mod1 = InnerModule()
+                self.inner_mod2 = InnerModule()
+
+            def forward(self, x):
+                a = checkpoint(self.inner_mod1, x, use_reentrant=False)
+                a = torch.cos(a)
+                a = checkpoint(self.inner_mod2, a, use_reentrant=False)
+                a = torch.cos(a)
+                return a
+
+        mod = MockModule().cuda()
+        mod = DDP(mod, bucket_cap_mb=1)
+        x = torch.randn(N, N, device="cuda", requires_grad=True)
+        args = (x,)
+
+        backend = "aot_eager"
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "DDPOptimizer backend: Found a higher order op in the graph"
+        ):
+            torch.compile(mod, backend=cnt)(*args)
+
+
     def test_fsdp_orig_params_assert(self):
         # Test with basic FSDP wrapping (outer wrap around whole model)
         m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
