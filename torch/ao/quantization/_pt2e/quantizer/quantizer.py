@@ -157,12 +157,6 @@ class QuantizationAnnotation:
     # whether the node is annotated or not
     _annotated: bool = False
 
-    # TODO: will be updated soon to use sharing group and be more general
-    _input_output_share_observers: bool = False
-
-    # TODO: remove after sharing API refactor
-    _reuse_input_obs_or_fq: bool = False
-
 class Quantizer(ABC):
 
     # annotate nodes in the graph with observer or fake quant constructors

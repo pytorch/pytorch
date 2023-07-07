@@ -185,3 +185,7 @@ jobs:
           if-no-files-found: error
           path: functorch_ghpages/nightly/
           s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/functorchdocs
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()

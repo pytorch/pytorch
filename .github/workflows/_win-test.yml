@@ -36,10 +36,16 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     steps:
-      - name: Enable git symlinks on Windows
+      # Duplicated in win-build because this MUST go before a checkout
+      - name: Enable git symlinks on Windows and disable fsmonitor daemon
         shell: bash
         run: |
           git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
 
       - name: Clean up leftover processes on non-ephemeral Windows runner
         uses: pytorch/test-infra/.github/actions/cleanup-runner@main
@@ -70,6 +76,18 @@ jobs:
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
+      # TODO: Move to a requirements.txt file for windows
+      - name: Install pip dependencies
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+        with:
+          shell: bash
+          timeout_minutes: 5
+          max_attempts: 5
+          retry_wait_seconds: 30
+          command: |
+            set -eu
+            python3 -m pip install rockset==1.0.3
+
       - name: Start monitoring script
         id: monitor-script
         shell: bash
@@ -90,10 +108,10 @@ jobs:
         run: |
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
 
-      - name: Check for keep-going label
+      - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conviniently
-        # checks for labels.  It does not actually do any filtering.  All
-        # filtering is done in the build step.
+        # checks for labels and re-enabled test issues.  It does not actually do
+        # any filtering.  All filtering is done in the build step.
         id: keep-going
         uses: ./.github/actions/filter-test-configs
         with:
@@ -123,6 +141,12 @@ jobs:
           VC_YEAR: "2019"
           AWS_DEFAULT_REGION: us-east-1
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CUDA_VERSION: ${{ inputs.cuda-version }}
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
@@ -131,25 +155,11 @@ jobs:
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           TEST_CONFIG: ${{ matrix.config }}
-          PR_BODY: ${{ github.event.pull_request.body }}
+          REENABLED_ISSUES: ${{ github.event.pull_request.reenabled-issues }}
           TORCH_CUDA_ARCH_LIST: "8.6"
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
-
-          # sanitize the input commit message and PR body here:
-          #
-          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
-          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          PR_BODY="${PR_BODY//[$'\n\r']}"
-
-          # then trim all special characters like single and double quotes to avoid unescaped inputs to
-          # wreak havoc internally
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
-          export PR_BODY="${PR_BODY//[\'\"]}"
-
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
           # shellcheck disable=SC2046
           python3 -mpip install $(echo *.whl)[opt-einsum]

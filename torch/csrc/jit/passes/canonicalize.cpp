@@ -51,7 +51,7 @@ std::shared_ptr<Graph> Canonicalize(
 }
 
 // Which index in b's owning Node is b
-size_t blockIndex(const Block* b) {
+static size_t blockIndex(const Block* b) {
   auto n = b->owningNode();
   AT_ASSERT(n);
   for (size_t i = 0; i < n->blocks().size(); ++i) {
@@ -73,7 +73,7 @@ size_t blockIndex(const Block* b) {
  * NB: this is not a topological index. Topologically, two nodes in
  * different blocks of an if node are not topologically < or > each other.
  */
-bool isBefore(Node* n1, Node* n2) {
+static bool isBefore(Node* n1, Node* n2) {
   // Invalid to call with the same node as both args
   AT_ASSERT(n1 != n2);
 
@@ -122,7 +122,7 @@ bool isBefore(Node* n1, Node* n2) {
   }
 }
 
-bool isBefore(const Use& a, const Use& b) {
+static bool isBefore(const Use& a, const Use& b) {
   // If two uses are the same node, we order on offset
   if (a.user == b.user) {
     return a.offset < b.offset;
@@ -131,7 +131,7 @@ bool isBefore(const Use& a, const Use& b) {
   return isBefore(a.user, b.user);
 }
 
-bool isAfter(const Use& a, const Use& b) {
+static bool isAfter(const Use& a, const Use& b) {
   if (a.user == b.user && a.offset == b.offset) {
     return false;
   }
@@ -157,14 +157,14 @@ c10::optional<const Use> firstOrLastUse(Value* v, bool find_first) {
   return extreme_use;
 }
 
-std::vector<c10::optional<const Use>> gatherFirstUses(
+static std::vector<c10::optional<const Use>> gatherFirstUses(
     at::ArrayRef<Value*> values) {
   return fmap(values, [&](Value* v) -> c10::optional<const Use> {
     return firstOrLastUse(v, true);
   });
 }
 
-std::vector<size_t> sort_indexes(at::ArrayRef<Value*> values) {
+static std::vector<size_t> sort_indexes(at::ArrayRef<Value*> values) {
   // initialize original index locations
   std::vector<size_t> idx(values.size());
   std::iota(idx.begin(), idx.end(), 0);
@@ -194,17 +194,17 @@ std::vector<size_t> sort_indexes(at::ArrayRef<Value*> values) {
   return idx;
 }
 
-void CanonicalizeLoopOutputs(Node* n) {
+static void CanonicalizeLoopOutputs(Node* n) {
   auto new_indices = sort_indexes(n->outputs());
   LoopView(n).permuteLoopCarried(new_indices);
 }
 
-void CanonicalizeIfOutputs(Node* n) {
+static void CanonicalizeIfOutputs(Node* n) {
   auto new_indices = sort_indexes(n->outputs());
   IfView(n).permuteOutputs(new_indices);
 }
 
-void CanonicalizeOutputs(Block* block) {
+static void CanonicalizeOutputs(Block* block) {
   // We iterate in reverse since ordering of a node's outputs is dependent on
   // the value use following it in the graph
   for (Node* n : block->nodes().reverse()) {
