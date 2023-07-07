@@ -511,6 +511,7 @@ int64_t _fused_sdp_choice_meta(
   }
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
+namespace {
 
 inline void validate_sdpa_input(
     const Tensor& query_,

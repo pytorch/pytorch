@@ -274,7 +274,7 @@ ALLOW_LIST = [
     ("aten::_flash_attention_forward", datetime.date(2023, 5, 15)),
     ("aten::_flash_attention_backward", datetime.date(2023, 5, 15)),
     ("aten::_efficient_attention_forward", datetime.date(2023, 7, 1)),
-    ("aten::_efficient_attention_backward", datetime.date(2023, 7, 1)),
+    ("aten::_efficient_attention_backward", datetime.date(2023, 8, 1)),
     ("mkldnn::_convolution_pointwise.binary", datetime.date(2022, 12, 15)),
     ("prim::CudaFusionIvalGuard", datetime.date(2023, 2, 1)),
     ("prim::CudaFusionGuard", datetime.date(2023, 2, 1)),
