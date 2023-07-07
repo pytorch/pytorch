@@ -1763,13 +1763,49 @@ class CTCLoss(_Loss):
                           self.zero_infinity)
 
 
-# This Loss function using for Object Detection Task.
-
+# This Loss function can be used for Object detection tasks.
 class OBJLoss(_Loss):
     def __init__(self):
         super(OBJLoss, self).__init__()
 
     def forward(self, y_true:Tensor, yhat:Tensor):
+        """
+        OBJLoss is a custom loss function for object detection. It is a combination of the coordinate loss and the size loss.
+
+        Args:
+            y_true: Ground truth bounding boxes.
+            yhat: Predicted bounding boxes.
+
+        Returns:
+            The loss value.
+
+        Maths:
+            The loss function is defined as follows:
+
+            loss = delta_coord + delta_size
+
+            where delta_coord is the sum of the squared differences between the ground truth coordinates 
+            and the predicted coordinates, and delta_size is the sum of the squared differences between 
+            the ground truth sizes and the predicted sizes.
+        
+        Examples:
+            >>> import torch
+            >>> import torch.nn as nn
+
+            >>> y_true = torch.tensor([[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]])
+            >>> y_hat = torch.tensor([[0.2, 0.3, 0.4, 0.5], [0.6, 0.7, 0.8, 0.9]])
+
+            >>> loss = OBJLoss()(y_true, y_hat)
+            >>> print(loss.item())
+            0.04000000283122063
+
+        Images:
+            [Image of Ground truth bounding boxes]
+            [Image of Predicted bounding boxes]
+
+
+
+       """
         delta_coord = torch.sum(torch.square(y_true[:, :2] - yhat[:, :2]))
 
         h_true = y_true[:, 3] - y_true[:, 1]
