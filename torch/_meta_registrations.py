@@ -2674,6 +2674,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     [
         aten._foreach_neg_.default,
         aten._foreach_reciprocal_.default,
+        aten._foreach_sqrt_.default,
     ]
 )
 def meta__foreach_unaop_(self):
