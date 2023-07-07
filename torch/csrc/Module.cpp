@@ -1,4 +1,5 @@
 #include <c10/util/Optional.h>
+#include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
 
@@ -1802,7 +1803,7 @@ Call this whenever a new thread is created in order to propagate values from
 inline void pytorch_duplicate_guard() {
   static int initialized = 0;
   if (initialized) {
-    fprintf(stderr, "pytorch: _C shared library re-initialized\n");
+    fmt::print(stderr, "pytorch: _C shared library re-initialized\n");
     abort();
   }
   initialized = 1;

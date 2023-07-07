@@ -311,7 +311,7 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
         2: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
     }
     binary_op_configs: List[BackendPatternConfig] = []
-    for op in [operator.add, torch.add]:
+    for op in [operator.add, torch.add, operator.sub, torch.sub, operator.mul, torch.mul]:
         bop_patterns = [
             (op, torch.nn.ReLU),
             (op, torch.nn.functional.relu),
@@ -350,14 +350,18 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         F.max_pool2d,
         F.relu,
         F.relu6,
+        F.leaky_relu,
+        F.leaky_relu_,
         torch.nn.AdaptiveAvgPool2d,
         torch.nn.MaxPool2d,
         torch.nn.ReLU6,
         torch.nn.Hardtanh,
+        torch.nn.LeakyReLU,
         torch.clamp,
         torch.flatten,
         torch.mean,
         torch.permute,
+        torch.permute_copy,
         torch.squeeze,
         "clamp",
         "mean",
@@ -367,6 +371,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         "relu_",
         "squeeze",
         "squeeze_",
+        "leaky_relu",
     ]
     share_qparams_op_configs: List[BackendPatternConfig] = []
     for op in share_qparams_ops:
