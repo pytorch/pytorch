@@ -230,10 +230,11 @@ _recompile_re()
 
 def is_torch_inline_allowed(filename):
     # XXX: figure out a better way to allow inlining the placement types
-    if torch.distributed.is_available() and filename.startswith(
-        _module_dir(torch.distributed._tensor.placement_types)
-    ):
-        return True
+    if torch.distributed.is_available():
+        import torch.distributed._tensor.placement_types as placement_types
+
+        if filename.startswith(_module_dir(placement_types)):
+            return True
 
     return any(
         filename.startswith(_module_dir(mod))
