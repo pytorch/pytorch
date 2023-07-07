@@ -154,20 +154,21 @@ def set_device_states(devices, states) -> None:
 
 
 def _get_autocast_kwargs(device="cuda"):
-
     if device == "cuda":
         device_autocast_kwargs = {
             "enabled": torch.is_autocast_enabled(),
             "dtype": torch.get_autocast_gpu_dtype(),
             "cache_enabled": torch.is_autocast_cache_enabled(),
         }
-    else:
+    elif _supports_autocast(device):
         device_module = _get_device_module(device)
         device_autocast_kwargs = {
             "enabled": device_module.is_autocast_enabled(),
             "dtype": device_module.get_autocast_dtype(),
             "cache_enabled": torch.is_autocast_cache_enabled(),
         }
+    else:
+        device_autocast_kwargs = None
 
     cpu_autocast_kwargs = {
         "enabled": torch.is_autocast_cpu_enabled(),
@@ -177,6 +178,10 @@ def _get_autocast_kwargs(device="cuda"):
 
     return device_autocast_kwargs, cpu_autocast_kwargs
 
+def _supports_autocast(device):
+    device_module = _get_device_module(device)
+    return (hasattr(device_module, "is_autocast_enabled")
+            and hasattr(device_module, "get_autocast_dtype"))
 
 class CheckpointFunction(torch.autograd.Function):
     @staticmethod
@@ -197,7 +202,7 @@ class CheckpointFunction(torch.autograd.Function):
             # we have no way to anticipate this will happen before we run the function.)
             ctx.had_device_in_fwd = False
             device_module = _get_device_module(ctx.device)
-            if device_module._initialized:
+            if hasattr(device_module, "_initialized") and device_module._initialized:
                 ctx.had_device_in_fwd = True
                 ctx.fwd_devices, ctx.fwd_device_states = get_device_states(*args)
 
@@ -252,9 +257,12 @@ class CheckpointFunction(torch.autograd.Function):
                 if ctx.had_device_in_fwd:
                     set_device_states(ctx.fwd_devices, ctx.fwd_device_states)
             detached_inputs = detach_variable(tuple(inputs))
-            with torch.enable_grad(), device_module.amp.autocast(
+
+            device_autocast_ctx = device_module.amp.autocast(
                 **ctx.device_autocast_kwargs
-            ), torch.cpu.amp.autocast(**ctx.cpu_autocast_kwargs):
+            ) if _supports_autocast(ctx.device) else contextlib.nullcontext()
+            with torch.enable_grad(), device_autocast_ctx, \
+                 torch.cpu.amp.autocast(**ctx.cpu_autocast_kwargs):
                 outputs = ctx.run_function(*detached_inputs)
 
         if isinstance(outputs, torch.Tensor):
@@ -862,7 +870,7 @@ def _checkpoint_without_reentrant(
         # we have no way to anticipate this will happen before we run the function.
         # If they do so, we raise an error.)
         had_device_in_fwd = False
-        if device_module._initialized:
+        if hasattr(device_module, "_initialized") and device_module._initialized:
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
@@ -881,9 +889,11 @@ def _checkpoint_without_reentrant(
                 if had_device_in_fwd:
                     set_device_states(fwd_devices, fwd_device_states)
 
-            with device_module.amp.autocast(
+            device_autocast_ctx = device_module.amp.autocast(
                 **device_autocast_kwargs
-            ), torch.cpu.amp.autocast(**cpu_autocast_kwargs), recompute_context:
+            ) if _supports_autocast(device) else contextlib.nullcontext()
+            with device_autocast_ctx, torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
+                 recompute_context:
                 fn(*args, **kwargs)
 
     new_frame = _CheckpointFrame(recompute_fn, _enable_checkpoint_early_stop)
@@ -897,7 +907,8 @@ def _checkpoint_without_reentrant(
     with _checkpoint_hook(new_frame), forward_context:
         ret = fn(*args, **kwargs)
 
-    if device_module._initialized and preserve_rng_state and not had_device_in_fwd:
+    if hasattr(device_module, "_initialized") and device_module._initialized and \
+       preserve_rng_state and not had_device_in_fwd:
         # Device was not initialized before running the forward, so we didn't
         # stash the device state.
         raise RuntimeError(
