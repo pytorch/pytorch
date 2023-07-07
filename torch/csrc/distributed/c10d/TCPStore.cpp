@@ -1284,7 +1284,7 @@ void TCPStore::doWait(
   }
 
   response = client_->receiveValue<detail::WaitResponseType>();
-  // this can happen if the server responds before we cancel, just ignorte it
+  // this can happen if the server responds before we cancel, just ignore it
   if (response != detail::WaitResponseType::WAIT_CANCELED) {
     if (response != detail::WaitResponseType::STOP_WAITING) {
       TORCH_CHECK(false, "Stop_waiting response is expected");
