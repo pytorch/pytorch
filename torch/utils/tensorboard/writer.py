@@ -411,7 +411,6 @@ class SummaryWriter:
             Summary::tensor::float_val [1,2,3]
                    ::tensor::shape [3]
                    ::tag 'x'
-
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_tensor")
         if self._check_caffe2_blob(tensor):
