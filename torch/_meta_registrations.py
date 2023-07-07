@@ -4596,17 +4596,18 @@ def meta__scaled_dot_product_efficient_backward(
         device=value.device,
     )
     grad_bias = None
-    if attn_bias is not None and attn_bias.requires_grad:
-        assert isinstance(attn_bias, TensorLike)
-        nominal_sizes = attn_bias.size()
-        last_dim_size = attn_bias.size(-1)
-        alignTo = 16
-        nominal_sizes[-1] = alignTo * ((last_dim_size + alignTo - 1) / alignTo)
-        grad_bias = torch.empty(
-            nominal_sizes,
-            dtype=attn_bias.dtype,
-            device=attn_bias.device,
-        )[:, :, :, :last_dim_size]
+    # if attn_bias is not None and attn_bias.requires_grad:
+    if attn_bias is not None:
+        grad_bias = torch.empty_like(attn_bias)
+        # assert isinstance(attn_bias, TensorLike)
+        # last_dim_size = attn_bias.size(-1)
+        # alignTo = 16
+        # rounded_last_dim_size = alignTo * ((last_dim_size + alignTo - 1) / alignTo)
+        # grad_bias = torch.empty(
+        #     (attn_bias.size(0),attn_bias.size(1), attn_bias.size(2), rounded_last_dim_size),
+        #     dtype=attn_bias.dtype,
+        #     device=attn_bias.device,
+        # )[:, :, :, :last_dim_size]
 
     return grad_q, grad_k, grad_v, grad_bias
 
