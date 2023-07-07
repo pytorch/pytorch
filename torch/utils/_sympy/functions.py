@@ -1,7 +1,7 @@
 import sympy
 from sympy.core.logic import fuzzy_and, fuzzy_or
 
-__all__ = ["FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv", "LShift", "RShift"]
+__all__ = ["FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv"]
 
 
 class FloorDiv(sympy.Function):
@@ -156,19 +156,3 @@ class CeilDiv(sympy.Function):
             return CleanDiv(base, divisor)
         else:
             return FloorDiv(base + (divisor - 1), divisor)
-
-
-class LShift(sympy.Function):
-    @classmethod
-    def eval(cls, base, shift):
-        if shift < 0:
-            raise ValueError('negative shift count')
-        return base * 2 ** shift
-
-
-class RShift(sympy.Function):
-    @classmethod
-    def eval(cls, base, shift):
-        if shift < 0:
-            raise ValueError('negative shift count')
-        return base // 2 ** shift
