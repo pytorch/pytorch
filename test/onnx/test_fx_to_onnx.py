@@ -4,12 +4,12 @@ from __future__ import annotations
 import pytorch_test_common
 import torch
 from torch import nn
+from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import diagnostics
 from torch.testing._internal import common_utils
-from torch._subclasses import fake_tensor
 
 
 def assert_has_diagnostics(
