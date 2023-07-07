@@ -142,6 +142,7 @@ class TestEnvironment:
             TestEnvironment.repro_env_vars[name] = env_var_val
 
         # export flag globally for convenience
+        assert name not in globals(), f"duplicate definition of flag '{name}'"
         globals()[name] = enabled
 
     # Returns a string prefix usable to set environment variables for any test
@@ -1165,6 +1166,25 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
         return fn
 
     return decorator
+
+
+# Run PyTorch tests with translation validation on.
+TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
+
+if TEST_WITH_TV:
+    torch._dynamo.config.translation_validation = True
+
+# Some tests take too long when dynamic_shapes is combined with
+# translation_validation. Whenever that happens, we solve that by
+# disabling translation_validation.
+def disable_translation_validation_if_dynamic_shapes(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if torch._dynamo.config.dynamic_shapes:
+            # Turning TV off due to high latency on dynamic shapes.
+            torch._dynamo.config.translation_validation = False
+        return fn(*args, **kwargs)
+    return wrapper
 
 
 # Determine whether to enable cuda memory leak check.
@@ -2244,7 +2264,8 @@ class TestCase(expecttest.TestCase):
             if PRINT_REPRO_ON_FAILURE:
                 env_var_prefix = TestEnvironment.repro_env_var_prefix()
                 try:
-                    test_filename = os.path.relpath(inspect.getfile(type(self)), start=os.curdir)
+                    REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+                    test_filename = os.path.relpath(inspect.getfile(type(self)), start=REPO_ROOT)
                     repro_str = f"""
 To execute this test, run the following from the base repo dir:
     {env_var_prefix} python {test_filename} -k {method_name}

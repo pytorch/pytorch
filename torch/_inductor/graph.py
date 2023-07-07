@@ -1,9 +1,11 @@
+import hashlib
 import logging
 import operator
 import os
 import re
 import sys
 import time
+from contextlib import contextmanager
 from typing import Dict, List, Optional, Set, Tuple
 
 import sympy
@@ -150,10 +152,13 @@ class GraphLowering(torch.fx.Interpreter):
         cpp_wrapper=False,
         aot_mode=False,
         user_visible_outputs=frozenset(),
+        layout_opt=None,
     ):
         super().__init__(gm)
 
-        self.layout_opt = self.decide_layout_opt()
+        self.layout_opt = (
+            layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
+        )
         self.num_channels_last_conv = 0
 
         self.extra_traceback = False  # we do our own error wrapping
@@ -173,11 +178,13 @@ class GraphLowering(torch.fx.Interpreter):
         self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
+        self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
         self.mutated_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
+        self.current_node: Optional[torch.fx.Node] = None
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
@@ -202,7 +209,8 @@ class GraphLowering(torch.fx.Interpreter):
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
 
-    def decide_layout_opt(self) -> bool:
+    @staticmethod
+    def decide_layout_opt(gm) -> bool:
         """
         Decide if we should enable layout optimization for this graph based on
         heuristics.
@@ -210,7 +218,6 @@ class GraphLowering(torch.fx.Interpreter):
         if not config.layout_optimization:
             return False
 
-        gm = self.module
         conv_nodes = [
             n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
         ]
@@ -452,7 +459,8 @@ class GraphLowering(torch.fx.Interpreter):
         def allocate():
             for name, value in self.constants.items():
                 if (
-                    data.size() == value.size()
+                    not data.is_mkldnn
+                    and data.size() == value.size()
                     and data.stride() == value.stride()
                     and data.dtype == value.dtype
                     and data.device == value.device
@@ -461,6 +469,9 @@ class GraphLowering(torch.fx.Interpreter):
                     return name
             name = f"constant{len(self.constants)}"
             self.constants[name] = data
+            self.constant_reprs[name] = hashlib.sha256(
+                repr(data).encode("utf-8")
+            ).hexdigest()
             return name
 
         return TensorBox.create(
@@ -635,7 +646,7 @@ class GraphLowering(torch.fx.Interpreter):
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins):
+        with ir.IRNode.current_origins(origins), self.set_current_node(n):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
@@ -786,6 +797,15 @@ class GraphLowering(torch.fx.Interpreter):
 
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
+
+    @contextmanager
+    def set_current_node(self, node: torch.fx.Node):
+        old = self.current_node
+        try:
+            self.current_node = node
+            yield
+        finally:
+            self.current_node = old
 
     def check_cpp_wrapper(self):
         self.check_cpp_codegen_disabled()

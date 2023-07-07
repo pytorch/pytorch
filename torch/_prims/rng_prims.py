@@ -1,4 +1,3 @@
-from functools import partial
 from typing import Optional, Tuple
 
 import torch
@@ -14,7 +13,6 @@ from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
-    unwrap_proxy,
 )
 from torch.types import _device, _dtype
 from torch.utils._python_dispatch import (
@@ -164,9 +162,7 @@ def get_device(args, kwargs):
 
 
 def register_run_and_save_rng_state_op():
-    run_and_save_rng_state = HigherOrderOperator(
-        "run_and_save_rng_state", _deprecated_global_ns=True
-    )
+    run_and_save_rng_state = HigherOrderOperator("run_and_save_rng_state")
 
     run_and_save_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
     run_and_save_rng_state.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
@@ -205,8 +201,8 @@ def register_run_and_save_rng_state_op():
         with _pop_mode_temporarily() as mode:
             if mode.enable_tracing:
                 out = impl_fake_tensor_mode(op, *args, **kwargs)
-                proxy_args = pytree.tree_map(partial(unwrap_proxy, mode), (op, *args))
-                proxy_kwargs = pytree.tree_map(partial(unwrap_proxy, mode), kwargs)
+                proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (op, *args))
+                proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
                 out_proxy = mode.tracer.create_proxy(
                     "call_function", run_and_save_rng_state, proxy_args, proxy_kwargs
                 )
@@ -220,9 +216,7 @@ def register_run_and_save_rng_state_op():
 
 
 def register_run_with_rng_state_op():
-    run_with_rng_state = HigherOrderOperator(
-        "run_with_rng_state", _deprecated_global_ns=True
-    )
+    run_with_rng_state = HigherOrderOperator("run_with_rng_state")
 
     run_with_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
     run_with_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
@@ -258,9 +252,9 @@ def register_run_with_rng_state_op():
                 with disable_proxy_modes_tracing():
                     out = run_with_rng_state(rng_state, op, *args, **kwargs)
                 proxy_args = pytree.tree_map(
-                    partial(unwrap_proxy, mode), (rng_state, op, *args)
+                    mode.tracer.unwrap_proxy, (rng_state, op, *args)
                 )
-                proxy_kwargs = pytree.tree_map(partial(unwrap_proxy, mode), kwargs)
+                proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
                 out_proxy = mode.tracer.create_proxy(
                     "call_function", run_with_rng_state, proxy_args, proxy_kwargs
                 )
