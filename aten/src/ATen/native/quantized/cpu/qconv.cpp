@@ -1882,18 +1882,15 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(quantized, MkldnnCPU, m) {
-  // Conv1D/2D/3D with Unary postop
+  // Conv1D/2D/3D with unary postop
   m.impl(TORCH_SELECTIVE_NAME("quantized::qconv1d_pointwise_pt2e"), QConvPT2E::run_pointwise);
   m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_pointwise_pt2e"), QConvPT2E::run_pointwise);
   m.impl(TORCH_SELECTIVE_NAME("quantized::qconv3d_pointwise_pt2e"), QConvPT2E::run_pointwise);
 
   // Conv2D with binary postop
   m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_pointwise_pt2e.binary"), QConvPT2E::run_pointwise_binary);
-  // m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_add_pt2e"), QConvPT2E<PostOps::Add>::run_add);
-  // m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_add_relu_pt2e"), QConvPT2E<PostOps::AddRelu>::run_add);
 
   m.impl(TORCH_SELECTIVE_NAME("quantized::dynamic_quant_qconv.tensor"), QConvPT2E::run_dynamic_qconv);
-
 }
 
 } // namespace
