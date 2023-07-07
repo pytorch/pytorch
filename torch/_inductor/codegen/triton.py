@@ -1351,7 +1351,7 @@ class TritonKernel(Kernel):
         sizes[-1] = "None"
         return f"{value}[{', '.join(sizes)}]"
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
         assert self.inside_reduction
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
@@ -1507,17 +1507,20 @@ class TritonKernel(Kernel):
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
             result_var.mask_vars = var_name.mask_vars
+        self.outside_loop_vars.add(result_var)
+        return result_var
+
+    def store_reduction(self, name, index, value):
+        assert self.inside_reduction
         self.inside_reduction = False
         index, mask_vars, mask, _ = self.indexing(index)
         assert "rmask" not in index
         self.inside_reduction = True
-        self.outside_loop_vars.add(result_var)
-        self.cse.store_cache[name] = result_var
-        if name not in V.graph.removed_buffers:
-            var = self.args.output(name)
-            self.suffix.writeline(
-                DeferredLine(name, f"tl.store({var} + {index}, {result_var}, {mask})")
-            )
+
+        var = self.args.output(name)
+        self.suffix.writeline(
+            DeferredLine(name, f"tl.store({var} + ({index}), {value}, {mask})")
+        )
 
     def codegen_body(self):
         """
