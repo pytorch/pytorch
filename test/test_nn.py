@@ -627,6 +627,8 @@ class TestNN(NNTestCase):
     def test_buffer_not_persistent_assign(self):
         m = nn.Module()
         m.buf = nn.Buffer(torch.rand(5), persistent=False)
+        self.assertTrue(len(list(m.buffers())) == 1)
+        self.assertTrue(len(m.state_dict()) == 0)
 
         # Assigning None removes the buffer but if we then assign a new Tensor
         # to the same property, it should still be marked as a buffer.
