@@ -24,4 +24,3 @@ filelock==3.6.0
 sympy==1.11.1
 pytest-cpp==2.3.0
 rockset==1.0.3
-z3-solver==4.12.2.0
