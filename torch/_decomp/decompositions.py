@@ -1434,19 +1434,16 @@ def native_batch_norm_helper(
         invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
         output = (input - mean) * invstd
 
-    if weight is None:
-        weight = input.new_ones(())
-    else:
+    if weight is not None:
         weight = weight.flatten()
+        weight = _unsqueeze_to_dim(weight, input.dim() - 1)
+        output = output * weight
 
-    if bias is None:
-        bias = input.new_zeros(())
-    else:
+    if bias is not None:
         bias = bias.flatten()
+        bias = _unsqueeze_to_dim(bias, input.dim() - 1)
+        output = output + bias
 
-    weight = _unsqueeze_to_dim(weight, input.dim() - 1)
-    bias = _unsqueeze_to_dim(bias, input.dim() - 1)
-    output = output * weight + bias
     if input.device.type == "cpu":
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
@@ -3471,21 +3468,18 @@ def multi_margin_loss(
     torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
     _multi_margin_loss_shape_check(ndims, input, target)
     input = torch.atleast_2d(input)
-    target = torch.atleast_1d(target)
+    target = torch.atleast_1d(target).unsqueeze(1)
     if weight is not None:
         weight = torch.atleast_1d(weight)
     size = input.size(1)
-    mask = torch.arange(size, device=input.device) != target.unsqueeze(1)
-
-    def _f(x):
-        return torch.gather(x, dim=1, index=target.unsqueeze(-1))
-
-    z = margin - _f(input) + input
+    mask = torch.arange(size, device=input.device) != target
+    u = torch.gather(input, dim=1, index=target)
+    z = margin - u + input
     z = z.clamp_min(0)
     z = z if p == 1 else z * z
     if weight is not None:
         z = z * weight[target].unsqueeze(1)
-    loss = z.where(mask, 0).sum(dim=1).div(size)
+    loss = z.where(mask, 0).mean(dim=1)
     return apply_loss_reduction(loss, reduction)
 
 
@@ -3505,16 +3499,13 @@ def multi_margin_loss_backward(
     nframe, dim = _multi_margin_loss_shape_check(ndims, input, target)
     orig_shape = input.shape
     input = torch.atleast_2d(input)
-    target = torch.atleast_1d(target)
+    target = torch.atleast_1d(target).unsqueeze(1)
     if weight is not None:
         weight = torch.atleast_1d(weight)
     size = input.size(1)
-    mask = torch.arange(size, device=input.device) != target.unsqueeze(1)
-
-    def _f(x):
-        return torch.gather(x, dim=1, index=target.unsqueeze(-1))
-
-    z = margin - _f(input) + input
+    mask = torch.arange(size, device=input.device) != target
+    u = torch.gather(input, dim=1, index=target)
+    z = margin - u + input
     z = z.clamp_min(0)
     g = 1.0 / (nframe * dim) if reduction == Reduction.MEAN.value else 1.0 / dim
     g = torch.tensor(g, dtype=input.dtype, device=input.device)

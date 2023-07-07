@@ -4,11 +4,9 @@ import functools
 import itertools
 import logging
 import math
-import os
 import re
 import sys
 from copy import copy, deepcopy
-from pathlib import Path
 from typing import Dict, List
 
 import numpy
@@ -213,28 +211,6 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)
     return sympy.simplify(new_index - index)
-
-
-@functools.lru_cache()
-def cpp_prefix_path():
-    path = Path(__file__).parent / "cpp_prefix.h"
-    with path.open() as f:
-        content = f.read()
-        _, filename = codecache.write(
-            content,
-            "h",
-        )
-    return filename
-
-
-def cpp_prefix():
-    filename = cpp_prefix_path()
-    if config.is_fbcode():
-        # We need relative paths, since we bundle up
-        # everything that we compile into a folder for remote compilation.
-        return f'#include "{os.path.basename(filename)}"'
-    else:
-        return f'#include "{filename}"'
 
 
 class CppPrinter(ExprPrinter):
@@ -568,10 +544,8 @@ class CppVecOverrides(OpOverrides):
         assert opt_ctx.dtype in [torch.int32, torch.float32, torch.bfloat16]
         proposed_dtype = opt_ctx.dtype
         if val == float("inf"):
-            assert proposed_dtype == torch.float
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif val == float("-inf"):
-            assert proposed_dtype == torch.float
             quote = f"-std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif math.isnan(val):
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::quiet_NaN()"
@@ -2647,7 +2621,7 @@ class KernelGroup:
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
-        code.writeline(cpp_prefix())
+        code.writeline(codecache.cpp_prefix())
 
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():
