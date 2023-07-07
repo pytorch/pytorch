@@ -195,14 +195,15 @@ _efficient_attention_backward(
 
   if (bias_requires_grad) {
     // Alignment has already been enforced
-    grad_bias = at::empty_like(*bias);
-    // // force alignment for the last dim
-    // std::vector<int64_t> sz = bias->sizes().vec();
-    // int64_t lastDim = sz[sz.size() - 1];
-    // int64_t alignTo = 16;
-    // sz[sz.size() - 1] = alignTo * ((lastDim + alignTo - 1) / alignTo);
-    // grad_bias = at::empty(sz, bias->options())
-    //                 .slice(/*dim=*/-1, /*start=*/0, /*end=*/lastDim);
+    // grad_bias = at::empty_strided((*bias).sizes(), (*bias).strides(), (*bias).options());
+    // grad_bias = at::empty_like(*bias);
+    // force alignment for the last dim
+    std::vector<int64_t> sz = bias->sizes().vec();
+    int64_t lastDim = sz[sz.size() - 1];
+    int64_t alignTo = 16;
+    sz[sz.size() - 1] = alignTo * ((lastDim + alignTo - 1) / alignTo);
+    grad_bias = at::empty(sz, bias->options())
+                    .slice(/*dim=*/-1, /*start=*/0, /*end=*/lastDim);
   }
   at::Tensor workspace;
 
