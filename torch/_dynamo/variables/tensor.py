@@ -713,6 +713,12 @@ class TensorWithTFOverrideVariable(VariableTracker):
         self.subclass_torch_function__func = subclass_torch_function__func
         self.subclass_type = subclass_type
 
+    def as_proxy(self):
+        return self.tensor_variable.as_proxy()
+
+    def python_type(self):
+        return self.subclass_type
+
     def call_method(
         self,
         tx,
@@ -732,7 +738,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
         # the tensor immediately, that will not happen.
         # See https://github.com/pytorch/torchdynamo/issues/1951
         args = list(args)
-        args.insert(0, self.tensor_variable)
+        args.insert(0, self)
         func_var = GetAttrVariable(self.tensor_variable, name)
 
         unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(

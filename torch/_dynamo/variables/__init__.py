@@ -45,6 +45,7 @@ from .tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
+    TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
 )
 from .torch import TorchHigherOrderOperatorVariable, TorchVariable
@@ -83,6 +84,7 @@ __all__ = [
     "SliceVariable",
     "SuperVariable",
     "TensorVariable",
+    "TensorWithTFOverrideVariable",
     "TorchVariable",
     "TupleVariable",
     "UnknownVariable",

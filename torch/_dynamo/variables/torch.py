@@ -382,11 +382,9 @@ class TorchVariable(VariableTracker):
             # This code block implements inlining the __torch_function__
             # override of a tensor.
 
-            tensor_with_tf_override = args[0]
-
             # TODO(future PR): make this implement the full __torch_function__ API
             # instead of assuming the relevant override is in the first argument.
-            args[0] = args[0].tensor_variable
+            tensor_with_tf_override = args[0]
 
             unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
                 tx,
@@ -565,6 +563,19 @@ class TorchVariable(VariableTracker):
                 unimplemented("Unsupported unflatten with len(args) != 2")
 
             return torch.utils._pytree.tree_unflatten(args[0], args[1].value)
+        # TODO: make this general
+        elif self.value == torch.utils._pytree.tree_map_only:
+            ty = args[0].value  # should be a type
+            fn = args[1]
+            tree = args[2]
+
+            def map_fn(v):
+                if ty == v.python_type():
+                    return fn.call_function(tx, [v], {})
+                else:
+                    return v
+
+            return torch.utils._pytree.tree_map(map_fn, tree)
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
