@@ -206,7 +206,7 @@ static int getLRUCacheLimit() {
 template <typename T, typename KeyType>
 struct BenchmarkCache {
 std::list<KeyType> engine_cache_order;
-std::unordered_map<KeyType, std::pair<cudnn_frontend::ExecutionPlan, typename std::list<KeyType>::iterator >, ParamsWrapperHash<KeyType>> engine_cache;
+std::unordered_map<KeyType, std::pair<cudnn_frontend::ExecutionPlan, typename std::list<KeyType>::iterator>, ParamsWrapperHash<KeyType>> engine_cache;
 
 // no mutexes here as caches are now thread local for v8, can also return a pointer
 // to the Execution Plan if we know it will not be invalidated by another thread
