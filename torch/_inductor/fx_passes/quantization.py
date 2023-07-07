@@ -1,7 +1,7 @@
 import functools
 
 import torch
-from ..ir import QConv, QConvPT2E
+from ..ir import QConv, QConvPointWisePT2E
 from ..pattern_matcher import Arg, CallFunction, KeywordArg, Match
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -221,7 +221,7 @@ def _register_quantized_conv_lowering_pt2e(pattern):
 
         weight_shape = packed_weight.get_size()
         dim = len(weight_shape) - 2
-        return QConvPT2E.create(
+        return QConvPointWisePT2E.create(
             dim,
             x,
             x_scale,
@@ -238,6 +238,10 @@ def _register_quantized_conv_lowering_pt2e(pattern):
             o_inv_scale,
             o_zero_point,
             o_dtype,
+            False,  # fp32_output
+            "none",  # unary_attr
+            [],  # unary_scalars
+            "",  # unary_algorithm
         )
 
     return qconv
