@@ -542,7 +542,12 @@ at::Tensor _qconv_prepack_pt2e(
     }
   }
 
-  op_attr.set_zero_points_mask(DNNL_ARG_SRC, /* zero_points_mask= */0);
+  if (input_scale != 1.0f) {
+    op_attr.set_scales_mask(DNNL_ARG_SRC, /* src_scales_mask= */0);
+  }
+  if (input_zero_point != 0) {
+    op_attr.set_zero_points_mask(DNNL_ARG_SRC, /* src_zero_points_mask= */0);
+  }
 
   at::Tensor weight_copy;
   ideep::tensor::desc w_desc;
