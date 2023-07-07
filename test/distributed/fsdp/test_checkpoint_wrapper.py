@@ -118,6 +118,7 @@ class CheckpointWrapperTest(TestCase):
         def get_ctx_mgrs():
             return (ctx_manager(), ctx_manager())
 
+        # kwargs test
         torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
         m = checkpoint_wrapper(
             torch.nn.Linear(1, 1),

@@ -25,6 +25,9 @@
 #include <ATen/ops/_batch_norm_impl_index.h>
 #include <ATen/ops/_batch_norm_impl_index_backward_native.h>
 #include <ATen/ops/_batch_norm_impl_index_native.h>
+#include <ATen/ops/_native_batch_norm_legit_native.h>
+#include <ATen/ops/_native_batch_norm_legit_no_training.h>
+#include <ATen/ops/_native_batch_norm_legit_no_training_native.h>
 #include <ATen/ops/alias.h>
 #include <ATen/ops/batch_norm.h>
 #include <ATen/ops/batch_norm_native.h>
@@ -163,7 +166,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       return 1 / at::sqrt(running_var + eps);
     }
   }());
-  const bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
   auto w = weight.defined() ? as_nd(weight) :
       at::detail::scalar_tensor_static(1, dtype, kCPU);
@@ -197,7 +200,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   int64_t n = input.numel() / n_input;
 
   bool all_contiguous = is_contiguous(input);
-  const bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
 
   auto save_mean_a = save_mean.accessor<param_t, 1>();
@@ -281,7 +284,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     reduce_dims[i - 1] = i;
   }
 
-  const bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
   Tensor save_mean = is_contiguous(input) ? at::empty({n_input}, input.options().dtype(dtype)) : at::mean(input, /*dim=*/reduce_dims, /*keepdim=*/false, dtype);
   Tensor save_var_transform = at::empty({n_input}, input.options().dtype(dtype));
@@ -296,7 +299,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
 
   using accscalar_t = at::acc_type<scalar_t, false>;
 
-  const bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
 
   Tensor grad_input;
@@ -383,7 +386,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
   auto in_channel_stride = input.strides()[1];
   auto in_data = input.data_ptr<scalar_t>();
   auto grad_in_channel_stride = grad_input_mask[0] ? grad_input.strides()[1] : 0;
-  auto grad_in_data = grad_input_mask[0] ? grad_input.data_ptr<scalar_t>() : nullptr;
+  auto grad_in_data = grad_input_mask[0] ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   auto grad_out_channel_stride = grad_out_.strides()[1];
   auto grad_out_data = grad_out_.data_ptr<scalar_t>();
 

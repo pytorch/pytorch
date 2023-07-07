@@ -19,7 +19,6 @@ from ..observer import (
 )
 from ..qconfig import (
     _is_reuse_input_qconfig,
-    _obs_or_fq_ctr_equals,
     QConfigAny,
 )
 from ..qconfig_mapping import (
@@ -179,7 +178,7 @@ def _create_obs_or_fq_from_qspec(
         edge_or_node = quantization_spec.edge_or_node
         assert edge_or_node in obs_or_fq_map, \
             "please make sure only refer to edge or node that has " \
-            "observer/fake_quant inserted {} not in {}".format(edge_or_node, obs_or_fq_map)
+            "observer/fake_quant inserted: '{}' not in\n{}".format(edge_or_node, obs_or_fq_map.keys())
         return obs_or_fq_map[edge_or_node]
     elif isinstance(quantization_spec, DerivedQuantizationSpec):
         # can't use asdict, so not calling get_observer_kwargs here
@@ -207,11 +206,11 @@ def _create_obs_or_fq_from_qspec(
     kwargs.pop("observer_or_fake_quant_ctr")
     # we will remove is_dynamic from QuantizationSpec because
     # it seems that dynamic range quantization
-    if not _obs_or_fq_ctr_equals(observer_or_fake_quant_ctr, PlaceholderObserver):
-        kwargs.pop("is_dynamic")
     obs_or_fq_class = observer_or_fake_quant_ctr
     if isinstance(observer_or_fake_quant_ctr, _PartialWrapper):
         obs_or_fq_class = observer_or_fake_quant_ctr.p.func  # type: ignore[union-attr, assignment]
+    if obs_or_fq_class != torch.ao.quantization.observer.PlaceholderObserver:
+        kwargs.pop("is_dynamic")
     if "PerChannel" not in obs_or_fq_class.__name__:  # type: ignore[operator, union-attr]
         kwargs.pop("ch_axis")
     return observer_or_fake_quant_ctr.with_args(**kwargs)()

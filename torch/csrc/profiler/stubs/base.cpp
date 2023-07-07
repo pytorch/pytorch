@@ -12,10 +12,10 @@ namespace {
 struct DefaultStubs : public ProfilerStubs {
   DefaultStubs(const char* name) : name_{name} {}
 
-  void record(int*, ProfilerEventStub*, int64_t*) const override {
+  void record(int*, ProfilerVoidEventStub*, int64_t*) const override {
     fail();
   }
-  float elapsed(const ProfilerEventStub*, const ProfilerEventStub*)
+  float elapsed(const ProfilerVoidEventStub*, const ProfilerVoidEventStub*)
       const override {
     fail();
     return 0.f;
@@ -74,6 +74,7 @@ struct DefaultStubs : public ProfilerStubs {
 
 REGISTER_DEFAULT(cuda, CUDA)
 REGISTER_DEFAULT(itt, ITT)
+REGISTER_DEFAULT(privateuse1, PrivateUse1)
 #undef REGISTER_DEFAULT
 
 } // namespace impl

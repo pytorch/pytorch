@@ -1,7 +1,7 @@
 import io
 
 import torch
-from ._utils import _type, _cuda
+from ._utils import _type, _cuda, _hpu
 from torch.types import Storage
 from typing import Any, TypeVar, Type, Union, cast, Dict as _Dict
 import copy
@@ -39,6 +39,7 @@ class _StorageBase:
 
     def type(self, dtype: str = None, non_blocking: bool = False) -> T: ...  # noqa: E704
     def cuda(self, device=None, non_blocking=False, **kwargs) -> T: ...  # noqa: E704
+    def hpu(self, device=None, non_blocking=False, **kwargs) -> T: ...  # noqa: E704
     def element_size(self) -> int: ...  # noqa: E704
 
     def get_device(self) -> int:
@@ -76,6 +77,8 @@ class _StorageBase:
     def _free_weak_ref(cls, *args, **kwargs): ...  # noqa: E704
     @property
     def is_cuda(self): ...  # noqa: E704
+    @property
+    def is_hpu(self): ...  # noqa: E704
     @classmethod
     def from_file(cls, filename, shared, nbytes) -> T: ...  # noqa: E704
     @classmethod
@@ -133,7 +136,7 @@ class _StorageBase:
             return self
 
     def mps(self):
-        """Returns a CPU copy of this storage if it's not already on the CPU"""
+        """Returns a MPS copy of this storage if it's not already on the MPS"""
         if self.device.type != 'mps':
             return torch.UntypedStorage(self.size(), device="mps").copy_(self, False)
         else:
@@ -238,8 +241,8 @@ class _StorageBase:
         Returns: self
         """
         from torch.multiprocessing import get_sharing_strategy
-        if self.is_cuda:
-            pass  # CUDA doesn't use POSIX shared memory
+        if self.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+            pass  # CUDA or PrivateUse1 doesn't use POSIX shared memory
         elif get_sharing_strategy() == 'file_system':
             self._share_filename_cpu_()
         else:
@@ -251,7 +254,7 @@ class _StorageBase:
         """Creates a new storage in shared memory with the same data type"""
         from torch.multiprocessing import get_sharing_strategy
         device = torch.device(device)
-        if device.type == 'cuda':
+        if device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
             return cls(size, device=device)
         elif get_sharing_strategy() == 'file_system':
             return cls._new_using_filename_cpu(size)
@@ -314,6 +317,10 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
     def is_cuda(self):
         return self.device.type == 'cuda'
 
+    @property
+    def is_hpu(self):
+        return self.device.type == 'hpu'
+
     @_share_memory_lock_protected
     def share_memory_(self, *args, **kwargs):
         return super().share_memory_(*args, **kwargs)
@@ -332,6 +339,7 @@ def _load_from_bytes(b):
 
 _StorageBase.type = _type  # type: ignore[assignment]
 _StorageBase.cuda = _cuda  # type: ignore[assignment]
+_StorageBase.hpu = _hpu  # type: ignore[assignment]
 
 
 @lru_cache(maxsize=None)
@@ -427,6 +435,12 @@ def _warn_typed_storage_removal(stacklevel=2):
 def _reset_warn_typed_storage_removal():
     _warn_typed_storage_removal.__dict__['has_warned'] = False
 
+def _get_device_from_module(module: str):
+    if module.split(".")[-1] in ["cuda", torch._C._get_privateuse1_backend_name()]:
+        return module.split(".")[-1]
+    else:
+        return "cpu"
+
 class TypedStorage:
     is_sparse = False
 
@@ -484,7 +498,7 @@ class TypedStorage:
                 return TypedStorage(
                     *args,
                     dtype=cls._dtype,
-                    device='cuda' if cls.__module__ == 'torch.cuda' else 'cpu',
+                    device=_get_device_from_module(cls.__module__),
                     _internal=True)
 
             else:
@@ -499,7 +513,7 @@ class TypedStorage:
                         arg_error_msg +
                         f"\nArgument 'wrap_storage' must be UntypedStorage, but got {type(wrap_storage)}")
 
-                cls_device = 'cuda' if cls.__module__ == 'torch.cuda' else 'cpu'
+                cls_device = _get_device_from_module(cls.__module__)
 
                 if wrap_storage.device.type != cls_device:
                     raise RuntimeError(
@@ -585,6 +599,11 @@ class TypedStorage:
     def is_cuda(self):
         _warn_typed_storage_removal()
         return self._untyped_storage.device.type == 'cuda'
+
+    @property
+    def is_hpu(self):
+        _warn_typed_storage_removal()
+        return self._untyped_storage.device.type == 'hpu'
 
     def untyped(self):
         """Returns the internal :class:`torch.UntypedStorage`"""
@@ -728,6 +747,13 @@ class TypedStorage:
             raise RuntimeError("Cannot create CUDA storage with quantized dtype")
         cuda_storage: torch.UntypedStorage = self._untyped_storage.cuda(device, non_blocking, **kwargs)
         return self._new_wrapped_storage(cuda_storage)
+
+    def hpu(self, device=None, non_blocking=False, **kwargs) -> T:
+        _warn_typed_storage_removal()
+        if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
+            raise RuntimeError("Cannot create HPU storage with quantized dtype")
+        hpu_storage: torch.UntypedStorage = self._untyped_storage.hpu(device, non_blocking, **kwargs)
+        return self._new_wrapped_storage(hpu_storage)
 
     def element_size(self):
         _warn_typed_storage_removal()
@@ -1083,10 +1109,10 @@ class TypedStorage:
 
         storage_name = _dtype_to_storage_type_map()[self.dtype]
 
-        if self.device.type not in ['cpu', 'cuda']:
+        if self.device.type not in ['cpu', 'cuda', torch._C._get_privateuse1_backend_name()]:
             return None
 
-        module = torch if self.device.type == 'cpu' else torch.cuda
+        module = torch if self.device.type == 'cpu' else getattr(torch, self.device.type)
 
         try:
             return getattr(module, storage_name)
@@ -1095,13 +1121,14 @@ class TypedStorage:
 
 TypedStorage.type.__doc__ = _type.__doc__
 TypedStorage.cuda.__doc__ = _cuda.__doc__
+TypedStorage.hpu.__doc__ = _hpu.__doc__
 
 class _LegacyStorageMeta(type):
     dtype: torch.dtype
 
     def __instancecheck__(cls, instance):
         if type(instance) == TypedStorage:
-            cls_device = 'cuda' if cls.__module__ == 'torch.cuda' else 'cpu'
+            cls_device = _get_device_from_module(cls.__module__)
             return (cls_device == instance.device.type) and (cls.dtype == instance.dtype)
         return False
 
