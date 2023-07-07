@@ -231,16 +231,18 @@ TORCH_LIBRARY(quantized, m) {
   // Weight Prepack
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv_prepack_pt2e(Tensor weight, Tensor w_scales, int[] x_shape, float x_scale, int x_zp, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor"));
 
-  // Conv1D
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv1d_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv3d_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
-  // Post Op ReLU
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_relu_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
+  // Conv1D/2D/3D with Unary postop
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv1d_pointwise_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str attr, Scalar?[] scalars, str? algorithm) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_pointwise_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str attr, Scalar?[] scalars, str? algorithm) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv3d_pointwise_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str attr, Scalar?[] scalars, str? algorithm) -> Tensor"));
+
+  // Conv2D with binary postop
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_pointwise_pt2e.binary(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str binary_attr, Scalar? alpha, str? unary_attr, Scalar?[] unary_scalars, str? unary_algorithm) -> Tensor"));
+
   // Post Op Add
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_add_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
+  // m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_add_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
   // Post Op AddReLU
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_add_relu_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
+  // m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv2d_add_relu_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
 }
 
 // According to #33294: The "_" prefix registration will be
