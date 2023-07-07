@@ -454,7 +454,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             device_id,
             param_init_fn,
             sync_module_states,
-            FullyShardedDataParallel,
         )
         self._fsdp_wrapped_module = module
         if not use_orig_params:

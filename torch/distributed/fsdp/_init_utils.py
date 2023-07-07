@@ -15,7 +15,6 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    Type,
     Union,
 )
 
@@ -37,7 +36,6 @@ from torch.distributed.fsdp._common_utils import (
     TrainingState,
 )
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
-from torch.distributed.fsdp._wrap_utils import _get_fully_sharded_module_to_states
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
@@ -485,11 +483,9 @@ def _init_param_handle_from_module(
     device_id: Optional[Union[int, torch.device]],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
-    module_wrapper_cls: Type,
 ) -> _FSDPState:
     """
     Initializes a ``FlatParamHandle`` from a module ``fully_sharded_module``.
-    This is the module wrapper code path.
     """
     _check_single_device_module(fully_sharded_module, state._ignored_params, device_id)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
@@ -504,7 +500,7 @@ def _init_param_handle_from_module(
     elif is_torchdistX_deferred_init:
         deferred_init.materialize_module(
             fully_sharded_module,
-            check_fn=lambda k: not isinstance(k, module_wrapper_cls),
+            check_fn=lambda k: _get_module_fsdp_state(k) is None,
         )
     _move_module_to_device(
         fully_sharded_module, state._ignored_params, device_from_device_id
@@ -522,90 +518,6 @@ def _init_param_handle_from_module(
             fully_sharded_module, managed_params, state.process_group
         )
     _init_param_handle_from_params(state, managed_params, fully_sharded_module)
-    return state
-
-
-@no_type_check
-def _init_param_handles_from_module(
-    state: _FSDPState,
-    root_module: nn.Module,
-    policy: _FSDPPolicy,
-    device_id: Optional[Union[int, torch.device]],
-    param_init_fn: Optional[Callable[[nn.Module], None]],
-    sync_module_states: bool,
-) -> _FSDPState:
-    """
-    Initializes all ``FlatParamHandle`` s from a module ``root_module``. This
-    is the non-module-wrapper code path. ``root_module`` is guaranteed to be
-    a fully sharded module, and some of its submodules may be as well,
-    depending on ``policy``. See [Note: Fully Sharded Module].
-    """
-    fully_sharded_module_to_states = _get_fully_sharded_module_to_states(
-        root_module,
-        policy,
-        state._ignored_modules,
-        state._ignored_params,
-    )
-    _check_single_device_module(root_module, state._ignored_params, device_id)
-    device_from_device_id = _get_device_from_device_id(device_id, state.rank)
-    # Initialize and shard `FlatParamHandle`s one by one following reverse
-    # depth-first order (i.e. reverse `.modules()` order), which represents a
-    # reverse topological sort order. This avoids increasing peak GPU memory
-    # usage when the unsharded model exists on CPU or meta device.
-    # NOTE: This order differs from that followed by the wrapper path when
-    # using auto wrapping, which also represents a valid reverse topological
-    # sort order, but the difference does not matter.
-    materialized_module = False
-    for fully_sharded_module, (params, buffers) in reversed(
-        fully_sharded_module_to_states.items()
-    ):
-        # Materialize the module if needed
-        is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
-            fully_sharded_module, state._ignored_params, state._ignored_modules
-        )
-        if is_meta_module or is_torchdistX_deferred_init:
-            materialized_module = True
-            # Save the parameter and buffer names to reacquire references after
-            # after materialization since their variables may change
-            param_names, buffer_names = _get_state_names_for_states(
-                fully_sharded_module, params, buffers
-            )
-        if (
-            is_meta_module or is_torchdistX_deferred_init
-        ) and param_init_fn is not None:
-            _materialize_with_param_init_fn(fully_sharded_module, param_init_fn)
-        elif is_meta_module:
-            _materialize_meta_module(fully_sharded_module, device_id)
-        elif is_torchdistX_deferred_init:
-            deferred_init.materialize_module(
-                root_module,
-                check_fn=lambda _: True,
-            )
-        if materialized_module:
-            # Reacquire references using the pre-computed state names
-            params = [
-                fully_sharded_module.get_parameter(param_name)
-                for param_name in param_names
-            ]
-            buffers = [
-                fully_sharded_module.get_buffer(buffer_name)
-                for buffer_name in buffer_names
-            ]
-        _move_states_to_device(params, buffers, device_from_device_id)
-        if state.compute_device is None:  # only need to set once
-            state.compute_device = _get_compute_device(
-                fully_sharded_module,
-                state._ignored_params,
-                device_from_device_id,
-                state.rank,
-            )
-        if sync_module_states:
-            _sync_module_states(params, buffers, state.process_group)
-        _init_param_handle_from_params(state, params, fully_sharded_module)
-    # Reverse `_handles` to preserve depth-first `.modules()` order for
-    # consistency with the wrapper path (namely, so that `_get_fsdp_handles()`
-    # returns the same ordering for both paths).
-    state._handles.reverse()
     return state
 
 
