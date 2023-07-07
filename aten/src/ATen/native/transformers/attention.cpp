@@ -32,8 +32,7 @@ namespace native {
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
 REGISTER_NO_CPU_DISPATCH(_fused_sdp_choice_stub);
 
-DEFINE_DISPATCH(efficient_attention_kernel);
-DEFINE_DISPATCH(efficient_attention_backward_kernel);
+DEFINE_DISPATCH(flash_attention_kernel);
 
 namespace {
 
@@ -486,72 +485,6 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cpu(
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    bool compute_logsumexp,
-    double dropout_p,
-    bool is_causal,
-    c10::optional<double> scale) {
-
-  int64_t B = query.size(0);
-  int64_t H = query.size(1);
-  int64_t M = query.size(2);
-  int64_t Kv = value.size(-1);
-
-  auto attn = at::empty({B, M, H, Kv}, query.options());
-  auto lse = at::empty({B, compute_logsumexp ? M : 0, H}, query.options());
-
-  auto q_t = query.transpose(1, 2);
-  auto k_t = key.transpose(1, 2);
-  auto v_t = value.transpose(1, 2);
-
-  efficient_attention_kernel(kCPU, attn, lse, q_t, k_t, v_t, compute_logsumexp, is_causal, scale);
-
-  attn = attn.transpose(1, 2);
-  lse = lse.transpose(1, 2);
-
-  return std::make_tuple(std::move(attn), std::move(lse), Tensor{}, Tensor{});
-}
-
-std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cpu(
-    const at::Tensor& grad_out,
-    const at::Tensor& query,
-    const at::Tensor& key,
-    const at::Tensor& value,
-    const at::Tensor& out,
-    const at::Tensor& logsumexp,
-    const at::Tensor& philox_seed,
-    const at::Tensor& philox_offset,
-    double dropout_p,
-    bool causal,
-    c10::optional<double> scale){
-
-  if (!grad_out.defined()) {
-    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
-  }
-
-  auto grad_out_t = grad_out.transpose(1, 2);
-  auto q_t = query.transpose(1, 2);
-  auto k_t = key.transpose(1, 2);
-  auto v_t = value.transpose(1, 2);
-  auto o_t = out.transpose(1, 2);
-  auto lse_t = logsumexp.transpose(1, 2);
-
-  auto grad_q = at::zeros(q_t.sizes(), query.options());
-  auto grad_k = at::zeros(k_t.sizes(), key.options());
-  auto grad_v = at::zeros(v_t.sizes(), value.options());
-
-  efficient_attention_backward_kernel(kCPU, grad_q, grad_k, grad_v, grad_out_t, q_t, k_t, v_t, o_t, lse_t, causal, scale);
-
-  grad_q = grad_q.transpose(1, 2);
-  grad_k = grad_k.transpose(1, 2);
-  grad_v = grad_v.transpose(1, 2);
-
-  return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v));
-}
-
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
   return static_cast<int64_t>(sdp::SDPBackend::math);
@@ -763,6 +696,55 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     }
 
     return std::make_tuple(at::matmul(attn, value), attn);
+}
+
+std::tuple<
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    int64_t,
+    int64_t,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor>
+_scaled_dot_product_flash_attention_cpu(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    c10::optional<double> scale) {
+
+  int64_t batchSize = query.size(0);
+  int64_t qSize = query.size(2);
+  int64_t num_head = query.size(1);
+  int64_t headSize = query.size(3);
+
+  at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
+  at::Tensor logsumexp = at::empty({batchSize, qSize, num_head}, at::kFloat);
+  at::Tensor cum_seq_q = Tensor();
+  at::Tensor cum_seq_k = Tensor();
+  int64_t max_q = 0;
+  int64_t max_k = 0;
+  at::Tensor philox_seed = Tensor();
+  at::Tensor philox_offset = Tensor();
+  at::Tensor debug_attn_mask = Tensor();
+
+  auto q_t = query.transpose(1, 2);
+  auto k_t = key.transpose(1, 2);
+  auto v_t = value.transpose(1, 2);
+
+  flash_attention_kernel(kCPU, output, logsumexp, cum_seq_q, cum_seq_k,
+      max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
+      q_t, k_t, v_t, dropout_p, is_causal, return_debug_mask, scale);
+
+  output = output.transpose(1, 2);
+
+  return std::make_tuple(std::move(output), std::move(logsumexp),
+      cum_seq_q, cum_seq_k, max_q, max_k,
+      philox_seed, philox_offset, debug_attn_mask);
 }
 
 Tensor triton_multi_head_attention(
