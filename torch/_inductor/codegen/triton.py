@@ -1331,7 +1331,7 @@ class TritonKernel(Kernel):
         sizes[-1] = "None"
         return f"{value}[{', '.join(sizes)}]"
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
         assert self.inside_reduction
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
@@ -1487,17 +1487,20 @@ class TritonKernel(Kernel):
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
             result_var.mask_vars = var_name.mask_vars
+        self.outside_loop_vars.add(result_var)
+        return result_var
+
+    def store_reduction(self, name, index, value):
+        assert self.inside_reduction
         self.inside_reduction = False
         index, mask_vars, mask, _ = self.indexing(index)
         assert "rmask" not in index
         self.inside_reduction = True
-        self.outside_loop_vars.add(result_var)
-        self.cse.store_cache[name] = result_var
-        if name not in V.graph.removed_buffers:
-            var = self.args.output(name)
-            self.suffix.writeline(
-                DeferredLine(name, f"tl.store({var} + {index}, {result_var}, {mask})")
-            )
+
+        var = self.args.output(name)
+        self.suffix.writeline(
+            DeferredLine(name, f"tl.store({var} + ({index}), {value}, {mask})")
+        )
 
     def codegen_body(self):
         """
@@ -1717,10 +1720,13 @@ class TritonKernel(Kernel):
         triton_meta["configs"] = [config_of(signature)]
 
         for tree in self.range_trees:
-            if tree.prefix != "r" or (
-                self.inside_reduction and not self.persistent_reduction
+            if tree.prefix == "r" and (
+                not self.inside_reduction or self.persistent_reduction
             ):
-                argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
+                continue
+            if tree.prefix == "x" and self.no_x_dim:
+                continue
+            argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
 
         if self.inside_reduction:
             reduction_hint = self.reduction_hint
@@ -1792,6 +1798,9 @@ class TritonKernel(Kernel):
                     continue
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
+
+            if tree.prefix == "x" and self.no_x_dim:
+                code.writeline("XBLOCK: tl.constexpr = 1")
 
     def triton_tensor_ndim(self):
         no_x_dim = int(bool(self.no_x_dim))
