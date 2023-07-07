@@ -1178,6 +1178,7 @@ class CppKernel(Kernel):
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
+        self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
@@ -1235,6 +1236,22 @@ class CppKernel(Kernel):
             )
         else:
             acc_type = reduction_acc_type(reduction_type, dtype)
+
+            if (reduction_type, acc_type) not in self.reduction_omp_dec:
+                if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
+                    # Scalar reduction for other reductions are declared by default
+                    self.reduction_prefix.splice(
+                        f"""\
+    #pragma omp declare reduction(\
+    {RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
+    omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
+    initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
+                """
+                    )
+                self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
+                    reduction_type
+                ]
+
             self.reduction_prefix.writeline(
                 f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
             )
@@ -1414,7 +1431,6 @@ class CppVecKernel(CppKernel):
             tiling_factor = codecache.pick_vec_isa().nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
-        self.reduction_omp_dec: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
     def load(self, name: str, index: sympy.Expr):
@@ -1525,7 +1541,7 @@ class CppVecKernel(CppKernel):
         acc_type = reduction_acc_type(reduction_type, dtype)
         acc_type_vec = reduction_acc_type_vec(reduction_type, dtype)
 
-        if reduction_type not in self.reduction_omp_dec:
+        if (reduction_type, acc_type) not in self.reduction_omp_dec:
             if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
                 # Scalar reduction for other reductions are declared by default
                 self.reduction_prefix.splice(
@@ -1536,6 +1552,11 @@ omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
 initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
             """
                 )
+            self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
+                reduction_type
+            ]
+
+        if (reduction_type, acc_type_vec) not in self.reduction_omp_dec:
             self.reduction_prefix.splice(
                 f"""\
 #pragma omp declare reduction(\
@@ -1544,7 +1565,9 @@ omp_out = {reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
 initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             """
             )
-            self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
+            self.reduction_omp_dec[reduction_type, acc_type_vec] = RTYPE_TO_CPP[
+                reduction_type
+            ]
 
         acc = self.reduction_cse.generate(
             self.loads, f"reduction {name} {cexpr_index(index)}", write=False
