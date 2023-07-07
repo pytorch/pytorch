@@ -99,7 +99,7 @@ def ones(
         requires_grad (bool, optional): If autograd should record operations on the
             returned :class:`DTensor`. Default: ``False``.
         device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
-        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``
+        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``
 
     Returns:
         A :class:`DTensor` object on each rank
@@ -142,7 +142,7 @@ def empty(
         requires_grad (bool, optional): If autograd should record operations on the
             returned :class:`DTensor`. Default: ``False``.
         device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
-        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``
+        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``
 
     Returns:
         A :class:`DTensor` object on each rank
@@ -188,7 +188,7 @@ def full(
         requires_grad (bool, optional): If autograd should record operations on the
             returned :class:`DTensor`. Default: ``False``.
         device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks.
-        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``.
+        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``
 
     Returns:
         A :class:`DTensor` object on each rank
@@ -230,7 +230,7 @@ def zeros(
         layout (:class:`torch.layout`, optional): the desired layout of returned :class:`DTensor`.
             Default: ``torch.strided``.
         device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
-        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``
+        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``
 
     Returns:
         A :class:`DTensor` object on each rank

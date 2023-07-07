@@ -10,7 +10,7 @@ def is_built() -> bool:
     doesn't necessarily mean MPS is available; just that if this PyTorch
     binary were run a machine with working MPS drivers and devices, we
     would be able to use it."""
-    return torch._C.has_mps
+    return torch._C._has_mps
 
 
 @_lru_cache()

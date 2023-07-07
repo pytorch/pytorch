@@ -19,7 +19,11 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
-from .functions import NestedUserFunctionVariable, UserFunctionVariable
+from .functions import (
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+)
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -189,6 +193,16 @@ class ClosureVariable(UnknownVariable):
         return [codegen.create_load_closure(self.name)]
 
 
+# closure variable created by an inlined function
+class InlinedClosureVariable(UnknownVariable):
+    def __init__(self, name, **kwargs):
+        super().__init__(**kwargs)
+        self.name = name
+
+    def reconstruct(self, codegen):
+        return [codegen.create_load_closure(self.name)]
+
+
 class NewCellVariable(VariableTracker):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -285,7 +299,7 @@ class AutogradFunctionVariable(VariableTracker):
             if jvp_fn is not torch.autograd.Function.jvp:
                 unimplemented("NYI - User defind jvp")
 
-            from .torch import (
+            from .higher_order_ops import (
                 safe_or_raise_always_restore,
                 TorchHigherOrderOperatorVariable,
             )
@@ -317,7 +331,7 @@ class AutogradFunctionVariable(VariableTracker):
             module_source = AttrSource(
                 tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
             )
-            higher_order_autograd_fn = TorchHigherOrderOperatorVariable(
+            higher_order_autograd_fn = TorchHigherOrderOperatorVariable.make(
                 trampoline_autograd_fwd, source=AttrSource(module_source, "forward")
             )
             speculated_fwd_result = higher_order_autograd_fn.call_function(
@@ -329,7 +343,7 @@ class AutogradFunctionVariable(VariableTracker):
                 tx,
                 graph_checkpoint,
                 checkpoint,
-                TorchHigherOrderOperatorVariable(
+                TorchHigherOrderOperatorVariable.make(
                     trampoline_autograd_bwd,
                     source=AttrSource(module_source, "backward"),
                 ),
@@ -338,7 +352,7 @@ class AutogradFunctionVariable(VariableTracker):
             # If fwd and backward are sound, we want apply in the graph.
             # And we don't want backwards for the obvious reasons.
             args = args[1:]
-            return TorchHigherOrderOperatorVariable(
+            return TorchHigherOrderOperatorVariable.make(
                 trampoline_autograd_apply
             ).call_function(tx, args, kwargs)
 
@@ -369,17 +383,41 @@ class AutogradFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ):
-        if name not in ["backward", "forward"]:
-            unimplemented(f"Unsupported method: {name}")
-
         if name == "backward":
             with tx.strict_translation_mode():
-                return tx.inline_call(
-                    tx, UserFunctionVariable(self.fn_cls.backward), args, kwargs
+                if isinstance(self.fn_cls.backward, types.FunctionType):
+                    backward = UserFunctionVariable(self.fn_cls.backward)
+                elif isinstance(self.fn_cls.backward, types.MethodType):
+                    backward = UserMethodVariable(
+                        self.fn_cls.backward.__func__,
+                        variables.UserDefinedClassVariable(self.fn_cls),
+                    )
+                    args = [backward.obj] + args
+                else:
+                    unimplemented(
+                        f"backward is a non-function or method: {self.fn_cls.backward}"
+                    )
+
+                return tx.inline_call(tx, backward, args, kwargs)
+
+        elif name == "forward":
+            if isinstance(self.fn_cls.forward, types.FunctionType):
+                forward = UserFunctionVariable(self.fn_cls.forward)
+            elif isinstance(self.fn_cls.forward, types.MethodType):
+                forward = UserMethodVariable(
+                    self.fn_cls.forward.__func__,
+                    variables.UserDefinedClassVariable(self.fn_cls),
                 )
-        return tx.inline_call(
-            tx, UserFunctionVariable(self.fn_cls.forward), args, kwargs
-        )
+                args = [forward.obj] + args
+            else:
+                unimplemented(
+                    f"forward is a non-function or method: {self.fn_cls.forward}"
+                )
+
+            return tx.inline_call(tx, forward, args, kwargs)
+
+        else:
+            unimplemented(f"Unsupported method: {name}")
 
 
 class AutogradFunctionContextVariable(UserDefinedObjectVariable):
@@ -388,7 +426,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, value_type=None, inference=False, **kwargs):
+        saved_tensors = kwargs.pop("_saved_tensors", [])
         super().__init__(value=value, value_type=value_type, **kwargs)
+        self._saved_tensors = saved_tensors
         self.inference = inference
 
     @staticmethod
@@ -618,10 +658,15 @@ class SkipFilesVariable(VariableTracker):
             or len(args) == 1
             and BuiltinVariable.is_supported_call_dict_arg(tx, args[0])
         ):
+            if len(args) == 0:
+                args = dict(kwargs) if kwargs else None
+            else:
+                args = args[0]
+
             return BuiltinVariable.call_dict_helper(
                 tx,
                 collections.OrderedDict,
-                None if len(args) == 0 else args[0],
+                args,
                 **options,
             )
         elif (
@@ -764,6 +809,8 @@ class NumpyVariable(VariableTracker):
             unimplemented(f"numpy.{self.value}()")
         import torch_np
 
+        from ..utils import numpy_to_tensor_wrapper
+
         from .builder import wrap_fx_proxy_cls
         from .tensor import NumpyNdarrayVariable
 
@@ -776,7 +823,7 @@ class NumpyVariable(VariableTracker):
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    func,
+                    numpy_to_tensor_wrapper(func),
                     *proxy_args_kwargs(args, kwargs),
                 ),
                 example_value=None,

@@ -7,7 +7,7 @@
 #include <c10/util/Metaprogramming.h>
 #include <torch/library.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // This function implements a boxed fallback to CPU.
 // External backends can add their own custom logging on top if it to customize their own CPU fallbacks.
@@ -42,5 +42,4 @@ using call_fallback_fn_symint = _call_fallback_fn<fallback_fn, Op, true, typenam
 template<c10::KernelFunction::BoxedKernelFunction* fallback_fn, class Op>
 using call_fallback_fn = _call_fallback_fn<fallback_fn, Op, false, typename Op::schema>;
 
-} // namespace native
-} // namespace at
+} // namespace at::native

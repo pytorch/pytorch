@@ -1006,6 +1006,10 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 # as we had before.  By default, we don't run these tests.
 TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 
+TEST_CUDA_GRAPH = TEST_CUDA and os.getenv('PYTORCH_TEST_SKIP_CUDAGRAPH', '0') != '1' and (
+    (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 11) or
+    (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
+)
 
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
@@ -1030,7 +1034,9 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
 
 # Run PyTorch tests with TorchDynamo
 TEST_WITH_TORCHINDUCTOR = os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
-TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
+# AOT_EAGER not tested in ci, useful for debugging
+TEST_WITH_AOT_EAGER = os.getenv('PYTORCH_TEST_WITH_AOT_EAGER') == '1'
+TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
@@ -1084,6 +1090,25 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
         return fn
 
     return decorator
+
+
+# Run PyTorch tests with translation validation on.
+TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
+
+if TEST_WITH_TV:
+    torch._dynamo.config.translation_validation = True
+
+# Some tests take too long when dynamic_shapes is combined with
+# translation_validation. Whenever that happens, we solve that by
+# disabling translation_validation.
+def disable_translation_validation_if_dynamic_shapes(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if torch._dynamo.config.dynamic_shapes:
+            # Turning TV off due to high latency on dynamic shapes.
+            torch._dynamo.config.translation_validation = False
+        return fn(*args, **kwargs)
+    return wrapper
 
 
 # Determine whether to enable cuda memory leak check.
@@ -1815,6 +1840,7 @@ def check_if_enable(test: unittest.TestCase):
                         "asan": TEST_WITH_ASAN,
                         "dynamo": TEST_WITH_TORCHDYNAMO,
                         "inductor": TEST_WITH_TORCHINDUCTOR,
+                        "slow": TEST_WITH_SLOW,
                     }
 
                     invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
@@ -2153,6 +2179,9 @@ class TestCase(expecttest.TestCase):
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
 
+    def assertExpectedInline(self, actual, expect, skip=0):
+        return super().assertExpectedInline(actual if isinstance(actual, str) else str(actual), expect, skip + 1)
+
     def assertLogs(self, logger=None, level=None):
         if logger is None:
             logger = logging.getLogger("torch")
@@ -2259,6 +2288,8 @@ class TestCase(expecttest.TestCase):
         super_run = super().run
         if TEST_WITH_TORCHINDUCTOR:
             super_run = torch._dynamo.optimize("inductor")(super_run)
+        elif TEST_WITH_AOT_EAGER:
+            super_run = torch._dynamo.optimize("aot_eager")(super_run)
         elif TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
             super_run = torch._dynamo.optimize("eager")(super_run)

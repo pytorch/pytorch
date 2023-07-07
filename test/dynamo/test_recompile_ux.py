@@ -12,7 +12,7 @@ import torch._dynamo.testing
 
 
 class RecompileUxTests(torch._dynamo.test_case.TestCase):
-    # TODO(whc) dynamo actualy recompiles one more time than the cache limit
+    # TODO(whc) dynamo actually recompiles one more time than the cache limit
     cache_limit = 1
 
     @classmethod

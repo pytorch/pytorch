@@ -55,6 +55,7 @@ Features described in this documentation are classified by release status:
    compile/guards-overview
    compile/custom-backends
    compile/fine_grained_apis
+   compile/profiling_torch_compile
    compile/inductor_profiling
    compile/deep-dive
    compile/cudagraph_trees
@@ -91,6 +92,7 @@ Features described in this documentation are classified by release status:
    cuda
    mps
    torch.backends <backends>
+   export
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
