@@ -25,6 +25,7 @@ from ctypes import cdll
 from dataclasses import field
 from functools import partial
 from importlib import abc
+from pathlib import Path
 from threading import Thread
 from time import sleep, time
 from typing import Any, Callable, Dict, List, Set, Union
@@ -810,6 +811,36 @@ class AotCodeCache:
         return wrapper_call
 
 
+# Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
+# Why? importing from cpp.py invokes codecache.pick_vec_isa(), which takes out a lock.
+# Cycle goes:
+# - CppCodeCache.load()
+# - pick_vec_isa()
+# - valid_vec_isa_list()
+# - VecISA.__bool__() <-- takes out a lock
+# - compile_file() <-- imports cpp_prefix_path from cpp, which causes us to try to take out the same lock.
+@functools.lru_cache()
+def cpp_prefix_path():
+    path = Path(__file__).parent / "codegen/cpp_prefix.h"
+    with path.open() as f:
+        content = f.read()
+        _, filename = write(
+            content,
+            "h",
+        )
+    return filename
+
+
+def cpp_prefix():
+    filename = cpp_prefix_path()
+    if config.is_fbcode():
+        # We need relative paths, since we bundle up
+        # everything that we compile into a folder for remote compilation.
+        return f'#include "{os.path.basename(filename)}"'
+    else:
+        return f'#include "{filename}"'
+
+
 # Given a path to an input cpp file and an output path,
 # Attempts to compile the file, storing the output in "output_path"
 def compile_file(input_path, output_path, cmd) -> None:
@@ -817,8 +848,6 @@ def compile_file(input_path, output_path, cmd) -> None:
     try:
         if config.is_fbcode():
             # Need to copy our header into the same folder as the sourcecode.
-            from torch._inductor.codegen.cpp import cpp_prefix_path
-
             header_path = cpp_prefix_path()
             header_name = os.path.basename(header_path)
             output_name = os.path.basename(output_path)

@@ -77,7 +77,6 @@ SKIP = {
     # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
     "tacotron2",
 }
-SKIP.update(DETECTRON2_MODELS)
 
 SKIP_FOR_CPU = {
     "hf_T5_generate",  # OOMs
