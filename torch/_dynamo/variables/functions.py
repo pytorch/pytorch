@@ -59,13 +59,13 @@ def wrap_bound_arg(tx, val, options, source=None):
     elif istensor(val):
         from torch._dynamo.variables.builder import VariableBuilder
 
-        return VariableBuilder(tx, source=source, **options)(val)
+        return VariableBuilder(tx, source=source)(val).add_options(options)
     elif isinstance(val, VariableTracker):
         return val
     else:
         from torch._dynamo.variables.builder import VariableBuilder
 
-        return VariableBuilder(tx, source=source, **options)(val)
+        return VariableBuilder(tx, source=source)(val).add_options(options)
 
 
 def wrap_args_kwargs(tx, result, options):
