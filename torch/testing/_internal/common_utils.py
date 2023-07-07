@@ -2255,7 +2255,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                         lambda repro_str=repro_str: print_repro_on_failure(repro_str=repro_str))
                 except Exception as e:
                     # Don't fail entirely if we can't get the test filename
-                    log.exception("could not print repro string", extra=str(e))
+                    log.info("could not print repro string", extra=str(e))
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
