@@ -974,6 +974,17 @@ class TritonKernel(Kernel):
         new_index = sympy_subs(index, dict(zip(index_vars, reindex(new_index_vars))))
         return new_index
 
+    def index_to_str(self, index: sympy.Expr) -> str:
+        """
+        Convert an index expr to a string that can be used in triton code.
+        e.g. a sympy expression "s2" may actually appear as "ks1" in the triton kernel.
+
+        Index expressions often need to be passed in as arguments to the triton kernel.
+        Rename_indexing and codegen_indexing keep track of the needed indices and add
+        new parameters to the function signature.
+        """
+        return texpr(self.rename_indexing(self.codegen_indexing(index)))
+
     def indexing(
         self,
         index: sympy.Expr,
@@ -1008,7 +1019,7 @@ class TritonKernel(Kernel):
                     index = sympy_subs(index, replacements)
 
         index_vars = index.free_symbols
-        index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
+        index_str = self.index_to_str(index)
 
         mask_vars: Set[str] = set()
         for var in index_vars:
@@ -1187,9 +1198,7 @@ class TritonKernel(Kernel):
                 )
 
             self.indirect_max_sizes_expr[map_key] = size
-            self.indirect_max_sizes_printed[map_key] = texpr(
-                self.rename_indexing(self.codegen_indexing(size))
-            )
+            self.indirect_max_sizes_printed[map_key] = self.index_to_str(size)
 
         return sympy_symbol(str(var))
 
@@ -1295,7 +1304,7 @@ class TritonKernel(Kernel):
         self,
         values: CSEVariable,
         offsets_name: str,
-        offsets_size,
+        offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
     ):
@@ -1305,6 +1314,7 @@ class TritonKernel(Kernel):
 
         offsets_ptr = self.args.input(offsets_name)
         block_size = self.dense_size_str()
+        offsets_size_str = self.index_to_str(offsets_size)
 
         if indexing_dtype == torch.int32:
             triton_dtype = "tl.int32"
@@ -1317,7 +1327,7 @@ class TritonKernel(Kernel):
 
         result = self.cse.generate(
             self.compute,
-            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size}, {block_size})",  # noqa: B950 line too long
+            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size_str}, {block_size})",  # noqa: B950 line too long
         )
 
         return result
