@@ -520,6 +520,18 @@ def cached_autotune(
     mutated_arg_names = meta.pop("mutated_arg_names", ())
 
     def decorator(fn):
+        # Remove XBLOCK from config if it's not a function argument.
+        # This way, coordinate descent tuning will not try to tune it.
+        #
+        # Context: When TritonKernel.no_x_dim is True, we hardcode XBLOCK to 1.
+        import inspect
+
+        if "XBLOCK" not in inspect.signature(fn.fn).parameters:
+            for tconfig in configs:
+                if "XBLOCK" in tconfig.kwargs:
+                    assert tconfig.kwargs["XBLOCK"] == 1
+                    tconfig.kwargs.pop("XBLOCK")
+
         if config.profile_bandwidth:
             return DebugAutotuner(
                 fn,
@@ -575,7 +587,9 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
         )
 
 
-def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
+def triton_config(
+    size_hints, x, y=None, z=None, num_stages=1, num_elements_per_warp=256
+) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -623,7 +637,9 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
         cfg["YBLOCK"] = y
     if z:
         cfg["ZBLOCK"] = z
-    num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // 256, 1), 8))
+    num_warps = next_power_of_2(
+        min(max(conditional_product(x, y, z) // num_elements_per_warp, 1), 8)
+    )
     # we are going to arrive at 2 warps only if bs was too small due to
     # numel being too small. However to workaround some ptx bugs we still
     # want at least 4 warps if there's enough elements per thread
@@ -703,13 +719,27 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     bs = max(256, min(numel // 128, 1024))
 
     if len(size_hints) == 1:
-        return cached_autotune(
-            size_hints,
-            [triton_config(size_hints, bs)],
-            meta=meta,
-            heuristic_type=HeuristicType.POINTWISE,
-            filename=filename,
-        )
+        if disable_pointwise_autotuning() and not (
+            config.max_autotune or config.max_autotune_pointwise
+        ):
+            return cached_autotune(
+                size_hints,
+                [triton_config(size_hints, bs)],
+                meta=meta,
+                heuristic_type=HeuristicType.POINTWISE,
+                filename=filename,
+            )
+        else:
+            return cached_autotune(
+                size_hints,
+                [
+                    triton_config(size_hints, bs, num_elements_per_warp=256),
+                    triton_config(size_hints, bs // 2, num_elements_per_warp=64),
+                ],
+                meta=meta,
+                heuristic_type=HeuristicType.POINTWISE,
+                filename=filename,
+            )
     if len(size_hints) == 2:
         if (disable_pointwise_autotuning() or tile_hint == TileHint.SQUARE) and not (
             config.max_autotune or config.max_autotune_pointwise
@@ -896,7 +926,7 @@ def grid(xnumel, ynumel=None, znumel=None):
 
     def grid_fn(meta):
         return (
-            get_grid_dim(xnumel, meta.get("XBLOCK", None)),
+            get_grid_dim(xnumel, meta.get("XBLOCK", 1)),
             get_grid_dim(ynumel, meta.get("YBLOCK", None)),
             get_grid_dim(znumel, meta.get("ZBLOCK", None)),
         )
