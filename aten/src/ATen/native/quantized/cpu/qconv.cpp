@@ -1370,7 +1370,6 @@ template at::Tensor PackedConvWeightsOnednn<3>::apply_relu(
     double output_scale,
     int64_t output_zero_point);
 
-template <PostOps postOpFused>
 static at::Tensor _quantized_convolution_pt2e(
     at::Tensor act, // contains quantized values but not QTensor
     double act_scale,
@@ -1390,7 +1389,11 @@ static at::Tensor _quantized_convolution_pt2e(
     double accum_scale,
     int64_t accum_zero_point,
     bool fp32_output,
-    const c10::optional<c10::ArrayRef<c10::IValue>>& post_op_args) {
+    c10::optional<c10::string_view> binary_attr,
+    c10::optional<at::Scalar> binary_alpha,
+    c10::optional<c10::string_view> unary_attr,
+    torch::List<c10::optional<at::Scalar>> unary_scalars,
+    c10::optional<c10::string_view> unary_algorithm) {
   /*********************************/
   /*          Checks               */
   /*********************************/
@@ -1405,17 +1408,20 @@ static at::Tensor _quantized_convolution_pt2e(
 
   int kSpatialDim = act.dim() - 2;
   bool is_1d = (1 == kSpatialDim);
+
+  bool has_binary_post_op = binary_attr.has_value();
+  bool has_unary_post_op = unary_attr.has_value();
   // has_accum: extra input besides the conv to do conv add fusion.
-  bool has_accum = (postOpFused == PostOps::Add) || (postOpFused == PostOps::AddRelu);
+  bool has_accum = has_binary_post_op && binary_attr.value() == "add";
   std::string func_name = "quantized::packed_weights_conv";
   func_name += std::to_string(kSpatialDim) + "d";
-  if (postOpFused == PostOps::Relu) {
-    func_name += "_relu";
-  } else if(postOpFused == PostOps::Add) {
-    func_name += "_add";
-  } else if (postOpFused == PostOps::AddRelu) {
-    func_name += "_add_relu";
+  if (has_binary_post_op) {
+    func_name += binary_attr.value().data();
   }
+  if (has_unary_post_op) {
+    func_name += unary_attr.value().data();
+  }
+
   if (kSpatialDim == 1) {
     kSpatialDim += 1;
   }
@@ -1562,7 +1568,7 @@ static at::Tensor _quantized_convolution_pt2e(
   ideep::attr_t op_attr;
   // attr
   if (has_accum) {
-    op_attr = (postOpFused == PostOps::AddRelu) ? ideep::attr_t::residual_with_sum_zero_point() : ideep::attr_t::fuse_sum();
+    op_attr = (has_unary_post_op && unary_attr.value()=="relu") ? ideep::attr_t::residual_with_sum_zero_point() : ideep::attr_t::fuse_sum();
     const ideep::scale_t accum_ideep_scale = ideep::scale_t(1, 1.0/accum_scale);
     const ideep::zero_point_t accum_ideep_zero_points = ideep::zero_point_t(1, accum_zero_point);
     // Set the dst scale and zero point with the value of accum.
@@ -1570,7 +1576,7 @@ static at::Tensor _quantized_convolution_pt2e(
     dst.set_scale(accum_ideep_scale);
     dst.set_zero_point(accum_ideep_zero_points);
   } else {
-    op_attr = (postOpFused == PostOps::Relu) ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+    op_attr = (has_unary_post_op && unary_attr.value()=="relu") ? ideep::attr_t::fuse_relu() : ideep::attr_t();
   }
 
   // Weight Reorder
@@ -1728,10 +1734,9 @@ class QConvInt8ForBC final {
   }
 };
 
-template <PostOps postOpFused>
 class QConvPT2E final {
  public:
-  static at::Tensor run(
+  static at::Tensor run_pointwise(
       at::Tensor act, // contains quantized values but not QTensor
       double act_scale,
       int64_t act_zero_point,
@@ -1744,21 +1749,29 @@ class QConvPT2E final {
       torch::List<int64_t> dilation,
       int64_t groups,
       double output_scale,
-      int64_t output_zero_point) {
+      int64_t output_zero_point,
+      bool fp32_output,
+      c10::string_view attr,
+      torch::List<c10::optional<at::Scalar>> scalars,
+      c10::optional<c10::string_view> algorithm) {
 #if AT_MKLDNN_ENABLED()
-    return _quantized_convolution_pt2e<postOpFused>(
+    TORCH_CHECK(
+      attr == "none" || attr == "relu",
+      "none post op or post op relu is supported for quantized pointwise conv.")
+    return _quantized_convolution_pt2e(
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
         bias, stride, padding, dilation, /*transposed*/false,
         groups, output_scale, output_zero_point,
         /*accum*/c10::nullopt, /*accum_scale*/0.0, /*accum_zero_point*/0,
-        /*fp32_output*/false
+        /*fp32_output*/fp32_output, /*binary_attr*/c10::nullopt, /*binary_alpha*/c10::nullopt,
+        /*unary_attr*/attr, /*unary_scalars*/scalars, /*unary_algorithm*/algorithm
     );
 #else
     TORCH_CHECK(false, "Unimplemented as onednn is not available.")
 #endif
   }
-  static at::Tensor run_add(
+  static at::Tensor run_pointwise_binary(
       at::Tensor act, // contains quantized values but not QTensor
       double act_scale,
       int64_t act_zero_point,
@@ -1774,15 +1787,22 @@ class QConvPT2E final {
       torch::List<int64_t> dilation,
       int64_t groups,
       double output_scale,
-      int64_t output_zero_point) {
+      int64_t output_zero_point,
+      bool fp32_output,
+      c10::string_view binary_attr,
+      c10::optional<at::Scalar> alpha,
+      c10::optional<c10::string_view> unary_attr,
+      torch::List<c10::optional<at::Scalar>> unary_scalars,
+      c10::optional<c10::string_view> unary_algorithm) {
 #if AT_MKLDNN_ENABLED()
-    return _quantized_convolution_pt2e<postOpFused>(
+    return _quantized_convolution_pt2e(
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
         bias, stride, padding, dilation, /*transposed*/false,
         groups, output_scale, output_zero_point,
         accum, accum_scale, accum_zero_point,
-        /*fp32_output*/false
+        /*fp32_output*/false, binary_attr, alpha,
+        unary_attr, unary_scalars, unary_algorithm
     );
 #else
     TORCH_CHECK(false, "Unimplemented as onednn is not available.")
@@ -1823,15 +1843,15 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(quantized, MkldnnCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv1d_pt2e"), QConvPT2E<PostOps::NoPostOp>::run);
-  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_pt2e"), QConvPT2E<PostOps::NoPostOp>::run);
-  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv3d_pt2e"), QConvPT2E<PostOps::NoPostOp>::run);
-  // PostOP ReLU
-  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_relu_pt2e"), QConvPT2E<PostOps::Relu>::run);
-  // PostOP Add
-  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_add_pt2e"), QConvPT2E<PostOps::Add>::run_add);
-  // PostOP AddReLU
-  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_add_relu_pt2e"), QConvPT2E<PostOps::AddRelu>::run_add);
+  // Conv1D/2D/3D with Unary postop
+  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv1d_pointwise_pt2e"), QConvPT2E::run_pointwise);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_pointwise_pt2e"), QConvPT2E::run_pointwise);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv3d_pointwise_pt2e"), QConvPT2E::run_pointwise);
+
+  // Conv2D with binary postop
+  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_pointwise_pt2e.binary"), QConvPT2E::run_pointwise_binary);
+  // m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_add_pt2e"), QConvPT2E<PostOps::Add>::run_add);
+  // m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_add_relu_pt2e"), QConvPT2E<PostOps::AddRelu>::run_add);
 
 }
 
