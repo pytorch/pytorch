@@ -6562,7 +6562,7 @@ class CommonTemplate:
         import torch.library
         from torch.library import Library
 
-        foo = Library("foo", "DEF")
+        foo = Library("foo", "FRAGMENT")
         foo.define("custom(Tensor self) -> Tensor")
 
         @torch.library.impl(foo, "custom", "CPU")
