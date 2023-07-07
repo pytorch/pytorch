@@ -110,6 +110,7 @@ class DeviceMesh(object):
         mesh: Union[torch.Tensor, "ArrayLike"],
         *,
         _init_process_groups: bool = True,
+        _validate_mesh: bool = True,
     ) -> None:
         self.device_type = device_type
         self.mesh = (
@@ -117,6 +118,7 @@ class DeviceMesh(object):
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
+        self._validate_mesh = _validate_mesh
         # always try to create default (world) pg, even if it is not initialized
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
@@ -164,10 +166,11 @@ class DeviceMesh(object):
                 f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
             )
         # validate that all calling ranks pass in the same `mesh` argument.
-        self_mesh = self.mesh.to(self.device_type)
-        mesh_tensor = funcol.all_gather_tensor(
-            self_mesh, gather_dim=0, group=_get_default_group()
-        )
+        if self._validate_mesh:
+            self_mesh = self.mesh.to(self.device_type)
+            mesh_tensor = funcol.all_gather_tensor(
+                self_mesh, gather_dim=0, group=_get_default_group()
+            )
         mesh_tensor_chunked = torch.chunk(mesh_tensor, get_world_size())
         for other_rank, other_mesh in enumerate(mesh_tensor_chunked):
             if not torch.equal(self_mesh, other_mesh):
