@@ -227,7 +227,7 @@ class GraphEncoder {
       const std::string& onnx_file_path,
       const NodeAttrNameMap& node_attr_to_name = {});
 
-  onnx::ModelProto get_model_proto() {
+  std::shared_ptr<onnx::ModelProto> get_model_proto() {
     return model_proto_;
   }
 
@@ -379,7 +379,7 @@ class GraphEncoder {
       bool assign_dim_param = true);
 
   SymbolDimMap symbol_dim_map_;
-  onnx::ModelProto model_proto_;
+  std::shared_ptr<onnx::ModelProto> model_proto_;
   size_t num_blocks_;
   size_t num_op_nodes_;
   size_t num_external_data_;
@@ -491,7 +491,8 @@ GraphEncoder::GraphEncoder(
     bool use_external_data_format,
     const std::string& onnx_file_path,
     const NodeAttrNameMap& node_attr_to_name)
-    : num_blocks_(0),
+    : model_proto_(std::make_shared<onnx::ModelProto>()),
+      num_blocks_(0),
       num_op_nodes_(0),
       num_external_data_(0),
       operator_export_type_(operator_export_type),
@@ -502,7 +503,7 @@ GraphEncoder::GraphEncoder(
       custom_opsets_(custom_opsets),
       graph_(graph),
       node_attr_to_name_(node_attr_to_name) {
-  model_proto_.set_producer_name("pytorch");
+  model_proto_->set_producer_name("pytorch");
   TORCH_CHECK(
       onnx_opset_version > 0 &&
           static_cast<size_t>(onnx_opset_version) <
@@ -511,15 +512,14 @@ GraphEncoder::GraphEncoder(
       "Unsupported onnx_opset_version: ",
       onnx_opset_version);
 
-  model_proto_.set_ir_version(kOpsetVersionToIRVersion[onnx_opset_version]);
-  model_proto_.set_producer_version(TORCH_VERSION);
-
+  model_proto_->set_ir_version(kOpsetVersionToIRVersion[onnx_opset_version]);
+  model_proto_->set_producer_version(TORCH_VERSION);
   validateGraph(graph, operator_export_type);
 
   // If graph proto size exceed maximum protobuf size of 2GB, set
   // use_external_data_format to true.
   if (!use_external_data_format &&
-      GetGraphProtoSize(model_proto_.mutable_graph(), graph, initializers) >
+      GetGraphProtoSize(model_proto_->mutable_graph(), graph, initializers) >
           INT_MAX) {
     GRAPH_DEBUG(
         "Exporting model exceed maximum protobuf size of 2GB. Storing model parameters in external data files");
@@ -537,12 +537,12 @@ GraphEncoder::GraphEncoder(
         "be written to the same directory. Please specify the output file name.");
   }
 
-  auto* imp = model_proto_.add_opset_import();
+  auto* imp = model_proto_->add_opset_import();
   // This is the version of ONNX operator set we are targeting
   imp->set_version(onnx_opset_version);
 
   EncodeGraph(
-      model_proto_.mutable_graph(),
+      model_proto_->mutable_graph(),
       graph,
       initializers,
       dynamic_axes,
@@ -552,7 +552,7 @@ GraphEncoder::GraphEncoder(
       onnx_file_path);
 
   for (const std::string& domain : domains_) {
-    auto* opset = model_proto_.add_opset_import();
+    auto* opset = model_proto_->add_opset_import();
     opset->set_domain(domain);
     //  Check if domain version is registered. If not, set to version 1
     auto it = custom_opsets.find(domain);
@@ -779,7 +779,7 @@ void GraphEncoder::EncodeBlock(
       continue;
     }
     if (node->kind() == ::c10::Symbol::onnx("LocalFunctionDef")) {
-      auto* func_proto = model_proto_.add_functions();
+      auto* func_proto = model_proto_->add_functions();
       EncodeLocalFunction(
           graph_proto,
           func_proto,
@@ -833,32 +833,26 @@ unsigned long long int GraphEncoder::GetGraphProtoSize(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers) {
-  unsigned long long int sizes = 0;
+  onnx::GraphProto graph_proto_copy = onnx::GraphProto(*graph_proto);
+  unsigned long long int size = graph_proto_copy.ByteSizeLong();
   for (auto input : graph->inputs()) {
     auto name_tensor_pair = initializers.find(input->debugName());
     if (name_tensor_pair == initializers.end()) {
       continue;
     }
-    onnx::GraphProto* graph_proto_copy = new onnx::GraphProto(*graph_proto);
-    auto tensor_proto = graph_proto_copy->add_initializer();
-    const at::Tensor tensor = name_tensor_pair->second;
+    auto tensor_proto = graph_proto_copy.add_initializer();
+    const at::Tensor& tensor = name_tensor_pair->second;
     for (auto d : tensor.sizes()) {
       tensor_proto->add_dims(d);
     }
     tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.scalar_type()));
-    at::Tensor t;
-    if (tensor.is_quantized()) {
-      t = tensor.contiguous();
-    } else {
-      t = tensor.contiguous().cpu();
-    }
-    tensor_proto->set_raw_data(std::string(
-        static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
-    sizes += tensor_proto->ByteSizeLong();
-    delete graph_proto_copy;
-    graph_proto_copy = nullptr;
+
+    // Don't actually copy the buffer into tensor_proto since that is expensive.
+    // All we actually need is its size.
+    size += tensor_proto->ByteSizeLong();
+    size += tensor.element_size() * tensor.numel();
   }
-  return sizes;
+  return size;
 }
 
 void GraphEncoder::EncodeNode(
@@ -1328,9 +1322,9 @@ std::string pretty_print_onnx(
       false,
       std::string());
   if (google_printer) {
-    return graph_encoder.get_model_proto().DebugString();
+    return graph_encoder.get_model_proto()->DebugString();
   }
-  return prettyPrint(graph_encoder.get_model_proto());
+  return prettyPrint(*graph_encoder.get_model_proto());
 }
 
 std::tuple<
@@ -1369,10 +1363,9 @@ export_onnx(
       use_external_data_format,
       onnx_file_path,
       node_attr_to_name);
-  GRAPH_DEBUG("onnx proto:", prettyPrint(graph_encoder.get_model_proto()));
+  GRAPH_DEBUG("onnx proto:", prettyPrint(*graph_encoder.get_model_proto()));
   return std::make_tuple(
-      std::make_shared<::ONNX_NAMESPACE::ModelProto>(
-          graph_encoder.get_model_proto()),
+      graph_encoder.get_model_proto(),
       graph_encoder.get_raw_data_export_map(),
       graph_encoder.get_symbol_dim_param_map(),
       graph_encoder.get_use_external_data_format(),
