@@ -115,6 +115,7 @@ _efficient_attention_backward(
     const at::Tensor& philox_seed, // seed using for generating random numbers for dropout
     const at::Tensor& philox_offset, // offset into random number sequence
     int64_t custom_mask_type,
+    const bool bias_requires_grad,
     const c10::optional<double> scale,
     c10::optional <int64_t> num_splits_key) {
   #if defined(USE_FLASH_ATTENTION)
@@ -186,8 +187,6 @@ _efficient_attention_backward(
   int64_t nH = query.size(2);
   int64_t K = query.size(3);
   int64_t Kv = value.size(3);
-
-  const bool bias_requires_grad = bias.has_value() && bias->requires_grad();
 
   at::Tensor grad_q, grad_k, grad_v, grad_bias;
   grad_q = at::empty(query.sizes(), query.options());
@@ -556,8 +555,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
     double dropout_p,
+    std::array<bool, 4> grad_input_mask,
     bool causal,
-    c10::optional<double> scale){
+    c10::optional<double> scale) {
+
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
@@ -601,6 +602,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
           philox_seed,
           philox_offset,
           static_cast<int64_t>(custom_mask_type),
+          grad_input_mask[3],
           scale,
           c10::nullopt);  // num_split_keys
   return std::make_tuple(
