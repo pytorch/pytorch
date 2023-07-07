@@ -457,8 +457,7 @@ class GraphLowering(torch.fx.Interpreter):
         def allocate():
             for name, value in self.constants.items():
                 if (
-                    not data.is_mkldnn
-                    and data.size() == value.size()
+                    data.size() == value.size()
                     and data.stride() == value.stride()
                     and data.dtype == value.dtype
                     and data.device == value.device

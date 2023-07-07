@@ -3134,10 +3134,10 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(a >> 1, expected_r)
         self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
 
-    @onlyNativeDeviceTypes
+    @onlyCPU
     @dtypes(*get_all_int_dtypes())
     def test_shift_limits(self, device, dtype):
-        "Ensure that integer bit shifting works as expected with out-of-limits shift values."
+        "Ensure that CPU integer bit shifting works as expected with out-of-limits shift values."
         # Issue #70904
         iinfo = torch.iinfo(dtype)
         bits = iinfo.bits

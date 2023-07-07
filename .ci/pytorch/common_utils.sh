@@ -194,7 +194,6 @@ function install_huggingface() {
   version=$(get_pinned_commit huggingface)
   pip_install pandas
   pip_install scipy
-  pip_install z3-solver
   pip_install "transformers==${version}"
 }
 
@@ -203,7 +202,6 @@ function install_timm() {
   commit=$(get_pinned_commit timm)
   pip_install pandas
   pip_install scipy
-  pip_install z3-solver
   pip_install "git+https://github.com/rwightman/pytorch-image-models@${commit}"
 }
 
