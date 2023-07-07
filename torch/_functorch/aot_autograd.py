@@ -551,6 +551,8 @@ class ViewAndMutationMeta:
         self.num_outputs_rng_offset = 1 if self.is_rng_op_functionalized else 0
 
         self.num_outputs_dep_token = 0
+        if FunctionalAssertionsHelper.functionalization_enabled():
+            self.num_outputs_dep_token = 1
 
     def __eq__(self, other):
         if not isinstance(other, ViewAndMutationMeta):
@@ -985,8 +987,8 @@ class GraphSignature:
 
     backward_signature: Optional[BackwardSignature]
 
-    # If assertion functionalization is enabled and there is any assertion
-    # in the graph, an extra dependency token will be returned.
+    # If assertion functionalization is enabled, an extra dependency token will
+    # be returned.
     asserts_dep_token: Optional[GraphOutputName] = None
 
     @classmethod
@@ -1309,9 +1311,6 @@ def create_joint(
 # The function returned has signature that is either:
 # (1) "traced_fn(primals: List[Any])" if trace_joint is False
 # (2) "traced_fn(primals: List[Any], tangents: List[Any])" if trace_joint is True
-#
-# Also `meta` might be mutated while creating functionalized graph so the mutated
-# (or not) `meta` is returned as well.
 def create_functionalized_graph(
     fn,
     args,
@@ -1319,7 +1318,7 @@ def create_functionalized_graph(
     meta: ViewAndMutationMeta,
     aot_config: AOTConfig,
     trace_joint: bool,
-) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta]:
+):
     def functionalized_f_helper(*args):
         # Wrap inputs into functional wrappers
         f_args = pytree.tree_map(to_fun, args)
@@ -1379,7 +1378,6 @@ def create_functionalized_graph(
         return functionalized_f_helper(*args)
 
     helper = joint_helper if trace_joint else fwd_helper
-
     if config.functionalize_rng_ops:
         # Setup the wrapper for functionalization of rng ops
         helper, args = create_functionalized_rng_ops_wrapper(helper, args, trace_joint)
@@ -1392,9 +1390,8 @@ def create_functionalized_graph(
 
     with enable_python_dispatcher():
         fx_g = make_fx(helper, decomposition_table=aot_config.decompositions)(*args)
-        meta.num_outputs_dep_token = FunctionalAssertionsHelper.get_num_outputs_dep_token()
 
-    return fx_g, meta
+    return fx_g
 
 
 def normalize_as_list(x):
@@ -1490,10 +1487,7 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
             out = normalize_as_list(f(*args))
     return out
 
-
-def aot_dispatch_base_graph(
-    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
-) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta]:
+def aot_dispatch_base_graph(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
     # - outputs that are aliases of graph intermediates
@@ -1508,7 +1502,7 @@ def aot_dispatch_base_graph(
         keep_data_input_mutations=aot_config.keep_inference_input_mutations,
     )
 
-    fw_module, fw_metadata = create_functionalized_graph(
+    fw_module = create_functionalized_graph(
         fn_to_trace,
         flat_args,
         meta=fw_metadata,
@@ -1530,12 +1524,10 @@ def aot_dispatch_base_graph(
     if aot_config.enable_log:
         aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
 
-    return fw_module, fw_metadata
+    return fw_module
 
-def aot_dispatch_base(
-    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
-) -> Tuple[Callable, ViewAndMutationMeta]:
-    fw_module, fw_metadata = aot_dispatch_base_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
+def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
+    fw_module = aot_dispatch_base_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = torch._C._DisableAutocast if disable_amp else nullcontext
@@ -1562,6 +1554,7 @@ def aot_dispatch_base(
     # Create a wrapper to set up the rng functionalize bits
     @wraps(compiled_fw)
     def wrapper(args):
+        # args is a list because compiled_fw is boxed_call
         if fw_metadata.is_rng_op_functionalized:
             # Add the seed and offset to args
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
@@ -1580,7 +1573,7 @@ def aot_dispatch_base(
         disable_amp=disable_amp
     )
 
-    return compiled_fn, fw_metadata
+    return compiled_fn
 
 
 # Returns the number of detected copy_
@@ -2071,7 +2064,7 @@ def aot_wrapper_dedupe(
     *,
     compiler_fn,
     fw_metadata,
-) -> Tuple[Callable, ViewAndMutationMeta]:
+):
     # Use information about whether or not flat_fn mutates its arguments
     # or not to handle dupe args
 
@@ -2247,7 +2240,7 @@ fw_metadata={str(fw_metadata)}
 
     debugged_compiled_fn._boxed_call = True
 
-    return debugged_compiled_fn, fw_metadata
+    return debugged_compiled_fn
 
 # This layer handles the situation where you have two inputs that alias each other,
 # and one of the inputs is mutated.
@@ -2267,7 +2260,7 @@ def aot_wrapper_synthetic_base(
     # the synthetic base code prohibits more cases in the autograd case than the inference case.
     needs_autograd: bool,
     compiler_fn,
-) -> Tuple[Callable, ViewAndMutationMeta]:
+):
     is_inference = not needs_autograd
     flat_args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
         flat_args, fw_metadata.input_info, is_inference=is_inference,
@@ -2372,7 +2365,7 @@ fw_metadata={str(fw_metadata)}
             return user_outs
         return outs
 
-    return wrapped_compiled_fn, updated_fw_metadata
+    return wrapped_compiled_fn
 
 
 def describe_input(i, aot_config):
@@ -2592,6 +2585,7 @@ def _runtime_functionalization_epilogue(metadata, outs):
         outs = outs[:-1]
     return outs
 
+
 def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
     # Functionalization of rng ops changes the calling convention of the joint graph.
     # It goes from (primals, tangents) to (seed, offset, primals, tangents)
@@ -2646,9 +2640,7 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
 # the same storage, so long as they have separate TensorImpls.)
-def aot_dispatch_autograd_graph(
-    flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
-) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta]:
+def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
     # traced_tangents corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
@@ -2666,7 +2658,7 @@ def aot_dispatch_autograd_graph(
     )
     joint_fn_to_trace = create_joint(fn_prepared_for_autograd, aot_config=aot_config)
 
-    fx_g, fw_metadata = create_functionalized_graph(
+    fx_g = create_functionalized_graph(
         joint_fn_to_trace,
         joint_inputs,
         meta=fw_metadata,
@@ -2686,12 +2678,10 @@ def aot_dispatch_autograd_graph(
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
     # when we need to manually detach() some inputs in the forward.
     # Higher order ops might eventually need to do the same.
-    return fx_g, fw_metadata
+    return fx_g
 
-def aot_dispatch_autograd(
-    flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta,
-) -> Tuple[Callable, ViewAndMutationMeta]:
-    fx_g, fw_metadata = aot_dispatch_autograd_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
+def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
+    fx_g = aot_dispatch_autograd_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
     # Copied from aot_dispatch_autograd_graph.
     traced_tangents = pytree.tree_map(
@@ -2786,6 +2776,7 @@ def aot_dispatch_autograd(
             + fw_metadata.num_outputs_rng_offset
             + fw_metadata.num_outputs_dep_token
         )
+
         for i, (bw_out) in enumerate(bw_outs):
             if bw_out is None:
                 _indices_of_inps_to_detach.append(i)
@@ -3109,7 +3100,7 @@ def aot_dispatch_autograd(
     )
 
     if not config.debug_assert:
-        return compiled_function, fw_metadata
+        return compiled_function
 
     flat_requires_grad = [
         a.requires_grad if isinstance(a, Tensor) else None for a in flat_args
@@ -3138,7 +3129,7 @@ def aot_dispatch_autograd(
 
         return compiled_function(*args)
 
-    return debug_compiled_function, fw_metadata
+    return debug_compiled_function
 
 
 @dynamo_timed
@@ -3204,6 +3195,7 @@ def create_aot_dispatcher_function(
     with torch.autograd.set_multithreading_enabled(
         False
     ), preserve_rng_state(), fake_mode, python_dispatcher_mode, PhiloxStateTracker():
+
         def process_inputs(flat_args):
             def convert(idx, x):
                 if shape_env is not None:
@@ -3306,9 +3298,10 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
         # You can put more passes here
 
         with maybe_enable_functionalize_asserts:
-            compiled_fn, fw_metadata = compiler_fn(
+            compiled_fn = compiler_fn(
                 flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata,
             )
+
         if aot_config.is_export:
 
             mutated_user_inp_locs = [
