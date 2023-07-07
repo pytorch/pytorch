@@ -7,6 +7,7 @@ import numpy as np
 import unittest
 import operator
 import random
+from typing import NamedTuple, List
 
 import torch
 from torch import _VF
@@ -40,6 +41,13 @@ np_dtype = {
     torch.qint8 : np.int8,
     torch.qint32 : np.int32
 }
+
+class PointwisePostOp(NamedTuple):
+    binary_attr : str = "none"
+    alpha : float = 1.0
+    unary_attr : str = "none"
+    scalars : List = []
+    algorithm : str = ""
 
 # Make sure we won't have overflows from vpmaddubsw instruction used in FBGEMM.
 # On the current Intel x86 architecture, we need to utilize vpmaddubsw instruction
@@ -6374,6 +6382,7 @@ class TestQuantizedConv(TestCase):
         output_dtype=torch.quint8,
         X2_scale=1.0,
         X2_zero_point=128,
+        fp32_output=False,
     ):
         # ONEDNN only supports symmetric quantization of weight
         if W_zero_point is not None:
@@ -6410,11 +6419,8 @@ class TestQuantizedConv(TestCase):
         )
         result_ref = conv_op(X)
         X2_q = None
-        if post_op == "relu":
-            assert not use_transpose, "Cannot fuse ReLU with ConvTranspose"
-            relu = torch.nn.ReLU()
-            result_ref = relu(result_ref)
-        elif post_op in ["add", "add_relu"]:
+
+        if post_op.binary_attr == "add":
             (X_value_min, X_value_max) = (0, 4)
             X2_init = torch.randint(
                 X_value_min, X_value_max, result_ref.size(), device=device
@@ -6424,9 +6430,13 @@ class TestQuantizedConv(TestCase):
                 X2, scale=X2_scale, zero_point=X2_zero_point, dtype=input_dtype
             )
             result_ref = result_ref + X2
-            if post_op == "add_relu":
+            if post_op.unary_attr == "relu":
                 relu = torch.nn.ReLU()
                 result_ref = relu(result_ref)
+        elif post_op.unary_attr == "relu":
+            assert not use_transpose, "Cannot fuse ReLU with ConvTranspose"
+            relu = torch.nn.ReLU()
+            result_ref = relu(result_ref)
 
         # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
@@ -6460,7 +6470,7 @@ class TestQuantizedConv(TestCase):
             groups,
         )
 
-        if post_op in ["add", "add_relu"]:
+        if post_op.binary_attr == "add":
             X2_q_cpu_tensor = X2_q.int_repr()
             Y_q_cpu_tensor = qconv(
                 X_q_cpu_tensor,
@@ -6479,6 +6489,12 @@ class TestQuantizedConv(TestCase):
                 groups,
                 Y_scale,
                 Y_zero_point,
+                fp32_output,
+                post_op.binary_attr,
+                post_op.alpha,
+                post_op.unary_attr,
+                post_op.scalars,
+                post_op.algorithm,
             )
         else:
             Y_q_cpu_tensor = qconv(
@@ -6495,6 +6511,10 @@ class TestQuantizedConv(TestCase):
                 groups,
                 Y_scale,
                 Y_zero_point,
+                fp32_output,
+                post_op.unary_attr,
+                post_op.scalars,
+                post_op.algorithm,
             )
 
         # Make sure the results match
@@ -6509,6 +6529,11 @@ class TestQuantizedConv(TestCase):
         # For example, the result of round(2.5) + 1 is 3 while
         # round(2.5 + 1) is 4 assuming the rounding mode is
         # round-to-nearest, ties-to-even.
+
+        # print("result_ref is: {}".format(result_ref), flush=True)
+        # print("result_ref_q.int_repr().cpu().numpy() is: {}".format(result_ref_q.int_repr().cpu().numpy()), flush=True)
+        # print("Y_q_cpu_tensor.cpu().numpy() is: {}".format(Y_q_cpu_tensor.cpu().numpy()), flush=True)
+
         np.testing.assert_array_almost_equal(
             result_ref_q.int_repr().cpu().numpy(),
             Y_q_cpu_tensor.cpu().numpy(),
@@ -6554,11 +6579,12 @@ class TestQuantizedConv(TestCase):
                 groups,
             )
 
-            qconv = torch.ops.quantized.qconv1d_pt2e
+            qconv = torch.ops.quantized.qconv1d_pointwise_pt2e
             qconv_prepack = torch.ops.quantized.qconv_prepack_pt2e
 
             X_qdtype = torch.quint8
             weight_dtype = torch.qint8
+            pointwise_post_op = PointwisePostOp()
 
             self._test_qconv_impl_cpu_tensor(
                 qconv,
@@ -6581,12 +6607,13 @@ class TestQuantizedConv(TestCase):
                 Y_scale,
                 Y_zero_point,
                 use_bias,
-                "none",
+                pointwise_post_op,
                 use_channelwise,
                 False,
                 input_dtype=X_qdtype,
                 weight_dtype=weight_dtype,
                 output_dtype=X_qdtype,
+                fp32_output=False,
             )
 
     @skipIfNoONEDNN
@@ -6623,7 +6650,7 @@ class TestQuantizedConv(TestCase):
             pads = (pad_h, pad_w)
             dilations = (dilation, dilation)
 
-            qconv = torch.ops.quantized.qconv2d_pt2e
+            qconv = torch.ops.quantized.qconv2d_pointwise_pt2e
             qconv_prepack = torch.ops.quantized.qconv_prepack_pt2e
             conv_op = torch.nn.Conv2d(
                 input_channels,
@@ -6637,6 +6664,7 @@ class TestQuantizedConv(TestCase):
 
             X_qdtype = torch.quint8
             weight_dtype = torch.qint8
+            pointwise_post_op = PointwisePostOp()
             self._test_qconv_impl_cpu_tensor(
                 qconv,
                 qconv_prepack,
@@ -6658,12 +6686,13 @@ class TestQuantizedConv(TestCase):
                 Y_scale,
                 Y_zero_point,
                 use_bias,
-                "none",
+                pointwise_post_op,
                 use_channelwise,
                 False,
                 input_dtype=X_qdtype,
                 weight_dtype=weight_dtype,
                 output_dtype=X_qdtype,
+                fp32_output=False,
             )
 
     @skipIfNoONEDNN
@@ -6702,7 +6731,7 @@ class TestQuantizedConv(TestCase):
             pads = (pad_d, pad_h, pad_w)
             dilations = (dilation, dilation, dilation)
 
-            qconv = torch.ops.quantized.qconv3d_pt2e
+            qconv = torch.ops.quantized.qconv3d_pointwise_pt2e
             qconv_prepack = torch.ops.quantized.qconv_prepack_pt2e
             conv_op = torch.nn.Conv3d(
                 input_channels,
@@ -6715,6 +6744,7 @@ class TestQuantizedConv(TestCase):
             )
             X_qdtype = torch.quint8
             weight_dtype = torch.qint8
+            pointwise_post_op = PointwisePostOp()
             self._test_qconv_impl_cpu_tensor(
                 qconv,
                 qconv_prepack,
@@ -6736,12 +6766,13 @@ class TestQuantizedConv(TestCase):
                 Y_scale,
                 Y_zero_point,
                 use_bias,
-                "none",
+                pointwise_post_op,
                 use_channelwise,
                 use_transpose=False,
                 input_dtype=X_qdtype,
                 weight_dtype=weight_dtype,
                 output_dtype=X_qdtype,
+                fp32_output=False,
             )
 
     # Test qconv with post op relu
@@ -6777,7 +6808,7 @@ class TestQuantizedConv(TestCase):
             pads = (pad_h, pad_w)
             dilations = (dilation, dilation)
 
-            qconv = torch.ops.quantized.qconv2d_relu_pt2e
+            qconv = torch.ops.quantized.qconv2d_pointwise_pt2e
             qconv_prepack = torch.ops.quantized.qconv_prepack_pt2e
             conv_op = torch.nn.Conv2d(
                 input_channels,
@@ -6791,6 +6822,7 @@ class TestQuantizedConv(TestCase):
 
             X_qdtype = torch.quint8
             weight_dtype = torch.qint8
+            pointwise_post_op = PointwisePostOp(unary_attr="relu")
 
             self._test_qconv_impl_cpu_tensor(
                 qconv,
@@ -6813,12 +6845,13 @@ class TestQuantizedConv(TestCase):
                 Y_scale,
                 Y_zero_point,
                 use_bias,
-                "relu",
+                pointwise_post_op,
                 use_channelwise,
                 False,
                 input_dtype=X_qdtype,
                 weight_dtype=weight_dtype,
                 output_dtype=X_qdtype,
+                fp32_output=False,
             )
 
     # Test qconv with post op add
@@ -6859,7 +6892,7 @@ class TestQuantizedConv(TestCase):
             pads = (pad_h, pad_w)
             dilations = (dilation, dilation)
 
-            qconv = torch.ops.quantized.qconv2d_add_pt2e
+            qconv = torch.ops.quantized.qconv2d_pointwise_pt2e.binary
             qconv_prepack = torch.ops.quantized.qconv_prepack_pt2e
             conv_op = torch.nn.Conv2d(
                 input_channels,
@@ -6873,6 +6906,7 @@ class TestQuantizedConv(TestCase):
 
             X_qdtype = torch.quint8
             weight_dtype = torch.qint8
+            pointwise_post_op = PointwisePostOp(binary_attr="add")
             self._test_qconv_impl_cpu_tensor(
                 qconv,
                 qconv_prepack,
@@ -6894,7 +6928,7 @@ class TestQuantizedConv(TestCase):
                 Y_scale,
                 Y_zero_point,
                 use_bias,
-                "add",
+                pointwise_post_op,
                 use_channelwise,
                 False,
                 input_dtype=X_qdtype,
@@ -6902,6 +6936,7 @@ class TestQuantizedConv(TestCase):
                 output_dtype=X_qdtype,
                 X2_scale=X2_scale,
                 X2_zero_point=X2_zero_point,
+                fp32_output=False,
             )
 
     # Test qconv with post op add relu
@@ -6942,7 +6977,7 @@ class TestQuantizedConv(TestCase):
             pads = (pad_h, pad_w)
             dilations = (dilation, dilation)
 
-            qconv = torch.ops.quantized.qconv2d_add_relu_pt2e
+            qconv = torch.ops.quantized.qconv2d_pointwise_pt2e.binary
             qconv_prepack = torch.ops.quantized.qconv_prepack_pt2e
             conv_op = torch.nn.Conv2d(
                 input_channels,
@@ -6956,6 +6991,7 @@ class TestQuantizedConv(TestCase):
 
             X_qdtype = torch.quint8
             weight_dtype = torch.qint8
+            pointwise_post_op = PointwisePostOp(binary_attr="add", unary_attr="relu")
             self._test_qconv_impl_cpu_tensor(
                 qconv,
                 qconv_prepack,
@@ -6977,7 +7013,7 @@ class TestQuantizedConv(TestCase):
                 Y_scale,
                 Y_zero_point,
                 use_bias,
-                "add_relu",
+                pointwise_post_op,
                 use_channelwise,
                 False,
                 input_dtype=X_qdtype,
@@ -6985,6 +7021,7 @@ class TestQuantizedConv(TestCase):
                 output_dtype=X_qdtype,
                 X2_scale=X2_scale,
                 X2_zero_point=X2_zero_point,
+                fp32_output=False,
             )
 
 class TestPadding(TestCase):
