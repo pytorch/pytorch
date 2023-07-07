@@ -252,12 +252,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         export_output = torch.onnx.dynamo_export(model, tensor_x)
         model_proto = export_output.model_proto
         self.assertEqual(
-            {
-                # TODO(bowbao): remove this once we correctly name the ONNX initializer.
-                # #104670
-                initializer.name.replace("_", ".")
-                for initializer in model_proto.graph.initializer
-            },
+            {initializer.name for initializer in model_proto.graph.initializer},
             {*model.state_dict().keys()},
         )
 
