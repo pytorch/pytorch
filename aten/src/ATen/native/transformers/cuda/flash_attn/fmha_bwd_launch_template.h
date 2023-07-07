@@ -8,6 +8,8 @@
 #include <ATen/native/transformers/cuda/flash_attn/fmha.h>
 #include <ATen/native/transformers/cuda/flash_attn/fmha_dgrad_kernel_1xN_loop.h>
 
+namespace pytorch_fmha {
+
 // Pick whether we should parallelize across seqlen_k (num_splits > 1) or not (num_splits=1).
 // Parallelizing will have better occupancy, but has some overhead due to having to zero out
 // dq_tmp and having to copy dq_tmp to dq.
@@ -113,3 +115,5 @@ void run_fmha_bwd_loop(FMHA_dgrad_params &params, cudaStream_t stream, const boo
         FMHA_CHECK_CUDA(cudaPeekAtLastError());
     }));
 }
+
+}; // namespace pytorch_fmha

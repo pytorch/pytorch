@@ -112,6 +112,12 @@ enum class Rule : uint32_t {
   kFindOpschemaMatchedSymbolicFunction,
 
   /**
+   * @brief Determine if type promotion is required for the FX node. Insert cast
+   * nodes if needed.
+   */
+  kFxNodeInsertTypePromotion,
+
+  /**
    * @brief The formatted str for argument to display is too verbose.
    */
   kArgFormatTooVerbose,
@@ -136,6 +142,7 @@ static constexpr const char* const kPyRuleNames[] = {
     "unsupported_fx_node_analysis",
     "op_level_debugging",
     "find_opschema_matched_symbolic_function",
+    "fx_node_insert_type_promotion",
     "arg_format_too_verbose",
 };
 
