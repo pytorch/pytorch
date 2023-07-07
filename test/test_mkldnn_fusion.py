@@ -15,7 +15,7 @@ FUSION_GROUP = 'prim::TensorExprGroup'
 
 class PointwisePostOp(NamedTuple):
     attr : str
-    pointwise_module : torch.nn.Module
+    pointwise_module : nn.Module
     scalars : List = []
     algorithm : str = ""
 
