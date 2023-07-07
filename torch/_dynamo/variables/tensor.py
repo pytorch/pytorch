@@ -719,6 +719,9 @@ class TensorWithTFOverrideVariable(VariableTracker):
     def python_type(self):
         return self.subclass_type
 
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        return self.tensor_variable.var_getattr(tx, name)
+
     def call_method(
         self,
         tx,
@@ -974,6 +977,9 @@ class TensorSubclassVariable(VariableTracker):
     def __init__(self, value, *args, **kwargs):
         self.value = value
         super().__init__(*args, **kwargs)
+
+    def as_python_constant(self):
+        return self.value
 
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]

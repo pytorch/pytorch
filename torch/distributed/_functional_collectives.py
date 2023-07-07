@@ -397,8 +397,7 @@ class AsyncCollectiveTensor(torch.Tensor):
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         def unwrap(e: AsyncCollectiveTensor):
             # wait_tensor is idempotent and will do stream sync only once
-            wait_tensor(e.elem)
-            return e.elem
+            return wait_tensor(e.elem)
 
         unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
         unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
