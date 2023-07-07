@@ -790,7 +790,7 @@ inline at::Device toDevice(PyObject* obj) {
   if (THPUtils_checkLong(obj)) {
     const auto device_index = THPUtils_unpackLong(obj);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
-    return at::Device(DeviceType::CUDA, device_index);
+    return at::Device(c10::DeviceType::CUDA, device_index);
   }
   const std::string& device_str = THPUtils_unpackString(obj);
   return at::Device(device_str);
@@ -1099,7 +1099,7 @@ inline at::Storage PythonArgs::storage(
 inline c10::Stream PythonArgs::stream(int i) {
   if (!args[i])
     return c10::Stream(
-        c10::Stream::Default::DEFAULT, c10::Device(DeviceType::CPU, -1));
+        c10::Stream::Default::DEFAULT, c10::Device(c10::DeviceType::CPU, -1));
   if (!THPStream_Check(args[i])) {
     throw TypeError(
         "expected Stream object. Got '%s'", Py_TYPE(args[i])->tp_name);
@@ -1107,7 +1107,7 @@ inline c10::Stream PythonArgs::stream(int i) {
   return c10::Stream::unpack3(
       ((THPStream*)args[i])->stream_id,
       ((THPStream*)args[i])->device_index,
-      static_cast<DeviceType>(((THPStream*)args[i])->device_type));
+      static_cast<c10::DeviceType>(((THPStream*)args[i])->device_type));
 }
 
 inline PyObject* PythonArgs::pyobject(int i) {
