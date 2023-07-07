@@ -395,6 +395,9 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
         def unwrap(e: AsyncCollectiveTensor):
             # wait_tensor is idempotent and will do stream sync only once
             return wait_tensor(e.elem)
@@ -402,7 +405,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
         unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
 
-        return super().__torch_function__(func, types, unwrapped_args, unwrapped_kwargs)
+        return func(*unwrapped_args, **unwrapped_kwargs)
 
 torch._dynamo.config.traceable_tensor_subclasses.add(AsyncCollectiveTensor)
 

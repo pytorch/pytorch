@@ -596,7 +596,10 @@ class VariableBuilder:
             #     source=self.source,
             #     guards=self.make_guards(GuardBuilder.ID_MATCH),
             # )
-        elif value in config.traceable_tensor_subclasses:
+        elif (
+            isinstance(value, torch._C._TensorMeta)
+            and value in config.traceable_tensor_subclasses
+        ):
             return TensorSubclassVariable(value, source=self.source)
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
