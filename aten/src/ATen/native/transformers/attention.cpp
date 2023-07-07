@@ -573,27 +573,14 @@ c10::optional<Tensor> convert_boolean_attn_mask(const c10::optional<Tensor>& att
 // if padding is done it will be tracked for backward automatically
 at::Tensor pad_bias(const at::Tensor& attn_bias) {
   int align_to = 16;
-  if (attn_bias.size(-1) % align_to == 0) {
+  auto last_dim_size = attn_bias.sym_size(-1);
+  if (last_dim_size % align_to == 0) {
     return attn_bias;
   }
-  int pad_count = align_to - (attn_bias.size(-1) % align_to);
-  auto padded_bias = at::pad(attn_bias, {0, pad_count});
-  return padded_bias.slice(-1, 0, attn_bias.size(-1));
-}
-// Hmmm bad optional access syms like the above needs to be symintified
-at::Tensor pad_bias_no_sym(const at::Tensor& attn_bias) {
-  int align_to = 16;
-  auto last_dim_opt = attn_bias.sym_size(-1).maybe_as_int();
-  if (!last_dim_opt.has_value()) {
-    TORCH_CHECK("This function only supports static shape");
-  }
-  int64_t last_dim = last_dim_opt.value();
-  if (last_dim % align_to == 0) {
-    return attn_bias;
-  }
-  int pad_count = align_to - (last_dim % align_to);
-  auto padded_bias = at::pad(attn_bias, {0, pad_count});
-  return padded_bias.slice(-1, 0, last_dim);
+  auto pad_count = align_to - (last_dim_size % align_to);
+  c10::SymIntArrayRef padded_shape = {0, pad_count};
+  auto padded_bias = at::pad_symint(attn_bias, padded_shape);
+  return padded_bias.slice_symint(-1, 0, last_dim_size);
 }
 
 } // namespace
@@ -652,10 +639,14 @@ Tensor scaled_dot_product_attention(
       bool compute_logsumexp =
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
-      if(attn_mask.has_value()){
-        attn_mask = pad_bias_no_sym(attn_mask.value());
+      if (attn_mask.has_value()) {
+        attn_mask = pad_bias(attn_mask.value());
         // Expand to 4d case
-        attn_mask = attn_mask.value().expand({query_.size(0), query_.size(1), query_.size(2), key.size(2)});
+        attn_mask = attn_mask.value().expand_symint(
+            {query_.sym_size(0),
+             query_.sym_size(1),
+             query_.sym_size(2),
+             key.sym_size(2)});
       }
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
