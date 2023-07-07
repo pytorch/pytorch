@@ -230,7 +230,8 @@ cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
     engine_cache_order.push_back(key);
     engine_cache.erase(key);
     engine_cache.emplace(key, std::make_pair(plan, --engine_cache_order.end()));
-    TORCH_INTERNAL_ASSERT(engine_cache.find(key)->first == *(engine_cache.find(key)->second.second), "CUDNN V8 LRU Cache Corrupted (refresh list vs. map key mismatch). Please report a bug to PyTorch.");
+    it = engine_cache.find(key);
+    TORCH_INTERNAL_ASSERT(it->first == *(it->second.second), "CUDNN V8 LRU Cache Corrupted (refresh list vs. map key mismatch). Please report a bug to PyTorch.");
     TORCH_INTERNAL_ASSERT((long) engine_cache_order.size() <= lru_cache_limit, "CUDNN V8 LRU Cache Corrupted (refresh size exceeds limit: ", lru_cache_limit, " please report a bug to PyTorch.");
     TORCH_INTERNAL_ASSERT(engine_cache_order.size() == engine_cache_order_size, "CUDNN V8 LRU Cache Corrupted (list size unexpectedly changed). Please report a bug to PyTorch.");
     TORCH_INTERNAL_ASSERT(engine_cache.size() == engine_cache.size(), "CUDNN V8 LRU Cache Corrupted (cache size unexpectedly changed). Please report a bug to PyTorch.");
