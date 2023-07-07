@@ -1,71 +1,27 @@
 import functools
 
 import torch
-from .. import config
 from ..pattern_matcher import (
-    _return_true,
     inference_graph,
     init_once_fakemode,
     PatternMatcherPass,
-    register_graph_pattern,
     register_replacement,
-    stable_topological_sort,
 )
 
 aten = torch.ops.aten
 
-# First pass_patterns[0] are applied, then [1], then [2]
-pass_patterns = [
-    PatternMatcherPass(),
-    PatternMatcherPass(),
-    PatternMatcherPass(),
-]
-
-
-def freezing_passes(gm: torch.fx.GraphModule):
-    """
-    Passes that are applied to the graph to freeze pass.
-    """
-
-    lazy_init()
-    for patterns in pass_patterns:
-        patterns.apply(gm.graph)
-
-    if torch._C._has_mkldnn and config.cpp.weight_prepack:
-        from .mkldnn_fusion import _eliminate_duplicate_packed_nodes
-
-        _eliminate_duplicate_packed_nodes(gm)
-
-    stable_topological_sort(gm.graph)
-    gm.recompile()
-    gm.graph.lint()
-
 
 @init_once_fakemode
-def lazy_init():
-    if torch._C._has_mkldnn and config.cpp.weight_prepack:
-        from .mkldnn_fusion import _mkldnn_weight_pack_init
-
-        _mkldnn_weight_pack_init()
-
-    addmm_patterns_init()
-
-
-def register_freezing_graph_pattern(pattern, extra_check=_return_true, pass_number=0):
-    return register_graph_pattern(
-        pattern,
-        extra_check=extra_check,
-        pass_dict=pass_patterns[pass_number],
-    )
-
-
 @functools.lru_cache(None)
-def addmm_patterns_init():
+def get_freezing_patterns():
+    patterns = PatternMatcherPass()
+
     if torch.cuda.is_available():
         # workaround https://github.com/pytorch/pytorch/issues/97894
         device = "cuda"
     else:
         device = "cpu"
+
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
 
     def check_concat_weights(match):
@@ -74,6 +30,7 @@ def addmm_patterns_init():
             match.kwargs["w2"],
             match.kwargs["w3"],
         ]
+
         return all(
             w.op == "get_attr" and w.meta["val"].shape == weights[0].meta["val"].shape
             for w in weights
@@ -92,7 +49,7 @@ def addmm_patterns_init():
         matmul_replacement,
         [val(), val(), val(), val()],
         inference_graph,
-        pass_patterns[0],
+        patterns,
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2", "w3"),
     )
@@ -114,7 +71,9 @@ def addmm_patterns_init():
         addmm_fuse_replacement_second,
         [val() for _ in range(7)],
         inference_graph,
-        pass_patterns[0],
+        patterns,
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2", "w3", "b1", "b2", "b3"),
     )
+
+    return patterns

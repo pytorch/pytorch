@@ -1336,15 +1336,6 @@ for name in dir(_C._VariableFunctions):
     if not name.startswith("_"):
         __all__.append(name)
 
-
-
-################################################################################
-# Import TorchDynamo's lazy APIs to avoid circular dependenices
-################################################################################
-
-# needs to be before from .functional import * to avoid circular dependencies
-from ._compile import _disable_dynamo
-
 ################################################################################
 # Import interface functions defined in Python
 ################################################################################
