@@ -149,10 +149,14 @@ def _create_chunk_dtensor(
     corresponding chunk as the local tensor to create a DTensor.
     """
     shard_placement = DShard(0)
-    tensor_padded_list, _ = shard_placement._split_tensor(
+    tensor_list, _ = shard_placement._split_tensor(
         tensor,
         device_mesh.size(dim=0),
         with_padding=False,
         contiguous=True,
     )
-    return DTensor.from_local(tensor_padded_list[rank], device_mesh, [shard_placement])
+    # We need to explicitly call .clone() here as tensor.chunks() splits a tensor into the specified number of chunks.
+    # Each chunk is a view of the input tensor. If the original tensor change, the view will also be changed.
+    # We need to explicitly call .detach() to return a new tensor detached from the current graph.
+    local_tensor = tensor_list[rank].clone().detach()
+    return DTensor.from_local(local_tensor, device_mesh, [shard_placement])
