@@ -5057,6 +5057,130 @@ def fn():
         dis.dis(fn)
         self.assertEqual(torch._dynamo.optimize("eager")(fn)(), 3)
 
+    @skipIfNotPy311
+    def test_get_instruction_source_311(self):
+        def f():
+            # flake8: noqa
+            # fmt: off
+            # test binary ops
+            a = ( b   )   +   c
+            a = (a + b) // (c - d)
+            a = b    \
+         +   c  # test
+            a = (
+                (b  # test +
+                    )  \
+                # +
+            << (
+
+                c  # test
+                \
+            )  # test
+            )
+
+            # test slice
+            a = bbb   [  ccc    ]
+            b = bbbbb \
+                [  ccc # test
+
+                 + ddd  \
+
+                ] # test
+            a = bbb[ccc][ddd][eee]
+
+            # test nested and multiline function calls
+            a = g(g(g(b)))
+            a = g(h(
+                g(b),
+                c
+            ))
+
+            # test unicode (match traceback behavior)
+            a = "🔥😂👌" + b
+
+        from torch._dynamo.utils import get_instruction_source_311
+
+        offsets = (3, 11, 15, 19, 23, 29, 35, 46, 58, 64)
+        insts = list(dis.get_instructions(f))
+        expected = (
+            """\
+            a = ( b   )   +   c
+                ~~~~~~~~~~^~~~~
+""",
+            """\
+            a = (a + b) // (c - d)
+                ~~~~~~~~^^~~~~~~~~
+""",
+            """\
+            a = b    \\
+                ~~~~~~
+         +   c  # test
+         ^~~~~
+""",
+            """\
+                (b  # test +
+                ~~~~~~~~~~~~
+                    )  \\
+                    ~~~~
+                # +
+                ~~~
+            << (
+            ^^~~
+
+
+                c  # test
+                ~~~~~~~~~
+                \\
+                ~
+            )  # test
+            ~
+""",
+            """\
+            a = bbb   [  ccc    ]
+                ~~~~~~^^^^^^^^^^^
+""",
+            """\
+            b = bbbbb \\
+                ~~~~~~~
+                [  ccc # test
+                ^^^^^^^^^^^^^
+
+
+                 + ddd  \\
+                 ^^^^^^^^
+
+
+                ] # test
+                ^
+""",
+            """\
+            a = bbb[ccc][ddd][eee]
+                ~~~~~~~~^^^^^
+""",
+            """\
+            a = g(g(g(b)))
+                  ^^^^^^^
+""",
+            """\
+            a = g(h(
+                  ^^
+                g(b),
+                ^^^^^
+                c
+                ^
+            ))
+            ^
+""",
+            """\
+            a = "🔥😂👌" + b
+                ~~~~~~^~~
+""",
+        )
+        for offset, answer in zip(offsets, expected):
+            self.assertEqual(
+                get_instruction_source_311(f.__code__, insts[offset]), answer
+            )
+
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 

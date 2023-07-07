@@ -1787,43 +1787,42 @@ def _extract_anchors_from_expr(segment):
         return lineno, col
 
     statement = tree.body[0]
-    match statement:
-        case ast.Expr(expr):
-            match expr:
-                case ast.BinOp():
-                    cur_lineno = expr.left.end_lineno - 2
-                    cur_col = normalize(cur_lineno, expr.left.end_col_offset)
-                    cur_lineno, cur_col = next_valid_char(cur_lineno, cur_col)
+    if isinstance(statement, ast.Expr):
+        expr = statement.value
+        if isinstance(expr, ast.BinOp):
+            cur_lineno = expr.left.end_lineno - 2
+            cur_col = normalize(cur_lineno, expr.left.end_col_offset)
+            cur_lineno, cur_col = next_valid_char(cur_lineno, cur_col)
 
-                    # heuristic to find the operator character
-                    while (ch := lines[cur_lineno][cur_col]).isspace() or ch in ")\\#":
-                        if ch in "\\#":
-                            cur_lineno, cur_col = nextline(cur_lineno, cur_col)
-                        else:
-                            cur_lineno, cur_col = increment(cur_lineno, cur_col)
+            # heuristic to find the operator character
+            while (ch := lines[cur_lineno][cur_col]).isspace() or ch in ")\\#":
+                if ch in "\\#":
+                    cur_lineno, cur_col = nextline(cur_lineno, cur_col)
+                else:
+                    cur_lineno, cur_col = increment(cur_lineno, cur_col)
 
-                    right_anchor = cur_col + 1
-                    # handle operators that have multiple characters
-                    if (
-                        right_anchor < len(lines[cur_lineno])
-                        and not lines[cur_lineno][right_anchor].isspace()
-                    ):
-                        right_anchor += 1
+            right_anchor = cur_col + 1
+            # handle operators that have multiple characters
+            if (
+                right_anchor < len(lines[cur_lineno])
+                and not lines[cur_lineno][right_anchor].isspace()
+            ):
+                right_anchor += 1
 
-                    return _Anchors(cur_lineno, cur_col, cur_lineno, right_anchor)
-                case ast.Subscript():
-                    left_lineno = expr.value.end_lineno - 2
-                    left_col = normalize(left_lineno, expr.value.end_col_offset)
-                    left_lineno, left_col = next_valid_char(left_lineno, left_col)
-                    while lines[left_lineno][left_col] != "[":
-                        left_lineno, left_col = increment(left_lineno, left_col)
-                    right_lineno = expr.slice.end_lineno - 2
-                    right_col = normalize(right_lineno, expr.slice.end_col_offset)
-                    right_lineno, right_col = next_valid_char(right_lineno, right_col)
-                    while lines[right_lineno][right_col] != "]":
-                        right_lineno, right_col = increment(right_lineno, right_col)
-                    right_col += 1
-                    return _Anchors(left_lineno, left_col, right_lineno, right_col)
+            return _Anchors(cur_lineno, cur_col, cur_lineno, right_anchor)
+        elif isinstance(expr, ast.Subscript):
+            left_lineno = expr.value.end_lineno - 2
+            left_col = normalize(left_lineno, expr.value.end_col_offset)
+            left_lineno, left_col = next_valid_char(left_lineno, left_col)
+            while lines[left_lineno][left_col] != "[":
+                left_lineno, left_col = increment(left_lineno, left_col)
+            right_lineno = expr.slice.end_lineno - 2
+            right_col = normalize(right_lineno, expr.slice.end_col_offset)
+            right_lineno, right_col = next_valid_char(right_lineno, right_col)
+            while lines[right_lineno][right_col] != "]":
+                right_lineno, right_col = increment(right_lineno, right_col)
+            right_col += 1
+            return _Anchors(left_lineno, left_col, right_lineno, right_col)
 
     return None
 
@@ -1893,6 +1892,9 @@ def get_instruction_source_311(code, inst):
         markers = ["".join(marker) for marker in markers]
 
     for i in range(len(markers)):
-        result += linecache.getline(code.co_filename, inst.positions.lineno + i)
+        result += (
+            linecache.getline(code.co_filename, inst.positions.lineno + i).rstrip()
+            + "\n"
+        )
         result += markers[i] + "\n"
     return result
