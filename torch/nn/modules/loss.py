@@ -1763,8 +1763,7 @@ class CTCLoss(_Loss):
                           self.zero_infinity)
 
 
-# This Loss function using for Object Detection Task.
-
+# This Loss function can be used for Object detection tasks.
 class OBJLoss(_Loss):
     def __init__(self):
         super(OBJLoss, self).__init__()
