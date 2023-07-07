@@ -4916,9 +4916,17 @@ greater than 0.0 is specified.
 
     # Efficient implementation equivalent to the following:
     scale_factor = 1 / math.sqrt(Q.size(-1)) if scale is None else scale
-    attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0) if is_causal else torch.zeros(L, S, dtype=Q.dtype)
-    attn_mask = attn_mask.masked_fill(~attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
-    attn_weight = torch.softmax((Q @ K.transpose(-2, -1) * scale_factor) + attn_mask, dim=-1)
+    if is_causal:
+        assert attn_mask is None
+        attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+    attn_bias = torch.zeros(L, S, dtype=Q.dtype)
+    if attn_mask is not None:
+        if attn_mask.dtype == torch.bool:
+            attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+        else:
+            attn_bias += attn_mask
+    attn_weight = torch.softmax(
+        (Q @ K.transpose(-2, -1) * scale_factor) + attn_bias, dim=-1)
     attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
     attn_weight @ V
 
