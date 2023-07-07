@@ -226,9 +226,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         def func(inp, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(inp, "sum", ranks, tag)
-            y = inp + 10
+            y = torch.add(inp, 10)
             print("graph break")
-            ar += y
+            ar.add_(y)
             return ar
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
