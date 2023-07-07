@@ -266,11 +266,14 @@ def _share_state_and_init_handle_attrs(
             raise RuntimeError(
                 "FSDP optimizer in backward only supported with use_orig_params=True!"
             )
-        if flat_param._params is not None:
-            handle._has_optim_in_backward = any(
-                hasattr(param, "_in_backward_optimizers")
+
+        handle._has_optim_in_backward = (
+            flat_param._params is not None and
+            any(
+                hasattr(param, '_in_backward_optimizers')
                 for param in flat_param._params
             )
+        )
 
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
