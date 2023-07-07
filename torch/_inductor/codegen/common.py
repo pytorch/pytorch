@@ -14,7 +14,7 @@ from sympy.printing.printer import Printer
 import torch
 import torch.fx
 
-from .. import metrics
+from .. import metrics, config
 from ..utils import (
     DeferredLineBase,
     free_symbol_startswith,
@@ -527,6 +527,7 @@ class KernelArgs:
         call_args = []
         precompile_args = []
         for inplaced in unique(self.inplace_buffers.values()):
+            # if (not config.triton.multi_kernel) and inplaced == "REMOVED":
             if inplaced == "REMOVED":
                 continue
             arg_defs.append(inplaced.inner_name)
@@ -541,7 +542,8 @@ class KernelArgs:
         for outer, inner in chain(
             self.input_buffers.items(), self.output_buffers.items()
         ):
-            if outer in self.inplace_buffers or inner == "REMOVED":
+            # if outer in self.inplace_buffers or ((not config.triton.multi_kernel) and inner == "REMOVED"):
+            if outer in self.inplace_buffers or (inner == "REMOVED"):
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
@@ -733,6 +735,7 @@ class Kernel(CodeGen):
         self.must_keep_buffers = set()
         self.current_node = None
         self.store_buffer_names = set()
+        self.kernel_name = None
 
     @contextlib.contextmanager
     def set_current_node(self, node):

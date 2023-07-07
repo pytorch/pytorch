@@ -1335,6 +1335,8 @@ class Scheduler:
                 self.remove_buffer(name)
 
     def remove_buffer(self, name):
+        if config.triton.multi_kernel:
+            return
         # Assign a special value instead of deleting the entry
         # because we still rely on output_buffers's length to
         # generate unique arg name.
@@ -1343,6 +1345,8 @@ class Scheduler:
         V.graph.removed_buffers.add(name)
 
     def remove_inplace_buffer(self, name):
+        if config.triton.multi_kernel:
+            return
         log.debug("removing_inplace_buffer(%r)", name)
         V.kernel.args.inplace_buffers[name] = "REMOVED"
         V.graph.removed_buffers.add(name)

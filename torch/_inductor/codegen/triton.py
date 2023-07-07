@@ -47,6 +47,7 @@ from .common import (
     SizeArg,
 )
 from .triton_utils import config_of, signature_of
+from .multi_kernel import MultiKernel
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -1669,10 +1670,13 @@ class TritonKernel(Kernel):
         triton_meta["configs"] = [config_of(signature)]
 
         for tree in self.range_trees:
-            if tree.prefix != "r" or (
-                self.inside_reduction and not self.persistent_reduction
+            if tree.prefix == "r" and (
+                not self.inside_reduction or self.persistent_reduction
             ):
-                argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
+                continue
+            if tree.prefix == "x" and self.no_x_dim:
+                continue
+            argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
 
         if self.inside_reduction:
             reduction_hint = self.reduction_hint
@@ -1744,6 +1748,9 @@ class TritonKernel(Kernel):
                     continue
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
+
+            if tree.prefix == "x" and self.no_x_dim:
+                code.writeline("XBLOCK: tl.constexpr = 1")
 
     def triton_tensor_ndim(self):
         no_x_dim = int(bool(self.no_x_dim))
@@ -2146,6 +2153,7 @@ class TritonScheduling:
 
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
+        kernel.kernel_name = kernel_name
 
         if kernel.persistent_reduction and config.triton.multi_kernel:
             V.graph.restore_state()
@@ -2157,15 +2165,19 @@ class TritonScheduling:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel2)
             src_code2 = kernel2.codegen_kernel()
             kernel_name2 = self.define_kernel(src_code2, node_schedule)
+            kernel2.kernel_name = kernel_name2
 
             from ..utils import blue_text
             print(blue_text(f"kernel {kernel_name} v.s. kernel2 {kernel_name2}"))
 
+            multi_kernel = MultiKernel([kernel, kernel2])
+            multi_kernel.call_kernel()
+
             # call either kernel_name of kernel_name2
-            if config.triton.multi_kernel == 1:
-                kernel.call_kernel(kernel_name)
-            else:
-                kernel2.call_kernel(kernel_name2)
+            # if config.triton.multi_kernel == 1:
+            #     kernel.call_kernel(kernel_name)
+            # else:
+            #     kernel2.call_kernel(kernel_name2)
         else:
             V.graph.drop_state()
             kernel.call_kernel(kernel_name)
@@ -2252,6 +2264,7 @@ class TritonScheduling:
             wrapper.define_kernel(
                 kernel_name, compile_wrapper.getvalue(), metadata_comment
             )
+
         return kernel_name
 
     def codegen_template(self, template_node, epilogue_nodes):
