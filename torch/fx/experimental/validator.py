@@ -378,11 +378,17 @@ try:
                 # wish to prove. So, we just return.
                 return self.Result(success=True)
 
-            # Here, we use "QF_NIRA" logic for the solver.
+            # Here, we use "QF_NRA" logic for the solver:
+            #   "Quantifier-free Non-linear Real Arithmetic".
+            #
+            # Most of the guards expressions have:
             #   1. arithmetic between integer and reals
             #   2. no quantifiers
             #   3. potentially non-linear.
-            solver = z3.SolverFor("QF_NIRA")
+            #
+            # Although there's also "QF_NIRA" (mixed integer-real arithmetic),
+            # "QF_NRA" seems to work better on 'dynamo/test_dynamic_shapes.py'.
+            solver = z3.SolverFor("QF_NRA")
             # Set a timeout for finding a solution.
             solver.set(timeout=translation_validator_timeout())
 
