@@ -10574,9 +10574,13 @@ class TestConsistency(TestCaseMPS):
                 atol = None
                 rtol = None
             if use_fp32:
-                print(cpu_fp32_args)
-                print(cpu_out)
-                print(mps_out)
+                print("cpu_args: ", cpu_args)
+                print("mps_args: ", mps_args)
+                print("cpu_fp32_args: ", cpu_fp32_args)
+                print("cpu_kwargs: ", cpu_kwargs)
+                print("mps_kwargs: ", mps_kwargs)
+                print("cpu_out: ", cpu_out)
+                print("mps_out", mps_out)
                 self.assertEqual(cpu_fp32_args, mps_out, atol=atol, rtol=rtol)
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
