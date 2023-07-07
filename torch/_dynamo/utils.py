@@ -1604,9 +1604,9 @@ def nnmodule_has_hooks(
 def to_numpy_helper(value):
     """Convert tensor and torch_np.ndarray to numpy.ndarray."""
     if isinstance(value, torch_np.ndarray):
-        return value.tensor.numpy()
+        return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
-        return value.numpy()
+        return value.cpu().numpy()
     elif isinstance(value, (tuple, list)):
         return type(value)(to_numpy_helper(obj) for obj in value)
     else:
