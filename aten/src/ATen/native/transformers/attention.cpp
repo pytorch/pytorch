@@ -580,6 +580,21 @@ at::Tensor pad_bias(const at::Tensor& attn_bias) {
   auto padded_bias = at::pad(attn_bias, {0, pad_count});
   return padded_bias.slice(-1, 0, attn_bias.size(-1));
 }
+// Hmmm bad optional access syms like the above needs to be symintified
+at::Tensor pad_bias_no_sym(const at::Tensor& attn_bias) {
+  int align_to = 16;
+  auto last_dim_opt = attn_bias.sym_size(-1).maybe_as_int();
+  if (!last_dim_opt.has_value()) {
+    TORCH_CHECK("This function only supports static shape");
+  }
+  int64_t last_dim = last_dim_opt.value();
+  if (last_dim % align_to == 0) {
+    return attn_bias;
+  }
+  int pad_count = align_to - (last_dim % align_to);
+  auto padded_bias = at::pad(attn_bias, {0, pad_count});
+  return padded_bias.slice(-1, 0, last_dim);
+}
 
 } // namespace
 
@@ -638,7 +653,7 @@ Tensor scaled_dot_product_attention(
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
       if(attn_mask.has_value()){
-        attn_mask = pad_bias(attn_mask.value());
+        attn_mask = pad_bias_no_sym(attn_mask.value());
         // Expand to 4d case
         attn_mask = attn_mask.value().expand({query_.size(0), query_.size(1), query_.size(2), key.size(2)});
       }
