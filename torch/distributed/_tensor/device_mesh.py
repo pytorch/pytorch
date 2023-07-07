@@ -118,13 +118,12 @@ class DeviceMesh(object):
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
-        self._validate_mesh = _validate_mesh
         # always try to create default (world) pg, even if it is not initialized
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
         self._get_or_create_default_group()
         if _init_process_groups:
-            self._init_process_groups()
+            self._init_process_groups(_validate_mesh)
 
     def _get_or_create_default_group(self):
         default_initialized = is_initialized()
@@ -158,19 +157,19 @@ class DeviceMesh(object):
         )
         return _get_default_group()
 
-    def _init_process_groups(self):
+    def _validate_mesh(self):
         # check mesh tensor validity
         unique_mesh_values = self.mesh.unique(sorted=True)
         if unique_mesh_values.numel() != self.mesh.numel():
             raise RuntimeError(
                 f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
             )
+
         # validate that all calling ranks pass in the same `mesh` argument.
-        if self._validate_mesh:
-            self_mesh = self.mesh.to(self.device_type)
-            mesh_tensor = funcol.all_gather_tensor(
-                self_mesh, gather_dim=0, group=_get_default_group()
-            )
+        self_mesh = self.mesh.to(self.device_type)
+        mesh_tensor = funcol.all_gather_tensor(
+            self_mesh, gather_dim=0, group=_get_default_group()
+        )
         mesh_tensor_chunked = torch.chunk(mesh_tensor, get_world_size())
         for other_rank, other_mesh in enumerate(mesh_tensor_chunked):
             if not torch.equal(self_mesh, other_mesh):
@@ -180,11 +179,15 @@ class DeviceMesh(object):
                     f"has mesh {other_mesh}!"
                 )
 
+    def _init_process_groups(self, _validate_mesh):
+        if _validate_mesh:
+            self._validate_mesh()
+
         # group tag/ranks associated with each mesh dimension, each mesh dimension should
         # have one sub-group per rank
         dim_group_infos: List[Tuple[str, List[int]]] = []
 
-        if self.mesh.ndim == 1 and len(unique_mesh_values) == get_world_size():
+        if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
             # if the mesh is the same as world_pg, we just append the default
             # pg to the first dim groups, as new_group cannot have the exact
             # same ranks as world
