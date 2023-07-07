@@ -926,6 +926,19 @@ class TestTensorExprFuser(BaseTestClass):
             #     print("Failed on dev=", dev, "function=", torch_fn)
             #     # np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
 
+
+    def test_round_2(self):
+        def round(x):
+            return torch.round(x)
+
+        for data_type in [torch.float32, torch.double]:
+            a = torch.tensor([0.2, 1.6, 2.5, 3.5]).to(data_type)
+            traced = torch.jit.trace(round, (a))
+            x = warmup_and_run_forward(traced, a)
+            self.assertLastGraphAllFused()
+            y = round(x)
+            self.assertEqual(x, y)
+
     def test_rand_like(self):
         N = 1 << 16
 
