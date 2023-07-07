@@ -692,6 +692,24 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3, 3)
         self._test_wrap_simple(g, (x,), 2)
 
+    def test_wrap_kwarg(self):
+        def f(x, y):
+            return wrap(lambda x, y: x + y, x, y=y)
+
+        x = torch.randn(3,)
+        y = torch.randn(3, 3)
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_wrap_kwarg_int(self):
+        def f(x, y):
+            return wrap(lambda x, y: x + y, x, y=y)
+
+        x = torch.randn(3,)
+        y = 8
+        # int are not passed as argument and directly
+        # baked into the graph.
+        self._test_wrap_simple(f, (x, y), 2)
+
     def test_map_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
