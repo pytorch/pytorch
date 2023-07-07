@@ -6560,10 +6560,13 @@ class CommonTemplate:
     @config.patch(implicit_fallbacks=True)
     def test_custom_op(self):
         import torch.library
-        from torch.library import Library
 
-        foo = Library("foo", "FRAGMENT")
-        foo.define("custom(Tensor self) -> Tensor")
+        @functools.lru_cache()
+        def define_op(foo):
+            foo.define("custom(Tensor self) -> Tensor")
+
+        foo = torch.library.Library("foo", "DEF")
+        define_op(foo)
 
         @torch.library.impl(foo, "custom", "CPU")
         def foo_cpu(x):
