@@ -1,24 +1,93 @@
 import collections
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from .. import variables
+from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..source import AttrSource, Source
 from ..utils import dict_values, identity, istype, odict_values
 
 
-class MutableLocal:
+class MutableLocalSource(Enum):
+    """
+    If the VariableTracker.mutable_local represents a Variable that:
+    - already existed that Dynamo began tracking while introspection (Existing)
+    - is a new variable that is created during Dynamo introspection (Local)
+    """
+
+    Existing = 0
+    Local = 1
+
+
+class MutableLocalBase:
+    """
+    Base class for Variable.mutable_local
+    """
+
+    def __init__(self, typ: MutableLocalSource):
+        # In HigherOrderOperator tracing, we need to distinguish
+        # between MutableLocals inside the HigherOrderOperator and
+        # ones outside it. For example, it is not safe to mutate
+        # `a` in the following example because it was constructed
+        # in a different scope.
+        #
+        # def f(x):
+        #     a = 1
+        #     def g(x):
+        #         nonlocal a
+        #         a = 2
+        #         return x
+        #     return wrap(g, x) + a
+        #
+        # We use self.scope to distinguish this.
+        # scope == 0: The object was an existing variable
+        # scope == 1: The object was created while Dynamo
+        #             was introspecting a function
+        #             (and no HigherOrderOps were involved)
+        # scope >= 2: The object was created through
+        #             Dynamo introspection of a HigherOrderOp.
+        #             The exact number corresponds to the level
+        #             of nested HigherOrderOps.
+        if typ is MutableLocalSource.Existing:
+            self.scope = 0
+        elif typ is MutableLocalSource.Local:
+            self.scope = current_scope_id()
+        else:
+            unimplemented(f"Unsupported MutableLocalSource: {typ}")
+
+
+class MutableLocal(MutableLocalBase):
     """
     Marker used to indicate this (list, iter, etc) was constructed in
     local scope and can be mutated safely in analysis without leaking
     state.
     """
 
+    def __init__(self):
+        super().__init__(MutableLocalSource.Local)
+
     def __hash__(self):
         return id(self)
 
     def __eq__(self, other):
         return self is other
+
+
+def _is_top_level_scope(scope_id):
+    return scope_id == 1
+
+
+def is_side_effect_safe(m: MutableLocalBase):
+    scope_id = current_scope_id()
+
+    # In the top-level scope (if no HigherOrderOperators are involved),
+    # we are allowed to modify variables created in this scope as well
+    # as existing variables.
+    if _is_top_level_scope(scope_id):
+        return True
+    # Otherwise, only allow local mutation of variables created in the current scope
+    return m.scope == scope_id
 
 
 # metaclass to call post_init
