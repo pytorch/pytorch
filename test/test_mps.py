@@ -23,7 +23,7 @@ from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI, NoTest,
-     TEST_WITH_UBSAN, skipIfSlowGradcheckEnv, TEST_WITH_ASAN, suppress_warnings)
+     TEST_WITH_UBSAN, skipIfSlowGradcheckEnv, suppress_warnings)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
@@ -480,6 +480,8 @@ def mps_ops_modifier(ops):
         'nn.functional.interpolatebicubic': None,
         'nn.functional.interpolatelinear': None,
         'nn.functional.interpolatetrilinear': None,
+        # TODO: max_pool2d for integral types fails the numerical test
+        'nn.functional.max_pool2d': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
         'nn.functional.max_unpool3dgrad': None,
@@ -817,7 +819,7 @@ if not torch.backends.mps.is_available():
     TestCase = NoTest  # noqa: F811
     NNTestCase = NoTest  # noqa: F811
 
-product_version = float('.'.join(platform.mac_ver()[0].split('.')[:2]))
+product_version = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 
 # Determine whether to enable MPS memory leak check (uses same code as CUDA).
 TEST_MPS_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_MPS_MEM_LEAK_CHECK', '0') == '1'
@@ -4610,6 +4612,23 @@ class TestNLLLoss(TestCaseMPS):
 
         helper((2, 3, 4, 5))
 
+    def test_argmax(self):
+        # https://github.com/pytorch/pytorch/issues/98191
+        cpu_tensor = torch.tensor([[0, 1], [2, 1], [1, 0]])
+        res_cpu = torch.argmax(cpu_tensor, dim=1)
+
+        mps_tensor = cpu_tensor.to(torch.device('mps'))
+        res_mps = torch.argmax(mps_tensor, dim=1)
+        self.assertEqual(res_cpu, res_mps)
+
+        # https://github.com/pytorch/pytorch/issues/92311
+        mps_tensor = torch.randn(10, 2, device='mps', dtype=torch.float32)
+        cpu_tensor = mps_tensor.detach().clone().cpu()
+
+        res_mps = torch.argmax(mps_tensor, dim=1)
+        res_cpu = torch.argmax(cpu_tensor, dim=1)
+        self.assertEqual(res_cpu, res_mps)
+
     # Test forward argmin argmax
     def test_argmin_argmax(self):
         def helper(n, c, h, w, reduction_type, dtype=torch.float32):
@@ -6602,6 +6621,13 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(neg_result, neg_result_cpu)
 
         helper((2, 8, 4, 5))
+
+    def test_neg_strided_input(self):
+        # See https://github.com/pytorch/pytorch/issues/98074#issuecomment-1496088337
+        x = torch.arange(18.0, device='mps').reshape(2, 3, 3)
+        y = x.permute(1, 0, 2)[..., 1]
+        z = y + y.neg()
+        self.assertEqual(z.abs().max().item(), 0.0)
 
     # Test index add
     def test_index_add(self):
@@ -10378,6 +10404,17 @@ class TestNoRegression(TestCase):
             self.assertEqual(x, x2)
             self.assertEqual(x2.device.type, "cpu")
 
+        # Ensures that `mps:0` Tensors can be loaded on mps
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2, device="mps:0")
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f, map_location="mps:0")
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "mps")
+
 
 MPS_DTYPES = get_all_dtypes()
 for t in [torch.double, torch.cdouble, torch.cfloat, torch.bfloat16]:
@@ -10407,7 +10444,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
-        'round', 'xlogy',
+        'round', 'xlogy', 'addcmul',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
@@ -10636,7 +10673,6 @@ class TestCommon(TestCase):
     # MPS still requires some fairly heavy special casing in the test framework.
     # When MPS becomes more consistent, this can probably be merged with that test using
     # `@dtypesIfMPS(torch.float32)`, but for now, the assertions themselves need to be loosened
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     # MPS only supports float32
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))

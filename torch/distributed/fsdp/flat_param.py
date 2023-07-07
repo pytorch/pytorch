@@ -1287,11 +1287,23 @@ class FlatParamHandle:
             padded_unsharded_flat_param.numel() == expected_numel,
             f"Expects {expected_numel} numel but got {padded_unsharded_flat_param.numel()}",
         )
-        dist.all_gather_into_tensor(
-            padded_unsharded_flat_param,
-            sharded_flat_param,
-            self.process_group,
-        )
+
+        # HACK this should be handled by C10D
+        if sharded_flat_param.is_cpu:  # type: ignore[attr-defined]
+            tensor_list = list(
+                torch.chunk(
+                    padded_unsharded_flat_param, dist.get_world_size(self.process_group)
+                )
+            )
+            work = dist.all_gather(
+                tensor_list, sharded_flat_param, group=self.process_group
+            )
+        else:
+            dist.all_gather_into_tensor(
+                padded_unsharded_flat_param,
+                sharded_flat_param,
+                self.process_group,
+            )
         return padded_unsharded_flat_param
 
     def _use_unsharded_flat_param(
@@ -1614,7 +1626,7 @@ class FlatParamHandle:
         """
         self._check_sharded_strategy()
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
-        self._check_storage_allocated(unsharded_flat_param, self.flat_param._fqns)
+        self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
         _no_dispatch_record_stream(
@@ -2202,20 +2214,31 @@ class FlatParamHandle:
             assert self.flat_param._is_grad_none_mask is not None
             self.flat_param._is_grad_none_mask[tensor_index] = True
 
-    def _clear_grads_if_needed(self):
+    def _reset_flat_param_grad_info_if_needed(self):
         """
-        When ``use_orig_params=True``, sets the underlying ``flat_param.grad``
-        to ``None`` if *all* of the original parameters' ``.grad`` are
-        ``None``. This is targeting ``optim.zero_grad(set_to_none=True)``, in
+        When ``use_orig_params=True``:
+        (1) sets the underlying ``flat_param.grad`` to ``None`` if *all* of the
+        original parameters' ``.grad`` are ``None``, and
+        (2) sets ``flat_param.requires_grad=False`` if *none* of the original
+        parameters require gradient.
+        For (1), this is targeting ``optim.zero_grad(set_to_none=True)``, in
         which case we want to free the gradients as soon after the
         ``zero_grad()`` call as possible.
         """
         if not self._use_orig_params:
             return
         flat_param = self.flat_param
-        assert flat_param._params is not None
-        if all(param.grad is None for param in flat_param._params):
+        assert flat_param._params is not None  # mypy
+        all_grad_none = True
+        requires_grad = False
+        for param in flat_param._params:
+            all_grad_none &= param.grad is None
+            requires_grad |= param.requires_grad
+        if all_grad_none:
             flat_param.grad = None
+        # As long as one parameter requires gradient, then the flat parameter
+        # must require gradient
+        flat_param.requires_grad = requires_grad
 
     def _deregister_orig_params(self):
         for param_info in self.flat_param._param_infos:
@@ -2383,12 +2406,9 @@ class FlatParamHandle:
         )
 
     @staticmethod
-    def _check_storage_allocated(tensor: Tensor, fqns: List[str]):
+    def _check_storage_allocated(tensor: Tensor):
         storage_size: int = tensor._typed_storage()._size()
-        _p_assert(
-            storage_size > 0,
-            f"Expects storage to be allocated for FlatParam with  original param fqns {fqns}"
-        )
+        _p_assert(storage_size > 0, "Expects storage to be allocated")
 
     def _check_low_precision_shard(self):
         _p_assert(

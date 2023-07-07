@@ -1,3 +1,4 @@
+import warnings
 from enum import auto, Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
@@ -226,6 +227,13 @@ def checkpoint_wrapper(
             Wrapped module
     """
 
+    if checkpoint_impl == CheckpointImpl.REENTRANT:
+        warnings.warn(
+            f"Please specify {CheckpointImpl.NO_REENTRANT} as "
+            f"{CheckpointImpl.REENTRANT} will soon be removed as "
+            "the default and eventually deprecated.",
+            stacklevel=1,
+        )
     return CheckpointWrapper(
         module,
         checkpoint_impl,
@@ -282,9 +290,16 @@ def apply_activation_checkpointing(
         if auto_wrap_policy is not None
         else partial(lambda_auto_wrap_policy, lambda_fn=check_fn)
     )
+    if not callable(policy):
+        if not hasattr(policy, "policy") or not callable(policy.policy):  # type: ignore[attr-defined]
+            raise RuntimeError(
+                f"Expected {policy} to be callable or have a callable ``policy`` attribute."
+            )
+        policy = policy.policy  # type: ignore[attr-defined]
+
     _recursive_wrap(
         module=model,
-        auto_wrap_policy=policy,
+        auto_wrap_policy=policy,  # type: ignore[arg-type]
         wrapper_cls=checkpoint_wrapper_fn,
         ignored_modules=set(),
         ignored_params=set(),

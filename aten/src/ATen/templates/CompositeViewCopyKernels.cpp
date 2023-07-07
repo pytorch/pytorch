@@ -18,6 +18,7 @@ namespace native {
 // This file contains a number of kernels for aten functions that are fully code-generated.
 // TODO: rename this file to something more generic.
 
+namespace {
 at::Tensor clone_arg(const at::Tensor& t) {
     return t.clone();
 }
@@ -58,6 +59,7 @@ void resize_out_helper(const at::TensorList& dst, const at::TensorList& src) {
     for (const auto& i : c10::irange(dst.size())) {
         at::native::resize_output(dst[i], src[i].sizes());
     }
+}
 }
 
 

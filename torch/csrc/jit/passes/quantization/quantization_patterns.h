@@ -282,7 +282,7 @@ QuantFusionInfo getObservedQParamOpFusionInfo(
 
 } // namespace
 
-std::vector<QuantFusionInfo> quant_fusion_pattern_and_replacements() {
+static std::vector<QuantFusionInfo> quant_fusion_pattern_and_replacements() {
   // aten::conv1d
   std::string conv1d = R"(
 graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
@@ -1105,7 +1105,8 @@ graph(%packed_params, %a):
   };
 }
 
-std::vector<QuantFusionInfo> dynamic_quant_fusion_pattern_and_replacements() {
+static std::vector<QuantFusionInfo>
+dynamic_quant_fusion_pattern_and_replacements() {
   std::string linear_dynamic = R"(
 graph(%packed_params, %a, %reduce_range, %a_dtype):
         %a_scale : float, %a_zero_point : int = aten::_choose_qparams_per_tensor(%a, %reduce_range)
@@ -1142,7 +1143,7 @@ graph(%packed_params, %a):
   };
 }
 
-std::vector<QuantFusionInfo> linear_prepack_unpack_patterns() {
+static std::vector<QuantFusionInfo> linear_prepack_unpack_patterns() {
   std::string linear_with_quant = R"(
 graph(%a_dequant, %w_quant, %b):
         %w_dequant = aten::dequantize(%w_quant)
@@ -1178,7 +1179,7 @@ graph(%w, %a_dq, %b):
   };
 }
 
-std::vector<QuantFusionInfo> conv_prepack_unpack_patterns() {
+static std::vector<QuantFusionInfo> conv_prepack_unpack_patterns() {
   std::string conv1d_with_quant = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         %w_dequant = aten::dequantize(%w_quant)

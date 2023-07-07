@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+import socket
 import sys
 import tempfile
 import time
@@ -307,6 +308,18 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
         rpc.shutdown()
 
+    @skip_if_win32()
+    def test_take_over_listen_socket(self):
+        listen_sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listen_sock.bind(("localhost", 0))
+        addr, port, *_ = listen_sock.getsockname()
+        listen_fd = listen_sock.detach()
+
+        store = dist.TCPStore(addr, port, 1, is_master=True, master_listen_fd=listen_fd)
+
+        store.set("key", "value")
+        self.assertEqual(b"value", store.get("key"))
+
     # The TCPStore has 6 keys in test_set_get. It contains the 5 keys added by
     # the user and one additional key used for coordinate all the workers.
     @property
@@ -425,6 +438,16 @@ class MyPythonStore(dist.Store):
         self.set(key, bytes(str(new).encode("utf-8")))
         return new
 
+    def compare_set(self, key, expected, newValue):
+        if type(expected) is not bytes:
+            raise AssertionError("compare_set::expected not bytes")
+        if type(newValue) is not bytes:
+            raise AssertionError("compare_set::newValue not bytes")
+
+        val = self.store.get(key, None)
+        if expected == val or val is None:
+            val = self.store[key] = newValue
+        return val
 
 class PythonStoreTest(TestCase):
     def test_set_get(self):
@@ -633,6 +656,18 @@ class TestPythonStore(TestCase):
         self.assertEqual(1, len(store.multi_sets))
         self.assertEqual(["p/foo", "p/bar"], store.multi_sets[0][0])
         self.assertEqual([b'x', b'y'], store.multi_sets[0][1])
+
+    def test_extended_methods_fallbacks(self):
+        test_store = MyPythonStore()
+        store = dist.PrefixStore("p", test_store)
+        self.assertFalse(store.has_extended_api())
+        store.append("foo", b"po")
+        store.append("foo", b"tato")
+        self.assertEqual(store.get("foo"), b"potato")
+
+        store.multi_set(["a", "b"], [b"c", b"d"])
+        self.assertEqual(store.multi_get(["a", "b", "foo"]), [b"c", b"d", b"potato"])
+
 
 class TestMultiThreadedWait(MultiThreadedTestCase):
     # TODO: Use less hacky means of instantiating stores.

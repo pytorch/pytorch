@@ -79,6 +79,7 @@ def init_cellvars(parent, result, code):
     closure_cells = dict()
     side_effects = parent.output.side_effects
 
+    # for name in itertools.chain(code.co_cellvars, code.co_freevars):
     for name in code.co_cellvars:
         closure_cells[name] = side_effects.track_cell_new()
         if name in result:
@@ -457,6 +458,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return self.f_globals
 
     def bind_args(self, parent, args, kwargs):
+        from .misc import InlinedClosureVariable
+
         code = self.get_code()
         func = types.FunctionType(
             code,
@@ -474,9 +477,19 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
-            assert getattr(self.closure.items[idx], name, name) == name
+            cell = self.closure.items[idx]
+            assert getattr(cell, name, name) == name
             assert name not in result
-            closure_cells[name] = self.closure.items[idx]
+            if isinstance(cell, InlinedClosureVariable):
+                # InlinedClosureVariable's are created from LOAD_CLOSURE's from
+                # InliningInstructionTranslators when the variable name is not found in closure_cells.
+                # They should remain outside of closure_cells, so that our callee (the
+                # InliningInstructionTranslator that traces `func`) handles
+                # the cell correctly - that is, the cell's contents are treated as if they
+                # are local variables, like in UserFunctionVariable's bind_args for freevars.
+                result[name] = parent.symbolic_locals[name]
+            else:
+                closure_cells[name] = self.closure.items[idx]
 
         return result, closure_cells
 
