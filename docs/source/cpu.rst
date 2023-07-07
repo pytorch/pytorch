@@ -1,4 +1,4 @@
-torch.cuda
+torch.cpu
 ===================================
 .. automodule:: torch.cpu
 .. currentmodule:: torch.cpu
