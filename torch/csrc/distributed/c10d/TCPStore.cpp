@@ -1295,7 +1295,7 @@ void TCPStore::doWait(
       TORCH_CHECK(false, "wait_canceled response is expected");
     }
   }
-  TORCH_CHECK(false, "Wait timeout");
+  TORCH_CHECK(false, "Socket Timeout");
 }
 
 void TCPStore::append(

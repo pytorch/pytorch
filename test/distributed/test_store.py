@@ -574,7 +574,7 @@ class RendezvousTCPTest(TestCase):
         # this should time out in 10s. If the timeout passed into rendezvous was
         # not respected, it will take much longer to timeout.
         start = time.time()
-        with self.assertRaisesRegex(RuntimeError, "Wait timeout"):
+        with self.assertRaisesRegex(RuntimeError, "Timeout"):
             store0.get("nonexistant key")
 
         end = time.time()
@@ -589,7 +589,7 @@ class RendezvousTCPTest(TestCase):
         # this should time out in 10s. If the timeout passed into rendezvous was
         # not respected, it will take much longer to timeout.
         start = time.time()
-        with self.assertRaisesRegex(RuntimeError, "Wait timeout"):
+        with self.assertRaisesRegex(RuntimeError, "Timeout"):
             store0.get("the_key")
 
         store0.set("the_key", "x")
