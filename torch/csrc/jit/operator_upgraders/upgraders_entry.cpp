@@ -146,9 +146,5 @@ void populate_upgraders_graph_map() {
   }
 }
 
-std::unordered_map<std::string, std::string> get_upgraders_entry_map() {
-  return kUpgradersEntryMap;
-}
-
 } // namespace jit
 } // namespace torch
