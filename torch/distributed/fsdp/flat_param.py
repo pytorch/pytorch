@@ -498,16 +498,6 @@ class FlatParamHandle:
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
         self._fully_sharded_module = fully_sharded_module
-        # NB: this is updated during lazy initialization because optimizers can be applied after
-        # wrapping with FSDP.
-        self._has_optim_in_backward = any(
-            hasattr(param, "_in_backward_optimizers") for param in params
-        )
-        if self._has_optim_in_backward:
-            if not use_orig_params:
-                raise RuntimeError(
-                    "FSDP optimizer in backward only supported with use_orig_params=True!"
-                )
         # NOTE: For the code path using this flag, we only skip calling
         # `_use_sharded_views()` and do not skip switching to the sharded flat
         # parameter since whether `self.flat_param` uses the sharded or

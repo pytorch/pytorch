@@ -888,7 +888,9 @@ def _post_backward_hook(
                 # using `non_blocking=True` here.
                 # TODO (rohan-varma): When CPU offload and optimizer overlap,
                 # non_blocking=True won't work since the copy may have not finished
-                # before the optimizer step executes on CPU.
+                # before the optimizer step executes on CPU. If we want to use
+                # non-blocking=True here, we'll have to synchronize before using
+                # result on CPU.
                 non_blocking = (
                     handle.uses_sharded_strategy and not handle._has_optim_in_backward
                 )
@@ -926,7 +928,8 @@ def _post_backward_hook(
                         ):
                             # TODO (rohan-varma): For CPU offload, this unfortunately
                             # operates on CPU, because the parameters and gradients
-                            # have already been offloaded.
+                            # have already been offloaded. We should run this on
+                            # GPU after refactoring.
                             for optim in orig_param._in_backward_optimizers:
                                 optim.step()
                             # Set orig param gradient to None to maintain the

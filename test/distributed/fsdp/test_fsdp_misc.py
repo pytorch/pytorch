@@ -56,6 +56,15 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+class MyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a = nn.Linear(2, 2)
+        self.b = nn.Linear(2, 2)
+
+    def forward(self, x, y):
+        return self.b(self.a(x + y))
+
 
 class TestFSDPMiscMultiProcess(FSDPTest):
     @property
@@ -265,15 +274,6 @@ class TestFSDPMiscMultiProcess(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_optim_overlap_no_use_orig_params_error(self):
-        class MyModel(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = nn.Linear(10, 10)
-                self.b = nn.Linear(10, 10)
-
-            def forward(self, x, y):
-                return self.b(self.a(x + y))
-
         fsdp_overlap = FSDP(
             MyModel().cuda(),
             auto_wrap_policy=always_wrap_policy,
@@ -297,18 +297,6 @@ class TestFSDPMiscMultiProcess(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fsdp_optimizer_overlap(self):
         torch.manual_seed(0)
-
-        class MyModel(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = nn.Linear(2, 2)
-                self.b = nn.Linear(2, 2)
-
-            def forward(self, x, y):
-                return self.b(self.a(x + y))
-
-        from copy import deepcopy
-
         for cpu_offload in [True, False]:
             offload = CPUOffload(offload_params=cpu_offload)
             model = MyModel().cuda()
