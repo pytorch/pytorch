@@ -330,6 +330,36 @@ void gemm(
 void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
+    const float alpha,
+    const at::BFloat16 *a, int64_t lda,
+    const at::BFloat16 *b, int64_t ldb,
+    const float beta,
+    float *c, int64_t ldc) {
+  internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#ifdef MKL_HAS_SBGEMM
+  if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    mkl_gemm_bf16bf16f32(transa, transb, m_, n_, k_, alpha, a, lda_, b, ldb_, beta, c, ldc_);
+    return;
+  }
+#endif
+  int64_t c_size = n * ldc;
+  std::vector<at::BFloat16> bfloat_v(c, c + c_size);
+  gemm(transa, transb,
+      m, n, k,
+      alpha,
+      a, lda,
+      b, ldb,
+      beta,
+      bfloat_v.data(), ldc);
+  for (auto cv: bfloat_v) {
+    *(c++) = c10::convert<float>(cv);
+  }
+}
+
+void gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
     const int64_t alpha,
     const int64_t *a, int64_t lda,
     const int64_t *b, int64_t ldb,

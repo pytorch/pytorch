@@ -17,10 +17,6 @@
 #include <ATen/ops/empty.h>
 #endif
 
-#if AT_MKL_ENABLED()
-#include <mkl.h>
-#endif
-
 namespace at::native {
 
 namespace {
@@ -36,67 +32,6 @@ inline void _store(
     vec::Vectorized<float> src) {
   auto res = vec::convert_float_bfloat16(src, src);
   res.store(dst, vec::Vectorized<float>::size());
-}
-
-inline void _mkl_gemm(
-    const bool& need_trans_a,
-    const bool& need_trans_b,
-    const int& m,
-    const int& n,
-    const int& k,
-    const float& alpha,
-    float* a,
-    const int& lda,
-    float* b,
-    const int& ldb,
-    const float& beta,
-    float* c,
-    const int& ldc) {
-  cpublas::gemm(
-      need_trans_a ? TransposeType::Transpose : TransposeType::NoTranspose,
-      need_trans_b ? TransposeType::Transpose : TransposeType::NoTranspose,
-      m,
-      n,
-      k,
-      alpha,
-      a,
-      lda,
-      b,
-      ldb,
-      beta,
-      c,
-      ldc);
-}
-
-inline void _mkl_gemm(
-    const bool& need_trans_a,
-    const bool& need_trans_b,
-    const int& m,
-    const int& n,
-    const int& k,
-    const float& alpha,
-    at::BFloat16* a,
-    const int& lda,
-    at::BFloat16* b,
-    const int& ldb,
-    const float& beta,
-    float* c,
-    const int& ldc) {
-  cblas_gemm_bf16bf16f32(
-      CblasColMajor,
-      need_trans_a ? CblasTrans : CblasNoTrans,
-      need_trans_b ? CblasTrans : CblasNoTrans,
-      m,
-      n,
-      k,
-      alpha,
-      (const MKL_BF16*)(a),
-      lda,
-      (const MKL_BF16*)(b),
-      ldb,
-      beta,
-      c,
-      ldc);
 }
 
 template <typename scalar_t>
@@ -347,10 +282,9 @@ void cpu_flash_attention(
       int64_t num_keys = is_causal ? std::min(m + qBlockSize, kvSize) : kvSize;
       for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
         int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
-        // Calculate scale * q @ k.T
-        _mkl_gemm(
-            true,
-            false,
+        cpublas::gemm(
+            TransposeType::Transpose,
+            TransposeType::NoTranspose,
             kvBlockSize,
             qBlockSize,
             headSize,
@@ -385,10 +319,9 @@ void cpu_flash_attention(
             kvBlockSize,
             headSize,
             n);
-        // Calculate Softmax(q @ k.T) @ v
-        _mkl_gemm(
-            false,
-            false,
+        cpublas::gemm(
+            TransposeType::NoTranspose,
+            TransposeType::NoTranspose,
             headSize,
             qBlockSize,
             kvBlockSize,
