@@ -10548,6 +10548,9 @@ class TestConsistency(TestCaseMPS):
                 mps_args[1] = cpu_args[1]
 
             cpu_out = op(*cpu_args, **cpu_kwargs)
+            cpu_fp32_out = None
+            if use_fp32:
+                cpu_fp32_out = op(*cpu_fp32_args, **cpu_kwargs)
             mps_out = op(*mps_args, **mps_kwargs)
 
             if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
@@ -10581,6 +10584,7 @@ class TestConsistency(TestCaseMPS):
                 print("mps_kwargs: ", mps_kwargs)
                 print("cpu_out: ", cpu_out)
                 print("mps_out", mps_out)
+                print("cpu_fp32_out", cpu_fp32_out)
                 self.assertEqual(cpu_fp32_args, mps_out, atol=atol, rtol=rtol)
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
