@@ -497,7 +497,7 @@ def _multi_tensor_adam(params: List[Tensor],
 
             # Re-assign for clarity as we maintain minimal intermediates: we'll have
             # step_size = - lr / (1 - beta1 ^ t) where t = num_steps
-            # bias_correction2 = 1 - beta2 ^ t
+            # bias_correction2_sqrt = sqrt(1 - beta2 ^ t)
             step_size = bias_correction1
             bias_correction2_sqrt = bias_correction2
 
@@ -510,17 +510,11 @@ def _multi_tensor_adam(params: List[Tensor],
             else:
                 exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
 
-            # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
-            # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
-            torch._foreach_mul_(bias_correction2_sqrt, step_size)
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
+            torch._foreach_add_(exp_avg_sq_sqrt, eps)
+            torch._foreach_div_(exp_avg_sq_sqrt, step_size)
 
-            # now exp_avg_sq_sqrt = sqrt(exp_avg_sq_sqrt / 1 - beta2 ^ t) * - (1 - beta1 ^ t) / lr
-            torch._foreach_div_(step_size, eps)
-            torch._foreach_reciprocal_(step_size)
-
-            # now step_size = eps * - (1 - beta1 ^ t) / lr
-            torch._foreach_add_(exp_avg_sq_sqrt, step_size)
+            # at this point, exp_avg_sq_sqrt = - (1 - beta^t) * [sqrt(exp_avg_sq / (1 - beta2^t)) + eps] / lr
             torch._foreach_addcdiv_(device_params, device_exp_avgs, exp_avg_sq_sqrt)
         else:
             bias_correction1 = [1 - beta1 ** _get_value(step) for step in device_state_steps]

@@ -821,11 +821,15 @@ class TestOptim(TestCase):
         return [
             (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
             (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=False, maximize=True)),
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=True, maximize=True)),
             (optim.Adam, dict(weight_decay=0.0, amsgrad=False, capturable=True, maximize=True)),
             (optim.Adam, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
-            (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=False)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=True)),
+            (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, maximize=True)),
+            (optim.AdamW, dict(weight_decay=0.0, amsgrad=False, maximize=True)),
+            (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=False, capturable=True, maximize=True)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
@@ -887,9 +891,11 @@ class TestOptim(TestCase):
             (optim.Adam, optim.AdamW),
             (
                 dict(weight_decay=1., amsgrad=False, capturable=True, maximize=True),
+                dict(weight_decay=1., amsgrad=False, maximize=True),
                 dict(weight_decay=1., amsgrad=True),
                 dict(weight_decay=0., amsgrad=False),
                 dict(weight_decay=0., amsgrad=True, capturable=True, maximize=True),
+                dict(weight_decay=0., amsgrad=True, maximize=True),
             ),
         ))
 
