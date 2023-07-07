@@ -24,10 +24,10 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
         fx_module: torch.fx.GraphModule,
-        nn_module: torch.nn.Module,
+        original_nn_module: torch.nn.Module,
     ):
         super().__init__(diagnostic_context, fx_module)
-        self.original_module = nn_module
+        self.original_nn_module = original_nn_module
 
     @_beartype.beartype
     def _rename_param_and_buffer(
@@ -65,7 +65,7 @@ class RestoreParameterAndBufferNames(_pass.Transform):
 
         For each `get_attr` node, if the target is a str representing a parameter or buffer
         under `self.module`, we rename the parameter or buffer to its original name.
-        The parameters and buffers between `self.module` and `self.original_module` refer
+        The parameters and buffers between `self.module` and `self.original_nn_module` refer
         to the same objects, allowing us to use it as key to retrieve the original name.
         """
         assert len(args) == 0, "RestoreParameterAndBufferNames does not take any args"
@@ -76,10 +76,10 @@ class RestoreParameterAndBufferNames(_pass.Transform):
         # the parameter/buffer. E.g., "self.linear.weight".
         state_to_readable_name: Dict[Union[torch.nn.Parameter, torch.Tensor], str] = {}
         state_to_readable_name.update(
-            {v: k for k, v in self.original_module.named_parameters()}
+            {v: k for k, v in self.original_nn_module.named_parameters()}
         )
         state_to_readable_name.update(
-            {v: k for k, v in self.original_module.named_buffers()}
+            {v: k for k, v in self.original_nn_module.named_buffers()}
         )
         diagnostic = self.diagnostic_context.inflight_diagnostic()
 

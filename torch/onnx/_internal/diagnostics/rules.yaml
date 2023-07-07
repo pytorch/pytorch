@@ -390,6 +390,31 @@
     deprecated: false
     tags: []
 
+- id: FXE0015
+  name: fx-node-insert-type-promotion
+  short_description:
+    text: Determine if type promotion is required for the FX node. Insert cast nodes if needed.
+  full_description:
+    text: "Determine if type promotion is required for the FX node. Insert cast nodes if needed."
+    markdown: |
+      This diagnostic monitors the node-level type promotion insertion process. In PyTorch, there is an automatic process called implicit type promotion,
+      where the input types of an operator are promoted to a common type. The determination of the common type is based on the type promotion rule specific to each operator.
+      To learn more about PyTorch's type promotion rules, refer to the [elementwise_dtypes doc](https://github.com/pytorch/pytorch/blob/f044613f78df713fb57f70c608483c9f10ad332e/torch/_prims_common/__init__.py#L1252-L1335)
+      and [torch._refs ops](https://github.com/pytorch/pytorch/blob/a475ea4542dfe961c9d097e33ab5041f61c8c17f/torch/_refs/__init__.py#L484).
+
+      However, implicit type promotion is not supported in ONNX. Therefore, to replicate the PyTorch behavior, we need to explicitly insert cast nodes.
+      This diagnostic tracks the process of node-level type promotion insertion.
+
+      The type promotion rules used by this process can be found in `torch/onnx/_internal/fx/passes/type_promotion.py.`
+      To update or add new type promotion rules, please refer to the [Note: Update type promotion rule] section.
+  message_strings:
+    default:
+      text: "Performing explicit type promotion for node {target}. "
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
 - id: DIAGSYS0001
   name: arg-format-too-verbose
   short_description:

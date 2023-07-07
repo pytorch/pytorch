@@ -546,6 +546,15 @@ class TestSymNumberMagicMethods(TestCase):
                 # Complex result, which we do not support:
                 # TypeError: Cannot convert complex to float
                 return self.assertRaises((TypeError,))
+            elif fn in ("lshift", "rshift") and not (
+                isinstance(inp1, (SymInt, int)) and
+                isinstance(inp2, (SymInt, int))
+            ):
+                # TypeError: unsupported operand type(s)
+                return self.assertRaises((TypeError,))
+            elif fn in ("lshift", "rshift") and inp2 < 0:
+                # ValueError: math domain error
+                return self.assertRaises((ValueError,))
             else:
                 return contextlib.nullcontext()
 
