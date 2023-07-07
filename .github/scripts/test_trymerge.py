@@ -379,7 +379,7 @@ class TestTryMerge(TestCase):
         """Tests that all checkruns can be fetched"""
         pr = GitHubPR("pytorch", "pytorch", 77700)
         conclusions = pr.get_checkrun_conclusions()
-        self.assertEqual(len(conclusions), 79)
+        self.assertEqual(len(conclusions), 70)
         self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
 
     def test_cancelled_gets_ignored(self, *args: Any) -> None:

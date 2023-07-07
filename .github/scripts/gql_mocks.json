@@ -10261,13 +10261,6 @@
                                 "title": "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build"
                               },
                               {
-                                "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2197192471/jobs/3232461410",
-                                "databaseId": 6099431819,
-                                "title": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build"
-                              },
-                              {
                                 "name": "linux-xenial-py3.7-clang7-asan / build",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2197192471/jobs/3232461543",
@@ -10359,13 +10352,6 @@
                                 "title": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit / build-and-test"
                               },
                               {
-                                "name": "linux-xenial-py3.7-gcc5.4 / build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2197192471/jobs/3232462683",
-                                "databaseId": 6099433758,
-                                "title": "linux-xenial-py3.7-gcc5.4 / build"
-                              },
-                              {
                                 "name": "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test / build-and-test",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2197192471/jobs/3232462738",
@@ -10399,48 +10385,6 @@
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2197192471/jobs/3232547612",
                                 "databaseId": 6099557310,
                                 "title": "linux-docs / build-docs (python)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2197192471/jobs/3232547714",
-                                "databaseId": 6099557449,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2197192471/jobs/3232547764",
-                                "databaseId": 6099557512,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2197192471/jobs/3232547824",
-                                "databaseId": 6099557588,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2197192471/jobs/3232547869",
-                                "databaseId": 6099557655,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2197192471/jobs/3232547909",
-                                "databaseId": 6099557717,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2197192471/jobs/3232547973",
-                                "databaseId": 6099557795,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)"
                               },
                               {
                                 "name": "linux-vulkan-bionic-py3.7-clang9 / test (default, 1, 1, linux.2xlarge)",
@@ -11617,13 +11561,6 @@
                                 "title": "linux-bionic-cuda11.3-py3.7-clang9 / build"
                               },
                               {
-                                "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2273063632/jobs/3379902507",
-                                "databaseId": 6299246168,
-                                "title": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build"
-                              },
-                              {
                                 "name": "linux-bionic-py3.7-clang9 / build",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2273063632/jobs/3379902560",
@@ -11685,13 +11622,6 @@
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2273063632/jobs/3379902874",
                                 "databaseId": 6299246687,
                                 "title": "linux-xenial-cuda11.3-py3.7-gcc7 / build"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2273063632/jobs/3379903006",
-                                "databaseId": 6299246843,
-                                "title": "linux-xenial-py3.7-gcc5.4 / build"
                               },
                               {
                                 "name": "linux-xenial-py3.7-gcc7-no-ops / build",
@@ -11769,48 +11699,6 @@
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2273063632/jobs/3379946337",
                                 "databaseId": 6299307961,
                                 "title": "linux-docs / build-docs (python)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2273063632/jobs/3379946359",
-                                "databaseId": 6299308001,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2273063632/jobs/3379946391",
-                                "databaseId": 6299308035,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2273063632/jobs/3379946423",
-                                "databaseId": 6299308082,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2273063632/jobs/3379946453",
-                                "databaseId": 6299308120,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2273063632/jobs/3379946496",
-                                "databaseId": 6299308169,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2273063632/jobs/3379946529",
-                                "databaseId": 6299308217,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)"
                               },
                               {
                                 "name": "linux-bionic-py3.7-clang9 / test (default, 1, 2, linux.2xlarge)",
@@ -12158,13 +12046,6 @@
                                 "title": "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build"
                               },
                               {
-                                "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2276796865/jobs/3387422303",
-                                "databaseId": 6309472172,
-                                "title": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build"
-                              },
-                              {
                                 "name": "linux-xenial-py3-clang5-mobile-custom-build-static / build",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2276796865/jobs/3387422476",
@@ -12177,13 +12058,6 @@
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2276796865/jobs/3387422715",
                                 "databaseId": 6309472715,
                                 "title": "linux-bionic-cuda11.3-py3.7-clang9 / build"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2276796865/jobs/3387422963",
-                                "databaseId": 6309473041,
-                                "title": "linux-xenial-py3.7-gcc5.4 / build"
                               },
                               {
                                 "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single / build-and-test",
@@ -12240,48 +12114,6 @@
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2276796865/jobs/3387546119",
                                 "databaseId": 6309647538,
                                 "title": "linux-xenial-py3.7-gcc7 / test (default, 2, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2276796865/jobs/3387553028",
-                                "databaseId": 6309657055,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2276796865/jobs/3387553144",
-                                "databaseId": 6309657196,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2276796865/jobs/3387553251",
-                                "databaseId": 6309657332,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2276796865/jobs/3387553438",
-                                "databaseId": 6309657575,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)",
-                                "conclusion": "FAILURE",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2276796865/jobs/3387553556",
-                                "databaseId": 6309657726,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2276796865/jobs/3387553668",
-                                "databaseId": 6309657858,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)"
                               },
                               {
                                 "name": "linux-docs / build-docs (cpp)",
@@ -13849,79 +13681,6 @@
                           },
                           "workflowRun": {
                             "workflow": {
-                              "name": "linux-xenial-py3.7-gcc5.4"
-                            },
-                            "url": "https://github.com/pytorch/pytorch/actions/runs/1886754078"
-                          },
-                          "checkRuns": {
-                            "nodes": [
-                              {
-                                "name": "build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/1886754078/jobs/2663109777",
-                                "databaseId": 5302020048,
-                                "title": null
-                              },
-                              {
-                                "name": "test (backwards_compat, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/1886754078/jobs/2663201383",
-                                "databaseId": 5302147216,
-                                "title": null
-                              },
-                              {
-                                "name": "test (default, 1, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/1886754078/jobs/2663201458",
-                                "databaseId": 5302147336,
-                                "title": null
-                              },
-                              {
-                                "name": "test (default, 2, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/1886754078/jobs/2663201512",
-                                "databaseId": 5302147409,
-                                "title": null
-                              },
-                              {
-                                "name": "test (distributed, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/1886754078/jobs/2663201580",
-                                "databaseId": 5302147493,
-                                "title": null
-                              },
-                              {
-                                "name": "test (jit_legacy, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/1886754078/jobs/2663201672",
-                                "databaseId": 5302147622,
-                                "title": null
-                              },
-                              {
-                                "name": "test (docs_test, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/1886754078/jobs/2663201839",
-                                "databaseId": 5302147822,
-                                "title": null
-                              }
-                            ],
-                            "pageInfo": {
-                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAATwIWu4=",
-                              "hasNextPage": false
-                            }
-                          },
-                          "conclusion": "SUCCESS"
-                        },
-                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAUK_Uco="
-                      },
-                      {
-                        "node": {
-                          "app": {
-                            "name": "GitHub Actions",
-                            "databaseId": 15368
-                          },
-                          "workflowRun": {
-                            "workflow": {
                               "name": "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test"
                             },
                             "url": "https://github.com/pytorch/pytorch/actions/runs/1886754079"
@@ -13952,11 +13711,6 @@
                   },
                   "status": {
                     "contexts": [
-                      {
-                        "context": "ci/circleci: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build",
-                        "state": "SUCCESS",
-                        "targetUrl": "https://circleci.com/gh/pytorch/pytorch/17017798?utm_campaign=vcs-integration-link&utm_medium=referral&utm_source=github-build-link"
-                      },
                       {
                         "context": "ci/circleci: docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
                         "state": "SUCCESS",
@@ -14803,13 +14557,6 @@
                                 "title": "linux-xenial-py3.7-clang7-onnx / build"
                               },
                               {
-                                "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2217622878/jobs/3270927567",
-                                "databaseId": 6150895428,
-                                "title": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build"
-                              },
-                              {
                                 "name": "pytorch-xla-linux-bionic-py3.7-clang8 / build",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2217622878/jobs/3270927674",
@@ -14873,13 +14620,6 @@
                                 "title": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit / build-and-test"
                               },
                               {
-                                "name": "linux-xenial-py3.7-gcc5.4 / build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2217622878/jobs/3270928256",
-                                "databaseId": 6150896213,
-                                "title": "linux-xenial-py3.7-gcc5.4 / build"
-                              },
-                              {
                                 "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single / build-and-test",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2217622878/jobs/3270928291",
@@ -14920,48 +14660,6 @@
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2217622878/jobs/3270928445",
                                 "databaseId": 6150896443,
                                 "title": "linux-bionic-cuda11.3-py3.7-clang9 / build"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2217622878/jobs/3270991071",
-                                "databaseId": 6150970691,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2217622878/jobs/3270991125",
-                                "databaseId": 6150970749,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2217622878/jobs/3270991162",
-                                "databaseId": 6150970796,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2217622878/jobs/3270991195",
-                                "databaseId": 6150970831,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2217622878/jobs/3270991233",
-                                "databaseId": 6150970876,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2217622878/jobs/3270991261",
-                                "databaseId": 6150970911,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)"
                               },
                               {
                                 "name": "linux-docs / build-docs (cpp)",
@@ -17591,13 +17289,6 @@
                                 "title": null
                               },
                               {
-                                "name": "docker-build (pytorch-linux-xenial-py3.7-gcc5.4)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867844/jobs/3528128639",
-                                "databaseId": 6498902041,
-                                "title": null
-                              },
-                              {
                                 "name": "docker-build (pytorch-linux-xenial-py3.7-gcc7)",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867844/jobs/3528128687",
@@ -17685,13 +17376,6 @@
                                 "title": "linux-bionic-cuda11.3-py3.7-clang9 / build"
                               },
                               {
-                                "name": "linux-xenial-py3.7-gcc5.4 / build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867849/jobs/3528152014",
-                                "databaseId": 6498934411,
-                                "title": "linux-xenial-py3.7-gcc5.4 / build"
-                              },
-                              {
                                 "name": "linux-xenial-py3.7-clang7-onnx / build",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867849/jobs/3528152139",
@@ -17760,13 +17444,6 @@
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867849/jobs/3528153005",
                                 "databaseId": 6498935802,
                                 "title": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single / build-and-test"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867849/jobs/3528153062",
-                                "databaseId": 6498935884,
-                                "title": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build"
                               },
                               {
                                 "name": "pytorch-xla-linux-bionic-py3.7-clang8 / build",
@@ -17949,41 +17626,6 @@
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867849/jobs/3528310101",
                                 "databaseId": 6499153676,
                                 "title": null
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867849/jobs/3528384337",
-                                "databaseId": 6499259414,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867849/jobs/3528384379",
-                                "databaseId": 6499259466,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867849/jobs/3528384408",
-                                "databaseId": 6499259509,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867849/jobs/3528384441",
-                                "databaseId": 6499259568,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867849/jobs/3528384471",
-                                "databaseId": 6499259607,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)"
                               }
                             ],
                             "pageInfo": {
@@ -18148,13 +17790,6 @@
                       {
                         "checkRuns": {
                           "nodes": [
-                            {
-                              "name": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)",
-                              "conclusion": "SUCCESS",
-                              "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2348867849/jobs/3528384494",
-                              "databaseId": 6499259645,
-                              "title": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)"
-                            },
                             {
                               "name": "linux-docs / build-docs (cpp)",
                               "conclusion": "SUCCESS",
@@ -19227,13 +18862,6 @@
                                 "title": null
                               },
                               {
-                                "name": "linux-xenial-py3.7-gcc5.4 / build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2018440039/jobs/2903896936",
-                                "databaseId": 5633828594,
-                                "title": null
-                              },
-                              {
                                 "name": "linux-xenial-py3-clang5-mobile-build / build",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2018440039/jobs/2903897025",
@@ -19290,13 +18918,6 @@
                                 "title": null
                               },
                               {
-                                "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
-                                "conclusion": "SUCCESS",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2018440039/jobs/2903897630",
-                                "databaseId": 5633829746,
-                                "title": null
-                              },
-                              {
                                 "name": "linux-xenial-py3-clang5-mobile-custom-build-static / build",
                                 "conclusion": "SUCCESS",
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2018440039/jobs/2903897699",
@@ -19323,48 +18944,6 @@
                                 "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2018440039/jobs/2904327838",
                                 "databaseId": 5634453232,
                                 "title": null
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)",
-                                "conclusion": "FAILURE",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2018440039/jobs/2904327956",
-                                "databaseId": 5634453388,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (default, 1, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)",
-                                "conclusion": "FAILURE",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2018440039/jobs/2904327997",
-                                "databaseId": 5634453444,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (default, 2, 2, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)",
-                                "conclusion": "FAILURE",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2018440039/jobs/2904328035",
-                                "databaseId": 5634453499,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (distributed, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)",
-                                "conclusion": "FAILURE",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2018440039/jobs/2904328093",
-                                "databaseId": 5634453573,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (docs_test, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)",
-                                "conclusion": "FAILURE",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2018440039/jobs/2904328131",
-                                "databaseId": 5634453624,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (backwards_compat, 1, 1, linux.2xlarge)"
-                              },
-                              {
-                                "name": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)",
-                                "conclusion": "FAILURE",
-                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/2018440039/jobs/2904328177",
-                                "databaseId": 5634453683,
-                                "title": "linux-xenial-py3.7-gcc5.4 / test (jit_legacy, 1, 1, linux.2xlarge)"
                               },
                               {
                                 "name": "linux-xenial-py3.7-gcc7 / test (default, 1, 2, linux.2xlarge)",
@@ -19537,11 +19116,6 @@
                   },
                   "status": {
                     "contexts": [
-                      {
-                        "context": "ci/circleci: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build",
-                        "state": "SUCCESS",
-                        "targetUrl": "https://circleci.com/gh/pytorch/pytorch/17048428?utm_campaign=vcs-integration-link&utm_medium=referral&utm_source=github-build-link"
-                      },
                       {
                         "context": "ci/circleci: docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
                         "state": "SUCCESS",
