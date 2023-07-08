@@ -75,14 +75,14 @@ class OnnxRegistry:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
         for aten_name, aten_overloads_func in torchlib_registry.items():
-            internal_name_class = OpName.from_qualified_name(aten_name)
+            internal_name_instance = OpName.from_qualified_name(aten_name)
             for overload_func in aten_overloads_func.overloads:
                 symbolic_function = SymbolicFunction(
                     onnx_function=overload_func,
-                    op_full_name=internal_name_class.qualified_name(),
+                    op_full_name=internal_name_instance.qualified_name(),
                     is_custom=False,
                 )
-                self._register(internal_name_class, symbolic_function)
+                self._register(internal_name_instance, symbolic_function)
 
     @_beartype.beartype
     def _register(
@@ -116,15 +116,15 @@ class OnnxRegistry:
         Raises:
             ValueError: If the name is not in the form of 'namespace::op'.
         """
-        internal_name_class = OpName.from_name_parts(
+        internal_name_instance = OpName.from_name_parts(
             namespace=namespace, op_name=op_name, overload=overload
         )
         symbolic_function = SymbolicFunction(
             onnx_function=function,
-            op_full_name=internal_name_class.qualified_name(),
+            op_full_name=internal_name_instance.qualified_name(),
             is_custom=True,
         )
-        self._register(internal_name_class, symbolic_function)
+        self._register(internal_name_instance, symbolic_function)
 
     @_beartype.beartype
     def get_functions(
@@ -144,10 +144,10 @@ class OnnxRegistry:
             A list of SymbolicFunctions corresponding to the given name, or None if
             the name is not in the registry.
         """
-        internal_name_class = OpName.from_name_parts(
+        internal_name_instance = OpName.from_name_parts(
             namespace=namespace, op_name=op_name, overload=overload
         )
-        return self._registry.get(internal_name_class)
+        return self._registry.get(internal_name_instance)
 
     @_beartype.beartype
     def is_registered_op(
