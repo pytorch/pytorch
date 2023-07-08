@@ -51,8 +51,6 @@ namespace torch {
 namespace autograd {
 
 namespace {
-static Engine::compiled_autograd_fn the_compiled_autograd = nullptr;
-
 static bool in_bad_autograd_fork =
     false; // True for children forked after engine's thread pool init
 
@@ -79,14 +77,22 @@ inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
   }
 }
 
+static std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd =
+    nullptr;
 static std::atomic<int32_t> num_threads_in_backwards;
 struct CompiledAutogradThreadingDebugCheck {
-  CompiledAutogradThreadingDebugCheck() {
+  CompiledAutogradThreadingDebugCheck() : active(true) {
     num_threads_in_backwards++;
   }
   ~CompiledAutogradThreadingDebugCheck() {
-    num_threads_in_backwards--;
+    release();
   }
+  void release() {
+    if (std::exchange(active, false)) {
+      num_threads_in_backwards--;
+    }
+  }
+  bool active;
 };
 
 } // namespace
@@ -1164,6 +1170,10 @@ auto Engine::execute(
         "your parameters to None after use to break the cycle and avoid the leak.");
   }
 
+  // Allows us to assert no other threads are in backwards
+  CompiledAutogradThreadingDebugCheck _thread_check;
+  auto compiled_autograd = the_compiled_autograd.load();
+
   // accumulate_grad is true if and only if the frontend call was to
   // grad(), not backward(). grad() returns the sum of the gradients
   // w.r.t. the inputs and thus needs the inputs to be present.
@@ -1174,7 +1184,7 @@ auto Engine::execute(
   // initialize a new thread local ready queue on CPU or reuse the existing one
   // (if there is one allocated already, i.e. consecutive backward calls,
   // re-entrant backward calls), then memoize the local_ready_queue in GraphTask
-  if (the_compiled_autograd == nullptr) {
+  if (compiled_autograd == nullptr) {
     init_local_ready_queue();
   }
   bool not_reentrant_backward_call = worker_device == NO_DEVICE;
@@ -1194,8 +1204,7 @@ auto Engine::execute(
       /* graph_roots */ std::move(temp_roots));
 
   // If we receive a single root, skip creating extra root node
-  bool skip_dummy_node =
-      root_edges.size() == 1 && the_compiled_autograd == nullptr;
+  bool skip_dummy_node = root_edges.size() == 1 && compiled_autograd == nullptr;
   auto graph_root = skip_dummy_node
       ? root_edges.at(0).function
       : std::make_shared<GraphRoot>(root_edges, inputs);
@@ -1204,15 +1213,15 @@ auto Engine::execute(
   // Now compute the dependencies for all executable functions
   compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
 
-  if (the_compiled_autograd != nullptr) {
+  if (compiled_autograd != nullptr) {
     // see [Note: Compiled Autograd]
     TORCH_CHECK(!keep_graph, "compiled_autograd does not support keep_graph");
     TORCH_CHECK(
         !create_graph, "compiled_autograd does not support create_graph");
-    return (*the_compiled_autograd)(
+    _thread_check.release();
+    return (*compiled_autograd)(
         graph_root, *graph_task, accumulate_grad, outputs);
   }
-  CompiledAutogradThreadingDebugCheck _thread_count;
 
   if (!outputs.empty()) {
     graph_task->init_to_execute(
@@ -1352,7 +1361,7 @@ Engine& Engine::get_default_engine() {
 }
 
 void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
-  the_compiled_autograd = fn;
+  the_compiled_autograd.store(fn);
   TORCH_CHECK(
       num_threads_in_backwards.load() == 0,
       "compiled_autograd.enable() requires no threads in backwards()")
