@@ -2245,6 +2245,21 @@ Target Guards:
             return int(sym)
         return SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
 
+    def create_symint_and_symbol(self, value, source, dynamic_dim):
+        # TODO: This is wrong wrong wrong, create_symbol will
+        # generate something that is non-negative, but this is
+        # not a sound assumption to make.
+        # Not fixing as this was a preexisting condition.
+        return self.create_symintnode(
+            self.create_symbol(
+                value,
+                source=source,
+                dynamic_dim=dynamic_dim,
+            ),
+            hint=value,
+            source=source,
+        )
+
     def create_symboolnode(self, sym: "sympy.Expr"):
         # This function is only being used in serialization, so we do not track it
         # for validation.
