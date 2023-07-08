@@ -856,10 +856,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable, TensorVariable
         from .builder import wrap_fx_proxy
-
-        self.check_kwargs(kwargs, (ConstantVariable, TensorVariable))
 
         p_args, p_kwargs, example_value = self.create_wrapped_node(tx, args, kwargs)
 
@@ -881,10 +878,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         from torch._higher_order_ops.wrap import TagActivationCheckpoint
-        from . import ConstantVariable, TensorVariable
         from .builder import wrap_fx_proxy
-
-        self.check_kwargs(kwargs, (ConstantVariable, TensorVariable))
 
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 

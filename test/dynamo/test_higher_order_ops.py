@@ -796,6 +796,19 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             # we take the `else` branch and `y` is not lifted.
             self._test_wrap_simple(f, (x, y, 8), 2)
 
+    def test_wrap_unsupported_kwarg(self):
+        def f(x, y, z):
+            def fn(*, x, y, z):
+                z1, z2 = z
+                return (x * 2) + y + z1
+
+            return wrap(fn, x=x, y=y, z=z)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        self._assert_wrap_fallback(f, (x, y, (x, y)))
+
     def test_map_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
