@@ -657,23 +657,16 @@ class FxOnnxInterpreter:
         ],
         fx_graph_module: torch.fx.GraphModule,
     ):
-        current_attr = fx_graph_module
-        sub_attr_names = node.target.split(".")  # type: ignore[union-attr]
-        # If node.targe is "conv.weight", the following loop first
-        # assigns fx_module_with_metadata.conv to current_attr, and then
-        # fx_module_with_metadata.conv.weight to current_attr.
-        while sub_attr_names:
-            sub_attr_name = sub_attr_names.pop(0)
-            if not hasattr(current_attr, sub_attr_name):
-                raise AttributeError(
-                    f"Attribute {sub_attr_name} is not found in {current_attr}."
-                )
-            current_attr = getattr(current_attr, sub_attr_name)
+        assert isinstance(node.target, str), f"node.target {node.target} is not a str."
+        attr_tensor = getattr(fx_graph_module, node.target)
+        assert isinstance(attr_tensor, torch.Tensor), f"{attr_tensor} is not a tensor."
 
-        input_ = onnxscript_graph.add_initializer(node.name, current_attr)
+        # Parameter/buffer name cannot contain "."
+        # Revert from "/" to restore namespace formatting.
+        input_ = onnxscript_graph.add_initializer(
+            node.target.replace("/", "."), attr_tensor
+        )
 
         assert isinstance(input_, onnxscript_graph_building.TorchScriptTensor)
         assert isinstance(input_, onnxscript.tensor.Tensor)
         fx_name_to_onnxscript_value[node.name] = input_
-        # FIXME: Refactor logic getting 'current_attr'.
-        assert isinstance(current_attr, torch.Tensor)

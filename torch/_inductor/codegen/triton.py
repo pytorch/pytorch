@@ -20,6 +20,7 @@ from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..triton_heuristics import AutotuneHint
 from ..utils import (
     DeferredLineBase,
     get_fused_kernel_name,
@@ -741,6 +742,9 @@ class TritonKernel(Kernel):
         )
         self.initialize_range_tree(pid_cache)
 
+        # A set of autotuning hints to pass as part of triton_meta
+        self.autotune_hints: Set[AutotuneHint] = set()
+
         # define this in a closure to make cache local to object
         @functools.lru_cache(None)
         def simplify_indexing(index: sympy.Expr):
@@ -974,6 +978,17 @@ class TritonKernel(Kernel):
         new_index = sympy_subs(index, dict(zip(index_vars, reindex(new_index_vars))))
         return new_index
 
+    def index_to_str(self, index: sympy.Expr) -> str:
+        """
+        Convert an index expr to a string that can be used in triton code.
+        e.g. a sympy expression "s2" may actually appear as "ks1" in the triton kernel.
+
+        Index expressions often need to be passed in as arguments to the triton kernel.
+        Rename_indexing and codegen_indexing keep track of the needed indices and add
+        new parameters to the function signature.
+        """
+        return texpr(self.rename_indexing(self.codegen_indexing(index)))
+
     def indexing(
         self,
         index: sympy.Expr,
@@ -1008,7 +1023,7 @@ class TritonKernel(Kernel):
                     index = sympy_subs(index, replacements)
 
         index_vars = index.free_symbols
-        index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
+        index_str = self.index_to_str(index)
 
         mask_vars: Set[str] = set()
         for var in index_vars:
@@ -1187,9 +1202,7 @@ class TritonKernel(Kernel):
                 )
 
             self.indirect_max_sizes_expr[map_key] = size
-            self.indirect_max_sizes_printed[map_key] = texpr(
-                self.rename_indexing(self.codegen_indexing(size))
-            )
+            self.indirect_max_sizes_printed[map_key] = self.index_to_str(size)
 
         return sympy_symbol(str(var))
 
@@ -1295,7 +1308,7 @@ class TritonKernel(Kernel):
         self,
         values: CSEVariable,
         offsets_name: str,
-        offsets_size,
+        offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
     ):
@@ -1303,8 +1316,15 @@ class TritonKernel(Kernel):
         See [Note: Inductor bucketize op]
         """
 
+        # Triton performance for bucketize_binary_search is much better when the number
+        # of threads equals the number of elements.
+        # If we're trying to use a bucketize kernel, we should make sure that an
+        # autotuning config with num_elements_per_warp=32 exists.
+        self.autotune_hints.add(AutotuneHint.ELEMENTS_PER_WARP_32)
+
         offsets_ptr = self.args.input(offsets_name)
         block_size = self.dense_size_str()
+        offsets_size_str = self.index_to_str(offsets_size)
 
         if indexing_dtype == torch.int32:
             triton_dtype = "tl.int32"
@@ -1317,7 +1337,7 @@ class TritonKernel(Kernel):
 
         result = self.cse.generate(
             self.compute,
-            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size}, {block_size})",  # noqa: B950 line too long
+            f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {triton_dtype}, {right}, {offsets_size_str}, {block_size})",  # noqa: B950 line too long
         )
 
         return result
@@ -1604,7 +1624,7 @@ class TritonKernel(Kernel):
                     import triton.language as tl
                     from torch._inductor.ir import ReductionHint
                     from torch._inductor.ir import TileHint
-                    from torch._inductor.triton_heuristics import {heuristics}
+                    from torch._inductor.triton_heuristics import AutotuneHint, {heuristics}
                     from torch._inductor.utils import instance_descriptor
                     from torch._inductor import triton_helpers
                 """
@@ -1648,6 +1668,7 @@ class TritonKernel(Kernel):
             "device": V.graph.scheduler.current_device.index,
             "constants": {},
             "mutated_arg_names": mutated_args,
+            "autotune_hints": set(self.autotune_hints),
         }
 
         for tree in self.range_trees:
@@ -1665,10 +1686,13 @@ class TritonKernel(Kernel):
         triton_meta["configs"] = [config_of(signature)]
 
         for tree in self.range_trees:
-            if tree.prefix != "r" or (
-                self.inside_reduction and not self.persistent_reduction
+            if tree.prefix == "r" and (
+                not self.inside_reduction or self.persistent_reduction
             ):
-                argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
+                continue
+            if tree.prefix == "x" and self.no_x_dim:
+                continue
+            argdefs.append(f"{tree.prefix.upper()}BLOCK : tl.constexpr")
 
         if self.inside_reduction:
             reduction_hint = self.reduction_hint
@@ -1740,6 +1764,9 @@ class TritonKernel(Kernel):
                     continue
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
+
+            if tree.prefix == "x" and self.no_x_dim:
+                code.writeline("XBLOCK: tl.constexpr = 1")
 
     def triton_tensor_ndim(self):
         no_x_dim = int(bool(self.no_x_dim))

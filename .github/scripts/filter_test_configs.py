@@ -73,6 +73,7 @@ TEST_JOB_NAME = "test"
 BUILD_AND_TEST_JOB_NAME = "build-and-test"
 JOB_NAME_CFG_REGEX = re.compile(r"(?P<job>[\w-]+)\s+\((?P<cfg>[\w-]+)\)")
 EXCLUDED_BRANCHES = ["nightly"]
+MEM_LEAK_LABEL = "enable-mem-leak-check"
 
 
 class IssueType(Enum):
@@ -495,6 +496,12 @@ def perform_misc_tasks(
 
     set_output("reenabled-issues", ",".join(get_reenabled_issues(pr_body=pr_body)))
 
+    if MEM_LEAK_LABEL in labels:
+        # Enable mem leak check if label is added
+        for config in test_matrix.get("include", []):
+            if is_cuda_or_rocm_job(job_name):
+                config["mem_leak_check"] = "mem_leak_check"
+
 
 def main() -> None:
     args = parse_args()
@@ -558,14 +565,6 @@ def main() -> None:
             args.workflow, args.job_name, filtered_test_matrix
         )
 
-    # Set the filtered test matrix as the output
-    set_output("test-matrix", json.dumps(filtered_test_matrix))
-
-    filtered_test_matrix_len = len(filtered_test_matrix.get("include", []))
-    # and also put a flag if the test matrix is empty, so subsequent jobs can
-    # quickly check it without the need to parse the JSON string
-    set_output("is-test-matrix-empty", filtered_test_matrix_len == 0)
-
     pr_body = get_pr_info(int(pr_number)).get("body", "") if pr_number else ""
 
     perform_misc_tasks(
@@ -574,6 +573,14 @@ def main() -> None:
         job_name=args.job_name,
         pr_body=pr_body,
     )
+
+    # Set the filtered test matrix as the output
+    set_output("test-matrix", json.dumps(filtered_test_matrix))
+
+    filtered_test_matrix_len = len(filtered_test_matrix.get("include", []))
+    # and also put a flag if the test matrix is empty, so subsequent jobs can
+    # quickly check it without the need to parse the JSON string
+    set_output("is-test-matrix-empty", filtered_test_matrix_len == 0)
 
 
 if __name__ == "__main__":
