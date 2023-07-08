@@ -54,7 +54,9 @@ def are_tensors(var):
     return False
 
 
-def check_args_and_maybe_add_to_graph(sub_args, tracer, tx, add_arg_to_graph):
+def validate_args_and_manually_create_graph_inputs(
+    sub_args, tracer, tx, manually_set_subgraph_inputs
+):
     from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
     from .builder import wrap_fx_proxy
 
@@ -68,7 +70,7 @@ def check_args_and_maybe_add_to_graph(sub_args, tracer, tx, add_arg_to_graph):
             # Ensures that we recompile when the constant value changes
             a.add_guard(GuardBuilder.CONSTANT_MATCH)
 
-            if add_arg_to_graph:
+            if manually_set_subgraph_inputs:
                 # This arg is not used in the body of the higher order op.
                 # Currently, this new input is added to make the calls
                 # happy, which expect a fixed number of arguments. In
@@ -76,7 +78,7 @@ def check_args_and_maybe_add_to_graph(sub_args, tracer, tx, add_arg_to_graph):
                 tracer.create_graph_input("const")
             new_arg = a
         elif isinstance(a, TensorVariable):
-            if add_arg_to_graph:
+            if manually_set_subgraph_inputs:
                 new_proxy = tracer.create_graph_input(a.as_proxy().node.name)
                 example_value = a.as_proxy().node.meta["example_value"]
                 new_arg = wrap_fx_proxy(
@@ -85,7 +87,7 @@ def check_args_and_maybe_add_to_graph(sub_args, tracer, tx, add_arg_to_graph):
             else:
                 new_arg = a
         elif isinstance(a, AutogradFunctionContextVariable):
-            if add_arg_to_graph:
+            if manually_set_subgraph_inputs:
                 tracer.create_graph_input(a.as_proxy().node.name)
             new_arg = a
         else:
@@ -102,27 +104,45 @@ def speculate_subgraph(
     tx,
     f,
     sub_args,
+    sub_kwargs,
     graph_checkpoint,
     checkpoint,
     *,
     always_restore=False,
     enable_grad=False,
-    # If add_arg_to_subgraph=True, then we manually add
+    # NOTE [Temporary argument `manually_set_subgraph_inputs`]
+    # If manually_set_subgraph_inputs=True, then we manually add
     # the `sub_args` to `subgraph`, if False then we rely
     # on tracer's lifting mechanism to lift these args.
-    add_arg_to_subgraph=True,
+    # NOTE: Default `True` is temporary and plan is
+    #       to always lift args in future and remove this
+    #       argument.
+    manually_set_subgraph_inputs=True,
 ):
+    if sub_kwargs is None:
+        sub_kwargs = {}
+
+    # See NOTE [Temporary argument `manually_set_subgraph_inputs`]
+    if sub_kwargs and manually_set_subgraph_inputs:
+        unimplemented(
+            "Use `manually_set_subgraph_inputs=False` when passing `sub_kwargs`."
+        )
+
     try:
         with tx.output.new_subtracer() as tracer:
-            args = check_args_and_maybe_add_to_graph(
-                sub_args, tracer, tx, add_arg_to_subgraph
+            args = validate_args_and_manually_create_graph_inputs(
+                sub_args, tracer, tx, manually_set_subgraph_inputs
+            )
+
+            validate_args_and_manually_create_graph_inputs(
+                sub_kwargs.values(), tracer, tx, manually_set_subgraph_inputs=False
             )
 
             autograd_ctx = (
                 dynamo_enable_grad(tx) if enable_grad else contextlib.nullcontext()
             )
             with autograd_ctx:
-                output = f.call_function(tx, args, {})
+                output = f.call_function(tx, args, sub_kwargs)
 
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
@@ -327,8 +347,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # NB: 0 is predicate
             ix = 1 if branch else 2
             try:
+                # TODO: Support kwargs
                 ret_val, ret_graph, ret_lifted_freevars = speculate_subgraph(
-                    tx, args[ix], operands, graph_checkpoint, checkpoint
+                    tx, args[ix], operands, {}, graph_checkpoint, checkpoint
                 )
             # Reraise because we want to suggest workarounds
             except Unsupported as e:
@@ -451,6 +472,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         first_dim = args[1].call_method(
             tx, "__getitem__", args=[ConstantVariable(0)], kwargs={}
         )
+
+        # TODO: Support kwargs
         (
             body_r,
             body_graph,
@@ -462,6 +485,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 first_dim,
                 *args[2:],
             ],
+            {},
             tx.output.graph,
             checkpoint,
         )
@@ -588,10 +612,12 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         #
         # with no_grad():  # This will not disable grad tracking inside of grad(f).
         #     grad_o = torch.func.grad(f)(x)
+        # TODO: Support kwargs
         body_r, body_graph, body_lifted_freevars = speculate_subgraph(
             tx,
             func,
             args[3].items,
+            {},
             graph_checkpoint,
             checkpoint,
             # See NOTE [HACK: Enable autograd while tracing function]
@@ -720,6 +746,8 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         checkpoint = tx.copy_graphstate()
         pre_guards = tx.output.guards
         graph_checkpoint = tx.output.graph
+
+        # TODO: Support kwargs
         (
             body_r,
             body_graph,
@@ -730,6 +758,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             [
                 *args,
             ],
+            {},
             graph_checkpoint,
             checkpoint,
             # Backwards should never, ever be stored!
@@ -787,7 +816,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # See NOTE [HigherOrderOperator tracing design] for more details
         checkpoint = tx.copy_graphstate()
         graph_checkpoint = tx.output.graph
-        flattened_kwargs = [kwargs[key] for key in sorted(kwargs.keys())]
 
         (
             body_r,
@@ -796,10 +824,11 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             args[0],  # function
-            [*(args[1:] + flattened_kwargs)],
+            [*args[1:]],
+            kwargs,
             graph_checkpoint,
             checkpoint,
-            add_arg_to_subgraph=False,
+            manually_set_subgraph_inputs=False,
         )
 
         body_name = add_subgraph(
@@ -811,7 +840,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_node = make_attr(tx, body_name)
 
-        # Since, we call `speculate_subgraph` with `add_arg_to_subgraph=False`,
+        # Since, we call `speculate_subgraph` with `manually_set_subgraph_inputs=False`,
         # all the arguments are lifted.
         lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
 
