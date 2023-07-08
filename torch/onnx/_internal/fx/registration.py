@@ -75,7 +75,7 @@ class OnnxRegistry:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
         for aten_name, aten_overloads_func in torchlib_registry.items():
-            internal_name_class = OpName.from_full_name(aten_name)
+            internal_name_class = OpName.from_qualified_name(aten_name)
             for overload_func in aten_overloads_func.overloads:
                 symbolic_function = SymbolicFunction(
                     onnx_function=overload_func,
@@ -147,9 +147,7 @@ class OnnxRegistry:
         internal_name_class = OpName.from_name_parts(
             namespace=namespace, op_name=op_name, overload=overload
         )
-        if (functions := self._registry.get(internal_name_class)) is not None:
-            return functions
-        return None
+        return self._registry.get(internal_name_class)
 
     @_beartype.beartype
     def is_registered_op(
@@ -194,15 +192,18 @@ class OpName:
     ) -> OpName:
         # NOTE: in PyTorch, the overload could be unprovided to indicate the
         # default overload
+        # TODO: This is slightly unsafe that dev could accidentally create illegal
+        # OpName by using initializer directly
+        # https://github.com/pytorch/pytorch/pull/103943#discussion_r1256511069
         if overload is None or overload == "":
             overload = "default"
         return cls(namespace, op_name, overload)
 
     @classmethod
     @_beartype.beartype
-    def from_full_name(cls, full_name: str) -> OpName:
+    def from_qualified_name(cls, qualified_name: str) -> OpName:
         """When the name is <namespace>::<op_name>[.<overload>]"""
-        namespace, opname_overload = full_name.split("::")
+        namespace, opname_overload = qualified_name.split("::")
         op_name, *overload = opname_overload.split(".", 1)
         overload = overload[0] if overload else "default"
         return cls(namespace, op_name, overload)
@@ -210,7 +211,7 @@ class OpName:
     @classmethod
     @_beartype.beartype
     def from_op_overload(cls, op_overload: torch._ops.OpOverload) -> OpName:
-        return cls.from_full_name(op_overload.name())
+        return cls.from_qualified_name(op_overload.name())
 
     @_beartype.beartype
     def qualified_name(self) -> str:
