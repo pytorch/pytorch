@@ -13,7 +13,7 @@ __all__ = ['L1Loss', 'NLLLoss', 'NLLLoss2d', 'PoissonNLLLoss', 'GaussianNLLLoss'
            'MSELoss', 'BCELoss', 'BCEWithLogitsLoss', 'HingeEmbeddingLoss', 'MultiLabelMarginLoss',
            'SmoothL1Loss', 'HuberLoss', 'SoftMarginLoss', 'CrossEntropyLoss', 'MultiLabelSoftMarginLoss',
            'CosineEmbeddingLoss', 'MarginRankingLoss', 'MultiMarginLoss', 'TripletMarginLoss',
-           'TripletMarginWithDistanceLoss', 'CTCLoss','OBJLoss']
+           'TripletMarginWithDistanceLoss', 'CTCLoss','ObjectDetectionCoordinatesAndSizeLoss']
 
 class _Loss(Module):
     reduction: str
@@ -1764,13 +1764,13 @@ class CTCLoss(_Loss):
 
 
 # This Loss function can be used for Object detection tasks.
-class OBJLoss(_Loss):
+class ObjectDetectionCoordinatesAndSizeLoss(_Loss):
     def __init__(self):
-        super(OBJLoss, self).__init__()
+        super(ObjectDetectionCoordinatesAndSizeLoss, self).__init__()
 
     def forward(self, y_true:Tensor, yhat:Tensor):
         """
-        OBJLoss is a custom loss function for object detection. It is a combination of the coordinate loss and the size loss.
+        ObjectDetectionCoordinatesAndSizeLoss is a custom loss function for object detection. It is a combination of the coordinate loss and the size loss.
 
         Args:
             y_true: Ground truth bounding boxes.
