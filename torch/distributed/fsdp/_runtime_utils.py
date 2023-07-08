@@ -58,6 +58,7 @@ log = logging.getLogger(__name__)
 HOMOGENEOUS_ATTR_NAMES = (
     "_use_orig_params",
     "limit_all_gathers",
+    "_use_full_prec_in_eval",
 )
 
 
@@ -231,10 +232,12 @@ def _init_device_mesh(
     device_type = root_state.compute_device.type
     mesh_tensor = torch.arange(get_world_size(root_state.process_group))
     device_mesh = DeviceMesh(device_type, mesh_tensor, _init_process_groups=False)
-    device_mesh._dim_group_infos = (
-        _get_group_tag(root_state.process_group),
-        mesh_tensor.tolist(),
-    )
+    device_mesh._dim_group_infos = [
+        (
+            _get_group_tag(root_state.process_group),
+            mesh_tensor.tolist(),
+        )
+    ]
     return device_mesh
 
 
@@ -257,7 +260,6 @@ def _share_state_and_init_handle_attrs(
     root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
     root_state._device_mesh = _init_device_mesh(root_state)
-
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
@@ -584,7 +586,7 @@ def _root_pre_forward(
 
         # We cast buffers back to full precision if we're forcing full precision. Disjointly, we check if buffers
         # are in full precision and if we should cast them back to lower precision, which happens when
-        # exiting eval() mode.
+        # exiting eval() mode and full precision in eval was configured.
         should_cast_buffers_to_full_prec = any(
             handle._force_full_precision for handle in state._handles
         )
@@ -654,7 +656,7 @@ def _root_cast_forward_input(
     state: _FSDPState, module: torch.nn.Module, args, kwargs
 ) -> Tuple[Any, Any]:
     should_cast_forward_inputs = (
-        module.training
+        (module.training or not state._use_full_prec_in_eval)
         and all(not handle._force_full_precision for handle in state._handles)
     ) and state.mixed_precision.cast_root_forward_inputs
 
@@ -801,7 +803,7 @@ def _post_backward_hook(
                 not _low_precision_hook_enabled(state)
                 and flat_param.grad.dtype != handle._reduce_dtype
                 # If we are forcing full precision but communicating grads
-                # (i.e. model.eval()), don't downcast gradient.
+                # (i.e. model.eval() + full precision in eval was configured), don't downcast gradient.
                 and not handle._force_full_precision
             ):
                 flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)

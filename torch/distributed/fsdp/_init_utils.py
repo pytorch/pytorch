@@ -1,5 +1,6 @@
 import collections
 import itertools
+import os
 import warnings
 from typing import (
     Any,
@@ -48,6 +49,7 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.fsdp.flat_param import (
+    _FSDP_USE_FULL_PREC_IN_EVAL,
     _HandlesKey,
     FlatParameter,
     FlatParamHandle,
@@ -395,6 +397,9 @@ def _init_core_state(
         torch._C._log_api_usage_once(
             f"torch.distributed.fsdp.mixed_precision.{str(state.mixed_precision)}"
         )
+    state._use_full_prec_in_eval = (
+        os.environ.get(_FSDP_USE_FULL_PREC_IN_EVAL, "") == "1"
+    )
     state.cpu_offload = cpu_offload or CPUOffload()
     state.limit_all_gathers = limit_all_gathers
     state._use_orig_params = use_orig_params

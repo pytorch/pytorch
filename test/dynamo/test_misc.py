@@ -2127,8 +2127,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             f = "linetable_writer"
             return f"Test if {f} generates correct co_linetable: {c}"
 
-        # Dynamo doesn't deal with column locations or end line numbers,
-        # so we only check that start line numbers in the linetables match.
         keys = bytecode_transformation.get_code_keys()
         code_options = {k: getattr(fn.__code__, k) for k in keys}
         result = bytecode_transformation.clean_and_assemble_instructions(
@@ -2139,8 +2137,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
         self.assertEqual(len(l1), len(l2))
         for p1, p2 in zip(l1, l2):
-            # check that start line numbers match
-            self.assertEqual(p1[0], p2[0])
+            self.assertEqual(p1, p2)
         self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
 
     @skipIfNotPy311
@@ -2180,8 +2177,7 @@ def fn():
         l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
         self.assertEqual(len(l1), len(l2))
         for p1, p2 in zip(l1, l2):
-            # check that start line numbers match
-            self.assertEqual(p1[0], p2[0])
+            self.assertEqual(p1, p2)
         self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
 
     @unittest.skipIf(
