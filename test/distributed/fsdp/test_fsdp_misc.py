@@ -274,6 +274,75 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         dist.barrier()
 
     @skip_if_lt_x_gpu(2)
+    def test_fsdp_optim_overlap_ckpt(self):
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(10, 10)
+                self.b = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.b(self.a(x))
+
+        optim_cls = torch.optim.SGD
+        optim_kwargs = {"lr": 0.03}
+        fsdp = FSDP(
+            MyModel().cuda(),
+            auto_wrap_policy=always_wrap_policy,
+            use_orig_params=True,
+        )
+        _apply_optimizer_in_backward(
+            optimizer_class=optim_cls,
+            params=fsdp.parameters(),
+            optimizer_kwargs=optim_kwargs,
+            register_hook=False,
+        )
+        def _get_in_backward_optimizers(model):
+            optims = []
+            for p in model.parameters():
+                optims.extend(getattr(p, '_in_backward_optimizers', []))
+
+            return optims
+
+        inp = torch.randn(10, 10, device="cuda")
+        fsdp(inp).sum().backward()
+        # Checkpoint Optimizers
+        optims = _get_in_backward_optimizers(fsdp)
+        from collections import defaultdict
+        param_fqn_to_optims = defaultdict(list)
+        param_fqn_to_optim_checkpoint = {}
+        for name, param in fsdp.named_parameters(recurse=True):
+            # Find the optims that are optimizing param
+            # TODO: multiple parameter groups unsupported
+            for opt in optims:
+                optim_param_dps = [p.data_ptr() for p in opt.param_groups[0]['params']]
+                if param.data_ptr() in optim_param_dps:
+                    param_fqn_to_optims[name].append(opt)
+
+        # Go through each optim, checkpoint it via FSDP APIs, and remember a set to
+        # not multiple checkpoint the same optim.
+        already_ckpt_optims = set()
+        for param_fqn, optims in param_fqn_to_optims.items():
+            for optim in optims:
+                if optim in already_ckpt_optims:
+                    continue
+
+                already_ckpt_optims.add(optim)
+                ckpt = FSDP.optim_state_dict(fsdp, optim)
+                param_fqn_to_optim_checkpoint[param_fqn] = ckpt
+
+        import io
+        torch.save(param_fqn_to_optim_checkpoint, io.BytesIO())
+
+
+
+
+
+
+
+
+
+    @skip_if_lt_x_gpu(2)
     def test_fsdp_optim_overlap_no_use_orig_params_error(self):
         fsdp_overlap = FSDP(
             MyModel().cuda(),
