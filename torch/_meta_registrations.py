@@ -20,7 +20,6 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
     make_contiguous_strides_for,
-    NumberType,
     TensorLike,
 )
 

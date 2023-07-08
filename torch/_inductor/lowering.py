@@ -1586,7 +1586,7 @@ def _inductor_bucketize(
         indices = ops.bucketize(
             val,
             boundaries.get_name(),
-            ops.index_expr(boundaries_size, index_dtype),
+            boundaries_size,
             index_dtype,
             right,
         )
