@@ -11,22 +11,22 @@ from .debug import printd
 
 # Used to ensure that iterating over a set is deterministic
 def tuple_sorted(x):
-    return sorted(x, key=lambda x: x.name)
+    return sorted(x, key=lambda x: x.get_name())
 
 
-def sink_waits(result: List[fx.Node]) -> List[fx.Node]:
+def sink_waits(result: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
     """
     Greedily moves waits as late as possible (i.e. until we reach an use). Optimal in terms of
     communication overlap.
     """
     new_result = []
     cur_waits = set()
-    for node in result:
-        if isinstance(node.meta["fusion_meta"].snode.node, ir.Wait):
-            cur_waits.add(node)
+    for snode in result:
+        if isinstance(snode.node, ir.Wait):
+            cur_waits.add(snode)
         else:
             for wait in tuple_sorted(cur_waits):
-                if node in wait.users:
+                if snode in wait.node_users:
                     new_result.append(wait)
                     cur_waits.remove(wait)
 
@@ -36,24 +36,24 @@ def sink_waits(result: List[fx.Node]) -> List[fx.Node]:
     return new_result
 
 
-def raise_comms(result: List[fx.Node]) -> List[fx.Node]:
+def raise_comms(result: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
     """
     Greedily moves comms as early as possible (i.e. until we reach an input).
     Optimal in terms of communication overlap.
     """
     new_result = []
     cur_comms = []
-    for node in reversed(result):
-        if isinstance(node.meta["fusion_meta"].snode.node, ir.CollectiveKernel):
-            cur_comms.append(node)
+    for snode in reversed(result):
+        if isinstance(snode.node, ir.CollectiveKernel):
+            cur_comms.append(snode)
         else:
-            while len(cur_comms) > 0 and any([node in comm.args for comm in cur_comms]):
+            while len(cur_comms) > 0 and any([snode in comm.args for comm in cur_comms]):
                 comm = cur_comms.pop(0)
                 new_result.append(comm)
-            new_result.append(node)
+            new_result.append(snode)
     assert len(cur_comms) <= 1
-    for node in tuple_sorted(cur_comms):
-        new_result.append(node)
+    for snode in tuple_sorted(cur_comms):
+        new_result.append(snode)
     result = new_result[::-1]
     return result
 
@@ -64,7 +64,7 @@ def get_ancestors(node):
     while len(cur_nodes) > 0:
         new_nodes = []
         for node in cur_nodes:
-            for inp in node.args:
+            for inp in node.inverse_users:
                 if inp not in ancestors:
                     ancestors.add(inp)
                     new_nodes.append(inp)
@@ -78,7 +78,7 @@ def get_descendants(node):
     while len(cur_nodes) > 0:
         new_nodes = []
         for node in cur_nodes:
-            for inp in node.users:
+            for inp in node.node_users:
                 if inp not in descendants:
                     descendants.add(inp)
                     new_nodes.append(inp)
@@ -113,7 +113,7 @@ def debug_print(s=""):
         printd(s)
 
 
-def smart_reordering(nodes: List[fx.Node]) -> List[fx.Node]:
+def reorder_computation_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
     """
     Decides a global ordering of all nodes. Assumes that we already have a global ordering of communication nodes.
 
@@ -124,31 +124,27 @@ def smart_reordering(nodes: List[fx.Node]) -> List[fx.Node]:
 
     Repeat.
     """
-    nodes = [node for node in nodes if "fusion_meta" in node.meta]
     comm_nodes = []
-    for node in nodes:
-        if isinstance(node.meta["fusion_meta"].snode.node, ir.CollectiveKernel):
-            comm_nodes.append(node)
+    for snode in snodes:
+        if isinstance(snode.node, ir.CollectiveKernel):
+            comm_nodes.append(snode)
 
     if len(comm_nodes) == 0:
-        return nodes
+        return snodes
 
     comm_ancestors = {node: get_ancestors(node) for node in comm_nodes}
     comm_descendants = {node: get_descendants(node) for node in comm_nodes}
 
-    indeg = {k: 0 for k in nodes}
-    buf_uses = defaultdict(set)
-    for node in nodes:
-        snode = node.meta["fusion_meta"].snode
-        for buf in snode.used_buffer_names():
-            buf_uses[buf].add(snode)
-        for user in node.users:
+    indeg = {k: 0 for k in snodes}
+    for snode in snodes:
+        for user in snode.node_users:
             if user in indeg:
                 indeg[user] += 1
-    free_nodes = set([node for node in nodes if indeg[node] == 0])
+    breakpoint()
+    free_nodes = set([node for node in snodes if indeg[node] == 0])
 
     result = []
-    unused_nodes = set([node for node in nodes if "fusion_meta" in node.meta])
+    unused_nodes = set(snodes)
 
     def add_node(node):
         assert node in unused_nodes
@@ -157,28 +153,30 @@ def smart_reordering(nodes: List[fx.Node]) -> List[fx.Node]:
         free_nodes.remove(node)
         unused_nodes.remove(node)
         result.append(node)
-        for user in node.users:
+        for user in node.node_users:
             if user in indeg:
                 indeg[user] -= 1
                 if indeg[user] == 0:
                     free_nodes.add(user)
 
-    def add_all_nodes(nodes):
+    def add_all_nodes(snodes):
         """
-        Schedules all nodes in an arbitrary topologically valid order.
+        Schedules all snodes in an arbitrary topologically valid order.
         """
-        all_nodes = set(nodes)
+        all_nodes = set(snodes)
         assert all([node in unused_nodes for node in all_nodes])
         while len(all_nodes) > 0:
+            progress = False
             for node in tuple_sorted(all_nodes):
                 if node in free_nodes:
                     add_node(node)
                     all_nodes.remove(node)
+                    progress = True
+            if not progress:
+                breakpoint()
+                print()
 
     add_all_nodes(list(comm_ancestors[comm_nodes[0]]) + [comm_nodes[0]])
-
-    def get_runtime_fx(node):
-        return get_runtime_snode(node.meta["fusion_meta"].snode)
 
     rolled_over_compute = 0
     for idx in range(1, len(comm_ancestors)):
@@ -195,9 +193,9 @@ def smart_reordering(nodes: List[fx.Node]) -> List[fx.Node]:
             comm_ancestors[comm_nodes[idx]] - comm_descendants[comm_nodes[idx - 1]]
         )
         total_cost = rolled_over_compute + sum(
-            [get_runtime_fx(node) for node in priority1]
+            [get_runtime_snode(node) for node in priority1]
         )
-        comm_cost = get_runtime_fx(comm_nodes[idx - 1])
+        comm_cost = get_runtime_snode(comm_nodes[idx - 1])
         add_all_nodes(tuple_sorted(priority1))
 
         debug_print("Priority 2")
@@ -220,20 +218,20 @@ def smart_reordering(nodes: List[fx.Node]) -> List[fx.Node]:
                 overlappable_nodes, key=earliest_comm_descendant
             )
 
-            for node in overlappable_nodes:
+            for snode in overlappable_nodes:
                 if total_cost >= comm_cost:
                     break
                 if not isinstance(
-                    node.meta["fusion_meta"].snode.node, ir.CollectiveKernel
+                    snode.node, ir.CollectiveKernel
                 ):
-                    runtime_cost = get_runtime_fx(node)
+                    runtime_cost = get_runtime_snode(snode)
                     # If we're not able to leverage more than half of this
                     # node's compute to overlap, we skip it.
                     # TODO: Smarter heuristics for packing the cost here
                     if (comm_cost - total_cost) <= runtime_cost / 2:
                         continue
-                    add_node(node)
-                    total_cost += get_runtime_fx(node)
+                    add_node(snode)
+                    total_cost += get_runtime_snode(snode)
         rollable_compute = total_cost - group1_cost
         # The idea here is that if there are no compute nodes in priority 3, we
         # can roll over the compute nodes in priority 2 to the next comm, since
