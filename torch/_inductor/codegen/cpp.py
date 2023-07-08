@@ -4,11 +4,9 @@ import functools
 import itertools
 import logging
 import math
-import os
 import re
 import sys
 from copy import copy, deepcopy
-from pathlib import Path
 from typing import Dict, List
 
 import numpy
@@ -20,11 +18,11 @@ from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 from torch.utils._sympy.functions import FloorDiv
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..optimize_indexing import get_expr_range, range_expressable_in_32_bits
+from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import SchedulerNode
 from ..utils import (
     cache_on_self,
@@ -50,24 +48,6 @@ from .common import (
 )
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
-
-DTYPE_TO_COMPUTATION_DTYPE = {
-    torch.bfloat16: torch.float,
-    torch.float16: torch.float,
-    **{
-        dtype: dtype
-        for dtype in [
-            torch.bool,
-            torch.float32,
-            torch.float64,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.uint8,
-        ]
-    },
-}
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -104,7 +84,6 @@ DEVICE_TO_ATEN = {
 
 INDEX_TYPE = "long"
 
-NATIVE_OMP_RTYPES = {"+", "*", "^", "||", "min", "max"}
 RTYPE_TO_CPP = {
     "sum": "+",
     "prod": "*",
@@ -114,15 +93,6 @@ RTYPE_TO_CPP = {
     "argmin": "argmin",
     "argmax": "argmax",
     "any": "||",
-    "var_unnormalized": "welford",
-}
-VECTORIZABLE_RTYPES = {
-    "max",
-    "min",
-    "sum",
-    "prod",
-    "xor_sum",
-    "var_unnormalized",
 }
 
 PYTHON_TO_CPP = {
@@ -159,39 +129,7 @@ def reduction_init(reduction_type, dtype):
             if is_float_dtype(dtype)
             else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
         )
-    if reduction_type == "var_unnormalized":
-        return f"Welford<{DTYPE_TO_CPP[dtype]}>()"
     raise AssertionError(reduction_type)
-
-
-def reduction_init_vec(reduction_type, dtype):
-    scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
-    vec_type = f"at::vec::Vectorized<{scalar_type}>"
-
-    if reduction_type == "var_unnormalized":
-        return f"Welford<{vec_type}>()"
-
-    scalar_init = reduction_init(reduction_type, dtype)
-    return f"{vec_type}({scalar_init})"
-
-
-def reduction_acc_type(reduction_type, dtype):
-    assert reduction_type not in {"argmin", "argmax"}
-    scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
-    if reduction_type == "var_unnormalized":
-        return f"Welford<{scalar_type}>"
-
-    return scalar_type
-
-
-def reduction_acc_type_vec(reduction_type, dtype):
-    assert reduction_type not in {"argmin", "argmax"}
-    scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
-    vec_type = f"at::vec::Vectorized<{scalar_type}>"
-    if reduction_type == "var_unnormalized":
-        return f"Welford<{vec_type}>"
-
-    return vec_type
 
 
 def reduction_combine(reduction_type, var, next_value):
@@ -205,8 +143,6 @@ def reduction_combine(reduction_type, var, next_value):
         return f"{var} || {next_value}"
     if reduction_type in ("min", "max"):
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
-    if reduction_type == "var_unnormalized":
-        return f"welford_combine({var}, {next_value})"
     raise AssertionError(reduction_type)
 
 
@@ -221,18 +157,8 @@ def reduction_combine_vec(reduction_type, var, next_value):
         return f"{var} * {next_value}"
     elif reduction_type == "xor_sum":
         return f"{var} ^ {next_value}"
-    elif reduction_type == "var_unnormalized":
-        return f"welford_combine({var}, {next_value})"
     else:
         raise NotImplementedError()
-
-
-def reduction_project(reduction_type, acc):
-    if reduction_type == "var_unnormalized":
-        return f"{acc}.m2"
-    elif reduction_type in {"argmin", "argmax"}:
-        return f"{acc}.index"
-    return acc
 
 
 index_value_name_counter = 1
@@ -285,28 +211,6 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)
     return sympy.simplify(new_index - index)
-
-
-@functools.lru_cache()
-def cpp_prefix_path():
-    path = Path(__file__).parent / "cpp_prefix.h"
-    with path.open() as f:
-        content = f.read()
-        _, filename = codecache.write(
-            content,
-            "h",
-        )
-    return filename
-
-
-def cpp_prefix():
-    filename = cpp_prefix_path()
-    if config.is_fbcode():
-        # We need relative paths, since we bundle up
-        # everything that we compile into a folder for remote compilation.
-        return f'#include "{os.path.basename(filename)}"'
-    else:
-        return f'#include "{filename}"'
 
 
 class CppPrinter(ExprPrinter):
@@ -1212,50 +1116,47 @@ class CppKernel(Kernel):
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
 
-    def reduction(self, dtype, src_dtype, reduction_type, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
-
-        reduction_key = src_dtype, reduction_type, value
-        if reduction_key in self.reduction_cse.reduction_cache:
-            return self.reduction_cse.reduction_cache[reduction_key]
-
-        acc = self.reduction_cse.generate(
-            self.loads, f"reduction {reduction_key}", write=False
+        tmpvar = self.reduction_cse.generate(
+            self.loads, f"reduction {name} {cexpr_index(index)}", write=False
         )
-        self.reduction_var_map[acc] = reduction_type
+        index = self.rename_indexing(index)
+        self.reduction_var_map[tmpvar] = reduction_type
         if argmax_or_argmin:
             self.reduction_prefix.writelines(
-                argmax_argmin_prefix(reduction_type, src_dtype, acc)
+                argmax_argmin_prefix(reduction_type, src_dtype, tmpvar)
             )
             compare_op = "<" if reduction_type == "argmax" else ">"
             self.stores.writelines(
                 [
-                    f"if ({acc}.value {compare_op} {value}) {{",
-                    f"    {acc}.index = {self.itervars[-1]}; {acc}.value = {value};",
+                    f"if ({tmpvar}.value {compare_op} {value}) {{",
+                    f"    {tmpvar}.index = {self.itervars[-1]}; {tmpvar}.value = {value};",
                     "}",
                 ],
             )
         else:
-            acc_type = reduction_acc_type(reduction_type, dtype)
-            self.reduction_prefix.writeline(
-                f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
-            )
+            if dtype in (torch.float16, torch.bfloat16):
+                self.reduction_prefix.writeline(
+                    f"float {tmpvar} = {reduction_init(reduction_type, dtype)};"
+                )
+            else:
+                self.reduction_prefix.writeline(
+                    f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+                )
             self.stores.writeline(
-                f"{acc} = {reduction_combine(reduction_type, acc, value)};"
+                f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, value)};"
             )
 
-        result = self.cse.generate(
-            self.reduction_suffix, f"{reduction_project(reduction_type, acc)}"
-        )
-        self.reduction_cse.reduction_cache[reduction_key] = result
-        return result
-
-    def store_reduction(self, name, index, value):
-        index = self.rename_indexing(index)
-        var = self.args.output(name)
-        self.reduction_suffix.writeline(
-            DeferredLine(name, f"{var}[{cexpr_index(index)}] = {value};")
-        )
+        if name not in V.graph.removed_buffers:
+            var = self.args.output(name)
+            member_name = ".index" if argmax_or_argmin else ""
+            self.reduction_suffix.writeline(
+                DeferredLine(
+                    name, f"{var}[{cexpr_index(index)}] = {tmpvar}{member_name};"
+                )
+            )
+        self.cse.store_cache[name] = tmpvar
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
@@ -1512,127 +1413,98 @@ class CppVecKernel(CppKernel):
             )
         self.stores.writeline(DeferredLine(name, line))
 
-    def reduction(self, dtype, src_dtype, reduction_type, value):
-        assert reduction_type in {
-            "max",
-            "min",
-            "sum",
-            "prod",
-            "xor_sum",
-            "var_unnormalized",
-        }
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+        assert reduction_type in {"max", "min", "sum", "prod", "xor_sum"}
         assert dtype == torch.float
         assert src_dtype == torch.float
 
         vec_ns = "at::vec"
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
-        acc_type = reduction_acc_type(reduction_type, dtype)
-        acc_type_vec = reduction_acc_type_vec(reduction_type, dtype)
 
         if reduction_type not in self.reduction_omp_dec:
-            if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
-                # Scalar reduction for other reductions are declared by default
-                self.reduction_prefix.splice(
-                    f"""\
-#pragma omp declare reduction(\
-{RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
-omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
-initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
-            """
-                )
-            self.reduction_prefix.splice(
-                f"""\
-#pragma omp declare reduction(\
-{RTYPE_TO_CPP[reduction_type]}:{acc_type_vec}:\
-omp_out = {reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
-initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
-            """
+            vec_reduc_prefix = "#pragma omp declare reduction("
+            vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
+            vec_reduc_prefix += "omp_out = "
+            vec_reduc_prefix += reduction_combine_vec(
+                reduction_type, "omp_out", "omp_in"
             )
+            vec_reduc_prefix += ")"
+            vec_reduc_prefix += " initializer("
+            vec_reduc_prefix += "omp_priv={{"
+            vec_reduc_prefix += f"{reduction_init(reduction_type, dtype)}"
+            vec_reduc_prefix += "}})"
             self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
+            self.reduction_prefix.writeline(vec_reduc_prefix)
 
-        reduction_key = src_dtype, reduction_type, value
-        if reduction_key in self.reduction_cse.reduction_cache:
-            return self.reduction_cse.reduction_cache[reduction_key]
-
-        acc = self.reduction_cse.generate(
-            self.loads, f"reduction {reduction_key}", write=False
+        tmpvar = self.reduction_cse.generate(
+            self.loads, f"reduction {name} {cexpr_index(index)}", write=False
         )
-        acc_vec = f"{acc}_vec"
+        tmpvar_vec = f"{tmpvar}_vec"
 
-        self.reduction_var_map[acc_vec] = reduction_type
+        index = self.rename_indexing(index)
+        self.reduction_var_map[tmpvar_vec] = reduction_type
         self.reduction_prefix.writeline(
-            f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
+            f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
         )
         self.reduction_prefix.writeline(
-            f"{acc_type_vec} {acc_vec} = {reduction_init_vec(reduction_type, dtype)};"
+            f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
         )
         self.stores.writeline(
-            f"{acc_vec} = {reduction_combine_vec(reduction_type, acc_vec, value)};"
+            f"{tmpvar_vec} = {reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
         )
 
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
-            if reduction_type == "var_unnormalized":
-                next_value = f"welford_vec_reduce_all({acc_vec})"
-            else:
-                reduce_all_body = (
-                    "{ return "
-                    + reduction_combine_vec(reduction_type, "x", "y")
-                    + "; }"
-                )
-                vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
-                next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
-
-            self.reduction_suffix.writeline(
-                f"{acc} = {reduction_combine(reduction_type, acc, next_value)};"
+            reduce_all_body = (
+                "{ return " + reduction_combine_vec(reduction_type, "x", "y") + "; }"
             )
-            tmpvar = acc
-        else:
-            tmpvar = acc_vec
-
-        result = self.cse.generate(
-            self.reduction_suffix, reduction_project(reduction_type, tmpvar)
-        )
-        self.reduction_cse.reduction_cache[reduction_key] = result
-        return result
-
-    def store_reduction(self, name, index, value):
-        index = self.rename_indexing(index)
-        var = self.args.output(name)
-        out_dtype = V.graph.get_dtype(name)
-        # Only float reductions are vectorized currently
-        dtype = torch.float
-        if self.tiling_idx >= self.reduction_depth:
-            # Horizontal reduction
+            vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+            next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {tmpvar_vec})"
             self.reduction_suffix.writeline(
                 DeferredLine(
                     name,
-                    f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});",
+                    f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, next_value)};",
                 )
             )
-        else:
-            # Vertical reduction
-            store_lines = [
-                DeferredLine(name, f"{value}.store({var} + {cexpr_index(index)});")
-            ]
-            if out_dtype != dtype:
-                if out_dtype == torch.bfloat16 and dtype == torch.float:
-                    bf16_tmpvar = f"bf16_{value}"
-                    store_lines = [
-                        DeferredLine(
-                            name,
-                            f"auto {bf16_tmpvar} = cvt_fp32_to_bf16({value});",
-                        ),
-                        DeferredLine(
-                            name,
-                            f"{bf16_tmpvar}.store({var} + {cexpr_index(index)}, {self.tiling_factor});",
-                        ),
-                    ]
-                else:
-                    raise AssertionError(
-                        f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
+
+        if name not in V.graph.removed_buffers:
+            var = self.args.output(name)
+            out_dtype = V.graph.get_dtype(name)
+            if self.tiling_idx >= self.reduction_depth:
+                # Horizontal reduction
+                self.reduction_suffix.writeline(
+                    DeferredLine(
+                        name,
+                        f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({tmpvar});",
                     )
-            self.reduction_suffix.writelines(store_lines)
+                )
+            else:
+                # Vertical reduction
+                store_lines = [
+                    DeferredLine(
+                        name, f"{tmpvar_vec}.store({var} + {cexpr_index(index)});"
+                    )
+                ]
+                if out_dtype != dtype:
+                    if out_dtype == torch.bfloat16 and dtype == torch.float:
+                        bf16_tmpvar_vec = f"bf16_{tmpvar_vec}"
+                        store_lines = [
+                            DeferredLine(
+                                name,
+                                f"auto {bf16_tmpvar_vec} = cvt_fp32_to_bf16({tmpvar_vec});",
+                            ),
+                            DeferredLine(
+                                name,
+                                f"{bf16_tmpvar_vec}.store({var} + {cexpr_index(index)}, {self.tiling_factor});",
+                            ),
+                        ]
+                    else:
+                        raise AssertionError(
+                            f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
+                        )
+                self.reduction_suffix.writelines(store_lines)
+
+        self.cse.store_cache[name] = tmpvar
 
 
 class CppTile2DKernel(CppVecKernel):
@@ -1977,20 +1849,17 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"not a loop: {index}")
             return self.simd_vec
 
-    def reduction(self, dtype, src_dtype, reduction_type, value):
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         if (
             dtype == torch.float
             and src_dtype == torch.float
-            and reduction_type in VECTORIZABLE_RTYPES
+            and reduction_type in ["max", "min", "sum", "prod", "xor_sum"]
         ):
             pass
         else:
             self.disable_vec(
                 f"reduction: dtype {dtype}, src_dtype {src_dtype}, reduction_type {reduction_type}"
             )
-        return self.simd_vec
-
-    def store_reduction(self, name, index, value):
         return self.simd_vec
 
     def is_supported_cmp(self, node: torch.fx.Node):
@@ -2066,12 +1935,10 @@ class CppVecKernelChecker(CppVecKernel):
                 return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(dtype, src_dtype, reduction_type, value):
-                return self.reduction(dtype, src_dtype, reduction_type, value)
-
-            @staticmethod
-            def store_reduction(name, index, value):
-                return self.store_reduction(name, index, value)
+            def reduction(name, dtype, src_dtype, reduction_type, index, value):
+                return self.reduction(
+                    name, dtype, src_dtype, reduction_type, index, value
+                )
 
             @staticmethod
             def constant(val, dtype):
@@ -2133,7 +2000,7 @@ class CppVecKernelChecker(CppVecKernel):
                             and expr <= i32_iinfo.max
                             and expr >= i32_iinfo.min
                         )
-                    expr_ranges = get_expr_range(expr, vars_ranges)
+                    expr_ranges = bound_sympy(expr, vars_ranges)
                     if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):
                         return False
                     return range_expressable_in_32_bits(
@@ -2359,9 +2226,11 @@ class CppKernelProxy(CppKernel):
                 elif _node.target == "reduction":
                     (
                         ops,
+                        name,
                         dtype,
                         src_dtype,
                         reduction_type,
+                        index,
                         value,
                     ) = _node.args
                     if src_dtype == torch.bfloat16:
@@ -2373,9 +2242,11 @@ class CppKernelProxy(CppKernel):
                         assert dtype in [torch.float, torch.bfloat16, torch.int64]
                         _node.args = (
                             ops,
+                            name,
                             torch.float if dtype == torch.bfloat16 else dtype,
                             torch.float,
                             reduction_type,
+                            index,
                             value,
                         )
                 elif _node.target == "to_dtype" and _node.args[-1] in [torch.bfloat16]:
@@ -2750,7 +2621,7 @@ class KernelGroup:
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
-        code.writeline(cpp_prefix())
+        code.writeline(codecache.cpp_prefix())
 
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():
