@@ -159,9 +159,8 @@ class ResolvedExportOptions(ExportOptions):
                 "torch.onnx.dynamo_export", torch.__version__, logger=self.logger
             )
 
-            # TODO(titaiwang): opset version for registry should be provided from torchlib (source)
-            # However, torchlib doesn't have opset version in anywhere yet. We need to revisit this
-            # once torchlib has multiple opset version.
+            # TODO(titaiwang): When OnnxRegistry is exposed, users should only control
+            # the opset_version with registry, instead of ExportOptions.
             self.onnx_registry = registration.OnnxRegistry(self.opset_version)
             self.decomposition_table = (
                 decomposition_table.create_onnx_friendly_decomposition_table(
@@ -177,7 +176,6 @@ class ResolvedExportOptions(ExportOptions):
                 onnxfunction_dispatcher.OnnxFunctionDispatcher(
                     self.onnx_registry,
                     self.diagnostic_context,
-                    self.opset_version,
                 )
             )
 
