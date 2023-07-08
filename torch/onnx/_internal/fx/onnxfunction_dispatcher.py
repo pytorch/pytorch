@@ -46,9 +46,7 @@ def _find_opschema_matched_symbolic_function_disagnostic_message_formatter(
     all_function_overload_names = ""
     for symbolic_func in default_and_custom_functions:
         overload_func = symbolic_func.onnx_function
-        all_function_overload_names += (
-            f"ONNX Node: {overload_func.name}[opset={overload_func.opset}]. \n"
-        )
+        all_function_overload_names += f"ONNX Node: {overload_func.name}[opset={overload_func.opset};is_custom={symbolic_func.is_custom}]. \n"  # noqa: B950
     return f"FX Node: {node.target}. \n" f"{all_function_overload_names}"
 
 
@@ -243,7 +241,9 @@ class OnnxFunctionDispatcher:
             aten_op_default = node.target.default
             return registration.OpName.from_op_overload(op_overload=aten_op_default)  # type: ignore[no-any-return]
 
-        if _symint_symfloat_builtin_to_exporter_key_table(node.target) is not None:
+        if (
+            aten_op := _symint_symfloat_builtin_to_exporter_key_table(node.target)
+        ) is not None:
             # Make sure it's symint/symfloat consuming builtin ops.
             for node_arg in node.args:
                 if (not isinstance(node_arg, (torch.fx.Node, int, float))) or (
@@ -263,9 +263,7 @@ class OnnxFunctionDispatcher:
                     )
                     diagnostic_context.log(diagnostic)
                     raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
-            aten_op = _symint_symfloat_builtin_to_exporter_key_table(node.target)
-            if aten_op is not None:
-                return registration.OpName.from_op_overload(op_overload=aten_op)
+            return registration.OpName.from_op_overload(op_overload=aten_op)
 
         if isinstance(node.target, torch._ops.OpOverload):
             return registration.OpName.from_op_overload(op_overload=node.target)
@@ -309,23 +307,14 @@ class OnnxFunctionDispatcher:
         # And non-registerd ATen/Custom operators will trigger error in the next step.
         function_group: Optional[List[registration.SymbolicFunction]] = None
 
-        if self.onnx_registry.is_registered_op(
+        function_group = self.onnx_registry.get_functions(
             namespace=internal_opname.namespace,
             op_name=internal_opname.op_name,
             overload=internal_opname.overload,
-        ):
-            function_group = self.onnx_registry.get_functions(
-                namespace=internal_opname.namespace,
-                op_name=internal_opname.op_name,
-                overload=internal_opname.overload,
-            )
+        )
 
         # NOTE: Fall back to default overload if the ONNX registry doesn't have the overload.
-        elif self.onnx_registry.is_registered_op(
-            namespace=internal_opname.namespace,
-            op_name=internal_opname.op_name,
-            overload=None,
-        ):
+        if function_group is None:
             function_group = self.onnx_registry.get_functions(
                 namespace=internal_opname.namespace,
                 op_name=internal_opname.op_name,
@@ -345,6 +334,7 @@ class OnnxFunctionDispatcher:
             )
             diagnostic.level = diagnostics.levels.WARNING
 
+        # NOTE: If the ATen/Custom operators are not registered, the group will be None.
         if function_group is not None:
             return function_group
 
