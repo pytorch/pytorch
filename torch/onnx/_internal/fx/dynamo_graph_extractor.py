@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import copy
 import functools
 import inspect
 from typing import (
@@ -176,10 +175,6 @@ class DynamoExport(exporter.FXGraphExtractor):
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:
-        # args will be converted to symbolic tensor. Let's copy to avoid side effects.
-        args = copy.deepcopy(model_args)
-        kwargs = copy.deepcopy(model_kwargs)
-
         # `dynamo.export` does not recognize custom user defined classes as output type.
         # Apply wrapper to adapt the outputs back to `dynamo.export` compatible types,
         # i.e. :class:`torch.Tensor`.
@@ -194,7 +189,7 @@ class DynamoExport(exporter.FXGraphExtractor):
         #
         fx_mode = "symbolic" if options.dynamic_shapes else "fake"
         graph_module, graph_guard = torch._dynamo.export(
-            wrapped_model, *args, tracing_mode=fx_mode, **kwargs
+            wrapped_model, *model_args, tracing_mode=fx_mode, **model_kwargs
         )
         del graph_guard  # Unused
         torch._dynamo.reset()

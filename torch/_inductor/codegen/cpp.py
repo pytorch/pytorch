@@ -18,11 +18,11 @@ from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 from torch.utils._sympy.functions import FloorDiv
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..optimize_indexing import get_expr_range, range_expressable_in_32_bits
+from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import SchedulerNode
 from ..utils import (
     cache_on_self,
@@ -2000,7 +2000,7 @@ class CppVecKernelChecker(CppVecKernel):
                             and expr <= i32_iinfo.max
                             and expr >= i32_iinfo.min
                         )
-                    expr_ranges = get_expr_range(expr, vars_ranges)
+                    expr_ranges = bound_sympy(expr, vars_ranges)
                     if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):
                         return False
                     return range_expressable_in_32_bits(
