@@ -78,6 +78,17 @@ inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
     return false;
   }
 }
+
+static std::atomic<int32_t> num_threads_in_backwards;
+struct CompiledAutogradThreadingDebugCheck {
+  CompiledAutogradThreadingDebugCheck() {
+    num_threads_in_backwards++;
+  }
+  ~CompiledAutogradThreadingDebugCheck() {
+    num_threads_in_backwards--;
+  }
+};
+
 } // namespace
 
 // Threads spawned by the engine are assigned a 'worker_device' specifying
@@ -1201,6 +1212,7 @@ auto Engine::execute(
     return (*the_compiled_autograd)(
         graph_root, *graph_task, accumulate_grad, outputs);
   }
+  CompiledAutogradThreadingDebugCheck _thread_count;
 
   if (!outputs.empty()) {
     graph_task->init_to_execute(
@@ -1341,6 +1353,9 @@ Engine& Engine::get_default_engine() {
 
 void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
   the_compiled_autograd = fn;
+  TORCH_CHECK(
+      num_threads_in_backwards.load() == 0,
+      "compiled_autograd.enable() requires no threads in backwards()")
 }
 
 void Engine::queue_callback(std::function<void()> callback) {
