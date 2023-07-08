@@ -205,7 +205,7 @@ class _BufferMeta(torch._C._TensorMeta):
 
 
 class Buffer(torch.Tensor, metaclass=_BufferMeta):
-    r"""A kind of Tensor that is to be considered a module parameter but not a model
+    r"""A kind of Tensor that should not be considered a model
     parameter. For example, BatchNorm's ``running_mean`` is not a parameter, but is part of the module's state.
 
     Buffers are :class:`~torch.Tensor` subclasses, that have a
@@ -216,17 +216,15 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
     a the modules `~register_buffer` function.
 
     Args:
-        data (Tensor): parameter tensor.
+        data (Tensor): buffer tensor.
+        requires_grad (bool, optional): if the buffer requires gradient.
+            Default: `False`
+        persistent (bool, optional): whether the buffer is part of the module's
+            :attr:`state_dict`. Default: `True`
     """
     def __new__(cls, data=None, requires_grad=False, persistent=True):
         if data is None:
             data = torch.empty(0)
-        if type(data) is torch.Tensor or type(data) is Buffer:
-            # For ease of BC maintenance, keep this path for standard Tensor.
-            # Eventually (tm), we should change the behavior for standard Tensor to match.
-            ret = torch.Tensor._make_subclass(cls, data, require_grad=requires_grad)
-            ret.persistent = persistent
-            return ret
 
         # Path for custom tensors: set a flag on the instance to indicate buffer-ness.
         t = data.detach().requires_grad_(requires_grad)
