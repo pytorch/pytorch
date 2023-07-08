@@ -100,7 +100,7 @@ try:
         # Python semantics for 'Mod' is defined as: p % q = p - floordiv(p, q) * q
         # It should work with both integer and reals.
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
-            return p - self.floordiv(p, q) * p
+            return p - self.floordiv(p, q) * q
 
         def pow(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
             # Z3 can't handle complex numbers very well.
