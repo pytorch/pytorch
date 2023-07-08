@@ -52,7 +52,7 @@ split_cat_fx_passes = True
 reordering = True
 
 # Reorders computation to maximize overlap between compute and communication
-comm_reordering = False
+reordering_for_comms = False
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"

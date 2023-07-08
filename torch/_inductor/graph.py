@@ -642,17 +642,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler = Scheduler(self.buffers)
         assert self.scheduler is not None  # mypy can't figure this out
 
-        from .analysis import create_fx_from_snodes
-
-        def reorder_nodes(nodes, ordering_pass):
-            fx_graph = create_fx_from_snodes(nodes)
-            new_nodes = ordering_pass(fx_graph.nodes)
-            return [node.meta["fusion_meta"].snode for node in new_nodes]
-
-        if config.comm_reordering:
-            self.scheduler.nodes = reorder_nodes(
-                self.scheduler.nodes, comms.smart_reordering
-            )
+        if config.reordering_for_comms:
+            from .debug import breakpointd
+            self.scheduler.nodes = comms.reorder_computation_for_overlap(self.scheduler.nodes)
 
         self.scheduler.compute_last_usage()
         self.scheduler.codegen()
