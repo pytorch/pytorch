@@ -1,6 +1,13 @@
 ![PyTorch Logo](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/pytorch-logo-dark.png)
 
---------------------------------------------------------------------------------
+--------------------------------------------------------------------------
+ PyTorch is its dynamic computation graph. Unlike some other deep learning frameworks that use static computation graphs, PyTorch allows for dynamic graph construction during runtime.
+
+
+
+
+
+
 
 PyTorch is a Python package that provides two high-level features:
 - Tensor computation (like NumPy) with strong GPU acceleration
