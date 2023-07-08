@@ -169,7 +169,6 @@ class IndexPropagation:
             return tuple(self.wrap(v) for v in a)
         return IndexPropVar(a)
 
-
     def fallback(self, name, args, kwargs):
         # Fallback to the wrapped handler
         new_args = [self.unwrap(a) for a in args]

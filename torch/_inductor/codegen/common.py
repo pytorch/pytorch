@@ -138,7 +138,7 @@ class DataTypePropagation:
         if node.target == "reduction":
             return node.args[1]
 
-        if node.target.startswith("masked_subblock"):
+        if isinstance(node.target, str) and node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
 
         return self.deduce_node_dtype_by_inputs(node)
@@ -793,7 +793,7 @@ class Kernel(CodeGen):
         self,
         values,
         offsets_name: str,
-        offsets_size,
+        offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
     ):
@@ -865,7 +865,7 @@ class Kernel(CodeGen):
             def bucketize(
                 values,
                 offsets_name: str,
-                offsets_size,
+                offsets_size: sympy.Expr,
                 indexing_dtype: torch.dtype,
                 right: bool,
             ):

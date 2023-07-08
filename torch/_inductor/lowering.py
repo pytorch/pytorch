@@ -1586,7 +1586,7 @@ def _inductor_bucketize(
         indices = ops.bucketize(
             val,
             boundaries.get_name(),
-            ops.index_expr(boundaries_size, index_dtype),
+            boundaries_size,
             index_dtype,
             right,
         )
@@ -3949,7 +3949,9 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     m2_init = zeros_like(x)
     weight_init = ones_like(x)
 
-    reduction_kwargs = dict(axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None)
+    reduction_kwargs = dict(
+        axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
+    )
     mean_kwargs = _make_reduction_inner(x, **reduction_kwargs)
     m2_kwargs = _make_reduction_inner(m2_init, **reduction_kwargs)
     weight_kwargs = _make_reduction_inner(weight_init, **reduction_kwargs)
@@ -3957,9 +3959,9 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
     mean, m2, _ = ir.WelfordReduction.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
-        mean_fn = mean_kwargs["inner_fn"],
-        m2_fn = m2_kwargs["inner_fn"],
-        weight_fn = weight_kwargs["inner_fn"],
+        mean_fn=mean_kwargs["inner_fn"],
+        m2_fn=m2_kwargs["inner_fn"],
+        weight_fn=weight_kwargs["inner_fn"],
         ranges=mean_kwargs["ranges"],
         reduction_ranges=mean_kwargs["reduction_ranges"],
         reduction_type="welford",

@@ -146,7 +146,6 @@ class KernelFormatterHandler:
         self.output.writeline(f"{','.join(varnames)} = {line}")
         return tuple(varnames)
 
-
     def getvalue(self, result):
         self.output.writeline(f"return {result}")
         return self.output.getvalue()
@@ -253,7 +252,6 @@ class OpsWrapper:
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)
         return _ops.indirect_indexing(index, size, check)
-
 
 
 ops = OpsWrapper()
