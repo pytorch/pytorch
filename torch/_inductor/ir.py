@@ -3428,6 +3428,8 @@ def _prepare_convolution_fusion_create(
 
     x.realize()
     weight.realize()
+    if bias is not None:
+        bias.realize()
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
@@ -4479,6 +4481,19 @@ class LoopBodyBlock:
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
+            def bucketize(
+                self,
+                values,
+                offsets_name: str,
+                offsets_size: sympy.Expr,
+                indexing_dtype: torch.dtype,
+                right: bool,
+            ):
+                offsets_size = add_index(offsets_size, "other")
+                return self._inner.bucketize(
+                    values, offsets_name, offsets_size, indexing_dtype, right
+                )
+
             @staticmethod
             def masked(mask_proxy, masked_body: Callable[..., Any], other_proxy):
                 """
@@ -4572,7 +4587,7 @@ class Wait(ExternKernelAlloc):
 
     def codegen(self, wrapper):
         wrapper.add_import_once(
-            "from torch.distributed._functional_collectives import _wait_tensor"
+            "from torch.distributed._functional_collectives_impl import _wait_tensor"
         )
         (input_collective,) = [t.codegen_reference() for t in self.inputs]
         wrapper.writeline(f"{input_collective} = _wait_tensor({input_collective})")
@@ -4631,7 +4646,7 @@ class CollectiveKernel(ExternKernel):
         wrapper.add_import_once("import torch.distributed as dist")
         wrapper.add_import_once("import torch.distributed.distributed_c10d as c10d")
         wrapper.add_import_once(
-            "import torch.distributed._functional_collectives as fun_col"
+            "import torch.distributed._functional_collectives_impl as fun_col_impl"
         )
         # extract references to our args in string form for codegen output
         input_names = [t.codegen_reference() for t in self.inputs]
@@ -4646,7 +4661,7 @@ class CollectiveKernel(ExternKernel):
         self.codegen_output(wrapper, output_name, input_names)
         self.codegen_collective(wrapper, output_name, input_names)
         wrapper.writeline(
-            f"fun_col._register_tensor_work({output_name}, {output_name}_work)"
+            f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
         )
 
 
@@ -4816,7 +4831,7 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
         wrapper.writeline(
             f"{output_name}_work = dist.all_reduce_coalesced("
             f"{output_name}, "
-            f"op=fun_col._str_to_reduce_op('{str(self.reduce_op)}'), "
+            f"op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'), "
             f"group={output_name}_pg, "
             "async_op=True)"
         )
@@ -4845,7 +4860,7 @@ class AllReduce(InPlaceCollectiveKernel):
     def codegen_collective(self, wrapper, output_name, input_names):
         wrapper.writeline(
             f"{output_name}_work = dist.all_reduce("
-            f"{output_name}, async_op=True, group={output_name}_pg, op=fun_col._str_to_reduce_op('{str(self.reduce_op)}'))"
+            f"{output_name}, async_op=True, group={output_name}_pg, op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'))"
         )
 
 
@@ -4915,7 +4930,7 @@ class ReduceScatterTensor(OutOfPlaceCollectiveKernel):
         wrapper.writeline(
             f"{output_name}_work = dist.reduce_scatter_tensor("
             f"{output_name}[0], {output_name}_inputs[0], "
-            f"async_op=True, group={output_name}_pg, op=fun_col._str_to_reduce_op('{str(self.reduce_op)}'))"
+            f"async_op=True, group={output_name}_pg, op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'))"
         )
 
 
@@ -4952,7 +4967,7 @@ class AllGatherIntoTensorCoalesced(OutOfPlaceCollectiveKernel):
 
     def codegen_collective(self, wrapper, output_name, input_names):
         wrapper.writeline(
-            f"{output_name}_work = fun_col._all_gather_into_tensor_coalesced_fallback("
+            f"{output_name}_work = fun_col_impl._all_gather_into_tensor_coalesced_fallback("
             f"output_tensors={output_name}, "
             f"input_tensors={output_name}_inputs, "
             f"group={output_name}_pg, "
@@ -4995,10 +5010,10 @@ class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
 
     def codegen_collective(self, wrapper, output_name, input_names):
         wrapper.writeline(
-            f"{output_name}_work = fun_col._reduce_scatter_tensor_coalesced_fallback("
+            f"{output_name}_work = fun_col_impl._reduce_scatter_tensor_coalesced_fallback("
             f"output_tensors={output_name}, "
             f"input_tensors={output_name}_inputs, "
-            f"op=fun_col._str_to_reduce_op('{str(self.reduce_op)}'), "
+            f"op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'), "
             f"group={output_name}_pg, "
             "async_op=True)"
         )

@@ -279,7 +279,9 @@ def adam(params: List[Tensor],
     if foreach is None:
         foreach = False
 
-    if not all(isinstance(t, torch.Tensor) for t in state_steps):
+    # this check is slow during compilation, so we skip it
+    # if it's strictly needed we can add this check back in dynamo
+    if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     if foreach and torch.jit.is_scripting():
@@ -339,7 +341,8 @@ def _single_tensor_adam(params: List[Tensor],
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
-        if capturable:
+        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+        if not torch._utils.is_compiling() and capturable:
             assert param.is_cuda and step_t.is_cuda, "If capturable=True, params and state_steps must be CUDA tensors."
 
         # update step
@@ -355,7 +358,7 @@ def _single_tensor_adam(params: List[Tensor],
             param = torch.view_as_real(param)
 
         # Decay the first and second moment running average coefficient
-        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+        exp_avg.lerp_(grad, 1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
 
         if capturable or differentiable:
@@ -428,7 +431,8 @@ def _multi_tensor_adam(params: List[Tensor],
     if len(params) == 0:
         return
 
-    if capturable:
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
         assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
             "If capturable=True, params and state_steps must be CUDA tensors."
 
@@ -463,8 +467,7 @@ def _multi_tensor_adam(params: List[Tensor],
             device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
-        torch._foreach_mul_(device_exp_avgs, beta1)
-        torch._foreach_add_(device_exp_avgs, device_grads, alpha=1 - beta1)
+        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - beta1)
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
         torch._foreach_addcmul_(device_exp_avg_sqs, device_grads, device_grads, 1 - beta2)
