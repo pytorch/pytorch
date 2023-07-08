@@ -394,6 +394,7 @@ def min_cut_rematerialization_partition(
 
     joint_module.graph.eliminate_dead_code()
     joint_module.recompile()
+    draw_graph(joint_module, 'joint.svg')
 
     fx_g = joint_module.graph
 
