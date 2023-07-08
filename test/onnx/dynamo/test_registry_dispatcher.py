@@ -27,10 +27,10 @@ class TestRegistration(common_utils.TestCase):
         self.custom_domain = onnxscript.values.Opset(domain="custom", version=1)
 
     def tearDown(self) -> None:
-        internal_name_class = registration.OpName.from_name_parts(
+        internal_name_instance = registration.OpName.from_name_parts(
             namespace="test", op_name="test_op"
         )
-        self.registry._registry.pop(internal_name_class, None)
+        self.registry._registry.pop(internal_name_instance, None)
 
     def test_register_custom_op_registers_custom_function(self):
         self.assertFalse(self.registry.is_registered_op("test", "test_op", "default"))
@@ -55,13 +55,13 @@ class TestRegistration(common_utils.TestCase):
             return op.Add(x, y)
 
         # default has to be specified, as we are not using the registration.OpName
-        internal_name_class = registration.OpName.from_name_parts(
+        internal_name_instance = registration.OpName.from_name_parts(
             namespace="test", op_name="test_op", overload="default"
         )
         symbolic_fn = registration.SymbolicFunction(
-            test_original, op_full_name=internal_name_class.qualified_name()
+            test_original, op_full_name=internal_name_instance.qualified_name()
         )
-        self.registry._register(internal_name_class, symbolic_fn)
+        self.registry._register(internal_name_instance, symbolic_fn)
         self.assertTrue(self.registry.is_registered_op("test", "test_op"))
 
         @onnxscript.script(self.custom_domain)
