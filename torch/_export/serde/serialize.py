@@ -34,6 +34,7 @@ from .schema import (  # type: ignore[attr-defined]
     MemoryFormat,
     NamedArgument,
     Node,
+    OptionalTensorArgument,
     RangeConstraint,
     ScalarType,
     SymBool,
@@ -235,10 +236,21 @@ def deserialize_metadata(metadata) -> Dict[str, str]:
             key = kv[:key_idx]
             assert kv[key_idx + 1] == "("
             assert kv[-1] == ")"
-            values = kv[key_idx + 2: -1].split(",")
-            assert len(values) == 2
-            module = deserialize_meta_func(values[1])
-            nn_module_stack[key] = (values[0], module)
+
+            paren = 0
+            comma_idx = None
+            for i, c in enumerate(kv[key_idx + 2:-1]):
+                if c == "," and paren == 0:
+                    assert comma_idx is None
+                    comma_idx = i + key_idx + 2
+                elif c == "(":
+                    paren += 1
+                elif c == ")":
+                    paren -= 1
+
+            assert comma_idx is not None
+            module = deserialize_meta_func(kv[comma_idx + 1:-1])
+            nn_module_stack[key] = (kv[key_idx + 2:comma_idx], module)
         ret["nn_module_stack"] = nn_module_stack
 
     if source_fn_str := metadata.get("source_fn"):
@@ -618,8 +630,19 @@ class GraphModuleSerializer:
                 return Argument.create(
                     as_tensors=[TensorArgument(name=a.name) for a in arg],
                 )
+            elif any(isinstance(a, torch.fx.Node) for a in arg):
+                def serialize_optional_tensor_args(a):
+                    if a is None:
+                        return OptionalTensorArgument.create(as_none=())
+                    elif isinstance(a, torch.fx.Node):
+                        return OptionalTensorArgument.create(as_tensor=a.name)
+                    else:
+                        raise SerializeError(f"Unsupported list/tuple argument: {a}")
+                return Argument.create(
+                    as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
+                )
             else:
-                raise SerializeError(f"Unsupported list/tuple argument type: {type(arg)}")
+                raise SerializeError(f"Unsupported list/tuple argument type: {type(arg[0])}")
         elif isinstance(arg, torch.dtype):
             return Argument.create(as_scalar_type=_TORCH_TO_SERIALIZE_DTYPE[arg])
         elif isinstance(arg, torch.device):
@@ -751,9 +774,11 @@ class GraphModuleSerializer:
 
 class ExportedProgramSerializer:
     def __init__(self, opset_version: Optional[Dict[str, int]] = None):
-        self.opset_version: Dict[str, int] = (
-            {} if opset_version is None else opset_version
-        )
+        self.opset_version: Dict[str, int] = {}
+        if opset_version:
+            self.opset_version.update(opset_version)
+        if "aten" not in self.opset_version:
+            self.opset_version["aten"] = torch._C._get_max_operator_version()
 
     def serialize(self, exported_program: ep.ExportedProgram) -> Tuple[ExportedProgram, bytes]:
         serialized_graph_module = (
@@ -1008,13 +1033,26 @@ class GraphModuleDeserializer:
                 return list(value)
             elif isinstance(value[0], (SymIntArgument, SymBoolArgument)):
                 return [self.deserialize_sym_argument(arg) for arg in value]
+            elif isinstance(value[0], OptionalTensorArgument):
+                def deserialize_optional_tensor_args(a):
+                    if a.type == "as_none":
+                        return None
+                    elif a.type == "as_tensor":
+                        return self.serialized_name_to_node[a.value]
+                    else:
+                        raise SerializeError(f"Unhandled argument {inp}")
+                return list(map(deserialize_optional_tensor_args, value))
             else:
                 raise SerializeError(f"Unhandled argument {inp}")
         else:
             raise SerializeError(f"Unhandled argument {inp}")
 
     def deserialize_sym_argument(self, sym_int_arg):
-        return self.serialized_name_to_node[sym_int_arg.as_name]
+        if sym_int_arg.type == "as_int":
+            return sym_int_arg.as_int
+        else:
+            assert sym_int_arg.type == "as_name"
+            return self.serialized_name_to_node[sym_int_arg.as_name]
 
     def deserialize_sym_op_outputs(self, serialized_node: Node, fx_node: torch.fx.Node):
         self.sync_fx_node(serialized_node.outputs[0].value.as_name, fx_node)
@@ -1068,9 +1106,11 @@ class GraphModuleDeserializer:
 
 class ExportedProgramDeserializer:
     def __init__(self, expected_opset_version: Optional[Dict[str, int]] = None):
-        self.expected_opset_version: Dict[str, int] = (
-            {} if expected_opset_version is None else expected_opset_version
-        )
+        self.expected_opset_version: Dict[str, int] = {}
+        if expected_opset_version:
+            self.expected_opset_version.update(expected_opset_version)
+        if "aten" not in self.expected_opset_version:
+            self.expected_opset_version["aten"] = torch._C._get_max_operator_version()
 
     def deserialize_range_constraints(
         self,

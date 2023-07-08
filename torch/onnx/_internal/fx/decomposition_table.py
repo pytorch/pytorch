@@ -52,8 +52,8 @@ def _create_onnx_supports_op_overload_table(
 
             for overload_name in op_overload_packet.overloads():
                 op_overload = getattr(op_overload_packet, overload_name)
-                internal_op_name = registration.OpName.from_full_name(
-                    full_name=op_overload.name()
+                internal_op_name = registration.OpName.from_qualified_name(
+                    qualified_name=op_overload.name()
                 )
                 # NOTE: If the overload is supported in registry or it's default overload is supported in registry,
                 # we add it to the table.
