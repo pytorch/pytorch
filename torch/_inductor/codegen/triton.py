@@ -140,12 +140,14 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def constant(value, dtype):
-        if dtype == torch.uint8:
-            tmp = ops.constant_val(value)
-            return ops.to_dtype(tmp, dtype)
-        else:
-            type_ = torch._prims_common.dtype_to_type(dtype)
-            return triton_constant(type_(value))
+        # NOTE: We use a tensor here in order to get the correct type.
+        # Otherwise, e.g. float64 constants would be trunctated to float32.
+        ndim = V.kernel.triton_tensor_ndim()
+        shape = [1] * ndim
+        type_ = torch._prims_common.dtype_to_type(dtype)
+        triton_val = triton_constant(type_(value))
+        triton_type = triton_compute_type(dtype)
+        return f"tl.full({shape}, {triton_val}, {triton_type})"
 
     @staticmethod
     def abs(x):
