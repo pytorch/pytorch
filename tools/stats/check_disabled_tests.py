@@ -55,7 +55,9 @@ def process_report(
         # list is a skipped message.  In the context of rerunning disabled tests, we could
         # ignore this case as returning a list of subskips only happens when tests are run
         # normally
-        if skipped and (type(skipped) is list or "num_red" not in skipped.get("message", "")):
+        if skipped and (
+            type(skipped) is list or "num_red" not in skipped.get("message", "")
+        ):
             continue
 
         name = parsed_test_case.get("name", "")
