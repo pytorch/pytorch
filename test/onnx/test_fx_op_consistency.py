@@ -321,14 +321,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("linalg_cross"),
     ),
     xfail(
-        "div", variant_name="no_rounding_mode", dtypes=onnx_test_common.BOOL_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Div", "bool")
-    ),
-    xfail(
-        "div", variant_name="no_rounding_mode", dtypes=onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_script_does_not_support("Div", "int has type issue.")
-    ),
-    xfail(
         "dot", dtypes=(torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_does_not_support("MatMul", "uint8, int8, int16")
     ),
