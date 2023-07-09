@@ -927,16 +927,15 @@ class VariableBuilder:
         self.tx.output.add_symbol_bindings(grapharg)
 
         if type(value) in config.traceable_tensor_subclasses:
-            subclass_torch_function__func = value.__torch_function__.__func__
-            subclass_type = type(value)
             # NB: This is slightly misnamed, a tensor subclass might not have
             # any explicit __torch_function__ implementation and is relying
             # on the default inherited from torch.Tensor
-            return TensorWithTFOverrideVariable(
+            return TensorWithTFOverrideVariable.create(
+                self.tx,
                 tensor_variable,
                 source,
-                subclass_torch_function__func,
-                subclass_type,
+                value.__torch_function__.__func__,
+                type(value),
             )
 
         return tensor_variable

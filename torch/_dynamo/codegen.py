@@ -107,8 +107,8 @@ class PyCodegen:
         elif isinstance(value, TensorWithTFOverrideVariable):
             tensor_variable = value.tensor_variable
             graph_outputs_key = self.add_graph_output(tensor_variable)
-            self.load_import_from(
-                value.subclass_type.__module__, value.subclass_type.__name__
+            output.append(
+                self.create_load_global(value.global_class_name(), True, add=True)
             )
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.extend(create_call_function(1, True))

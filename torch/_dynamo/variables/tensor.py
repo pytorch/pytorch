@@ -677,6 +677,26 @@ class TensorWithTFOverrideVariable(VariableTracker):
     Represents a tensor subclass instance with a __torch_function__ override.
     """
 
+    @staticmethod
+    def create(
+        tx,
+        tensor_variable,
+        orig_tensor_variable_source,
+        torch_function_fn,
+        subclass_type,
+        **kwargs,
+    ):
+        var = TensorWithTFOverrideVariable(
+            tensor_variable,
+            orig_tensor_variable_source,
+            torch_function_fn,
+            subclass_type,
+            **kwargs,
+        )
+        # stash the subclass type to rewrap an output tensor if needed
+        tx.output.install_global(var.global_class_name(), subclass_type)
+        return var
+
     def __init__(
         self,
         tensor_variable,
@@ -735,6 +755,9 @@ class TensorWithTFOverrideVariable(VariableTracker):
             self.subclass_torch_function__func,
             self.subclass_type,
         )
+
+    def global_class_name(self):
+        return f"__subclass_{self.subclass_type.__name__}"
 
     @staticmethod
     def inline_torch_function_unwrapped(
@@ -951,7 +974,8 @@ class TensorSubclassVariable(VariableTracker):
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
-            return TensorWithTFOverrideVariable(
+            return TensorWithTFOverrideVariable.create(
+                tx,
                 args[0],
                 args[0].source,
                 self.value.__torch_function__.__func__,
