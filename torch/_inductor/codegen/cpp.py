@@ -2123,7 +2123,22 @@ class CppVecKernelChecker(CppVecKernel):
                     elif dtype == torch.bool:
                         pass
                     elif dtype == torch.uint8:
-                        if not all(usr.target in ["store"] for usr in cur_node.users):
+                        # Only allow below 2 cases:
+                        # Case 1: to_uint8 and store which corresponding to the single quant node
+                        # at last of fusion pattern.
+                        is_to_uint8_and_store = all(
+                            usr.target in ["store"] for usr in cur_node.users
+                        )
+                        # Case 2: to_uint8 and to_float which corresponding to pair of quant/dequant node
+                        # at middle of fusion pattern.
+                        is_to_uint8_and_to_float = all(
+                            (
+                                usr.target in ["to_dtype"]
+                                and usr.args[2] == torch.float32
+                            )
+                            for usr in cur_node.users
+                        )
+                        if not (is_to_uint8_and_store or is_to_uint8_and_to_float):
                             self.disable_vec(f"to_dtype: dtype {dtype}")
                     else:
                         self.disable_vec(f"to_dtype: dtype {dtype}")
