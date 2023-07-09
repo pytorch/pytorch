@@ -547,7 +547,7 @@ class SchedulerNode(BaseSchedulerNode):
             or
             # reordering CPU reductions leads to some subtle bugs in vectorization
             # in tests like test_transpose_sum_outer
-            # self.get_device().type == "cpu" and
+            self.get_device().type == "cpu" and
             self.is_reduction()
         ):
             return choices

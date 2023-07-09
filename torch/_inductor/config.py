@@ -25,7 +25,7 @@ static_weight_shapes = True
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 
 # maximum number of candidate loop orderings to explore, 1 to disable
-loop_ordering_search_limit = 256
+loop_ordering_search_limit = 128
 
 # break up loops ranges to allow more fusion
 split_var_ranges = True
