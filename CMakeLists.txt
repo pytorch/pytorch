@@ -163,7 +163,6 @@ include(CMakeDependentOption)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
-option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2 "Master flag to build Caffe2" OFF)
 option(BUILD_LITE_INTERPRETER "Master flag to build Lite Interpreter" OFF)
@@ -173,7 +172,7 @@ cmake_dependent_option(
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
-    "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
+    "BUILD_SHARED_LIBS AND NOT USE_SYSTEM_PROTOBUF" OFF)
 cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
@@ -227,6 +226,8 @@ option(USE_METAL "Use Metal for Caffe2 iOS build" ON)
 option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
+option(USE_SYSTEM_LIBS "Use system-provided libraries" OFF)
+option(USE_SYSTEM_PROTOBUF "Use system-provided protobuf" ${USE_SYSTEM_LIBS})
 cmake_dependent_option(
     USE_MPS "Use MPS for macOS build" ON
     "MPS_FOUND" OFF)
@@ -239,7 +240,7 @@ cmake_dependent_option(
     USE_STATIC_NCCL "Use static NCCL" OFF
     "USE_NCCL" OFF)
 cmake_dependent_option(
-    USE_SYSTEM_NCCL "Use system-wide NCCL" OFF
+    USE_SYSTEM_NCCL "Use system-provided NCCL" ${USE_SYSTEM_LIBS}
     "USE_NCCL" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
@@ -262,8 +263,9 @@ option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
 option(USE_REDIS "Use Redis" OFF)
 option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
-option(USE_SYSTEM_EIGEN_INSTALL
-    "Use system Eigen instead of the one under third_party" OFF)
+cmake_dependent_option(
+  USE_SYSTEM_EIGEN "Use system-provided Eigen" ${USE_SYSTEM_LIBS}
+  "BLAS STREQUAL \"Eigen\"" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
@@ -295,6 +297,9 @@ cmake_dependent_option(
   USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." "${CPU_INTEL}"
   "CPU_INTEL OR CPU_AARCH64" OFF)
 cmake_dependent_option(
+  USE_SYSTEM_MKLDNN "Use system-provided mkldnn." ${USE_SYSTEM_LIBS}
+  "USE_MKLDNN" OFF)
+cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
@@ -310,7 +315,7 @@ cmake_dependent_option(
     USE_UCC "Use UCC. Only available if USE_DISTRIBUTED is on." OFF
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
-    USE_SYSTEM_UCC "Use system-wide UCC" OFF
+    USE_SYSTEM_UCC "Use system-wide UCC" ${USE_SYSTEM_LIBS}
     "USE_UCC" OFF)
 cmake_dependent_option(
     USE_C10D_UCC "USE C10D UCC" ON "USE_DISTRIBUTED;USE_UCC" OFF)
@@ -334,7 +339,8 @@ cmake_dependent_option(
     "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB (Deprecated)" OFF)
 cmake_dependent_option(
-    USE_SYSTEM_TBB "Use system-provided Intel TBB." OFF "USE_TBB" OFF)
+    USE_SYSTEM_TBB "Use system-provided Intel TBB." ${USE_SYSTEM_LIBS}
+    "USE_TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
@@ -400,53 +406,23 @@ endif()
 # directory.
 # USE_SYSTEM_LIBS is a shortcut variable to toggle all the # USE_SYSTEM_*
 # variables on. Individual USE_SYSTEM_* variables can be toggled with
-# USE_SYSTEM_LIBS being "OFF".
-option(USE_SYSTEM_LIBS "Use all available system-provided libraries." OFF)
-option(USE_SYSTEM_CPUINFO "Use system-provided cpuinfo." OFF)
-option(USE_SYSTEM_SLEEF "Use system-provided sleef." OFF)
-option(USE_SYSTEM_FBGEMM "Use system-provided fbgemm." OFF)
-option(USE_SYSTEM_GLOO "Use system-provided gloo." OFF)
-option(USE_SYSTEM_FP16 "Use system-provided fp16." OFF)
-option(USE_SYSTEM_MKLDNN "Use system-provided mkldnn." OFF)
-option(USE_SYSTEM_PYBIND11 "Use system-provided PyBind11." OFF)
-option(USE_SYSTEM_PTHREADPOOL "Use system-provided pthreadpool." OFF)
-option(USE_SYSTEM_PSIMD "Use system-provided psimd." OFF)
-option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
-option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
-option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
-option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
-option(USE_SYSTEM_ZSTD "Use system-provided zstd." OFF)
-option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
-if(USE_SYSTEM_LIBS)
-  set(USE_SYSTEM_CPUINFO ON)
-  set(USE_SYSTEM_SLEEF ON)
-  if(USE_FBGEMM)
-    set(USE_SYSTEM_FBGEMM ON)
-  endif()
-  set(USE_SYSTEM_GLOO ON)
-  set(BUILD_CUSTOM_PROTOBUF OFF)
-  set(USE_SYSTEM_EIGEN_INSTALL ON)
-  set(USE_SYSTEM_FP16 ON)
-  set(USE_SYSTEM_PTHREADPOOL ON)
-  set(USE_SYSTEM_PSIMD ON)
-  set(USE_SYSTEM_FXDIV ON)
-  set(USE_SYSTEM_BENCHMARK ON)
-  set(USE_SYSTEM_ONNX ON)
-  if(USE_MKLDNN)
-    set(USE_SYSTEM_MKLDNN ON)
-  endif()
-  set(USE_SYSTEM_XNNPACK ON)
-  set(USE_SYSTEM_PYBIND11 ON)
-  if(USE_NCCL)
-    set(USE_SYSTEM_NCCL ON)
-  endif()
-  if(USE_TBB)
-    set(USE_SYSTEM_TBB ON)
-  endif()
-  if(USE_ZSTD)
-    set(USE_SYSTEM_ZSTD ON)
-  endif()
-endif()
+# USE_SYSTEM_LIBS being "OFF", even if USE_SYSTEM_LIBS is "ON".
+option(USE_SYSTEM_LIBS "Use all available system-provided libraries." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_CPUINFO "Use system-provided cpuinfo." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_SLEEF "Use system-provided sleef." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_FBGEMM "Use system-provided fbgemm." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_GLOO "Use system-provided gloo." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_FMT "Use system-provided fmt." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_FP16 "Use system-provided fp16." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_PYBIND11 "Use system-provided PyBind11." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_PTHREADPOOL "Use system-provided pthreadpool." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_PSIMD "Use system-provided psimd." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_ONNX "Use system-provided onnx." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." ${USE_SYSTEM_LIBS})
+option(USE_SYSTEM_ZSTD "Use system-provided zstd." ${USE_SYSTEM_LIBS})
+option(USE_GOLD_LINKER "Use ld.gold to link" ${USE_SYSTEM_LIBS})
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" ON)
@@ -1107,7 +1083,7 @@ endif()
 # ---[ Make configuration files for cmake to allow dependent libraries
 # easier access to Caffe2.
 
-if((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
+if(NOT (USE_GLOG AND USE_GFLAGS AND USE_SYSTEM_PROTOBUF))
   message(WARNING
       "Generated cmake files are only fully tested if one builds "
       "with system glog, gflags, and protobuf. Other settings may "

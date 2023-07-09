@@ -62,7 +62,7 @@ CMAKE_ARGS=()
 # Build PyTorch mobile
 CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$($PYTHON -c 'import sysconfig; print(sysconfig.get_path("purelib"))')")
 CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$($PYTHON -c 'import sys; print(sys.executable)')")
-CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
+CMAKE_ARGS+=("-DUSE_SYSTEM_PROTOBUF=ON")
 
 # custom build with selected ops
 if [ -n "${SELECTED_OP_LIST}" ]; then

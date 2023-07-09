@@ -993,14 +993,14 @@ list(APPEND Caffe2_DEPENDENCY_LIBS fp16)
 # ---[ EIGEN
 # Due to license considerations, we will only use the MPL2 parts of Eigen.
 set(EIGEN_MPL2_ONLY 1)
-if(USE_SYSTEM_EIGEN_INSTALL)
+if(USE_SYSTEM_EIGEN)
   find_package(Eigen3)
   if(EIGEN3_FOUND)
     message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
   else()
     message(STATUS "Did not find system Eigen. Using third party subdirectory.")
     set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
-    caffe2_update_option(USE_SYSTEM_EIGEN_INSTALL OFF)
+    caffe2_update_option(USE_SYSTEM_EIGEN OFF)
   endif()
 else()
   message(STATUS "Using third party subdirectory Eigen.")
@@ -1828,16 +1828,20 @@ endif()
 #
 set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
-add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
+if(USE_SYSTEM_FMT)
+  find_package(fmt REQUIRED)
+else()
+  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 
-# Disable compiler feature checks for `fmt`.
-#
-# CMake compiles a little program to check compiler features. Some of our build
-# configurations (notably the mobile build analyzer) will populate
-# CMAKE_CXX_FLAGS in ways that break feature checks. Since we already know
-# `fmt` is compatible with a superset of the compilers that PyTorch is, it
-# shouldn't be too bad to just disable the checks.
-set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
+  # Disable compiler feature checks for `fmt`.
+  #
+  # CMake compiles a little program to check compiler features. Some of our build
+  # configurations (notably the mobile build analyzer) will populate
+  # CMAKE_CXX_FLAGS in ways that break feature checks. Since we already know
+  # `fmt` is compatible with a superset of the compilers that PyTorch is, it
+  # shouldn't be too bad to just disable the checks.
+  set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
+endif()
 
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)

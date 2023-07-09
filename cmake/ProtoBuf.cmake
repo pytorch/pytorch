@@ -77,15 +77,15 @@ macro(custom_protobuf_find)
 endmacro()
 
 # Main entry for protobuf. If we are building on Android, iOS or we have hard
-# coded BUILD_CUSTOM_PROTOBUF, we will hard code the use of custom protobuf
+# coded NOT USE_SYSTEM_PROTOBUF, we will hard code the use of custom protobuf
 # in the submodule.
 if(ANDROID OR IOS)
-  if(NOT BUILD_CUSTOM_PROTOBUF)
+  if(USE_SYSTEM_PROTOBUF)
     message(WARNING
         "For Android and iOS cross compilation, I am automatically using "
         "custom protobuf under third party. Note that this behavior may "
         "change in the future, and you will need to specify "
-        "-DBUILD_CUSTOM_PROTOBUF=ON explicitly.")
+        "-DUSE_SYSTEM_PROTOBUF=OFF explicitly.")
   endif()
   # There is link error when cross compiling protoc on mobile:
   # https://github.com/protocolbuffers/protobuf/issues/2719
@@ -94,7 +94,7 @@ if(ANDROID OR IOS)
   set(protobuf_BUILD_PROTOC_BINARIES OFF CACHE BOOL "" FORCE)
   custom_protobuf_find()
   set(protobuf_BUILD_PROTOC_BINARIES ${__caffe2_protobuf_BUILD_PROTOC_BINARIES} CACHE BOOL "" FORCE)
-elseif(BUILD_CUSTOM_PROTOBUF)
+elseif(NOT USE_SYSTEM_PROTOBUF)
   message(STATUS "Building using own protobuf under third_party per request.")
   custom_protobuf_find()
 else()
@@ -105,7 +105,7 @@ if((NOT TARGET protobuf::libprotobuf) AND (NOT TARGET protobuf::libprotobuf-lite
   message(WARNING
       "Protobuf cannot be found. Caffe2 will automatically switch to use "
       "own protobuf under third_party. Note that this behavior may change in "
-      "the future, and you will need to specify -DBUILD_CUSTOM_PROTOBUF=ON "
+      "the future, and you will need to specify -DUSE_SYSTEM_PROTOBUF=OFF "
       "explicitly.")
   custom_protobuf_find()
 
