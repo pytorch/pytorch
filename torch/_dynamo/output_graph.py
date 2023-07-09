@@ -1105,7 +1105,7 @@ class SubgraphTracer(fx.Tracer):
         # 1. We see a free variable that is already tracked by Dynamo.
         # 2. We see a free variable that has not been tracked by Dynamo
         #
-        # In case 1, we call `lift_tracked_freevar_to_input` (below)
+        # In case 1, we call `maybe_lift_tracked_freevar_to_input` (below)
         # which will lift the freevar to be an input of this subgraph
         # and also recursively lift it to be an input on the parent(s).
         #
@@ -1131,19 +1131,8 @@ class SubgraphTracer(fx.Tracer):
             flat_args, tree_spec = pytree.tree_flatten(args)
             new_args = []
             for arg in flat_args:
-                if not isinstance(arg, torch.fx.Proxy):
-                    new_args.append(arg)
-                elif arg.tracer == self:
-                    new_args.append(arg)
-                elif not hasattr(arg, "node"):
-                    new_args.append(arg)
-                elif "saved_tensor_marked" in arg.node.meta:
-                    new_args.append(arg)
-                else:
-                    # Create a new input for this arg, and replace the current arg
-                    # with the new arg
-                    new_arg = self.lift_tracked_freevar_to_input(arg)
-                    new_args.append(new_arg)
+                maybe_new_arg = self.maybe_lift_tracked_freevar_to_input(arg)
+                new_args.append(maybe_new_arg)
 
             args = pytree.tree_unflatten(new_args, tree_spec)
 
@@ -1182,8 +1171,22 @@ class SubgraphTracer(fx.Tracer):
 
         return rv
 
-    def create_node(self, *args, **kwargs):
-        node = super().create_node(*args, **kwargs)
+    def create_node(
+        self, op, target, args=None, kwargs=None, name=None, type_expr=None
+    ):
+        if self.parent is not None:
+            flat_args, _ = pytree.tree_flatten((args, kwargs))
+            for arg in flat_args:
+                if not isinstance(arg, torch.fx.Node):
+                    continue
+                # Special case for autograd.Function tracing
+                if "saved_tensor_marked" in arg.meta:
+                    continue
+                assert (
+                    arg.graph == self.graph
+                ), "create_node using arg not from this SubgraphTracer"
+
+        node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
         return node
 
@@ -1257,6 +1260,21 @@ class SubgraphTracer(fx.Tracer):
         if self.parent is not None and proxy.tracer != self.parent:
             self.parent.lift_tracked_freevar_to_input(proxy)
         return new_proxy
+
+    def maybe_lift_tracked_freevar_to_input(self, arg):
+        """
+        If arg is a free variable, then lift it to be an input.
+        Returns the new lifted arg (if arg was a freevar), else the
+        original arg.
+        """
+        if not isinstance(arg, torch.fx.Proxy):
+            return arg
+        elif arg.tracer == self:
+            return arg
+        # Special case for autograd.Function tracing
+        elif "saved_tensor_marked" in arg.node.meta:
+            return arg
+        return self.lift_tracked_freevar_to_input(arg)
 
 
 # NOTE: [HigherOrderOperator tracing design]
