@@ -244,11 +244,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(inputs, **self.get_world_trs())
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty_strided") \
             .check("buf0.copy_(arg0_1)") \
             .check("buf1 = buf0") \
             .check("buf1_work = dist.all_reduce(buf1") \
-            .check("fun_col._register_tensor_work(buf1, buf1_work)") \
+            .check("fun_col_impl._register_tensor_work(buf1, buf1_work)") \
             .check("_wait_tensor(buf0)") \
             .check("return (buf2, )") \
             .run(code)
@@ -276,14 +275,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf1 = buf0; del buf0  # reuse") \
             .check_not("buf1.copy_(") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
-            .check("fun_col._register_tensor_work(buf2, buf2_work)") \
+            .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf3 = buf1") \
-            .check("buf4 = empty_strided") \
             .check("return (buf3, buf4") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
@@ -312,14 +309,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty_strided(") \
-            .check("buf4 = empty_strided") \
             .check("triton_poi__0.run(arg0_1, buf0, buf4") \
             .check_not("copy_(") \
-            .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
-            .check("fun_col._register_tensor_work(buf2, buf2_work)") \
+            .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf3 = buf1") \
             .check("return (buf3, buf4, buf5") \
@@ -553,20 +547,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty_strided(") \
-            .check("buf5 = empty_strided(") \
             .check("triton_poi__0.run(arg0_1, buf0, buf5") \
-            .check("buf1 = empty_strided") \
-            .check("buf2 = empty_strided") \
             .check_not("copy_(") \
             .check("buf3_inputs = [buf0,arg0_1]") \
             .check("buf3 = [buf1,buf2]") \
-            .check("buf3_work = fun_col._all_gather_into_tensor_coalesced_fallback("
+            .check("buf3_work = fun_col_impl._all_gather_into_tensor_coalesced_fallback("
                    "output_tensors=buf3, input_tensors=buf3_inputs") \
-            .check("fun_col._register_tensor_work(buf3, buf3_work)") \
+            .check("fun_col_impl._register_tensor_work(buf3, buf3_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf4 = buf1") \
-            .check("buf6 = buf0; del buf0  # reuse") \
             .check("_wait_tensor(buf2)") \
             .check("buf7 = buf2") \
             .check("return (buf4, buf5, buf6, buf7") \
@@ -598,19 +587,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("buf0 = empty_strided(") \
-            .check("buf5 = empty_strided(") \
             .check("triton_poi__0.run(arg0_1, buf0, buf5") \
-            .check("buf1 = empty_strided") \
-            .check("buf2 = empty_strided") \
             .check_not("copy_(") \
             .check("buf3 = [buf1,buf2]") \
-            .check("buf3_work = fun_col._reduce_scatter_tensor_coalesced_fallback("
+            .check("buf3_work = fun_col_impl._reduce_scatter_tensor_coalesced_fallback("
                    "output_tensors=buf3, input_tensors=buf3_inputs") \
-            .check("fun_col._register_tensor_work(buf3, buf3_work)") \
+            .check("fun_col_impl._register_tensor_work(buf3, buf3_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf4 = buf1") \
-            .check("buf6 = buf0; del buf0  # reuse") \
             .check("_wait_tensor(buf2)") \
             .check("buf7 = buf2") \
             .check("return (buf4, buf5, buf6, buf7") \

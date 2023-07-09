@@ -2,7 +2,6 @@ import collections
 import contextlib
 import dataclasses
 import functools
-import hashlib
 import os
 import re
 from itertools import count
@@ -285,9 +284,8 @@ class WrapperCodeGen(CodeGen):
         self.write_header()
         self.write_prefix()
 
-        for name, value in V.graph.constants.items():
+        for name, hashed in V.graph.constant_reprs.items():
             # include a hash so our code cache gives different constants different files
-            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
             self.write_constant(name, hashed)
 
         self.allocated = set()
@@ -794,7 +792,12 @@ class WrapperCodeGen(CodeGen):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
 
     def make_buffer_free(self, buffer):
-        return f"del {buffer.get_name()}"
+        name = buffer.get_name()
+        if name in self.freed:
+            return ""
+        else:
+            self.freed.add(name)
+            return f"del {buffer.get_name()}"
 
     def make_buffer_reuse(self, old, new, delete_old=True):
         assert old.get_dtype() == new.get_dtype()
@@ -854,7 +857,6 @@ class WrapperCodeGen(CodeGen):
 
         if not self.can_reuse(buffer):
             return
-        self.freed.add(name)
 
         layout = buffer.get_layout()
         if isinstance(layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
@@ -1187,11 +1189,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return f"{{{', '.join(parts)}}}"
 
     def make_buffer_free(self, buffer):
-        return (
-            ""
-            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
-            else f"{buffer.get_name()}.reset();"
-        )
+        name = buffer.get_name()
+        if name in self.freed:
+            return ""
+        else:
+            self.freed.add(name)
+            return (
+                ""
+                if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+                else f"{buffer.get_name()}.reset();"
+            )
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
@@ -1217,6 +1224,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 break
         if output_idx is not None and V.graph.aot_mode:
             # In aot_mode, output buffers are managed by the AOT runtime.
+            assert config.memory_pool != "outputs" and config.memory_pool != "combined"
             return (
                 f"at::Tensor {buffer.get_name()} = outputs[{output_idx}]{self.ending}"
             )

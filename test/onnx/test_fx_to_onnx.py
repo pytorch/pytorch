@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytorch_test_common
 import torch
 from torch import nn
+from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
 from torch.onnx._internal.diagnostics import infra
@@ -41,6 +42,7 @@ def assert_has_diagnostics(
     )
 
 
+@common_utils.instantiate_parametrized_tests
 class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def setUp(self):
         super().setUp()
@@ -67,6 +69,16 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         tensor_x = torch.randn(1, 1, 2)
         _ = dynamo_export(func, tensor_x, export_options=self.export_options)
+
+    def test_args_used_for_export_is_not_converted_to_fake_tensors(self):
+        def func(x, y):
+            return x + y
+
+        tensor_x = torch.randn(1, 1, 2)
+        tensor_y = torch.randn(1, 1, 2)
+        _ = dynamo_export(func, tensor_x, tensor_y, export_options=self.export_options)
+        self.assertNotIsInstance(tensor_x, fake_tensor.FakeTensor)
+        self.assertNotIsInstance(tensor_y, fake_tensor.FakeTensor)
 
     def test_mnist(self):
         class MNISTModel(nn.Module):
@@ -142,7 +154,30 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_error_node="aten.embedding.default",
         )
 
-    def test_unsupported_function_schema_with_op_level_debug(self):
+    @common_utils.parametrize(
+        "op_level_debug, rule, expected_error_node",
+        [
+            common_utils.subtest(
+                (
+                    True,
+                    diagnostics.rules.op_level_debugging,
+                    "aten.convolution.default",
+                ),
+                name="bypassing_failed_op_level_debug",
+            ),
+            common_utils.subtest(
+                (
+                    False,
+                    diagnostics.rules.find_opschema_matched_symbolic_function,
+                    "aten.convolution.default",
+                ),
+                name="found_nearest_match",
+            ),
+        ],
+    )
+    def test_unsupported_function_schema_raises_diagnostic_warning(
+        self, op_level_debug: bool, rule: infra.Rule, expected_error_node: str
+    ):
         class TraceModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -155,13 +190,70 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         x = torch.randn(20, 16, 50, 50)
         export_output = dynamo_export(
-            TraceModel(), x, export_options=ExportOptions(op_level_debug=True)
+            TraceModel(), x, export_options=ExportOptions(op_level_debug=op_level_debug)
         )
         assert_has_diagnostics(
             export_output.diagnostic_context,
-            diagnostics.rules.op_level_debugging,
+            rule,
             diagnostics.levels.WARNING,
-            expected_error_node="aten.convolution.default",
+            expected_error_node=expected_error_node,
+        )
+
+    def test_dispatch_overload_fall_back_default_raise_diagnostic_warning(self):
+        class TraceModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.ops.aten.add(input, input)
+
+        x = torch.tensor(3)
+        export_output = dynamo_export(TraceModel(), x)
+        assert_has_diagnostics(
+            export_output.diagnostic_context,
+            diagnostics.rules.find_operator_overloads_in_onnx_registry,
+            diagnostics.levels.WARNING,
+            expected_error_node="aten.add.Tensor",
+        )
+
+    def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=False)
+                self.fc1 = nn.Linear(9216, 128, bias=False)
+                self.register_buffer("buffer", torch.randn(1, 128))
+
+            def forward(self, tensor_x: torch.Tensor):
+                tensor_x = self.conv2(tensor_x)
+                tensor_x = F.sigmoid(tensor_x)
+                tensor_x = F.max_pool2d(tensor_x, 2)
+                tensor_x = torch.flatten(tensor_x, 1)
+                tensor_x = self.fc1(tensor_x)
+                tensor_x = tensor_x + self.buffer
+                tensor_x = F.sigmoid(tensor_x)
+                return tensor_x
+
+        class MNISTModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=False)
+                self.submodule = SubModule()
+                self.fc2 = nn.Linear(128, 10, bias=False)
+
+            def forward(self, tensor_x: torch.Tensor):
+                tensor_x = self.conv1(tensor_x)
+                tensor_x = F.sigmoid(tensor_x)
+                tensor_x = self.submodule(tensor_x)
+                tensor_x = self.fc2(tensor_x)
+                output = F.log_softmax(tensor_x, dim=1)
+                return output
+
+        tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
+
+        model = MNISTModel()
+        export_output = torch.onnx.dynamo_export(model, tensor_x)
+        model_proto = export_output.model_proto
+        self.assertEqual(
+            {initializer.name for initializer in model_proto.graph.initializer},
+            {*model.state_dict().keys()},
         )
 
 

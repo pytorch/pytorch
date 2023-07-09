@@ -214,7 +214,7 @@ class Allocation(AllocationTreeNode):
             f"live_Range={self.live_range}, "
             f"size_hint={self.size_hint}, "
             f"symbolic_size={self.symbolic_size}, "
-            f"pool={self.pool.name}, "
+            f"pool={self.pool.name if self.pool else None}, "
             f"offset={self.offset})"
         )
 
