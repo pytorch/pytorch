@@ -132,14 +132,9 @@ def out_dtype_func1(op, output_dtype, *args):
         for arg in args
     )
     # pyre-ignore
-    guard = torch._C.ExcludeDispatchKeyGuard(
-        torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
-    )
-    try:
+    with torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)):
         res = out_dtype(op, output_dtype, *unwrapped_args)
-        return _wrap_all_tensors_to_functional(res, level=0)
-    finally:
-        del guard
+    return _wrap_all_tensors_to_functional(res, level=0)
 
 
 @out_dtype.py_impl(torch._C._functorch.TransformType.Functionalize)
