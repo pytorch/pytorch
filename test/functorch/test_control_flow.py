@@ -1265,5 +1265,65 @@ class TestControlFlowTraced(TestCase):
         x = torch.ones(4, 3, 2)
         self.assertEqual(foo(x), gm(x))
 
+    def test_tracing_scan_real(self):
+        def f(carry, x):
+            return [carry[0]+1, carry[1]+1], x+carry[0]
+
+        def g(init, xs):
+            return control_flow.scan(f, init, xs)
+
+        init = [torch.rand(1, 2), torch.rand(1, 2)]
+        xs = torch.rand(10, 2)
+        gm = make_fx(g, tracing_mode="real")(init, xs)
+        init_test = [torch.rand(1, 2), torch.rand(1, 2)]
+        xs_test = torch.rand(10, 2)
+        res = gm(init_test, xs_test)
+        self.assertEqual(res, g(init_test, xs_test))
+    
+    def test_tracing_scan_symbolic_simple(self):
+        def f(carry, x):
+            return carry+1, x+carry
+
+        def g(init, xs):
+            return control_flow.scan(f, init, xs)
+
+        init = torch.rand(1, 2)
+        xs = torch.rand(10, 2)
+        gm = make_fx(g, tracing_mode="symbolic")(init, xs)
+        init_test = torch.rand(1, 2)
+        xs_test = torch.rand(10, 2)
+        res = gm(init_test, xs_test)
+        self.assertEqual(res, g(init_test, xs_test))
+
+    def test_tracing_scan_symbolic_nested_list(self):
+        def f(carry, x):
+            return carry+1, (x[0]*carry, carry)
+        
+        def g(init, xs):
+            return control_flow.scan(f, init, xs)
+
+        init = torch.rand(1, 2, requires_grad=True)
+        xs = [torch.rand(10, 2, requires_grad=True), torch.rand(10, 2, requires_grad=True)]
+        gm = make_fx(g, tracing_mode="symbolic")(init, xs)
+        init_test = torch.rand(1, 2, requires_grad=True)
+        xs_test = [torch.rand(10, 2, requires_grad=True), torch.rand(10, 2, requires_grad=True)]
+        res = gm(init_test, xs_test)
+        self.assertEqual(res, g(init_test, xs_test))
+    
+    def test_tracing_scan_real_nested_list(self):
+        def f(carry, x):
+            return carry+1, (x[0]*carry, carry)
+        
+        def g(init, xs):
+            return control_flow.scan(f, init, xs)
+
+        init = torch.rand(1, 2, requires_grad=True)
+        xs = [torch.rand(10, 2, requires_grad=True), torch.rand(10, 2, requires_grad=True)]
+        gm = make_fx(g, tracing_mode="real")(init, xs)
+        init_test = torch.rand(1, 2, requires_grad=True)
+        xs_test = [torch.rand(10, 2, requires_grad=True), torch.rand(10, 2, requires_grad=True)]
+        res = gm(init_test, xs_test)
+        self.assertEqual(res, g(init_test, xs_test))
+
 if __name__ == '__main__':
     run_tests()

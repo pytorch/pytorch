@@ -1,12 +1,21 @@
+from functools import partial
 import torch
+from torch._subclasses.fake_tensor import FakeTensorMode
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._functorch.aot_autograd import create_joint, AOTConfig
 from torch._ops import HigherOrderOperator
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.fx.experimental.proxy_tensor import (
+    ProxyTorchDispatchMode,
     disable_proxy_modes_tracing,
     make_fx,
+    track_tensor_tree,
+    unwrap_proxy,
+)
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode,
+    _pop_mode_temporarily,
 )
 from torch._dispatch.python import suspend_functionalization
 
@@ -182,6 +191,43 @@ class ScanAutogradOp(torch.autograd.Function):
             flat_carry_out_grads, flat_out_grads = scan_impl(ctx._joint_graph, final_carry_grad, (*ys_grad, carries, *flat_xs), return_all_carries=False, reverse=True)
             return None, None, None, *flat_carry_out_grads, *flat_out_grads
 
+def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, return_all_carries=False, reverse=False):
+    xs = flat_xs
+    leading_dim_size = xs[0].shape[0]
+
+    example_input = _unstack_pytree(xs)[0]
+    body_graph = f
+    if not isinstance(body_graph, torch.fx.GraphModule):
+        body_graph = make_fx(body_graph)(*flat_init, *example_input)
+
+    with disable_proxy_modes_tracing():
+        example_outs = body_graph(*flat_init, *example_input)
+
+        def expand_tensor(t):
+            if isinstance(t, torch.Tensor):
+                return t.expand(leading_dim_size, *t.shape)
+            return t
+        if return_all_carries:
+            expanded_outs = (example_outs[:len(flat_init)], pytree.tree_map(expand_tensor, example_outs[len(flat_init):]), [flat_init] * leading_dim_size)
+        else:
+            expanded_outs = (example_outs[:len(flat_init)], pytree.tree_map(expand_tensor, example_outs[len(flat_init):]))
+
+    next_name = None
+    i = 0
+    while not next_name:
+        candidate = f"body_graph_{i}"
+        if hasattr(proxy_mode.tracer.root, candidate):
+            i += 1
+        else:
+            next_name = candidate
+
+    proxy_mode.tracer.root.register_module(next_name, body_graph)
+    node_args = (body_graph, flat_init, flat_xs)
+    proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), node_args)
+    out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {"return_all_carries": return_all_carries, "reverse": reverse},
+                                               name="scan_impl")
+    return track_tensor_tree(expanded_outs, out_proxy, constant=None, tracer=proxy_mode.tracer)
+
 def _unstack_and_flatten_tensors_or_lists(flat_xs):
     '''
         This function performs unstacking and flattening of a list of mixed items, where items can be of type
@@ -300,6 +346,21 @@ def scan_autograd(f, flat_init, flat_xs, return_all_carries=False, reverse=False
         carries = [flat_carries[i*num_carry_out:(i+1)*num_carry_out] for i in range(len(flat_carries)//num_carry_out)]
         return flat_all_out[:num_carry_out], flat_all_out[num_carry_out:num_carry_out + num_flat_ys], carries
     return flat_all_out[:num_carry_out], flat_all_out[num_carry_out:num_carry_out + num_flat_ys]
+
+@scan_impl.py_impl(ProxyTorchDispatchMode)
+def map_proxy_torch_dispatch_mode(f, flat_init, flat_xs, return_all_carries=False, reverse=False):
+    mode = _get_current_dispatch_mode()
+    assert (mode is not None), "Mode should always be enabled for python fallback key"
+    with _pop_mode_temporarily() as mode:
+        if mode.enable_tracing:
+            return trace_scan(mode, scan_impl, f, flat_init, flat_xs, return_all_carries=return_all_carries, reverse=reverse)
+        else:
+            return scan_impl(f, flat_init, flat_xs, return_all_carries=return_all_carries, reverse=reverse)
+
+@scan_impl.py_impl(FakeTensorMode)
+def map_fake_tensor_mode(f, flat_init, flat_xs, return_all_carries=False, reverse=False):
+    return scan_dense(f, flat_init, flat_xs, return_all_carries=return_all_carries, reverse=reverse)
+
 
 # TODO(voz) Make this automatic for keys, this is very ugly atm
 scan_impl.fallthrough(DispatchKey.PythonDispatcher)
