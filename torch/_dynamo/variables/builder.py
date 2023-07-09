@@ -1123,6 +1123,44 @@ def wrap_fx_proxy(tx, proxy, example_value=None, **options):
 
 # Note: Unfortunate split due to some gross classes existing that subclass TensorVariable
 # Should be compositional instead
+#
+# This is a horribly complicated function that does too many things, to
+# explain what it does, let's first talk about the classic usage wrap_fx_proxy
+# for a TensorVariable.  There are two primary modes of use:
+#
+#   1. Wrapping a pre-existing Tensor.  In this case, example_value is set
+#      to the pre-existing Tensor.  (Note that this example_value will NOT
+#      be the final example_value we put into node.meta['example_value'],
+#      instead it is converted into a fake tensor using
+#      wrap_to_fake_tensor_and_record and registered as a graph input.)
+#
+#   2. "Wrapping" the result of some Tensor operation Dynamo traced over.  In
+#      this case, example_value is None (and we are going to figure it out
+#      ourselves using FakeTensors, via get_fake_value, which will run
+#      the operation represented by the (singular!) FX node referenced by
+#      the passed in proxy.)
+#
+# The expectation is you end up with a Tensor output, and everything is
+# straightforwardly traced into the graph.
+#
+# Upon closer inspection, you may notice that there are a slurry of non-Tensor
+# output cases.  What gives?  Well, we sometimes trace operations into the
+# graph that don't involve tensors.
+#
+#   * Some operators return tuples; we need to recursively handle their
+#     contents
+#
+#   * Some operators have side effects that will affect subsequent AOTAutograd
+#     tracing but don't otherwise return anything.
+#
+#   * Some operators return symbolic ints/floats/bools which can go in the
+#     graph and be traced (but only if they're actually symbolic!  If they're
+#     static you don't want to put them in the graph, which means you
+#     shouldn't call this function.)
+#
+# The common theme is that you only use this function WHEN YOU ARE TRACING
+# SOMETHING INTO THE GRAPH.  This is sort of obvious, because you can't call
+# this function without a proxy.
 def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, ignore_subclass=False, **options
 ):
