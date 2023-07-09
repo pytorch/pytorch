@@ -113,8 +113,7 @@ def validate_ir(node_or_nodes):
                     DynamicScalar,
                     TensorBox,
                     sympy.Symbol,
-                    sympy.core.relational.Relational,
-                    sympy.core.relational.Unequality,
+                    sympy.logic.boolalg.Boolean,
                     Expr,
                     torch._inductor.ir.ExpandView,
                 ),
@@ -2721,7 +2720,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, (sympy.Expr, sympy.Rel, int)):
+        if isinstance(x, (sympy.Expr, sympy.logic.boolalg.Boolean, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
