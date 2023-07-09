@@ -387,7 +387,7 @@ void cumulative_op_impl(const Tensor& self,
               dim,
               ")");
   if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE(op_name, "supported by MPS on MacOS 13+, please upgrade");
+    TORCH_WARN_ONCE(op_name, " supported by MPS on MacOS 13+, please upgrade");
     auto cpu_result = self.to(at::Device(kCPU)).cumsum(dim, dtype);
     at::_copy_from_and_resize(cpu_result, result);
     return;
@@ -400,9 +400,9 @@ void cumulative_op_impl(const Tensor& self,
                         input.scalar_type() != ScalarType::Long);
 
   TORCH_CHECK(macOS13_3_plus || input.scalar_type() != ScalarType::Long,
-              "MPS does not support",
+              "MPS does not support ",
               op_name,
-              "op with int64 input. Support has been added in macOS 13.3");
+              " op with int64 input. Support has been added in macOS 13.3");
 
   mps::unary_op(
       input, result, op_name + std::to_string(dim), ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
