@@ -949,6 +949,8 @@ aten::mps_convolution_backward
 aten::mps_convolution_backward.out
 aten::mps_convolution_transpose_backward
 aten::mps_convolution_transpose_backward.out
+aten::multi_margin_loss_backward
+aten::multi_margin_loss_backward.grad_input
 aten::multilabel_margin_loss_backward
 aten::multilabel_margin_loss_backward.grad_input
 aten::multilabel_margin_loss_forward
