@@ -2799,12 +2799,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             )
 
             num_outputs = CompiledFunction.metadata.num_outputs
-            num_outputs_aliased_to_inputs = (
-                CompiledFunction.metadata.num_outputs_aliased_to_inputs
-            )
-            num_outputs_aliased_to_intermediates = (
-                CompiledFunction.metadata.num_outputs_aliased_to_intermediates
-            )
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
@@ -2979,10 +2973,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # Add the seed and offset to args
                 rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
-            all_args = (
-                list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args) + list(rng_args)
-            )
-
+            all_args = [
+                *ctx.symints,
+                *ctx.saved_tensors,
+                *contiguous_args,
+                *rng_args
+            ]
             del contiguous_args
 
             def call_compiled_backward():

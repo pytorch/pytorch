@@ -77,6 +77,7 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
     ListVariable,
     NamedTupleVariable,
@@ -108,12 +109,7 @@ from .tensor import (
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
 )
-from .torch import (
-    tensor_dunder_fns,
-    torch_special_class_types,
-    TorchHigherOrderOperatorVariable,
-    TorchVariable,
-)
+from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
 from .user_defined import (
     ProcessGroupVariable,
     UserDefinedClassVariable,
@@ -562,8 +558,9 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
         elif isinstance(value, HigherOrderOperator):
-            return TorchHigherOrderOperatorVariable(
+            return TorchHigherOrderOperatorVariable.make(
                 value,
+                source=self.source,
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
                 ),
@@ -1031,19 +1028,10 @@ class VariableBuilder:
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
 
-                wrapped_value = shape_env.create_symintnode(
-                    # TODO: This is wrong wrong wrong, create_symbol will
-                    # generate something that is non-negative, but this is
-                    # not a sound assumption to make.
-                    # Not fixing as this was a preexisting condition.
-                    shape_env.create_symbol(
-                        value,
-                        source=self.source,
-                        dynamic_dim=dynamic_dim,
-                        constraint_dim=None,
-                    ),
-                    hint=value,
+                wrapped_value = shape_env.create_symint_and_symbol(
+                    value,
                     source=self.source,
+                    dynamic_dim=dynamic_dim,
                 )
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
@@ -1468,10 +1456,9 @@ def wrap_to_fake_tensor_and_record(
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
-        tx.output.tensor_weakref_to_sizes_strides_offset[WeakIdRef(e)] = {
+        tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
-            "storage_offset": fake_e.storage_offset(),
         }
         return fake_e
     else:
