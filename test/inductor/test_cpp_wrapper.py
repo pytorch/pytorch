@@ -269,6 +269,11 @@ if RUN_CUDA:
             device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
+        BaseTest(
+            "test_mm_plus_mm2",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
         BaseTest("test_fft_real_input"),
         BaseTest("test_fft_real_input_real_output"),
     ]:
