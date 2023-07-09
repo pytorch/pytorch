@@ -1008,6 +1008,7 @@ class TritonKernel(Kernel):
                     index = sympy_subs(index, replacements)
 
         index_vars = index.free_symbols
+        index = self.simplify_indexing(index)
         index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
 
         mask_vars: Set[str] = set()
