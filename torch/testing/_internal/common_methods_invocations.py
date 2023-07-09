@@ -1397,6 +1397,7 @@ def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(_make_tensor, dtype=torch.long, requires_grad=False)
+    make_weight = partial(_make_tensor, requires_grad=False)
 
     inputs = (
         ((), make_target([], low=0, high=1), {}),
@@ -1405,6 +1406,7 @@ def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwa
         ((S, M), make_target([S], low=0, high=M), {"margin": 1.0}),
         ((S, M), make_target([S], low=0, high=M), {"margin": -3.14}),
         ((M, S), make_target([M], low=0, high=S), {"weight": None}),
+        ((M, S), make_target([M], low=0, high=S), {"weight": make_weight([S], low=-10., high=10.)}),
         ((M, S), make_target([M], low=0, high=S), {"reduction": "none"}),
         ((M, S), make_target([M], low=0, high=S), {"reduction": "mean"}),
         ((M, S), make_target([M], low=0, high=S), {"reduction": "sum"}),
@@ -1418,6 +1420,7 @@ def reference_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **
     yield from sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs)
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(_make_tensor, dtype=torch.long, requires_grad=False)
+    make_weight = partial(_make_tensor, requires_grad=False)
 
     inputs = (
         ((), make_target([], low=0, high=1)),
@@ -1427,10 +1430,11 @@ def reference_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **
     )
     ps = (1, 2)
     margins = (0, 7, -3.14)
+    weights = (None, make_weight([S], low=-10., high=10.))
     reductions = (None, "none", "mean", "sum")
 
-    for (input_shape, target), p, margin, reduction in product(inputs, ps, margins, reductions):
-        kwargs = {"p": p, "margin": margin}
+    for (input_shape, target), p, margin, weight, reduction in product(inputs, ps, margins, weights, reductions):
+        kwargs = {"p": p, "margin": margin, "weight": weight}
         if reduction is not None:
             kwargs["reduction"] = reduction
         yield SampleInput(_make_tensor(input_shape), args=(target,), kwargs=kwargs)
@@ -1454,6 +1458,13 @@ def error_inputs_multi_margin_loss(op, device, **kwargs):
     # invalid target dtype
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={}),
                      error_type=RuntimeError, error_regex='expected scalar type Long but found Float')
+    # invalid weight
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={'weight': make_input(())}),
+                     error_type=ValueError, error_regex='weight must be one-dimensional')
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={'weight': make_input(5, 4)}),
+                     error_type=ValueError, error_regex='weight must be one-dimensional')
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={'weight': make_input(5,)}),
+                     error_type=RuntimeError, error_regex=r'inconsistent weight size, expected 4 but got \[5\]')
     # invalid p
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={'p': 3}),
                      error_type=ValueError, error_regex='only p == 1 and p == 2 supported')
