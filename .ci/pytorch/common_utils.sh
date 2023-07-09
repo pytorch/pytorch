@@ -148,6 +148,13 @@ function install_torchvision() {
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
 }
 
+function install_numpy_pytorch_interop() {
+  local commit
+  commit=$(get_pinned_commit numpy_pytorch_interop)
+  # TODO: --no-use-pep517 will result in failure.
+  pip_install --user "git+https://github.com/Quansight-Labs/numpy_pytorch_interop.git@${commit}"
+}
+
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
     git clone --recursive --quiet https://github.com/pytorch/xla.git
@@ -168,7 +175,7 @@ function checkout_install_torchdeploy() {
   pushd multipy
   git checkout "${commit}"
   python multipy/runtime/example/generate_examples.py
-  pip install -e . --install-option="--cudatests"
+  BUILD_CUDA_TESTS=1 pip install -e .
   popd
   popd
 }
@@ -187,6 +194,7 @@ function install_huggingface() {
   version=$(get_pinned_commit huggingface)
   pip_install pandas
   pip_install scipy
+  pip_install z3-solver
   pip_install "transformers==${version}"
 }
 
@@ -195,6 +203,7 @@ function install_timm() {
   commit=$(get_pinned_commit timm)
   pip_install pandas
   pip_install scipy
+  pip_install z3-solver
   pip_install "git+https://github.com/rwightman/pytorch-image-models@${commit}"
 }
 

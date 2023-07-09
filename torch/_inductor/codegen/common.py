@@ -130,13 +130,13 @@ class DataTypePropagation:
         if node.target in (
             "load",
             "store",
+            "store_reduction",
         ):
             buf_name = node.args[1]
             return V.graph.get_dtype(buf_name)
 
         if node.target == "reduction":
-            _, _, dtype, _, _, _, _ = node.args
-            return dtype
+            return node.args[1]
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
@@ -217,6 +217,8 @@ class ExprPrinter(Printer):
         # into Tensor expressions earlier and do that instead.
         if exp == 0.5:
             return self._helper_sqrt(base)
+        elif exp == -0.5:
+            return "1/" + self._helper_sqrt(base)
         base = self._print(base)
         assert exp == int(exp), exp
         exp = int(exp)
@@ -226,6 +228,9 @@ class ExprPrinter(Printer):
             return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
         else:  # exp == 0
             return "1"
+
+    def _print_Unequality(self, expr):
+        return " != ".join(map(self.paren, map(self._print, expr.args)))
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
@@ -586,8 +591,9 @@ class KernelArgs:
 
 class CSEVariable:
     """A CSEVariable is just a name for an expression but it is useful to be able to annotate them on a backend dependent basis.
-    The backends can inherit from this class and overload the "create_cse_var" Kernel to do that.
-    The "update_on_args" method gives you a hook for annotations, see example of TritonCSEVariable in triton.py.
+    To do so, the backends can simply overload `Kernel.create_cse_var`
+    The "CSEVariable.update_on_args" method gives you a hook for annotations
+    See example of TritonCSEVariable in triton.py
     """
 
     def __init__(self, name):
@@ -672,7 +678,8 @@ class CSE:
         if isinstance(expr, CSEVariable):
             return expr
         cache_key = expr
-        if cache_key not in self.cache:
+        var = self.cache.get(cache_key, None)
+        if not var:
             var = self.newvar() if assignment else None
             self.cache[cache_key] = var
             if write:
@@ -686,7 +693,7 @@ class CSE:
                     line = f"{expr}{self.suffix}"
                 buffer.writeline(line)
 
-        return self.cache[cache_key]
+        return var
 
     def newvar(self) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
@@ -769,10 +776,26 @@ class Kernel(CodeGen):
         finally:
             self.loads = prior
 
+    def store_reduction(self, name, index, value):
+        raise NotImplementedError()
+
     def store(self, name, index, value, mode=None):
         raise NotImplementedError()
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
+        raise NotImplementedError()
+
+    def bucketize(
+        self,
+        values,
+        offsets_name: str,
+        offsets_size: sympy.Expr,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ):
+        """
+        See [Note: Inductor bucketize op]
+        """
         raise NotImplementedError()
 
     def __enter__(self):
@@ -820,10 +843,44 @@ class Kernel(CodeGen):
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(name, dtype, src_dtype, reduction_type, index, value):
+            def store_reduction(name, index, value):
                 self.store_buffer_names.add(name)
-                return self.reduction(
-                    name, dtype, src_dtype, reduction_type, index, value
+                self.cse.store_cache[name] = value
+                if self.current_node:
+                    for other_name in self.current_node.get_mutations():
+                        self.cse.store_cache[other_name] = value
+
+                if name not in V.graph.removed_buffers:
+                    return self.store_reduction(name, index, value)
+
+            @staticmethod
+            def reduction(dtype, src_dtype, reduction_type, value):
+                return self.reduction(dtype, src_dtype, reduction_type, value)
+
+            @staticmethod
+            def bucketize(
+                values,
+                offsets_name: str,
+                offsets_size: sympy.Expr,
+                indexing_dtype: torch.dtype,
+                right: bool,
+            ):
+                """
+                [Note: Inductor bucketize op]
+
+                Given values (tensor) and offsets_name (reference to the name of a 1D
+                tensor), calculate the bucket that each value belongs to.
+
+                e.g. for values [-1, 0, 1, 2, 3, 4, 5, 9], offsets [0, 4, 4, 8], right=True
+                return =        [ 0, 1, 1, 1, 1, 3, 3, 4].
+
+                When right == False, bucket i refers to range (offsets[i], offsets[i+1]].
+                When right == True,  bucket i refers to range [offsets[i], offsets[i+1]).
+
+                Offsets must be non-decreasing or the result is undefined.
+                """
+                return self.bucketize(
+                    values, offsets_name, offsets_size, indexing_dtype, right
                 )
 
         super().__enter__()
@@ -868,5 +925,3 @@ class OptimizationContext:
 
     # Load uint8 value as float32
     is_load_uint8_as_float: bool = False
-    # Store float32 value as uint8
-    is_store_float_as_uint8: bool = False
