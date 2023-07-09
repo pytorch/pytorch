@@ -810,7 +810,9 @@ class CudaReproTests(TestCase):
 
     def test_issue104759(self):
         def fn(arg7_1, add_1, permute_2, select_scatter, slice_8):
-            slice_scatter_4 = torch.ops.aten.slice_scatter.default(permute_2, select_scatter, 0, 1, 9223372036854775807)
+            slice_scatter_4 = torch.ops.aten.slice_scatter.default(
+                permute_2, select_scatter, 0, 1, 9223372036854775807
+            )
             permute_3 = torch.ops.aten.permute.default(slice_scatter_4, [1, 3, 0, 2, 4])
             view_6 = torch.ops.aten.view.default(permute_3, [1, 1000, 48])
             view_7 = torch.ops.aten.view.default(view_6, [1000, 48])
@@ -818,8 +820,12 @@ class CudaReproTests(TestCase):
             view_9 = torch.ops.aten.view.default(view_8, [1, 1000, 3, 4, 4])
             permute_4 = torch.ops.aten.permute.default(view_9, [2, 0, 3, 1, 4])
             slice_7 = torch.ops.aten.slice.Tensor(permute_4, 0, 1, 9223372036854775807)
-            slice_scatter_5 = torch.ops.aten.slice_scatter.default(slice_8, slice_7, 4, 0, 9223372036854775807)
-            slice_scatter_6 = torch.ops.aten.slice_scatter.default(arg7_1, slice_scatter_5, 3, 0, 1000)
+            slice_scatter_5 = torch.ops.aten.slice_scatter.default(
+                slice_8, slice_7, 4, 0, 9223372036854775807
+            )
+            slice_scatter_6 = torch.ops.aten.slice_scatter.default(
+                arg7_1, slice_scatter_5, 3, 0, 1000
+            )
             mul_8 = torch.ops.aten.mul.Scalar(add_1, 0.7071067811865476)
             slice_9 = torch.ops.aten.slice.Tensor(slice_scatter_6, 3, 0, 1000)
             slice_10 = torch.ops.aten.slice.Tensor(slice_9, 4, 0, 9223372036854775807)
@@ -834,11 +840,36 @@ class CudaReproTests(TestCase):
             return (bmm,)
 
         args = []
-        args.append(torch.randn((2, 1, 4, 1200, 4), dtype=torch.float16, device='cuda'))
-        args.append(rand_strided((1, 4, 1000, 4), (16000, 4, 16, 1), dtype=torch.float16, device='cuda'))
-        args.append(rand_strided((3, 1, 4, 1000, 4), (16, 48000, 4, 48, 1), dtype=torch.float16, device='cuda'))
-        args.append(rand_strided((2, 1, 4, 1000, 4), (16, 48000, 4, 48, 1), dtype=torch.float16, device='cuda'))
-        args.append(rand_strided((2, 1, 4, 1000, 4), (19200, 19200, 4800, 4, 1), dtype=torch.float16, device='cuda'))
+        args.append(torch.randn((2, 1, 4, 1200, 4), dtype=torch.float16, device="cuda"))
+        args.append(
+            rand_strided(
+                (1, 4, 1000, 4), (16000, 4, 16, 1), dtype=torch.float16, device="cuda"
+            )
+        )
+        args.append(
+            rand_strided(
+                (3, 1, 4, 1000, 4),
+                (16, 48000, 4, 48, 1),
+                dtype=torch.float16,
+                device="cuda",
+            )
+        )
+        args.append(
+            rand_strided(
+                (2, 1, 4, 1000, 4),
+                (16, 48000, 4, 48, 1),
+                dtype=torch.float16,
+                device="cuda",
+            )
+        )
+        args.append(
+            rand_strided(
+                (2, 1, 4, 1000, 4),
+                (19200, 19200, 4800, 4, 1),
+                dtype=torch.float16,
+                device="cuda",
+            )
+        )
 
         correct = fn(*args)
         mod = make_fx(fn, tracing_mode="real")(*args)
