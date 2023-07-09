@@ -6,7 +6,6 @@ from typing import Optional
 import numpy as np
 
 import torch
-from caffe2.torch.utils.tensorboard.summary import tensor_proto
 from google.protobuf import struct_pb2
 
 from tensorboard.compat.proto.summary_pb2 import (
@@ -38,6 +37,7 @@ __all__ = [
     "audio",
     "custom_scalars",
     "text",
+    "tensor_proto",
     "pr_curve_raw",
     "pr_curve",
     "compute_curve",
