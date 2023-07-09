@@ -3459,6 +3459,7 @@ def _multi_margin_loss_shape_check(ndims, input, target):
 
 
 @register_decomposition(aten.multi_margin_loss)
+@aten.multi_margin_loss.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 def multi_margin_loss(
     input: Tensor,
@@ -3485,45 +3486,6 @@ def multi_margin_loss(
         z = z * weight[target].unsqueeze(1)
     loss = z.where(mask, 0).mean(dim=1)
     return apply_loss_reduction(loss, reduction)
-
-
-@register_decomposition(aten.multi_margin_loss_backward)
-@out_wrapper()
-def multi_margin_loss_backward(
-    grad_output: Tensor,
-    input: Tensor,
-    target: Tensor,
-    p: NumberType,
-    margin: NumberType,
-    weight: Optional[Tensor] = None,
-    reduction: int = Reduction.MEAN.value,
-) -> Tensor:
-    ndims = input.ndim
-    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
-    nframe, dim = _multi_margin_loss_shape_check(ndims, input, target)
-    orig_shape = input.shape
-    input = torch.atleast_2d(input)
-    target = torch.atleast_1d(target).unsqueeze(1)
-    if weight is not None:
-        weight = torch.atleast_1d(weight)
-    size = input.size(1)
-    mask = torch.arange(size, device=input.device) != target
-    u = torch.gather(input, dim=1, index=target)
-    z = margin - u + input
-    z = z.clamp_min(0)
-    g = 1.0 / (nframe * dim) if reduction == Reduction.MEAN.value else 1.0 / dim
-    g = g * torch.ones((), dtype=input.dtype, device=input.device)
-    z = torch.where(z > 0, g, 0) if p == 1 else 2 * g * z
-    if weight is not None:
-        z = z * weight[target].unsqueeze(1)
-    z = z.where(mask, 0)
-    s = z.neg().sum(dim=1)
-    grad_input = torch.where(mask, z, s.unsqueeze(1))
-    if reduction != Reduction.NONE.value or grad_output.ndim == 0:
-        grad_input = grad_input * grad_output
-    else:
-        grad_input = grad_input * grad_output.unsqueeze(1)
-    return grad_input.reshape(orig_shape)
 
 
 def register_inplace(aten_op, outplace_op):
