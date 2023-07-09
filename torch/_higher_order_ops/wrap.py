@@ -1,6 +1,8 @@
 from torch._ops import HigherOrderOperator
 from torch.utils.checkpoint import checkpoint
 from itertools import count
+import inspect
+
 uid = count(1)
 
 # Used for testing the HigherOrderOperator mechanism
@@ -93,9 +95,18 @@ class TagActivationCheckpoint(HigherOrderOperator):
         We do sorting to ensure same graph from run to run for better
         debuggability. It is not required for correctness.
         """
-        checkpoint_keys = ("use_reentrant", "context_fn", "determinism_check", "debug", "preserve_rng_state")
-        checkpoint_kwargs = {name: kwargs[name] for name in sorted(kwargs.keys()) if name in checkpoint_keys}
-        gmod_kwargs = {name: kwargs[name] for name in sorted(kwargs.keys()) if name not in checkpoint_keys}
+        ckpt_signature = inspect.signature(checkpoint)
+        checkpoint_keys = set()
+        for name in ckpt_signature.parameters:
+            if name in ("function", "args", "kwargs"):
+                continue
+            checkpoint_keys.add(name)
+
+        # `preserve_rng_state` is not a regular kwarg
+        checkpoint_keys.add("preserve_rng_state")
+
+        checkpoint_kwargs = {name: kwargs[name] for name in kwargs.keys() if name in checkpoint_keys}
+        gmod_kwargs = {name: kwargs[name] for name in kwargs.keys() if name not in checkpoint_keys}
         return checkpoint_kwargs, gmod_kwargs
 
     def tag_nodes(self, gmod):
