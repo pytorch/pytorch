@@ -54,6 +54,9 @@ load_tests = load_tests
 # batched grad doesn't support sparse
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
+# enable sparse outputs support for gradcheck
+gradcheck = torch.sparse.enable_sparse_outputs(gradcheck)
+
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
 ) or (not IS_WINDOWS and not TEST_WITH_ROCM)
@@ -999,7 +1002,7 @@ class TestSparse(TestSparseBase):
                     else:
                         self.assertFalse(s_permuted.is_coalesced())
 
-                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_())
+                    gradcheck(lambda t: t.permute(dims), s.requires_grad_())
                 else:
                     # otherwise check if exception is thrown
                     fail_message = "transpositions between sparse and dense dimensions are not allowed"
@@ -1632,20 +1635,21 @@ class TestSparse(TestSparseBase):
         # https://github.com/pytorch/pytorch/issues/79914
         a = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
         b = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
-        gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(masked_grad=gradcheck.masked), [a, b])
+        gradcheck(lambda x, y: torch.sparse.sum(x * y), [a, b])
 
         def test_shape(sparse_dims, nnz, with_shape):
             a = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
             b = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
 
-            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense(), masked=True)
-            gradcheck(lambda x, y: (x * y).to_dense(), [a, b])
+            self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense())
+            if not gradcheck.masked:
+                gradcheck(lambda x, y: x * y, [a, b])
             # Issues with 0-dim indices/values
-            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True)
+            if gradcheck.masked and coalesced and a.is_cpu:
+                gradcheck(lambda x, y: torch.sparse.sum(x * y), [a, b])
 
-        # TODO: Re-enable these
-        # test_shape(2, 3, [2, 3, 4, 5])
-        # test_shape(2, 3, [2, 2, 0])
+        test_shape(2, 3, [2, 3, 4, 5])
+        test_shape(2, 3, [2, 2, 0])
 
     @coalescedonoff
     @dtypes(torch.double)
@@ -1822,7 +1826,7 @@ class TestSparse(TestSparseBase):
 
                 def fn(S):
                     res = torch.sparse.sum(S, td)
-                    return res.to_dense(masked_grad=True)
+                    return res
                 gradcheck(fn, (S,), masked=True)
 
         nnz = 10
@@ -2171,8 +2175,8 @@ class TestSparse(TestSparseBase):
                 # sparsity_pattern(lhs) == sparsity_pattern(lhs.grad).
                 # lhs.sparse_mask(lhs_mask) accomplishes that.
                 lhs_mask = lhs.detach().clone()
-                gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs).to_dense(masked_grad=True), (lhs,), masked=True)
-                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False)
+                gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs), (lhs,), masked=True)
+                gradcheck(lambda x: x.sparse_mask(rhs), (lhs,), masked=False)
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
@@ -4082,7 +4086,7 @@ class TestSparseOneOff(TestCase):
 
 def _sparse_to_dense(tensor):
     if tensor.dtype != torch.bool:
-        return tensor.to_dense(masked_grad=True)
+        return tensor.to_dense()
 
     # to_dense uses coalesce which isn't implemented for bool
     return tensor.to(torch.int8).to_dense().to(torch.bool)
@@ -4168,8 +4172,7 @@ class TestSparseUnaryUfuncs(TestCase):
             sparse_input = sample.input.to_sparse().detach().requires_grad_(True)
 
             def fn(x):
-                return _sparse_to_dense(
-                    op(x, *sample.args, **sample.kwargs))
+                return op(x, *sample.args, **sample.kwargs)
 
             self.assertTrue(gradcheck(
                 fn,
