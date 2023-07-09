@@ -266,7 +266,7 @@ namespace {
     scalar_t *gOut_ptr = grad_output.data_ptr<scalar_t>();
     scalar_t *gInp_ptr = nullptr;
     if (input_requires_grad) {
-      gInp_ptr = grad_input.data_ptr<scalar_t>();
+      gInp_ptr = grad_input.mutable_data_ptr<scalar_t>();
     }
     scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
     // loop over each output pixel
@@ -747,7 +747,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
   scalar_t *inp_ptr = input.data_ptr<scalar_t>();
   scalar_t *grid_ptr = grid.data_ptr<scalar_t>();
   scalar_t *gOut_ptr = grad_output.data_ptr<scalar_t>();
-  scalar_t *gInp_ptr = grad_input.data_ptr<scalar_t>();
+  scalar_t *gInp_ptr = grad_input.mutable_data_ptr<scalar_t>();
   scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
   // loop over each output pixel
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
