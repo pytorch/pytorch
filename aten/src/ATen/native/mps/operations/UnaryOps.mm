@@ -388,7 +388,12 @@ void cumulative_op_impl(const Tensor& self,
               ")");
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE(op_name, " supported by MPS on MacOS 13+, please upgrade");
-    auto cpu_result = self.to(at::Device(kCPU)).cumsum(dim, dtype);
+    Tensor cpu_result;
+    if (cumulativeOpType == MPSCumulativeOpType::CUMSUM) {
+      cpu_result = self.to(at::Device(kCPU)).cumsum(dim, dtype);
+    } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
+      cpu_result = self.to(at::Device(kCPU)).cumprod(dim, dtype);
+    }
     at::_copy_from_and_resize(cpu_result, result);
     return;
   }
