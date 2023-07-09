@@ -3201,13 +3201,6 @@ class FallbackKernel(ExternKernelAlloc):
                 )
         else:
             if V.graph.cpp_wrapper:
-                from torch._inductor.codegen.wrapper import (
-                    SUPPORTED_FALLBACK_CPP_WRAPPER,
-                )
-
-                assert (
-                    kernel.__name__ in SUPPORTED_FALLBACK_CPP_WRAPPER
-                ), f"{kernel.__name__} is not supported with cpp wrapper"
                 self.use_cpp_op_schema = True
                 self.set_cpp_kernel(kernel)
             else:
