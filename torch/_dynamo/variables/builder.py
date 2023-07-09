@@ -1282,6 +1282,7 @@ def wrap_fx_proxy_cls(
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
     elif isinstance(example_value, int) and proxy.node.target in [
+        torch.sym_int,
         getattr,
         operator.getitem,
     ]:
