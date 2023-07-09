@@ -138,7 +138,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             options["mutable_local"] = MutableLocal()
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
         elif dataclasses.is_dataclass(self.value):
-            # If we don't create DataClassVariable here, then it is mapped to
+            # If we don't handle dataclass here, then it is mapped to
             # UserDefinedObjectVariable and the code path goes through inline
             # translator where binding of default arguments gets unnecessary
             # complicated.
