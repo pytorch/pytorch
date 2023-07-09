@@ -6,7 +6,8 @@ import inspect
 import itertools
 import operator
 import unittest
-from typing import Any, NamedTuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -1241,6 +1242,24 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out.dtype, compiled_out.dtype)
         self.assertEqual(out.device, compiled_out.device)
         self.assertEqual(out.size(), compiled_out.size())
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_dataclass_default_dict(self):
+        @dataclass
+        class Output:
+            b: int
+            named_tensors: Dict[str, torch.Tensor] = field(default_factory=dict)
+
+        def fn(x):
+            Output(5, named_tensors={"x": x})
+            return torch.cos(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.randn(4)
+        out = fn(x)
+        compiled_out = compiled_fn(x)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 

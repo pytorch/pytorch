@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import dataclasses
 import functools
 import importlib
 import inspect
@@ -133,6 +134,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.NamedTupleVariable(
                 items, self.value, **VariableTracker.propagate(self, items)
             )
+        elif variables.DataClassVariable.is_matching_cls(self.value):
+            options["mutable_local"] = MutableLocal()
+            return variables.DataClassVariable.create(self.value, args, kwargs, options)
+        elif dataclasses.is_dataclass(self.value):
+            # If we don't create DataClassVariable here, then it is mapped to
+            # UserDefinedObjectVariable and the code path goes through inline
+            # translator where binding of default arguments gets unnecessary
+            # complicated.
+            from .dicts import create_dict_variable_for_dataclass
+
+            return create_dict_variable_for_dataclass(self.value, args, kwargs, options)
         elif (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
             and SideEffects.cls_supports_mutation_side_effects(self.value)
@@ -156,9 +168,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return var
             else:
                 return var.add_options(var.call_method(tx, "__init__", args, kwargs))
-        elif variables.DataClassVariable.is_matching_cls(self.value):
-            options["mutable_local"] = MutableLocal()
-            return variables.DataClassVariable.create(self.value, args, kwargs, options)
 
         return super().call_function(tx, args, kwargs)
 
