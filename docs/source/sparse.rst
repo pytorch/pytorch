@@ -1333,6 +1333,15 @@ To manage checking sparse tensor invariants, see:
 
     sparse.check_sparse_tensor_invariants
 
+To enable sparse output support for :func:`~torch.autograd.gradcheck`
+function, decorate the function with
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    sparse.enable_sparse_outputs
+
 Unary functions
 ---------------
 
