@@ -5987,8 +5987,6 @@ def ___make_guard_fn():
         self.assertIsNotNone(r.failed_source_expr)
 
 
-
-
 class TestTracer(JitTestCase):
     def test_jit_save(self):
         def fn():

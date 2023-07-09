@@ -30,6 +30,7 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.utils
+import torch._export
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
@@ -81,7 +82,6 @@ class CI(NamedTuple):
 
 
 CI_SKIP = collections.defaultdict(list)
-CI_TV_OFF = collections.defaultdict(list)
 
 
 # Skips for dynamic=False
@@ -302,40 +302,6 @@ CI_SKIP_OPTIMIZER = {
     "PegasusForConditionalGeneration",  # OOM
 }
 
-# Turning translation validation (TV) off for a few benchmarks
-# due to timeout.
-
-CI_TV_OFF[CI("aot_eager", training=True, dynamic=True, device="cuda")] = [
-    # TIMM
-    "eca_halonext26ts",
-    "swin_base_patch4_window7_224",
-    "mobilevit_s",
-    # TorchBench
-    "attention_is_all_you_need_pytorch",
-    "hf_GPT2",
-    "yolov3",
-]
-
-
-CI_TV_OFF[CI("inductor", training=False, dynamic=False, device="cuda")] = [
-    # TorchBench
-    "hf_T5_generate",
-]
-
-CI_TV_OFF[CI("inductor", training=True, dynamic=True, device="cuda")] = [
-    # TIMM
-    "eca_halonext26ts",
-    "swin_base_patch4_window7_224",
-    # TorchBench
-    "yolov3",
-]
-
-CI_TV_OFF[CI("inductor", training=False, dynamic=True, device="cpu")] = [
-    # TIMM
-    "eca_halonext26ts",
-    "swin_base_patch4_window7_224",
-]
-
 
 def model_specified_by_path(path_and_class_str):
     return ":" in path_and_class_str
@@ -440,7 +406,7 @@ def summarize_graph_break(filename):
         df.to_csv(f"{log_file.rstrip('.csv')}_deduped.csv", index=False)
 
 
-def print_summary(filename):
+def print_summary(filename, print_dataframe=False):
     if not (filename and os.path.exists(filename)):
         return
     data = pd.read_csv(filename)
@@ -449,13 +415,18 @@ def print_summary(filename):
             if tag == "0.0000":
                 continue  # This happens for failed runs
             print(f"\nSummary for tag={tag}:")
-            print_summary_table(data[data.tag == tag])
+            print_summary_table(data[data.tag == tag], print_dataframe=print_dataframe)
     else:
-        print_summary_table(data)
+        print_summary_table(data, print_dataframe=print_dataframe)
     summarize_graph_break(filename)
 
 
-def print_summary_table(data):
+def print_summary_table(data, print_dataframe=False):
+    if print_dataframe:
+        pd.options.display.max_rows = 1000
+        pd.options.display.max_columns = 1000
+        pd.options.display.width = 2000
+        print(data)
     width = max(map(len, data.columns))
     for col in data.columns:
         try:
@@ -1988,8 +1959,24 @@ class BenchmarkRunner:
             try:
                 model_copy = deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
-                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                new_result = optimized_model_iter_fn(model_copy, example_inputs)
+                if self.args.export:
+                    # TB and TIMM use list example_inputs
+                    # HF use dict example_inputs
+                    if isinstance(example_inputs, dict):
+                        raise RuntimeError(
+                            "expect example_inputs as list/tuple, but got dict. need to support kwargs in torch._export.export"
+                        )
+                    # apply export on module directly
+                    # no need for n iterations
+                    # the logic should be the same to self.model_iter_fn (forward_pass)
+                    with self.autocast():
+                        optimized_model_iter_fn = optimize_ctx(
+                            model_copy, example_inputs
+                        )
+                        new_result = optimized_model_iter_fn(*example_inputs)
+                else:
+                    optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+                    new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception(e)
                 print(
@@ -2553,6 +2540,11 @@ def parse_args(args=None):
         help="print extra memory statistics",
     )
     parser.add_argument(
+        "--print-dataframe-summary",
+        action="store_true",
+        help="print dataframe result used for calculating accuracy",
+    )
+    parser.add_argument(
         "--cold-start-latency",
         "--cold_start_latency",
         action="store_true",
@@ -2694,6 +2686,11 @@ def parse_args(args=None):
         "--inductor",
         action="store_true",
         help="Measure speedup with TorchInductor",
+    )
+    group.add_argument(
+        "--export",
+        action="store_true",
+        help="Measure pass rate with export",
     )
     group.add_argument(
         "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
@@ -3014,6 +3011,10 @@ def run(runner, args, original_dir=None):
         )
         experiment = speedup_experiment
         output_filename = "inductor.csv"
+    elif args.export:
+        optimize_ctx = torch._export.export
+        experiment = speedup_experiment
+        output_filename = "export.csv"
     elif args.xla:
         (dev,) = args.devices
         os.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]
@@ -3232,28 +3233,16 @@ def run(runner, args, original_dir=None):
                     args.per_process_memory_fraction
                 )
 
-            # Set translation validation on by default on CI accuracy runs.
-            ci = CI(
-                args.backend,
-                training=args.training,
-                dynamic=args.dynamic_shapes,
-                device=device,
+            model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            runner.run_one_model(
+                name,
+                model,
+                example_inputs,
+                optimize_ctx,
+                experiment,
+                explain=args.explain,
+                tag=args.tag,
             )
-            translation_validation = args.only not in CI_TV_OFF[ci]
-
-            with torch._dynamo.config.patch(
-                translation_validation=translation_validation
-            ):
-                model, example_inputs = runner.cast_based_on_args(model, example_inputs)
-                runner.run_one_model(
-                    name,
-                    model,
-                    example_inputs,
-                    optimize_ctx,
-                    experiment,
-                    explain=args.explain,
-                    tag=args.tag,
-                )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(
@@ -3315,7 +3304,7 @@ def run(runner, args, original_dir=None):
             except subprocess.SubprocessError:
                 print("ERROR", file=sys.stderr)
                 write_csv("infra_error")
-        print_summary(output_filename)
+        print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
 
 
 def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):

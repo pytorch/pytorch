@@ -48,6 +48,7 @@ log = logging.getLogger(__name__)
 HOMOGENEOUS_ATTR_NAMES = (
     "_use_orig_params",
     "limit_all_gathers",
+    "_use_full_prec_in_eval",
 )
 
 
@@ -252,7 +253,6 @@ def _share_state_and_init_handle_attrs(
     root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
     root_state._device_mesh = _init_device_mesh(root_state)
-
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
@@ -641,10 +641,9 @@ def _root_cast_forward_input(
     state: _FSDPState, module: torch.nn.Module, args, kwargs
 ) -> Tuple[Any, Any]:
     should_cast_forward_inputs = (
-        state._handle
-        and not state._handle._force_full_precision
-        and state.mixed_precision.cast_root_forward_inputs
-    )
+        (module.training or not state._use_full_prec_in_eval)
+        and (not state.handle._force_full_precision)
+    ) and state.mixed_precision.cast_root_forward_inputs
 
     if should_cast_forward_inputs:
         input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
@@ -786,7 +785,7 @@ def _post_backward_hook(
                 not _low_precision_hook_enabled(state)
                 and flat_param.grad.dtype != handle._reduce_dtype
                 # If we are forcing full precision but communicating grads
-                # (i.e. model.eval()), don't downcast gradient.
+                # (i.e. model.eval() + full precision in eval was configured), don't downcast gradient.
                 and not handle._force_full_precision
             ):
                 flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
