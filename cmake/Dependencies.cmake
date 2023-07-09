@@ -810,7 +810,7 @@ endif()
 
 if(USE_FBGEMM)
   if(NOT TARGET fbgemm AND USE_SYSTEM_FBGEMM)
-    find_package(fbgemmLibrary REQUIRED)
+    find_package(fbgemm REQUIRED)
   elseif(NOT TARGET fbgemm AND NOT USE_SYSTEM_FBGEMM)
     set(FBGEMM_BUILD_TESTS OFF CACHE BOOL "")
     set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
