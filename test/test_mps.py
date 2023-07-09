@@ -3662,7 +3662,7 @@ class TestMPS(TestCaseMPS):
         except Exception as e:
             e_string = str(e)
             self.assertEqual(e_string, "MPS does not support cumsum_out_mps op with int64 input." +
-                             "Support has been added in macOS 13.3")
+                             " Support has been added in macOS 13.3")
 
     def test_cumsum_minus_one_axis(self):
         def helper(dtype):
@@ -3697,7 +3697,7 @@ class TestMPS(TestCaseMPS):
         except Exception as e:
             e_string = str(e)
             self.assertEqual(e_string, "MPS does not support cumprod_out_mps op with int64 input."
-                             + "Support has been added in macOS 13.3")
+                             + " Support has been added in macOS 13.3")
 
     def test_cumprod_minus_one_axis(self):
         def helper(dtype):
