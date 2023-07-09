@@ -5,14 +5,11 @@ import sys
 import unittest
 from collections import OrderedDict
 from dataclasses import dataclass
-from enum import auto, Enum
 from typing import List
 
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp._wrap_utils import _get_fully_sharded_module_to_states
-from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -117,110 +114,7 @@ class TestUtils(TestCase):
         self.assertEqual(torch.sum(x), 0)
 
 
-class TestGetSubmoduleToStates(TestCase):
-    """Tests the function ``_get_fully_sharded_module_to_states()``."""
-
-    class SharedParameterMode(Enum):
-        """
-        - ``PARENT_CHILD``: A parent submodule shares a parameter with a child
-        submodule.
-        - ``SIBLING``: Two sibling submodules share a parameter.
-        """
-
-        PARENT_CHILD = auto()
-        SIBLING = auto()  # TODO: not yet supported
-
-    class Model(nn.Module):
-        """Nested model with buffers and a shared parameter."""
-
-        def __init__(self, shared_parameter_mode) -> None:
-            super().__init__()
-            self.seq1 = nn.Sequential(
-                nn.Linear(5, 5, bias=False),
-                nn.Linear(5, 5, bias=False),
-            )
-            self.seq1.register_buffer("seq1_buffer", torch.randn((5,)))
-            self.lin = nn.Linear(5, 5, bias=False)
-            self.seq2 = nn.Sequential(
-                nn.Sequential(nn.Linear(5, 5, bias=False)), nn.Linear(5, 5, bias=False)
-            )
-            if (
-                shared_parameter_mode
-                == TestGetSubmoduleToStates.SharedParameterMode.PARENT_CHILD
-            ):
-                self.seq2[0][0].weight = self.lin.weight
-            elif (
-                shared_parameter_mode
-                == TestGetSubmoduleToStates.SharedParameterMode.SIBLING
-            ):
-                self.seq2[0][0].weight = self.seq1[0].weight
-            self.seq2[1].register_buffer("seq2_1_buffer", torch.randn((5,)))
-
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            return self.seq2(self.lin(self.seq1(x)))  # equivalent to one matmul
-
-    def test_get_fully_sharded_module_to_states(self):
-        """
-        Tests the helper function ``_get_fully_sharded_module_states()`` that
-        performs the pseudo-auto-wrapping for the non-wrapper path.
-
-        NOTE: This test is hard coded against ``Model``.
-        """
-        model = self.Model(TestGetSubmoduleToStates.SharedParameterMode.PARENT_CHILD)
-
-        # Compute the mapping from fully sharded module to states according to
-        # a logical module wrap policy
-        module_classes = (nn.Sequential,)
-        auto_wrap_policy = ModuleWrapPolicy(set(module_classes))
-        fully_sharded_module_to_states = _get_fully_sharded_module_to_states(
-            model, auto_wrap_policy, set(), set()
-        )
-        # Check the number of submodules with states in the mapping
-        num_submodules_with_states = sum(
-            isinstance(submodule, module_classes) for submodule in model.modules()
-        )  # explicitly show how to compute the expected number
-        if not isinstance(model, module_classes):
-            num_submodules_with_states += 1  # always include the root
-        assert num_submodules_with_states == 4, f"{num_submodules_with_states}"
-        self.assertEqual(
-            len(fully_sharded_module_to_states), num_submodules_with_states
-        )
-
-        # Check the mapping, i.e. that the dict order follows `model.modules()`
-        # order and that the contents are expected
-        fully_sharded_modules = list(fully_sharded_module_to_states.keys())
-        expected_fully_sharded_modules = [
-            module
-            for module in model.modules()
-            if isinstance(module, nn.Sequential) or module is model
-        ]
-        self.assertEqual(expected_fully_sharded_modules, fully_sharded_modules)
-        # - Root module `model`
-        self.assertEqual(fully_sharded_modules[0], model)
-        root_states = fully_sharded_module_to_states[fully_sharded_modules[0]]
-        self.assertEqual(root_states.params, [model.lin.weight])
-        self.assertEqual(root_states.buffers, [])
-        # - `seq1`
-        self.assertEqual(fully_sharded_modules[1], model.seq1)
-        seq1_states = fully_sharded_module_to_states[fully_sharded_modules[1]]
-        self.assertEqual(
-            seq1_states.params, [model.seq1[0].weight, model.seq1[1].weight]
-        )
-        self.assertEqual(seq1_states.buffers, [model.seq1.seq1_buffer])
-        # - `seq2`
-        self.assertEqual(fully_sharded_modules[2], model.seq2)
-        seq2_states = fully_sharded_module_to_states[fully_sharded_modules[2]]
-        self.assertEqual(seq2_states.params, [model.seq2[1].weight])
-        self.assertEqual(seq2_states.buffers, [model.seq2[1].seq2_1_buffer])
-        # - `seq2[0]`
-        self.assertEqual(fully_sharded_modules[3], model.seq2[0])
-        seq2_0_states = fully_sharded_module_to_states[fully_sharded_modules[3]]
-        self.assertEqual(seq2_0_states.params, [])  # shared parameter
-        self.assertEqual(seq2_0_states.buffers, [])
-
-
 instantiate_parametrized_tests(TestUtils)
-instantiate_parametrized_tests(TestGetSubmoduleToStates)
 
 if __name__ == "__main__":
     run_tests()
