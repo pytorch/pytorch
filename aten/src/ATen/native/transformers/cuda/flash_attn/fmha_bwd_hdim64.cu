@@ -4,6 +4,8 @@
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha_bwd_launch_template.h>
 
+namespace pytorch_fmha {
+
 void run_fmha_bwd_hdim64(FMHA_dgrad_params &params, cudaStream_t stream, const bool configure) {
     FP16_SWITCH(params.is_bf16, ([&] {
         auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -32,3 +34,5 @@ void run_fmha_bwd_hdim64(FMHA_dgrad_params &params, cudaStream_t stream, const b
         }
     }));
 }
+
+}; // namespace pytorch_fmha
