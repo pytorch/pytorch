@@ -366,6 +366,23 @@ class LoggingTests(LoggingTestCase):
         for line in lines:
             if "concrete" in line:
                 self.assertIsNotNone(re.search(r"\(concrete\): \(\d+, \d+\)", line))
+                
+    @make_logging_test(graph_code=True)
+    def test_graph_code_graph_module(self, records):
+        # test that compiled GraphModules log original source lines
+        class MyModule(torch.nn.Module):
+            def forward(self, a):
+                return a * 2
+        gm = torch.fx.symbolic_trace(MyModule())
+        torch._dynamo.optimize("eager")(gm)(torch.randn(3, 3))
+
+        for record in records:
+            print(record.getMessage())
+            if "return a * 2" in record.getMessage():
+                break
+        else:
+            # original source line not found
+            self.assertTrue(False)
 
 
 # single record tests

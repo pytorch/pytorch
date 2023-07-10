@@ -13,6 +13,7 @@ import torch
 import keyword
 import re
 import builtins
+import linecache
 import math
 import warnings
 import inspect
@@ -465,9 +466,21 @@ class CodeGen:
                             if matches:
                                 file = matches.group(1)
                                 lineno = matches.group(2)
-                                # next line should be the code
-                                code = lines[idx + 1].strip()
-                                summary_str = f'File: {file}:{lineno}, code: {code}'
+                                code = ''
+                                codetype = 'generated'
+                                original_filename_matches = re.search(r" from (.+):\d+ in ", file)
+                                if original_filename_matches:
+                                    original_filename = original_filename_matches.group(1)
+                                    code = linecache.getline(original_filename, int(lineno))
+                                    if code != '':
+                                        file = original_filename
+                                        codetype = 'original'
+                                if code == '':
+                                    # no original_filename or linecache failed
+                                    file = matches.group(1)
+                                    # next line should be the code
+                                    code = lines[idx + 1].strip()
+                                summary_str = f'File: {file}:{lineno}, code ({codetype}): {code}'
                                 break
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":
