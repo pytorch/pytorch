@@ -193,8 +193,8 @@ class RNNBase(Module):
                         self.hidden_size, self.proj_size, self.num_layers,
                         self.batch_first, bool(self.bidirectional))
 
-    def _apply(self, fn):
-        ret = super()._apply(fn)
+    def _apply(self, fn, recurse=True):
+        ret = super()._apply(fn, recurse)
 
         # Resets _flat_weights
         # Note: be v. careful before removing this, as 3rd party device types

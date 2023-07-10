@@ -67,6 +67,15 @@ class AdamW(Optimizer):
                                    f"supported devices: {fused_supported_devices}.")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
+            # TODO(crcrpar): [low prec params & their higher prec copy]
+            # Suppor AMP with FP16/BF16 model params which would need
+            # higher prec copy of params to do update math in higher prec to
+            # alleviate the loss of information.
+            if not all(
+                p.is_cuda and torch.is_floating_point(p)
+                for pg in self.param_groups for p in pg['params']
+            ):
+                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -295,7 +304,7 @@ def adamw(
     See :class:`~torch.optim.AdamW` for details.
     """
 
-    if not all(isinstance(t, torch.Tensor) for t in state_steps):
+    if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
         )
@@ -373,7 +382,8 @@ def _single_tensor_adamw(
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
-        if capturable:
+        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+        if not torch._utils.is_compiling() and capturable:
             assert (
                 param.is_cuda and step_t.is_cuda
             ), "If capturable=True, params and state_steps must be CUDA tensors."
@@ -470,7 +480,8 @@ def _multi_tensor_adamw(
     if len(params) == 0:
         return
 
-    if capturable:
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
         assert all(
             p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
         ), "If capturable=True, params and state_steps must be CUDA tensors."
@@ -481,11 +492,16 @@ def _multi_tensor_adamw(
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([
         params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
-    for (device_params, device_grads, device_exp_avgs, device_exp_avg_sqs,
-         device_max_exp_avg_sqs, device_state_steps) in grouped_tensors.values():
+    for ((
+        device_params,
+        device_grads,
+        device_exp_avgs,
+        device_exp_avg_sqs,
+        device_max_exp_avg_sqs,
+        device_state_steps,
+    ), _) in grouped_tensors.values():
         if maximize:
             device_grads = torch._foreach_neg(tuple(device_grads))  # type: ignore[assignment]
-
 
         device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
         device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
@@ -592,6 +608,8 @@ def _fused_adamw(
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
 ) -> None:
+    if not params:
+        return
     if differentiable:
         raise RuntimeError("_fused_adamw is not differentiable")
     grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
@@ -599,14 +617,14 @@ def _fused_adamw(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device, dtype) in grouped_tensors:
-        (
+        ((
             device_params,
             device_grads,
             device_exp_avgs,
             device_exp_avg_sqs,
             device_max_exp_avg_sqs,
             device_state_steps,
-        ) = grouped_tensors[(device, dtype)]
+        ), _) = grouped_tensors[(device, dtype)]
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             if device not in grad_scale_dict:
