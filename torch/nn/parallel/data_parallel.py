@@ -155,7 +155,8 @@ class DataParallel(Module, Generic[T]):
         self.output_device = _get_device_index(output_device, True)
         self.src_device_obj = torch.device(device_type, self.device_ids[0])
 
-        _check_balance(self.device_ids)
+        if device_type == "cuda":
+            _check_balance(self.device_ids)
 
         if len(self.device_ids) == 1:
             self.module.to(self.src_device_obj)

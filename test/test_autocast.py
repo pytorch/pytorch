@@ -232,6 +232,13 @@ class TestTorchAutocast(TestCase):
         self.assertEqual(gpu_fast_dtype, torch.half)
         self.assertEqual(cpu_fast_dtype, torch.bfloat16)
 
+    def test_invalid_device(self):
+        dev = 'not a real device'
+        msg = f'unsupported autocast device_type \'{dev}\''
+        with self.assertRaisesRegex(RuntimeError, msg):
+            with torch.autocast(device_type=dev):
+                _ = torch.tensor(1)
+
 
 if __name__ == '__main__':
     run_tests()

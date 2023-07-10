@@ -3,7 +3,7 @@ import sys
 import unittest
 from typing import NamedTuple
 
-import torch._dynamo
+import torch
 from torch._inductor import config
 from torch.testing._internal.common_utils import (
     IS_MACOS,
@@ -81,13 +81,9 @@ test_failures_cpp_wrapper = {
     ),
 }
 
-# see https://github.com/pytorch/pytorch/issues/103194
 test_failures_cuda_wrapper = {
-    "test_fft_real_input_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",)
-    ),
-    "test_fft_real_input_real_output_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",)
+    "test_custom_op_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",), is_skip=True
     ),
 }
 
@@ -168,6 +164,7 @@ if RUN_CPU:
             slow=True,
         ),
         BaseTest("test_conv_transpose2d_packed", "cpu", test_cpu_repro.CPUReproTests()),
+        BaseTest("test_custom_op"),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
@@ -184,6 +181,7 @@ if RUN_CPU:
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_mm_views"),
         BaseTest("test_profiler_mark_wrapper_call"),
+        BaseTest("test_randint"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
@@ -236,6 +234,7 @@ if RUN_CUDA:
         BaseTest("test_cat"),  # alias
         BaseTest("test_convolution1"),
         BaseTest("test_conv_backward"),
+        BaseTest("test_custom_op"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_index_tensor"),

@@ -25,6 +25,11 @@
 #
 # Environment variables for feature toggles:
 #
+#   DEBUG_CUDA=1
+#     if used in conjunction with DEBUG or REL_WITH_DEB_INFO, will also
+#     build CUDA kernels with -lineinfo --source-in-ptx.  Note that
+#     on CUDA 12 this may cause nvcc to OOM, so this is disabled by default.
+#
 #   USE_CUDNN=0
 #     disables the cuDNN build
 #
@@ -205,6 +210,10 @@
 #      Use system-provided libraries to satisfy the build dependencies.
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
+#
+#   USE_MIMALLOC
+#      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
+#      By default, It is only enabled on Windows.
 
 import sys
 if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
@@ -1194,6 +1203,8 @@ def main():
         'include/THH/generic/*.h',
         'include/sleef.h',
         "_inductor/codegen/*.h",
+        "_inductor/aot_inductor_include/*.cpp",
+        "_inductor/aot_inductor_include/*.h",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',
