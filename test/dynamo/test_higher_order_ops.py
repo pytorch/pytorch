@@ -153,7 +153,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(test, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(fn, (x,), 3)
+
+        # Since, `x` is unused, we don't lift it to
+        # be the input.
+        self._test_wrap_simple(fn, (x,), 2)
 
     def test_return_captured_vars(self):
         freevar1 = torch.randn(3)
@@ -166,7 +169,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(test, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(fn, (x,), 4, 4)
+
+        # Since, `x` is unused, we don't lift it to
+        # be the input.
+        self._test_wrap_simple(fn, (x,), 3, 4)
 
     def test_return_captured_var_used_multiple_times(self):
         freevar = torch.randn(3)
@@ -290,7 +296,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(g, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(f, (x,), 3, 3)
+
+        # Since, `x` is unused, we don't lift it to
+        # be the input.
+        self._test_wrap_simple(f, (x,), 2, 3)
 
     def test_capture_value_created_in_subgraph(self):
         backend = EagerAndRecordGraphs()
