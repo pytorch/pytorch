@@ -360,6 +360,8 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         torch.clamp,
         torch.flatten,
         torch.mean,
+        torch.permute,
+        torch.permute_copy,
         torch.squeeze,
         "clamp",
         "mean",
