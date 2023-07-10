@@ -2264,8 +2264,21 @@ class TestCase(expecttest.TestCase):
             if PRINT_REPRO_ON_FAILURE:
                 env_var_prefix = TestEnvironment.repro_env_var_prefix()
                 try:
-                    REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-                    test_filename = os.path.relpath(inspect.getfile(type(self)), start=REPO_ROOT)
+                    def _get_rel_test_path(abs_test_path):
+                        # Attempt to get relative path based on the "test" dir.
+                        # In CI, the working dir is not guaranteed to be the base repo dir so
+                        # we can't just compute relative path from that.
+                        parts = Path(abs_test_path).parts
+                        for i, part in enumerate(parts):
+                            if part == "test":
+                                base_dir = os.path.join(*parts[:i])
+                                return os.path.relpath(abs_test_path, start=base_dir)
+
+                        # Can't determine containing dir; just return the test filename.
+                        # The path isn't strictly correct but it's arguably better than nothing.
+                        return os.path.split(abs_test_path)[1]
+
+                    test_filename = _get_rel_test_path(inspect.getfile(type(self)))
                     repro_str = f"""
 To execute this test, run the following from the base repo dir:
     {env_var_prefix} python {test_filename} -k {method_name}
