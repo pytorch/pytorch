@@ -153,6 +153,10 @@ class _NamedOptimizer(optim.Optimizer):
         """
         self._optimizer.step(closure=closure)
 
+    @property
+    def state(self) -> Mapping[torch.Tensor, Any]:
+        return self._optimizer.state
+
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
         """
         This public function defines the default behavior to load a state_dict
@@ -299,6 +303,8 @@ class _NamedOptimizer(optim.Optimizer):
         self.step(closure=None)
 
     def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
+        # TODO(chienchin): This API should be FSDP agnostic and should support
+        # general user hooks.
         if isinstance(self.module, FSDP):
             return FSDP.optim_state_dict_to_load(
                 self.module, self._optimizer, state_dict, is_named_optimizer=True
@@ -306,8 +312,10 @@ class _NamedOptimizer(optim.Optimizer):
         return state_dict
 
     def _post_state_dict(self, state_dict) -> Dict[str, Any]:
+        # TODO(chienchin): This API should be FSDP agnostic and should support
+        # general user hooks.
         if isinstance(self.module, FSDP):
-            FSDP.optim_state_dict_post_hook(self.module, self._optimizer, state_dict)
+            FSDP.optim_state_dict(self.module, self._optimizer, state_dict)
         return state_dict
 
 
