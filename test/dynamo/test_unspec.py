@@ -304,6 +304,15 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         sample_input = torch.tensor([4, 4, 16, 32], dtype=torch.uint8)
         opt_fn(sample_input)
 
+    def test_sym_int_conversion(self):
+        def f(x):
+            y = x.size(0)
+            return x * int(y == 0)
+
+        opt_fn = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(2, 3)
+        opt_fn(x)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

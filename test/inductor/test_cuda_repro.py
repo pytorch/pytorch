@@ -808,6 +808,27 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expect, actual)
 
+    @config.patch({"triton.dense_indexing": True})
+    @dynamo_config.patch(automatic_dynamic_shapes=True)
+    def test_bucketize_dynamic_dense(self):
+        """
+        Make sure that ops.bucketize() can handle dense_indexing, which previously
+        caused issues due to incorrect handling of the size of offsets.
+        """
+
+        def fn(values, offsets):
+            return torch.ops.prims._inductor_bucketize(values, offsets)
+
+        values = torch.rand((64, 64), device="cuda")
+        offsets = torch.tensor([0.05, 0.1, 0.5, 0.8, 0.85, 0.95], device="cuda")
+
+        expect = fn(values, offsets)
+
+        opt_fn = torch.compile(fn, dynamic=True)
+        actual = opt_fn(values, offsets)
+
+        self.assertEqual(expect, actual)
+
     def test_issue104759(self):
         def fn(arg7_1, add_1, permute_2, select_scatter, slice_8):
             slice_scatter_4 = torch.ops.aten.slice_scatter.default(
