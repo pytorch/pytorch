@@ -9,9 +9,8 @@ import torch
 
 import torch._inductor
 
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import TestCase
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
 
@@ -95,7 +94,4 @@ class CompiledOptimizerTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
-        run_tests(needs="filelock")
+    run_tests()
