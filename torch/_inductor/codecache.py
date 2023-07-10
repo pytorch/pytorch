@@ -538,6 +538,7 @@ class VecAVX2(VecISA):
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
+
 @dataclasses.dataclass
 class VecZVECTOR(VecISA):
     _bit_width = 256
@@ -549,6 +550,7 @@ class VecZVECTOR(VecISA):
         return "zvector"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
 
 class InvalidVecISA(VecISA):
     _bit_width = 0
@@ -566,8 +568,9 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2()]
+supported_x86_vec_isa_list = [VecAVX512(), VecAVX2()]
 zvector_vec_isa = VecZVECTOR()
+
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
 # might have too much redundant content that is useless for ISA check. Hence,
@@ -583,7 +586,7 @@ def valid_vec_isa_list():
     isa_list = []
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
-        for isa in supported_vec_isa_list:
+        for isa in supported_x86_vec_isa_list:
             if str(isa) in _cpu_info_content and isa:
                 isa_list.append(isa)
         return isa_list
@@ -1030,13 +1033,14 @@ class CppWrapperCodeCache:
                     _opt_flags = optimization_flags()
                     _shared = get_shared()
                     _warning_all_flag = get_warning_all_flag()
-                    _ipaths, _lpaths, _libs, _macros = get_include_and_linking_paths(
+                    _ipaths, _lpaths, _libs, _macros, _arch_flags = get_include_and_linking_paths(
                         vec_isa=pick_vec_isa(),
                         cuda=cuda,
                     )
                     _use_custom_generated_macros = use_custom_generated_macros()
 
-                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_use_custom_generated_macros}"
+                    extra_cflags = (f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_use_custom_generated_macros}"
+                                    " {_arch_flags}")
                     # For CPP wrapper, add -ffast-math during linking to make CPU flush denormals.
                     # CPP wrapper leverages cpp_extension which will do the compilation and linking in two stages.
                     # We need to explicitly add -ffast-math as a linking flag.

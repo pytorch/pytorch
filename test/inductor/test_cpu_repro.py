@@ -2,6 +2,7 @@
 import contextlib
 import itertools
 import math
+import platform
 import sys
 import unittest
 from typing import Callable
@@ -863,12 +864,47 @@ class CPUReproTests(TestCase):
             self.common(fn, (value,))
 
     @unittest.skipIf(
+        platform.processor() != "s390x", "Platform is not s390x"
+    )
+    def test_auto_simd_s390x(self):
+        vec_zvector = codecache.zvector_vec_isa
+        self.assertTrue(vec_zvector.bit_width() == 256)
+        self.assertTrue(vec_zvector.nelements() == 8)
+
+        with config.patch({"cpp.simdlen": None}):
+            isa = codecache.pick_vec_isa()
+            self.assertTrue(isa == vec_zvector)
+
+        with config.patch({"cpp.simdlen": 0}):
+            isa = codecache.pick_vec_isa()
+            self.assertFalse(isa)
+
+        with config.patch({"cpp.simdlen": 1}):
+            isa = codecache.pick_vec_isa()
+            self.assertFalse(isa)
+
+        with config.patch({"cpp.simdlen": 257}):
+            isa = codecache.pick_vec_isa()
+            self.assertFalse(isa)
+
+        with config.patch({"cpp.simdlen": 257}):
+            isa_list = codecache.valid_vec_isa_list()
+            if vec_zvector in isa_list:
+                self.assertFalse(isa)
+
+        with config.patch({"cpp.simdlen": 256}):
+            isa_list = codecache.valid_vec_isa_list()
+            if vec_zvector in isa_list:
+                isa = codecache.pick_vec_isa()
+                self.assertTrue(isa == vec_zvector)
+
+    @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
-        vec_avx512 = codecache.supported_vec_isa_list[0]
-        vec_avx2 = codecache.supported_vec_isa_list[1]
+        vec_avx512 = codecache.supported_x86_vec_isa_list[0]
+        vec_avx2 = codecache.supported_x86_vec_isa_list[1]
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
