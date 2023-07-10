@@ -1,0 +1,1 @@
+add_example_executable(example_groupnorm_sigmoid_fp16 groupnorm_sigmoid_fp16.cpp)

@@ -1,0 +1,2 @@
+add_example_executable(example_dual_reduce_multiblock dual_reduce_multiblock.cpp)
+add_example_executable(example_dual_reduce_threadwise dual_reduce_threadwise.cpp)

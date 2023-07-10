@@ -1,0 +1,61 @@
+include_directories(BEFORE
+    ${PROJECT_SOURCE_DIR}/
+    ${PROJECT_SOURCE_DIR}/profiler/include
+)
+
+include(googletest)
+
+add_custom_target(tests)
+
+function(add_test_executable TEST_NAME)
+    message("adding test ${TEST_NAME}")
+    add_executable(${TEST_NAME} ${ARGN})
+    add_test(NAME ${TEST_NAME} COMMAND $<TARGET_FILE:${TEST_NAME}>)
+    add_dependencies(tests ${TEST_NAME})
+    add_dependencies(check ${TEST_NAME})
+    rocm_install(TARGETS ${TEST_NAME} COMPONENT tests)
+endfunction(add_test_executable TEST_NAME)
+
+include(GoogleTest)
+
+function(add_gtest_executable TEST_NAME)
+    message("adding gtest ${TEST_NAME}")
+    add_executable(${TEST_NAME} ${ARGN})
+    add_dependencies(tests ${TEST_NAME})
+    add_dependencies(check ${TEST_NAME})
+
+    # suppress gtest warnings
+    target_compile_options(${TEST_NAME} PRIVATE -Wno-global-constructors -Wno-undef)
+    target_link_libraries(${TEST_NAME} PRIVATE gtest_main)
+    add_test(NAME ${TEST_NAME} COMMAND $<TARGET_FILE:${TEST_NAME}> )
+    rocm_install(TARGETS ${TEST_NAME} COMPONENT tests)
+endfunction(add_gtest_executable TEST_NAME)
+
+add_subdirectory(magic_number_division)
+add_subdirectory(space_filling_curve)
+add_subdirectory(conv_util)
+add_subdirectory(reference_conv_fwd)
+add_subdirectory(gemm)
+add_subdirectory(gemm_split_k)
+add_subdirectory(gemm_reduce)
+add_subdirectory(batched_gemm)
+add_subdirectory(batched_gemm_reduce)
+add_subdirectory(batched_gemm_gemm)
+add_subdirectory(batched_gemm_softmax_gemm)
+add_subdirectory(batched_gemm_softmax_gemm_permute)
+add_subdirectory(grouped_gemm)
+add_subdirectory(reduce)
+add_subdirectory(convnd_fwd)
+add_subdirectory(convnd_bwd_data)
+add_subdirectory(grouped_convnd_fwd)
+add_subdirectory(grouped_convnd_bwd_weight)
+add_subdirectory(block_to_ctile_map)
+add_subdirectory(softmax)
+add_subdirectory(normalization)
+add_subdirectory(data_type)
+add_subdirectory(elementwise_normalization)
+add_subdirectory(batchnorm)
+if(GPU_TARGETS MATCHES "gfx1100")
+    add_subdirectory(wmma_op)
+endif()
+add_subdirectory(host_tensor)

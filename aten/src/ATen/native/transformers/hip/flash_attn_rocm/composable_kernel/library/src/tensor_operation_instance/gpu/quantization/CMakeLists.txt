@@ -1,0 +1,6 @@
+add_instance_library(device_quantization_instance
+    device_conv2d_xdl_bias_perchannel_quantization_int8_instance.cpp
+    device_conv2d_xdl_bias_perlayer_quantization_int8_instance.cpp
+    device_conv2d_xdl_perchannel_quantization_int8_instance.cpp
+    device_conv2d_xdl_perlayer_quantization_int8_instance.cpp
+)

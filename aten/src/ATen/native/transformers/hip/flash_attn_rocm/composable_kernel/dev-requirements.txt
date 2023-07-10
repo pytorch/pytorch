@@ -1,0 +1,3 @@
+ROCmSoftwarePlatform/rocm-recipes
+RadeonOpenCompute/rocm-cmake@04f694df2a8dc9d7e35fa4dee4ba5fa407ec04f8 --build
+danmar/cppcheck@2.9

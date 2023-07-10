@@ -1,0 +1,67 @@
+cff-version: 1.2.0
+title: Composable Kernel
+message: If you use this software, please cite using the following metadata.
+type: software
+authors:
+  - given-names: Chao
+    family-names: Liu
+    email: chao.liu2@amd.com
+    affiliation: AMD
+  - given-names: Jing
+    family-names: Zhang
+    email: jing.zhang3@amd.com
+    affiliation: AMD
+  - given-names: Letao
+    family-names: Qin
+    email: letao.qin@amd.com
+    affiliation: AMD
+  - given-names: Qianfeng
+    family-names: Zhang
+    email: qianfeng.zhang@amd.com
+    affiliation: AMD
+  - given-names: Liang
+    family-names: Huang
+    email: carlus.huang@amd.com
+    affiliation: AMD
+  - given-names: Shaojie
+    family-names: Wang
+    email: shaojie.wang@amd.com
+    affiliation: AMD
+  - given-names: Anthony
+    family-names: Chang
+    email: antc@amd.com
+    affiliation: AMD
+  - given-names: Chunyu
+    family-names: Lai
+    email: chunyu.lai@amd.com
+    affiliation: AMD
+  - given-names: Illia
+    family-names: Silin
+    email: illia.silin@amd.com
+    affiliation: AMD
+  - given-names: Adam
+    family-names: Osewski
+    email: adam.osewski@amd.com
+    affiliation: AMD
+  - given-names: Poyen
+    family-names: Chen
+    email: poyen.chen@amd.com
+    affiliation: AMD
+  - given-names: Rosty
+    family-names: Geyyer
+    email: rosty.geyyer@amd.com
+    affiliation: AMD
+  - given-names: Hanwen
+    family-names: Chen
+  - given-names: Tejash
+    family-names: Shah
+  - given-names: Xiaoyan
+    family-names: Zhou
+  - given-names: Jianfeng
+    family-names: Yan
+repository-code: 'https://github.com/ROCmSoftwarePlatform/composable_kernel'
+abstract: Composable Kernel (CK) library aims to provide a programming model for writing performance critical kernels for Machine Learning workloads across multiple architectures including GPUs, CPUs, etc, through general purpose kernel progarmming languages, like HIP C++.
+keywords:
+  - 'CK, Composable Kernel, Tensor Coordinate Transformation'
+license: MIT
+license-url: https://github.com/ROCmSoftwarePlatform/composable_kernel/blob/7fc3ed761aa35709d87c8fbbe41dd368648b3541/LICENSE

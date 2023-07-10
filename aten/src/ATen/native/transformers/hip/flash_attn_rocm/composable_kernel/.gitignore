@@ -1,0 +1,59 @@
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+*.ipch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# vim tags
+tags
+.tags
+.*.swp
+
+# Editors
+.vscode
+
+# build-in-source directory
+build*
+
+# emacs temporary/backup files
+.\#*
+\#*\#
+*~
+
+# GDB temporary files
+.gdb_history
+install.dir*
+<<<<<<< HEAD
+library/src/utility/convolution_parameter.cu
+library/src/utility/host_tensor.cu
+library/src/utility/device_memory.cu
+=======
+
+library/src/utility/convolution_parameter.cu
+library/src/utility/host_tensor.cu
+library/src/utility/device_memory.cu
+>>>>>>> 12ac9ebf5f8723dcb9815070c1d86223cfbb0ce9

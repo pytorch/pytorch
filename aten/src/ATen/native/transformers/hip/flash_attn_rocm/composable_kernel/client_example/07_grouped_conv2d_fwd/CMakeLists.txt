@@ -1,0 +1,2 @@
+add_executable(client_grouped_conv2d_fwd grouped_conv2d_fwd.cpp)
+target_link_libraries(client_grouped_conv2d_fwd PRIVATE composable_kernel::device_operations)

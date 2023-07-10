@@ -1,0 +1,1 @@
+add_test_executable(test_space_filling_curve space_filling_curve.cpp)

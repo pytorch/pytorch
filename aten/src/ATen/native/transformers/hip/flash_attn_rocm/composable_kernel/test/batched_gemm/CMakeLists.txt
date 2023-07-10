@@ -1,0 +1,15 @@
+add_test_executable(test_batched_gemm_fp16 batched_gemm_fp16.cpp)
+target_link_libraries(test_batched_gemm_fp16 PRIVATE utility)
+target_link_libraries(test_batched_gemm_fp16 PRIVATE device_batched_gemm_instance)
+
+add_test_executable(test_batched_gemm_fp32 batched_gemm_fp32.cpp)
+target_link_libraries(test_batched_gemm_fp32 PRIVATE utility)
+target_link_libraries(test_batched_gemm_fp32 PRIVATE device_batched_gemm_instance)
+
+add_test_executable(test_batched_gemm_bf16 batched_gemm_bf16.cpp)
+target_link_libraries(test_batched_gemm_bf16 PRIVATE utility)
+target_link_libraries(test_batched_gemm_bf16 PRIVATE device_batched_gemm_instance)
+
+add_test_executable(test_batched_gemm_int8 batched_gemm_int8.cpp)
+target_link_libraries(test_batched_gemm_int8 PRIVATE utility)
+target_link_libraries(test_batched_gemm_int8 PRIVATE device_batched_gemm_instance)

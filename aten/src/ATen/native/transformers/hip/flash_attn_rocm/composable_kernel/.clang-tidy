@@ -1,0 +1,3 @@
+CheckOptions:
+  - key: bugprone-reserved-identifier.AllowedIdentifiers
+    value: '__HIP_PLATFORM_HCC__;__HIP_ROCclr__'
