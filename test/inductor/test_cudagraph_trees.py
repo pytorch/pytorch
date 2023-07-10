@@ -829,8 +829,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     thrown = True
                     self.assertTrue("at::cuda::blas::gemm<float>" in str(e))
                     self.assertTrue(
-                        "getCurrentCUDABlasHandle" in str(e) or
-                        "getNewWorkspace" in str(e)
+                        "getCurrentCUDABlasHandle" in str(e)
+                        or "getNewWorkspace" in str(e)
                     )
 
                 self.assertTrue(thrown)
