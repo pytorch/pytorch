@@ -695,7 +695,9 @@ class TensorWithTFOverrideVariable(VariableTracker):
             **kwargs,
         )
         # stash the subclass type to rewrap an output tensor if needed
-        tx.output.install_global(var.global_class_name(), subclass_type)
+        if var.global_class_name() not in tx.output.global_scope:
+            tx.output.install_global(var.global_class_name(), subclass_type)
+
         return var
 
     def __init__(
