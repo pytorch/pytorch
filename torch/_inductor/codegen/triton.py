@@ -134,18 +134,29 @@ class TritonOverrides(OpOverrides):
     def to_dtype_bitcast(x, dtype: torch.dtype):
         return f"{x}.to({triton_compute_type(dtype)}, bitcast=True)"
 
-    @staticmethod
-    def constant_val(val):
-        return triton_constant(val)
-
-    @staticmethod
-    def constant(value, dtype):
+    @classmethod
+    def constant(cls, value, dtype):
         if dtype == torch.uint8:
-            tmp = ops.constant_val(value)
-            return ops.to_dtype(tmp, dtype)
-        else:
-            type_ = torch._prims_common.dtype_to_type(dtype)
-            return triton_constant(type_(value))
+            # tl.full is broken for uint8, remove once triton is fixed.
+            # See openai/triton#1919
+            tmp = cls.constant(value, torch.int16)
+            return cls.to_dtype(tmp, dtype)
+
+        type_ = torch._prims_common.dtype_to_type(dtype)
+        triton_val = triton_constant(type_(value))
+        triton_type = triton_compute_type(dtype)
+
+        if triton_type == "tl.float32":
+            # Float constants are always f32 in triton
+            return triton_val
+
+        # NOTE: We use a tensor here in order to get the expected type.
+        # Otherwise, e.g. float64 constants would be trunctated to float32.
+        # Also, we could just use shape=[1] here but starting with the correct
+        # ndim avoids extra `tt.expand_dim` ops appearing in the triton IR.
+        ndim = V.kernel.triton_tensor_ndim()
+        shape = [1] * ndim
+        return f"tl.full({shape}, {triton_val}, {triton_type})"
 
     @staticmethod
     def abs(x):

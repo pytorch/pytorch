@@ -829,6 +829,18 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expect, actual)
 
+    def test_float64_constants(self):
+        def fn():
+            # NOTE: tensors of all the same value are constant folded, so we
+            # need a tensor with two distinct values
+            a = torch.tensor([1 / 10, 2 / 10], dtype=torch.float64, device="cuda")
+            return a * 2e50
+
+        cfn = torch.compile(fn)
+        expect = fn()
+        actual = cfn()
+        self.assertEqual(expect, actual, atol=0, rtol=0)
+
     def test_issue104759(self):
         def fn(arg7_1, add_1, permute_2, select_scatter, slice_8):
             slice_scatter_4 = torch.ops.aten.slice_scatter.default(
