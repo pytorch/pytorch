@@ -378,11 +378,13 @@ def tensor_proto(tag, tensor):
             "dim": [
                 TensorShapeProto.Dim(size=tensor.shape[i]) for i in range(tensor.dim())
             ],
-            proto_val_field: torch.view_as_real(tensor).tolist()
+            proto_val_field: torch.view_as_real(tensor).flatten().tolist()
             if proto_val_field == "scomplex_val" or proto_val_field == "dcomplex_val"
-            else tensor.flatten().tolist(force=True)
-            if tensor.numel() > 0
-            else [],
+            else [tensor.item()]
+            if tensor.numel() == 1
+            else []
+            if tensor.numel() == 0
+            else tensor.flatten().tolist(),
         }
         tensor_proto = TensorProto(**tensor_proto_args)
     else:
