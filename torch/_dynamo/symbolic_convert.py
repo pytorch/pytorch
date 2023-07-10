@@ -2167,12 +2167,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
-        # TODO: once skipfiles is revamped
-        # handle this in a cleaner way
-        # cast is just the identity function
-        if isinstance(func, UserFunctionVariable) and func.fn is typing.cast:
-            return
-
         if skipfiles.check(
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):

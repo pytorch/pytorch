@@ -8,7 +8,7 @@ import logging
 import operator
 import re
 import types
-from typing import cast, List, NamedTuple, Optional, Union
+from typing import List, NamedTuple, Optional, Union
 
 import torch
 
@@ -482,14 +482,6 @@ class VariableBuilder:
                     if callable(value)
                     else GuardBuilder.TYPE_MATCH
                 ),
-            )
-        # TODO: once skipfiles are revamped, allow this to be traced
-        # it is just the identity function
-        elif value is cast:
-            return UserFunctionVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif (
             istype(value, (type, types.FunctionType))
