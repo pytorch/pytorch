@@ -41,6 +41,8 @@ from torch._prims_common import (
     make_contiguous_strides_for,
 )
 from torch.fx.experimental.symbolic_shapes import FloorDiv
+from torch.fx.immutable_collections import immutable_list
+from torch.fx.operator_schemas import get_signature_for_torch_op
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -2647,6 +2649,50 @@ class ConcatKernel(NopKernel):
         return True
 
 
+def type_match(arg, arg_type):
+    if isinstance(arg, immutable_list):
+        if all(
+            isinstance(x, int) or (isinstance(x, sympy.Symbol) and x.is_integer)
+            for x in arg
+        ):
+            update_type = "List[int]"
+            return update_type == str(arg_type)
+        else:
+            # TODO: add support here
+            return False
+    else:
+        # TODO: add support here
+        return False
+
+
+def schema_match(schema, args, arg_types, kwargs, arg_names, kwarg_types):
+    for i, arg in enumerate(args):
+        arg_type = arg_types[i]
+        if not type_match(arg, arg_type):
+            return False
+
+    # TODO: check kwargs type. support default values. check arg_nums
+    for name, value in kwargs.items():
+        if name not in arg_names:
+            return False
+        # TODO: check if type of value matches with kwarg_types[name]. Might be optional.
+    return True
+
+
+def try_find_schema(schemas, args, kwargs):
+    for schema in schemas:
+        arg_types = [x.type for x in schema.arguments]
+        arg_names = [x.name for x in schema.arguments if x.kwarg_only]
+        kwarg_types = {x.name: x.type for x in schema.arguments if x.kwarg_only}
+        assert len(args) <= len(arg_types)
+
+        if schema_match(schema, args, arg_types, kwargs, arg_names, kwarg_types):
+            return schema
+
+    # TODO: should we ever return None here?
+    return None
+
+
 @dataclasses.dataclass
 class ExternKernel(InputsKernel):
     constant_args: Tuple[Any, ...] = ()
@@ -2677,6 +2723,15 @@ class ExternKernel(InputsKernel):
     @classmethod
     def process_kernel(cls, kernel, *args, **kwargs):
         binded_args = signature(kernel).bind(*args, **kwargs).arguments
+
+        _, schemas = get_signature_for_torch_op(kernel, return_schemas=True)
+
+        schema = None
+        # For cpp wrapper, when kwargs is not empty, for OpOverloadPacket kernel, we need to
+        # know the exact overload schema to handle the kwargs properly when calling the cpp kernel.
+        if V.graph.cpp_wrapper and kwargs and isinstance(kernel, torch._ops.OpOverloadPacket):
+            schema = try_find_schema(schemas, args, kwargs)
+
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
         is_arg_tensor = []
@@ -2728,7 +2783,7 @@ class ExternKernel(InputsKernel):
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
-        return example_output, tensor_args, non_tensor_args, unflatten_args
+        return example_output, tensor_args, non_tensor_args, unflatten_args, schema
 
     @classmethod
     def convert_to_reinterpret_view(cls, x):
@@ -3275,6 +3330,7 @@ class FallbackKernel(ExternKernelAlloc):
         nontensor_args,
         unflatten_args,
         kwargs=None,
+        schema=None,
     ):
         super().__init__(
             layout,
@@ -3298,16 +3354,15 @@ class FallbackKernel(ExternKernelAlloc):
                 if V.graph.cpp_wrapper
                 else f"aten.{kernel.__name__}"
             )
-            # TODO: use_key="" for now. Should be overload name?
-            schema = torch._C._get_schema(op_overload_packet._qualified_op_name, "")
-            self.ordered_kwargs_for_cpp_kernel = [
-                x.name for x in schema.arguments if x.kwarg_only
-            ]
-            self.kwargs_default_value = {
-                x.name: {"type": x.real_type, "value": x.default_value}
-                for x in schema.arguments
-                if x.kwarg_only
-            }
+            if schema is not None:
+                self.ordered_kwargs_for_cpp_kernel = [
+                    x.name for x in schema.arguments if x.kwarg_only
+                ]
+                self.kwargs_default_value = {
+                    x.name: {"type": x.real_type, "value": x.default_value}
+                    for x in schema.arguments
+                    if x.kwarg_only
+                }
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
                 self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
@@ -3424,6 +3479,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                schema,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
         device = FallbackKernel.find_device(tensor_args, example_output)
@@ -3434,6 +3490,7 @@ class FallbackKernel(ExternKernelAlloc):
             tensor_args,
             non_tensor_args,
             unflatten_args,
+            schema=schema,
         )
 
         def generate_output(output, indices):
