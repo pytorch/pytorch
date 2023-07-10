@@ -165,7 +165,15 @@ per_channel_symmetric: qscheme = ...
 per_channel_affine_float_qparams: qscheme = ...
 
 # Defined in torch/csrc/autograd/python_function.cpp
-class _FunctionBase: ...
+class _FunctionBase:
+    saved_tensors: Tuple[Tensor]
+    _raw_saved_tensors: Tuple[Any]
+    next_functions: Tuple[Tuple[Any, _int], ...]
+    needs_input_grad: Tuple[_bool]
+    metadata: dict
+    _materialize_non_diff_grads: _bool
+    # skip adding type hints for the fields that have wrappers defined
+    # in torch/autograd/function.py
 
 # Defined in torch/csrc/autograd/python_legacy_variable.cpp
 class _LegacyVariableBase(Tensor):  # inherits from Tensor to appease mypy
