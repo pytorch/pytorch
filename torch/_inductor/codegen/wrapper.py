@@ -453,10 +453,16 @@ class WrapperCodeGen(CodeGen):
                 if predecessor.is_nop_node:
                     for prepredecessor in predecessor.predecessors.values():
                         if prepredecessor.stream_id != tmp_ssnode.stream_id and not prepredecessor.is_nop_node:
-                            kernel_IndentedBuffer.writeline(f"stream{tmp_ssnode.stream_id}_raw.wait_event(event_{prepredecessor.get_name()})")
+                            if V.graph.cpp_wrapper:
+                                kernel_IndentedBuffer.writeline(f"cudaStreamWaitEvent(stream{tmp_ssnode.stream_id}, event_{prepredecessor.get_name()}, 0);")
+                            else:
+                                kernel_IndentedBuffer.writeline(f"stream{tmp_ssnode.stream_id}_raw.wait_event(event_{prepredecessor.get_name()})")
                 else:
                     if predecessor.stream_id != tmp_ssnode.stream_id and not predecessor.is_nop_node:
-                        kernel_IndentedBuffer.writeline(f"stream{tmp_ssnode.stream_id}_raw.wait_event(event_{predecessor.get_name()})")
+                        if V.graph.cpp_wrapper:
+                            kernel_IndentedBuffer.writeline(f"cudaStreamWaitEvent(stream{tmp_ssnode.stream_id}, event_{predecessor.get_name()}, 0);")
+                        else:
+                            kernel_IndentedBuffer.writeline(f"stream{tmp_ssnode.stream_id}_raw.wait_event(event_{predecessor.get_name()})")
         update_event_dependency(ssnode)
         for predecessor in ssnode.predecessors.values():
             if predecessor.is_nop_node:
@@ -464,11 +470,17 @@ class WrapperCodeGen(CodeGen):
 
     def cuda_event_create(self, node_name, kernel_IndentedBuffer):
         ssnode = V.graph.stream_graph.name_mapping[node_name]
-        kernel_IndentedBuffer.writeline(f"event_{ssnode.get_name()} = torch.cuda.Event()")
+        if V.graph.cpp_wrapper:
+            kernel_IndentedBuffer.writeline(f"cudaEvent_t event_{ssnode.get_name()};")
+        else:
+            kernel_IndentedBuffer.writeline(f"event_{ssnode.get_name()} = torch.cuda.Event()")
 
     def cuda_event_record(self, node_name, kernel_IndentedBuffer):
         ssnode = V.graph.stream_graph.name_mapping[node_name]
-        kernel_IndentedBuffer.writeline(f"event_{ssnode.get_name()}.record(stream{ssnode.stream_id}_raw)")  
+        if V.graph.cpp_wrapper:
+            kernel_IndentedBuffer.writeline(f"cudaEventRecord(event_{ssnode.get_name()}, stream{ssnode.stream_id}_raw);")
+        else:
+            kernel_IndentedBuffer.writeline(f"event_{ssnode.get_name()}.record(stream{ssnode.stream_id}_raw)")  
 
 
     def generate_extern_kernel_w_stream(self, node_name, call_strs):
@@ -480,6 +492,7 @@ class WrapperCodeGen(CodeGen):
         stream_id = ssnode.stream_id
         kernel_IndentedBuffer = kernel_IndentedBuffer
         if stream_id != 0:
+            
             kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
             with kernel_IndentedBuffer.indent():
                 if isinstance(call_strs, list):
@@ -541,16 +554,20 @@ class WrapperCodeGen(CodeGen):
     def generate_stream_creation(self):
         # ignore cpp_wrapper
         if V.graph.cpp_wrapper:
-            return
-        self.write_triton_header_once()
-        self.header.writeline(f"")
-        if config.multiple_streams:
-            for i in range(1, V.graph.stream_graph.stream_pool_size + 1):
-                self.header.writeline(f"stream{i}_raw = torch.cuda.Stream()")
-                self.header.writeline(f"stream{i} = stream{i}_raw.cuda_stream")
-            self.header.writeline(f"stream0_raw = torch.cuda.default_stream()")
-        # TODO(Yueming): what about mutliple GPUs? is it always 0? is it better to change it to stream0_raw.cuda_stream?
-        self.header.writeline(f"stream0 = get_cuda_stream(0)")
+            if config.multiple_streams:
+                for i in range(1, V.graph.stream_graph.stream_pool_size + 1):
+                    self.header.writeline(f"cudaStream_t stream{i} = nullptr;")
+                self.header.writeline(f"cudaStream_t stream0 = 0;")
+        else:
+            self.write_triton_header_once()
+            self.header.writeline(f"")
+            if config.multiple_streams:
+                for i in range(1, V.graph.stream_graph.stream_pool_size + 1):
+                    self.header.writeline(f"stream{i}_raw = torch.cuda.Stream()")
+                    self.header.writeline(f"stream{i} = stream{i}_raw.cuda_stream")
+                self.header.writeline(f"stream0_raw = torch.cuda.default_stream()")
+            # TODO(Yueming): what about mutliple GPUs? is it always 0? is it better to change it to stream0_raw.cuda_stream?
+            self.header.writeline(f"stream0 = get_cuda_stream(0)")
 
     @dynamo_timed
     def generate(self):

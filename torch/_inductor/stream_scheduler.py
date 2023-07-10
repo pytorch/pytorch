@@ -236,7 +236,7 @@ class SSGraph:
     def print_graph(self):
         import datetime
         current_time = datetime.datetime.now().strftime("%Y%m%d%H%M")
-        reset_log_path = temporary_log_path(f'/tmp/yhao/stream_alexnet_{current_time}.log')
+        reset_log_path = temporary_log_path(f'/tmp/yhao/stream_assignment_{current_time}.log')
 
         log.info("=====findhao debug=====")
         for node in self.ssnodes:
