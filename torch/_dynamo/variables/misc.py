@@ -807,7 +807,9 @@ class NumpyVariable(VariableTracker):
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
         # lookup method name in torch_np. Things like np.dtype(float) are not supported yet.
         if self.value.__name__ == "dtype":
-            unimplemented(f"numpy dtype function is not supported yet. Got {self.value}.")
+            unimplemented(
+                f"numpy dtype function is not supported yet. Got {self.value}."
+            )
         elif hasattr(torch_np, self.value.__name__):
             func = getattr(torch_np, self.value.__name__)
             return wrap_fx_proxy_cls(
@@ -845,6 +847,7 @@ class NumpyVariable(VariableTracker):
             # retrieve attribute str. E.g., "float32" if given np.float32
             import numpy as np
             import torch_np
+
             try:
                 attr = next(a for a in dir(np) if getattr(np, a) is self.value)
                 # get torch_np equivalent
