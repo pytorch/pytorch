@@ -1,4 +1,3 @@
-import builtins
 import collections
 import dataclasses
 import functools
@@ -777,8 +776,7 @@ class SetVariable(VariableTracker):
         return set
 
     def reconstruct(self, codegen):
-        codegen.create_load_python_module(builtins, True)
-        codegen.create_load_global("set", False)
+        codegen.load_import_from("builtins", "set")
         codegen.foreach(self.items)
         return [create_instruction("BUILD_SET", arg=len(self.items))]
 
@@ -803,7 +801,7 @@ class SetVariable(VariableTracker):
             assert (
                 current_item not in underlying_items
             ), "Items modeling set invariant violated"
-            underlying_items.add(current_item)
+            underlying_items.add(self._as_set_element(tx, current_item))
 
         if isinstance(item, (list, set)):
             items_to_add = item
