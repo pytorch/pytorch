@@ -134,12 +134,13 @@ class TritonOverrides(OpOverrides):
     def to_dtype_bitcast(x, dtype: torch.dtype):
         return f"{x}.to({triton_compute_type(dtype)}, bitcast=True)"
 
-    @staticmethod
-    def constant_val(val):
-        return triton_constant(val)
+    @classmethod
+    def constant(cls, value, dtype):
+        if dtype == torch.uint8:
+            # tl.full is broken for uint8, remove once triton is fixed
+            tmp = cls.constant(value, torch.int16)
+            return cls.to_dtype(tmp, dtype)
 
-    @staticmethod
-    def constant(value, dtype):
         # NOTE: We use a tensor here in order to get the correct type.
         # Otherwise, e.g. float64 constants would be trunctated to float32.
         ndim = V.kernel.triton_tensor_ndim()
