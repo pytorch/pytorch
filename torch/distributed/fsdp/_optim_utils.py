@@ -436,7 +436,7 @@ def _flatten_optim_state_dict(
     unflat_osd_state = unflat_osd["state"]
     all_state_keys = set(unflat_osd_state.keys())
 
-    for fqns in param_to_fqns.values():
+    for param, fqns in param_to_fqns.items():
         fqn = fqns[0]
         if fqn not in unflat_osd_state:
             continue
@@ -476,16 +476,14 @@ def _flatten_optim_state_dict(
                     len(fqns) == 1
                 ), f"use_orig_params is True but there are multiple FQNs, {fqns}."
                 if optim is not None:  # NamedOptimizer or KeyedOptimizer case.
-                    flat_osd_state[key] = copy.deepcopy(
-                        tree_map_only(
-                            torch.Tensor,
-                            # Keep the step state on CPU.
-                            lambda t: t.cpu()
-                            if t.dim() == 0
-                            else torch.zeros(0, device=t.device, dtype=t.dtype),
-                            unflat_osd_state[fqn],
+                    state = optim.state.get(param, None)
+                    if state is not None:
+                        flat_osd_state[key] = copy.deepcopy(state)
+                    else:
+                        warnings.warn(
+                            f"optim_state[{key}] is not on rank{fsdp_state.rank}."
                         )
-                    )
+
             else:
                 raise RuntimeError(
                     f"The state of {key} is empty. This should happen when "

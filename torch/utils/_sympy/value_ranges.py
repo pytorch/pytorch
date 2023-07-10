@@ -90,12 +90,8 @@ class ValueRanges:
         assert self.is_bool == other.is_bool, (self, other)
         if self.is_bool:
             range = ValueRanges(sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper))
-            # Assert that it can't prove that the resulting range is invalid
-            assert not (range.lower is sympy.true and range.upper is sympy.false), (self, other)
         else:
             range = ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
-            # Assert that it can't prove that the resulting range is invalid
-            assert (range.lower > range.upper) is not True, (self, other)  # type: ignore[operator]
         return range
 
     # Intersection

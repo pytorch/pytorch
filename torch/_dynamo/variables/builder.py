@@ -1217,17 +1217,6 @@ def wrap_fx_proxy_cls(
         from . import UserDefinedObjectVariable
 
         return UserDefinedObjectVariable(example_value)
-    elif istype(example_value, int) and proxy.node.target in (
-        torch.seed,
-        operator.mod,
-        # some mac builds are missing torch.distributed.get_rank()
-        getattr(torch.distributed, "get_rank", _missing),
-        getattr(torch.distributed, "get_world_size", _missing),
-        # This always wants to be in the graph, even if the constraint
-        # results in a constant int
-        torch._export.constraints.constrain_as_value,
-    ):
-        return ConstantVariable(example_value, **options)
     elif istype(example_value, torch.Size) and all(
         isinstance(x, int) for x in example_value
     ):
@@ -1269,12 +1258,6 @@ def wrap_fx_proxy_cls(
             return NamedTupleVariable(unpacked, example_value.__class__, **options)
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable(None, **options)
-    elif (
-        isinstance(example_value, int)
-        and proxy.node.target is torch._utils._element_size
-    ):
-        proxy.node.meta["example_value"] = example_value
-        return ConstantVariable(example_value, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
@@ -1285,6 +1268,15 @@ def wrap_fx_proxy_cls(
         torch.sym_int,
         getattr,
         operator.getitem,
+        torch._utils._element_size,
+        torch.seed,
+        operator.mod,
+        # some mac builds are missing torch.distributed.get_rank()
+        getattr(torch.distributed, "get_rank", _missing),
+        getattr(torch.distributed, "get_world_size", _missing),
+        # This always wants to be in the graph, even if the constraint
+        # results in a constant int
+        torch._export.constraints.constrain_as_value,
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)
