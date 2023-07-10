@@ -561,7 +561,10 @@ at::Tensor _qconv_prepack_pt2e(
       strides, padding_l, padding_r, dilates, groups,
       dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
       dnnl::memory::data_type::u8, x_dims, op_attr, /*is_channels_last=*/true);
-  weight_copy = weight.clone();
+
+  // Note: Weight in Conv1D will unsqueeze into Conv2D in previous step
+  weight_copy = weight.clone(c10::MemoryFormat::Contiguous);
+
   if (with_groups) {
     w_tag = kSpatialDim == 2 ? ideep::tag::goihw : ideep::tag::goidhw;
   } else {
@@ -824,10 +827,10 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose3d_prepack"), TORCH_FN(QConvPackWeightInt8<3>::run_deconv));
 }
 
-TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   // New OP definition for Quantization in PyTorch 2.0 Export
   // Conv Prepack
-  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv_prepack_pt2e"), TORCH_FN(QConvPrepackPT2E::run_conv));
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_prepack_pt2e"), TORCH_FN(QConvPrepackPT2E::run_conv));
 }
 
 } // namespace
