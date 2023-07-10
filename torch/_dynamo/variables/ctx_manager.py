@@ -191,15 +191,13 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
 class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
     """represents torch.autograd.graph.disable_saved_tensors_hook."""
 
-    _guards_singleton = {
-        Guard("", GuardSource.GLOBAL, GuardBuilder.DETERMINISTIC_ALGORITHMS)
-    }
-
     @staticmethod
     def create(tx, target_value, **kwargs):
         var = DisabledSavedTensorsHooksVariable(
             target_values=[target_value],
-            initial_values=[torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()],
+            initial_values=[
+                torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
+            ],
             **kwargs,
         )
         var._call_func(tx, [target_value])
@@ -209,7 +207,6 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.guards = self.guards | self._guards_singleton
 
     def enter(self, tx):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
@@ -219,7 +216,10 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         value = values[0]
         if value is not None:
             tx.output.create_node(
-                "call_function", torch._C._autograd._saved_tensors_hooks_disable, (value,), {}
+                "call_function",
+                torch._C._autograd._saved_tensors_hooks_disable,
+                (value,),
+                {},
             )
             torch._C._autograd._saved_tensors_hooks_disable(value)
         else:
@@ -229,7 +229,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
             torch._C._autograd._saved_tensors_hooks_enable()
 
     def module_name(self):
-        return "torch"
+        return "torch.autograd.graph"
 
     def fn_name(self):
         return "disable_saved_tensors_hook"

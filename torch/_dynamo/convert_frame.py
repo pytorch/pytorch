@@ -346,11 +346,6 @@ def convert_frame_assert(
             torch.are_deterministic_algorithms_enabled()
         )
 
-        global initial_saved_tensors_hooks_state
-        initial_saved_tensors_hooks_state = (
-            torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
-        )
-
         signpost_event(
             "dynamo",
             "_convert_frame_assert._compile",

@@ -458,15 +458,6 @@ class DeterministicAlgorithmsSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class DisableSavedTensorsHooks(Source):
-    def name(self):
-        return ""
-
-    def guard_source(self):
-        return GuardSource.GLOBAL
-
-
-@dataclasses.dataclass(frozen=True)
 class GradModeSource(Source):
     def name(self):
         return ""

@@ -219,11 +219,11 @@ class TorchVariable(VariableTracker):
             CUDAStreamContextVariable,
             CUDAStreamVariable,
             DeterministicAlgorithmsVariable,
+            DisabledSavedTensorsHooksVariable,
             GradModeVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
-            DisabledSavedTensorsHooksVariable
         )
 
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
