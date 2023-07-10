@@ -395,6 +395,36 @@ class LoggingTests(LoggingTestCase):
 
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
+    def test_trace_call_inline_call(self, records):
+        def g(x):
+            return x * 2
+
+        def f(x):
+            return g(g(x))
+
+        fn_opt = torch._dynamo.optimize("eager")(f)
+        fn_opt(torch.randn(3, 3))
+
+        self.assertEqual(len(records), 4)
+        expected = (
+            """\
+            return g(g(x))
+                     ^^^^""",
+            """\
+            return x * 2
+                   ~~^~~""",
+            """\
+            return g(g(x))
+                   ^^^^^^^""",
+            """\
+            return x * 2
+                   ~~^~~""",
+        )
+        for record, answer in zip(records, expected):
+            self.assertIn(answer, record.getMessage())
+
+    @skipIfNotPy311
+    @make_logging_test(trace_call=True)
     def test_trace_call_graph_break(self, records):
         def fn(x):
             x = x * 2

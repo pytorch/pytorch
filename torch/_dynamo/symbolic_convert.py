@@ -59,6 +59,7 @@ from .source import (
 from .utils import (
     counters,
     get_fake_value,
+    get_instruction_source_311,
     graph_break_dup_warning_checker,
     istype,
     proxy_args_kwargs,
@@ -106,6 +107,7 @@ from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariab
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
+trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 
 
@@ -2236,6 +2238,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # with a single alias
         if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
+        if torch._logging._internal.log_state.is_artifact_enabled(
+            "trace_call"
+        ) and sys.version_info >= (3, 11):
+            cur_inst = parent.current_instruction
+            line = get_instruction_source_311(parent.f_code, cur_inst).rstrip()
+            header = parent.get_line_of_code_header(lineno=cur_inst.positions.lineno)
+            trace_call_log.debug(
+                "TRACE inlined call %s from %s\n%s", code.co_name, header, line
+            )
         log.debug("INLINING %s%s", code, suffix)
 
         tracer: InliningInstructionTranslator
