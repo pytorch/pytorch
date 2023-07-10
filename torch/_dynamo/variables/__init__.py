@@ -8,6 +8,7 @@ from .ctx_manager import (
     DeterministicAlgorithmsVariable,
     GradModeVariable,
     WithExitFunctionVariable,
+    DisabledSavedTensorsHooksVariable,
 )
 from .dicts import ConstDictVariable, DataClassVariable, DefaultDictVariable
 from .functions import (

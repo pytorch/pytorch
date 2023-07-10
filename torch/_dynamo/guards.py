@@ -69,6 +69,10 @@ CLOSURE_VARS = collections.OrderedDict(
             "___are_deterministic_algorithms_enabled",
             torch.are_deterministic_algorithms_enabled,
         ),
+        (
+            "___saved_tensors_hooks_enabled",
+            torch._C._autograd._saved_tensors_hooks_get_disabled_error_message(),
+        ),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
@@ -491,6 +495,15 @@ class GuardBuilder(GuardBuilderBase):
             code = "___are_deterministic_algorithms_enabled()"
         else:
             code = "not ___are_deterministic_algorithms_enabled()"
+        self._produce_guard_code(guard, [code])
+
+    def DISABLE_SAVED_TENSORS_HOOKS(self, guard: Guard):
+        assert guard.source is GuardSource.GLOBAL
+        code = None
+        if convert_frame.initial_deterministic_algorithms_state:
+            code = "___saved_tensors_hooks_enabled()"
+        else:
+            code = "not ___saved_tensors_hooks_enabled()"
         self._produce_guard_code(guard, [code])
 
     def DEFAULT_DEVICE(self, guard: Guard):
