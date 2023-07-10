@@ -40,9 +40,7 @@ def normalize_gm(gm_str):
 
 def check_dynamic_shape_capture():
     # This also mirrors config from `test/dynamo/test_dynamic_shapes.py:make_dynamic_cls`
-    if config.assume_static_by_default and config.automatic_dynamic_shapes:
-        return True
-    if not config.assume_static_by_default and not config.automatic_dynamic_shapes:
+    if not config.assume_static_by_default:
         return True
     return False
 
@@ -145,6 +143,44 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 2)
 
+    def test_return_captured_var(self):
+        freevar = torch.randn(3)
+
+        def test(x):
+            return freevar
+
+        def fn(x):
+            return wrap(test, x)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(fn, (x,), 3)
+
+    def test_return_captured_vars(self):
+        freevar1 = torch.randn(3)
+        freevar2 = torch.randn(3)
+
+        def test(x):
+            return freevar1, freevar2, freevar1
+
+        def fn(x):
+            return wrap(test, x)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(fn, (x,), 4, 4)
+
+    def test_return_captured_var_used_multiple_times(self):
+        freevar = torch.randn(3)
+
+        def test(x):
+            y = x + freevar
+            return y, freevar
+
+        def fn(x):
+            return wrap(test, x)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(fn, (x,), 3, 3)
+
     def test_capture_untracked_global(self):
         def f(x):
             return wrap(lambda x: x + global_var, x)
@@ -241,6 +277,20 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3, 3)
         y = torch.randn(3, 3)
         self._test_wrap_simple(f, (x, y), 3)
+
+    def test_same_freevar_twice(self):
+        free = torch.randn(3)
+
+        def g(x):
+            y = free.sin()
+            z = free.cos()
+            return y, z
+
+        def f(x):
+            return wrap(g, x)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(f, (x,), 3, 3)
 
     def test_capture_value_created_in_subgraph(self):
         backend = EagerAndRecordGraphs()
@@ -1240,6 +1290,31 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         y = torch.randn(3, 3)
         self._test_wrap_simple(h, (x, y), 3)
 
+    def test_internal_nonlocal(self):
+        def f(x, y):
+            w = 1
+
+            def g(x):
+                nonlocal w
+                w = x
+                return x
+
+            def h(x):
+                nonlocal w
+                w = w + 1
+                return x
+
+            g(x)
+            h(x)
+            return w + y
+
+        def h(x, y):
+            return wrap(f, x, y)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+        self._test_wrap_simple(h, (x, y), 3)
+
     def test_capture_numpy_number(self):
         import numpy as np
 
@@ -1375,8 +1450,6 @@ class GraphModule(torch.nn.Module):
         self.assertExpectedInline(actual, expected)
 
     def test_grad_freevar_tensor(self):
-        # NOTE: Captured variable is treated as side-effect since
-        #       PR https://github.com/pytorch/pytorch/pull/103386
         counters.clear()
         y = torch.randn(3, 3)
 
@@ -1388,12 +1461,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
         expected = wrapper_fn(x)
-        actual = torch.compile(wrapper_fn, backend="aot_eager")(x)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"NYI - torch.func.grad(f) where there are side effects in f": 2},
-        )
+        actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(actual, expected)
 
     def test_grad_freevar_python_scalar(self):
@@ -1464,7 +1532,10 @@ class GraphModule(torch.nn.Module):
         if check_dynamic_shape_capture():
             return
 
-        expected = """\
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
@@ -1486,9 +1557,8 @@ class GraphModule(torch.nn.Module):
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+""",
+        )
 
     def test_grad_closure_scalar(self):
         counters.clear()
