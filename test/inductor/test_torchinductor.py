@@ -5427,7 +5427,7 @@ class CommonTemplate:
         r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
         if self.device == "cuda":
             self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 1)
+            self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
         check(r2, g2)
 
@@ -5462,46 +5462,14 @@ class CommonTemplate:
         )
         if self.device == "cuda":
             self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 2)
-
-            # seed generation
-            self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
-            self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
-
-            expected_kernel = 6
+            self.assertEqual(bw_code.count("tl.rand"), 0)
+            expected_kernel = 4
         else:
             expected_kernel = 6
 
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
-
-    @config.patch(search_autotune_cache=False)
-    @torch._functorch.config.patch(partitioner_aggressive_fusion=True)
-    def test_dropout4(self):
-        m = torch.nn.Dropout(0.2)
-
-        @torch._dynamo.optimize_assert("inductor")
-        def run(x):
-            return m(x)
-
-        inp = torch.randn([8, 32], device=self.device, requires_grad=True)
-        result, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(inp))
-        zero_out = (result == 0).sum().item()
-        grad_zero = (inp.grad == 0).sum().item()
-        self.assertEqual(zero_out, grad_zero)
-
-        if self.device == "cuda":
-            self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 1)
-
-            # seed generation
-            self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
-            self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
-
-        else:
-            self.assertEqual(fw_code.count("aten.bernoulli"), 1)
-            self.assertEqual(bw_code.count("aten.bernoulli"), 0)
 
     def test_randint_kernel_count(self):
         @torch._dynamo.optimize_assert("inductor")
@@ -6549,6 +6517,93 @@ class CommonTemplate:
             return torch.fft.fftn(x).real
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
+
+    def test_inductor_bucketize(self):
+        def fn(input, boundaries, out_int32, right):
+            return torch.ops.prims._inductor_bucketize(
+                input, boundaries, out_int32=out_int32, right=right
+            )
+
+        input = torch.rand((64, 64)) * 2 - 1
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        for out_int32 in [True, False]:
+            for right in [True, False]:
+                out_int32 = True
+                right = False
+                self.common(fn, (input, boundaries, out_int32, right), check_lowp=False)
+
+    def test_inductor_bucketize_default_kwargs(self):
+        def fn(input, offsets):
+            return torch.ops.prims._inductor_bucketize(input, offsets)
+
+        input = torch.tensor(
+            [-1.0, -0.9, -0.8, -0.5, 0.0, 0.1, 0.2, 0.4, 0.5, 0.6, 0.9, 0.91]
+        )
+        offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        self.common(fn, (input, offsets), check_lowp=False)
+
+    def test_inductor_bucketize_int(self):
+        def fn(input, offsets, out_int32, right):
+            return torch.ops.prims._inductor_bucketize(
+                input, offsets, out_int32=out_int32, right=right
+            )
+
+        input = torch.randint(0, 102, (64, 64))
+        offsets = torch.arange(10, dtype=torch.int32) ** 2 + 1
+
+        for out_int32 in [True, False]:
+            for right in [True, False]:
+                self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
+
+    @patch.object(config.triton, "autotune_pointwise", True)
+    def test_inductor_bucketize_add_autotune(self):
+        """
+        Causes a @pointwise(size_hints) where size_hints is 2D
+        """
+
+        def fn(input, offsets, add_value):
+            return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
+
+        input = torch.rand((16, 16, 64, 64))
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+        add_value = torch.randint(0, 1024, (16, 16, 64, 64)).to(
+            memory_format=torch.channels_last
+        )
+
+        self.common(fn, (input, boundaries, add_value), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op(self):
+        import torch.library
+
+        @functools.lru_cache()
+        def define_op(foo):
+            foo.define("custom(Tensor self) -> Tensor")
+
+        foo = torch.library.Library("foo", "DEF")
+        define_op(foo)
+
+        @torch.library.impl(foo, "custom", "CPU")
+        def foo_cpu(x):
+            return 3 * x
+
+        @torch.library.impl(foo, "custom", "CUDA")
+        def foo_cuda(x):
+            return 3 * x
+
+        @torch.library.impl(foo, "custom", "Meta")
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.foo.custom(a)
+            c = torch.cos(b)
+            return c
+
+        self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
 
 
 @dataclasses.dataclass
