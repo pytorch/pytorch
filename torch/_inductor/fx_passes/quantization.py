@@ -1,7 +1,7 @@
 import functools
 
 import torch
-from ..ir import QConv, QConvPointWisePT2E
+from ..ir import QConv, QConvPointWisePT2E, TensorBox
 from ..pattern_matcher import Arg, CallFunction, KeywordArg, Match
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -221,27 +221,29 @@ def _register_quantized_conv_lowering_pt2e(pattern):
 
         weight_shape = packed_weight.get_size()
         dim = len(weight_shape) - 2
-        return QConvPointWisePT2E.create(
-            dim,
-            x,
-            x_scale,
-            x_zp,
-            packed_weight,
-            w_scale,
-            w_zp,
-            w_axis,
-            b,
-            stride,
-            padding,
-            dilation,
-            groups,
-            o_inv_scale,
-            o_zero_point,
-            o_dtype,
-            False,  # fp32_output
-            "none",  # unary_attr
-            [],  # unary_scalars
-            "",  # unary_algorithm
+        return TensorBox.create(
+            QConvPointWisePT2E.create(
+                dim,
+                x,
+                x_scale,
+                x_zp,
+                packed_weight,
+                w_scale,
+                w_zp,
+                w_axis,
+                b,
+                stride,
+                padding,
+                dilation,
+                groups,
+                o_inv_scale,
+                o_zero_point,
+                o_dtype,
+                False,  # fp32_output
+                "none",  # unary_attr
+                [],  # unary_scalars
+                "",  # unary_algorithm
+            )
         )
 
     return qconv
@@ -324,13 +326,13 @@ def _register_qconv_weight_prepack_pass(pattern):
             packed_weight_inputs = (
                 qw,
                 w_scale,
-                x_shape,
                 x_scale,
                 x_zp,
                 stride,
                 padding,
                 dilation,
                 groups,
+                x_shape,
             )
             packed_weight_op = torch.ops.quantized.qconv_prepack_pt2e
             prepack_weight_node = graph.call_function(
