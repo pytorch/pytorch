@@ -105,6 +105,7 @@ from .optimizer import OptimizerVariable
 from .tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
+    TensorSubclassVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
@@ -208,7 +209,11 @@ class VariableBuilder:
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt):
-        if type(vt) in [TensorVariable, UserDefinedObjectVariable]:
+        if type(vt) in [
+            TensorVariable,
+            TensorWithTFOverrideVariable,
+            UserDefinedObjectVariable,
+        ]:
             return True
         return False
 
@@ -554,6 +559,11 @@ class VariableBuilder:
             #     source=self.source,
             #     guards=self.make_guards(GuardBuilder.ID_MATCH),
             # )
+        elif (
+            isinstance(value, torch._C._TensorMeta)
+            and value in config.traceable_tensor_subclasses
+        ):
+            return TensorSubclassVariable(value, source=self.source)
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
@@ -893,16 +903,15 @@ class VariableBuilder:
         self.tx.output.add_symbol_bindings(grapharg)
 
         if type(value) in config.traceable_tensor_subclasses:
-            subclass_torch_function__func = value.__torch_function__.__func__
-            subclass_type = type(value)
             # NB: This is slightly misnamed, a tensor subclass might not have
             # any explicit __torch_function__ implementation and is relying
             # on the default inherited from torch.Tensor
-            return TensorWithTFOverrideVariable(
+            return TensorWithTFOverrideVariable.create(
+                self.tx,
                 tensor_variable,
                 source,
-                subclass_torch_function__func,
-                subclass_type,
+                value.__torch_function__.__func__,
+                type(value),
             )
 
         return tensor_variable
@@ -1004,19 +1013,10 @@ class VariableBuilder:
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
 
-                wrapped_value = shape_env.create_symintnode(
-                    # TODO: This is wrong wrong wrong, create_symbol will
-                    # generate something that is non-negative, but this is
-                    # not a sound assumption to make.
-                    # Not fixing as this was a preexisting condition.
-                    shape_env.create_symbol(
-                        value,
-                        source=self.source,
-                        dynamic_dim=dynamic_dim,
-                        constraint_dim=None,
-                    ),
-                    hint=value,
+                wrapped_value = shape_env.create_symint_and_symbol(
+                    value,
                     source=self.source,
+                    dynamic_dim=dynamic_dim,
                 )
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
@@ -1193,17 +1193,6 @@ def wrap_fx_proxy_cls(
         from . import UserDefinedObjectVariable
 
         return UserDefinedObjectVariable(example_value)
-    elif istype(example_value, int) and proxy.node.target in (
-        torch.seed,
-        operator.mod,
-        # some mac builds are missing torch.distributed.get_rank()
-        getattr(torch.distributed, "get_rank", _missing),
-        getattr(torch.distributed, "get_world_size", _missing),
-        # This always wants to be in the graph, even if the constraint
-        # results in a constant int
-        torch._export.constraints.constrain_as_value,
-    ):
-        return ConstantVariable(example_value, **options)
     elif istype(example_value, torch.Size) and all(
         isinstance(x, int) for x in example_value
     ):
@@ -1247,12 +1236,6 @@ def wrap_fx_proxy_cls(
             return NamedTupleVariable(unpacked, example_value.__class__, **options)
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable(None, **options)
-    elif (
-        isinstance(example_value, int)
-        and proxy.node.target is torch._utils._element_size
-    ):
-        proxy.node.meta["example_value"] = example_value
-        return ConstantVariable(example_value, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
@@ -1260,8 +1243,18 @@ def wrap_fx_proxy_cls(
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
     elif isinstance(example_value, int) and proxy.node.target in [
+        torch.sym_int,
         getattr,
         operator.getitem,
+        torch._utils._element_size,
+        torch.seed,
+        operator.mod,
+        # some mac builds are missing torch.distributed.get_rank()
+        getattr(torch.distributed, "get_rank", _missing),
+        getattr(torch.distributed, "get_world_size", _missing),
+        # This always wants to be in the graph, even if the constraint
+        # results in a constant int
+        torch._export.constraints.constrain_as_value,
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)

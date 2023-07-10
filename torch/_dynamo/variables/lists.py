@@ -754,22 +754,17 @@ class SetVariable(VariableTracker):
         regen_guards=True,
         **kwargs,
     ):
-        underlying_items = kwargs.pop("_underlying_items", set())
         super().__init__(recursively_contains=recursively_contains, **kwargs)
         # Note - Set is still backed by a list, because we want set behavior over the contents,
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
 
+        self.items = []
+        self._add(tx, items)
+
         # Sometimes, we know that we have passed in the guards from the items in the set
         if regen_guards:
             self.guards.update(VariableTracker.propagate(items)["guards"])
-
-        self.items = []
-        self._underlying_items = underlying_items
-        if underlying_items:
-            self.items = items
-        else:
-            self._add(tx, items)
 
         # Really annoying to store this here - but required because of how
         # VariableTracker's clone works w/r/t attr setting from dict
@@ -803,24 +798,43 @@ class SetVariable(VariableTracker):
         unimplemented(f"Sets with {type(vt)} NYI")
 
     def _add(self, tx, item):
-        if isinstance(item, (list, set)):
-            for i in item:
-                self._add(tx, i)
-            return self.items
+        underlying_items = set()
+        for current_item in self.items:
+            assert (
+                current_item not in underlying_items
+            ), "Items modeling set invariant violated"
+            underlying_items.add(current_item)
 
-        set_element = self._as_set_element(tx, item)
-        if set_element not in self._underlying_items:
-            # A miss here means we have a new object to register
-            self._underlying_items.add(set_element)
-            self.items.append(set_element.vt)
+        if isinstance(item, (list, set)):
+            items_to_add = item
         else:
-            # A collision here means we have to create dupe guards to preserve the
-            # relationship
-            for e in self._underlying_items:
-                if hash(set_element) == hash(e):
-                    alias_guard = make_dupe_guard(set_element.vt.source, e.vt.source)
+            items_to_add = [item]
+
+        for item_to_add in items_to_add:
+            set_element = self._as_set_element(tx, item_to_add)
+            if set_element not in underlying_items:
+                # A miss here means we have a new object to register
+                for e in underlying_items:
+                    alias_guard = make_dupe_guard(
+                        e.vt.source, set_element.vt.source, True
+                    )
                     if alias_guard:
-                        e.vt.add_guards({e.vt.source.make_guard(alias_guard)})
+                        # Create negation guards, x is not y
+                        set_element.vt = set_element.vt.add_guards(
+                            {e.vt.source.make_guard(alias_guard)}
+                        )
+                underlying_items.add(set_element)
+                self.items.append(set_element.vt)
+            else:
+                for e in underlying_items:
+                    dupe = hash(set_element) == hash(e)
+                    negate = not dupe
+                    alias_guard = make_dupe_guard(
+                        e.vt.source, set_element.vt.source, negate
+                    )
+                    if alias_guard:
+                        e.vt = e.vt.add_guards({e.vt.source.make_guard(alias_guard)})
+
         return self.items
 
     def call_method(
@@ -857,7 +871,7 @@ class SetVariable(VariableTracker):
             )
             return result
         elif name == "__len__":
-            return ConstantVariable(len(self.items))
+            return ConstantVariable(len(self.items)).add_options(options)
         else:
             return super().call_method(tx, name, args, kwargs)
 

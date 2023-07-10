@@ -6074,6 +6074,64 @@ def ___make_guard_fn():
         foo = torch._dynamo.optimize(counter)(foo)
         result = foo([x, x, x, x, y], y)
 
+    def test_set_aliasing_recompiles(self):
+        g1 = torch.randn(10)
+        g2 = torch.randn(10)
+        g3 = torch.randn(10)
+        g4 = torch.randn(10)
+
+        def foo(a, b, c):
+            myset = {g1, a, b, c}
+            return a + len(myset)
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter)(foo)
+        # first call with no aliasing
+        foo(g2, g3, g4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # no aliasing again
+        foo(g3, g2, g4)
+        # assert no recompile
+        self.assertEqual(counter.frame_count, 1)
+
+        # aliasing changes, we should recompile
+        foo(g2, g2, g2)
+        self.assertEqual(counter.frame_count, 2)
+
+        # same aliasing, different tensor
+        foo(g3, g3, g3)
+        self.assertEqual(counter.frame_count, 2)
+
+        # aliasing between global and arg, should recompile again
+        foo(g1, g1, g1)
+        self.assertEqual(counter.frame_count, 3)
+
+        # Reset
+        torch._dynamo.reset()
+
+        # aliasing between global and arg, first call
+        foo(g1, g1, g1)
+        self.assertEqual(counter.frame_count, 4)
+
+        # same aliasing, different tensor, all local, recompile
+        foo(g3, g3, g3)
+        self.assertEqual(counter.frame_count, 5)
+
+        # aliasing same tensor, we shouldn't recompile
+        foo(g2, g2, g2)
+        self.assertEqual(counter.frame_count, 5)
+
+        # No aliasing
+        foo(g2, g3, g4)
+        self.assertEqual(counter.frame_count, 6)
+
+        # No aliasing again
+        foo(g3, g2, g4)
+        # assert no recompile
+        self.assertEqual(counter.frame_count, 6)
+
+
 class TestTracer(JitTestCase):
     def test_jit_save(self):
         def fn():
