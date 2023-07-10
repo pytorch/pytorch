@@ -1918,16 +1918,16 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d"),  QConvInt8<2, false>::run);
 }
 
-TORCH_LIBRARY_IMPL(quantized, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
   // Conv1D/2D/3D with unary postop
-  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv1d_pointwise_pt2e"), QConvPT2E::run_pointwise);
-  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_pointwise_pt2e"), QConvPT2E::run_pointwise);
-  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv3d_pointwise_pt2e"), QConvPT2E::run_pointwise);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise_pt2e"), QConvPT2E::run_pointwise);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise_pt2e"), QConvPT2E::run_pointwise);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv3d_pointwise_pt2e"), QConvPT2E::run_pointwise);
 
   // Conv2D with binary postop
-  m.impl(TORCH_SELECTIVE_NAME("quantized::qconv2d_pointwise_pt2e.binary"), QConvPT2E::run_pointwise_binary);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise_pt2e.binary"), QConvPT2E::run_pointwise_binary);
 
-  m.impl(TORCH_SELECTIVE_NAME("quantized::dynamic_quant_qconv.tensor"), QConvPT2E::run_dynamic_qconv);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::dynamic_quant_qconv.tensor"), QConvPT2E::run_dynamic_qconv);
 }
 
 } // namespace

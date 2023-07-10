@@ -1919,11 +1919,11 @@ if torch._C._has_mkldnn:
                 (*input_tensor.shape[:-1], orig_weight.shape[0])
             )
 
-    _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
-        "quantized", "IMPL", "Meta"
+    _meta_lib_dont_use_me_use_register_meta_for_onednn = torch.library.Library(
+        "onednn", "IMPL", "Meta"
     )
 
-    @register_meta(torch.ops.quantized.dynamic_quant_qconv.tensor)
+    @register_meta(torch.ops.onednn.dynamic_quant_qconv.tensor)
     def meta_prepacked_dynamic_conv_tensor(
         x,
         x_scale,
@@ -5309,10 +5309,8 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta_for_mkldnn.impl(op_overload, fn)
             elif "mkl::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
-            elif "quantized::" in op_overload.name():
-                _meta_lib_dont_use_me_use_register_meta_for_quantized.impl(
-                    op_overload, fn
-                )
+            elif "onednn::" in op_overload.name():
+                _meta_lib_dont_use_me_use_register_meta_for_onednn.impl(op_overload, fn)
             else:
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
