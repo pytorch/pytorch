@@ -308,21 +308,20 @@ class DataClassVariable(ConstDictVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _patch_once():
-        from transformers.file_utils import ModelOutput
+        has_transformers = True
+        try:
+            from transformers.file_utils import ModelOutput
+        except ImportError:
+            has_transformers = False
 
-        for obj in ModelOutput.__dict__.values():
-            if callable(obj):
-                skip_code(obj.__code__)
+        if has_transformers:
+            for obj in ModelOutput.__dict__.values():
+                if callable(obj):
+                    skip_code(obj.__code__)
 
     @staticmethod
     def is_matching_cls(cls):
         return dataclasses.is_dataclass(cls)
-        try:
-            from transformers.file_utils import ModelOutput
-
-            return issubclass(cls, ModelOutput)
-        except ImportError:
-            return False
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -419,6 +418,14 @@ class DataClassVariable(ConstDictVariable):
             return variables.TupleVariable(list(self.items.values()), **options)
         elif name == "__setattr__":
             name = "__setitem__"
+        elif hasattr(self.user_cls, name):
+            # Inline methods on Dataclass variable
+            return variables.UserMethodVariable(
+                getattr(self.user_cls, name),
+                self,
+                **options,
+            ).call_function(tx, args, kwargs)
+
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":

@@ -1252,19 +1252,25 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_dataclass_default_dict(self):
         @dataclass
         class Output:
-            b: int
+            scalar: int
             named_tensors: Dict[str, torch.Tensor] = field(default_factory=dict)
+
+            def scale(self):
+                return self.scalar * 2
 
         def fn(x):
             a = Output(1)
+            # if isinstance(a.named_tensors, dict):
+            #     x = torch.cos(x)
             b = Output(5, named_tensors={"x": x})
-            return torch.cos(x) * a.b + b.named_tensors["x"]
+            return torch.cos(x) * a.scale() + b.named_tensors["x"]
 
         cnts = torch._dynamo.testing.CompileCounter()
-        compiled_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        compiled_fn = torch.compile(fn, backend=cnts)  # , fullgraph=True)
         x = torch.randn(4)
         out = fn(x)
         compiled_out = compiled_fn(x)
+        self.assertTrue(same(out, compiled_out))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
