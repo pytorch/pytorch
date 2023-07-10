@@ -602,7 +602,7 @@ class GraphLowering(torch.fx.Interpreter):
                     type(None),
                     ir.ConstantBuffer,
                     sympy.Expr,
-                    sympy.Rel,
+                    sympy.logic.boolalg.Boolean,
                     int,
                 ),
             )
