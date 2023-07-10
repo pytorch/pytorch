@@ -380,7 +380,9 @@ def tensor_proto(tag, tensor):
             ],
             proto_val_field: torch.view_as_real(tensor).tolist()
             if proto_val_field == "scomplex_val" or proto_val_field == "dcomplex_val"
-            else tensor.flatten().tolist(),
+            else tensor.flatten().tolist(force=True)
+            if tensor.numel() > 0
+            else [],
         }
         tensor_proto = TensorProto(**tensor_proto_args)
     else:
