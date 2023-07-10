@@ -118,6 +118,12 @@ enum class Rule : uint32_t {
   kFxNodeInsertTypePromotion,
 
   /**
+   * @brief Find the list of OnnxFunction of the PyTorch operator in onnx
+   * registry.
+   */
+  kFindOperatorOverloadsInOnnxRegistry,
+
+  /**
    * @brief The formatted str for argument to display is too verbose.
    */
   kArgFormatTooVerbose,
@@ -143,6 +149,7 @@ static constexpr const char* const kPyRuleNames[] = {
     "op_level_debugging",
     "find_opschema_matched_symbolic_function",
     "fx_node_insert_type_promotion",
+    "find_operator_overloads_in_onnx_registry",
     "arg_format_too_verbose",
 };
 
