@@ -805,8 +805,10 @@ class NumpyVariable(VariableTracker):
         from .tensor import NumpyNdarrayVariable
 
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
-        # lookup method name in torch_np
-        if hasattr(torch_np, self.value.__name__):
+        # lookup method name in torch_np. Things like np.dtype(float) are not supported yet.
+        if self.value.__name__ == "dtype":
+            unimplemented(f"numpy dtype function is not supported yet. Got {self.value}.")
+        elif hasattr(torch_np, self.value.__name__):
             func = getattr(torch_np, self.value.__name__)
             return wrap_fx_proxy_cls(
                 target_cls=NumpyNdarrayVariable,
@@ -838,9 +840,18 @@ class NumpyVariable(VariableTracker):
         return self.value
 
     def as_proxy(self):
+        # this handles numpy dtype attribute such as np.float32.
         if isinstance(self.value, type) and config.numpy_ndarray_as_tensor:
             # retrieve attribute str. E.g., "float32" if given np.float32
-            return self.value.__name__
+            import numpy as np
+            import torch_np
+            try:
+                attr = next(a for a in dir(np) if getattr(np, a) is self.value)
+                # get torch_np equivalent
+                tnp_dtype = torch_np.dtype(attr)
+                return tnp_dtype.name
+            except StopIteration:
+                unimplemented(f"Can't find {self.value} in numpy module!")
         return self.value
 
 
