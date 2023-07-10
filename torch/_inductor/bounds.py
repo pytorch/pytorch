@@ -86,10 +86,12 @@ class BoundVars:
 
     def get_index(self, name):
         expr = self.loop_body.indexing_exprs[name]
-        bound = self.replacement_vals.get(expr)
-        if bound is not None:
-            return bound
-
+        prev_bound = self.replacement_vals.get(expr)
         bound = bound_sympy(expr, self.replacement_vals)
+        assert prev_bound is None or bound == prev_bound
+        # TODO: I believe prev_bound == bound is always true, but I'm not sure
+        # If that's the case, we could elide the bound_sympy call
+        if prev_bound is not None:
+            bound = bound.tighten(prev_bound)
         self.replacement_vals[name] = bound
         return bound
