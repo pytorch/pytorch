@@ -17,10 +17,6 @@
 #include <ATen/ops/empty.h>
 #endif
 
-#if AT_MKL_ENABLED()
-#include <mkl.h>
-#endif
-
 namespace at::native {
 
 namespace {
@@ -36,67 +32,6 @@ inline void _store(
     vec::Vectorized<float> src) {
   auto res = vec::convert_float_bfloat16(src, src);
   res.store(dst, vec::Vectorized<float>::size());
-}
-
-inline void _mkl_gemm(
-    const bool& need_trans_a,
-    const bool& need_trans_b,
-    const int& m,
-    const int& n,
-    const int& k,
-    const float& alpha,
-    float* a,
-    const int& lda,
-    float* b,
-    const int& ldb,
-    const float& beta,
-    float* c,
-    const int& ldc) {
-  cpublas::gemm(
-      need_trans_a ? TransposeType::Transpose : TransposeType::NoTranspose,
-      need_trans_b ? TransposeType::Transpose : TransposeType::NoTranspose,
-      m,
-      n,
-      k,
-      alpha,
-      a,
-      lda,
-      b,
-      ldb,
-      beta,
-      c,
-      ldc);
-}
-
-inline void _mkl_gemm(
-    const bool& need_trans_a,
-    const bool& need_trans_b,
-    const int& m,
-    const int& n,
-    const int& k,
-    const float& alpha,
-    at::BFloat16* a,
-    const int& lda,
-    at::BFloat16* b,
-    const int& ldb,
-    const float& beta,
-    float* c,
-    const int& ldc) {
-  cblas_gemm_bf16bf16f32(
-      CblasColMajor,
-      need_trans_a ? CblasTrans : CblasNoTrans,
-      need_trans_b ? CblasTrans : CblasNoTrans,
-      m,
-      n,
-      k,
-      alpha,
-      (const MKL_BF16*)(a),
-      lda,
-      (const MKL_BF16*)(b),
-      ldb,
-      beta,
-      c,
-      ldc);
 }
 
 template <typename scalar_t>
@@ -306,6 +241,9 @@ void cpu_flash_attention(
   int64_t oStrideB = output.stride(0);
   int64_t oStrideM = output.stride(1);
   int64_t oStrideH = output.stride(2);
+  int64_t lStrideB = logsumexp.stride(0);
+  int64_t lStrideM = logsumexp.stride(1);
+  int64_t lStrideH = logsumexp.stride(2);
 
   int64_t qSlice = (qSize - 1) / qSplitSize + 1;
   int64_t num_thread = at::get_num_threads();
@@ -321,6 +259,7 @@ void cpu_flash_attention(
   scalar_t* k_data = key.data_ptr<scalar_t>();
   scalar_t* v_data = value.data_ptr<scalar_t>();
   scalar_t* out_data = output.data_ptr<scalar_t>();
+  float* lse_data = logsumexp.data_ptr<float>();
   float* qk_data = qk.data_ptr<float>();
   scalar_t* qk_norm_data = qk_norm.data_ptr<scalar_t>();
   float* qk_max_data = qk_max.data_ptr<float>();
@@ -336,15 +275,17 @@ void cpu_flash_attention(
       int64_t m = k * qSplitSize;
       int64_t qBlockSize = std::min(qSplitSize, qSize - m);
       // Initialize max and sum
-      fill_stub(qk_max_data + ompIdx * qSplitSize, -std::numeric_limits<float>::infinity(), qBlockSize);
-      fill_stub(qk_sum_data + ompIdx * qSplitSize, 0.f, qBlockSize);
+      fill_stub(qk_max_data + ompIdx * qSplitSize,
+          -std::numeric_limits<float>::infinity(), qBlockSize);
+      fill_stub(qk_sum_data + ompIdx * qSplitSize,
+          0.f, qBlockSize);
       int64_t num_keys = is_causal ? std::min(m + qBlockSize, kvSize) : kvSize;
       for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
         int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
         // Calculate scale * q @ k.T
-        _mkl_gemm(
-            true,
-            false,
+        cpublas::gemm(
+            TransposeType::Transpose,
+            TransposeType::NoTranspose,
             kvBlockSize,
             qBlockSize,
             headSize,
@@ -363,7 +304,9 @@ void cpu_flash_attention(
           for (const auto row : c10::irange(qBlockSize)) {
             int64_t last_col = m + row - n;
             float* row_ptr = qk_data + ompIdx * qSplitSize * kvSplitSize + row * kvBlockSize;
-            fill_stub(row_ptr + last_col + 1, -std::numeric_limits<float>::infinity(), kvBlockSize - last_col -1);
+            fill_stub(row_ptr + last_col + 1,
+                -std::numeric_limits<float>::infinity(),
+                kvBlockSize - last_col - 1);
           }
         }
         // Update coefficients with Softmax
@@ -378,9 +321,9 @@ void cpu_flash_attention(
             headSize,
             n);
         // Calculate Softmax(q @ k.T) @ v
-        _mkl_gemm(
-            false,
-            false,
+        cpublas::gemm(
+            TransposeType::NoTranspose,
+            TransposeType::NoTranspose,
             headSize,
             qBlockSize,
             kvBlockSize,
@@ -401,6 +344,12 @@ void cpu_flash_attention(
           qBlockSize,
           headSize,
           oStrideM);
+      // Store logsumexp for backward
+      float* lse_ptr = lse_data + i * lStrideB + j * lStrideH + m * lStrideM;
+      for (const auto row : c10::irange(qBlockSize)) {
+        lse_ptr[row * lStrideM] = qk_max_data[ompIdx * qSplitSize + row]
+            + std::log(qk_sum_data[ompIdx * qSplitSize + row]);
+      }
       // Move to the next query
       data_index_step(i, batchSize, j, num_head, k, qSlice);
     }
