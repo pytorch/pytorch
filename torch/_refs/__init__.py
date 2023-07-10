@@ -1144,7 +1144,7 @@ def pow(
 
 # TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
-# CompositeImplicitAutograd - don't register decomp
+# NB: aten_op not registered because CompositeExplicitAutograd
 @out_wrapper()
 def float_power(
     a: Union[TensorLikeType, NumberType],
