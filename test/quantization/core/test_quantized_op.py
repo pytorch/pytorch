@@ -6461,13 +6461,13 @@ class TestQuantizedConv(TestCase):
         packed_weight = qconv_prepack(
             W_q_cpu_tensor,
             weight_scale,
-            X_q_cpu_tensor.size(),
             X_scale,
             X_zero_point,
             strides,
             pads,
             dilations,
             groups,
+            X_q_cpu_tensor.size(),
         )
 
         if post_op.binary_attr == "add":
