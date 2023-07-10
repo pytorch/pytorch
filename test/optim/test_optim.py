@@ -773,6 +773,49 @@ class TestOptim(TestCase):
                 for k in st_p_state:
                     self.assertEqual(st_p_state[k], mt_p_state[k])
 
+    def _test_foreach_memory(self, optimizer_pairs_with_flags):
+        if not torch.cuda.is_available():
+            return
+
+        device = "cuda"
+        nparams = 10
+        for optimizer_constructor, kwargs in optimizer_pairs_with_flags:
+            max_mems = []
+            for flag_value in (False, True):
+                kwargs_with_flags = deepcopy(kwargs)
+                kwargs_with_flags['foreach'] = flag_value
+
+                # The 128 is critical here! Our CUDACachingAllocator allocates in blocks of 512,
+                # meaning any tensor that occupies <512 bytes of memory will allocate a whole
+                # 512 bytes anyway. We use 128 (since datasize would be 4 bytes) so that param
+                # is size 512 exactly, making our later calculations for intermediate_size easy.
+                param = torch.rand(128, device=device)
+                params = [torch.rand_like(param) for _ in range(nparams)]
+
+                optimizer = optimizer_constructor(
+                    params, **kwargs_with_flags
+                )
+
+                for p in params:
+                    p.grad = torch.rand_like(p)
+
+                optimizer.step()
+                import gc
+                gc.collect()
+                torch.cuda.reset_peak_memory_stats()
+                optimizer.step()
+                gc.collect()
+                max_mems.append(torch.cuda.max_memory_allocated())
+
+            st_max_mem, mt_max_mem = max_mems
+            intermediate_size = nparams * param.nelement() * param.element_size()
+            nintermediates = 1  # we expect a budget of 1 intermediate most of the time
+            if 'capturable' in kwargs_with_flags and kwargs_with_flags['capturable']:
+                # with capturable in Adam, we have 2 extra intermediates for the bias_corrections
+                nintermediates = 3
+
+            self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
+
     @property
     def _multi_tensor_optimizer_configs(self):
         return [
@@ -837,6 +880,10 @@ class TestOptim(TestCase):
             params[0].grad = torch.zeros_like(params[0])
             optimizer = optimizer_ctor(params, foreach=True, **optimizer_params)
             optimizer.step()
+
+    def test_peak_mem_multi_tensor_optimizers(self):
+        configs = [(o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ == "Adam"]
+        self._test_foreach_memory(configs)
 
     @property
     def _fused_optimizer_configs(self):
