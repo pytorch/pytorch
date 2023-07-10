@@ -359,6 +359,7 @@ def cross_entropy(
     reduce: Optional[bool] = ...,
     reduction: str = ...,
     label_smoothing: float = ...,
+    dim: Optional[int] = ...,
 ) -> Tensor: ...
 def binary_cross_entropy(
     input: Tensor,
