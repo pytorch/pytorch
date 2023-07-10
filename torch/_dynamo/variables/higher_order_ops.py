@@ -54,7 +54,7 @@ def are_tensors(var):
     return False
 
 
-def validate_args_and_manually_create_graph_inputs(
+def validate_args_and_maybe_create_graph_inputs(
     sub_args, tracer, tx, manually_set_subgraph_inputs
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
@@ -62,9 +62,7 @@ def validate_args_and_manually_create_graph_inputs(
 
     args = []
     for a in sub_args:
-        assert not isinstance(a, torch.Tensor), "Tensors should already be tracked?"
-        if a is None:
-            a = ConstantVariable(None)
+        assert isinstance(a, VariableTracker)
 
         if isinstance(a, ConstantVariable):
             # Ensures that we recompile when the constant value changes
@@ -130,11 +128,11 @@ def speculate_subgraph(
 
     try:
         with tx.output.new_subtracer() as tracer:
-            args = validate_args_and_manually_create_graph_inputs(
+            args = validate_args_and_maybe_create_graph_inputs(
                 sub_args, tracer, tx, manually_set_subgraph_inputs
             )
 
-            validate_args_and_manually_create_graph_inputs(
+            validate_args_and_maybe_create_graph_inputs(
                 sub_kwargs.values(), tracer, tx, manually_set_subgraph_inputs=False
             )
 
