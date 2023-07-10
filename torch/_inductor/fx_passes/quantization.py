@@ -219,13 +219,13 @@ def _register_qconv_weight_prepack_pass(pattern):
             packed_weight_inputs = (
                 qw,
                 w_scale,
-                x_shape,
                 x_scale,
                 x_zp,
                 stride,
                 padding,
                 dilation,
                 groups,
+                x_shape,
             )
             packed_weight_op = torch.ops.quantized.qconv_prepack_pt2e
             prepack_weight_node = graph.call_function(

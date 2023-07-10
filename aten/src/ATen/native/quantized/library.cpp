@@ -229,7 +229,7 @@ TORCH_LIBRARY(quantized, m) {
 
   // New OP definition for Quantization in PyTorch 2.0 Export
   // Weight Prepack
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv_prepack_pt2e(Tensor weight, Tensor w_scales, int[] x_shape, float x_scale, int x_zp, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv_prepack_pt2e(Tensor weight, Tensor w_scales, float x_scale, int x_zp, int[] stride, int[] padding, int[] dilation, int groups, int[]? x_shape=None) -> Tensor"));
 
   // Conv1D/2D/3D with unary postop
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::qconv1d_pointwise_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str attr, Scalar?[] scalars, str? algorithm) -> Tensor"));
