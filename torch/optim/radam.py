@@ -360,7 +360,7 @@ def _multi_tensor_radam(
         bias_correction1 = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
         unrect_step_size = _stack_if_compiling([(lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)])
         bias_correction2_sqrt_times_rect_step_size = [
-            _dispatch_sqrt(1 - beta2 ** _get_value(step)) * (lr * rect / bc) * -1 
+            _dispatch_sqrt(1 - beta2 ** _get_value(step)) * (lr * rect / bc) * -1
             for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)
         ]
 
