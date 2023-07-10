@@ -5936,13 +5936,13 @@ def ___make_guard_fn():
             (s0 % s1, z0 - z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1)) * z1),
             (
                 s2 % (s0 / s1),
-                z2 - z3.ToReal(z3.ToInt(
-                    z3.ToReal(z2) / (z3.ToReal(z0) * z1**-1)
-                )) * (z3.ToReal(z0) * z1**-1)
+                z2
+                - z3.ToReal(z3.ToInt(z3.ToReal(z2) / (z3.ToReal(z0) * z1**-1)))
+                * (z3.ToReal(z0) * z1**-1),
             ),
             (
                 s2 % (s0**3),
-                z2 - z3.ToReal(z3.ToInt(z3.ToReal(z2) / z0**3)) * z0**3
+                z2 - z3.ToReal(z3.ToInt(z3.ToReal(z2) / z0**3)) * z0**3,
             ),
         ]
 
