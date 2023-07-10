@@ -346,6 +346,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
     ]
     share_qparams_ops = [
         F.adaptive_avg_pool2d,
+        F.elu,
         F.hardtanh,
         F.max_pool2d,
         F.pad,
@@ -355,6 +356,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         F.leaky_relu_,
         torch.nn.AdaptiveAvgPool2d,
         torch.nn.ConstantPad2d,
+        torch.nn.ELU,
         torch.nn.MaxPool2d,
         torch.nn.ReLU6,
         torch.nn.Hardtanh,
