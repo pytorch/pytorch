@@ -483,14 +483,14 @@ template struct PackedConvWeightsOnednn<3>;
 at::Tensor _qconv_prepack_pt2e(
     at::Tensor weight, // from CPU backend instead of QuantizedCPU
     at::Tensor weight_scales, // Weight zero points must be 0 for onednn
-    torch::List<int64_t> input_shape,
     double input_scale,
     int64_t input_zero_point,
     torch::List<int64_t> stride,
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
-    int64_t groups) {
-  int kSpatialDim = input_shape.size() - 2;
+    int64_t groups,
+    c10::optional<torch::List<int64_t>> input_shape) {
+  int kSpatialDim = weight.ndimension() - 2;
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "Weights are expected to have ", kSpatialDim + 2, " dimensions");
@@ -508,10 +508,12 @@ at::Tensor _qconv_prepack_pt2e(
       kSpatialDim, "D convolution.");
 
   bool is_1d = (1 == kSpatialDim);
-  auto x_dims = input_shape.vec();
+  auto x_dims = input_shape.has_value()?input_shape.value().vec():ideep::dims();
   if (is_1d) {
-    // N, C, L -> N, C, 1, L
-    x_dims.insert(x_dims.begin() + 2, 1);
+    if (input_shape.has_value()) {
+      // N, C, L -> N, C, 1, L
+      x_dims.insert(x_dims.begin() + 2, 1);
+    }
     if (weight.dim() == 3) {
       weight = weight.unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
     }
@@ -782,17 +784,17 @@ class QConvPrepackPT2E final {
   static at::Tensor run_conv(
     at::Tensor weight, // from CPU backend instead of QuantizedCPU
     at::Tensor weight_scales, // Weight zero points must be 0s for onednn
-    torch::List<int64_t> input_shape,
     double input_scale,
     int64_t input_zero_point,
     torch::List<int64_t> stride,
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
-    int64_t groups) {
+    int64_t groups,
+    c10::optional<torch::List<int64_t>> input_shape) {
 #if AT_MKLDNN_ENABLED()
     return _qconv_prepack_pt2e(
-        weight, weight_scales, input_shape, input_scale, input_zero_point,
-        stride, padding, dilation, groups);
+        weight, weight_scales, input_scale, input_zero_point,
+        stride, padding, dilation, groups, input_shape);
 #else
     TORCH_CHECK(false, "Unimplemented as onednn is not available.")
 #endif
