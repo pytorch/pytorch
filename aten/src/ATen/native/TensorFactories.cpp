@@ -706,6 +706,17 @@ Tensor linspace(
   return at::linspace_out(result, start, end, steps);
 }
 
+Tensor linspace(
+    const Tensor& start,
+    const Tensor& end,
+    int64_t steps,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return at::linspace(start.item(), end.item(), steps, dtype, layout, device, pin_memory);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor logspace(
@@ -724,6 +735,18 @@ Tensor logspace(
   auto result_options = linspace_logspace_infer_options(start, end, options, "torch.logspace()");
   Tensor result = at::empty({steps}, result_options);
   return at::logspace_out(result, start, end, steps, base);
+}
+
+Tensor logspace(
+    const Tensor& start,
+    const Tensor& end,
+    int64_t steps,
+    double base,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return at::logspace(start.item(), end.item(), steps, base, dtype, layout, device, pin_memory);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

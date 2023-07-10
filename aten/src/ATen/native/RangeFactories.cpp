@@ -12,6 +12,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/linspace.h>
+#include <ATen/ops/logspace.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/linspace_native.h>
 #include <ATen/ops/logspace_native.h>
@@ -20,6 +22,9 @@
 
 namespace at { namespace native {
 
+Tensor& linspace_out(const Tensor& start, const Tensor& end, int64_t steps, Tensor& result) {
+  return at::linspace_out(result, start.item(), end.item(), steps);
+}
 
 Tensor& linspace_out(const Scalar& start, const Scalar& end, int64_t steps, Tensor& result) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
@@ -45,6 +50,10 @@ Tensor& linspace_out(const Scalar& start, const Scalar& end, int64_t steps, Tens
   }
 
   return result;
+}
+
+Tensor& logspace_out(const Tensor& start, const Tensor& end, int64_t steps, double base, Tensor& result) {
+  return at::logspace_out(result, start.item(), end.item(), steps, base);
 }
 
 Tensor& logspace_out(const Scalar& start, const Scalar& end, int64_t steps, double base, Tensor& result) {
