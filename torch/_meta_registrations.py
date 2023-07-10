@@ -2787,7 +2787,6 @@ def meta__foreach_binop_scalar(self, scalar=1):
 @register_meta([aten._foreach_lerp_.Scalar])
 def meta__foreach_ternop_scalar(self, tensors, scalar=1):
     _check_foreach_binop_tensor_lists(self, tensors)
-    return [torch.empty_like(s) for s in self]
 
 
 @register_meta(
