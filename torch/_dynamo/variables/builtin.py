@@ -1223,6 +1223,7 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             NNModuleVariable,
             TensorVariable,
+            UserDefinedObjectVariable,
             UserFunctionVariable,
         )
         from .lists import SizeVariable
@@ -1299,6 +1300,15 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
             return ConstantVariable(op(left.value, right.value))
 
+        if isinstance(left, UserDefinedObjectVariable) and isinstance(
+            right, UserDefinedObjectVariable
+        ):
+            return ConstantVariable(op(left.value, right.value))
+
+        if op.__name__ == "is_":
+            # If the two objects are of different type, we can safely return False
+            if type(left) is not type(right):
+                return ConstantVariable(False)
         _unimplemented()
 
     # and_ is a constant fold function, so we only get here if constant fold is not valid

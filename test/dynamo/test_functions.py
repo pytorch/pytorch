@@ -1256,8 +1256,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             named_tensors: Dict[str, torch.Tensor] = field(default_factory=dict)
 
         def fn(x):
-            Output(5, named_tensors={"x": x})
-            return torch.cos(x)
+            a = Output(1)
+            b = Output(5, named_tensors={"x": x})
+            return torch.cos(x) * a.b + b.named_tensors["x"]
 
         cnts = torch._dynamo.testing.CompileCounter()
         compiled_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -1265,7 +1266,28 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         out = fn(x)
         compiled_out = compiled_fn(x)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.op_count, 3)
+
+    def test_dataclass_factory(self):
+        @dataclass
+        class Output:
+            sharding_contexts: Any = field(default_factory=list)
+            a: int = 1
+
+        def fn(x):
+            l = Output(
+                [
+                    1,
+                ],
+                2,
+            )
+            return l.a * x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":

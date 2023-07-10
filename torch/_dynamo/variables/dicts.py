@@ -461,13 +461,6 @@ class HFPretrainedConfigVariable(VariableTracker):
         return variables.ConstantVariable(hasattr(self.obj, name)).add_options(self)
 
 
-def create_dict_variable_for_dataclass(user_cls, args, kwargs, options):
-    keys = [f.name for f in dataclasses.fields(user_cls)]
-    bound = inspect.signature(user_cls).bind(*args, **kwargs)
-    bound.apply_defaults()
-    return variables.ConstDictVariable(bound.arguments, user_cls, options)
-
-
 def _dictvariable_flatten(d: ConstDictVariable) -> Tuple[List[Any], pytree.Context]:
     if d.python_type() is not dict:
         # Note - ConstDictVariable can contain different kinds of dicts.
