@@ -769,6 +769,33 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self._test_wrap_simple(f, (x, y), 3)
 
+    def test_wrap_kwarg_recompile(self):
+        def f(x, y, z=None):
+            def fn(*, x, y, z=None):
+                if z is None:
+                    return (x * 2) + y
+                else:
+                    return 2 * x
+
+            return wrap(fn, x=x, y=y, z=z)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        counters.clear()
+        opt = torch.compile(f, backend="eager")
+        opt(x, y)
+        self.assertEqual(counters["stats"]["calls_captured"], 1)
+
+        # verify that we `don't` recompile
+        opt(x, y)
+        self.assertEqual(counters["stats"]["calls_captured"], 1)
+
+        # verify that we `do` recompile
+        output = opt(x, y, 8)
+        self.assertEqual(counters["stats"]["calls_captured"], 2)
+        self.assertEqual(output, 2 * x)
+
     def test_wrap_kwarg_default_else_branch(self):
         def f(x, y, z):
             def fn(*, x, y, z=None):
