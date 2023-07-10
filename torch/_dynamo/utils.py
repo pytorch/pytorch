@@ -1795,7 +1795,8 @@ def _extract_anchors_from_expr(segment):
             # handle operators that have multiple characters
             if (
                 right_anchor < len(lines[cur_lineno])
-                and not lines[cur_lineno][right_anchor].isspace()
+                and not (ch := lines[cur_lineno][right_anchor]).isspace()
+                and ch not in "\\#"
             ):
                 right_anchor += 1
 

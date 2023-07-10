@@ -5075,7 +5075,8 @@ def fn():
             a = ( b   )   +   c
             a = (a + b) // (c - d)
             a = b    \
-         +   c  # test
+         +\
+               c  # test
             a = (
                 (b  # test +
                     )  \
@@ -5123,8 +5124,10 @@ def fn():
             """\
             a = b    \\
                 ~~~~~~
-         +   c  # test
-         ^~~~~
+         +\\
+         ^~
+               c  # test
+               ~
 """,
             """\
                 (b  # test +
