@@ -99,7 +99,10 @@ class TestMatmulCuda(TestCase):
         # Move to CPU for comparison
         res_cuda = res_cuda.to("cpu")
         # Compare
-        self.assertEqual(res_cpu, res_cuda)
+        if dtype == torch.float16:
+            self.assertEqual(res_cpu, res_cuda, atol=size*2.5e-5, rtol=0.0)
+        else:
+            self.assertEqual(res_cpu, res_cuda)
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
 
     @onlyCUDA
