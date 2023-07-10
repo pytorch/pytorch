@@ -2631,9 +2631,11 @@ def parse_args(args=None):
     )
 
     parser.add_argument(
-        "--translation-validation",
-        action=argparse.BooleanOptionalAction,
+        "--no-translation-validation",
+        action="store_true",
+        help="Disable translation validation for accuracy builds.",
     )
+
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -3127,9 +3129,9 @@ def run(runner, args, original_dir=None):
         else:
             args.profiler_trace_name = args.profiler_trace_name
 
-    if args.translation_validation is not None:
+    if args.no_translation_validation:
         # Overwrite 'translation_validation' config, if specified.
-        torch._dynamo.config.translation_validation = args.translation_validation
+        torch._dynamo.config.translation_validation = False
 
     experiment = functools.partial(experiment, args, runner.model_iter_fn)
 
