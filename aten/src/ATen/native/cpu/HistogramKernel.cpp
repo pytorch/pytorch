@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Histogram.h>
-
+#include <iostream>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
@@ -195,6 +195,8 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
             if (!skip_elt) {
                 // In the unweighted case, the default weight is 1
                 input_t wt = accessor_wt.has_value() ? accessor_wt.value()[i] : static_cast<input_t>(1);
+                std::cout<<wt;
+                std::cout<<hist_local_data[hist_index];
 
                 hist_local_data[hist_index] += wt;
             }

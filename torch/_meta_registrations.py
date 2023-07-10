@@ -2674,6 +2674,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     [
         aten._foreach_neg_.default,
         aten._foreach_reciprocal_.default,
+        aten._foreach_sqrt_.default,
     ]
 )
 def meta__foreach_unaop_(self):
@@ -2759,6 +2760,7 @@ def meta__foreach_binop_list(self, other):
         aten._foreach_add_.Scalar,
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,
+        aten._foreach_div_.Scalar,
     ]
 )
 def meta__foreach_binop__scalar(self, scalar=1):
