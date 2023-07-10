@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -80,13 +81,25 @@ void unary_op(const Tensor& self,
       newCachedGraph->outputTensor_ = unaryBlock(mpsGraph, castTensor);
     });
 
+    // If self is densely mapped in storage, create a dense output-like representation
+    at::Tensor self_;
+    if (!is_dense_in_storage(self)) {
+      self_ = at::empty_like(output);
+      mps::mps_copy_(self_, self, false);
+    } else {
+      self_ = self;
+    }
+
     bool gatherTensorData = true;
+    // NS: This check is wrong and needs to be fixed, as it would produce wrong results for transposed outputs
+    // See https://github.com/pytorch/pytorch/issues/100764
+
     if (!output.is_contiguous() || output.is_view()) {
       gatherTensorData = false;
     }
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, /*mpsShape=*/nullptr, gatherTensorData);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output, /*mpsShape=*/nullptr, false);
+    auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self_, /*mpsShape=*/nullptr, gatherTensorData);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output, /*mpsShape=*/nullptr, false);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
         @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
