@@ -34,7 +34,7 @@ class TORCH_API Context {
   Context();
 
   const Generator& defaultGenerator(Device device) {
-    DeviceType device_type = device.type();
+    c10::DeviceType device_type = device.type();
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
     if (device_type == at::kCPU) {
@@ -44,18 +44,18 @@ class TORCH_API Context {
     } else if (device_type == at::kMPS) {
       return at::detail::getMPSHooks().getDefaultMPSGenerator();
     } else {
-      AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
+      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
-  Device getDeviceFromPtr(void* data, DeviceType device_type) {
+  Device getDeviceFromPtr(void* data, c10::DeviceType device_type) {
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
     if (device_type == at::kCPU) {
-      return DeviceType::CPU;
+      return c10::DeviceType::CPU;
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDeviceFromPtr(data);
     } else {
-      AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
+      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
   static bool isPinnedPtr(const void* data) {
@@ -96,19 +96,19 @@ class TORCH_API Context {
     return detail::getMPSHooks().hasMPS();
   }
   static bool hasIPU() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::IPU);
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::IPU);
   }
   static bool hasXLA() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::XLA);
   }
   static bool hasXPU() {
     return detail::getXPUHooks().hasXPU();
   }
   static bool hasLazy() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::Lazy);
   }
   static bool hasORT() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::ORT);
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::ORT);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -273,13 +273,13 @@ class TORCH_API Context {
   void unsetDefaultMobileCPUAllocator();
 
  private:
-  void initCUDAIfNeeded(DeviceType p) {
-    if (p == DeviceType::CUDA) {
+  void initCUDAIfNeeded(c10::DeviceType p) {
+    if (p == c10::DeviceType::CUDA) {
       lazyInitCUDA();
     }
   }
-  void initHIPIfNeeded(DeviceType p) {
-    if (p == DeviceType::HIP) {
+  void initHIPIfNeeded(c10::DeviceType p) {
+    if (p == c10::DeviceType::HIP) {
       lazyInitHIP();
     }
   }
@@ -428,7 +428,7 @@ static inline bool hasMKLDNN() {
 }
 
 static inline void manual_seed(uint64_t seed) {
-  auto gen = globalContext().defaultGenerator(DeviceType::CPU);
+  auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());
@@ -450,7 +450,7 @@ static inline void manual_seed(uint64_t seed) {
   }
 
   if (hasMPS()) {
-    auto mps_gen = globalContext().defaultGenerator(DeviceType::MPS);
+    auto mps_gen = globalContext().defaultGenerator(c10::DeviceType::MPS);
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(mps_gen.mutex());
     mps_gen.set_current_seed(seed);
