@@ -120,6 +120,9 @@ class TestEnvironment:
     #     include_in_repro (bool): Indicates whether this flag should be included in the
     #         repro command that is output on test failure (i.e. whether it is possibly
     #         relevant to reproducing the test failure). Default: True
+    #     enabled_fn (Callable): Callable returning whether the flag should be enabled
+    #         given the environment variable value and the default value. Default: Lambda
+    #         requiring "0" to disable if on by default OR "1" to enable if off by default.
     #     implied_by_fn (Callable): Thunk returning a bool to imply this flag as enabled
     #         by something outside of its primary environment variable setting. For example,
     #         this can be useful if the value of another environment variable implies the flag
@@ -130,12 +133,14 @@ class TestEnvironment:
         env_var=None,
         default=False,
         include_in_repro=True,
+        enabled_fn=lambda env_var_val, default: (
+            (env_var_val != "0") if default else (env_var_val == "1")),
         implied_by_fn=lambda: False,
     ):
         enabled = default
         if env_var is not None:
-            env_var_val = os.getenv(env_var, "")
-            enabled = (env_var_val != "0") if default else (env_var_val == "1")
+            env_var_val = os.getenv(env_var)
+            enabled = enabled_fn(env_var_val, default)
         implied = implied_by_fn()
         enabled = enabled or implied
         if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
@@ -162,7 +167,13 @@ FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
 
-TestEnvironment.def_flag("IS_CI", env_var="CI", include_in_repro=False)
+# NB: This flag differs semantically from others in that setting the env var to any
+# non-empty value will cause it to be true:
+#   CI=1, CI="true", CI=0, etc. all set the flag to be true.
+#   CI= and an unset CI set the flag to be false.
+# GitHub sets the value to CI="true" to enable it.
+TestEnvironment.def_flag("IS_CI", env_var="CI", include_in_repro=False,
+                         enabled_fn=lambda env_var_value, _: bool(env_var_value))
 TestEnvironment.def_flag(
     "IS_SANDCASTLE",
     env_var="SANDCASTLE",
