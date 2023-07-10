@@ -339,11 +339,14 @@ class DataClassVariable(ConstDictVariable):
         assert set(bound.arguments.keys()) == set(keys)
         items = collections.OrderedDict()
 
+        # For default values as factory functions, there are sitting in a
+        # init_closure environment
         init_freevars = user_cls.__init__.__code__.co_freevars
-        closure = user_cls.__init__.__closure__
+        init_closure = user_cls.__init__.__closure__
         defaults_map = {}
-        for name, cell in zip(init_freevars, closure):
+        for name, cell in zip(init_freevars, init_closure):
             defaults_map[name] = cell.cell_contents
+
         for key in keys:
             val = bound.arguments[key]
             if isinstance(val, VariableTracker):
