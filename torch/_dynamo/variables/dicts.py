@@ -342,7 +342,7 @@ class DataClassVariable(ConstDictVariable):
         # For default values as factory functions, there are sitting in a
         # init_closure environment
         init_freevars = user_cls.__init__.__code__.co_freevars
-        init_closure = user_cls.__init__.__closure__
+        init_closure = user_cls.__init__.__closure__ or ()
         defaults_map = {}
         for name, cell in zip(init_freevars, init_closure):
             defaults_map[name] = cell.cell_contents
