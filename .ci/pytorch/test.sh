@@ -353,6 +353,8 @@ test_perf_for_dashboard() {
       local target_flag=("--${target}")
       if [[ "$target" == "performance" ]]; then
         target_flag+=( --cold-start-latency)
+      elif [[ "$target" == "accuracy" ]]; then
+        target_flag+=( --no-translation-validation)
       fi
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
