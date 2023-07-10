@@ -2290,6 +2290,8 @@ Target Guards:
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
     ) -> "sympy.Expr":
+        # 'positive' is None for unspecified symbols, since we can't
+        # assume that it will be neither positive nor negative.
         return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None)
 
     def create_symbol(

@@ -983,10 +983,7 @@ class VariableBuilder:
                 and not isinstance(self.get_source(), RandomValueSource)
             ):
                 if torch._dynamo.config.specialize_int:
-                    # Negative values don't create_symbol correctly,
-                    # so make sure we do a constant in this case.
-                    #
-                    # Also, if specialize_int is False, also return
+                    # If specialize_int is False, also return
                     # a constant (but this should have been handled
                     # in the caller, TBH)
                     return ConstantVariable(
@@ -1032,10 +1029,6 @@ class VariableBuilder:
                     )
 
                 wrapped_value = shape_env.create_symintnode(
-                    # TODO: This is wrong wrong wrong, create_symbol will
-                    # generate something that is non-negative, but this is
-                    # not a sound assumption to make.
-                    # Not fixing as this was a preexisting condition.
                     shape_env.create_unspecified_symbol(
                         value,
                         source=self.source,
@@ -1045,7 +1038,6 @@ class VariableBuilder:
                     hint=value,
                     source=self.source,
                 )
-                symbol = wrapped_value.node._expr
 
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
