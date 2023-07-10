@@ -865,10 +865,6 @@ class TestOptim(TestCase):
     def test_multi_tensor_optimizers(self):
         self._test_derived_optimizers(self._multi_tensor_optimizer_configs, "foreach")
 
-    def test_peak_mem_multi_tensor_optimizers(self):
-        configs = [(o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ == "Adam"]
-        self._test_foreach_memory(configs)
-
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_multi_tensor_optimizers_with_varying_tensors(self):
         self._test_derived_optimizers_varying_tensors(self._multi_tensor_optimizer_configs, "foreach")
@@ -884,6 +880,10 @@ class TestOptim(TestCase):
             params[0].grad = torch.zeros_like(params[0])
             optimizer = optimizer_ctor(params, foreach=True, **optimizer_params)
             optimizer.step()
+
+    def test_peak_mem_multi_tensor_optimizers(self):
+        configs = [(o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ == "Adam"]
+        self._test_foreach_memory(configs)
 
     @property
     def _fused_optimizer_configs(self):
