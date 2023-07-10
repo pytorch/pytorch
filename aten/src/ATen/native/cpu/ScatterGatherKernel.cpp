@@ -12,6 +12,9 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
+#ifdef USE_FBGEMM
+#include <fbgemm/Utils.h>
+#endif
 
 namespace at::native {
 
@@ -574,6 +577,24 @@ struct cpu_scatter_gather_base_kernel {
   }
 };
 
+#ifndef USE_FBGEMM
+namespace fbgemm {
+
+template <typename K, typename V>
+std::pair<K*, V*> radix_sort_parallel(
+    K* const inp_key_buf,
+    V* const inp_value_buf,
+    K* const tmp_key_buf,
+    V* const tmp_value_buf,
+    const int64_t elements_count,
+    const int64_t max_value) {
+  TORCH_INTERNAL_ASSERT(false, "radix_sort_parallel: ATen not compiled with FBGEMM support");
+  std::make_pair(nullptr, nullptr);
+}
+
+}
+#endif
+
 // Note [scatter reduce optimization]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
@@ -627,7 +648,7 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
 
   int64_t* sorted_col_index_keys = nullptr;
   int64_t* sorted_col_index_values = nullptr;
-  std::tie(sorted_col_index_keys, sorted_col_index_values) = radix_sort_parallel(
+  std::tie(sorted_col_index_keys, sorted_col_index_values) = fbgemm::radix_sort_parallel(
       keys.get(),
       values.get(),
       keys_tmp.get(),
