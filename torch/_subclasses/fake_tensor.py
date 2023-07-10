@@ -1418,7 +1418,7 @@ class FakeTensorMode(TorchDispatchMode):
                     and common_device[0] is not None
                     and is_noncontiguous_supported(common_device[0]) is False
                 ):
-                    from torch.distributed._tensor.ops.pointwise_ops import(
+                    from torch.distributed._tensor.ops.pointwise_ops import (
                         pointwise_ops,
                     )
 
