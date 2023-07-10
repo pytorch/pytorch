@@ -76,6 +76,30 @@ struct VecReduceAllSIMD<float, Op> {
   }
 };
 #endif // defined(CPU_CAPABILITY_AVX512)
+#if defined(CPU_CAPABILITY_NEON)
+template <typename Op>
+struct VecReduceAllSIMD<float, Op> {
+  static inline float apply(const Op& vec_fun, const Vectorized<float>& acc_vec) {
+    using Vec = Vectorized<float>;
+    Vec v = acc_vec;
+    // 128-bit shuffle
+    Vec v1 = {v.get_high(), v.get_low()};
+    v = vec_fun(v, v1);
+    // 64-bit shuffle
+    float32x4_t v1_1 = vextq_f32(v.get_low(), v.get_low(), 2);
+    float32x4_t v1_2 = vextq_f32(v.get_high(), v.get_high(), 2);
+    v1 = {v1_1, v1_2};
+    v = vec_fun(v, v1);
+    // 32-bit shuffle
+    v1_1 = vrev64q_f32(v.get_low());
+    v1_2 = vrev64q_f32(v.get_high());
+    v1 = {v1_1, v1_2};
+    v = vec_fun(v, v1);
+
+    return v.get_low()[0];
+  }
+};
+#endif // defined(CPU_CAPABILITY_NEON)
 #endif // defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && !defined(C10_MOBILE)
 
 template <typename scalar_t, typename Op>

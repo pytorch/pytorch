@@ -18,6 +18,7 @@ import sysconfig
 import tempfile
 import threading
 import types
+import platform
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
@@ -363,7 +364,7 @@ class VecISA:
     # HW platform and PyTorch both could support AVX512 or AVX2. And suppose ARM
     # also needs the logic
     _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_NEON)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
@@ -429,6 +430,17 @@ cdll.LoadLibrary("__lib_path__")
 
             return True
 
+@dataclasses.dataclass
+class VecNEON(VecISA):
+    _bit_width = 256
+    _macro = "CPU_CAPABILITY_NEON"
+    _arch_flags = "" # Unused, even for AVX
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
+
+    def __str__(self) -> str:
+        return "neon" # Unused
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
 @dataclasses.dataclass
 class VecAVX512(VecISA):
@@ -472,7 +484,7 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2()]
+supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -487,7 +499,8 @@ def valid_vec_isa_list():
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
         for isa in supported_vec_isa_list:
-            if str(isa) in _cpu_info_content and isa:
+            # cpuinfo does not reveal info about NEON support. All aarch64 processors do support NEON though.
+            if (str(isa) in _cpu_info_content) or (isinstance(isa, VecNEON) and platform.processor() == "aarch64") and isa: 
                 isa_list.append(isa)
         return isa_list
 
