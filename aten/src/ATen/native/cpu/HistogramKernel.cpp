@@ -5,6 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
+#include <string>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -132,7 +133,7 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
               thread_hist_sizes.begin() + 1);
     Tensor thread_histograms = at::zeros(thread_hist_sizes, hist.dtype());
     TORCH_INTERNAL_ASSERT(thread_histograms.is_contiguous());
-
+    std::cout << "dog";
     at::parallel_for(0, N, GRAIN_SIZE, [&](int64_t start, int64_t end) {
         const auto tid = at::get_thread_num();
         auto hist_strides = thread_histograms.strides();
@@ -195,10 +196,14 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
             if (!skip_elt) {
                 // In the unweighted case, the default weight is 1
                 input_t wt = accessor_wt.has_value() ? accessor_wt.value()[i] : static_cast<input_t>(1);
-                std::cout<<wt;
-                std::cout<<hist_local_data[hist_index];
+                try {
+                    hist_local_data[hist_index] += wt;
+                }
+                catch (...) {
+                    std::cout << std::to_string(wt);
+                    std::cout << std::to_string(hist_local_data[hist_index]);
+                }
 
-                hist_local_data[hist_index] += wt;
             }
         }
     });
