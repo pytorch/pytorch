@@ -264,7 +264,7 @@ def _single_tensor_radam(
             grad = grad.add(param, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
-        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+        exp_avg.lerp_(grad, 1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
         # correcting bias for the first moving moment
@@ -337,8 +337,7 @@ def _multi_tensor_radam(
             grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
-        torch._foreach_mul_(grouped_exp_avgs, beta1)
-        torch._foreach_add_(grouped_exp_avgs, grouped_grads, alpha=1 - beta1)
+        torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
 
         torch._foreach_mul_(grouped_exp_avg_sqs, beta2)
         torch._foreach_addcmul_(grouped_exp_avg_sqs, grouped_grads, grouped_grads, 1 - beta2)

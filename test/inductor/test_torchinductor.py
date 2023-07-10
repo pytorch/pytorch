@@ -200,8 +200,10 @@ def clone_preserve_strides(x, device=None):
 
 
 @patch.object(config, "debug", True)
-def run_and_get_cpp_code(fn, *args, **kwargs):
-    torch._dynamo.reset()
+def run_and_get_cpp_code(fn, *args, _reset_dynamo=True, **kwargs):
+    if _reset_dynamo:
+        torch._dynamo.reset()
+
     import io
     import logging
 
@@ -6557,6 +6559,54 @@ class CommonTemplate:
             for right in [True, False]:
                 self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
 
+    @patch.object(config.triton, "autotune_pointwise", True)
+    def test_inductor_bucketize_add_autotune(self):
+        """
+        Causes a @pointwise(size_hints) where size_hints is 2D
+        """
+
+        def fn(input, offsets, add_value):
+            return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
+
+        input = torch.rand((16, 16, 64, 64))
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+        add_value = torch.randint(0, 1024, (16, 16, 64, 64)).to(
+            memory_format=torch.channels_last
+        )
+
+        self.common(fn, (input, boundaries, add_value), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op(self):
+        import torch.library
+
+        @functools.lru_cache()
+        def define_op(foo):
+            foo.define("custom(Tensor self) -> Tensor")
+
+        foo = torch.library.Library("foo", "DEF")
+        define_op(foo)
+
+        @torch.library.impl(foo, "custom", "CPU")
+        def foo_cpu(x):
+            return 3 * x
+
+        @torch.library.impl(foo, "custom", "CUDA")
+        def foo_cuda(x):
+            return 3 * x
+
+        @torch.library.impl(foo, "custom", "Meta")
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.foo.custom(a)
+            c = torch.cos(b)
+            return c
+
+        self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -6739,9 +6789,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 s = 0.7 * torch.arange(x.shape[0], device=x.device)
                 return x[s.long()]
 
-            fn_opt = torch._dynamo.optimize("inductor")(fn)
-            inps = [torch.randn(8, 3).cuda()]
-            code = run_and_get_triton_code(fn_opt, *inps)
+            fn_opt = torch.compile(fn)
+
+            x = torch.randn(8, device="cuda")
+            code = run_and_get_triton_code(fn_opt, x)
+
             # Check that there's indirect indexing...
             for c in code:
                 for line in c.split("\n"):
@@ -6754,7 +6806,25 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         )
             # ...but we have managed to elide the assert
             self.assertFalse("device_assert" in code)
-            self.assertEqual(fn_opt(*inps), fn(*inps))
+            self.assertEqual(fn_opt(x), fn(x))
+
+            # If we happen to have dynamic shapes
+            x = torch.randn(9, device="cuda")
+            code = run_and_get_triton_code(fn_opt, x, _reset_dynamo=False)
+
+            # ...we still have indirect indexing
+            for c in code:
+                for line in c.split("\n"):
+                    if "tl.load" in line:
+                        stmt = line.split("=")[-1]
+                        # indirect indexing involves a `tmp` variable
+                        test_case.assertTrue(
+                            "tmp" in stmt,
+                            msg=f"Indirect indexing not present in code:\n{code}",
+                        )
+            # ...but the assert is now there
+            self.assertTrue("device_assert" in code)
+            self.assertEqual(fn_opt(x), fn(x))
 
         def test_not_materialize_pointwise_reduction(self):
             def fn(a, b):

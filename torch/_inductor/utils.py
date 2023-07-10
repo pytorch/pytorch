@@ -678,7 +678,7 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs):
+def run_and_get_code(fn, *args, _reset_dynamo=True, **kwargs):
     from .graph import GraphLowering
 
     compile_to_module = GraphLowering.compile_to_module
@@ -693,13 +693,14 @@ def run_and_get_code(fn, *args, **kwargs):
     with mock.patch.object(
         GraphLowering, "compile_to_module", patched_compile_to_module
     ):
-        torch._dynamo.reset()
+        if _reset_dynamo:
+            torch._dynamo.reset()
         result = fn(*args, **kwargs)
     return result, source_codes
 
 
-def run_and_get_triton_code(fn, *args, **kwargs):
-    _, source_codes = run_and_get_code(fn, *args, **kwargs)
+def run_and_get_triton_code(fn, *args, _reset_dynamo=True, **kwargs):
+    _, source_codes = run_and_get_code(fn, *args, _reset_dynamo=_reset_dynamo, **kwargs)
     assert (
         len(source_codes) == 1
     ), f"expected exactly one code output got {len(source_codes)}"

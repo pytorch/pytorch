@@ -14,7 +14,6 @@ from sympy.printing.printer import Printer
 import torch
 import torch.fx
 from torch.utils._sympy.value_ranges import ValueRanges
-from ..._dynamo import config as dynamo_config
 
 from .. import metrics
 from ..utils import (
@@ -132,13 +131,13 @@ class DataTypePropagation:
         if node.target in (
             "load",
             "store",
+            "store_reduction",
         ):
             buf_name = node.args[1]
             return V.graph.get_dtype(buf_name)
 
         if node.target == "reduction":
-            _, _, dtype, _, _, _, _ = node.args
-            return dtype
+            return node.args[1]
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
@@ -743,23 +742,16 @@ class Kernel(CodeGen):
         self.stores = IndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
-        self.current_node = None
         self.store_buffer_names = set()
+        # set in set_current_node
+        self.current_node = None
         self.bounds = None
 
     @contextlib.contextmanager
     def set_current_node(self, node):
         prior = self.current_node
         self.current_node = node
-        # TODO loosen this restriction in the future
-        # At the time of this writing, the bounds analysis doesn't quite work with SymPy Expr
-        # We should be able to make it work at least for constant Expr
-        if not dynamo_config.dynamic_shapes:
-            # These are bounds on the buffers in the FX graph
-            # We will use them to determine the bounds on the CSE vars
-            bounds = node._body.bounds()
-            bounds.get_bounds()
-            self.bounds = bounds
+        self.bounds = node._body.bounds().get_bounds()
         try:
             yield
         finally:
@@ -798,17 +790,20 @@ class Kernel(CodeGen):
         finally:
             self.loads = prior
 
+    def store_reduction(self, name, index, value):
+        raise NotImplementedError()
+
     def store(self, name, index, value, mode=None):
         raise NotImplementedError()
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError()
 
     def bucketize(
         self,
         values,
         offsets_name: str,
-        offsets_size,
+        offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
     ):
@@ -824,17 +819,12 @@ class Kernel(CodeGen):
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):
-                    buf_bounds = ValueRanges.unknown()
-                    if self.bounds is not None:
-                        fx_node = V.interpreter.current_node
-                        buf_bounds = self.bounds._bounds.get(
-                            fx_node, ValueRanges.unknown()
-                        )
-                        # Sanity check: The variable is either bounded or unbounded
-                        assert (
-                            buf_bounds is not None
-                            or fx_node in self.bounds.unbounded_vars
-                        ), fx_node
+                    fx_node = V.interpreter.current_node
+                    buf_bounds = self.bounds.get(fx_node, ValueRanges.unknown())
+                    # Sanity check: The variable is either bounded or unbounded
+                    assert (
+                        buf_bounds is not None or fx_node in self.bounds.unbounded_vars
+                    ), fx_node
 
                     csevar = self.cse.generate(
                         self.compute,
@@ -876,17 +866,25 @@ class Kernel(CodeGen):
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(name, dtype, src_dtype, reduction_type, index, value):
+            def store_reduction(name, index, value):
                 self.store_buffer_names.add(name)
-                return self.reduction(
-                    name, dtype, src_dtype, reduction_type, index, value
-                )
+                self.cse.store_cache[name] = value
+                if self.current_node:
+                    for other_name in self.current_node.get_mutations():
+                        self.cse.store_cache[other_name] = value
+
+                if name not in V.graph.removed_buffers:
+                    return self.store_reduction(name, index, value)
+
+            @staticmethod
+            def reduction(dtype, src_dtype, reduction_type, value):
+                return self.reduction(dtype, src_dtype, reduction_type, value)
 
             @staticmethod
             def bucketize(
                 values,
                 offsets_name: str,
-                offsets_size,
+                offsets_size: sympy.Expr,
                 indexing_dtype: torch.dtype,
                 right: bool,
             ):
