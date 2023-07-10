@@ -122,7 +122,7 @@ enum class Activation {
   GELU,
 };
 
-#if (defined(USE_ROCM) && ROCM_VERSION >= 50600) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER))
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
 cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activation a) {
   switch (a) {
     case Activation::None:
@@ -167,16 +167,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
-#if defined(USE_ROCM) && ROCM_VERSION >= 50600
-    if (std::getenv("USE_HIPBLASLT")){
-      useLtInterface = self.is_contiguous() && self.dim() == 1 &&
-        result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
-        (scalar_type == at::ScalarType::Double ||
-        scalar_type == at::ScalarType::Float ||
-        scalar_type == at::ScalarType::Half ||
-        scalar_type == at::ScalarType::BFloat16);
-    }
-#endif
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11040 && !defined(_MSC_VER)
     // Strangely, if mat2 has only 1 row or column, we get
     // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
@@ -275,7 +265,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
-#if (defined(USE_ROCM) && ROCM_VERSION >= 50600) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER))
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
   if (useLtInterface) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
