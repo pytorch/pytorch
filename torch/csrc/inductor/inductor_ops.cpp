@@ -1,4 +1,4 @@
-#include <ATen/ops/matmul.h>
+#include <ATen/ops/mm.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 
@@ -12,7 +12,7 @@ Tensor _mm_plus_mm(
     const Tensor& c,
     const Tensor& d,
     Tensor& out) {
-  at::matmul_out(out, a, b);
+  at::mm_out(out, a, b);
   out.addmm_(c, d);
   return out;
 }

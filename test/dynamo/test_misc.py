@@ -4513,6 +4513,19 @@ def fn():
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_cast(self):
+        from typing import cast
+
+        def fn(x):
+            return cast(torch.Tensor, torch.add(x, 1.0))
+
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        ref = fn(torch.ones(2, 2))
+        res = opt_fn(torch.ones(2, 2))
+
+        self.assertTrue(same(ref, res))
+
     def test_T_tensor_attribute(self):
         def fn(x, y):
             a = x.T
@@ -5869,6 +5882,28 @@ def ___make_guard_fn():
         self.assertEqual(comp_out, real_out)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 18)
+
+    def test_tracing_tree_map_only(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            def mapper(x):
+                return x.clone()
+
+            y = pytree.tree_map_only(torch.Tensor, mapper, xs)
+            return y
+
+        xs = [torch.tensor(i) for i in range(3)] + ["hi"]
+        xsa = (xs, xs)
+        xsb = {"aa": xsa, "ab": xs}
+
+        counter = CompileCounter()
+        comp_out = torch._dynamo.optimize(counter, nopython=True)(fn)(xsb)
+        real_out = fn(xsb)
+
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 9)
 
     def _prepare_for_translation_validator(self):
         validator = TranslationValidator()
