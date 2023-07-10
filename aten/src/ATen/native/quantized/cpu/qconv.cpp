@@ -1399,9 +1399,10 @@ static at::Tensor _quantized_convolution_pt2e(
   /*********************************/
 
   if (fp32_output) {
-    // when fp32_output, if we set op_attr.set_zero_points, oneDNN will get wrong result
-    // When output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep
-    // When output_zero_point is 0, we will skip invoking of op_attr.set_zero_points in ideep
+    // When fp32_output, oneDNN expects op_attr doesn't set_scales and set_zero_points.
+    // So, we will use default output_scale as 1.0 and output_zero_point as 0, since
+    // when output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep;
+    // when output_zero_point is 0, we will skip invoking of op_attr.set_zero_points in ideep.
     TORCH_CHECK(output_scale == 1.0,  " (ONEDNN): fp32 output, output_scale must be 1.0.");
     TORCH_CHECK(output_zero_point == 0,  " (ONEDNN): fp32 output, output_zero_point must be 0");
   }
@@ -1409,10 +1410,10 @@ static at::Tensor _quantized_convolution_pt2e(
   int kSpatialDim = act.dim() - 2;
   bool is_1d = (1 == kSpatialDim);
 
-  bool has_binary_post_op = binary_attr.has_value();
-  bool has_unary_post_op = unary_attr.has_value();
-  // has_accum: extra input besides the conv to do conv add fusion.
-  bool has_accum = has_binary_post_op && binary_attr.value() == "add";
+  bool has_binary_post_op = binary_attr.has_value() && binary_attr.value() != "none";
+  bool has_unary_post_op = unary_attr.has_value() && unary_attr.value() != "none";
+  // has_accum_postop_sum: extra input besides the conv to do conv add fusion with post op sum.
+  bool has_accum_postop_sum = has_binary_post_op && binary_attr.value() == "add" && !fp32_output;
   std::string func_name = "quantized::packed_weights_conv";
   func_name += std::to_string(kSpatialDim) + "d";
   if (has_binary_post_op) {
@@ -1469,7 +1470,14 @@ static at::Tensor _quantized_convolution_pt2e(
   const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0 / act_scale);
   double inv_output_scale = 1.0 / output_scale;
 
-  // TODO (leslie): optimize the performance here.
+  // TODO (leslie): optimize the performance here:
+  // 1. Remove the reciprocal of weight scale, we have done the reciprocal of weight scale back in Ideep:
+  // https://github.com/intel/ideep/blob/3c90e365526e19c110371d23831678a7e9d4353d/include/ideep/operators/conv.hpp#L163-L168
+  // 2. Remove 2 memory copies of weight_scales:
+  //   2.1 Input of weights_scales is PyTorch Dense tensor, we convert it to vector<float>
+  //   2.2 OneDNN stream submit convert weights_scales from vector to ideep::tensor
+  //   https://github.com/intel/ideep/blob/3c90e365526e19c110371d23831678a7e9d4353d/include/ideep/operators/conv.hpp#L1855-L1860
+  // We should be able to directly convert weights_scales from PyTorch Dense Tensor to IDeep Tensor which can share same data ptr.
   ideep::scale_t weights_scales(weight_scales.numel());
   if (weight_scales.ndimension() == 0) {
     // Weight is quant per tensor, then weight_scales will be a scalar Tensor
@@ -1548,7 +1556,7 @@ static at::Tensor _quantized_convolution_pt2e(
   }
   ideep::tensor dst;
   at::Tensor accum_contig;
-  if (has_accum) {
+  if (has_accum_postop_sum) {
     auto dst_desc = ideep::tensor::desc(dst_dims, src_data_type,
         kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
     accum_contig = accum.value().contiguous(kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast : c10::MemoryFormat::ChannelsLast3d);
@@ -1567,7 +1575,7 @@ static at::Tensor _quantized_convolution_pt2e(
   }
   ideep::attr_t op_attr;
   // attr
-  if (has_accum) {
+  if (has_accum_postop_sum) {
     op_attr = (has_unary_post_op && unary_attr.value()=="relu") ? ideep::attr_t::residual_with_sum_zero_point() : ideep::attr_t::fuse_sum();
     const ideep::scale_t accum_ideep_scale = ideep::scale_t(1, 1.0/accum_scale);
     const ideep::zero_point_t accum_ideep_zero_points = ideep::zero_point_t(1, accum_zero_point);
@@ -1599,7 +1607,7 @@ static at::Tensor _quantized_convolution_pt2e(
     output.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
     return output;
   }
-  if (has_accum) {
+  if (has_accum_postop_sum) {
     return accum_contig;
   } else {
     return output;
@@ -1755,9 +1763,23 @@ class QConvPT2E final {
       torch::List<c10::optional<at::Scalar>> scalars,
       c10::optional<c10::string_view> algorithm) {
 #if AT_MKLDNN_ENABLED()
-    TORCH_CHECK(
-      attr == "none" || attr == "relu",
-      "none post op or post op relu is supported for quantized pointwise conv.")
+    if (act.dim() == 3 || act.dim() == 5) {
+      // Conv1D/3D post op check
+      TORCH_CHECK(
+        attr == "none",
+        "quantized pointwise conv",
+        act.dim()-2,
+        "d doesn't support unary_post_op fusion. Got unary_post_op: ",
+        attr,
+        ".")
+    } else {
+      // Conv2D post op check
+      TORCH_CHECK(
+        attr == "none" || attr == "relu",
+        "none post_op or post_op relu is supported for quantized pointwise conv2d. Got unary_post_op: ",
+        attr,
+        ".")
+    }
     return _quantized_convolution_pt2e(
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
@@ -1795,6 +1817,21 @@ class QConvPT2E final {
       torch::List<c10::optional<at::Scalar>> unary_scalars,
       c10::optional<c10::string_view> unary_algorithm) {
 #if AT_MKLDNN_ENABLED()
+    // Conv2D post op check
+    TORCH_CHECK(
+      act.dim() == 4 && binary_attr == "add" && (
+        !unary_attr.has_value() ||
+        (unary_attr.has_value() &&
+          (
+            unary_attr.value() == "none" || unary_attr.value() == "relu"
+          )
+        )
+      ),
+      "post_op add or post_op add_relu is supported for quantized pointwise conv2d. Got binary_post_op: ",
+      binary_attr,
+      " unary_post_op: ",
+      unary_attr.has_value() ? unary_attr.value() : "none",
+      ".")
     return _quantized_convolution_pt2e(
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,

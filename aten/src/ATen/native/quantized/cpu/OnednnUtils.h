@@ -382,13 +382,13 @@ static bool should_use_onednn_quant(
 at::Tensor _qconv_prepack_pt2e(
     at::Tensor weight, // from CPU backend instead of QuantizedCPU
     at::Tensor weight_scales, // Weight zero points must be 0 for onednn
-    torch::List<int64_t> input_shape,
     double input_scale,
     int64_t input_zero_point,
     torch::List<int64_t> stride,
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
-    int64_t groups);
+    int64_t groups,
+    c10::optional<torch::List<int64_t>> input_shape=c10::nullopt);
 
 static at::Tensor _quantized_convolution_pt2e(
     at::Tensor act, // contains quantized values but not QTensor
