@@ -462,9 +462,9 @@ void cpu_flash_attention_backward(
         for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
           int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
           // attn <- scale * q @ k.T
-          _mkl_gemm(
-            true,
-            false,
+          cpublas::gemm(
+            TransposeType::Transpose,
+            TransposeType::NoTranspose,
             kvBlockSize,
             qBlockSize,
             headSize,
@@ -497,9 +497,9 @@ void cpu_flash_attention_backward(
             }
           }
           // grad_v <- grad_v + attn.T @ grad_out
-          _mkl_gemm(
-            false,
-            true,
+          cpublas::gemm(
+            TransposeType::NoTranspose,
+            TransposeType::Transpose,
             headSize,
             kvBlockSize,
             qBlockSize,
@@ -514,9 +514,9 @@ void cpu_flash_attention_backward(
                 n * grad_vStrideN,
             grad_vStrideN);
           // grad_attn <- grad_out @ v.T
-          _mkl_gemm(
-            true,
-            false,
+          cpublas::gemm(
+            TransposeType::Transpose,
+            TransposeType::NoTranspose,
             kvBlockSize,
             qBlockSize,
             headSize,
@@ -541,9 +541,9 @@ void cpu_flash_attention_backward(
               kvBlockSize);
           }
           // grad_q <- grad_q + scale * grad_attn @ k
-          _mkl_gemm(
-            false,
-            false,
+          cpublas::gemm(
+            TransposeType::NoTranspose,
+            TransposeType::NoTranspose,
             headSize,
             qBlockSize,
             kvBlockSize,
@@ -558,9 +558,9 @@ void cpu_flash_attention_backward(
                 m * grad_qStrideM,
             grad_qStrideM);
           // grad_k <- grad_k + scale * grad_attn.T @ q
-          _mkl_gemm(
-            false,
-            true,
+          cpublas::gemm(
+            TransposeType::NoTranspose,
+            TransposeType::Transpose,
             headSize,
             kvBlockSize,
             qBlockSize,
