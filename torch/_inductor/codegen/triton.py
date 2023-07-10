@@ -137,17 +137,25 @@ class TritonOverrides(OpOverrides):
     @classmethod
     def constant(cls, value, dtype):
         if dtype == torch.uint8:
-            # tl.full is broken for uint8, remove once triton is fixed
+            # tl.full is broken for uint8, remove once triton is fixed.
+            # See openai/triton#1919
             tmp = cls.constant(value, torch.int16)
             return cls.to_dtype(tmp, dtype)
 
-        # NOTE: We use a tensor here in order to get the correct type.
-        # Otherwise, e.g. float64 constants would be trunctated to float32.
-        ndim = V.kernel.triton_tensor_ndim()
-        shape = [1] * ndim
         type_ = torch._prims_common.dtype_to_type(dtype)
         triton_val = triton_constant(type_(value))
         triton_type = triton_compute_type(dtype)
+
+        if triton_type == "tl.float32":
+            # Float constants are always f32 in triton
+            return triton_val
+
+        # NOTE: We use a tensor here in order to get the expected type.
+        # Otherwise, e.g. float64 constants would be trunctated to float32.
+        # Also, we could just use shape=[1] here but starting with the correct
+        # ndim avoids extra `tt.expand_dim` ops appearing in the triton IR.
+        ndim = V.kernel.triton_tensor_ndim()
+        shape = [1] * ndim
         return f"tl.full({shape}, {triton_val}, {triton_type})"
 
     @staticmethod
@@ -1354,14 +1362,16 @@ class TritonKernel(Kernel):
         sizes[-1] = "None"
         return f"{value}[{', '.join(sizes)}]"
 
+    @staticmethod
+    def _map_tuple_or_scalar(fn, value):
+        if isinstance(value, tuple):
+            return tuple(map(fn, value))
+        return fn(value)
+
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert self.inside_reduction
         default = ir.Reduction.default_value(reduction_type, src_dtype)
-        default = (
-            tuple(triton_constant(d) for d in default)
-            if isinstance(default, tuple)
-            else triton_constant(default)
-        )
+        default = self._map_tuple_or_scalar(triton_constant, default)
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
         masks = sorted(masks)
@@ -1370,6 +1380,16 @@ class TritonKernel(Kernel):
         reduction_range_prefix = self.range_trees[-1].prefix
         reduction_sizes = ["None" for _ in self.range_trees]
         reduction_sizes[-1] = ":"
+
+        # The shape of the reduction dimension changes the output, so
+        # explicitly broadcast the input to the expected shape.
+        dense_size_str = self.dense_size_str()
+        value = self._map_tuple_or_scalar(
+            lambda v: self.cse.generate(
+                self.compute, f"tl.broadcast_to({v}, {dense_size_str})"
+            ),
+            value,
+        )
 
         def final_reduction(value):
             use_helper = reduction_type in {"any", "max", "min", "prod"}
@@ -1529,8 +1549,7 @@ class TritonKernel(Kernel):
         self.cse.reduction_cache[cache_key] = result_var
 
         if isinstance(result_var, tuple):
-            for v in result_var:
-                self.outside_loop_vars.add(v)
+            self.outside_loop_vars |= set(result_var)
         else:
             self.outside_loop_vars.add(result_var)
 
