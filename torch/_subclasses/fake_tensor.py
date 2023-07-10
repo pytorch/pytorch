@@ -1518,7 +1518,6 @@ class FakeTensorMode(TorchDispatchMode):
                     common_device is not None
                 ), f"Could not find common device for {func}"
 
-
             if isinstance(e, FakeTensor):
                 torch._check(
                     e.device == common_device,
