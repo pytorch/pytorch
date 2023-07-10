@@ -1912,6 +1912,7 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
     raw_test_name = f'{test._testMethodName} ({test_suite})'
+    print(raw_test_name)
     if raw_test_name in slow_tests_dict:
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
