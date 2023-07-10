@@ -66,6 +66,23 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res = fn(input)
         self.assertIsInstance(res, LocalSubclass)
 
+    def test_unique_multi_subclass_dispatch(self):
+        pass
+
+    def test_torch_function_trace(self):
+        pass
+
+    def test_torch_function_trace_other_arg_positions(self):
+        pass
+
+    def test_unwrap_redispatch(self):
+        pass
+
+    # For example, calling + on tensor subclass
+    # should trigger torch function tracing
+    def builtin_torch_function_trigger(self):
+        pass
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
