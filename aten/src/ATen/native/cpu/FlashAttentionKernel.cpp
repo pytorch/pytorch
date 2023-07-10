@@ -282,6 +282,7 @@ void cpu_flash_attention(
       int64_t num_keys = is_causal ? std::min(m + qBlockSize, kvSize) : kvSize;
       for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
         int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
+        // Calculate scale * q @ k.T
         cpublas::gemm(
             TransposeType::Transpose,
             TransposeType::NoTranspose,
@@ -319,6 +320,7 @@ void cpu_flash_attention(
             kvBlockSize,
             headSize,
             n);
+        // Calculate Softmax(q @ k.T) @ v
         cpublas::gemm(
             TransposeType::NoTranspose,
             TransposeType::NoTranspose,
