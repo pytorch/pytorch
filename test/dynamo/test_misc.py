@@ -5870,6 +5870,28 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 18)
 
+    def test_tracing_tree_map_only(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            def mapper(x):
+                return x.clone()
+
+            y = pytree.tree_map_only(torch.Tensor, mapper, xs)
+            return y
+
+        xs = [torch.tensor(i) for i in range(3)] + ["hi"]
+        xsa = (xs, xs)
+        xsb = {"aa": xsa, "ab": xs}
+
+        counter = CompileCounter()
+        comp_out = torch._dynamo.optimize(counter, nopython=True)(fn)(xsb)
+        real_out = fn(xsb)
+
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 9)
+
     def _prepare_for_translation_validator(self):
         validator = TranslationValidator()
 
