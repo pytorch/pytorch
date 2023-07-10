@@ -3,11 +3,13 @@
 import sys
 
 import torch
+import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _get_module_fsdp_state
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -106,6 +108,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             {
                 "use_orig_params": [False, True],
                 "ignore_modules": [True, False],
+                "use_auto_wrap": [False, True],
                 "composable": [False],
             },
             self._test_ignored_modules_transformer,
@@ -119,13 +122,18 @@ class TestFSDPIgnoredModules(FSDPTest):
             {
                 "use_orig_params": [True],
                 "ignore_modules": [True, False],
+                "use_auto_wrap": [False, True],
                 "composable": [True],
             },
             self._test_ignored_modules_transformer,
         )
 
     def _test_ignored_modules_transformer(
-        self, use_orig_params: bool, ignore_modules: bool, composable: bool
+        self,
+        use_orig_params: bool,
+        ignore_modules: bool,  # as opposed to `ignored_states`
+        use_auto_wrap: bool,
+        composable: bool,
     ):
         # Initialize an FSDP-wrapped transformer model that has FSDP ignore
         # the `nn.Transformer` module's parameters
@@ -135,36 +143,20 @@ class TestFSDPIgnoredModules(FSDPTest):
             CUDAInitMode.CUDA_BEFORE,
             deterministic=True,
         )
+        fsdp_kwargs = {"process_group": self.process_group}
+        if use_auto_wrap:
+            # Unshare the output projection weight and embedding weight to be
+            # able to auto wrap every linear correctly
+            model.output_proj.weight = nn.Parameter(model.output_proj.weight.clone())
+            fsdp_kwargs[
+                "policy" if composable else "auto_wrap_policy"
+            ] = ModuleWrapPolicy({nn.Linear})
         if ignore_modules:
-            wrapped_model = (
-                FSDP(
-                    model,
-                    self.process_group,
-                    ignored_modules=[model.transformer],
-                    use_orig_params=use_orig_params,
-                )
-                if not composable
-                else fully_shard(
-                    model,
-                    process_group=self.process_group,
-                    ignored_modules=[model.transformer],
-                )
-            )
+            fsdp_kwargs["ignored_modules"] = [model.transformer]
         else:
-            wrapped_model = (
-                FSDP(
-                    model,
-                    self.process_group,
-                    ignored_states=list(model.transformer.parameters()),
-                    use_orig_params=use_orig_params,
-                )
-                if not composable
-                else fully_shard(
-                    model,
-                    process_group=self.process_group,
-                    ignored_states=list(model.transformer.parameters()),
-                )
-            )
+            fsdp_kwargs["ignored_states"] = list(model.transformer.parameters())
+        wrapper_cls = fully_shard if composable else FSDP
+        wrapped_model = wrapper_cls(model, **fsdp_kwargs)
         # Check that the wrapped model's flattened parameter does not include
         # the ignored transformer module's parameters
         nonwrapped_model: nn.Module = TransformerWithSharedParams.init(
@@ -173,29 +165,32 @@ class TestFSDPIgnoredModules(FSDPTest):
             CUDAInitMode.CUDA_BEFORE,
             deterministic=True,
         )
+        if use_auto_wrap:
+            nonwrapped_model.output_proj.weight = nn.Parameter(
+                nonwrapped_model.output_proj.weight.clone()
+            )
         total_numel = sum(p.numel() for p in nonwrapped_model.parameters())
         ignored_numel = sum(
             p.numel() for p in nonwrapped_model.transformer.parameters()
         )
         nonignored_numel = total_numel - ignored_numel
+        fsdp_managed_numel = 0
         with FSDP.summon_full_params(wrapped_model):
-            flat_param = (
-                wrapped_model.params[0]
-                if not composable
-                else _get_module_fsdp_state(wrapped_model).params[0]
-            )
-            flat_param_numel = flat_param.numel()
-            if composable or use_orig_params:
-                # Subtract the numel contributed from alignment padding
-                padding_numel = sum(
-                    numel
-                    for (numel, is_padding) in zip(
-                        flat_param._numels_with_padding, flat_param._is_padding_mask
+            for handle in traversal_utils._get_fsdp_handles(wrapped_model):
+                flat_param = handle.flat_param
+                flat_param_numel = flat_param.numel()
+                if composable or use_orig_params:
+                    # Subtract the numel contributed from alignment padding
+                    padding_numel = sum(
+                        numel
+                        for (numel, is_padding) in zip(
+                            flat_param._numels_with_padding, flat_param._is_padding_mask
+                        )
+                        if is_padding
                     )
-                    if is_padding
-                )
-                flat_param_numel -= padding_numel
-                self.assertEqual(flat_param_numel, nonignored_numel)
+                    flat_param_numel -= padding_numel
+                fsdp_managed_numel += flat_param_numel
+        self.assertEqual(fsdp_managed_numel, nonignored_numel)
         # Check that we can run a few iterations
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
         self._train_model(wrapped_model, optim, 3)
