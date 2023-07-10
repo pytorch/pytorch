@@ -83,6 +83,17 @@ class ValueRanges:
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
+    def tighten(self, other):
+        # Some invariants
+        if other == ValueRanges.unknown():
+            return self
+        assert self.is_bool == other.is_bool, (self, other)
+        if self.is_bool:
+            range = ValueRanges(sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper))
+        else:
+            range = ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
+        return range
+
     # Intersection
     def __and__(self, other):
         return ValueRanges(lower=max(self.lower, other.lower), upper=min(self.upper, other.upper))
