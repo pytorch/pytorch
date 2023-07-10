@@ -13,6 +13,21 @@
 
 namespace at::native::mps {
 
+/**
+ * Computes distance from lowest to highest element offset in given tensor.
+ */
+size_t compute_storage_numel_distance(const at::Tensor& t) {
+  size_t rc = 1;
+  if (t.numel() == 0) {
+    return 0;
+  }
+  for (const auto i : c10::irange(t.dim())) {
+    assert(t.size(i) > 0);
+    rc += (t.size(i) - 1) * t.stride(i);
+  }
+  return rc;
+}
+
 void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
   mpsStream->executeMPSGraph(mpsGraph, feeds, results, SyncType::COMMIT_ADAPTIVE);
 }

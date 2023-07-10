@@ -19,7 +19,7 @@ hf_Bert,pass,7
 hf_Bert_large,pass,7
 hf_DistilBert,pass,7
 hf_GPT2,pass,7
-hf_Reformer,pass,64
+hf_Reformer,pass,44
 hf_T5_large,pass_due_to_skip,0
 lennard_jones,pass,8
 maml_omniglot,pass,8
@@ -48,5 +48,5 @@ timm_vision_transformer_large,pass_due_to_skip,0
 timm_vovnet,pass,8
 tts_angular,pass,10
 vgg16,pass,8
-vision_maskrcnn,fail_accuracy,56
-yolov3,pass,11
+vision_maskrcnn,fail_accuracy,42
+yolov3,pass,10
