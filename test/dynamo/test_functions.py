@@ -7,7 +7,7 @@ import itertools
 import operator
 import unittest
 from dataclasses import dataclass, field
-from typing import Any, Dict, NamedTuple
+from typing import Any, Dict, List, NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -1252,18 +1252,30 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     def test_dataclass_default_dict(self):
         @dataclass
         class Output:
-            scalar: int
+            scalar: int = 2
             named_tensors: Dict[str, torch.Tensor] = field(default_factory=dict)
+            lists: List[torch.Tensor] = field(default_factory=list)
 
             def scale(self):
                 return self.scalar * 2
 
         def fn(x):
+            # Check default dict assignment
+            m = dict()
             a = Output(1)
-            # if isinstance(a.named_tensors, dict):
-            #     x = torch.cos(x)
+            # Check that dataclass methods can be inlined
+            scaled_value = a.scale()
+
+            # Check that normal assignment works
             b = Output(5, named_tensors={"x": x})
-            return torch.cos(x) * a.scale() + b.named_tensors["x"]
+
+            # Check default int assignment
+            c = Output()
+
+            # Check that the default members are properly initialized
+            if isinstance(a.named_tensors, dict):
+                x = torch.sin(x)
+            return torch.cos(x) * scaled_value + b.named_tensors["x"] + c.scalar
 
         cnts = torch._dynamo.testing.CompileCounter()
         compiled_fn = torch.compile(fn, backend=cnts)  # , fullgraph=True)
@@ -1272,7 +1284,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         compiled_out = compiled_fn(x)
         self.assertTrue(same(out, compiled_out))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 5)
 
     def test_dataclass_factory(self):
         @dataclass

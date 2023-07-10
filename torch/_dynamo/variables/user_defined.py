@@ -135,7 +135,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options["mutable_local"] = MutableLocal()
-            return variables.DataClassVariable.create(self.value, args, kwargs, options)
+            return variables.DataClassVariable.create(
+                tx, self.value, args, kwargs, options
+            )
         elif (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
             and SideEffects.cls_supports_mutation_side_effects(self.value)

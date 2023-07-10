@@ -9,6 +9,7 @@ import torch
 from torch.utils import _pytree as pytree
 
 from .. import variables
+from ..allowed_functions import is_builtin_callable
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
@@ -328,7 +329,7 @@ class DataClassVariable(ConstDictVariable):
         return cls.is_matching_cls(type(obj))
 
     @classmethod
-    def create(cls, user_cls, args, kwargs, options):
+    def create(cls, tx, user_cls, args, kwargs, options):
         DataClassVariable._patch_once()
 
         skip_code(user_cls.__init__.__code__)
@@ -337,6 +338,12 @@ class DataClassVariable(ConstDictVariable):
         bound.apply_defaults()
         assert set(bound.arguments.keys()) == set(keys)
         items = collections.OrderedDict()
+
+        init_freevars = user_cls.__init__.__code__.co_freevars
+        closure = user_cls.__init__.__closure__
+        defaults_map = {}
+        for name, cell in zip(init_freevars, closure):
+            defaults_map[name] = cell.cell_contents
         for key in keys:
             val = bound.arguments[key]
             if isinstance(val, VariableTracker):
@@ -346,9 +353,24 @@ class DataClassVariable(ConstDictVariable):
                     assert variables.ConstantVariable.is_literal(val)
                     items[key] = variables.ConstantVariable(val)
                 else:
-                    # Handle the default factory object
                     if isinstance(val, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
-                        items[key] = variables.UserDefinedObjectVariable(val)
+                        # This indicates that dataclass has a default factory
+                        # function for a field. We can look at the defaults map
+                        # to find the factory fn.
+                        dataclass_default_prefix = "_dflt_"
+                        default_key = dataclass_default_prefix + key
+                        assert default_key in defaults_map
+                        default_val = defaults_map[default_key]
+                        if is_builtin_callable(default_val):
+                            items[key] = variables.BuiltinVariable(
+                                default_val
+                            ).call_function(tx, (), {})
+                        else:
+                            unimplemented(
+                                "unsupport default factory fn for dataclasses"
+                            )
+                    elif variables.ConstantVariable.is_literal(val):
+                        items[key] = variables.ConstantVariable(val)
                     else:
                         assert val is None, f"unexpected {val}"
 
