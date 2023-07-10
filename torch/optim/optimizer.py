@@ -34,10 +34,10 @@ from torch.utils._foreach_utils import (
 from torch._utils import is_compiling
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
-GlobalOptimizerPreHook: TypeAlias = Callable[
-    ["Optimizer", Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]]
-]
-GlobalOptimizerPostHook: TypeAlias = Callable[["Optimizer", Tuple[Any, ...], Dict[str, Any]], None]
+Args: TypeAlias = Tuple[Any, ...]
+Kwargs: TypeAlias = Dict[str, Any]
+GlobalOptimizerPreHook: TypeAlias = Callable[["Optimizer", Args, Kwargs], Optional[Tuple[Args, Kwargs]]]
+GlobalOptimizerPostHook: TypeAlias = Callable[["Optimizer", Args, Kwargs], None]
 
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
 _global_optimizer_pre_hooks: Dict[int, GlobalOptimizerPreHook] = OrderedDict()
@@ -222,9 +222,9 @@ class Optimizer:
     """
 
     OptimizerPreHook: TypeAlias = Callable[
-        [Self, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]]  # type: ignore[valid-type]
+        [Self, Args, Kwargs], Optional[Tuple[Args, Kwargs]]  # type: ignore[valid-type]
     ]
-    OptimizerPostHook: TypeAlias = Callable[[Self, Tuple[Any, ...], Dict[str, Any]], None]  # type: ignore[valid-type]
+    OptimizerPostHook: TypeAlias = Callable[[Self, Args, Kwargs], None]  # type: ignore[valid-type]
 
     _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: Dict[int, OptimizerPostHook]
