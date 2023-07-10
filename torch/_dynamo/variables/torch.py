@@ -372,11 +372,9 @@ class TorchVariable(VariableTracker):
             # This code block implements inlining the __torch_function__
             # override of a tensor.
 
-            tensor_with_tf_override = args[0]
-
             # TODO(future PR): make this implement the full __torch_function__ API
             # instead of assuming the relevant override is in the first argument.
-            args[0] = args[0].tensor_variable
+            tensor_with_tf_override = args[0]
 
             unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
                 tx,
@@ -389,16 +387,8 @@ class TorchVariable(VariableTracker):
                 kwargs,
             )
 
-            # The wrapping here follows the logic in
-            # `torch.Tensor.__torch_function__`.
-            if self.value in torch.overrides.get_default_nowrap_functions():
-                return unwrapped
-            return TensorWithTFOverrideVariable(
-                unwrapped,
-                tensor_with_tf_override.orig_tensor_variable_source,
-                tensor_with_tf_override.subclass_torch_function__func,
-                tensor_with_tf_override.subclass_type,
-            )
+            return unwrapped
+
         elif self.value in [
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,

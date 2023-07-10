@@ -420,7 +420,9 @@ class BuiltinVariable(VariableTracker):
 
     def tensor_args(self, *args, **kwargs):
         return any(
-            isinstance(i, variables.TensorVariable)
+            isinstance(
+                i, (variables.TensorVariable, variables.TensorWithTFOverrideVariable)
+            )
             for i in itertools.chain(args, kwargs.values())
         ) and not any(
             isinstance(i, variables.GetAttrVariable)

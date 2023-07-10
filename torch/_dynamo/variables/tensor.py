@@ -1,4 +1,5 @@
 import inspect
+
 import operator
 import types
 from typing import Dict, List
@@ -711,6 +712,15 @@ class TensorWithTFOverrideVariable(VariableTracker):
         self.subclass_torch_function__func = subclass_torch_function__func
         self.subclass_type = subclass_type
 
+    def as_proxy(self):
+        return self.tensor_variable.as_proxy()
+
+    def python_type(self):
+        return self.subclass_type
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        return self.tensor_variable.var_getattr(tx, name)
+
     def call_method(
         self,
         tx,
@@ -723,17 +733,11 @@ class TensorWithTFOverrideVariable(VariableTracker):
         from . import GetAttrVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
-        # insert unwrapped version of self as the first argument
-        # TODO: This is wrong!  When you call the internal __torch_function__,
-        # you still get the wrapped version of self, and if you call functions
-        # inside __torch_function__, they should come back here.  If we unwrap
-        # the tensor immediately, that will not happen.
-        # See https://github.com/pytorch/torchdynamo/issues/1951
         args = list(args)
-        args.insert(0, self.tensor_variable)
+        args.insert(0, self)
         func_var = GetAttrVariable(self.tensor_variable, name)
 
-        unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
+        return TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
             tx,
             func_var,
             self.orig_tensor_variable_source,
@@ -742,18 +746,6 @@ class TensorWithTFOverrideVariable(VariableTracker):
             options,
             args,
             kwargs,
-        )
-
-        # TODO(future PR): implement rewrapping conditional on method presence
-        # in `torch.overrides.get_default_nowrap_function()`. It's unclear how
-        # to do this easily in the current codebase since the resolution of
-        # `GetAttrVariable` depends on the type of the underlying object.
-
-        return TensorWithTFOverrideVariable(
-            unwrapped,
-            self.orig_tensor_variable_source,
-            self.subclass_torch_function__func,
-            self.subclass_type,
         )
 
     def global_class_name(self):
@@ -969,6 +961,9 @@ class TensorSubclassVariable(VariableTracker):
     def __init__(self, value, *args, **kwargs):
         self.value = value
         super().__init__(*args, **kwargs)
+
+    def as_python_constant(self):
+        return self.value
 
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
