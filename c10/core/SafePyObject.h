@@ -22,6 +22,9 @@ struct C10_API SafePyObject {
   // Steals a reference to data
   SafePyObject(PyObject* data, c10::impl::PyInterpreter* pyinterpreter)
       : data_(data), pyinterpreter_(pyinterpreter) {}
+  SafePyObject(SafePyObject&& other)
+      : data_(std::exchange(other.data_, nullptr)),
+        pyinterpreter_(other.pyinterpreter_) {}
 
   // In principle this could be copyable if we add an incref to PyInterpreter
   // but for now it's easier to just disallow it.
@@ -29,13 +32,22 @@ struct C10_API SafePyObject {
   SafePyObject& operator=(SafePyObject const&) = delete;
 
   ~SafePyObject() {
-    (*pyinterpreter_)->decref(data_, /*is_tensor*/ false);
+    if (data_ != nullptr) {
+      (*pyinterpreter_)->decref(data_, /*is_tensor*/ false);
+    }
   }
 
   c10::impl::PyInterpreter& pyinterpreter() const {
     return *pyinterpreter_;
   }
   PyObject* ptr(const c10::impl::PyInterpreter*) const;
+
+  // stop tracking the current object, and return it
+  PyObject* release() {
+    auto rv = data_;
+    data_ = nullptr;
+    return rv;
+  }
 
  private:
   PyObject* data_;

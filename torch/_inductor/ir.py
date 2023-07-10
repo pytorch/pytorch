@@ -113,8 +113,7 @@ def validate_ir(node_or_nodes):
                     DynamicScalar,
                     TensorBox,
                     sympy.Symbol,
-                    sympy.core.relational.Relational,
-                    sympy.core.relational.Unequality,
+                    sympy.logic.boolalg.Boolean,
                     Expr,
                     torch._inductor.ir.ExpandView,
                 ),
@@ -2721,7 +2720,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, (sympy.Expr, sympy.Rel, int)):
+        if isinstance(x, (sympy.Expr, sympy.logic.boolalg.Boolean, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
@@ -3201,13 +3200,6 @@ class FallbackKernel(ExternKernelAlloc):
                 )
         else:
             if V.graph.cpp_wrapper:
-                from torch._inductor.codegen.wrapper import (
-                    SUPPORTED_FALLBACK_CPP_WRAPPER,
-                )
-
-                assert (
-                    kernel.__name__ in SUPPORTED_FALLBACK_CPP_WRAPPER
-                ), f"{kernel.__name__} is not supported with cpp wrapper"
                 self.use_cpp_op_schema = True
                 self.set_cpp_kernel(kernel)
             else:
@@ -4504,6 +4496,19 @@ class LoopBodyBlock:
                     return self._inner.constant(int(index), dtype)
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
+
+            def bucketize(
+                self,
+                values,
+                offsets_name: str,
+                offsets_size: sympy.Expr,
+                indexing_dtype: torch.dtype,
+                right: bool,
+            ):
+                offsets_size = add_index(offsets_size, "other")
+                return self._inner.bucketize(
+                    values, offsets_name, offsets_size, indexing_dtype, right
+                )
 
             @staticmethod
             def masked(mask_proxy, masked_body: Callable[..., Any], other_proxy):
