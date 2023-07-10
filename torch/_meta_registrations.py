@@ -2807,6 +2807,26 @@ def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
 
 @register_meta(
     [
+        aten._foreach_lerp_.Scalar,
+    ]
+)
+def meta__foreach_lerp__scalar(self, tensor1, scalar=1):
+    torch._check(
+        all(isinstance(l, List) for l in [self, tensor1]),
+        lambda: (
+            "All arguments of _foreach_lerp_ must be List[Tensor], "
+            f"but got {type(self)} and {type(tensor1)}"
+        ),
+    )
+    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
+    torch._check(
+        len(self) == len(tensor1),
+        lambda: "All input tensor lists must have the same length",
+    )
+
+
+@register_meta(
+    [
         aten._foreach_addcdiv.Scalar,
         aten._foreach_addcmul.Scalar,
     ]

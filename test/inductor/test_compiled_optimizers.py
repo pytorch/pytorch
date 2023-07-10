@@ -91,3 +91,7 @@ class CompiledOptimizerTests(TestCase):
 
     test_adam = make_test(torch.optim.Adam, lr=0.01)
     test_adam_weight_decay = make_test(torch.optim.Adam, lr=0.01, weight_decay=0.01)
+
+
+if __name__ == "__main__":
+    run_tests()
