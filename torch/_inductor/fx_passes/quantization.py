@@ -145,7 +145,7 @@ def _register_quantized_conv_lowering(pattern):
 
 
 aten_qconv_pt2e_pattern = CallFunction(
-    torch.ops.quantized.dynamic_quant_qconv.tensor,
+    torch.ops.onednn.dynamic_quant_qconv.tensor,
     dequantize_activation_pattern,
     KeywordArg("dynamic_x_scale"),  # x_scale
     KeywordArg("dynamic_x_zp"),  # x_zp
@@ -397,7 +397,7 @@ def _register_qconv_weight_prepack_pass(pattern):
                 groups,
                 x_shape,
             )
-            packed_weight_op = torch.ops.quantized.qconv_prepack_pt2e
+            packed_weight_op = torch.ops.onednn.qconv_prepack_pt2e
             prepack_weight_node = graph.call_function(
                 packed_weight_op, args=packed_weight_inputs
             )
@@ -419,7 +419,7 @@ def _register_qconv_weight_prepack_pass(pattern):
                 groups,
             )
             new_conv_node = graph.call_function(
-                torch.ops.quantized.dynamic_quant_qconv.tensor, args=new_args
+                torch.ops.onednn.dynamic_quant_qconv.tensor, args=new_args
             )
             conv_node.replace_all_uses_with(new_conv_node)
             new_conv_node.meta.update(conv_node.meta)
