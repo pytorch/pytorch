@@ -179,7 +179,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
   const auto input_dim = self.dim();
   TORCH_CHECK(pad.size() % 2 == 0, "Padding length must be divisible by 2");
   TORCH_CHECK(static_cast<int64_t>(pad.size()) <= input_dim * 2,
-              "Input dimension should be at least ", pad.size() / 2, " but got ", input_dim);
+              "Padding length should be less than or equal to two times the input dimension but got padding length ", pad.size(), " and input of dimension ", input_dim);
   auto mode = static_cast<at::padding_mode>(mode_int);
 
   if (mode == at::padding_mode::constant) {
