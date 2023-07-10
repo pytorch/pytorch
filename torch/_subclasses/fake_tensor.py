@@ -1411,7 +1411,7 @@ class FakeTensorMode(TorchDispatchMode):
             common_device = FakeTensor._find_common_device(func, args, kwargs)
             with in_kernel_invocation_manager(self):
                 r = func(*args, **kwargs)
-                if common_device is not None and is_noncontiguous_supported(common_device[0]) is False::
+                if common_device is not None and is_noncontiguous_supported(common_device[0]) is False:
                     from torch.distributed._tensor.ops.pointwise_ops import(
                         pointwise_ops,
                     )
