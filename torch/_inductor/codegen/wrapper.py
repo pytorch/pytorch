@@ -2,7 +2,6 @@ import collections
 import contextlib
 import dataclasses
 import functools
-import hashlib
 import os
 import re
 from itertools import count
@@ -110,12 +109,6 @@ def get_cpp_op_schema(kernel):
         for arg_type, arg_name in zip(arg_types, arg_names)
     ]
     return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
-
-
-SUPPORTED_FALLBACK_CPP_WRAPPER = [
-    "repeat_interleave.Tensor",
-    "convert_element_type.default",  # can appear as a fallback if it has a complex input
-]
 
 
 @dataclasses.dataclass
@@ -286,9 +279,8 @@ class WrapperCodeGen(CodeGen):
         self.write_header()
         self.write_prefix()
 
-        for name, value in V.graph.constants.items():
+        for name, hashed in V.graph.constant_reprs.items():
             # include a hash so our code cache gives different constants different files
-            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
             self.write_constant(name, hashed)
 
         self.allocated = set()
@@ -1060,7 +1052,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         result.writeline("'''\n)")
         # get the hash of the wrapper code to name the extension
-        wrapper_call_hash = codecache.code_hash(self.wrapper_call.getvalue())
+        wrapper_call_hash = codecache.code_hash(result.getvalue())
         result.splice(
             f"""
             module = CppWrapperCodeCache.load(cpp_wrapper_src, '{self.call_func_name}', '{wrapper_call_hash}', {self.cuda})
@@ -1200,15 +1192,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
     ):
         if cpp_kernel_key not in self.extern_call_ops:
             self.writeline(
-                f"""
-    static auto op_{cpp_kernel_key} =
-    c10::Dispatcher::singleton()
-        .findSchemaOrThrow(
-            \"{kernel}\",
-            \"{cpp_kernel_overload_name}\")
-        .typed<{cpp_op_schema}>();
-            """
+                f"static auto op_{cpp_kernel_key} = c10::Dispatcher::singleton()"
             )
+            self.writeline(
+                f'\t.findSchemaOrThrow("{kernel}", "{cpp_kernel_overload_name}")'
+            )
+            self.writeline(f"\t.typed<{cpp_op_schema}>();")
             self.extern_call_ops.add(cpp_kernel_key)
 
         self.writeline(

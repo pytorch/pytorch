@@ -84,6 +84,7 @@ from .variables.tensor import (
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
+graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 
 
 class OutputGraphState(NamedTuple):
@@ -838,6 +839,31 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
 
+    def log_graph_sizes(self, name):
+        graph_sizes_str = "TRACED GRAPH TENSOR SIZES\n"
+        graph_sizes_str += f"===== {name} =====\n"
+        for node in self.graph.nodes:
+            example_value = node.meta.get("example_value", None)
+            if isinstance(example_value, torch._subclasses.FakeTensor):
+                size = example_value.size()
+                graph_sizes_str += f"{node.name}: {tuple(size)}\n"
+                concrete_size = []
+                has_symint = False
+                for sz in size:
+                    if isinstance(sz, int):
+                        concrete_size.append(sz)
+                    elif isinstance(sz, torch.SymInt):
+                        has_symint = True
+                        concrete_size.append(sz.node.hint)
+                    else:
+                        break
+                else:
+                    if has_symint:
+                        graph_sizes_str += (
+                            f"{node.name} (concrete): {tuple(concrete_size)}\n"
+                        )
+        graph_sizes_log.debug(graph_sizes_str)
+
     @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
@@ -870,6 +896,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
+        if torch._logging._internal.log_state.is_artifact_enabled("graph_sizes"):
+            self.log_graph_sizes(name)
 
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
@@ -1077,7 +1105,7 @@ class SubgraphTracer(fx.Tracer):
         # 1. We see a free variable that is already tracked by Dynamo.
         # 2. We see a free variable that has not been tracked by Dynamo
         #
-        # In case 1, we call `lift_tracked_freevar_to_input` (below)
+        # In case 1, we call `maybe_lift_tracked_freevar_to_input` (below)
         # which will lift the freevar to be an input of this subgraph
         # and also recursively lift it to be an input on the parent(s).
         #
@@ -1103,19 +1131,8 @@ class SubgraphTracer(fx.Tracer):
             flat_args, tree_spec = pytree.tree_flatten(args)
             new_args = []
             for arg in flat_args:
-                if not isinstance(arg, torch.fx.Proxy):
-                    new_args.append(arg)
-                elif arg.tracer == self:
-                    new_args.append(arg)
-                elif not hasattr(arg, "node"):
-                    new_args.append(arg)
-                elif "saved_tensor_marked" in arg.node.meta:
-                    new_args.append(arg)
-                else:
-                    # Create a new input for this arg, and replace the current arg
-                    # with the new arg
-                    new_arg = self.lift_tracked_freevar_to_input(arg)
-                    new_args.append(new_arg)
+                maybe_new_arg = self.maybe_lift_tracked_freevar_to_input(arg)
+                new_args.append(maybe_new_arg)
 
             args = pytree.tree_unflatten(new_args, tree_spec)
 
@@ -1154,8 +1171,22 @@ class SubgraphTracer(fx.Tracer):
 
         return rv
 
-    def create_node(self, *args, **kwargs):
-        node = super().create_node(*args, **kwargs)
+    def create_node(
+        self, op, target, args=None, kwargs=None, name=None, type_expr=None
+    ):
+        if self.parent is not None:
+            flat_args, _ = pytree.tree_flatten((args, kwargs))
+            for arg in flat_args:
+                if not isinstance(arg, torch.fx.Node):
+                    continue
+                # Special case for autograd.Function tracing
+                if "saved_tensor_marked" in arg.meta:
+                    continue
+                assert (
+                    arg.graph == self.graph
+                ), "create_node using arg not from this SubgraphTracer"
+
+        node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
         return node
 
@@ -1229,6 +1260,21 @@ class SubgraphTracer(fx.Tracer):
         if self.parent is not None and proxy.tracer != self.parent:
             self.parent.lift_tracked_freevar_to_input(proxy)
         return new_proxy
+
+    def maybe_lift_tracked_freevar_to_input(self, arg):
+        """
+        If arg is a free variable, then lift it to be an input.
+        Returns the new lifted arg (if arg was a freevar), else the
+        original arg.
+        """
+        if not isinstance(arg, torch.fx.Proxy):
+            return arg
+        elif arg.tracer == self:
+            return arg
+        # Special case for autograd.Function tracing
+        elif "saved_tensor_marked" in arg.node.meta:
+            return arg
+        return self.lift_tracked_freevar_to_input(arg)
 
 
 # NOTE: [HigherOrderOperator tracing design]
