@@ -278,9 +278,12 @@ def _find_onnxscript_op(
             if onnx_fn is not None:
                 # TODO(titaiwang): to_function_proto is onnx-script API and can be annotated
                 # after onnx-script is dependency
-                onnx_function_list.append(onnx_fn.to_function_proto())  # type: ignore[attr-defined]
-                included_node_func.add(node_kind)
+                if hasattr(onnx_fn, "to_function_proto"):
+                    onnx_function_proto = onnx_fn.to_function_proto()  # type: ignore[attr-defined]
+                    onnx_function_list.append(onnx_function_proto)
+                    included_node_func.add(node_kind)
                 continue
+
             raise errors.UnsupportedOperatorError(
                 node_kind,
                 specified_version,

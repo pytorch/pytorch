@@ -159,9 +159,8 @@ class ResolvedExportOptions(ExportOptions):
                 "torch.onnx.dynamo_export", torch.__version__, logger=self.logger
             )
 
-            # TODO(titaiwang): opset version for registry should be provided from torchlib (source)
-            # However, torchlib doesn't have opset version in anywhere yet. We need to revisit this
-            # once torchlib has multiple opset version.
+            # TODO(titaiwang): When OnnxRegistry is exposed, users should only control
+            # the opset_version with registry, instead of ExportOptions.
             self.onnx_registry = registration.OnnxRegistry(self.opset_version)
             self.decomposition_table = (
                 decomposition_table.create_onnx_friendly_decomposition_table(
@@ -177,7 +176,6 @@ class ResolvedExportOptions(ExportOptions):
                 onnxfunction_dispatcher.OnnxFunctionDispatcher(
                     self.onnx_registry,
                     self.diagnostic_context,
-                    self.opset_version,
                 )
             )
 
@@ -452,7 +450,9 @@ class Exporter:
         )
 
         # TODO: Design the passes API
-        graph_module = pre_export_passes(self.options, graph_module, updated_model_args)
+        graph_module = pre_export_passes(
+            self.options, self.model, graph_module, updated_model_args
+        )
 
         # TODO: Defer `import onnxscript` out of `import torch` path
         # https://github.com/pytorch/pytorch/issues/103764
@@ -610,6 +610,7 @@ def dynamo_export(
 @_beartype.beartype
 def pre_export_passes(
     options: ResolvedExportOptions,
+    original_model: Union[torch.nn.Module, Callable],
     fx_module: torch.fx.GraphModule,
     fx_module_args: Sequence[Any],
 ):
@@ -650,6 +651,11 @@ def pre_export_passes(
     analysis.UnsupportedFxNodesAnalysis(
         diagnostic_context, module, options.onnxfunction_dispatcher
     ).analyze(infra.levels.ERROR)
+
+    if isinstance(original_model, torch.nn.Module):
+        module = passes.RestoreParameterAndBufferNames(
+            diagnostic_context, module, original_model
+        ).run()
 
     # ONNX does not support None inputs. During graph building, all None inputs
     # are removed. Here we register this step to input adapter.
