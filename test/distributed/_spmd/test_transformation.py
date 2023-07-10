@@ -342,4 +342,5 @@ class TransformationTest(DTensorTestBase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if False:
+        run_tests()

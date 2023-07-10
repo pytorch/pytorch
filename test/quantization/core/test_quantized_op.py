@@ -6383,6 +6383,7 @@ class TestQuantizedConv(TestCase):
         X2_scale=1.0,
         X2_zero_point=128,
         fp32_output=False,
+        weight_in_channel_last_format=False,
     ):
         # ONEDNN only supports symmetric quantization of weight
         if W_zero_point is not None:
@@ -6458,6 +6459,12 @@ class TestQuantizedConv(TestCase):
             else torch.tensor(W_q.q_zero_point(), dtype=torch.int64, device=device)
         )
 
+        if weight_in_channel_last_format:
+            if W_q_cpu_tensor.dim() == 5:
+                W_q_cpu_tensor = W_q_cpu_tensor.to(memory_format=torch.channels_last_3d)
+            elif W_q_cpu_tensor.dim() == 4:
+                W_q_cpu_tensor = W_q_cpu_tensor.to(memory_format=torch.channels_last)
+
         packed_weight = qconv_prepack(
             W_q_cpu_tensor,
             weight_scale,
@@ -6516,6 +6523,11 @@ class TestQuantizedConv(TestCase):
                 post_op.scalars,
                 post_op.algorithm,
             )
+            if fp32_output:
+                self.assertTrue(Y_q_cpu_tensor.dtype == torch.float32)
+                Y_q_cpu_tensor = torch.quantize_per_tensor(
+                    Y_q_cpu_tensor, scale=Y_scale, zero_point=Y_zero_point, dtype=output_dtype
+                ).int_repr()
 
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
@@ -6561,8 +6573,16 @@ class TestQuantizedConv(TestCase):
         Y_zero_point = 0
         use_bias_list = [False, True]
         use_channelwise_list = [False, True]
-        options = itertools.product(groups_list, use_bias_list, use_channelwise_list)
-        for groups, use_bias, use_channelwise in options:
+        fp32_output_list = [False, True]
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list, fp32_output_list)
+        for groups, use_bias, use_channelwise, fp32_output in options:
+            if fp32_output and not (use_bias and use_channelwise):
+                # Remove some test combination to reduce UT test time
+                continue
+            if fp32_output:
+                Y_scale = 1.0
+                Y_zero_point = 0
+
             input_channels = input_channels_per_group * groups
             output_channels = output_channels_per_group * groups
             conv1d = torch.nn.Conv1d(
@@ -6575,8 +6595,8 @@ class TestQuantizedConv(TestCase):
                 groups,
             )
 
-            qconv = torch.ops.quantized.qconv1d_pointwise_pt2e
-            qconv_prepack = torch.ops.quantized.qconv_prepack_pt2e
+            qconv = torch.ops.onednn.qconv1d_pointwise_pt2e
+            qconv_prepack = torch.ops.onednn.qconv_prepack_pt2e
 
             X_qdtype = torch.quint8
             weight_dtype = torch.qint8
@@ -6609,7 +6629,7 @@ class TestQuantizedConv(TestCase):
                 input_dtype=X_qdtype,
                 weight_dtype=weight_dtype,
                 output_dtype=X_qdtype,
-                fp32_output=False,
+                fp32_output=fp32_output,
             )
 
     @skipIfNoONEDNN
@@ -6636,9 +6656,23 @@ class TestQuantizedConv(TestCase):
         Y_zero_point = 0
         use_bias_list = [False, True]
         use_channelwise_list = [False, True]
+        channel_last_weight_format_list = [False, True]
+        fp32_output_list = [False, True]
 
-        options = itertools.product(groups_list, use_bias_list, use_channelwise_list)
-        for groups, use_bias, use_channelwise in options:
+        options = itertools.product(
+            groups_list,
+            use_bias_list,
+            use_channelwise_list,
+            channel_last_weight_format_list,
+            fp32_output_list,
+        )
+        for groups, use_bias, use_channelwise, channel_last_weight_format, fp32_output in options:
+            if (fp32_output or channel_last_weight_format) and not (use_bias and use_channelwise):
+                # Remove some test combination to reduce UT test time
+                continue
+            if fp32_output:
+                Y_scale = 1.0
+                Y_zero_point = 0
             input_channels = input_channels_per_group * groups
             output_channels = output_channels_per_group * groups
             kernels = (kernel_h, kernel_w)
@@ -6646,8 +6680,8 @@ class TestQuantizedConv(TestCase):
             pads = (pad_h, pad_w)
             dilations = (dilation, dilation)
 
-            qconv = torch.ops.quantized.qconv2d_pointwise_pt2e
-            qconv_prepack = torch.ops.quantized.qconv_prepack_pt2e
+            qconv = torch.ops.onednn.qconv2d_pointwise_pt2e
+            qconv_prepack = torch.ops.onednn.qconv_prepack_pt2e
             conv_op = torch.nn.Conv2d(
                 input_channels,
                 output_channels,
@@ -6688,7 +6722,8 @@ class TestQuantizedConv(TestCase):
                 input_dtype=X_qdtype,
                 weight_dtype=weight_dtype,
                 output_dtype=X_qdtype,
-                fp32_output=False,
+                fp32_output=fp32_output,
+                weight_in_channel_last_format=channel_last_weight_format,
             )
 
     @skipIfNoONEDNN
@@ -6718,8 +6753,22 @@ class TestQuantizedConv(TestCase):
         Y_zero_point = 0
         use_bias_list = [False, True]
         use_channelwise_list = [False, True]
-        options = itertools.product(groups_list, use_bias_list, use_channelwise_list)
-        for groups, use_bias, use_channelwise in options:
+        channel_last_weight_format_list = [False, True]
+        fp32_output_list = [False, True]
+        options = itertools.product(
+            groups_list,
+            use_bias_list,
+            use_channelwise_list,
+            channel_last_weight_format_list,
+            fp32_output_list,
+        )
+        for groups, use_bias, use_channelwise, channel_last_weight_format, fp32_output in options:
+            if (fp32_output or channel_last_weight_format) and not (use_bias and use_channelwise):
+                # Remove some test combination to reduce UT test time
+                continue
+            if fp32_output:
+                Y_scale = 1.0
+                Y_zero_point = 0
             input_channels = input_channels_per_group * groups
             output_channels = output_channels_per_group * groups
             kernels = (kernel_d, kernel_h, kernel_w)
@@ -6727,8 +6776,8 @@ class TestQuantizedConv(TestCase):
             pads = (pad_d, pad_h, pad_w)
             dilations = (dilation, dilation, dilation)
 
-            qconv = torch.ops.quantized.qconv3d_pointwise_pt2e
-            qconv_prepack = torch.ops.quantized.qconv_prepack_pt2e
+            qconv = torch.ops.onednn.qconv3d_pointwise_pt2e
+            qconv_prepack = torch.ops.onednn.qconv_prepack_pt2e
             conv_op = torch.nn.Conv3d(
                 input_channels,
                 output_channels,
@@ -6768,7 +6817,8 @@ class TestQuantizedConv(TestCase):
                 input_dtype=X_qdtype,
                 weight_dtype=weight_dtype,
                 output_dtype=X_qdtype,
-                fp32_output=False,
+                fp32_output=fp32_output,
+                weight_in_channel_last_format=channel_last_weight_format,
             )
 
     # Test qconv with post op relu
@@ -6804,8 +6854,8 @@ class TestQuantizedConv(TestCase):
             pads = (pad_h, pad_w)
             dilations = (dilation, dilation)
 
-            qconv = torch.ops.quantized.qconv2d_pointwise_pt2e
-            qconv_prepack = torch.ops.quantized.qconv_prepack_pt2e
+            qconv = torch.ops.onednn.qconv2d_pointwise_pt2e
+            qconv_prepack = torch.ops.onednn.qconv_prepack_pt2e
             conv_op = torch.nn.Conv2d(
                 input_channels,
                 output_channels,
@@ -6888,8 +6938,8 @@ class TestQuantizedConv(TestCase):
             pads = (pad_h, pad_w)
             dilations = (dilation, dilation)
 
-            qconv = torch.ops.quantized.qconv2d_pointwise_pt2e.binary
-            qconv_prepack = torch.ops.quantized.qconv_prepack_pt2e
+            qconv = torch.ops.onednn.qconv2d_pointwise_pt2e.binary
+            qconv_prepack = torch.ops.onednn.qconv_prepack_pt2e
             conv_op = torch.nn.Conv2d(
                 input_channels,
                 output_channels,
@@ -6973,8 +7023,8 @@ class TestQuantizedConv(TestCase):
             pads = (pad_h, pad_w)
             dilations = (dilation, dilation)
 
-            qconv = torch.ops.quantized.qconv2d_pointwise_pt2e.binary
-            qconv_prepack = torch.ops.quantized.qconv_prepack_pt2e
+            qconv = torch.ops.onednn.qconv2d_pointwise_pt2e.binary
+            qconv_prepack = torch.ops.onednn.qconv_prepack_pt2e
             conv_op = torch.nn.Conv2d(
                 input_channels,
                 output_channels,
