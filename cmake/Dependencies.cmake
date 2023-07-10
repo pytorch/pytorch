@@ -1980,4 +1980,8 @@ if(USE_KINETO)
 endif()
 
 # Include google/FlatBuffers
-include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)
+if(USE_SYSTEM_FLATBUFFERS)
+  find_package(FlatBuffers REQUIRED)
+else()
+  include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)
+endif()
