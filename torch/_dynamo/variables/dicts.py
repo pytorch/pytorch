@@ -316,6 +316,7 @@ class DataClassVariable(ConstDictVariable):
 
     @staticmethod
     def is_matching_cls(cls):
+        return dataclasses.is_dataclass(cls)
         try:
             from transformers.file_utils import ModelOutput
 
@@ -346,7 +347,11 @@ class DataClassVariable(ConstDictVariable):
                     assert variables.ConstantVariable.is_literal(val)
                     items[key] = variables.ConstantVariable(val)
                 else:
-                    assert val is None, f"unexpected {val}"
+                    # Handle the default factory object
+                    if isinstance(val, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+                        items[key] = variables.UserDefinedObjectVariable(val)
+                    else:
+                        assert val is None, f"unexpected {val}"
 
         if len(items) == 1 and not isinstance(items[keys[0]], variables.TensorVariable):
             unimplemented("DataClassVariable iterator constructor")

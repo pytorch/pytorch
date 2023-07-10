@@ -133,6 +133,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.NamedTupleVariable(
                 items, self.value, **VariableTracker.propagate(self, items)
             )
+        elif variables.DataClassVariable.is_matching_cls(self.value):
+            options["mutable_local"] = MutableLocal()
+            return variables.DataClassVariable.create(self.value, args, kwargs, options)
         elif (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
             and SideEffects.cls_supports_mutation_side_effects(self.value)
@@ -156,9 +159,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return var
             else:
                 return var.add_options(var.call_method(tx, "__init__", args, kwargs))
-        elif variables.DataClassVariable.is_matching_cls(self.value):
-            options["mutable_local"] = MutableLocal()
-            return variables.DataClassVariable.create(self.value, args, kwargs, options)
 
         return super().call_function(tx, args, kwargs)
 
@@ -268,12 +268,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
-                source = None
-                if self.source:
-                    if name == "__init__":
-                        source = AttrSource(self.source, name)
-                    else:
-                        source = AttrSource(AttrSource(self.source, "__class__"), name)
+                source = (
+                    None
+                    if self.source is None
+                    else AttrSource(AttrSource(self.source, "__class__"), name)
+                )
                 # TODO(jansel): add a guard to check for monkey patching?
                 return UserMethodVariable(
                     method, self, source=source, **options
