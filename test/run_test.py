@@ -190,7 +190,6 @@ TESTS = discover_tests(
         "test_jit_string",
         "test_kernel_launch_checks",
         "test_nnapi",
-        "test_segment_reductions",
         "test_static_runtime",
         "test_throughput_benchmark",
         "test_typing",

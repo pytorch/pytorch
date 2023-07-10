@@ -629,7 +629,7 @@ inline DispatchKey computeDispatchKey(
       const auto dtype_ = dtype_or_default(dtype);
       switch (device_.type()) {
 #define DO_CASE(device, _)                   \
-  case DeviceType::device: {                 \
+  case c10::DeviceType::device: {            \
     if (isQIntType(dtype_)) {                \
       return DispatchKey::Quantized##device; \
     }                                        \
@@ -637,18 +637,18 @@ inline DispatchKey computeDispatchKey(
   }
         C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
 #undef DO_CASE
-        case DeviceType::FPGA:
+        case c10::DeviceType::FPGA:
           return DispatchKey::FPGA;
-        case DeviceType::ORT:
+        case c10::DeviceType::ORT:
           return DispatchKey::ORT;
-        case DeviceType::Vulkan:
+        case c10::DeviceType::Vulkan:
           return DispatchKey::Vulkan;
-        case DeviceType::Metal:
+        case c10::DeviceType::Metal:
           return DispatchKey::Metal;
-        case DeviceType::MKLDNN:
-        case DeviceType::OPENGL:
-        case DeviceType::OPENCL:
-        case DeviceType::IDEEP:
+        case c10::DeviceType::MKLDNN:
+        case c10::DeviceType::OPENGL:
+        case c10::DeviceType::OPENCL:
+        case c10::DeviceType::IDEEP:
           TORCH_INTERNAL_ASSERT(
               0,
               "This is a grandfathered Caffe2 device type ",
@@ -664,7 +664,7 @@ inline DispatchKey computeDispatchKey(
     case Layout::Sparse:
       switch (device_.type()) {
 #define DO_CASE(device, _)              \
-  case DeviceType::device: {            \
+  case c10::DeviceType::device: {       \
     return DispatchKey::Sparse##device; \
   }
         C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
@@ -677,7 +677,7 @@ inline DispatchKey computeDispatchKey(
       }
     case Layout::Mkldnn:
       switch (device_.type()) {
-        case DeviceType::CPU:
+        case c10::DeviceType::CPU:
           return DispatchKey::MkldnnCPU;
         default:
           TORCH_CHECK_NOT_IMPLEMENTED(
@@ -690,9 +690,9 @@ inline DispatchKey computeDispatchKey(
     case Layout::SparseBsr:
     case Layout::SparseBsc:
       switch (device_.type()) {
-        case DeviceType::CPU:
+        case c10::DeviceType::CPU:
           return DispatchKey::SparseCsrCPU;
-        case DeviceType::CUDA:
+        case c10::DeviceType::CUDA:
           return DispatchKey::SparseCsrCUDA;
         default:
           AT_ERROR(
@@ -726,24 +726,24 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
   }
 }
 
-inline DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
+inline c10::DeviceType dispatchKeyToDeviceType(DispatchKey dispatch_key) {
   switch (dispatch_key) {
     // stuff that's real
 #define DO_CASE(suffix, prefix)     \
   case DispatchKey::prefix##suffix: \
-    return DeviceType::suffix;
+    return c10::DeviceType::suffix;
 #define DO_CASES(_, prefix) C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, prefix)
     C10_FORALL_FUNCTIONALITY_KEYS(DO_CASES)
 #undef DO_CASES
 #undef DO_CASE
 
     case DispatchKey::MkldnnCPU:
-      return DeviceType::CPU;
+      return c10::DeviceType::CPU;
     case DispatchKey::Vulkan:
-      return DeviceType::Vulkan;
+      return c10::DeviceType::Vulkan;
 
     case DispatchKey::ORT:
-      return DeviceType::ORT;
+      return c10::DeviceType::ORT;
     default:
       TORCH_CHECK(
           false,
