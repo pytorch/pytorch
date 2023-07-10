@@ -283,7 +283,7 @@ def _single_tensor_rmsprop(
             grad_avg = grad_avgs[i]
             if is_complex_param:
                 grad_avg = torch.view_as_real(grad_avg)
-            grad_avg.lerp_(grad, 1 - alpha)
+            grad_avg.mul_(alpha).add_(grad, alpha=1 - alpha)
             avg = square_avg.addcmul(grad_avg, grad_avg, value=-1).sqrt_()
         else:
             avg = square_avg.sqrt()
@@ -348,7 +348,8 @@ def _multi_tensor_rmsprop(
 
         if centered:
             grouped_grad_avgs = _view_complex_as_real(grouped_grad_avgs)
-            torch._foreach_lerp_(grouped_grad_avgs, grouped_grads, 1 - alpha)
+            torch._foreach_mul_(grouped_grad_avgs, alpha)
+            torch._foreach_add_(grouped_grad_avgs, grouped_grads, alpha=1 - alpha)
             avg = torch._foreach_addcmul(grouped_square_avgs, grouped_grad_avgs, grouped_grad_avgs, value=-1)
             torch._foreach_sqrt_(avg)
             torch._foreach_add_(avg, eps)
