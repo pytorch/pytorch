@@ -1630,10 +1630,6 @@ class FakeTensorMode(TorchDispatchMode):
                     common_device,
                     has_scalar_only_inputs,
                 ) = FakeTensor._find_common_device(func, args, kwargs)
-                assert (
-                    common_device is not None
-                ), f"Could not find common device for {func}"
-
 
             if self.is_our_fake(e):
                 torch._check(
