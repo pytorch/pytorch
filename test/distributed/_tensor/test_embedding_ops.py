@@ -54,11 +54,9 @@ class TestEmbeddingOp(DTensorTestBase):
         inp = torch.randint(
             0, num_embeddings, tuple(input_size), device=self.device_type
         )
-        target = (
-            torch.empty(*inp.size(), embedding_dim, dtype=torch.float)
-            .random_(0, 1)
-            .to(self.rank)
-        )
+        target = torch.empty(
+            *inp.size(), embedding_dim, dtype=torch.float, device=self.device_type
+        ).random_(0, 1)
         placements = [Replicate()]
         replicate_inp = DTensor.from_local(inp, device_mesh, placements)
         sharded_output = sharded_embedding(replicate_inp)
