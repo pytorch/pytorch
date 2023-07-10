@@ -16,7 +16,7 @@ class ExecutorchCppSignatureTest(unittest.TestCase):
         self.sig = ExecutorchCppSignature.from_native_function(DEFAULT_NATIVE_FUNCTION)
 
     def test_runtime_signature_contains_runtime_context(self) -> None:
-        # test if `RuntimeContext` argument exists in `RuntimeSignature`
+        # test if `KernelRuntimeContext` argument exists in `RuntimeSignature`
         with parametrize(
             use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False
         ):
@@ -25,7 +25,7 @@ class ExecutorchCppSignatureTest(unittest.TestCase):
             self.assertTrue(any(a.name == "context" for a in args))
 
     def test_runtime_signature_does_not_contain_runtime_context(self) -> None:
-        # test if `RuntimeContext` argument is missing in `RuntimeSignature`
+        # test if `KernelRuntimeContext` argument is missing in `RuntimeSignature`
         with parametrize(
             use_const_ref_for_mutable_tensors=False, use_ilistref_for_tensor_lists=False
         ):
@@ -42,7 +42,7 @@ class ExecutorchCppSignatureTest(unittest.TestCase):
                 decl,
                 (
                     "torch::executor::Tensor & foo_outf("
-                    "torch::executor::RuntimeContext & context, "
+                    "torch::executor::KernelRuntimeContext & context, "
                     "const torch::executor::Tensor & input, "
                     "torch::executor::Tensor & out)"
                 ),
