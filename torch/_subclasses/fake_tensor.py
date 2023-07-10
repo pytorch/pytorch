@@ -110,12 +110,6 @@ _device_not_kwarg_ops = (
 # this op is never actually used
 _non_kwarg_device_constructors = (aten._list_to_tensor,)
 
-# This function indicates if the backend device
-# supports non-contiguous tensors
-def is_noncontiguous_supported(device):
-    if device.type == "hpu":
-        return False
-    return True
 
 # This function indicates if the backend device
 # supports non-contiguous tensors
@@ -1538,7 +1532,11 @@ class FakeTensorMode(TorchDispatchMode):
             common_device = FakeTensor._find_common_device(func, args, kwargs)
             with in_kernel_invocation_manager(self):
                 r = func(*args, **kwargs)
-                if common_device is not None and is_noncontiguous_supported(common_device[0]) is False::
+                if (
+                    common_device is not None
+                    and common_device[0] is not None
+                    and is_noncontiguous_supported(common_device[0]) is False
+                ):
                     from torch.distributed._tensor.ops.pointwise_ops import(
                         pointwise_ops,
                     )
@@ -1632,7 +1630,10 @@ class FakeTensorMode(TorchDispatchMode):
                     common_device,
                     has_scalar_only_inputs,
                 ) = FakeTensor._find_common_device(func, args, kwargs)
-                assert common_device is not None, f"Could not find common device for {func}"
+                assert (
+                    common_device is not None
+                ), f"Could not find common device for {func}"
+
 
             if self.is_our_fake(e):
                 torch._check(
