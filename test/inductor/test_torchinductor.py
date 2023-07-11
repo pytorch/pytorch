@@ -200,10 +200,8 @@ def clone_preserve_strides(x, device=None):
 
 
 @patch.object(config, "debug", True)
-def run_and_get_cpp_code(fn, *args, _reset_dynamo=True, **kwargs):
-    if _reset_dynamo:
-        torch._dynamo.reset()
-
+def run_and_get_cpp_code(fn, *args, **kwargs):
+    torch._dynamo.reset()
     import io
     import logging
 
@@ -6788,7 +6786,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         def test_optimize_indexing_assert(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
-                s = 0.7 * torch.arange(x.shape[0], device=x.device)
+                s = 1.0 * torch.arange(x.shape[0], device=x.device)
                 return x[s.long()]
 
             fn_opt = torch.compile(fn)
@@ -6811,8 +6809,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(fn_opt(x), fn(x))
 
             # If we happen to have dynamic shapes
-            x = torch.randn(9, device="cuda")
-            code = run_and_get_triton_code(fn_opt, x, _reset_dynamo=False)
+            fn_opt = torch.compile(fn, dynamic=True)
+            x = torch.randn(8, device="cuda")
+            code = run_and_get_triton_code(fn_opt, x)
 
             # ...we still have indirect indexing
             for c in code:

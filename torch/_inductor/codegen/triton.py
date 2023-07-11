@@ -1165,7 +1165,7 @@ class TritonKernel(Kernel):
                 size, size_str = self.size_map[(self.var, self.mask)]
 
                 assert_min = (var.bounds.lower < 0) == sympy.true
-                assert_max = (var.bounds.upper > size) == sympy.true
+                assert_max = (var.bounds.upper >= size) == sympy.true
 
                 # FooBar interview question
                 if not (assert_min or assert_max):
