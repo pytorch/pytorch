@@ -889,7 +889,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 kwargs = create_pytorch_only_kwargs()
                 # Original outputs.
 
-                # pdb.set_trace()
                 ref_outputs = export_output.adapt_torch_outputs_to_onnx(
                     real_model(*args, **kwargs)
                 )

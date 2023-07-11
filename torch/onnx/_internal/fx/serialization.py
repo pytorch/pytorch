@@ -124,6 +124,10 @@ def save_model_with_external_data(
     for path in torch_load_paths:
         state_dict = torch.load(path)
         for name, tensor in state_dict.items():
+            # Basically, "transformer.attention.self.query.weight" is mapped
+            # to "transformer_attention_self_query_weight" for mimicking the
+            # name-modifying code in FX-to-ONNX exporter.
+            # See function _replace_get_attr_with_placeholder for details.
             name = name.replace(".", "_") if rename_initializer else name
             # For each PyTorch tensor name loaded by torch.load,
             #  1.  Search its best match in ONNX model. E.g., the match of
