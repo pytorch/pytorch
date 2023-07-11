@@ -1801,6 +1801,18 @@ def sample_inputs_bernoulli(self, device, dtype, requires_grad, **kwargs):
                         requires_grad=requires_grad)
         yield SampleInput(t)
 
+    for shape in shapes:
+        # Expect deterministic results using inputs with all zeros and all ones
+        t = make_tensor(shape, dtype=dtype, device=device,
+                        low=0, high=0,
+                        requires_grad=requires_grad)
+        yield SampleInput(t)
+
+        t = make_tensor(shape, dtype=dtype, device=device,
+                        low=1, high=1,
+                        requires_grad=requires_grad)
+        yield SampleInput(t)
+
 def error_inputs_bernoulli(op_info, device, **kwargs):
     # more than one element of the written-to tensor refers to a single memory location
     x = torch.rand((1,), device=device).expand((6,))
