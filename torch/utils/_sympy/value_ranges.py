@@ -83,7 +83,7 @@ class ValueRanges:
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
-    def tighten(self, other: ValueRanges):
+    def tighten(self, other: "ValueRanges"):
         """Given two ValueRanges, returns their intersection"""
         # Some invariants
         if other == ValueRanges.unknown():
