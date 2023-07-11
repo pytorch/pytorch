@@ -815,8 +815,9 @@ class TestOptim(TestCase):
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 nintermediates = 3
-            elif optimizer_constructor.__name__ == "NAdam":
-                # NAdam uses two intermediates at the same time (grouped_grads & exp_avg_sq_sqrt)
+            elif optimizer_constructor.__name__ in ["NAdam", "Adagrad"]:
+                # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
+                # Adagrad uses std and grads at the same time
                 nintermediates = 2
 
             self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
@@ -867,6 +868,8 @@ class TestOptim(TestCase):
             (optim.Adadelta, dict(weight_decay=1, maximize=True)),
             (optim.Adagrad, dict(weight_decay=0)),
             (optim.Adagrad, dict(weight_decay=1)),
+            (optim.Adagrad, dict(weight_decay=0, maximize=True)),
+            (optim.Adagrad, dict(weight_decay=1, maximize=True)),
         ]
 
     def test_multi_tensor_optimizers(self):
@@ -891,7 +894,7 @@ class TestOptim(TestCase):
     def test_peak_mem_multi_tensor_optimizers(self):
         configs = [
             (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
-                "Adadelta", "Adam", "AdamW", "RAdam", "NAdam"
+                "Adadelta", "Adagrad", "Adam", "AdamW", "RAdam", "NAdam"
             ]
         ]
         self._test_foreach_memory(configs)
