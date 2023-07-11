@@ -349,6 +349,8 @@ class ProcessLocalGroup(dist.ProcessGroup):
         if isinstance(world, ThreadLocalWorld):
             world = world._get_world()
         self._world = weakref.ref(world)
+        self._ctx = torch.autograd.set_multithreading_enabled(False)
+
         ProcessLocalGroup._register(self)
 
     def size(self):
@@ -389,19 +391,13 @@ class WorldData:
     pg_default_device: Dict[dist.ProcessGroup, torch.device]
 
 
-MTPG_TLS_KEY = "__ThreadLocalWorld"
 class ThreadLocalWorld:
     _world = threading.local()
 
     def _get_world(self) -> WorldData:
-        if torch._C._is_key_in_tls(MTPG_TLS_KEY):
-            return torch._C._get_obj_in_tls(MTPG_TLS_KEY)
         if not hasattr(ThreadLocalWorld._world, "world"):
-            obj = WorldData(None, {}, {}, {}, {}, 0, {}, {}, {}, {})
-            ThreadLocalWorld._world.world = obj
-            torch._C._stash_obj_in_tls(MTPG_TLS_KEY, obj)
-        res = ThreadLocalWorld._world.world
-        return res
+            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {}, {}, {})
+        return ThreadLocalWorld._world.world
 
     @property
     def default_pg(self):
@@ -453,12 +449,16 @@ class ThreadLocalWorld:
 
 
 _old_pg_world = None
+_ctx_manager = None
 
 
 def _install_threaded_pg():
     global _old_pg_world
+    global _ctx_manager
     _old_pg_world = dist.distributed_c10d._world
     dist.distributed_c10d._world = ThreadLocalWorld()
+    _ctx_manager = torch.autograd.set_multithreading_enabled(False)
+
     return dist.distributed_c10d._world
 
 

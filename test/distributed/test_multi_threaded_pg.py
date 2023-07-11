@@ -254,21 +254,26 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
 
     @skip_if_lt_x_gpu(1)
     def test_bwd_sees_fwd_pg(self):
-
         class MyFunc(torch.autograd.Function):
             @staticmethod
-            def forward(ctx, i):
-                result = i * 2
-                ctx.save_for_backward(result)
+            def forward(ctx, rank):
+                result = rank * 2
+
+                ctx.save_for_backward(result, rank)
+                assert int(rank.item()) == dist.get_rank()
                 return result
 
             @staticmethod
             def backward(ctx, grad_output):
-                result, = ctx.saved_tensors
+                result, rank = ctx.saved_tensors
+
+                assert int(rank.item()) == dist.get_rank()
                 dist.all_reduce(result)
+                assert int(result.item()) == 12  # (0 + 1 + 2 + 3) * 2
+
                 return grad_output * result
 
-        x = torch.rand(4, device="cuda", requires_grad=True)
+        x = torch.tensor([dist.get_rank()], dtype=torch.float, device="cuda", requires_grad=True)
         x = MyFunc.apply(x)
         x.sum().backward()
 
