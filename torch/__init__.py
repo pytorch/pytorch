@@ -1511,7 +1511,14 @@ class _TorchCompileInductorWrapper:
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
             from torch._inductor import list_mode_options
-            self.apply_options(list_mode_options(mode))
+            if mode == "reduce-overhead" and self.dynamic:
+                raise RuntimeError(
+                    "mode=reduce-overhead cannot be used together with dynamic=True! "
+                    "reduce-overhead enables cudagraph. dynamic=True forces recompiliation "
+                    "for each new shape, which defeats the purpose of cudagraph. "
+                    "Please only enable one of them."
+                )
+            self.apply_options(list_mode_options(mode, self.dynamic))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
@@ -1710,10 +1717,6 @@ from torch import func as func
 from torch.func import vmap
 
 
-# ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
-from torch import onnx as onnx  # ONNX depends on a bunch of Dynamo stuff
-
-
 # The function _sparse_coo_tensor_unsafe is removed from PyTorch
 # Python API (v. 1.13), here we temporarily provide its replacement
 # with a deprecation warning.
@@ -1756,6 +1759,8 @@ _deprecated_attrs = {
 _lazy_modules = {
     "_dynamo",
     "_inductor",
+    # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+    "onnx",
 }
 
 def __getattr__(name):
