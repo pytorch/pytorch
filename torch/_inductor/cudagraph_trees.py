@@ -873,7 +873,6 @@ class CUDAGraphNode:
                     self._tensor_metadata(out, ignore_storage_offset=False)
                 )
             else:
-                assert out is None
                 self.outputs_metadata.append(None)
 
         self.graph.replay()
@@ -1075,7 +1074,7 @@ class CUDAGraphNode:
         self.static_output_tensors = [None for _ in range(len(outputs))]
 
         for i, o in enumerate(outputs):
-            if o is None:
+            if o is None or not isinstance(o, torch.Tensor):
                 self.output_storage_alias.append(UnaliasedStorage)
                 continue
 
@@ -1120,7 +1119,7 @@ class CUDAGraphNode:
 
         assert not self.outputs_weakrefs
         for out, static_output_tensor in zip(outputs, self.static_output_tensors):
-            if out is None or static_output_tensor is not None:
+            if not isinstance(out, torch.Tensor) or static_output_tensor is not None:
                 self.outputs_weakrefs.append(None)
                 self.tensor_weakrefs.append(None)
             else:
@@ -2002,8 +2001,6 @@ class CUDAGraphTreeManager:
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
         for node in self.current_node._path_from_root:
-            if not len(node.tensor_weakrefs) == len(node.stack_traces):
-                breakpoint()
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()

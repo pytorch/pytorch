@@ -33,7 +33,7 @@ from torch import (  # noqa: F401
     SymInt,
 )
 from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, LShift, RShift
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame
@@ -281,7 +281,7 @@ def parallel_or(*args):
     Evaluate the logical OR of several arguments, avoiding guarding on
     unbacked SymInts if another argument is definitely True.
     """
-    if any(definitely_true(args) for a in args):
+    if any(definitely_true(a) for a in args):
         return True
     return any(args)
 
@@ -290,7 +290,7 @@ def parallel_and(*args):
     Evaluate the logical FALSE of several arguments, avoiding guarding on
     unbacked SymInts if another argument is definitely False.
     """
-    if any(definitely_false(args) for a in args):
+    if any(definitely_false(a) for a in args):
         return False
     return all(args)
 
@@ -756,6 +756,12 @@ class SymNode:
     def floordiv(self, other) -> "SymNode":  # noqa: F811
         return self._floordiv(other)  # type: ignore[attr-defined]
 
+    def lshift(self, other) -> "SymNode":  # noqa: F811
+        return self._lshift(other)  # type: ignore[attr-defined]
+
+    def rshift(self, other) -> "SymNode":  # noqa: F811
+        return self._rshift(other)  # type: ignore[attr-defined]
+
     def sym_not(self) -> "SymNode":  # noqa: F811
         return self._sym_not()  # type: ignore[attr-defined]
 
@@ -940,6 +946,8 @@ reflectable_magic_methods = {
     'or': lambda a, b: sympy.Or(a, b),
     'truediv': lambda a, b: TrueDiv(a, b),
     'floordiv': lambda a, b: FloorDiv(a, b),
+    'lshift': lambda a, b: LShift(a, b),
+    'rshift': lambda a, b: RShift(a, b),
 }
 
 
@@ -2236,6 +2244,21 @@ Target Guards:
                 assert int(sym) == hint
             return int(sym)
         return SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+
+    def create_symint_and_symbol(self, value, source, dynamic_dim):
+        # TODO: This is wrong wrong wrong, create_symbol will
+        # generate something that is non-negative, but this is
+        # not a sound assumption to make.
+        # Not fixing as this was a preexisting condition.
+        return self.create_symintnode(
+            self.create_symbol(
+                value,
+                source=source,
+                dynamic_dim=dynamic_dim,
+            ),
+            hint=value,
+            source=source,
+        )
 
     def create_symboolnode(self, sym: "sympy.Expr"):
         # This function is only being used in serialization, so we do not track it
