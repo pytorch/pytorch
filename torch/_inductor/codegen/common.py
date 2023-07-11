@@ -597,8 +597,8 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
-    def __init__(self, name, bounds):
-        assert bounds is not None
+    def __init__(self, name, bounds: ValueRanges):
+        assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
 
@@ -745,13 +745,13 @@ class Kernel(CodeGen):
         self.store_buffer_names = set()
         # set in set_current_node
         self.current_node = None
-        self.bounds = None
+        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
 
     @contextlib.contextmanager
     def set_current_node(self, node):
         prior = self.current_node
         self.current_node = node
-        self.bounds = node._body.bounds().get_bounds()
+        self.node_to_bounds = node._body.bounds().get_bounds()
         try:
             yield
         finally:
@@ -823,12 +823,9 @@ class Kernel(CodeGen):
                     buf_bounds = ValueRanges.unknown()
                     if hasattr(V.interpreter, "current_node"):
                         fx_node = V.interpreter.current_node
-                        buf_bounds = self.bounds.get(fx_node, ValueRanges.unknown())
-                        # Sanity check: The variable is either bounded or unbounded
-                        assert (
-                            buf_bounds is not None
-                            or fx_node in self.bounds.unbounded_vars
-                        ), fx_node
+                        buf_bounds = self.node_to_bounds.get(
+                            fx_node, ValueRanges.unknown()
+                        )
 
                     csevar = self.cse.generate(
                         self.compute,
