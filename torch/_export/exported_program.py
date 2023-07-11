@@ -245,7 +245,7 @@ def _fixup_graph_signature(
 ) -> ExportedProgram:
     def _get_output_node_names(gm: torch.fx.GraphModule) -> List[FQN]:
         output_node = next(n for n in gm.graph.nodes if n.op == "output")
-        return [str(arg) for arg in output_node.args[0]]
+        return [str(arg) for arg in output_node.args[0]]  # type: ignore[misc]
 
     # Update output names since after adding run time assertions, the names of
     # outputs could change.
@@ -263,9 +263,9 @@ def _fixup_graph_signature(
     gs = old_ep.graph_signature
     # Need to update graph signature fields related to output since after adding
     # runtime assertions, the output names could change.
-    new_user_outputs = [outputs_map[u] for u in gs.user_outputs]
+    new_user_outputs = [outputs_map[u] for u in gs.user_outputs]  # type: ignore[index]
     new_buffers_to_mutate = {
-        outputs_map[u]: b for u, b in gs.buffers_to_mutate.items()
+        outputs_map[u]: b for u, b in gs.buffers_to_mutate.items()  # type: ignore[index]
     }
 
     return _update_graph_signature(
