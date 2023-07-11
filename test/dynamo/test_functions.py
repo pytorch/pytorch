@@ -1277,14 +1277,20 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
             # Change dataclass
             c.scalar = 6
+            c.named_tensors["x"] = x
 
-            return torch.cos(x) * scaled_value + b.named_tensors["x"] + c.scalar
+            # Return dataclaass as well to check reconstruction
+            return c, torch.cos(x) * scaled_value + b.named_tensors["x"] + c.scalar
 
         cnts = torch._dynamo.testing.CompileCounter()
         compiled_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         x = torch.randn(4)
-        out = fn(x)
-        compiled_out = compiled_fn(x)
+        eager_dataclass, out = fn(x)
+        compiled_dataclass, compiled_out = compiled_fn(x)
+        self.assertEqual(eager_dataclass.scalar, compiled_dataclass.scalar)
+        self.assertEqual(
+            eager_dataclass.named_tensors["x"], compiled_dataclass.named_tensors["x"]
+        )
         self.assertTrue(same(out, compiled_out))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
