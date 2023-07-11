@@ -319,7 +319,7 @@ def _register_dequant_promotion_pass(pattern):
 
 dequant_per_channel_pattern = CallFunction(
     quantized_decomposed.dequantize_per_channel.default,  # dequant_per_channel node
-    KeywordArg("q_weight"),  # bias
+    KeywordArg("q_weight"),
     KeywordArg("w_scale"),
     KeywordArg("w_zp"),
     KeywordArg("w_axis"),
@@ -328,32 +328,71 @@ dequant_per_channel_pattern = CallFunction(
     KeywordArg("w_dtype"),
 )
 
-dequant_convolution_node_pattern = CallFunction(
-    aten.convolution.default,
-    dequantize_activation_pattern,
+
+dequant_per_channel_clone_channel_last_pattern = CallFunction(
+    aten.clone.default,
     dequant_per_channel_pattern,
-    KeywordArg("b"),  # bias
-    KeywordArg("stride"),
-    KeywordArg("padding"),
-    KeywordArg("dilation"),
-    KeywordArg("is_transposed"),
-    KeywordArg("out_padding"),
-    KeywordArg("groups"),
+    memory_format=KeywordArg("memory_format"),
 )
+
+
+def _is_dequant_conv2d(match):
+    conv_node = match.output_node()
+    assert conv_node.target is aten.convolution.default
+    input_meta_value = conv_node.args[0].meta.get("val")
+    weight_meta_value = conv_node.args[1].meta.get("val")
+    for meta_value in [input_meta_value, weight_meta_value]:
+        if (
+            meta_value is None
+            or meta_value.device.type != "cpu"
+            or meta_value.dim() != 4
+        ):
+            # Only support conv2d now
+            return False
+    to_fp32_node = match.nodes[0]
+    sub_node = match.nodes[1]
+    mul_node = match.nodes[2]
+    assert to_fp32_node.target is torch.ops.prims.convert_element_type.default
+    assert sub_node.target is torch.ops.aten.sub.Tensor
+    assert mul_node.target is torch.ops.aten.mul.Tensor
+    if (
+        len(list(to_fp32_node.users)) != 1
+        or len(list(sub_node.users)) != 1
+        or len(list(mul_node.users)) != 1
+    ):
+        # Ensure the dequant pattern only has 1 user
+        # since we will delete the dequant pattern here
+        return False
+    return True
 
 
 def _register_qconv_weight_prepack_pass(pattern):
     @register_freezing_graph_pattern(
-        pattern, pass_number=1
-    )  # pass_number=1, ensure it's behand dequant promotion pass
+        pattern,
+        extra_check=_is_dequant_conv2d,
+        pass_number=1,  # pass_number=1, ensure it's behand dequant promotion pass
+    )
     def qconv_weight_prepack(match: Match, *args, **kwargs):
+        print("---- match dequant weight prepack pattern ----", flush=True)
+
+        has_to_channel_last_in_pattern = False
+        for node in match.nodes:
+            if node.target == aten.clone.default:
+                has_to_channel_last_in_pattern = True
+
+        print(
+            "has_to_channel_last_in_pattern is: {}".format(
+                has_to_channel_last_in_pattern
+            ),
+            flush=True,
+        )
+
         to_fp32_node = match.nodes[0]
         sub_node = match.nodes[1]
         mul_node = match.nodes[2]
         dequant_per_channel = match.nodes[3]
-        conv_node = match.nodes[4]
-
-        print("---- match dequant weight prepack pattern ----", flush=True)
+        clone_node = match.nodes[4] if has_to_channel_last_in_pattern else None
+        conv_node = match.nodes[5] if has_to_channel_last_in_pattern else match.nodes[4]
 
         bias, stride, padding, dilation, is_transposed, out_padding, groups = (
             kwargs["b"],
@@ -403,30 +442,79 @@ def _register_qconv_weight_prepack_pass(pattern):
             )
 
             new_args = (
-                mul_node,
+                qx,
                 x_scale,
                 x_zp,
                 prepack_weight_node,
                 w_scale,
                 w_zp,
-                w_axis,
                 bias,
                 stride,
                 padding,
                 dilation,
-                is_transposed,
-                out_padding,
                 groups,
+                1.0,  # output_scale
+                0,  # output_zero_point
+                True,  # fp32_output
+                "none",  # attr
+                [],  # scalars
+                "",  # algorithm
             )
             new_conv_node = graph.call_function(
-                torch.ops.onednn.dynamic_quant_qconv.tensor, args=new_args
+                torch.ops.onednn.qconv2d_pointwise.default, args=new_args
             )
+
             conv_node.replace_all_uses_with(new_conv_node)
             new_conv_node.meta.update(conv_node.meta)
+
+            # Erase the original conv node
             graph.erase_node(conv_node)
+
+            if clone_node is not None:
+                graph.erase_node(clone_node)
+
+            # Erase the dequant pattern
+            graph.erase_node(mul_node)
+            graph.erase_node(sub_node)
+            graph.erase_node(to_fp32_node)
+
+            # Erase the dequant per channel pattern
+            graph.erase_node(dequant_per_channel)
+
+
+def _generate_dequant_convolution_node_pattern(_dequant_per_channel_pattern):
+    dequant_convolution_node_pattern = CallFunction(
+        aten.convolution.default,
+        dequantize_activation_pattern,
+        _dequant_per_channel_pattern,
+        KeywordArg("b"),
+        KeywordArg("stride"),
+        KeywordArg("padding"),
+        KeywordArg("dilation"),
+        KeywordArg("is_transposed"),
+        KeywordArg("out_padding"),
+        KeywordArg("groups"),
+    )
+    return dequant_convolution_node_pattern
+
+
+def _generate_weight_prepack_patterns():
+    replacement_weight_prepack_patterns = (
+        _generate_dequant_convolution_node_pattern(dequant_per_channel_pattern),
+        # There is another pattern due to the pass of convert_conv_weights_to_channels_last
+        # https://github.com/pytorch/pytorch/blob/07107919297db3f8ab37f11c12666b6d6d5f692e/torch/_inductor/freezing.py#L338-L362.
+        # Depend on some heuristics, it may or may not insert to(channel_last) node
+        # between convolution and dequant_per_channel node
+        _generate_dequant_convolution_node_pattern(
+            dequant_per_channel_clone_channel_last_pattern
+        ),
+    )
+    return replacement_weight_prepack_patterns
 
 
 @functools.lru_cache(None)
 def _quantization_mkldnn_weight_pack_init():
     _register_dequant_promotion_pass(dequant_node_pattern)
-    _register_qconv_weight_prepack_pass(dequant_convolution_node_pattern)
+    weight_prepack_patterns = _generate_weight_prepack_patterns()
+    for weight_prepack_pattern in weight_prepack_patterns:
+        _register_qconv_weight_prepack_pass(weight_prepack_pattern)

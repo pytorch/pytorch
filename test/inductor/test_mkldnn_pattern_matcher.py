@@ -1,14 +1,23 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import copy
 import itertools
 
 import torch
-
+import torch._dynamo as torchdynamo
+import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import run_and_get_code
+from torch.ao.quantization._pt2e.quantizer import X86InductorQuantizer
+from torch.ao.quantization._quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
 from torch.nn import functional as F
+from torch.testing._internal.common_quantization import (
+    skipIfNoDynamoSupport,
+    skipIfNoONEDNN,
+)
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
 
@@ -72,24 +81,51 @@ class TestPaternMatcher(TestCase):
         atol=1e-5,
         rtol=1.3e-6,
         check_autocast=False,
+        check_quantization=False,
     ):
         counters.clear()
         maybe_autocast = contextlib.nullcontext()
         if check_autocast and torch.ops.mkldnn._is_mkldnn_bf16_supported():
             maybe_autocast = torch.cpu.amp.autocast()
             atol, rtol = 1e-2, 1e-2
-        with torch.no_grad(), maybe_autocast:
-            clone_inputs = self._clone_inputs(inputs)
-            expected = mod(*inputs)
-            actual = torch.compile(mod)(*clone_inputs)
-            torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
-            self.assertEqual(
-                counters["inductor"]["pattern_matcher_count"], matcher_count
-            )
-            self.assertEqual(
-                counters["inductor"]["pattern_matcher_nodes"],
-                matcher_nodes,
-            )
+        if check_quantization:
+            with torch.no_grad():
+                export_model, guards = torchdynamo.export(
+                    mod,
+                    *copy.deepcopy(inputs),
+                    aten_graph=True,
+                )
+                quantizer = X86InductorQuantizer()
+                quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
+                prepare_model = prepare_pt2e_quantizer(export_model, quantizer)
+                prepare_model(*inputs)
+                convert_model = convert_pt2e(prepare_model).eval()
+                expected = convert_model(*inputs)
+                compiled_model = compile_fx(convert_model, inputs)
+                _ = compiled_model(*inputs)
+                actual = compiled_model(*inputs)
+                torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_count"], matcher_count
+                )
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_nodes"],
+                    matcher_nodes,
+                )
+
+        else:
+            with torch.no_grad(), maybe_autocast:
+                clone_inputs = self._clone_inputs(inputs)
+                expected = mod(*inputs)
+                actual = torch.compile(mod)(*clone_inputs)
+                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_count"], matcher_count
+                )
+                self.assertEqual(
+                    counters["inductor"]["pattern_matcher_nodes"],
+                    matcher_nodes,
+                )
 
     def _test_code_common(
         self, mod, inputs, include_ops, exclude_ops, atol=1e-5, rtol=1.3e-6
@@ -324,6 +360,44 @@ class TestPaternMatcher(TestCase):
                 self._test_common(
                     mod, (v, other), match_count, match_nodes, rtol=1e-2, atol=1e-2
                 )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_qconv2d_weight_prepack(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                auto_insert_channel_last_node=False,
+            ):
+                super().__init__()
+                if auto_insert_channel_last_node:
+                    self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
+                else:
+                    self.conv = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        for auto_insert_channel_last_node in [True, False]:
+            mod = M(auto_insert_channel_last_node).eval()
+            v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
+                1
+            )
+            # Totally 3 pattern_matcher_count, 9 or 10 pattern_matcher_nodes
+            # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
+            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+            # 2. dequant-conv pattern matched in quantization weight prepack
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, convolution]
+            #    auto_insert_channel_last_node: [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+            # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
+            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
+            self._test_common(
+                mod,
+                (v,),
+                3,
+                10 if auto_insert_channel_last_node else 9,
+                check_quantization=True,
+            )
 
     # https://github.com/pytorch/pytorch/issues/99841.
     def test_hardtanh_pattern_fallback(self):

@@ -1923,7 +1923,7 @@ if torch._C._has_mkldnn:
         "onednn", "IMPL", "Meta"
     )
 
-    @register_meta(torch.ops.onednn.dynamic_quant_qconv.tensor)
+    @register_meta(torch.ops.onednn.qconv2d_pointwise.default)
     def meta_prepacked_dynamic_conv_tensor(
         x,
         x_scale,
@@ -1931,14 +1931,17 @@ if torch._C._has_mkldnn:
         w,  # prepacked_weight
         w_scale,
         w_zp,
-        w_axis,
         bias,
         stride,
         padding,
         dilation,
-        transposed,
-        output_padding,
         groups,
+        output_scale,
+        output_zero_point,
+        fp32_output,
+        attr,
+        scalars,
+        algorithm,
     ):
         if len(x.shape) == 3 and len(w.shape) == 4:
             # For conv1d, x and w should both have rank 3
@@ -1960,6 +1963,9 @@ if torch._C._has_mkldnn:
         if len(shape_out) == 5:
             out_format = torch.channels_last_3d
         out = x.new_empty(shape_out)
+        if fp32_output:
+            # If case of int8-in, fp32-out
+            out = out.to(torch.float32)
         if len(shape_out) == 3:
             out = out.unsqueeze(2)
         out = out.to(memory_format=out_format)
