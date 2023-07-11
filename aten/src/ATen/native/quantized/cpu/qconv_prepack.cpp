@@ -480,7 +480,7 @@ template struct PackedConvWeightsOnednn<2>;
 template struct PackedConvWeightsOnednn<3>;
 
 // Return the packed weight as Mkldnn Tensor
-at::Tensor _qconv_prepack_pt2e(
+at::Tensor _qconv_prepack_onednn(
     at::Tensor weight, // from CPU backend instead of QuantizedCPU
     at::Tensor weight_scales, // Weight zero points must be 0 for onednn
     double input_scale,
@@ -782,7 +782,7 @@ class QConv1dPackWeightInt8 final {
   }
 };
 
-class QConvPrepackPT2E final {
+class QConvPrepackOneDNN final {
  public:
   static at::Tensor run_conv(
     at::Tensor weight, // from CPU backend instead of QuantizedCPU
@@ -795,7 +795,7 @@ class QConvPrepackPT2E final {
     int64_t groups,
     c10::optional<torch::List<int64_t>> input_shape) {
 #if AT_MKLDNN_ENABLED()
-    return _qconv_prepack_pt2e(
+    return _qconv_prepack_onednn(
         weight, weight_scales, input_scale, input_zero_point,
         stride, padding, dilation, groups, input_shape);
 #else
@@ -830,7 +830,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   // New OP definition for Quantization in PyTorch 2.0 Export
   // Conv Prepack
-  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_prepack_pt2e"), TORCH_FN(QConvPrepackPT2E::run_conv));
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_prepack"), TORCH_FN(QConvPrepackOneDNN::run_conv));
 }
 
 } // namespace
