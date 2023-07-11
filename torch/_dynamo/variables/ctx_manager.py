@@ -215,6 +215,9 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         assert len(values) == 1
         value = values[0]
         if value is not None:
+            # Disable `saved_tensors_hooks` with message (`value`)
+            # OR
+            # we are exiting this context and restoring the previous message.
             tx.output.create_node(
                 "call_function",
                 torch._C._autograd._saved_tensors_hooks_disable,
@@ -223,6 +226,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
             )
             torch._C._autograd._saved_tensors_hooks_disable(value)
         else:
+            # We are exiting this context and if prev_message was None, we re-enable `saved_tensors_hooks`.
             tx.output.create_node(
                 "call_function", torch._C._autograd._saved_tensors_hooks_enable, (), {}
             )
