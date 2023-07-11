@@ -819,12 +819,15 @@ class Kernel(CodeGen):
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):
-                    fx_node = V.interpreter.current_node
-                    buf_bounds = self.bounds.get(fx_node, ValueRanges.unknown())
-                    # Sanity check: The variable is either bounded or unbounded
-                    assert (
-                        buf_bounds is not None or fx_node in self.bounds.unbounded_vars
-                    ), fx_node
+                    # TritonTemplateKernel has no current_node
+                    buf_bounds = ValueRanges.unknown()
+                    if hasattr(V.interpreter, "current_node"):
+                        fx_node = V.interpreter.current_node
+                        buf_bounds = self.bounds.get(fx_node, ValueRanges.unknown())
+                        # Sanity check: The variable is either bounded or unbounded
+                        assert (
+                            buf_bounds is not None or fx_node in self.bounds.unbounded_vars
+                        ), fx_node
 
                     csevar = self.cse.generate(
                         self.compute,
