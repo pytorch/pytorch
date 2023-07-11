@@ -201,7 +201,6 @@ static int getLRUCacheLimit() {
   } ();
   return limit;
 }
-}
 
 template <typename T, typename KeyType>
 struct BenchmarkCache {
