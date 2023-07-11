@@ -838,9 +838,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         Arguments:
             model_name: Name of the model. It used to name temporary files.
-            create_model: A function that creates a model. It should always create the same model.
-            create_args: A function that creates random input arguments for the model.
-            create_kwargs: A function that creates kwargs for calling PyTorch model with real tensors.
+            create_model: A function that creates a model.
+            create_args: A function that creates positional inputs for the model.
+            create_kwargs: A function that creates keyword inputs for ther model.
 
         This test contains several steps.
 
