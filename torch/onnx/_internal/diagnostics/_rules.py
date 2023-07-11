@@ -474,6 +474,26 @@ class _FxNodeInsertTypePromotion(infra.Rule):
         return self, level, self.format_message(target=target)
 
 
+class _FindOperatorOverloadsInOnnxRegistry(infra.Rule):
+    """Find the list of OnnxFunction of the PyTorch operator in onnx registry."""
+
+    def format_message(self, node) -> str:  # type: ignore[override]
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'Checking if the FX node: {node} is supported in onnx registry.'
+        """
+        return self.message_default_template.format(node=node)
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, node
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'Checking if the FX node: {node} is supported in onnx registry.'
+        """
+        return self, level, self.format_message(node=node)
+
+
 class _ArgFormatTooVerbose(infra.Rule):
     """The formatted str for argument to display is too verbose."""
 
@@ -978,6 +998,31 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """Determine if type promotion is required for the FX node. Insert cast nodes if needed."""
+
+    find_operator_overloads_in_onnx_registry: _FindOperatorOverloadsInOnnxRegistry = dataclasses.field(
+        default=_FindOperatorOverloadsInOnnxRegistry.from_sarif(
+            **{
+                "id": "FXE0016",
+                "name": "find-operator-overloads-in-onnx-registry",
+                "short_description": {
+                    "text": "Find the list of OnnxFunction of the PyTorch operator in onnx registry."
+                },
+                "full_description": {
+                    "text": "This rule involves finding the list of OnnxFunction for the PyTorch operator overload in the ONNX registry. If the operator overload is not supported but its default overload is, a warning will be issued. If both the operator overload and its default overload are not supported, an error will be issued.",
+                    "markdown": "The operator overload name serves the purpose of verifying whether a PyTorch operator is registered in the ONNX registry.\nIf it's not found, the dispatcher takes a fallback approach and tries to locate the default overload of the PyTorch\noperator in the registry. If even the default overload is absent, it signifies that the operator is officially unsupported.\n\nThere are three types of level that can be triggered in this rule:\n\n1. NOTE: The op overload is supported.\n2. WARNING: The op overload is not supported, but it's default overload is supported.\n3. ERROR: The op overload is not supported, and it's default overload is also not supported.\n\nHere are some suggestions based on the WARNING situation:\n\n1. If there are NO errors or mismatches in the results, it is safe to disregard this warning.\n2. If there are errors or mismatches in the results, it is recommended to:\n  (a) Enable op_level_debugging to determine if the OnnxFunction might be incorrect.\n  (b) Report the unsupported overload to the PyTorch-ONNX team.\n  (c) Create/register a custom symbolic function to replace the default one.\n\nHere are some suggestions based on the ERROR situation:\n\n1. Report the unsupported operator to the PyTorch-ONNX team.\n2. Create/register a custom symbolic function to replace the default one.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "Checking if the FX node: {node} is supported in onnx registry."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Find the list of OnnxFunction of the PyTorch operator in onnx registry."""
 
     arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
         default=_ArgFormatTooVerbose.from_sarif(
