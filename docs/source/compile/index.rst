@@ -45,21 +45,14 @@ There is some nuance involved in benchmarking ``torch.compile`` so we've provide
 
 You can get the full list of community backends by running :func:`~torch._dynamo.list_backends`
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
+Troubleshooting
+---------------
 
-    compile
-
-Troubleshooting and Gotchas
----------------------------
-
-IF you experience issues with models failing to compile, running of out of memory, recompiling too often, not giving accurate results,
-odds are you will find the right tool to solve your problem in our guides.
+If you experience issues with models failing to compile, running out of memory, recompiling too often, not giving accurate results, you might find the right tool to solve your problem in one of our guides.
 
 .. WARNING::
-    A few features are still very much in development and not likely to work for most users. Please do not use these features
-    in production code and if you're a library maintainer please do not expose these options to your users
+    A few features are still in development and not likely to work for most users. Please do not use these features
+    in production code and if you're a library maintainer please do not expose these options to your users.
     Dynamic shapes ``dynamic=true`` and max autotune ``mode="max-autotune"`` which can be passed in to :func:`~torch.compile`.
     Distributed training has some quirks which you can follow in the troubleshooting guide below. Model export is not ready yet.
 
@@ -72,8 +65,8 @@ odds are you will find the right tool to solve your problem in our guides.
 Learn more
 ----------
 
-If you can't wait to get started and want to learn more about the internals of the PyTorch 2.0 stack then
-please check out the references below.
+To learn more about the internals of the PyTorch 2.0 stack, check out the
+following references:
 
 .. toctree::
    :maxdepth: 1
