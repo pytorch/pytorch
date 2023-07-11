@@ -851,7 +851,8 @@ if _has_triton():
         value: torch.Tensor,
         attn_mask: Optional[torch.Tensor],
         dropout_p: float = 0.0,
-        is_causal: bool = False
+        is_causal: bool = False,
+        scale: Optional[float]
     ):
         f_name = "_scaled_dot_product_attention"
         check(
@@ -881,7 +882,8 @@ if _has_triton():
             check_dtype(f_name, attn_mask, query.dtype)
 
         sdpa = sampled_addmm(attn_mask, query, key.transpose(-2, -1), beta=0.0, skip_checks=False)
-        sdpa.values().div_(math.sqrt(query.size(-1)))
+        scale_factor = 1 / match.sqrt(query.size(-1)) if scale is None else scale
+        sdpa.values().mul_(scale_factor)
         sdpa = bsr_softmax(sdpa)
         torch.nn.functional.dropout(sdpa.values(), p=dropout_p, inplace=True)
         sdpa = bsr_dense_mm(sdpa, value)

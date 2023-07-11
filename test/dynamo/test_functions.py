@@ -17,6 +17,9 @@ from torch import sub
 from torch._dynamo.testing import expectedFailureDynamic, requires_numpy_pytorch_interop
 from torch._dynamo.utils import same
 from torch.nn import functional as F
+from torch.testing._internal.common_utils import (
+    disable_translation_validation_if_dynamic_shapes,
+)
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
@@ -982,6 +985,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    @disable_translation_validation_if_dynamic_shapes
     @make_test
     def test_torch_distributions_functions(x):
         normal = torch.distributions.Normal(x, torch.tensor(1))
@@ -1111,6 +1115,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_ndarray_builtin_functions(x):
         a = x.numpy()
         return a + a, a - a
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_dtype_argument_to_function(x):
+        import numpy as np
+
+        return np.empty_like(x, dtype=np.float64)
 
 
 def global_func_with_default_tensor_args(
