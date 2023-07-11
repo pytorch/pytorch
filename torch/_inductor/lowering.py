@@ -1586,7 +1586,7 @@ def _inductor_bucketize(
         indices = ops.bucketize(
             val,
             boundaries.get_name(),
-            ops.index_expr(boundaries_size, index_dtype),
+            boundaries_size,
             index_dtype,
             right,
         )
@@ -1670,6 +1670,7 @@ make_fallback(aten.adaptive_max_pool2d)
 make_fallback(aten.adaptive_max_pool3d)
 make_fallback(aten.addbmm)
 make_fallback(aten.addmv, warn=False)
+make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)

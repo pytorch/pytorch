@@ -1278,6 +1278,42 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+    @requires_numpy_pytorch_interop
+    def test_mandelbrot_numpy(self):
+        def mandelbrot_numpy(max_iter):
+            # Define the boundaries of the complex plane
+            xn = 450
+            yn = 375
+            xmin = -2.25
+            xmax = 0.75
+            ymin = -1.25
+            ymax = 1.25
+
+            # Create the grid of complex numbers
+            x_values = np.linspace(xmin, xmax, xn, dtype=np.float64)
+            y_values = np.linspace(ymin, ymax, yn, dtype=np.float64)
+            rx, iy = np.meshgrid(x_values, y_values, indexing="xy")
+
+            x = rx.copy()
+            y = iy.copy()
+            mask = np.zeros_like(x)
+            for i in range(max_iter):
+                x_prev = x
+                y_prev = y
+                x = x_prev**2 - y_prev**2 + rx
+                y = 2 * x_prev * y_prev + iy
+                inside = np.sqrt(x**2 + y**2) <= 2
+                mask += inside
+            return mask
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(mandelbrot_numpy)
+        for _ in range(10):
+            x = torch.randint(100, (1,))
+            ref = mandelbrot_numpy(x.item())
+            res = opt_fn(x.item())
+            self.assertTrue(same(ref, res))
+
     def test_(self):
         def fn(x: torch.Tensor, y: int):
             z = x.detach()
@@ -4513,6 +4549,19 @@ def fn():
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_cast(self):
+        from typing import cast
+
+        def fn(x):
+            return cast(torch.Tensor, torch.add(x, 1.0))
+
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        ref = fn(torch.ones(2, 2))
+        res = opt_fn(torch.ones(2, 2))
+
+        self.assertTrue(same(ref, res))
+
     def test_T_tensor_attribute(self):
         def fn(x, y):
             a = x.T
@@ -5870,6 +5919,28 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 18)
 
+    def test_tracing_tree_map_only(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            def mapper(x):
+                return x.clone()
+
+            y = pytree.tree_map_only(torch.Tensor, mapper, xs)
+            return y
+
+        xs = [torch.tensor(i) for i in range(3)] + ["hi"]
+        xsa = (xs, xs)
+        xsb = {"aa": xsa, "ab": xs}
+
+        counter = CompileCounter()
+        comp_out = torch._dynamo.optimize(counter, nopython=True)(fn)(xsb)
+        real_out = fn(xsb)
+
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 9)
+
     def _prepare_for_translation_validator(self):
         validator = TranslationValidator()
 
@@ -5907,7 +5978,6 @@ def ___make_guard_fn():
                 (op(s0, s1), op(z0, z1))
                 for op in (
                     operator.add,
-                    operator.mod,
                     operator.mul,
                     operator.pow,
                 )
@@ -5933,9 +6003,18 @@ def ___make_guard_fn():
                 s0 / s1,
                 z3.ToReal(z0) * (z1**-1),
             ),
-            (s2 % (s0 / s1), z2 % z3.ToInt(z3.ToReal(z0) * (z1**-1))),
-            (s2 % (s0**3), z2 % z3.ToInt(z0**3)),
             (FloorDiv(s0, s1), z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))),
+            (s0 % s1, z0 - z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1)) * z1),
+            (
+                s2 % (s0 / s1),
+                z2
+                - z3.ToReal(z3.ToInt(z3.ToReal(z2) / (z3.ToReal(z0) * z1**-1)))
+                * (z3.ToReal(z0) * z1**-1),
+            ),
+            (
+                s2 % (s0**3),
+                z2 - z3.ToReal(z3.ToInt(z3.ToReal(z2) / z0**3)) * z0**3,
+            ),
         ]
 
         toZ3 = SympyToZ3(validator)
