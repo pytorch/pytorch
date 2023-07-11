@@ -2997,16 +2997,8 @@ def _make_base_grid_4d(theta: Tensor, h: int, w: int, align_corners: bool):
 
     # Using padding and summation generates a single kernel vs using torch.stack where 3 kernels generated
     # corresponding to each individual tensor: grid_x, grid_y, grid_one
-    grid_x = (
-        _linspace_from_neg_one(w, align_corners, dtype, device)
-        .view(1, w, 1)
-        .expand(h, w, 1)
-    )
-    grid_y = (
-        _linspace_from_neg_one(h, align_corners, dtype, device)
-        .view(h, 1, 1)
-        .expand(h, w, 1)
-    )
+    grid_x = _linspace_from_neg_one(w, align_corners, dtype, device).view(1, w, 1)
+    grid_y = _linspace_from_neg_one(h, align_corners, dtype, device).view(h, 1, 1)
     grid_one = torch.ones((1, 1, 1), dtype=dtype, device=device)
 
     # this is just a temporary hack and we should use torch.stack here once #104480 is merged
@@ -3020,21 +3012,9 @@ def _make_base_grid_5d(theta: Tensor, d: int, h: int, w: int, align_corners: boo
     dtype = theta.dtype
     device = theta.device
 
-    grid_x = (
-        _linspace_from_neg_one(w, align_corners, dtype, device)
-        .view(1, 1, w, 1)
-        .expand(d, h, w, 1)
-    )
-    grid_y = (
-        _linspace_from_neg_one(h, align_corners, dtype, device)
-        .view(1, h, 1, 1)
-        .expand(d, h, w, 1)
-    )
-    grid_z = (
-        _linspace_from_neg_one(d, align_corners, dtype, device)
-        .view(d, 1, 1, 1)
-        .expand(d, h, w, 1)
-    )
+    grid_x = _linspace_from_neg_one(w, align_corners, dtype, device).view(1, 1, w, 1)
+    grid_y = _linspace_from_neg_one(h, align_corners, dtype, device).view(1, h, 1, 1)
+    grid_z = _linspace_from_neg_one(d, align_corners, dtype, device).view(d, 1, 1, 1)
     grid_one = torch.ones((1, 1, 1, 1), dtype=dtype, device=device)
 
     # this is just a temporary hack and we should use torch.stack here once #104480 is merged
