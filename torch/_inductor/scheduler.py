@@ -17,9 +17,9 @@ from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
 from .codegen.common import index_prevent_reordering
-from .dependencies import StarDep, WeakDep
+from .dependencies import extract_read_writes, StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, has_triton
+from .utils import cache_on_self, cmp, has_triton, sympy_subs
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -416,7 +416,15 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
 @dataclasses.dataclass
 class LoopOrder:
     @classmethod
-    def permute(cls, node, body, sizes, order):
+    def permute(cls, node, body, sizes, order, priority=0):
+        if list(order) == list(range(len(order))):
+            return cls(
+                node,
+                body,
+                sizes,
+                priority=priority,
+            )
+
         iter_size, reduce_size = sizes
         iter_size = [iter_size[i] for i in order]
         assert len(order) == len(iter_size)
@@ -436,9 +444,12 @@ class LoopOrder:
             wrapped,
             (iter_size, reduce_size),
             permute_order=order,
+            priority=priority,
         )
 
-    def __init__(self, node, body, sizes, read_writes=None, permute_order=None):
+    def __init__(
+        self, node, body, sizes, read_writes=None, permute_order=None, priority=0
+    ):
         self.node = node
         self.body = body
         self.sizes = sizes
@@ -446,6 +457,7 @@ class LoopOrder:
             read_writes = dependencies.extract_read_writes(body, *sizes, normalize=True)
         self.read_writes = read_writes
         self.permute_order = permute_order
+        self.priority = priority
 
     def __str__(self):
         return textwrap.dedent(
@@ -533,6 +545,27 @@ class SchedulerNode(BaseSchedulerNode):
         self.group = (node.get_device(), group_fn(self._sizes))
         self._vars = None
 
+    def default_loop_order(self):
+        """
+        This mimics the older loop order heuristics from
+        apply_loop_reordering.  In theory, we could entirely replace this
+        with the newer algorithm in select_loop_orders(), but this is
+        needed for performance.
+        """
+        (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(*self._sizes)
+        indexing = [
+            sympy_subs(
+                # drop the reduction part
+                r.index,
+                {v: sympy.Integer(0) for v in reduction_vars if v != 0},
+            )
+            for r in extract_read_writes(self._body, *self._sizes).reads_and_writes()
+        ]
+        stride_lengths = [
+            V.graph.sizevars.stride_hints(expr, index_vars) for expr in indexing
+        ]
+        return tuple(reversed(pick_loop_order(stride_lengths, self._sizes[0])))
+
     @cache_on_self
     def possible_loop_orders(self):
         if self.is_template():
@@ -541,20 +574,25 @@ class SchedulerNode(BaseSchedulerNode):
                     self, self._body, self._sizes, self.node.normalized_read_writes()
                 )
             ]
-        choices = [LoopOrder(self, self._body, self._sizes)]
+
+        default_order = self.default_loop_order()
+        choices = [
+            LoopOrder.permute(self, self._body, self._sizes, default_order, priority=1)
+        ]
         if (
             config.loop_ordering_search_limit <= 1
             or
             # reordering CPU reductions leads to some subtle bugs in vectorization
             # in tests like test_transpose_sum_outer
-            self.get_device().type == "cpu" and
-            self.is_reduction()
+            self.get_device().type == "cpu"
+            and self.is_reduction()
         ):
             return choices
+
         permute = functools.partial(LoopOrder.permute, self, self._body, self._sizes)
         iter_sizes, reduce_sizes = self._sizes
         n = len(iter_sizes)
-        tried = {tuple(range(n))}
+        tried = {default_order}
         if len(iter_sizes) >= 2:
             order = (1, *range(2, n), 0)
             choices.append(permute(order))
@@ -733,11 +771,13 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
         def score(ordering: Dict[SchedulerNode, LoopOrder]):
             reuse_score = 0
+            priority = 0
             combined = set()
             internal_deps = set()
             external_reads = set()
             external_writes = set()
             for node, order in ordering.items():
+                priority += order.priority
                 union = set(order.read_writes.reads_and_writes())
                 reuse_score += len(combined & union)
                 combined.update(union)
@@ -757,36 +797,33 @@ class FusedSchedulerNode(BaseSchedulerNode):
                     else:
                         external_writes.add(dep)
 
-                # TODO(jansel): include this?
-                # for dep in order.read_writes.index_exprs:
-                #    internal_deps.add(dep)
-
             return (
                 # TODO(jansel): this heuristic has not been well tuned
                 reuse_score,
+                priority,
                 sum(map(score_dep, external_writes | external_reads)),
-                # sum(map(score_dep, external_reads)),
                 sum(map(score_dep, internal_deps)),
             )
 
-        def score_dep(dep: dependencies.MemoryDep, limit=8):
-            # TODO(jansel): include indirect?
+        def score_dep(dep: dependencies.MemoryDep):
             if (
                 isinstance(dep, dependencies.StarDep)
                 or dep.is_indirect()
                 or dep.is_scalar()
             ):
+                # TODO(jansel): include indirect?
                 return 0
             strides = V.graph.sizevars.stride_hints(dep.index, dep.var_names)
             sizes = V.graph.sizevars.size_hints(dep.size)
             assert len(strides) == len(sizes)
-            score = 0
             expected = 1
             for size, stride in zip(reversed(sizes), reversed(strides)):
-                score -= int(stride != expected)
+                if stride != expected:
+                    if expected <= 32:
+                        return -10
+                    return -1
                 expected = stride * size
-            # TODO(jansel): different limit?
-            return max(-limit, score)
+            return 0
 
         all_node_names = functools.reduce(set.union, (n.get_names() for n in snodes))
         numel_hint = max(n.numel_hint() for n in snodes)

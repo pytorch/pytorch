@@ -46,7 +46,8 @@ struct InputMetadata {
       bool is_tensor_subclass)
       : options_{options},
         shape_{std::move(input_shape)},
-        is_tensor_subclass_{is_tensor_subclass} {
+        is_tensor_subclass_{is_tensor_subclass},
+        was_default_constructed_{false} {
     auto device_ = options.device();
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
   }
@@ -135,6 +136,10 @@ struct InputMetadata {
     return ss;
   }
 
+  bool was_default_constructed() const {
+    return was_default_constructed_;
+  }
+
  private:
   bool is_nested_tensor() const {
     return (c10::holds_alternative<at::Tensor>(shape_));
@@ -160,6 +165,7 @@ struct InputMetadata {
   MetadataShape shape_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());
   bool is_tensor_subclass_ = false;
+  bool was_default_constructed_ = true;
 };
 } // namespace autograd
 } // namespace torch
