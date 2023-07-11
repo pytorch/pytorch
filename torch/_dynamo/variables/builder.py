@@ -912,7 +912,6 @@ class VariableBuilder:
             dup_guard = self._make_dupe_guard(stored_value)
             if dup_guard:
                 stored_value = stored_value.add_guards(self.make_guards(dup_guard))
-            breakpoint()
             return stored_value
 
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
