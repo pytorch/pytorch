@@ -1116,6 +1116,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         a = x.numpy()
         return a + a, a - a
 
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_dtype_argument_to_function(x):
+        import numpy as np
+
+        return np.empty_like(x, dtype=np.float64)
+
 
 def global_func_with_default_tensor_args(
     x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))
