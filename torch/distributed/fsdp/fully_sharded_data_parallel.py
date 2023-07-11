@@ -98,7 +98,7 @@ from ._unshard_param_utils import (
     _unshard_params_recurse,
 )
 from .flat_param import FlatParameter
-from .wrap import _FSDPPolicy
+from .wrap import _WrapPolicy
 
 
 __all__ = [
@@ -242,11 +242,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             This configures CPU offloading. If this is set to ``None``, then
             no CPU offloading happens. See :class:`CPUOffload` for details.
             (Default: ``None``)
-        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], _FSDPPolicy]]):
-            This is either ``None``, an ``_FSDPPolicy``, or a callable of
+        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], _WrapPolicy]]):
+            This is either ``None``, an ``_WrapPolicy``, or a callable of
             a fixed signature. If it is ``None``, then ``module`` is wrapped
             with only a top-level FSDP instance without any nested wrapping. If
-            it is an ``_FSDPPolicy``, then the wrapping follows the given
+            it is an ``_WrapPolicy``, then the wrapping follows the given
             policy. ``ModuleWrapPolicy`` in ``torch.distributed.fsdp.wrap.py``
             is an example. If it is a callable, then it should take in three
             arguments ``module: nn.Module``, ``recurse: bool``, and
@@ -385,7 +385,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         process_group: ProcessGroupType = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        auto_wrap_policy: Optional[Union[Callable, _FSDPPolicy]] = None,
+        auto_wrap_policy: Optional[Union[Callable, _WrapPolicy]] = None,
         backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,

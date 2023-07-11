@@ -129,10 +129,10 @@ def always_wrap_policy(*args, **kwargs) -> bool:
     return True
 
 
-class _FSDPPolicy(ABC):
+class _WrapPolicy(ABC):
     """
     This defines an abstract base class that represents a policy for auto
-    wrapping with FSDP.
+    wrapping with a module-level API.
     """
 
     @abstractmethod
@@ -140,11 +140,11 @@ class _FSDPPolicy(ABC):
         self,
         root_module: nn.Module,
         ignored_modules: Set[nn.Module],
-        root_fsdp_kwargs: Dict[str, Any],
+        root_kwargs: Dict[str, Any],
     ) -> Dict[nn.Module, Dict[str, Any]]:
         """
         This should return a dict ``target_module_to_kwargs`` that maps from
-        each target module to wrap to its FSDP kwargs.
+        each target module to wrap to its kwargs.
         """
         ...
 
@@ -181,10 +181,10 @@ def _module_wrap_policy(
     return isinstance(module, tuple(module_classes))
 
 
-class ModuleWrapPolicy(_FSDPPolicy):
+class ModuleWrapPolicy(_WrapPolicy):
     """
-    This policy wraps every module of the specified module classes with FSDP
-    using the kwargs passed to the root.
+    This policy wraps every module of the specified module classes, passing in
+    the kwargs given to the root.
     """
 
     def __init__(self, module_classes: Iterable[Type[nn.Module]]):
@@ -200,7 +200,7 @@ class ModuleWrapPolicy(_FSDPPolicy):
         self,
         root_module: nn.Module,
         ignored_modules: Set[nn.Module],
-        root_fsdp_kwargs: Dict[str, Any],
+        root_kwargs: Dict[str, Any],
     ) -> Dict[nn.Module, Dict[str, Any]]:
         module_classes = tuple(self._module_classes)
         target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]] = {}
@@ -209,7 +209,7 @@ class ModuleWrapPolicy(_FSDPPolicy):
                 continue
             elif isinstance(module, module_classes):
                 # Shallow copy to avoid coupling changes across modules
-                target_module_to_kwargs[module] = copy.copy(root_fsdp_kwargs)
+                target_module_to_kwargs[module] = copy.copy(root_kwargs)
         return target_module_to_kwargs
 
     def __repr__(self) -> str:

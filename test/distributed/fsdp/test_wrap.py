@@ -19,9 +19,9 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp.wrap import (
-    _FSDPPolicy,
     _or_policy,
     _wrap_module_cls_individually,
+    _WrapPolicy,
     always_wrap_policy,
     enable_wrap,
     LambdaWrapPolicy,
@@ -460,7 +460,7 @@ class TestAutoWrap(TestCase):
         self._test_transformer_wrapping(auto_wrap_policy)
 
     def _test_transformer_wrapping(
-        self, auto_wrap_policy: Union[Callable, _FSDPPolicy]
+        self, auto_wrap_policy: Union[Callable, _WrapPolicy]
     ):
         fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
         fsdp_model = TransformerWithSharedParams.init(
@@ -826,7 +826,7 @@ class TestAutoWrap(TestCase):
         ):
             self._test_frozen_params(use_orig_params, policy)
 
-    def _test_frozen_params(self, use_orig_params: bool, policy: _FSDPPolicy):
+    def _test_frozen_params(self, use_orig_params: bool, policy: _WrapPolicy):
         model = LoraModel().cuda()
         msg = "layers.0.attn has both parameters with requires_grad=True and False. "
         if use_orig_params:
