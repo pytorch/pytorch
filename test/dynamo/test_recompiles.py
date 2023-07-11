@@ -189,6 +189,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
     def test_aliasing_guard_failures_with_globals(self):
         g1 = torch.randn([3])
         g2 = torch.randn([3])
+
         def foo(a):
             a.add_(g1)
             return g2 + 1
@@ -197,9 +198,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         compiled_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
 
         z = torch.randn([3])
-        cmp_result = compiled_foo(
-            z.clone().detach()
-        )
+        cmp_result = compiled_foo(z.clone().detach())
         eager_result = foo(z.clone().detach())
         self.assertEqual(cmp_result, eager_result)
         self.assertEqual(cnt.frame_count, 1)
