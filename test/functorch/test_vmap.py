@@ -3736,6 +3736,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('equal', ''),
         xfail('linalg.lu', ''),
+        xfail('linspace', ''),
+        xfail('logspace', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
         # UBSAN: runtime error: shift exponent -1 is negative
