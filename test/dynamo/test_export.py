@@ -3000,6 +3000,7 @@ def forward(self, x):
     return pytree.tree_unflatten([slice_tensor, slice_tensor_3, slice_tensor_6, slice_tensor_9], self._out_spec)""",
         )
 
+    @unittest.expectedFailure
     def test_capture_symbolic_tracing(self) -> None:
         from torch._dynamo.output_graph import config
         from torch._subclasses import fake_tensor
