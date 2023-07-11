@@ -364,7 +364,7 @@ class TestTensorBoardSummary(BaseTestCase):
             summary.histogram('dummy', np.ndarray(0), 'tensorflow')
 
     def test_tensor_proto(self):
-        self.assertTrue(compare_proto(summary.tensor_proto('dummy', torch.tensor([1, 2, 3]), self)))
+        self.assertTrue(compare_proto(summary.tensor_proto('dummy', torch.tensor([1, 2, 3])), self))
 
     def test_image_with_boxes(self):
         self.assertTrue(compare_image_proto(summary.image_boxes('dummy',
