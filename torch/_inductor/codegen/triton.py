@@ -1208,6 +1208,7 @@ class TritonKernel(Kernel):
                     else f"({' & '.join(str(v) for v in mask_vars)})"
                 )
 
+            # An assertion line may have been written already, if so just
             # update the max size.
             map_key = (var, mask)
             existing_size, _ = self.indirect_max_sizes.get(map_key, (None, None))
