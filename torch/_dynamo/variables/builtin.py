@@ -21,6 +21,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
+from ..side_effects import SideEffects
 from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
     build_checkpoint_variable,
@@ -1114,7 +1115,11 @@ class BuiltinVariable(VariableTracker):
                     "Can't inplace modify module params/buffers inside HigherOrderOp"
                 )
 
-            if isinstance(name_var, ConstantVariable) and obj.is_buffer(tx, name_var):
+            if (
+                isinstance(name_var, ConstantVariable)
+                and obj.is_buffer(tx, name_var)
+                and SideEffects.cls_supports_mutation_side_effects(obj.module_type)
+            ):
                 # Its a buffer, so we can mutate the buffer in the graph module itself
                 name = name_var.value
                 buffer_var = obj.var_getattr(tx, name)

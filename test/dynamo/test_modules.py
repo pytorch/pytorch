@@ -1959,6 +1959,32 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_module_customized_setattr(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor(0)
+                self.register_buffer("iterations", torch.tensor(0))
+
+            def forward(self, x):
+                self.iterations += 1
+                return x * self.a * self.iterations
+
+            def __setattr__(self, name: str, value) -> None:
+                if name == "iterations":
+                    self.a = -5
+                return super().__setattr__(name, value)
+
+        mod = MockModule()
+        x = torch.ones(4)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch.compile(MockModule(), backend=cnt)
+        self.assertEqual(mod(x), opt_mod(x))
+        # there is a graph break due to custom setattr
+        self.assertEqual(cnt.frame_count, 2)
+        # Run again to check mutation is handled correctly
+        self.assertEqual(mod(x), opt_mod(x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
