@@ -64,10 +64,10 @@ select = [
     "G",
     "E",
     "F",
-    "PERF",
     "SIM1",
     "W",
     # Not included in flake8
+    "PERF",
     "PLE",
     "TRY302",
 ]
