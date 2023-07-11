@@ -2,11 +2,10 @@ from typing import Dict, List
 
 import torch
 
-from ._distributed_c10d import ProcessGroup, Store
+from ._distributed_c10d import Store
 from ._distributed_rpc import (
     _TensorPipeRpcBackendOptionsBase,
     TensorPipeAgent,
-    WorkerInfo,
 )
 
 # This module is defined in torch/csrc/distributed/rpc/testing/init.cpp

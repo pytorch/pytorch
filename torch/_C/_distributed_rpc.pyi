@@ -5,8 +5,8 @@ import torch
 
 from . import Future
 from ._autograd import ProfilerEvent
-from ._distributed_c10d import ProcessGroup, Store
-from ._profiler import ActiveProfilerType, ProfilerConfig, ProfilerState
+from ._distributed_c10d import Store
+from ._profiler import ProfilerConfig
 
 # This module is defined in torch/csrc/distributed/rpc/init.cpp
 
