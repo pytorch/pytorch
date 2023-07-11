@@ -11,7 +11,6 @@ from weakref import WeakSet
 log = logging.getLogger(__name__)
 
 DEFAULT_LOG_LEVEL = logging.WARN
-DEFAULT_FORMAT = "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
 LOG_ENV_VAR = "TORCH_LOGS"
 
 
@@ -305,6 +304,11 @@ def set_logs(
                 val = default_level
 
             if log_registry.is_artifact(alias):
+                if not isinstance(val, bool):
+                    raise ValueError(
+                        f"Expected bool to enable artifact {alias}, received {val}"
+                    )
+
                 if val:
                     log_state.enable_artifact(alias)
             elif log_registry.is_log(alias) or alias in log_registry.child_log_qnames:
@@ -531,10 +535,21 @@ class TorchLogsFormatter(logging.Formatter):
             )
             if artifact_formatter is not None:
                 return artifact_formatter.format(record)
-        return super().format(record)
+
+        record.message = record.getMessage()
+        record.asctime = self.formatTime(record, self.datefmt)
+
+        lines = record.message.split("\n")
+        record.rankprefix = ""
+        if dist.is_available() and dist.is_initialized():
+            record.rankprefix = f"[rank{dist.get_rank()}]:"
+        prefix = (
+            f"{record.rankprefix}[{record.asctime}] {record.name}: [{record.levelname}]"
+        )
+        return "\n".join(f"{prefix} {l}" for l in lines)
 
 
-DEFAULT_FORMATTER = TorchLogsFormatter(DEFAULT_FORMAT)
+DEFAULT_FORMATTER = TorchLogsFormatter()
 
 
 def _setup_handlers(create_handler_fn, log):
@@ -629,3 +644,6 @@ def warning_once(logger_obj, *args, **kwargs):
     another type of cache that includes the caller frame information in the hashing function.
     """
     logger_obj.warning(*args, **kwargs)
+
+
+import torch.distributed as dist
