@@ -105,7 +105,6 @@ jit_core_sources = [
 core_sources_common = [
     "torch/csrc/autograd/autograd_meta.cpp",
     "torch/csrc/autograd/forward_grad.cpp",
-    "torch/csrc/autograd/VariableFallbackKernel.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/mobile/compatibility/runtime_compatibility.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
@@ -170,6 +169,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/record_function_ops.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
+    "torch/csrc/autograd/VariableFallbackKernel.cpp",
     "torch/csrc/autograd/utils/warnings.cpp",
     "torch/csrc/autograd/jit_decomp_interface.cpp",
     "torch/csrc/jit/frontend/name_mangler.cpp",
