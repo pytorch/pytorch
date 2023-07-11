@@ -87,6 +87,7 @@ def save_model_with_external_data(
     initializer_location: str,
     torch_load_paths: Tuple[Union[str, io.BytesIO], ...],
     onnx_model: onnx.ModelProto,
+    rename_initializer: bool = False,
 ) -> None:
     """Load PyTorch tensors from files and add to "onnx_model" as external initializers.
 
@@ -111,6 +112,7 @@ def save_model_with_external_data(
         onnx_model: ONNX model to be saved with external initializers.
             If an input name matches a tensor loaded from "torch_load_paths",
             the tensor will be saved as that input's external initializer.
+        rename_initializer: Replaces "." by "_" for all ONNX initializer names.
     """
     # FIXME: Avoid importing onnx into torch.onnx.
     import onnx
@@ -122,13 +124,8 @@ def save_model_with_external_data(
     for path in torch_load_paths:
         state_dict = torch.load(path)
         for name, tensor in state_dict.items():
-            # Basically, "transformer.attention.self.query.weight" is mapped
-            # to "transformer_attention_self_query_weight" for mimicking the
-            # name-modifying code in FX-to-ONNX exporter.
-            # See function _replace_get_attr_with_placeholder for details.
-            refined_name = name.replace(".", "_")
-
-            # For each refined PyTorch tensor name loaded by torch.load,
+            name = name.replace(".", "_") if rename_initializer else name
+            # For each PyTorch tensor name loaded by torch.load,
             #  1.  Search its best match in ONNX model. E.g., the match of
             #       "transformer_attention_weight" could be "attention_weight".
             #  2.  Set "tensor" as the initializer of the matched ONNX input.
@@ -136,20 +133,18 @@ def save_model_with_external_data(
             # Step 1 is required because sometimes, tensor names are stored with prefix the dictionary
             # loaded by torch.load.
             for onnx_input_name in onnx_input_names:
-                if onnx_input_name.endswith(refined_name) or refined_name.endswith(
-                    onnx_input_name
-                ):
-                    # Find a match. Change refined_name to the matched ONNX input name, so that we
+                if onnx_input_name.endswith(name) or name.endswith(onnx_input_name):
+                    # Find a match. Change name to the matched ONNX input name, so that we
                     # create initializer with the right ONNX name.
-                    refined_name = onnx_input_name
+                    name = onnx_input_name
                     break
 
-            relative_tensor_file_path = os.path.join(initializer_location, refined_name)
+            relative_tensor_file_path = os.path.join(initializer_location, name)
             # Create one file per tensor.
             # tensor_proto.raw_data is stored to external file at
             # os.path.join(basepath, relative_tensor_file_path).
             tensor_proto = _create_tensor_proto_with_external_data(
-                tensor, refined_name, relative_tensor_file_path, basepath
+                tensor, name, relative_tensor_file_path, basepath
             )
             # Add the tensor_proto to the ONNX model as an initializer with external data.
             onnx_model_with_initializers.graph.initializer.append(tensor_proto)
