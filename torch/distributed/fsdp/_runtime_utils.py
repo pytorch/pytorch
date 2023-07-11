@@ -358,7 +358,10 @@ def _unshard(
     if state.limit_all_gathers:
         event = state._free_event_queue.dequeue_if_needed()
         if event:
-            event.synchronize()
+            with torch.profiler.record_function(
+                "FullyShardedDataParallel.rate_limiter"
+            ):
+                event.synchronize()
     with state._device_handle.stream(unshard_stream):
         for handle in handles:
             handle.unshard()
