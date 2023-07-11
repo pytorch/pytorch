@@ -251,8 +251,6 @@ class TestTensorBoardWriter(BaseTestCase):
                                         n_iter)
             x = np.zeros(sample_rate * 2)
 
-            # add tensor: invisible on tensorboard TODO support full tensor plugin
-            writer.add_tensor('Full tensor', torch.tensor([1, 2, 3]), n_iter)
             writer.add_audio('myAudio', x, n_iter)
             writer.add_video('myVideo', np.random.rand(16, 48, 1, 28, 28).astype(np.float32), n_iter)
             writer.add_text('Text', 'text logged at step:' + str(n_iter), n_iter)
@@ -363,9 +361,6 @@ class TestTensorBoardSummary(BaseTestCase):
     def test_empty_input(self):
         with self.assertRaises(Exception) as e_info:
             summary.histogram('dummy', np.ndarray(0), 'tensorflow')
-
-    def test_tensor_proto(self):
-        self.assertTrue(compare_proto(summary.tensor_proto('dummy', torch.tensor([1, 2, 3])), self))
 
     def test_image_with_boxes(self):
         self.assertTrue(compare_image_proto(summary.image_boxes('dummy',
