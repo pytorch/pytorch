@@ -1249,7 +1249,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
-    def test_dataclass_default_dict(self):
+    def test_dataclass_factory(self):
         @dataclass
         class Output:
             scalar: int = 2
@@ -1261,7 +1261,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         def fn(x):
             # Check default dict assignment
-            m = dict()
             a = Output(1)
             # Check that dataclass methods can be inlined
             scaled_value = a.scale()
@@ -1275,10 +1274,14 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             # Check that the default members are properly initialized
             if isinstance(a.named_tensors, dict):
                 x = torch.sin(x)
+
+            # Change dataclass
+            c.scalar = 6
+
             return torch.cos(x) * scaled_value + b.named_tensors["x"] + c.scalar
 
         cnts = torch._dynamo.testing.CompileCounter()
-        compiled_fn = torch.compile(fn, backend=cnts)  # , fullgraph=True)
+        compiled_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         x = torch.randn(4)
         out = fn(x)
         compiled_out = compiled_fn(x)
@@ -1286,22 +1289,21 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
 
-    def test_dataclass_factory(self):
+    def test_dataclass_nested(self):
         @dataclass
-        class Output:
-            sharding_contexts: Any = field(default_factory=list)
-            a: int = 1
+        class Base:
+            outer_a: int
+            outer_b: int
+
+        @dataclass
+        class Derived(Base):
+            inner_a: Any = field(default_factory=list)
 
         def fn(x):
-            l = Output(
-                [
-                    1,
-                ],
-                2,
-            )
-            return l.a * x
+            l = Derived(1, 2)
+            return l.outer_a * x
 
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         res = fn(x)
         ref = opt_fn(x)
