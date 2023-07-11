@@ -635,16 +635,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        skips=(
-            # Compiler issue on ROCm
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_non_standard_bool_values",
-                dtypes=[torch.bool],
-                active_if=TEST_WITH_ROCM,
-            ),
-        ),
     ),
     OpInfo(
         "fft.ifftshift",
@@ -655,16 +645,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        skips=(
-            # Compiler issue on ROCm
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_non_standard_bool_values",
-                dtypes=[torch.bool],
-                active_if=TEST_WITH_ROCM,
-            ),
-        ),
     ),
 ]
 
