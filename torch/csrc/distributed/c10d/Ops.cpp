@@ -485,11 +485,19 @@ namespace {
     m.impl(#FUNC, FUNC##DEV);        \
   }
 
+#define REGISTER_C10D_FALLTHROUGH(FUNC, KEY)              \
+  TORCH_LIBRARY_IMPL(c10d, KEY, m) {                      \
+    m.impl(#FUNC, torch::CppFunction::makeFallthrough()); \
+  }
+
 // 1st level expansion
-#define REGISTER_C10D_OP(FUNC)  \
-  REGISTER_C10D_OP1(FUNC, CPU)  \
-  REGISTER_C10D_OP1(FUNC, CUDA) \
-  REGISTER_C10D_OP1(FUNC, PrivateUse1)
+#define REGISTER_C10D_OP(FUNC)                  \
+  REGISTER_C10D_OP1(FUNC, CPU)                  \
+  REGISTER_C10D_FALLTHROUGH(FUNC, AutogradCPU)  \
+  REGISTER_C10D_OP1(FUNC, CUDA)                 \
+  REGISTER_C10D_FALLTHROUGH(FUNC, AutogradCUDA) \
+  REGISTER_C10D_OP1(FUNC, PrivateUse1)          \
+  REGISTER_C10D_FALLTHROUGH(FUNC, AutogradPrivateUse1)
 
 // Now we start to register ops with the three device keys
 
@@ -517,6 +525,10 @@ REGISTER_C10D_OP(barrier)
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("monitored_barrier_", monitored_barrier_CPU);
+}
+
+TORCH_LIBRARY_IMPL(c10d, AutogradCPU, m) {
+  m.impl("monitored_barrier_", torch::CppFunction::makeFallthrough());
 }
 
 // TODO: The SparseCPU/SparseCUDA dispatched methods are only used to support
