@@ -654,16 +654,16 @@ def get_include_and_linking_paths(
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
         # and we need a way to link to what PyTorch links.
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
-        if aot_mode:
-            ipaths += [os.path.join(_TORCH_PATH, "_inductor", "aot_inductor_include")]
         lpaths = cpp_extension.library_paths(cuda) + [
             sysconfig.get_config_var("LIBDIR")
         ]
         libs = []
         # No need to manually specify libraries in fbcode.
         if not config.is_fbcode():
-            libs += ["c10", "torch", "torch_cpu", "torch_python"]
+            libs += ["c10", "torch", "torch_cpu"]
             libs += ["gomp"]
+            if not aot_mode:
+                libs += ["torch_python"]
         else:
             # internal remote execution is able to find omp, but not gomp
             libs += ["omp"]

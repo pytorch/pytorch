@@ -1,11 +1,12 @@
 #pragma once
 
-#include "aot_inductor_model.h"
-
 #include <future>
 #include <mutex>
 #include <shared_mutex>
 
+#include <torch/csrc/inductor/aot_inductor_model.h>
+
+namespace torch {
 namespace aot_inductor {
 
 class AOTInductorModelContainer {
@@ -172,3 +173,4 @@ class AOTInductorModelContainer {
 };
 
 } // namespace aot_inductor
+} // namespace torch
