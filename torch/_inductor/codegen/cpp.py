@@ -2121,7 +2121,7 @@ class CppVecKernelChecker(CppVecKernel):
                 def can_use_int32():
                     free_symbols = list(expr.free_symbols)
                     vars_ranges = {
-                        k: ValueRanges(0, v)
+                        k: ValueRanges(0, v - 1)
                         for k, v in zip(self.itervars, self.ranges)
                         if k in free_symbols
                     }
