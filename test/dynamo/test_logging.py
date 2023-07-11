@@ -367,6 +367,10 @@ class LoggingTests(LoggingTestCase):
             if "concrete" in line:
                 self.assertIsNotNone(re.search(r"\(concrete\): \(\d+, \d+\)", line))
 
+    def test_invalid_artifact_flag(self):
+        with self.assertRaises(ValueError):
+            torch._logging.set_logs(aot_graphs=5)
+
 
 # single record tests
 exclusions = {
