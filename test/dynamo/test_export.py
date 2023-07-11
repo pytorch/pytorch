@@ -2705,7 +2705,7 @@ def forward(self, x):
                 return x * self.iterations
 
         x = torch.ones(1, 2, 3)
-        eager_mod = Foo()
+        # eager_mod = Foo()
         gm, _ = torch._dynamo.export(Foo(), x, aten_graph=True)
         count = 0
         for node in gm.graph.nodes:
