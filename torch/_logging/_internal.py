@@ -524,6 +524,19 @@ def _has_registered_parent(log_qname):
 # apply custom formats to artifacts when necessary
 class TorchLogsFormatter(logging.Formatter):
     def format(self, record):
+        if "\n" in record.msg:
+            res = []
+            old_msg = record.msg
+            try:
+                for l in record.msg.splitlines():
+                    assert "\n" not in l
+                    # destructively modify record for convenience
+                    record.msg = l
+                    res.append(self.format(record))
+            finally:
+                record.msg = old_msg
+            return "\n".join(res)
+
         artifact_name = getattr(logging.getLogger(record.name), "artifact_name", None)
         if artifact_name is not None:
             artifact_formatter = log_registry.artifact_log_formatters.get(
