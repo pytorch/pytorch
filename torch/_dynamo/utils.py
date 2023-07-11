@@ -235,8 +235,7 @@ def compile_times(repr="str", aggregate=False):
 
 @atexit.register
 def dump_compile_times():
-    pass
-    # log.info(compile_times(repr="str", aggregate=True))
+    log.info(compile_times(repr="str", aggregate=True))
 
 
 tensortype_to_dtype = {

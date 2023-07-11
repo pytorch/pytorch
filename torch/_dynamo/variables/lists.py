@@ -778,7 +778,9 @@ class SetVariable(VariableTracker):
     def reconstruct(self, codegen):
         codegen.load_import_from("builtins", "set")
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_SET", arg=len(self.items))]
+        return [
+            create_instruction("BUILD_SET", arg=len(self.items))
+        ] + create_call_function(1, True)
 
     # Note - this is only used for producing a set
     def _as_set_element(self, tx, vt):
@@ -811,27 +813,18 @@ class SetVariable(VariableTracker):
         for item_to_add in items_to_add:
             set_element = self._as_set_element(tx, item_to_add)
             if set_element not in underlying_items:
-                # A miss here means we have a new object to register
-                for e in underlying_items:
-                    alias_guard = make_dupe_guard(
-                        e.vt.source, set_element.vt.source, True
-                    )
-                    if alias_guard:
-                        # Create negation guards, x is not y
-                        set_element.vt = set_element.vt.add_guards(
-                            {e.vt.source.make_guard(alias_guard)}
-                        )
                 underlying_items.add(set_element)
                 self.items.append(set_element.vt)
             else:
                 for e in underlying_items:
-                    dupe = hash(set_element) == hash(e)
-                    negate = not dupe
-                    alias_guard = make_dupe_guard(
-                        e.vt.source, set_element.vt.source, negate
-                    )
-                    if alias_guard:
-                        e.vt = e.vt.add_guards({e.vt.source.make_guard(alias_guard)})
+                    if hash(set_element) == hash(e):
+                        alias_guard = make_dupe_guard(
+                            e.vt.source, set_element.vt.source
+                        )
+                        if alias_guard:
+                            e.vt = e.vt.add_guards(
+                                {e.vt.source.make_guard(alias_guard)}
+                            )
 
         return self.items
 

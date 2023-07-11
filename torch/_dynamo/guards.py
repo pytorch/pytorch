@@ -429,13 +429,6 @@ class GuardBuilder(GuardBuilderBase):
         code = [f"{ref_b} is {ref_a}"]
         self._produce_guard_code(guard, code)
 
-    def NOT_DUPLICATE_INPUT(self, guard, source_b):
-        ref_a = self.arg_ref(guard)
-        ref_b = self.arg_ref(source_b.name())
-
-        code = [f"{ref_b} is not {ref_a}"]
-        self._produce_guard_code(guard, code)
-
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
@@ -1163,7 +1156,7 @@ def unique(seq):
             seen.add(x)
 
 
-def make_dupe_guard(obj_source, dupe_source, negate=False):
+def make_dupe_guard(obj_source, dupe_source):
     # Note - we may end up in a situation where we invoke something like
     # def fn(x, y)
     # with fn(x, x)
@@ -1185,13 +1178,5 @@ def make_dupe_guard(obj_source, dupe_source, negate=False):
         if ser_source_is_local == source_is_local:
             # Note - this is a little agressive - these being duplicate input does not always matter.
             # However, this should always be a sound guard to add here.
-            if negate:
-                dup_guard = functools.partial(
-                    GuardBuilder.NOT_DUPLICATE_INPUT, source_b=dupe_source
-                )
-            else:
-                dup_guard = functools.partial(
-                    GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source
-                )
-            return dup_guard
+            return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)
     return None
