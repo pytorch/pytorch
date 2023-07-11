@@ -126,6 +126,23 @@ class SymPyOps:
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(sympy.Max(x.expr, y.expr), result_type)
 
+    @staticmethod
+    def floor(x):
+        return TypedExpr(sympy.Floor(x.expr), x.dtype)
+
+    @staticmethod
+    def ceil(x):
+        return TypedExpr(sympy.Ceil(x.expr), x.dtype)
+
+    @staticmethod
+    def trunc(x):
+        if x.expr.is_positive == True:
+            return SymPyOps.floor(x)
+        if x.expr.is_positive == False:
+            return SymPyOps.ceil(x)
+        # There is no sympy.Trunc
+        return NotImplemented
+
 
 @dataclass
 class IndexPropVar:
