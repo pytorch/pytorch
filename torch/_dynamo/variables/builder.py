@@ -221,16 +221,19 @@ class VariableBuilder:
         # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
         # leave unsourced - like a local list created and discharged entirely within a local scope.
         if deduped_object.source and deduped_object.source != self.source:
+            ser_source_is_local = is_from_local_source(deduped_object.source)
+            source_is_local = is_from_local_source(self.source)
             # Note - both must be local, or global, or we will run afoul of a lack of merging in how we currently
             # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
             # so maybe we should do this refactor before we land this...
             # TODO(voz): Combine local and global guard builders.
-            # Note - this is a little agressive - these being duplicate input does not always matter.
-            # However, this should always be a sound guard to add here.
-            dup_guard = functools.partial(
-                GuardBuilder.DUPLICATE_INPUT, source_b=deduped_object.source
-            )
-            return dup_guard
+            if ser_source_is_local == source_is_local:
+                # Note - this is a little agressive - these being duplicate input does not always matter.
+                # However, this should always be a sound guard to add here.
+                dup_guard = functools.partial(
+                    GuardBuilder.DUPLICATE_INPUT, source_b=deduped_object.source
+                )
+                return dup_guard
         return None
 
     def _can_lift_attrs_to_inputs(self, vt):
@@ -896,21 +899,6 @@ class VariableBuilder:
         # then the relevant SubgraphTracer will lift it to being an input of
         # the subgraph.
         # See NOTE [HigherOrderOperator tracing design] for more details.
-
-        if not self.tx.output.export:
-            # Export has (supposedly) valid cases for fake tensors as inputs here.
-            # I am not convinced, atm, but out of scope for what this assert was added for (protecting value checks
-            # in real_value_tensor_positive_aliases in the common case)
-            assert not isinstance(value, torch._subclasses.fake_tensor.FakeTensor)
-
-        if value in self.tx.output.real_value_tensor_positive_aliases:
-            stored_value = self.tx.output.real_value_tensor_positive_aliases[value]
-            # TODO(voz): Decently common pattern, refactor at some point.
-            dup_guard = self._make_dupe_guard(stored_value)
-            if dup_guard:
-                stored_value = stored_value.add_guards(self.make_guards(dup_guard))
-            return stored_value
-
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
         )
@@ -923,7 +911,6 @@ class VariableBuilder:
             ignore_subclass=ignore_subclass,
             source=source,
         )
-        self.tx.output.real_value_tensor_positive_aliases[value] = tensor_variable
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
