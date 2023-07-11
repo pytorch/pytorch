@@ -153,6 +153,11 @@ class NNModuleVariable(VariableTracker):
             tx, [variables.ConstantVariable(name)], {}
         )
 
+    def is_buffer(self, tx, name):
+        base = tx.output.get_submodule(self.module_key)
+        base_dict = object.__getattribute__(base, "__dict__")
+        return "_buffers" in base_dict and name.value in base_dict["_buffers"]
+
     def var_getattr(self, tx, name):
         from .builder import VariableBuilder
 

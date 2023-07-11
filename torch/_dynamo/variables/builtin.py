@@ -1109,10 +1109,31 @@ class BuiltinVariable(VariableTracker):
                 f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
             )
         elif isinstance(obj, variables.NNModuleVariable):
+            if isinstance(name_var, ConstantVariable) and obj.is_buffer(tx, name_var):
+                # Its a buffer, so we can mutate the buffer in the graph module itself
+                # TODO - One concern here is that this makes graph module
+                # stateful. There are efforts to make the graph completely
+                # stateless. Conceptually, this buffer mutation can conflict w/
+                # that.
+                name = name_var.value
+                buffer_node = obj.var_getattr(tx, name).as_proxy().node
+                new_value_node = val.as_proxy().node
+                tx.output.create_node(
+                    "call_function", torch.fill_, (buffer_node, new_value_node), {}
+                )
+                return obj.var_getattr(tx, name_var.value)
+
             if not tx.output.is_root_tracer():
                 raise AttributeMutationError(
                     "Can't inplace modify module params/buffers inside HigherOrderOp"
                 )
+
+            # We don't allow side effects during export
+            # https://github.com/pytorch/torchdynamo/issues/1475
+            assert (
+                not tx.export
+            ), f"Mutating module attribute {tx.current_instruction.argval} during export."
+
             obj.convert_to_unspecialized(tx)
 
     def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):

@@ -2694,6 +2694,29 @@ def forward(self, x):
         test_inp_v2 = (torch.ones(1, 2, 3),)
         self.assertEqual(gm(*test_inp), Foo()(*test_inp_v2))
 
+    def test_nn_module_buffer_mutation(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("iterations", torch.tensor(0))
+
+            def forward(self, x):
+                self.iterations += 1
+                return x * self.iterations
+
+        x = torch.ones(1, 2, 3)
+        eager_mod = Foo()
+        gm, _ = torch._dynamo.export(Foo(), x, aten_graph=True)
+        count = 0
+        for node in gm.graph.nodes:
+            if node.target == torch.ops.aten.fill_.Tensor:
+                count += 1
+        self.assertEqual(count, 1)
+        # TODO - export in place modifies the buffers, so the initial value is already incremented here. Fix it.
+        # ref = eager_mod(x)
+        # res = gm(x)
+        # self.assertEqual(ref, res)
+
     def test_round_dynamic_shapes(self):
         def f(x):
             return x[: round(x.shape[0] / 2)]
