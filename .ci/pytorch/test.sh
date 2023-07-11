@@ -58,11 +58,15 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   export VALGRIND=OFF
 fi
 
-if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]]; then
+if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]] || [[ "${CONTINUE_THROUGH_ERROR}" == "1" ]]; then
   # When rerunning disable tests, do not generate core dumps as it could consume
   # the runner disk space when crashed tests are run multiple times. Running out
   # of space is a nasty issue because there is no space left to even download the
   # GHA to clean up the disk
+  #
+  # We also want to turn off core dump when CONTINUE_THROUGH_ERROR is set as there
+  # is a small risk of having multiple core files generated. Arguably, they are not
+  # that useful in this case anyway and the test will still continue
   ulimit -c 0
 
   # Note that by piping the core dump to a script set in /proc/sys/kernel/core_pattern
