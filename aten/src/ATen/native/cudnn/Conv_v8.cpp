@@ -181,26 +181,26 @@ struct CacheKeyFusedWrapper : ParamsWrapper<CacheKeyFused> {
   }
 };
 
-static int _parseChosenLRUCacheLimit() {
-  const char * val = getenv("TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT");
-  int limit = 10000; // roughly corresponds to 2GiB assuming 200KiB per ExecutionPlan
-  if (val) {
+static int getLRUCacheLimit() {
+  constexpr int DEFAULT_LIMIT = 10000; // roughly corresponds to 2GiB assuming 200KiB per ExecutionPlan
+  static int limit = [] {
+    const char * val = getenv("TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT");
+    if (!val) {
+       return DEFAULT_LIMIT;
+    }
     try {
-      limit = std::stoi(val);
+      return std::stoi(val);
     } catch(std::invalid_argument const& e) {
       TORCH_WARN("invalid TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT,",
-                 " using default LRU cache limit of ", limit, " entries.");
+               " using default LRU cache limit of ", limit, " entries.");
     } catch(std::out_of_range const& e) {
       TORCH_WARN("invalid TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT,",
                  " using default LRU cache limit of ", limit, " entries.");
     }
-  }
+    return DEFAULT_LIMIT;
+  } ();
   return limit;
 }
-
-static int getLRUCacheLimit() {
-  static int limit = _parseChosenLRUCacheLimit();
-  return limit;
 }
 
 template <typename T, typename KeyType>
