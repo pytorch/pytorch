@@ -153,6 +153,10 @@ class _NamedOptimizer(optim.Optimizer):
         """
         self._optimizer.step(closure=closure)
 
+    @property
+    def state(self) -> Mapping[torch.Tensor, Any]:
+        return self._optimizer.state
+
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:
         """
         This public function defines the default behavior to load a state_dict

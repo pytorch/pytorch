@@ -732,7 +732,7 @@ if(DEBUG_CUDA)
     string(APPEND CMAKE_CUDA_FLAGS_DEBUG " --source-in-ptx")
     string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " --source-in-ptx")
   endif()
-endif(NOT MSVC)
+endif(DEBUG_CUDA)
 
 
 if(USE_FBGEMM)
