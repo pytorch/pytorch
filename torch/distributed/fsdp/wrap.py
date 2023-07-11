@@ -134,13 +134,11 @@ class _FSDPPolicy(ABC):
     """
 
     @abstractmethod
-    def run_policy(
+    def _run_policy(
         self,
         root_module: nn.Module,
         ignored_modules: Set[nn.Module],
         root_fsdp_kwargs: Dict[str, Any],
-        # *args: Tuple[Any, ...],
-        # **kwargs: Dict[str, Any],
     ) -> Dict[nn.Module, Dict[str, Any]]:
         """
         This should return a dict ``target_module_to_kwargs`` that maps from
@@ -196,7 +194,7 @@ class ModuleWrapPolicy(_FSDPPolicy):
         self._module_classes = module_classes_set
         self._module_classes_str = str(module_classes_set)
 
-    def run_policy(
+    def _run_policy(
         self,
         root_module: nn.Module,
         ignored_modules: Set[nn.Module],

@@ -46,7 +46,7 @@ def _auto_wrap(
     # TODO: Start migration to refactored auto wrapping with `ModuleWrapPolicy`
     if isinstance(policy, ModuleWrapPolicy):
         fsdp_kwargs["auto_wrap_policy" if is_wrapper else "policy"] = None
-        target_module_to_kwargs = policy.run_policy(
+        target_module_to_kwargs = policy._run_policy(
             root_module, ignored_modules, fsdp_kwargs
         )
         if mixed_precision is not None:
