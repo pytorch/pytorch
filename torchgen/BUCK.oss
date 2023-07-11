@@ -1,3 +1,5 @@
+load(":BUCK.bzl", "resources")
+
 python_library(
     name = "torchgen",
     srcs = glob(
@@ -9,6 +11,7 @@ python_library(
         "//third_party:pyyaml",
         "//third_party:typing-extensions",
     ],
+    resources = resources,
 )
 
 python_binary(

@@ -110,35 +110,7 @@ def define_tools_targets(
 
     python_library(
         name = "autograd",
-        # @lint-ignore BUCKRESTRICTEDSYNTAX
-        srcs = glob(
-            ["autograd/*.py"],
-        ),
-        base_module = "tools",
-        resources = [
-            "autograd/deprecated.yaml",
-            "autograd/derivatives.yaml",
-            "autograd/templates/ADInplaceOrViewType.cpp",
-            "autograd/templates/Functions.cpp",
-            "autograd/templates/Functions.h",
-            "autograd/templates/TraceType.cpp",
-            "autograd/templates/VariableType.cpp",
-            "autograd/templates/VariableType.h",
-            "autograd/templates/annotated_fn_args.py.in",
-            "autograd/templates/python_enum_tag.cpp",
-            "autograd/templates/python_fft_functions.cpp",
-            "autograd/templates/python_functions.cpp",
-            "autograd/templates/python_functions.h",
-            "autograd/templates/python_linalg_functions.cpp",
-            "autograd/templates/python_nested_functions.cpp",
-            "autograd/templates/python_nn_functions.cpp",
-            "autograd/templates/python_return_types.cpp",
-            "autograd/templates/python_sparse_functions.cpp",
-            "autograd/templates/python_special_functions.cpp",
-            "autograd/templates/python_torch_functions.cpp",
-            "autograd/templates/python_variable_methods.cpp",
-            "autograd/templates/variable_factories.h",
-        ],
+        srcs = [],
         visibility = ["PUBLIC"],
         deps = [
             third_party("pyyaml"),

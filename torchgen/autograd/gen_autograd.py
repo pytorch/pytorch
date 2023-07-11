@@ -2,11 +2,11 @@
 To run this file by hand from the root of the PyTorch
 repository, run:
 
-python -m tools.autograd.gen_autograd \
+python -m torchgen.autograd.gen_autograd \
        aten/src/ATen/native/native_functions.yaml \
        aten/src/ATen/native/tags.yaml \
        $OUTPUT_DIR \
-       tools/autograd
+       torchgen/autograd
 
 Where $OUTPUT_DIR is where you would like the files to be
 generated.  In the full build system, OUTPUT_DIR is

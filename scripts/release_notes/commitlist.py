@@ -244,7 +244,7 @@ class CommitList:
             if CommitList.keywordInFile(file, ['torch/sparse', 'aten/src/ATen/native/sparse', 'torch/_masked/__init__.py']):
                 category = 'sparse_frontend'
                 break
-            if CommitList.keywordInFile(file, ['tools/autograd']):
+            if CommitList.keywordInFile(file, ['torchgen/autograd']):
                 category = 'autograd_frontend'
                 break
             if CommitList.keywordInFile(file, ['test/test_nn.py', 'test/test_module.py', 'torch/nn/modules', 'torch/nn/functional.py']):

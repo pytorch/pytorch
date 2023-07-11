@@ -38,21 +38,21 @@ mkdir -p "$OUT"/pyi/torch/nn
 python -m tools.pyi.gen_pyi \
   --native-functions-path aten/src/ATen/native/native_functions.yaml \
   --tags-path aten/src/ATen/native/tags.yaml \
-  --deprecated-functions-path tools/autograd/deprecated.yaml \
+  --deprecated-functions-path torchgen/autograd/deprecated.yaml \
   --out "$OUT"/pyi
 
 # autograd codegen (called by torch codegen but can run independently)
-python -m tools.autograd.gen_autograd \
+python -m torchgen.autograd.gen_autograd \
   "$OUT"/torch/share/ATen/Declarations.yaml \
   aten/src/ATen/native/native_functions.yaml \
   aten/src/ATen/native/tags.yaml \
   "$OUT"/autograd \
-  tools/autograd
+  torchgen/autograd
 
 # annotated_fn_args codegen (called by torch codegen but can run independently)
 mkdir -p "$OUT"/annotated_fn_args
-python -m tools.autograd.gen_annotated_fn_args \
+python -m torchgen.autograd.gen_annotated_fn_args \
   aten/src/ATen/native/native_functions.yaml \
   aten/src/ATen/native/tags.yaml \
   "$OUT"/annotated_fn_args \
-  tools/autograd
+  torchgen/autograd

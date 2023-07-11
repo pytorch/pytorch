@@ -2,7 +2,7 @@ py_binary(
     name = "generate_code",
     srcs = ["generate_code.py"],
     deps = [
-        "//tools/autograd",
+        "//torchgen/autograd",
         "//torchgen",
     ],
     visibility = ["//:__pkg__"],

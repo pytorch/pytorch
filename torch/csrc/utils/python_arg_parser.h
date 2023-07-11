@@ -33,7 +33,7 @@
 //      generation logic always gives the overloads a canonical
 //      order, where Tensor overloads come first, before Scalar overloads.
 //      This logic is in sort_declarations in
-//      tools/autograd/gen_python_functions.py
+//      torchgen/autograd/gen_python_functions.py
 //
 //    - Zero-dim tensors (e.g., torch.tensor(2)) bind to both
 //      Scalar and Tensor, UNLESS they require grad (in which case
