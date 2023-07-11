@@ -3,6 +3,7 @@ import contextlib
 import itertools
 
 import torch
+from torch._dynamo import config as dynamo_config
 
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
@@ -48,7 +49,7 @@ binary_list = {
 
 
 @config.patch({"freezing": True})
-class TestPaternMatcher(TestCase):
+class TestPatternMatcherBase(TestCase):
     def _check_unary_is_decomposed(self, unary_fn):
         return not any(
             isinstance(unary_fn, fn)
@@ -106,7 +107,9 @@ class TestPaternMatcher(TestCase):
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
 
-    def test_conv2d_unary_cpu(self):
+
+class TestPatternMatcher(TestPatternMatcherBase):
+    def test_conv2d_unary(self):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -386,7 +389,7 @@ class TestPaternMatcher(TestCase):
             v = torch.randn(1, 3, 28, 28)
             self._test_common(mod, (v,), 1, 1)
 
-    def test_conv2d_binary_inplace_fusion_pass_cpu(
+    def test_conv2d_binary_inplace_fusion_pass(
         self, include_ops=None, exclude_ops=None
     ):
         class Model(torch.nn.Module):
@@ -413,7 +416,7 @@ class TestPaternMatcher(TestCase):
 
         self._test_code_common(mod, inputs, include_ops, exclude_ops)
 
-    def test_conv2d_binary_inplace_fusion_failed_cpu(
+    def test_conv2d_binary_inplace_fusion_failed(
         self, include_ops=None, exclude_ops=None
     ):
         # Written buffer is graph input, we can't fuse inplace.
@@ -535,6 +538,13 @@ class TestPaternMatcher(TestCase):
         mod = Model().eval()
         include_ops = ["mkldnn._convolution_pointwise_.binary"]
         self._test_code_common(mod, (input,), include_ops, [])
+
+
+@dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
+class TestDynamicPatternMatcher(TestPatternMatcherBase):
+    test_conv2d_unary_dynamic_shapes = TestPatternMatcher.test_conv2d_unary
+    test_conv2d_binary_dynamic_shapes = TestPatternMatcher.test_conv2d_binary
+    test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
 
 
 if __name__ == "__main__":
