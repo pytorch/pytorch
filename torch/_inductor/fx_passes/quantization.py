@@ -145,21 +145,24 @@ def _register_quantized_conv_lowering(pattern):
 
 
 aten_qconv_pt2e_pattern = CallFunction(
-    torch.ops.onednn.dynamic_quant_qconv.tensor,
-    dequantize_activation_pattern,
-    KeywordArg("dynamic_x_scale"),  # x_scale
-    KeywordArg("dynamic_x_zp"),  # x_zp
+    torch.ops.onednn.qconv2d_pointwise.default,
+    KeywordArg("x"),
+    KeywordArg("x_scale"),  # x_scale
+    KeywordArg("x_zp"),  # x_zp
     KeywordArg("packed_weight"),  # packed_weight
     KeywordArg("w_scale"),  # w_scale
     KeywordArg("w_zp"),  # w_zp
-    KeywordArg("w_axis"),  # w_axis
     KeywordArg("b"),  # bias
     KeywordArg("stride"),
     KeywordArg("padding"),
     KeywordArg("dilation"),
-    KeywordArg("transposed"),
-    KeywordArg("o_padding"),
     KeywordArg("groups"),
+    Arg(),  # output_scale
+    Arg(),  # output_zero_point
+    Arg(),  # fp32_output
+    Arg(),  # attr
+    Arg(),  # scalars
+    Arg(),  # algorithm
 )
 
 quantize_conv_output_pattern_pt2e = CallFunction(
@@ -208,11 +211,10 @@ def _register_quantized_conv_lowering_pt2e(pattern):
         )
 
         # packed_weight = kwargs["packed_weight"]
-        packed_weight, w_scale, w_zp, w_axis = (
+        packed_weight, w_scale, w_zp = (
             kwargs["packed_weight"],
             kwargs["w_scale"],
             kwargs["w_zp"],
-            kwargs["w_axis"],
         )
         global pattern_match_count
         pattern_match_count += 1
@@ -231,7 +233,7 @@ def _register_quantized_conv_lowering_pt2e(pattern):
                 packed_weight,
                 w_scale,
                 w_zp,
-                w_axis,
+                -1,  # w_axis delete it later
                 b,
                 stride,
                 padding,
