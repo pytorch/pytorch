@@ -4215,6 +4215,13 @@ memory is uninitialized.
     contiguity, or :meth:`~Tensor.reshape()`, which copies data if needed. To
     change the size in-place with custom strides, see :meth:`~Tensor.set_()`.
 
+.. note::
+
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, new
+    elements are initialized to prevent nondeterministic behavior from using
+    the result as an input to an operation. Floating point and complex values
+    are set to NaN, and integer values are set to the maximum value.
+
 Args:
     sizes (torch.Size or int...): the desired size
     memory_format (:class:`torch.memory_format`, optional): the desired memory format of
