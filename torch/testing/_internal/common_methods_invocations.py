@@ -1803,14 +1803,10 @@ def sample_inputs_bernoulli(self, device, dtype, requires_grad, **kwargs):
 
     for shape in shapes:
         # Expect deterministic results using inputs with all zeros and all ones
-        t = make_tensor(shape, dtype=dtype, device=device,
-                        low=0, high=0,
-                        requires_grad=requires_grad)
+        t = torch.full(shape, 0, dtype=dtype, device=device, requires_grad=requires_grad)
         yield SampleInput(t)
 
-        t = make_tensor(shape, dtype=dtype, device=device,
-                        low=1, high=1,
-                        requires_grad=requires_grad)
+        t = torch.full(shape, 1, dtype=dtype, device=device, requires_grad=requires_grad)
         yield SampleInput(t)
 
 def error_inputs_bernoulli(op_info, device, **kwargs):
