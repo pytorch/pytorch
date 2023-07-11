@@ -811,7 +811,7 @@ class TestOptim(TestCase):
             intermediate_size = nparams * param.nelement() * param.element_size()
             nintermediates = 1  # we expect a budget of 1 intermediate most of the time
             if (('capturable' in kwargs_with_flags and kwargs_with_flags['capturable']) or
-                 optimizer_constructor.__name__ == "Adadelta"):
+                    optimizer_constructor.__name__ == "Adadelta"):
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 nintermediates = 3
