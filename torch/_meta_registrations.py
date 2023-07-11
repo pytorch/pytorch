@@ -10,6 +10,7 @@ from torch._decomp import (
     global_decomposition_table,
     meta_table,
 )
+from torch._decomp.decompositions import Reduction
 from torch._ops import OpOverload
 from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
@@ -19,6 +20,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
     make_contiguous_strides_for,
+    NumberType,
     TensorLike,
 )
 
@@ -314,6 +316,137 @@ def meta_index_select(self, dim, index):
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
+
+
+def _multi_margin_loss_shape_check(ndims, input, target):
+    valid_inputs = (
+        (ndims == 2 and input.size(1) != 0)
+        or (ndims == 1 and input.size(0) != 0)
+        or ndims == 0
+    )
+    if ndims <= 1:
+        nframe = 1
+        dim = 1 if ndims == 0 else input.size(0)
+    else:
+        nframe = input.size(0)
+        dim = input.size(1)
+    torch._check(
+        valid_inputs,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+    )
+    torch._check(
+        valid_inputs and target.ndim <= 1 and target.numel() == nframe,
+        lambda: f"inconsistent target size, got: {target.shape}",
+    )
+    return nframe, dim
+
+
+@register_meta(aten.multi_margin_loss)
+@out_wrapper()
+def meta_multi_margin_loss(
+    input: Tensor,
+    target: Tensor,
+    p: NumberType = 1,
+    margin: NumberType = 1,
+    weight: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    ndims = input.ndim
+    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
+    nframe, _ = _multi_margin_loss_shape_check(ndims, input, target)
+    if reduction == Reduction.NONE.value and target.ndim > 0:
+        return input.new_empty(nframe)
+    else:
+        return input.new_empty(())
+
+
+@register_meta(aten.multi_margin_loss_backward)
+@out_wrapper()
+def meta_multi_margin_loss_backward(
+    grad_output: Tensor,
+    input: Tensor,
+    target: Tensor,
+    p: NumberType,
+    margin: NumberType,
+    weight: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    ndims = input.ndim
+    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
+    _multi_margin_loss_shape_check(ndims, input, target)
+    return input.new_empty(input.shape)
+
+
+def _multilabel_margin_loss_shape_check(ndims, target_arg, input, target):
+    valid_inputs = (
+        (ndims == 2 and input.size(1) != 0)
+        or (ndims == 1 and input.size(0) != 0)
+        or ndims == 0
+    )
+    torch._check(
+        valid_inputs,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+    )
+    if ndims <= 1:
+        nframe = 1
+        dim = 1 if ndims == 0 else input.size(0)
+        torch._check(
+            valid_inputs and target.ndim <= 1 and target.numel() == dim,
+            lambda: f"inconsistent size {target.shape} for {target_arg}",
+        )
+    else:
+        nframe = input.size(0)
+        dim = input.size(1)
+        torch._check(
+            valid_inputs
+            and target.ndim == 2
+            and target.size(0) == nframe
+            and target.size(1) == dim,
+            lambda: f"inconsistent size {target.shape} for {target_arg}",
+        )
+    return nframe, dim
+
+
+@register_meta(aten.multilabel_margin_loss_forward)
+@out_wrapper("output", "is_target")
+def meta_multilabel_margin_loss_forward(
+    input: Tensor,
+    target: Tensor,
+    reduction: int,
+) -> Tuple[Tensor, Tensor]:
+    target_arg = "argument #2 'target'"
+    ndims = input.ndim
+    nframe, _ = _multilabel_margin_loss_shape_check(ndims, target_arg, input, target)
+    if reduction != Reduction.NONE.value or target.ndim <= 1:
+        output = input.new_empty(())
+    else:
+        output = input.new_empty(nframe)
+    is_target = input.new_empty(target.shape)
+    return output, is_target
+
+
+@register_meta(aten.multilabel_margin_loss_backward)
+@out_wrapper()
+def meta_multilabel_margin_loss_backward(
+    grad_output: Tensor,
+    input: Tensor,
+    target: Tensor,
+    reduction: int,
+    is_target: Tensor,
+) -> Tensor:
+    target_arg = "argument #3 'target'"
+    is_target_arg = "argument #5 'is_target'"
+    ndims = input.ndim
+    _multilabel_margin_loss_shape_check(ndims, target_arg, input, target)
+    torch._check(
+        target.shape == is_target.shape,
+        lambda: (
+            f"Expected tensor for {target_arg} to have same size as tensor for {is_target_arg}"
+            f"; but {target.shape} does not equal {is_target.shape}"
+            f" (while checking arguments for multilabel_margin_loss_backward)"
+        ),
+    )
+    return input.new_empty(input.shape)
 
 
 @register_meta([aten.max.default, aten.max.unary_out])
@@ -2207,6 +2340,137 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
     return self.new_empty(self.shape).to(memory_format=memory_format)
 
 
+def _adaptive_pool_empty_output_check(grad_output: Tensor, arg_name: str):
+    ndim = grad_output.ndim
+    for i in range(1, ndim):
+        torch._check(
+            grad_output.size(i) > 0,
+            lambda: (
+                f"{arg_name}(): Expected grad_output to have non-zero size for non-batch dimensions, "
+                f"but grad_output has sizes {grad_output.shape} with dimension {i} being empty"
+            ),
+        )
+
+
+@register_meta(aten.adaptive_max_pool2d)
+@out_wrapper("out", "indices")
+def meta_adaptive_max_pool2d(input, output_size):
+    ndim = input.ndim
+    torch._check(
+        ndim in (3, 4),
+        lambda: f"adaptive_max_pool2d(): Expected 3D or 4D tensor, but got: {input.shape}",
+    )
+    for i in range(1, ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                f"adaptive_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
+                f"but input has sizes {input.shape} with dimension {i} being empty"
+            ),
+        )
+
+    torch._check(
+        len(output_size) == 2,
+        lambda: "adaptive_max_pool2d(): internal error: output_size.size() must be 2",
+    )
+
+    dimH = 1
+    sizeB = 1
+    sizeD = 0
+
+    if input.ndim == 4:
+        sizeB = input.size(0)
+        dimH += 1
+
+    sizeD = input.size(dimH - 1)
+    osizeH, osizeW = output_size
+
+    if input.ndim == 3:
+        out_shape = (sizeD, osizeH, osizeW)
+        out = input.new_empty(out_shape)
+        indices = input.new_empty(out_shape, dtype=torch.int64)
+        return out, indices
+    else:
+        out_shape = (sizeB, sizeD, osizeH, osizeW)  # type: ignore[assignment]
+        memory_format = utils.suggest_memory_format(input)
+        out = input.new_empty(out_shape).to(memory_format=memory_format)
+        indices = input.new_empty(out_shape, dtype=torch.int64).to(
+            memory_format=memory_format
+        )
+        return out, indices
+
+
+@register_meta(aten.adaptive_max_pool2d_backward)
+@out_wrapper()
+def meta_adaptive_max_pool2d_backward(grad_output, input, indices):
+    ndim = grad_output.ndim
+    torch._check(
+        ndim in (3, 4),
+        lambda: f"adaptive_max_pooling2d_backward(): Expected 3D or 4D grad_output, but got: {grad_output.shape}",
+    )
+
+    _adaptive_pool_empty_output_check(grad_output, "adaptive_max_pool2d_backward")
+
+    torch._check(
+        input.dtype == grad_output.dtype,
+        lambda: f"expected dtype {input.dtype} for `grad_output` but got dtype {grad_output.dtype}",
+    )
+
+    memory_format = utils.suggest_memory_format(input)
+    return input.new_empty(input.shape).to(memory_format=memory_format)
+
+
+@register_meta(aten.adaptive_max_pool3d)
+@out_wrapper("out", "indices")
+def meta_adaptive_max_pool3d(input, output_size):
+    ndim = input.ndim
+    torch._check(
+        ndim in (4, 5),
+        lambda: f"adaptive_max_pool3d(): Expected 4D or 5D tensor, but got: {input.shape}",
+    )
+    for i in range(1, ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                f"adaptive_max_pool3d(): Expected input to have non-zero size for non-batch dimensions, "
+                f"but input has sizes {input.shape} with dimension {i} being empty"
+            ),
+        )
+
+    torch._check(
+        len(output_size) == 3,
+        lambda: "adaptive_max_pool3d(): internal error: output_size.size() must be 3",
+    )
+
+    dimD = 0
+    sizeB = 1
+    sizeD = 0
+
+    if ndim == 5:
+        sizeB = input.size(0)
+        dimD += 1
+
+    sizeD = input.size(dimD)
+    osizeT, osizeH, osizeW = output_size
+
+    if ndim == 4:
+        out_shape = (sizeD, osizeT, osizeH, osizeW)
+    else:
+        out_shape = (sizeB, sizeD, osizeT, osizeH, osizeW)  # type: ignore[assignment]
+
+    out = input.new_empty(out_shape)
+    indices = input.new_empty(out_shape, dtype=torch.int64)
+
+    return out, indices
+
+
+@register_meta(aten.adaptive_max_pool3d_backward)
+@out_wrapper()
+def meta_adaptive_max_pool3d_backward(grad_output, input, indices):
+    _adaptive_pool_empty_output_check(grad_output, "adaptive_max_pool3d_backward")
+    return input.new_empty(input.shape)
+
+
 @register_meta(aten.repeat_interleave.Tensor)
 def meta_repeat_interleave_Tensor(repeats, output_size=None):
     if output_size is None:
@@ -2410,6 +2674,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     [
         aten._foreach_neg_.default,
         aten._foreach_reciprocal_.default,
+        aten._foreach_sqrt_.default,
     ]
 )
 def meta__foreach_unaop_(self):
@@ -2495,6 +2760,7 @@ def meta__foreach_binop_list(self, other):
         aten._foreach_add_.Scalar,
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,
+        aten._foreach_div_.Scalar,
     ]
 )
 def meta__foreach_binop__scalar(self, scalar=1):
@@ -2539,6 +2805,15 @@ def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
         len(self) == len(tensor1) and len(self) == len(tensor2),
         lambda: "All input tensor lists must have the same length",
     )
+
+
+@register_meta(
+    [
+        aten._foreach_lerp_.Scalar,
+    ]
+)
+def meta__foreach_lerp__scalar(self, other, scalar=1):
+    _check_foreach_binop_tensor_lists(self, other)
 
 
 @register_meta(
