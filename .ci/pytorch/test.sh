@@ -56,6 +56,9 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   #   auto z = call(b, b.sym_sizes(), b.sym_strides(), c10::nullopt);
   # }
   export VALGRIND=OFF
+  # For CPP tests
+  export CC=clang
+  export CXX=clang++
 fi
 
 if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]]; then
