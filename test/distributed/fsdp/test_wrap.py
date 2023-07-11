@@ -785,10 +785,11 @@ class TestWrapUtils(TestCase):
                 " We do not recommend wrapping such modules since the "
                 r"gradient memory usage will be higher than expected \("
                 f"{attn_total_param_numel} numel instead of {attn_nonfrozen_param_numel} numel "
-                r"before sharding via reduce-scatter\).\n"
+                r"before sharding via reduce-scatter\). "
             )
         else:
-            regex += " FSDP does not support wrapping such modules when use_orig_params=False.\n"
+            regex += " FSDP does not support wrapping such modules when use_orig_params=False. "
+        regex += "If possible, wrap the frozen parameters with FSDP separately.\n"
         regex += (
             "The following parameters have requires_grad=True:\n"
             r"\['layers.0.attn.lora_A.weight'\]\n"
