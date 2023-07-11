@@ -538,7 +538,9 @@ class TorchLogsFormatter(logging.Formatter):
         record.rankprefix = ""
         if dist.is_available() and dist.is_initialized():
             record.rankprefix = f"[rank{dist.get_rank()}]:"
-        prefix = f"{record.rankprefix}[{record.asctime}] {record.name}: [{record.levelname}]"
+        prefix = (
+            f"{record.rankprefix}[{record.asctime}] {record.name}: [{record.levelname}]"
+        )
         return "\n".join(f"{prefix} {l}" for l in lines)
 
 
