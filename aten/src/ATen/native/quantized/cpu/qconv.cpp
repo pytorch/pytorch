@@ -1372,7 +1372,7 @@ template at::Tensor PackedConvWeightsOnednn<3>::apply_relu(
     double output_scale,
     int64_t output_zero_point);
 
-static at::Tensor _quantized_convolution_pt2e(
+static at::Tensor _quantized_convolution_onednn(
     at::Tensor act, // contains quantized values but not QTensor
     double act_scale,
     int64_t act_zero_point,
@@ -1744,7 +1744,7 @@ class QConvInt8ForBC final {
   }
 };
 
-class QConvPT2E final {
+class QConvoneDNN final {
  public:
   static at::Tensor run_pointwise(
       at::Tensor act, // contains quantized values but not QTensor
@@ -1786,7 +1786,7 @@ class QConvPT2E final {
     // we will only get inv_scale instead of scale
     // TODO <Leslie> Fix it.
     output_scale = 1.0 / output_scale;
-    return _quantized_convolution_pt2e(
+    return _quantized_convolution_onednn(
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
         bias, stride, padding, dilation, /*transposed*/false,
@@ -1838,7 +1838,7 @@ class QConvPT2E final {
       " unary_post_op: ",
       unary_attr.has_value() ? unary_attr.value() : "none",
       ".")
-    return _quantized_convolution_pt2e(
+    return _quantized_convolution_onednn(
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
         bias, stride, padding, dilation, /*transposed*/false,
@@ -1874,7 +1874,7 @@ class QConvPT2E final {
     auto input = at::clamp((at::round(x / x_scale) + x_zero_point), 0, 255).to(c10::ScalarType::Byte);
 
     // int8-in, fp32-ouput
-    at::Tensor output_fp32 = _quantized_convolution_pt2e(
+    at::Tensor output_fp32 = _quantized_convolution_onednn(
         input, x_scale, x_zero_point,
         prepacked_w, weight_scales, weight_zero_points,
         bias, stride, padding, dilation, /*transposed*/transposed,
@@ -1924,14 +1924,14 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 
 TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
   // Conv1D/2D/3D with unary postop
-  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise_pt2e"), QConvPT2E::run_pointwise);
-  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise_pt2e"), QConvPT2E::run_pointwise);
-  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv3d_pointwise_pt2e"), QConvPT2E::run_pointwise);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise"), QConvoneDNN::run_pointwise);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise"), QConvoneDNN::run_pointwise);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv3d_pointwise"), QConvoneDNN::run_pointwise);
 
   // Conv2D with binary postop
-  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise_pt2e.binary"), QConvPT2E::run_pointwise_binary);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary"), QConvoneDNN::run_pointwise_binary);
+  m.impl(TORCH_SELECTIVE_NAME("onednn::dynamic_quant_qconv.tensor"), QConvoneDNN::run_dynamic_qconv);
 
-  m.impl(TORCH_SELECTIVE_NAME("onednn::dynamic_quant_qconv.tensor"), QConvPT2E::run_dynamic_qconv);
 }
 
 } // namespace

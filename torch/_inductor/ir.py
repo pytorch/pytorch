@@ -4289,7 +4289,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
                 const_args[14],
             )
 
-        self.kernel = "torch.ops.onednn.qconv2d_pointwise_pt2e"
+        self.kernel = "torch.ops.onednn.qconv2d_pointwise"
         conv_args = (
             "{}".format(args[0])
             + ", {}".format(x_scale)
