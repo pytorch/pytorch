@@ -821,6 +821,117 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_pytorch_only_extra_kwargs,
         )
 
+    @_beartype.beartype
+    def _test_fake_tensor_mode_exporter(
+        self,
+        model_name: str,
+        create_model: Callable,
+        create_args: Callable,
+        create_pytorch_only_kwargs: Callable,
+    ):
+        """Test helper for large-scale exporter.
+
+        Arguments:
+            model_name: Name of the model. It used to name temporary files.
+            create_model: A function that creates a model. It should always create the same model.
+            create_args: A function that creates random input arguments for the model.
+            create_pytorch_only_kwargs: A function that creates kwargs for calling PyTorch model with real tensors.
+
+        This test contains several steps.
+
+        1. Create a toy model.
+        2. Save the toy's state (parameters) to a file. This is for simulating a checkpoint file.
+        3. Load it back and export it to ONNX with large-scale exporter.
+            All operations (including model loading) are done under
+            FakeTensorMode so no real tensor is created and no real
+            computation happens.
+        4. Run PyTorch and ONNX models and compare their results.
+        """
+
+        # Create the toy model with real weight.
+        real_model = create_model()
+
+        with tempfile.NamedTemporaryFile(
+            prefix=model_name, suffix=".pt"
+        ) as tmp_checkpoint_file:
+            # Dump state_dict to a file to simulate how HuggingFace model is initialized.
+            # The file will be loaded via .load_state_dict(...)
+            torch.save(real_model.state_dict(), tmp_checkpoint_file.name)
+
+            with torch.onnx.enable_fake_mode() as fake_context:
+                fake_args = create_args()
+                fake_kwargs = create_pytorch_only_kwargs()
+                fake_model = create_model()
+
+            # Export the model with fake inputs and parameters
+            export_options = torch.onnx.ExportOptions(
+                opset_version=self.opset_version,
+                dynamic_shapes=self.dynamic_shapes,
+                op_level_debug=self.op_level_debug,
+                fake_context=fake_context,
+            )
+            export_output = torch.onnx.dynamo_export(
+                fake_model, *fake_args, **fake_kwargs, export_options=export_options
+            )
+
+            with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
+                export_output.save(
+                    tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
+                )
+
+                # Generate random inputs.
+                args = create_args()
+                kwargs = create_pytorch_only_kwargs()
+                # Original outputs.
+
+                # pdb.set_trace()
+                ref_outputs = export_output.adapt_torch_outputs_to_onnx(
+                    real_model(*args, **kwargs)
+                )
+                # ORT outputs.
+                args_not_none = export_output.adapt_torch_inputs_to_onnx(*args)
+                # Drop Parameters and buffers added by fx_serialization.save_model_with_external_data
+                args_not_none = args_not_none[: len(args) - len(kwargs)]
+
+                ort_outputs = onnx_test_common.run_ort(
+                    tmp_onnx_file.name,
+                    args_not_none,
+                )
+
+                assert len(ref_outputs) == len(ort_outputs)
+
+                for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+                    torch.testing.assert_close(ref_output, torch.tensor(ort_output))
+
+    @pytorch_test_common.skip_op_level_debug_test(
+        "op_level_debug_test does not support FakeTensor yet."
+    )
+    def test_fake_tensor_mode_simple(self):
+        def create_model() -> nn.Module:
+            class Model(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(2, 2)
+
+                def forward(self, x):
+                    out = self.linear(x)
+                    return out
+
+            return Model()
+
+        def create_args():
+            return (torch.rand(5, 2, 2),)
+
+        def create_pytorch_only_extra_kwargs():
+            return {}
+
+        self._test_fake_tensor_mode_exporter(
+            "simple",
+            create_model,
+            create_args,
+            create_pytorch_only_extra_kwargs,
+        )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
