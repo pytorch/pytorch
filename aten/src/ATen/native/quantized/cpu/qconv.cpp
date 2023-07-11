@@ -32,8 +32,6 @@
 #include <ATen/ops/quantize_per_channel_native.h>
 #include <ATen/ops/quantize_per_tensor_native.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/round.h>
-#include <ATen/ops/clamp.h>
 #endif
 
 #include <c10/util/irange.h>
