@@ -13,8 +13,6 @@ class TCPServer;
 
 class TCPClient;
 
-class TCPCallbackClient;
-
 struct SocketAddress {
   std::string host{};
   std::uint16_t port{};
@@ -68,13 +66,6 @@ class TORCH_API TCPStore : public Store {
 
   bool deleteKey(const std::string& key) override;
 
-  // NOTE: calling other TCPStore APIs inside the callback is NOT threadsafe
-  // watchKey() is a blocking operation. It will register the socket on
-  // TCPStoreMasterDaemon and the callback on TCPStoreWorkerDaemon. It will
-  // return once it has verified the callback is registered on both background
-  // threads. Only one thread can call watchKey() at a time.
-  void watchKey(const std::string& key, WatchKeyCallback callback) override;
-
   bool check(const std::vector<std::string>& keys) override;
 
   int64_t getNumKeys() override;
@@ -122,7 +113,6 @@ class TORCH_API TCPStore : public Store {
   detail::SocketAddress addr_;
   std::shared_ptr<detail::TCPServer> server_;
   std::unique_ptr<detail::TCPClient> client_;
-  std::unique_ptr<detail::TCPCallbackClient> callbackClient_;
   c10::optional<std::size_t> numWorkers_;
 
   const std::string initKey_ = "init/";
