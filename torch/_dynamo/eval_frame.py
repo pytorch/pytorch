@@ -1211,9 +1211,15 @@ class TorchPatcher:
     @staticmethod
     @functools.lru_cache(None)
     def patch():
-        # Disable TorchDynamo on some torch.* compilers generated frames
+        # A better way to disable the following would be decorate the source
+        # functions with @torch._disable_dynamo. However, this causes issues
+        # with torch.deploy internally.
         torch.jit.trace = disable(torch.jit.trace)
-
+        torch.jit.trace_module = disable(torch.jit.trace_module)
+        torch.jit._get_trace_graph = disable(torch.jit._get_trace_graph)
+        torch.fx._symbolic_trace.Tracer.trace = disable(
+            torch.fx._symbolic_trace.Tracer.trace
+        )
         torch.distributions.Distribution.set_default_validate_args(False)
 
         optimizers = [
@@ -1226,7 +1232,6 @@ class TorchPatcher:
         from ..optim import (
             adadelta,
             adagrad,
-            adam,
             adamax,
             adamw,
             asgd,
@@ -1239,7 +1244,6 @@ class TorchPatcher:
         for opt_mod in (
             adadelta,
             adagrad,
-            adam,
             adamax,
             adamw,
             asgd,
