@@ -212,7 +212,7 @@ class ModuleWrapPolicy(_WrapPolicy):
         return super().__repr__() + f"({self._module_classes_str})"
 
 
-class LambdaWrapPolicy(_FSDPPolicy):
+class LambdaWrapPolicy(_WrapPolicy):
     """
     This policy takes in a lambda function that maps a given ``nn.Module`` to
     either ``False``, ``True``, or a FSDP kwarg dictionary.
