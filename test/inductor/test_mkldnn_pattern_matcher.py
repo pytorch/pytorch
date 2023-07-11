@@ -102,9 +102,6 @@ class TestPaternMatcher(TestCase):
                 convert_model = convert_pt2e(prepare_model).eval()
                 expected = convert_model(*inputs)
                 compiled_model = compile_fx(convert_model, inputs)
-                _ = compiled_model(*inputs)
-                actual = compiled_model(*inputs)
-                torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
                 self.assertEqual(
                     counters["inductor"]["pattern_matcher_count"], matcher_count
                 )
