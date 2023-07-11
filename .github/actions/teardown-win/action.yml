@@ -49,6 +49,12 @@ runs:
             rm -rf "${EXTRA_DELETE_DIR}" || true
           fi
 
+          # NB: Clean up checkout GHA to avoid having the folder locked later on. The cleanup-runner
+          # GHA previously run has already ensured that there is no lock on this directory. The dir
+          # would be deleted anyway according to https://github.com/actions/runner
+          rm -rf "${{ runner.workspace }}/../_actions/*"
+
+          # Clean up the current workspace
           rm -rf ./*
 
     - name: Print all processes locking the runner workspace
