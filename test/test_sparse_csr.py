@@ -3599,13 +3599,14 @@ class TestSparseCompressedTritonKernels(TestCase):
 
             # NOTE: only boolean mask is directly compatible with the Strided version
             # without any pre-/post-processing. Hence we test against a boolean mask.
-            expected = torch.nn.functional.scaled_dot_product_attention(
-                *broadcast_input(query, key, value, attn_mask)
-            )
+            for scale in (None, 1. / 16):
+                expected = torch.nn.functional.scaled_dot_product_attention(
+                    *broadcast_input(query, key, value, attn_mask), scale=scale
+                )
 
-            for mask_dtype in (torch.bool, dtype):
-                res = _scaled_dot_product_attention(query, key, value, attn_mask_bsr.to(mask_dtype))
-                self.assertEqual(res, expected)
+                for mask_dtype in (torch.bool, dtype):
+                    res = _scaled_dot_product_attention(query, key, value, attn_mask_bsr.to(mask_dtype), scale=scale)
+                    self.assertEqual(res, expected)
 
 
     @parametrize("block_size", [16, 32, 64])
