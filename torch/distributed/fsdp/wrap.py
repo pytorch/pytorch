@@ -187,10 +187,6 @@ class ModuleWrapPolicy(_WrapPolicy):
 
     def __init__(self, module_classes: Iterable[Type[nn.Module]]):
         module_classes_set = set(module_classes)
-        self._policy: Callable = functools.partial(
-            _module_wrap_policy,
-            module_classes=module_classes_set,
-        )
         self._module_classes = module_classes_set
         self._module_classes_str = str(module_classes_set)
 
