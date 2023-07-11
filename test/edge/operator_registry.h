@@ -1,17 +1,18 @@
 #pragma once
 
 #include <cstring>
-
-#include <c10/util/ArrayRef.h>
-#include "Evalue.h"
-#include "RuntimeContext.h"
 #include <functional>
 #include <map>
+
+#include "Evalue.h"
+#include "kernel_runtime_context.h"
+
+#include <c10/util/ArrayRef.h>
 
 namespace torch {
 namespace executor {
 
-using KernelFunction = std::function<void(RuntimeContext&, EValue**)>;
+using KernelFunction = std::function<void(KernelRuntimeContext&, EValue**)>;
 
 template<typename T>
 using ArrayRef = at::ArrayRef<T>;
