@@ -1189,6 +1189,26 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     return out + beta * self
 
 
+@register_decomposition(aten._addmm_activation)
+@out_wrapper()
+@pw_cast_for_opmath
+def _addmm_activation(
+    self: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    beta: int = 1,
+    alpha: int = 1,
+    use_gelu: bool = False,
+):
+    out = addmm(self, mat1, mat2, beta, alpha)
+    if use_gelu:
+        if self.is_cuda:
+            return aten.gelu(out, approximate="tanh")
+        else:
+            return aten.gelu(out)
+    return aten.relu(out)
+
+
 @register_decomposition(aten.addmv)
 @out_wrapper()
 @pw_cast_for_opmath
@@ -1841,6 +1861,10 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
             lambda: "adaptive_avg_pool2d(): Expected input to have non-zero size for "
             f"non-batch dimensions, but input has shape {tuple(shape)}.",
         )
+
+    # TODO: decompose integer path
+    if input.dtype in [torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64]:
+        return torch.nn.functional.adaptive_avg_pool2d(input, output_size)
 
     # Optimisation (we should also do this in the kernel implementation)
     if shape[-2] % output_size[-2] == 0 and shape[-1] % output_size[-1] == 0:
@@ -2967,7 +2991,7 @@ def _linspace_from_neg_one(
     return torch.linspace(-a, a, steps=num_steps, device=device, dtype=dtype)
 
 
-def _make_base_grid_4d(theta: Tensor, n: int, h: int, w: int, align_corners: bool):
+def _make_base_grid_4d(theta: Tensor, h: int, w: int, align_corners: bool):
     dtype = theta.dtype
     device = theta.device
 
@@ -2975,51 +2999,45 @@ def _make_base_grid_4d(theta: Tensor, n: int, h: int, w: int, align_corners: boo
     # corresponding to each individual tensor: grid_x, grid_y, grid_one
     grid_x = (
         _linspace_from_neg_one(w, align_corners, dtype, device)
-        .view(1, 1, w, 1)
-        .expand(n, h, w, 1)
+        .view(1, w, 1)
+        .expand(h, w, 1)
     )
     grid_y = (
         _linspace_from_neg_one(h, align_corners, dtype, device)
-        .view(1, h, 1, 1)
-        .expand(n, h, w, 1)
+        .view(h, 1, 1)
+        .expand(h, w, 1)
     )
-    grid_one = (
-        torch.tensor(1, dtype=dtype, device=device).view(1, 1, 1, 1).expand(n, h, w, 1)
-    )
+    grid_one = torch.ones((1, 1, 1), dtype=dtype, device=device)
 
+    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
     grid_x = torch.nn.functional.pad(grid_x, pad=(0, 2), mode="constant", value=0)
     grid_y = torch.nn.functional.pad(grid_y, pad=(1, 1), mode="constant", value=0)
     grid_one = torch.nn.functional.pad(grid_one, pad=(2, 0), mode="constant", value=0)
     return grid_x + grid_y + grid_one
 
 
-def _make_base_grid_5d(
-    theta: Tensor, n: int, d: int, h: int, w: int, align_corners: bool
-):
+def _make_base_grid_5d(theta: Tensor, d: int, h: int, w: int, align_corners: bool):
     dtype = theta.dtype
     device = theta.device
 
     grid_x = (
         _linspace_from_neg_one(w, align_corners, dtype, device)
-        .view(1, 1, 1, w, 1)
-        .expand(n, d, h, w, 1)
+        .view(1, 1, w, 1)
+        .expand(d, h, w, 1)
     )
     grid_y = (
         _linspace_from_neg_one(h, align_corners, dtype, device)
-        .view(1, 1, h, 1, 1)
-        .expand(n, d, h, w, 1)
+        .view(1, h, 1, 1)
+        .expand(d, h, w, 1)
     )
     grid_z = (
         _linspace_from_neg_one(d, align_corners, dtype, device)
-        .view(1, d, 1, 1, 1)
-        .expand(n, d, h, w, 1)
+        .view(d, 1, 1, 1)
+        .expand(d, h, w, 1)
     )
-    grid_one = (
-        torch.tensor(1, dtype=dtype, device=device)
-        .view(1, 1, 1, 1, 1)
-        .expand(n, d, h, w, 1)
-    )
+    grid_one = torch.ones((1, 1, 1, 1), dtype=dtype, device=device)
 
+    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
     grid_x = torch.nn.functional.pad(grid_x, pad=(0, 3), mode="constant", value=0)
     grid_y = torch.nn.functional.pad(grid_y, pad=(1, 2), mode="constant", value=0)
     grid_z = torch.nn.functional.pad(grid_z, pad=(2, 1), mode="constant", value=0)
@@ -3029,15 +3047,21 @@ def _make_base_grid_5d(
 
 def _affine_grid_generator_4d(theta: Tensor, size: List[int], align_corners: bool):
     n, _, h, w = size
-    base_grid = _make_base_grid_4d(theta, n, h, w, align_corners=align_corners)
-    grid = base_grid.view(n, h * w, 3).bmm(theta.transpose(1, 2))
+    base_grid = _make_base_grid_4d(theta, h, w, align_corners=align_corners)
+    # base_grid shape is (h, w, 3) and theta shape is (n, 2, 3)
+    # We do manually a matrix multiplication which is faster than mm()
+    # (h * w, 3, 1) * (n, 1, 3, 2) -> (n, h * w, 2)
+    grid = (base_grid.view(-1, 3, 1) * theta.mT.unsqueeze(1)).sum(-2)
     return grid.view(n, h, w, 2)
 
 
 def _affine_grid_generator_5d(theta: Tensor, size: List[int], align_corners: bool):
     n, _, d, h, w = size
-    base_grid = _make_base_grid_5d(theta, n, d, h, w, align_corners=align_corners)
-    grid = base_grid.view(n, d * h * w, 4).bmm(theta.transpose(1, 2))
+    base_grid = _make_base_grid_5d(theta, d, h, w, align_corners=align_corners)
+    # base_grid shape is (d, h, w, 4) and theta shape is (n, 3, 4)
+    # We do manually a matrix multiplication which is faster than mm()
+    # (d * h * w, 4, 1) * (n, 1, 4, 3) -> (n, h * w, 3)
+    grid = (base_grid.view(-1, 4, 1) * theta.mT.unsqueeze(1)).sum(-2)
     return grid.view(n, d, h, w, 3)
 
 
@@ -3179,6 +3203,19 @@ def grid_sampler_2d(
 
         return get_summand(ix_nearest, iy_nearest, 1)
     else:  # interpolation_mode == 2, Bicubic
+        # Performance hack for channels last, bicubic, batch_size > 1 case:
+        # Convert to channels first, compute and convert back.
+        # By default without this hack:
+        # Times are in microseconds (us).
+        # - bicubic f32, CL, BS=2:  1233.0
+        # - bicubic f32, CL, BS=1:  34.9
+        # - bicubic f32, CF, BS=2:  51.2
+
+        to_channels_last = False
+        if len(a) > 1 and a.is_contiguous(memory_format=torch.channels_last):
+            to_channels_last = True
+            a = a.contiguous()
+
         ix = unnormalize(x, iW)
         iy = unnormalize(y, iH)
 
@@ -3204,7 +3241,10 @@ def grid_sampler_2d(
             return _upsample_cubic_interp1d(cs, tx)
 
         coeffs = tuple((get_coeff(ofs) for ofs in range(4)))
-        return _upsample_cubic_interp1d(coeffs, ty)
+        output = _upsample_cubic_interp1d(coeffs, ty)
+        if to_channels_last:
+            output = output.contiguous(memory_format=torch.channels_last)
+        return output
 
 
 @register_decomposition(aten.mv)
