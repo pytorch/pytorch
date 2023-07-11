@@ -120,18 +120,8 @@ class ConstantFolder(torch.fx.Interpreter):
             return self.unknown_value
 
         out = super().run_node(node)
-
         # TODO - remove constant from node_replacement when it has no uses
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
-            if (
-                node.target
-                == torch.ops.quantized_decomposed.dequantize_per_channel.default
-            ):
-                # For the pattern fp32_weight -> quantized_decomposed.quantize_per_channel.default
-                # -> quantized_decomposed.dequantize_per_channel.default
-                # We only folding fp32_weight -> quantized_decomposed.quantize_per_channel.default into
-                # int8_weight and leave quantized_decomposed.dequantize_per_channel.default in graph to be fused
-                return out
             self.node_replacements[node] = out
 
         return out
@@ -144,13 +134,32 @@ class ConstantFolder(torch.fx.Interpreter):
         return super().run(initial_env=env)
 
 
+def is_impure(node: torch.fx.node.Node):
+    if node.target == torch.ops.quantized_decomposed.dequantize_per_channel.default:
+        # For the pattern fp32_weight -> quantized_decomposed.quantize_per_channel.default
+        # -> quantized_decomposed.dequantize_per_channel.default
+        # We only folding fp32_weight -> quantized_decomposed.quantize_per_channel.default into
+        # int8_weight and leave quantized_decomposed.dequantize_per_channel.default in graph to be fused
+        return True
+    if (node.target == torch.ops.aten.clone.default) and (
+        node.args[0].target
+        == torch.ops.quantized_decomposed.dequantize_per_channel.default
+    ):
+        # With the pass of convert_conv_weights_to_channels_last
+        # https://github.com/pytorch/pytorch/blob/07107919297db3f8ab37f11c12666b6d6d5f692e/torch/_inductor/freezing.py#L338-L362.
+        # There may has the pattern clone(channel_last) <- quantized_decomposed.dequantize_per_channel.default
+        return True
+    return False
+
+
 @torch.utils._python_dispatch._disable_current_modes()
 def constant_fold(gm):
     cf = ConstantFolder(gm, skip_constructors=True)
     cf.run()
 
     for node, constant in cf.node_replacements.items():
-        replace_node_with_constant(gm, node, constant)
+        if not is_impure(node):
+            replace_node_with_constant(gm, node, constant)
 
     erased_params = []
     for node in gm.graph.nodes:
