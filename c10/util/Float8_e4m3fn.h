@@ -61,7 +61,7 @@ namespace detail {
  *
  * @note The implementation doesn't use any floating-point operations.
  */
-inline float fp8e4m3fn_to_fp32_value(uint8_t input) {
+inline C10_HOST_DEVICE float fp8e4m3fn_to_fp32_value(uint8_t input) {
   /*
    * Extend the fp8 E4M3FN number to 32 bits and shift to the
    * upper part of the 32-bit word:
@@ -155,7 +155,7 @@ inline float fp8e4m3fn_to_fp32_value(uint8_t input) {
  * Convert a 32-bit floating-point number in IEEE single-precision format to a
  * 8-bit floating-point number in fp8 E4M3FN format, in bit representation.
  */
-inline uint8_t fp8e4m3fn_from_fp32_value(float f) {
+inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
   /*
    * Binary representation of 480.0f, which is the first value
    * not representable in fp8e4m3fn range:
