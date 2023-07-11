@@ -251,7 +251,8 @@ class TestTensorBoardWriter(BaseTestCase):
                                         n_iter)
             x = np.zeros(sample_rate * 2)
 
-            writer.add_tensor('Full tensor', torch.tensor([1, 2, 3]), n_iter)  # invisible on tensorboard TODO support full tensor plugin
+            # add tensor: invisible on tensorboard TODO support full tensor plugin
+            writer.add_tensor('Full tensor', torch.tensor([1, 2, 3]), n_iter)
             writer.add_audio('myAudio', x, n_iter)
             writer.add_video('myVideo', np.random.rand(16, 48, 1, 28, 28).astype(np.float32), n_iter)
             writer.add_text('Text', 'text logged at step:' + str(n_iter), n_iter)
