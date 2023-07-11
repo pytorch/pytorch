@@ -701,7 +701,7 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model.module[2][0], nn.Linear))
         self.assertTrue(isinstance(model.module[2][1], nn.Linear))
 
-    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
     def test_frozen_params(self):
         """
         Tests that mixing frozen/non-frozen parameters in an FSDP instance
