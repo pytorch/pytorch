@@ -371,6 +371,25 @@ class LoggingTests(LoggingTestCase):
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
 
+    @requires_distributed()
+    def test_distributed_rank_logging(self):
+        env = dict(os.environ)
+        env["TORCH_LOGS"] = "dynamo"
+        stdout, stderr = self.run_process_no_exception(
+            """\
+import torch.distributed as dist
+import logging
+from torch.testing._internal.distributed.fake_pg import FakeStore
+store = FakeStore()
+dist.init_process_group("fake", rank=0, world_size=2, store=store)
+dynamo_log = logging.getLogger("torch._dynamo")
+dynamo_log.info("woof")
+print("arf")
+""",
+            env=env,
+        )
+        self.assertIn("[rank0]:", stderr.decode("utf-8"))
+
 
 # single record tests
 exclusions = {

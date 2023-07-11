@@ -535,8 +535,15 @@ class TorchLogsFormatter(logging.Formatter):
                 artifact_name, None
             )
             if artifact_formatter is not None:
-                return artifact_formatter.format(record)
-        return super().format(record)
+                r = artifact_formatter.format(record)
+            else:
+                r = super().format(record)
+        else:
+            r = super().format(record)
+
+        if dist.is_available() and dist.is_initialized():
+            r = f"[rank{dist.get_rank()}]:{r}"
+        return r
 
 
 DEFAULT_FORMATTER = TorchLogsFormatter(DEFAULT_FORMAT)
@@ -634,3 +641,6 @@ def warning_once(logger_obj, *args, **kwargs):
     another type of cache that includes the caller frame information in the hashing function.
     """
     logger_obj.warning(*args, **kwargs)
+
+
+import torch.distributed as dist
