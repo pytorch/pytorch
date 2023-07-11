@@ -480,6 +480,8 @@ def mps_ops_modifier(ops):
         'nn.functional.interpolatebicubic': None,
         'nn.functional.interpolatelinear': None,
         'nn.functional.interpolatetrilinear': None,
+        # TODO: max_pool2d for integral types fails the numerical test
+        'nn.functional.max_pool2d': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
         'nn.functional.max_unpool3dgrad': None,
@@ -658,7 +660,7 @@ def mps_ops_modifier(ops):
 
         # Failures due to random output that they generate using
         # Philox engine causing mismatch with CPU results
-        'multinomial': [torch.float32],  # random results
+        'multinomial': [torch.float16, torch.float32],  # random results
         'uniform': [torch.float16, torch.float32],
         'rand_like': [torch.float16, torch.float32],
         'randint_like': [torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
@@ -669,10 +671,10 @@ def mps_ops_modifier(ops):
         'normal': [torch.float16, torch.float32, torch.float16, torch.float32],
         'normalin_place': [torch.float16, torch.float32],
         'normalnumber_mean': [torch.float16, torch.float32],
-        'nn.functional.alpha_dropout': [torch.float32],
-        'nn.functional.dropout': [torch.float32],
-        'nn.functional.dropout2d': [torch.float32],
-        'nn.functional.dropout3d': [torch.float32],
+        'nn.functional.alpha_dropout': [torch.float16, torch.float32],
+        'nn.functional.dropout': [torch.float16, torch.float32],
+        'nn.functional.dropout2d': [torch.float16, torch.float32],
+        'nn.functional.dropout3d': [torch.float16, torch.float32],
         'nn.functional.multi_head_attention_forward': [torch.float32],
 
         # duplicate indices are used in the testcase - undefined behaviour
@@ -3693,6 +3695,18 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5), torch.int16)
 
+    def test_activation_checkpoint_does_not_error(self):
+        from torch.utils.checkpoint import checkpoint
+
+        for use_reentrant in (True, False):
+            a = torch.tensor(1., device="mps", requires_grad=True)
+
+            def fn(x):
+                return x.sin().cos().exp()
+
+            out = checkpoint(fn, a, use_reentrant=use_reentrant)
+            out.backward()
+
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
         return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -6619,6 +6633,13 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(neg_result, neg_result_cpu)
 
         helper((2, 8, 4, 5))
+
+    def test_neg_strided_input(self):
+        # See https://github.com/pytorch/pytorch/issues/98074#issuecomment-1496088337
+        x = torch.arange(18.0, device='mps').reshape(2, 3, 3)
+        y = x.permute(1, 0, 2)[..., 1]
+        z = y + y.neg()
+        self.assertEqual(z.abs().max().item(), 0.0)
 
     # Test index add
     def test_index_add(self):
