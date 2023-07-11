@@ -417,7 +417,7 @@ class SummaryWriter:
         if self._check_caffe2_blob(tensor):
             from caffe2.python import workspace
 
-            tensor = workspace.FetchBlob(tensor)
+            tensor = torch.tensor(workspace.FetchBlob(tensor))
 
         summary = tensor_proto(tag, tensor)
         self._get_file_writer().add_summary(summary, global_step, walltime)

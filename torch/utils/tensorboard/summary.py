@@ -6,6 +6,7 @@ from typing import Optional
 import numpy as np
 
 import torch
+
 from google.protobuf import struct_pb2
 
 from tensorboard.compat.proto.summary_pb2 import (
@@ -326,7 +327,7 @@ def scalar(name, tensor, collections=None, new_style=False, double_precision=Fal
 
 
 def tensor_proto(tag, tensor):
-    """Outputs a `Summary` protocol buffer containing the tensor.
+    """Outputs a `Summary` protocol buffer containing the full tensor.
     The generated Summary has a Tensor.proto containing the input Tensor.
     Args:
       name: A name for the generated node. Will also serve as the series name in
@@ -335,7 +336,8 @@ def tensor_proto(tag, tensor):
     Returns:
       A tensor protobuf in a `Summary` protobuf.
     Raises:
-      ValueError: If tensor is too big to be converted to protobuf
+      ValueError: If tensor is too big to be converted to protobuf, or
+                     tensor data type is not supported
     """
     if tensor.numel() * tensor.itemsize >= (1 << 31):
         raise ValueError(
@@ -359,6 +361,7 @@ def tensor_proto(tag, tensor):
         torch.int: ("DT_INT32", "int_val"),
         torch.int32: ("DT_INT32", "int_val"),
         torch.qint32: ("DT_INT32", "int_val"),
+        torch.int64: ("DT_INT64", "int64_val"),
         torch.complex32: ("DT_COMPLEX32", "scomplex_val"),
         torch.chalf: ("DT_COMPLEX32", "scomplex_val"),
         torch.complex64: ("DT_COMPLEX64", "scomplex_val"),
@@ -373,24 +376,28 @@ def tensor_proto(tag, tensor):
 
     if tensor.dtype in type_map:
         proto_val_field = type_map[tensor.dtype][1]
-        tensor_proto_args = {
-            "dtype": type_map[tensor.dtype][0],
-            "dim": [
-                TensorShapeProto.Dim(size=tensor.shape[i]) for i in range(tensor.dim())
-            ],
-            proto_val_field: torch.view_as_real(tensor).flatten().tolist()
+        proto_val_contents = (
+            torch.view_as_real(tensor).flatten().tolist()
             if proto_val_field == "scomplex_val" or proto_val_field == "dcomplex_val"
             else [tensor.item()]
             if tensor.numel() == 1
             else []
             if tensor.numel() == 0
-            else tensor.flatten().tolist(),
+            else tensor.flatten().tolist()
+        )
+        tensor_proto_args = {
+            "dtype": type_map[tensor.dtype][0],
+            "tensor_shape": TensorShapeProto(
+                dim=[
+                    TensorShapeProto.Dim(size=tensor.shape[i])
+                    for i in range(tensor.dim())
+                ]
+            ),
+            proto_val_field: proto_val_contents,
         }
         tensor_proto = TensorProto(**tensor_proto_args)
     else:
-        tensor_proto = TensorProto(
-            dtype="DT_STRING", string_val=f"{tag} has unsupported tensor dtype"
-        )
+        raise ValueError(f"{tag} has unsupported tensor dtype {tensor.dtype}")
 
     plugin_data = SummaryMetadata.PluginData(plugin_name="tensor")
     smd = SummaryMetadata(plugin_data=plugin_data)
