@@ -198,13 +198,14 @@ def _module_wrap_policy(
 class ModuleWrapPolicy(_FSDPPolicy):
     """This is a wrapper around :func:`_module_wrap_policy`."""
 
-    def __init__(self, module_classes: Set[Type[nn.Module]]):
+    def __init__(self, module_classes: Iterable[Type[nn.Module]]):
+        module_classes_set = set(module_classes)
         self._policy: Callable = functools.partial(
             _module_wrap_policy,
-            module_classes=module_classes,
+            module_classes=module_classes_set,
         )
-        self._module_classes = module_classes
-        self._module_classes_str = str(module_classes)
+        self._module_classes = module_classes_set
+        self._module_classes_str = str(module_classes_set)
 
     @property
     def policy(self):
