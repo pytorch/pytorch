@@ -19,6 +19,16 @@
 namespace at { namespace native {
 
 namespace {
+
+inline void raise_error_if_lapack_unsupported(const char* op_name){
+#if !AT_BUILD_WITH_LAPACK()
+  TORCH_CHECK(
+      false,
+      "Calling ", op_name, " on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#endif
+}
+
 /*
   Computes the Cholesky decomposition of matrices stored in `input`.
   This is an in-place routine and the content of 'input' is overwritten with the result.
@@ -34,12 +44,7 @@ namespace {
 */
 template <typename scalar_t>
 void apply_cholesky(const Tensor& input, const Tensor& info, bool upper) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(
-      false,
-      "Calling torch.linalg.cholesky on a CPU tensor requires compiling ",
-      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
-#else
+  raise_error_if_lapack_unsupported("torch.linalg.cholesky");
   char uplo = upper ? 'U' : 'L';
   auto input_data = input.data_ptr<scalar_t>();
   auto info_data = info.data_ptr<int>();
@@ -53,7 +58,6 @@ void apply_cholesky(const Tensor& input, const Tensor& info, bool upper) {
     int* info_working_ptr = &info_data[i];
     lapackCholesky<scalar_t>(uplo, n, input_working_ptr, lda, info_working_ptr);
   }
-#endif
 }
 
 // This is a type dispatching helper function for 'apply_cholesky'
@@ -103,9 +107,7 @@ For more information see LAPACK's documentation for POTRI routine.
 */
 template <typename scalar_t>
 void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(false, "cholesky_inverse: LAPACK library not found in compilation");
-#else
+  raise_error_if_lapack_unsupported("torch.cholesky_inverse");
   char uplo = upper ? 'U' : 'L';
 
   auto input_data = input.data_ptr<scalar_t>();
@@ -122,7 +124,6 @@ void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
     // LAPACK writes to only upper/lower part of the matrix leaving the other side unchanged
     apply_reflect_conj_tri_single<scalar_t>(input_working_ptr, n, lda, upper);
   }
-#endif
 }
 
 // This is a type dispatching helper function for 'apply_cholesky_inverse'
@@ -144,10 +145,7 @@ Tensor& cholesky_inverse_kernel_impl(Tensor& result, Tensor& infos, bool upper) 
 */
 template <typename scalar_t>
 void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(false, "Calling torch.linalg.eig on a CPU tensor requires compiling ",
-    "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
-#else
+  raise_error_if_lapack_unsupported("torch.linalg.eig");
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
 
   char jobvr = compute_eigenvectors ? 'V' : 'N';
@@ -190,7 +188,6 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
     lapackEig<scalar_t, value_t>(jobvl, jobvr, n, input_working_ptr, lda, values_working_ptr,
       lvectors_data, ldvl, rvectors_working_ptr, ldvr, work_data, lwork, rwork_data, info_working_ptr);
   }
-#endif
 }
 
 // This is a type dispatching helper function for 'apply_linalg_eig'
@@ -220,12 +217,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
 */
 template <typename scalar_t>
 void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(
-      false,
-      "Calling torch.linalg.eigh or eigvalsh on a CPU tensor requires compiling ",
-      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
-#else
+  raise_error_if_lapack_unsupported("torch.linalg.eigh or eigvalsh");
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
 
   char uplo = upper ? 'U' : 'L';
@@ -287,7 +279,6 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
       return;
     }
   }
-#endif
 }
 
 // This is a type dispatching helper function for 'apply_lapack_eigh'
@@ -323,12 +314,7 @@ void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, c
 */
 template <typename scalar_t>
 static void apply_geqrf(const Tensor& input, const Tensor& tau) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(
-      false,
-      "Calling torch.geqrf on a CPU tensor requires compiling ",
-      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
-#else
+  raise_error_if_lapack_unsupported("torch.geqrf");
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto input_data = input.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
@@ -366,7 +352,6 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
     // so we don't need to check it all the time
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
   }
-#endif
 }
 
 // This is a type dispatching helper function for 'apply_geqrf'
@@ -389,10 +374,7 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
 */
 template <typename scalar_t>
 inline void apply_orgqr(Tensor& self, const Tensor& tau) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(false, "Calling torch.orgqr on a CPU tensor requires compiling ",
-    "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
-#else
+  raise_error_if_lapack_unsupported("torch.orgqr");
   // Some LAPACK implementations might not work well with empty matrices:
   // workspace query might return lwork as 0, which is not allowed (requirement is lwork >= 1)
   // We don't need to do any calculations in this case, so let's return early
@@ -439,7 +421,6 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau) {
     // so we don't need to check it all the time
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
   }
-#endif
 }
 
 // This is a type dispatching helper function for 'apply_orgqr'
@@ -469,12 +450,7 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
 */
 template <typename scalar_t>
 void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, LapackLstsqDriverType driver_type) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(
-      false,
-      "Calling torch.linalg.lstsq on a CPU tensor requires compiling ",
-      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
-#else
+  raise_error_if_lapack_unsupported("torch.linalg.lstsq");
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   using driver_t = at::native::LapackLstsqDriverType;
 
@@ -603,7 +579,6 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
       }
     }
   );
-#endif
 }
 
 // This is a type and driver dispatching helper function for 'apply_lstsq'
@@ -640,10 +615,7 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_val
 */
 template <typename scalar_t>
 void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(false, "Calling torch.ormqr on a CPU tensor requires compiling ",
-    "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
-#else
+  raise_error_if_lapack_unsupported("torch.ormqr");
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
 
   char side = left ? 'L' : 'R';
@@ -692,7 +664,6 @@ void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bo
     // so we don't need to check it all the time
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
   }
-#endif
 }
 
 // This is a type dispatching helper function for 'apply_ormqr'
@@ -757,12 +728,7 @@ void apply_ldl_factor(
     const Tensor& info,
     bool upper,
     bool hermitian) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(
-      false,
-      "Calling torch.linalg.ldl_factor on a CPU tensor requires compiling ",
-      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
-#else
+  raise_error_if_lapack_unsupported("torch.linalg.ldl_factor");
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) > 0);
   auto batch_size = batchCount(A);
   auto n = A.size(-2);
@@ -800,7 +766,6 @@ void apply_ldl_factor(
         lwork,
         info_working_ptr);
   }
-#endif
 }
 
 void ldl_factor_kernel(
@@ -822,12 +787,7 @@ void apply_ldl_solve(
     const Tensor& B,
     bool upper,
     bool hermitian) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(
-      false,
-      "Calling torch.linalg.ldl_factor on a CPU tensor requires compiling ",
-      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
-#else
+  raise_error_if_lapack_unsupported("torch.linalg.ldl_solve");
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) > 0);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(pivots.unsqueeze(-1)) > 0);
   auto batch_size = batchCount(B);
@@ -866,7 +826,6 @@ void apply_ldl_solve(
         &info);
   }
   TORCH_INTERNAL_ASSERT(info == 0);
-#endif
 }
 
 void ldl_solve_kernel(
@@ -896,12 +855,7 @@ void ldl_solve_kernel(
 */
 template <typename scalar_t>
 void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(
-      false,
-      "Calling torch.linalg.lu_factor on a CPU tensor requires compiling ",
-      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
-#else
+  raise_error_if_lapack_unsupported("torch.linalg.lu_factor");
   TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on the CPU");
 
   auto input_data = input.data_ptr<scalar_t>();
@@ -936,7 +890,6 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
       std::min(1.0, 3200.0 / (matrix_rank * matrix_rank * matrix_rank)));
   int64_t grain_size = chunk_size_per_thread * at::get_num_threads();
   at::parallel_for(0, batch_size, grain_size, loop);
-#endif
 }
 
 // This is a type dispatching helper function for 'apply_lu'
@@ -961,12 +914,7 @@ void lu_factor_kernel(const Tensor& input, const Tensor& pivots, const Tensor& i
 */
 template <typename scalar_t>
 void apply_lu_solve(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(
-      false,
-      "Calling linalg.lu_solve on a CPU tensor requires compiling ",
-      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
-#else
+  raise_error_if_lapack_unsupported("torch.linalg.lu_solve");
   auto b_data = B.data_ptr<scalar_t>();
   auto lu_data = LU.data_ptr<scalar_t>();
   const auto trans = to_blas(transpose);
@@ -1002,7 +950,6 @@ void apply_lu_solve(const Tensor& LU, const Tensor& pivots, const Tensor& B, Tra
     // so we don't need to check it all the time
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
   }
-#endif
 }
 
 // This is a type dispatching helper function for 'apply_lu_solve'
@@ -1029,9 +976,7 @@ static void apply_svd(const Tensor& A,
                       const Tensor& S,
                       const Tensor& Vh,
                       const Tensor& info) {
-#if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(false, "svd: LAPACK library not found in compilation");
-#else
+  raise_error_if_lapack_unsupported("torch.svd or torch.linalg.svd");
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   const auto A_data = A.data_ptr<scalar_t>();
   const auto U_data = compute_uv ? U.data_ptr<scalar_t>() : nullptr;
@@ -1081,7 +1026,6 @@ static void apply_svd(const Tensor& A,
     lapackSvd<scalar_t, value_t>(jobz, m, n, A_working_ptr, lda,
                         S_working_ptr, U_working_ptr, ldu, Vh_working_ptr, ldvh, work_data, lwork, rwork_data, iwork_data, info_data + i);
   }
-#endif
 }
 
 void svd_kernel(const Tensor& A,
