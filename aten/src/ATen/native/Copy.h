@@ -12,6 +12,7 @@ namespace native {
 
 using copy_fn = void (*)(TensorIterator&, bool non_blocking);
 
+// 声明 copy 的 DispatchStub
 DECLARE_DISPATCH(copy_fn, copy_stub);
 
 TORCH_API void copy_ignoring_overlaps(const TensorBase &dst, const TensorBase &src);

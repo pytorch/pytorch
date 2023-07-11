@@ -196,6 +196,7 @@ private:
 namespace {
 template <typename DispatchStub>
 struct RegisterCUDADispatch {
+  // 构造函数将 value 注册到 stub
   RegisterCUDADispatch(DispatchStub &stub, typename DispatchStub::FnPtr value) {
     stub.set_cuda_dispatch_ptr(value);
   }
@@ -224,6 +225,9 @@ struct RegisterPRIVATEUSE1Dispatch {
 };
 
 } // anonymous namespace
+
+// 声明一个 Operator Dispatch。
+// 采用 CRTP 继承自 DispatchStub。
 // Compiler will complain if you put things like std::tuple<Tensor, Tensor> in
 // the `fn` argument of DECLARE_DISPATCH. Some possible workarounds, e.g.,
 // adding parentheses and using helper struct to get rid of the parentheses, do
@@ -237,6 +241,7 @@ struct RegisterPRIVATEUSE1Dispatch {
   };                                       \
   extern TORCH_API struct name name
 
+// 定义一个以 name 为名的 Dispatch struct 实例。
 #define DEFINE_DISPATCH(name) struct name name
 
 #define REGISTER_ARCH_DISPATCH(name, arch, fn) \
@@ -278,6 +283,7 @@ struct RegisterPRIVATEUSE1Dispatch {
 #define REGISTER_NO_CPU_DISPATCH(name)                                         \
   REGISTER_ALL_CPU_DISPATCH(name, nullptr)
 
+// 注册 Operator 的 cuda 执行函数 fn
 #define REGISTER_CUDA_DISPATCH(name, fn) \
   static RegisterCUDADispatch<struct name> name ## __register(name, fn);
 

@@ -268,6 +268,7 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
 
 } // namespace CPU_CAPABILITY
 
+// 注册 copy 算子的 cpu kernel 实现
 REGISTER_DISPATCH(copy_stub, &copy_kernel);
 
 } // namespace at::native

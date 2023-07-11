@@ -267,6 +267,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   }
 }
 
+// 注册 copy 算子的 cuda kernel 实现
 REGISTER_DISPATCH(copy_stub, &copy_kernel_cuda);
 
 } // namespace at::native

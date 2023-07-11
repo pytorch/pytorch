@@ -277,6 +277,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   if(!self.is_complex() && src.is_complex()) {
     TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
   }
+  // 最终调用的 copy_stub 来执行 copy
   copy_stub(device_type, iter, non_blocking);
   return self;
 }
