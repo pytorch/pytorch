@@ -10,27 +10,42 @@ import torch.utils.checkpoint
 from torch.utils._pytree import tree_map_only
 
 
-class Add1Subclass(torch.Tensor):
-    __slots__ = ["elem"]
+class PassthroughAddSubclass(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
 
-    def __init__(self, elem: torch.Tensor):
-        super().__init__()
-        self.elem = elem
+        if func == torch.add:
+            return args[0]
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
+class PassthroughMulSubclass(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        if func == torch.mul:
+            return args[0]
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
+class WrapperSubclass:
+    def __init__(self, tensor):
+        self.tensor = tensor
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
 
-        def add1(x):
-            return torch.add(x.elem, 1.0)
+        args = tree_map_only(WrapperSubclass, lambda x: x.tensor, args)
 
-        args = tree_map_only(cls, add1, args)
         return func(*args, **kwargs)
-
-
-class Add2Subclass(torch.Tensor):
-    pass
 
 
 class MockSubclass(torch.Tensor):
@@ -38,11 +53,15 @@ class MockSubclass(torch.Tensor):
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        return func(*args, **kwargs)
+        return super().__torch_function__(func, types, args, kwargs)
 
 
-GLOBAL_TEST_SUBCLASSES = {Add1Subclass, Add2Subclass, MockSubclass}
-
+GLOBAL_TEST_SUBCLASSES = {
+    PassthroughAddSubclass,
+    PassthroughMulSubclass,
+    WrapperSubclass,
+    MockSubclass,
+}
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 
 
@@ -101,27 +120,29 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_function_trace(self):
         def fn(x):
-            return torch.add(x, 1.0)
+            return torch.add(x, 10.0)
 
         fn_opt = compile_full_eager(fn)
 
-        input = Add1Subclass(torch.ones(2, 2))
+        input = torch.ones(2, 2).as_subclass(PassthroughAddSubclass)
         res_exp = fn(input)
         res_act = fn_opt(input)
 
         self.assertEqual(res_exp, res_act)
+        self.assertEqual(res_act, torch.ones(2, 2))
 
     def test_torch_function_trace_other_arg_positions(self):
         def fn(x):
-            return torch.div(1.0, x)
+            return torch.add(torch.ones(3, 3), x)
 
         fn_opt = compile_full_eager(fn)
 
-        input = torch.ones(2, 2).as_subclass(Add1Subclass)
+        input = torch.ones(2, 2).as_subclass(PassthroughAddSubclass)
         res_exp = fn(input)
         res_act = fn_opt(input)
 
         self.assertEqual(res_exp, res_act)
+        self.assertEqual(res_act, torch.ones(3, 3))
 
     def test_unwrap_redispatch(self):
         pass

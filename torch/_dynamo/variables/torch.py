@@ -13,6 +13,7 @@ import torch.nn
 import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
 from torch._dynamo.variables.user_defined import ProcessGroupVariable
+from torch.overrides import _get_overloaded_args
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -368,26 +369,32 @@ class TorchVariable(VariableTracker):
                 )
             else:
                 unimplemented(f"torch.from_numpy(<{type(t)}>)")
-        elif len(args) > 0 and isinstance(args[0], TensorWithTFOverrideVariable):
+        elif len(args) > 0 and any(
+            isinstance(arg, TensorWithTFOverrideVariable) for arg in args
+        ):
             # This code block implements inlining the __torch_function__
             # override of a tensor.
 
-            # TODO(future PR): make this implement the full __torch_function__ API
-            # instead of assuming the relevant override is in the first argument.
-            tensor_with_tf_override = args[0]
-
-            unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
-                tx,
-                self,
-                tensor_with_tf_override.orig_tensor_variable_source,
-                tensor_with_tf_override.subclass_torch_function__func,
-                tensor_with_tf_override.subclass_type,
-                options,
-                args,
-                kwargs,
+            overloaded_args = _get_overloaded_args(
+                [arg for arg in args if isinstance(arg, TensorWithTFOverrideVariable)],
+                lambda x: x.subclass_type,
             )
 
-            return unwrapped
+            for tf_tensor in overloaded_args:
+                unwrapped = (
+                    TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
+                        tx,
+                        self,
+                        tf_tensor.orig_tensor_variable_source,
+                        tf_tensor.subclass_torch_function__func,
+                        tf_tensor.subclass_type,
+                        options,
+                        args,
+                        kwargs,
+                    )
+                )
+
+                return unwrapped
 
         elif self.value in [
             torch.amp.autocast_mode.autocast,
