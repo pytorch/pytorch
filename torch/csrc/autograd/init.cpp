@@ -12,6 +12,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
+#include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
@@ -408,6 +409,37 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         auto cls = python_type_class.ptr();
         registerPythonTensorClass(device, cls);
       });
+  _C_m.def("_set_autograd_fallback_mode", [](const std::string& mode) {
+    if (mode == "nothing") {
+      torch::autograd::setAutogradFallbackMode(
+          torch::autograd::AutogradFallbackMode::Nothing);
+      return;
+    }
+    if (mode == "warn") {
+      torch::autograd::setAutogradFallbackMode(
+          torch::autograd::AutogradFallbackMode::Warn);
+      return;
+    }
+    if (mode == "error") {
+      torch::autograd::setAutogradFallbackMode(
+          torch::autograd::AutogradFallbackMode::Error);
+      return;
+    }
+    TORCH_INTERNAL_ASSERT(false, "Unsupported AutogradFallbackMode: ", mode);
+  });
+  _C_m.def("_get_autograd_fallback_mode", []() {
+    auto mode = torch::autograd::getAutogradFallbackMode();
+    switch (mode) {
+      case torch::autograd::AutogradFallbackMode::Nothing:
+        return "nothing";
+      case torch::autograd::AutogradFallbackMode::Warn:
+        return "warn";
+      case torch::autograd::AutogradFallbackMode::Error:
+        return "error";
+      default:
+        TORCH_INTERNAL_ASSERT(false, "Unsupported AutogradFallbackMode");
+    }
+  });
 
   _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
 
