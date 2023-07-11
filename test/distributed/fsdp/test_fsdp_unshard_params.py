@@ -288,8 +288,8 @@ class TestUnshardParams(TestUnshardParamsBase):
             ),
             **fsdp_kwargs,
         )
-        outer_flat_param = model._handle[0].flat_param
-        inner_flat_param = model.module[0]._handle.flat_param
+        outer_flat_param = model._handle.flat_param
+        inner_flat_param = model.module._handle.flat_param
         # NOTE: This assumes uniform sharding with padding across ranks.
         expected_outer_flat_param_unsharded_numel = (
             outer_flat_param.numel() * self.world_size
@@ -388,7 +388,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         sharded_inner_numel = int(math.ceil(unsharded_inner_numel / self.world_size))
         sharded_outer_numel = int(math.ceil(unsharded_outer_numel / self.world_size))
         inner_flat_param = model.module[0]._handle.flat_param
-        outer_flat_param = model._handle[0].flat_param
+        outer_flat_param = model._handle.flat_param
         self.assertEqual(sharded_inner_numel, inner_flat_param.numel())
         self.assertEqual(sharded_outer_numel, outer_flat_param.numel())
         expected_outer_numel = (
