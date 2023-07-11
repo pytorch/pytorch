@@ -642,7 +642,7 @@ def _root_cast_forward_input(
 ) -> Tuple[Any, Any]:
     should_cast_forward_inputs = (
         (module.training or not state._use_full_prec_in_eval)
-        and (not state.handle._force_full_precision)
+        and (state.handle and not state.handle._force_full_precision)
     ) and state.mixed_precision.cast_root_forward_inputs
 
     if should_cast_forward_inputs:
@@ -1352,6 +1352,8 @@ def _register_post_backward_reshard_only_hooks(
     # Construct `inp_tensors` lazily to avoid CPU overhead in typical case
     # where each flat parameter requires gradient
     inp_tensors: Optional[List[torch.Tensor]] = None
+    if not handle:
+        return
     if handle.flat_param.requires_grad:
         return
     if inp_tensors is None:
