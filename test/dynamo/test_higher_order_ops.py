@@ -153,7 +153,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(test, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(fn, (x,), 3)
+
+        # Since, `x` is unused, we don't lift it to
+        # be the input.
+        self._test_wrap_simple(fn, (x,), 2)
 
     def test_return_captured_vars(self):
         freevar1 = torch.randn(3)
@@ -166,7 +169,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(test, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(fn, (x,), 4, 4)
+
+        # Since, `x` is unused, we don't lift it to
+        # be the input.
+        self._test_wrap_simple(fn, (x,), 3, 4)
 
     def test_return_captured_var_used_multiple_times(self):
         freevar = torch.randn(3)
@@ -290,7 +296,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return wrap(g, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(f, (x,), 3, 3)
+
+        # Since, `x` is unused, we don't lift it to
+        # be the input.
+        self._test_wrap_simple(f, (x,), 2, 3)
 
     def test_capture_value_created_in_subgraph(self):
         backend = EagerAndRecordGraphs()
@@ -743,6 +752,160 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3, 3)
         self._test_wrap_simple(g, (x,), 2)
+
+    def test_wrap_kwarg(self):
+        def f(x, y):
+            return wrap(lambda x, y: x + y, x, y=y)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_wrap_kwarg_int(self):
+        def f(x, y):
+            return wrap(lambda x, y: x + y, x, y=y)
+
+        x = torch.randn(3)
+        y = 8
+
+        # When running with dynamic shapes, `y` is captured as SymNodeVariable,
+        # which is not supported currently.
+        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
+        err_ctx = (
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
+            if check_dynamic_shape_capture()
+            else contextlib.nullcontext()
+        )
+
+        with err_ctx:
+            # int are not passed as argument and directly
+            # baked into the graph.
+            self._test_wrap_simple(f, (x, y), 2)
+
+    def test_wrap_all_kwarg(self):
+        def f(y, x):
+            return wrap(lambda x, y: (x * 2) + y, x=x, y=y)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_wrap_kwarg_only(self):
+        def f(x, y):
+            def fn(*, x, y):
+                return (x * 2) + y
+
+            return wrap(fn, x=x, y=y)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_wrap_kwarg_default(self):
+        def f(x, y):
+            def fn(*, x, y, z=8):
+                return (x * 2) + y + z
+
+            return wrap(fn, x=x, y=y)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_wrap_kwarg_default_if_branch(self):
+        def f(x, y):
+            def fn(*, x, y, z=None):
+                if z is None:
+                    return (x * 2) + y
+                else:
+                    return 2 * x
+
+            return wrap(fn, x=x, y=y)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_wrap_kwarg_recompile(self):
+        def f(x, y, z=None):
+            def fn(*, x, y, z=None):
+                if z is None:
+                    return (x * 2) + y
+                else:
+                    return 2 * x
+
+            return wrap(fn, x=x, y=y, z=z)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        counters.clear()
+        opt = torch.compile(f, backend="eager", fullgraph=True)
+        opt(x, y)
+        self.assertEqual(counters["stats"]["calls_captured"], 1)
+
+        # verify that we `don't` recompile
+        opt(x, y)
+        self.assertEqual(counters["stats"]["calls_captured"], 1)
+
+        # When running with dynamic shapes, `z` is captured as SymNodeVariable,
+        # which is not supported currently.
+        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
+        err_ctx = (
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
+            if check_dynamic_shape_capture()
+            else contextlib.nullcontext()
+        )
+
+        with err_ctx:
+            # verify that we `do` recompile
+            output = opt(x, y, 8)
+            self.assertEqual(counters["stats"]["calls_captured"], 2)
+            self.assertEqual(output, 2 * x)
+
+    def test_wrap_kwarg_default_else_branch(self):
+        def f(x, y, z):
+            def fn(*, x, y, z=None):
+                if z is None:
+                    return (x * 2) + y
+                else:
+                    return 2 * x
+
+            return wrap(fn, x=x, y=y, z=z)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        # When running with dynamic shapes, `z` is captured as SymNodeVariable,
+        # which is not supported currently.
+        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
+        err_ctx = (
+            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
+            if check_dynamic_shape_capture()
+            else contextlib.nullcontext()
+        )
+
+        with err_ctx:
+            # expected_num_wrap_args = 2 because in this case,
+            # we take the `else` branch and `y` is not lifted.
+            self._test_wrap_simple(f, (x, y, 8), 2)
+
+    def test_wrap_unsupported_kwarg(self):
+        def f(x, y, z):
+            def fn(*, x, y, z):
+                z1, z2 = z
+                return (x * 2) + y + z1
+
+            return wrap(fn, x=x, y=y, z=z)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+
+        self._assert_wrap_fallback(f, (x, y, (x, y)))
 
     def test_map_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
