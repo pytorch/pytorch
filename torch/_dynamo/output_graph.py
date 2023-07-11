@@ -232,6 +232,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export_constraints = export_constraints
         self.frame_state = frame_state
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
+
+        # Used to maintain an alias between real values variable tracker for tensors we have seen.
+        self.real_value_tensor_positive_aliases: Dict[
+            torch.Tensor, VariableTracker
+        ] = {}
+
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(

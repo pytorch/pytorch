@@ -2,6 +2,7 @@
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/extension.h>
+#include <set>
 #include <sstream>
 
 namespace {
@@ -253,6 +254,9 @@ static int TensorGuards_init(
   auto len = PyTuple_GET_SIZE(args);
   checks.reserve(len);
   LocalState state;
+
+  // Every tensor in here in unique, they are not aliased, and we need to
+  // protect that.
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
     if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
@@ -260,6 +264,7 @@ static int TensorGuards_init(
       return -1;
     }
     auto tensor = THPVariable_Unpack(item);
+
     std::vector<std::optional<int64_t>> tensor_dims_size =
         per_tensor_dynamic_dims_sizes.size() == 0
         ? wrapIntegersInOptional(tensor.sizes())
@@ -292,11 +297,19 @@ PyObject* TensorGuards_check(TensorGuards* self, PyObject* args) {
   }
 
   LocalState state;
-
+  std::set<PyObject*> unique_tensors;
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
+
     if (Py_TYPE(item) != checks[i].pytype) {
       Py_RETURN_FALSE;
+    }
+    auto it = unique_tensors.find(item);
+    if (it != unique_tensors.end()) {
+      // Violates uniqueness
+      Py_RETURN_FALSE;
+    } else {
+      unique_tensors.insert(item);
     }
     if (!checks[i].check(state, THPVariable_Unpack(item))) {
       Py_RETURN_FALSE;
@@ -355,6 +368,7 @@ PyObject* TensorGuards_check_verbose(
   }
 
   LocalState state;
+  std::set<PyObject*> unique_tensors;
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
     if (Py_TYPE(item) != checks[i].pytype) {
@@ -368,6 +382,17 @@ PyObject* TensorGuards_check_verbose(
         fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
       }
       return Py_BuildValue("s", fail_reason.str().c_str());
+    }
+
+    auto it = unique_tensors.find(item);
+    if (it != unique_tensors.end()) {
+      std::stringstream fail_reason;
+      fail_reason << "Duplicate tensor found where not expected! ";
+      fail_reason << tensor_check_names[i]
+                  << "should not alias to anything, but is aliased";
+      return Py_BuildValue("s", fail_reason.str().c_str());
+    } else {
+      unique_tensors.insert(item);
     }
     std::string fail_reason = checks[i].check_verbose(
         state, THPVariable_Unpack(item), tensor_check_names[i]);

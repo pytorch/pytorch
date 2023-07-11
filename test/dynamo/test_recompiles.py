@@ -151,3 +151,25 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         with_automatic = run_with_automatic()
         self.assertEqual(with_automatic.frame_count, 3)
         self.assertEqual(with_automatic.op_count, 3)
+
+    def test_aliasing_guard_failures(self):
+        def foo(a, b, c):
+            a.add_(b)
+            return c + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+
+        x = torch.randn([3])
+        y = torch.randn([3])
+        z = torch.randn([3])
+        foo(x, y, z)
+        self.assertEqual(cnt.frame_count, 1)
+
+        foo(z, y, x)
+        # No recompile, alias preserved
+        self.assertEqual(cnt.frame_count, 1)
+
+        foo(x, y, x)
+        # Recompile, alias changed
+        self.assertEqual(cnt.frame_count, 2)
