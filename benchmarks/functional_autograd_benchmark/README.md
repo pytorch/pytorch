@@ -1,6 +1,6 @@
 # Benchmarking tool for the autograd API
 
-This folder contain a set of self-contained scripts that allow to benchmark the autograd with different common models.
+This folder contain a set of self-contained scripts that allows you to benchmark autograd with different common models.
 It is designed to run the benchmark before and after your change and will generate a table to share on the PR.
 
 To do so, you can use `functional_autograd_benchmark.py` to run the benchmarks before your change (using as output `before.txt`) and after your change (using as output `after.txt`).
