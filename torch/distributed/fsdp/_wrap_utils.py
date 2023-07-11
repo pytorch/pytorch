@@ -11,19 +11,19 @@ from torch.distributed.fsdp._utils import _override_module_mixed_precision
 
 from torch.distributed.fsdp.wrap import (
     _construct_wrap_fn,
-    _FSDPPolicy,
     _or_policy,
     _post_order_apply,
     _recursive_wrap,
     _run_mixed_precision_override_policy,
     _wrap_module_cls_individually,
+    _WrapPolicy,
     ModuleWrapPolicy,
 )
 
 
 def _auto_wrap(
     root_module: nn.Module,
-    policy: Union[Callable, _FSDPPolicy],
+    policy: Union[Callable, _WrapPolicy],
     ignored_modules: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
     fsdp_kwargs: Dict[str, Any],
@@ -72,10 +72,6 @@ def _auto_wrap(
         _post_order_apply(root_module, wrap_fn)
         return
 
-    # Support new way to pass an auto wrap policy
-    if isinstance(policy, _FSDPPolicy):
-        policy = policy.policy
-    assert policy is not None
     recursive_wrap_kwargs = {
         "module": root_module,
         "auto_wrap_policy": policy,
