@@ -727,12 +727,17 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # Initializers are saved to tmp_folder/onnx_initializer_location/*.onnx
             onnx_model_location = model_name + "_external_data.onnx"
             onnx_initializer_location = model_name + "_initializers"
+            # TODO: We are using the internal `save_model_with_external_data` instead of public
+            # `ExportOutput.save` because we need to rename ONNX initializers before saving.
+            # This is only needed/allowed because we are using `fx_tracer=FXSymbolicTracer`,
+            # which is not an official FX tracer.
             fx_serialization.save_model_with_external_data(
                 tmp_folder,
                 onnx_model_location,
                 onnx_initializer_location,
                 tuple(ctx.paths),
                 onnx_model,
+                rename_initializer=True,
             )
             # Generate random inputs.
             args = create_args()
@@ -798,7 +803,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.skip_dynamic_fx_test(
         "FakeTensor exporting is not supported by dynamic axes."
     )
-    def test_large_scale_exporter_with_tiny_gpt2(self):
+    def test_fx_symbolic_tracer_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
 
         def create_model() -> nn.Module:
@@ -816,6 +821,114 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_fx_symbolic_tracer_large_scale_exporter(
             "tiny_gpt2",
+            create_model,
+            create_args,
+            create_pytorch_only_extra_kwargs,
+        )
+
+    @_beartype.beartype
+    def _test_fake_tensor_mode_exporter(
+        self,
+        model_name: str,
+        create_model: Callable,
+        create_args: Callable,
+        create_kwargs: Callable,
+    ):
+        """Test helper for FakeTensorMode-enabled exporter.
+
+        Arguments:
+            model_name: Name of the model. It used to name temporary files.
+            create_model: A function that creates a model.
+            create_args: A function that creates positional inputs for the model.
+            create_kwargs: A function that creates keyword inputs for ther model.
+
+        This test contains several steps.
+
+        1. Create a toy model.
+        2. Save the toy's state (parameters) to a file. This is for simulating a checkpoint file.
+        3. Load it back and export it to ONNX with Fake Mode enabled.
+            Because all operations (including model and input loading) are done under
+            FakeTensorMode, no real tensor are created and no real computation happens.
+        4. The ONNX model generated in step 3 doesn't contain parameters,
+            and this step adds them as external data on an ONNX model.
+        5. Run PyTorch and ONNX models and compare their results.
+        """
+
+        # Create the toy model with real weight.
+        real_model = create_model()
+
+        with tempfile.NamedTemporaryFile(
+            prefix=model_name, suffix=".pt"
+        ) as tmp_checkpoint_file:
+            # Dump state_dict to a file to simulate how HuggingFace model is initialized.
+            # The file will be loaded via .load_state_dict(...)
+            torch.save(real_model.state_dict(), tmp_checkpoint_file.name)
+
+            with torch.onnx.enable_fake_mode() as fake_context:
+                fake_args = create_args()
+                fake_kwargs = create_kwargs()
+                fake_model = create_model()
+
+            # Export the model with fake inputs and parameters
+            export_options = torch.onnx.ExportOptions(
+                opset_version=self.opset_version,
+                dynamic_shapes=self.dynamic_shapes,
+                op_level_debug=self.op_level_debug,
+                fake_context=fake_context,
+            )
+            export_output = torch.onnx.dynamo_export(
+                fake_model, *fake_args, **fake_kwargs, export_options=export_options
+            )
+
+            with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
+                export_output.save(
+                    tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
+                )
+
+                # Generate random inputs.
+                args = create_args()
+                kwargs = create_kwargs()
+                # Original outputs.
+                ref_outputs = export_output.adapt_torch_outputs_to_onnx(
+                    real_model(*args, **kwargs)
+                )
+                # ORT outputs.
+                args_not_none = export_output.adapt_torch_inputs_to_onnx(*args)
+
+                ort_outputs = onnx_test_common.run_ort(
+                    tmp_onnx_file.name,
+                    args_not_none,
+                )
+
+                assert len(ref_outputs) == len(ort_outputs)
+
+                for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+                    torch.testing.assert_close(ref_output, torch.tensor(ort_output))
+
+    @pytorch_test_common.skip_op_level_debug_test(
+        "op_level_debug_test does not support FakeTensor yet."
+    )
+    def test_fake_tensor_mode_simple(self):
+        def create_model() -> nn.Module:
+            class Model(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(2, 2)
+
+                def forward(self, x):
+                    out = self.linear(x)
+                    return out
+
+            return Model()
+
+        def create_args():
+            return (torch.rand(5, 2, 2),)
+
+        def create_pytorch_only_extra_kwargs():
+            return {}
+
+        self._test_fake_tensor_mode_exporter(
+            "simple",
             create_model,
             create_args,
             create_pytorch_only_extra_kwargs,
