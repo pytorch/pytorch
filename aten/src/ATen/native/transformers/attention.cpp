@@ -733,13 +733,9 @@ _scaled_dot_product_flash_attention_cpu(
   at::Tensor philox_offset = Tensor();
   at::Tensor debug_attn_mask = Tensor();
 
-  auto q_t = query.transpose(1, 2);
-  auto k_t = key.transpose(1, 2);
-  auto v_t = value.transpose(1, 2);
-
   flash_attention_kernel(kCPU, output, logsumexp, cum_seq_q, cum_seq_k,
       max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
-      q_t, k_t, v_t, dropout_p, is_causal, return_debug_mask, scale);
+      query, key, value, dropout_p, is_causal, return_debug_mask, scale);
 
   output = output.transpose(1, 2);
   logsumexp = logsumexp.transpose(1, 2);
