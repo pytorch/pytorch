@@ -509,6 +509,8 @@ class FlatParamHandle:
         self._handle_index = None
         # Index in handles_to_pre_forward_order
         self._pre_forward_order_index = None
+        # Index in `handles_post_forward_order`
+        self._post_forward_index = None
 
         # NOTE: For the code path using this flag, we only skip calling
         # `_use_sharded_views()` and do not skip switching to the sharded flat

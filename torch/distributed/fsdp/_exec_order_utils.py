@@ -39,8 +39,6 @@ class _ExecOrderData:
         self.handles_pre_forward_order: List[FlatParamHandle] = []
         # Tracks the post-forward order for pre-backward prefetching
         self.handles_post_forward_order: List[FlatParamHandle] = []
-        # Maps each handles key to its index in `handles_post_forward_order`
-        self.handles_to_post_forward_order_index: Dict[FlatParamHandle, int] = {}
         self._iter = 0
 
         # Gives the max number of backward/forward prefetched all-gathers by a
@@ -99,9 +97,7 @@ class _ExecOrderData:
         prefetch given the current handles key. If there are no valid handles
         keys to prefetch, then this returns an empty :class:`list`.
         """
-        current_index = self.handles_to_post_forward_order_index.get(
-            current_handles_key, None
-        )
+        current_index = current_handles_key._post_forward_index
         if current_index is None:
             return None
         target_index = current_index - 1
@@ -148,10 +144,10 @@ class _ExecOrderData:
             return
         handles_key = handle
         # Only record the first usage of a handles key
-        if handles_key in self.handles_to_post_forward_order_index:
+        if handles_key._post_forward_index:
             return
         index = len(self.handles_post_forward_order)
-        self.handles_to_post_forward_order_index[handles_key] = index
+        handles_key._post_forward_index = index
         self.handles_post_forward_order.append(handles_key)
 
     def record_pre_forward(self, handle: FlatParamHandle, is_training: bool) -> None:
@@ -355,7 +351,6 @@ class _ExecOrderData:
         an iteration.
         """
         self._iter += 1
-        self.handles_to_post_forward_order_index.clear()
         self.handles_post_forward_order.clear()
         if self._checking_order:
             self.current_order_index = 0
