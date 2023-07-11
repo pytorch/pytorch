@@ -11,7 +11,6 @@ from weakref import WeakSet
 log = logging.getLogger(__name__)
 
 DEFAULT_LOG_LEVEL = logging.WARN
-DEFAULT_FORMAT = "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
 LOG_ENV_VAR = "TORCH_LOGS"
 
 
@@ -535,18 +534,22 @@ class TorchLogsFormatter(logging.Formatter):
                 artifact_name, None
             )
             if artifact_formatter is not None:
-                r = artifact_formatter.format(record)
-            else:
-                r = super().format(record)
-        else:
-            r = super().format(record)
+                return artifact_formatter.format(record)
 
+        record.message = record.getMessage()
+        record.asctime = self.formatTime(record, self.datefmt)
+
+        lines = record.message.split("\n")
+        record.rankprefix = ""
         if dist.is_available() and dist.is_initialized():
-            r = f"[rank{dist.get_rank()}]:{r}"
-        return r
+            record.rankprefix = f"[rank{dist.get_rank()}]:"
+        prefix = (
+            f"{record.rankprefix}[{record.asctime}] {record.name}: [{record.levelname}]"
+        )
+        return "\n".join(f"{prefix} {l}" for l in lines)
 
 
-DEFAULT_FORMATTER = TorchLogsFormatter(DEFAULT_FORMAT)
+DEFAULT_FORMATTER = TorchLogsFormatter()
 
 
 def _setup_handlers(create_handler_fn, log):
