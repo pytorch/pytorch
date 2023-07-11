@@ -234,6 +234,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
 
         # Used to maintain an alias between real values variable tracker for tensors we have seen.
+        # This map ensures that the only tensors in graph inputs, and the only tensors in guards are unique.
         self.real_value_tensor_positive_aliases: Dict[
             torch.Tensor, VariableTracker
         ] = {}

@@ -255,8 +255,6 @@ static int TensorGuards_init(
   checks.reserve(len);
   LocalState state;
 
-  // Every tensor in here in unique, they are not aliased, and we need to
-  // protect that.
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
     if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
@@ -264,7 +262,6 @@ static int TensorGuards_init(
       return -1;
     }
     auto tensor = THPVariable_Unpack(item);
-
     std::vector<std::optional<int64_t>> tensor_dims_size =
         per_tensor_dynamic_dims_sizes.size() == 0
         ? wrapIntegersInOptional(tensor.sizes())
@@ -297,6 +294,11 @@ PyObject* TensorGuards_check(TensorGuards* self, PyObject* args) {
   }
 
   LocalState state;
+  // Note - all the tensors that make it to guards must be unique. Dynamo
+  // builder handles guarding for positive aliases (X is Y). However, we do not
+  // create guards for negative alias (X is not Y) as that is an N^2
+  // relationship. Instead, we rely on the uniqueness upstream to verify, at
+  // check_fn time (this function).
   std::set<PyObject*> unique_tensors;
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
