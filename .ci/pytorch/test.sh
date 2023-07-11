@@ -368,7 +368,7 @@ test_perf_for_dashboard() {
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
         python "benchmarks/dynamo/$suite.py" \
-            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend aot_inductor --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
