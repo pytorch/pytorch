@@ -324,7 +324,7 @@ def process_jobs(
         warnings.warn(f"Invalid job name {job_name}, returning")
         return test_matrix
 
-    for _, record in download_json(url=url, headers={}).items():
+    for record in download_json(url=url, headers={}).values():
         (
             author,
             _,
