@@ -117,6 +117,12 @@ class TensorArgument:
 
 
 @dataclass
+class OptionalTensorArgument(_Union):
+    as_tensor: str
+    as_none: Tuple[()]
+
+
+@dataclass
 class GraphArgument:
     name: str
     graph: 'Graph'
@@ -144,6 +150,7 @@ class Argument(_Union):
     as_sym_bool: SymBoolArgument
     as_sym_bools: List[SymBoolArgument]
     as_graph: GraphArgument
+    as_optional_tensors: List[OptionalTensorArgument]
 
 
 @dataclass
