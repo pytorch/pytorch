@@ -9,10 +9,20 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+#include <type_traits>
 #include <ATen/OpMathType.h>
+
 namespace at::native {
 
 namespace {
+
+template <typename scalar_t>
+bool is_nan(scalar_t v) {
+  if (std::is_integral<scalar_t>::value || std::is_same<scalar_t, unsigned char>::value) {
+    return false;
+  }
+  return std::isnan(v);
+}
 
 template <typename scalar_t, typename opmath_t>
 inline
@@ -63,7 +73,7 @@ compute_internal(
           Vec maxval_vec = Vec::loadu(out_data + d2);
 
           // true = all ones, false = all zeros
-          Vec mask = (val_vec > maxval_vec) | val_vec.isnan();
+          Vec mask = (val_vec > maxval_vec) | is_nan_vec(val_vec);
           iVec imask = vec::cast<integer_t>(mask);
           Vec out_vec = Vec::blendv(maxval_vec, val_vec, mask);
           iVec ind_vec = iVec::blendv(maxindex_vec, index_vec, imask);
@@ -77,7 +87,7 @@ compute_internal(
           int64_t maxindex = ind[d2];
           scalar_t maxval = out_data[d2];
 
-          bool mask = (val > maxval) || std::isnan(val);
+          bool mask = (val > maxval) || is_nan(static_cast<double>(val));
           out_data[d2] = mask ? val : maxval;
           ind[d2] = mask ? index : maxindex;
         }
@@ -141,8 +151,8 @@ compute_internal(
           fVec maxval_fvec1 = fVec::loadu(max_ptr + d2 + fVec::size());
 
           // true = all ones, false = all zeros
-          fVec mask0 = (val_fvec0 > maxval_fvec0) | val_fvec0.isnan();
-          fVec mask1 = (val_fvec1 > maxval_fvec1) | val_fvec1.isnan();
+          fVec mask0 = (val_fvec0 > maxval_fvec0) | is_nan_vec(val_fvec0);
+          fVec mask1 = (val_fvec1 > maxval_fvec1) | is_nan_vec(val_fvec1);
           iVec imask0 = vec::cast<int32_t>(mask0);
           iVec imask1 = vec::cast<int32_t>(mask1);
 
@@ -265,13 +275,19 @@ void cpu_max_pool(
 
             // compute local max
             int64_t maxindex = id0 * input_height * input_width + ih0 * input_width + iw0;
-            opmath_t maxval = -std::numeric_limits<opmath_t>::infinity();
+            opmath_t maxval;
+            if (std::numeric_limits<opmath_t>::has_infinity) {
+              maxval = -std::numeric_limits<opmath_t>::infinity();
+            } else {
+              maxval = std::numeric_limits<opmath_t>::min();
+            }
+
             for (int64_t id = id0; id < id1; id += dilationD) {
               for (int64_t ih = ih0; ih < ih1; ih += dilationH) {
                 for (int64_t iw = iw0; iw < iw1; iw += dilationW) {
                   int64_t index = id * input_height * input_width + ih * input_width + iw;
                   opmath_t val = input_ptr[index];
-                  if ((val > maxval) || std::isnan(val)) {
+                  if ((val > maxval) || is_nan(static_cast<double>(val))) {
                     maxval = val;
                     maxindex = index;
                   }
@@ -297,6 +313,42 @@ void cpu_max_pool(
   }
 }
 
+template <typename scalar_t>
+vec::Vectorized<scalar_t> is_nan_vec(vec::Vectorized<scalar_t> vec) {
+  return vec.isnan();
+}
+
+// TODO: use is_integeral/is_same to check the scalar_t and simplify the implementation
+// currently it does not work
+template <>
+vec::Vectorized<unsigned char> is_nan_vec<unsigned char>(vec::Vectorized<unsigned char> vec) {
+  Vectorized<unsigned char> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<signed char> is_nan_vec<signed char>(vec::Vectorized<signed char> vec) {
+  Vectorized<signed char> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<short> is_nan_vec<short>(vec::Vectorized<short> vec) {
+  Vectorized<short> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<int> is_nan_vec<int>(vec::Vectorized<int> vec) {
+  Vectorized<int> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<int64_t> is_nan_vec<int64_t>(vec::Vectorized<int64_t> vec) {
+  Vectorized<int64_t> ret(false);
+  return ret;
+}
 
 template <typename scalar_t, bool is_3d>
 void cpu_max_pool_channels_last(
@@ -553,13 +605,13 @@ void max_pool2d_kernel_impl(
     int dilationW, int dilationH) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool2d", [&] {
+      AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool2d", [&] {
         cpu_max_pool<scalar_t, /*is 3d*/false>(output, indices, input, {kW, kH}, {dW, dH}, {padW, padH}, {dilationW, dilationH});
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool2d_channels_last", [&] {
+      AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool2d_channels_last", [&] {
         cpu_max_pool_channels_last<scalar_t, false>(output, indices, input, {kW, kH}, {dW, dH}, {padW, padH}, {dilationW, dilationH});
       });
       break;
@@ -592,7 +644,7 @@ void max_pool3d_kernel_impl(
       DimVector indices_sizes(indices.sizes().begin(), indices.sizes().end());
       indices_sizes.insert(indices_sizes.begin(), 1);
       indices.resize_(indices_sizes, at::MemoryFormat::ChannelsLast3d);
-      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool3d_channels_last", [&] {
+      AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool3d_channels_last", [&] {
         cpu_max_pool_channels_last<scalar_t, /*is 3d*/true>(output, indices, input_cl_check,
           {kW, kH, kD}, {dW, dH, dD}, {padW, padH, padD}, {dilationW, dilationH, dilationD});
       });
@@ -603,14 +655,14 @@ void max_pool3d_kernel_impl(
   }
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool3d", [&] {
+      AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool3d", [&] {
         cpu_max_pool<scalar_t, /*is 3d*/true>(output, indices, input,
             {kW, kH, kD}, {dW, dH, dD}, {padW, padH, padD}, {dilationW, dilationH, dilationD});
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast3d: {
-      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool3d_channels_last", [&] {
+      AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool3d_channels_last", [&] {
         cpu_max_pool_channels_last<scalar_t, true>(output, indices, input,
           {kW, kH, kD}, {dW, dH, dD}, {padW, padH, padD}, {dilationW, dilationH, dilationD});
       });
