@@ -48,8 +48,7 @@ You can get the full list of community backends by running :func:`~torch._dynamo
 Troubleshooting
 ---------------
 
-If you experience issues with models failing to compile, running out of memory, recompiling too often, not giving accurate results,
-are can find the right tool to solve your problem in one of our guides.
+If you experience issues with models failing to compile, running out of memory, recompiling too often, not giving accurate results, you might find the right tool to solve your problem in one of our guides.
 
 .. WARNING::
     A few features are still in development and not likely to work for most users. Please do not use these features
