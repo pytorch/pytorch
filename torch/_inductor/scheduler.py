@@ -787,7 +787,11 @@ class Scheduler:
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
         if config.multiple_streams:
-            stream_scheduler.stream_schedule(self.nodes)
+            ss_graph = stream_scheduler.stream_schedule(self.nodes)
+            # new_node_list = []
+            # for ssnode in ss_graph.final_order:
+            #     new_node_list.append(ssnode.original_node)
+            # self.nodes = new_node_list
 
         # used during codegen:
         self.current_device = None

@@ -214,6 +214,14 @@ class AllocateLine(MemoryPlanningLine):
         # if self has attribute user_streams, then it is used by multiple streams
         if hasattr(self, "user_streams"):
             need_cuda_event = False
+            if len(self.user_streams) > 1:
+                print(f"findhao-> buffer {self.node.get_name()} is used by multiple streams")
+            elif len(self.user_streams) == 1:
+                if self.user_streams[0] != 0:
+                    code.writeline(f"with torch.cuda.stream(stream{self.user_streams[0]}_raw):")
+                    with code.indent():
+                        code.writeline(line)
+                    return
             for user_stream in self.user_streams:
                 if user_stream != 0:
                     need_cuda_event = True
@@ -492,7 +500,7 @@ class WrapperCodeGen(CodeGen):
         stream_id = ssnode.stream_id
         kernel_IndentedBuffer = kernel_IndentedBuffer
         if stream_id != 0:
-            
+
             kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
             with kernel_IndentedBuffer.indent():
                 if isinstance(call_strs, list):

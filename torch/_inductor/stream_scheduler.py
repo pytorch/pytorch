@@ -1,7 +1,8 @@
+from os import environ
+from .virtualized import V
 import logging
 log = logging.getLogger(__name__)
-from .virtualized import V
-from os import environ
+
 
 def temporary_log_path(temp_log_path):
     # Store original configuration
@@ -24,7 +25,6 @@ def temporary_log_path(temp_log_path):
     return reset_log_path
 
 
-
 class SSNode:
     """
     Stream Scheduler Node is a wrapper of the original node. It contains the information of the original node and the information for stream scheduling.
@@ -39,12 +39,14 @@ class SSNode:
         cuda_event: mark if this node needs to generate a CUDA event. CUDA events are used to keep the data dependencies between streams.
         is_fused: mark if this node is a fused node.
     """
+
     def __init__(self, original_node) -> None:
         from .scheduler import NopKernelSchedulerNode
         self.successors = {}
         self.predecessors = {}
         self.name = original_node.get_name() if original_node else ""
         self.original_user_names = []
+        self.original_node = original_node
         self.to_output_node = False
         # -1 means not assigned
         self.stream_id = -1
@@ -65,7 +67,7 @@ class SSNode:
                     if user.name not in self.snode_names and user.name not in self.original_user_names:
                         if user.name != snode.get_name():
                             self.original_user_names.append(user.name)
-            
+
         else:
             self.is_fused = False
             if original_node is not None:
@@ -75,13 +77,16 @@ class SSNode:
                 for user in original_node.read_writes.reads:
                     if user.name != original_node.get_name():
                         self.original_user_names.append(user.name)
+
     def get_name(self):
         return self.name
+
+
 class SSGraph:
     """
     Stream Scheduler Graph records all the information for stream scheduling.
     Attributes:
-        ssnodes: [SSNode]. It records all the SSNodes in the graph.
+        ssnodes: [SSNode]. It records all the SSNodes in the graph. The order matters.
         name_mapping: {buf name: SSNode}. It records the mapping from the original node name to the SSNode. The names include scheduler node name and fused node. For example, buf4, buf5, and buf4_buf5 are all pointed to the same SSNode.
         reverse_level: {SSNode: level}. It records the levels back from the OUTPUT node. The level of OUTPUT node is 0. The level of the predecessors of OUTPUT node is 1. The level of the predecessors of the predecessors of OUTPUT node is 2. And so on.
         reverse_level_predecessors: {level: [SSNode]}. It records the predecessors of each level.
@@ -89,6 +94,7 @@ class SSGraph:
         stream_pool_size: how many extra CUDA streams used to allocate. TODO: it's better to use the max number of nodes in the same level in reverse_level
         stream_pool: [stream_index, ]. It records the CUDA streams used to allocate.
     """
+
     def __init__(self, nodes) -> None:
         self.ssnodes = []
         self.name_mapping = {}
@@ -98,6 +104,7 @@ class SSGraph:
         self.critical_path = []
         self.stream_pool_size = int(environ.get("STREAM_POOL_SIZE", 20))
         self.stream_pool = []
+        self.final_order = []
         self.build_graph(nodes)
         self.stream_scheduling()
 
@@ -112,15 +119,17 @@ class SSGraph:
             if new_ssnode.is_fused:
                 for snode in new_ssnode.snode_names:
                     self.name_mapping[snode] = new_ssnode
-        
+
         # clean the freed buffers
         for snode in self.ssnodes:
             for user in snode.original_user_names:
                 if user not in self.name_mapping:
-                    snode.original_user_names = [user for user in snode.original_user_names if user in self.name_mapping]
+                    snode.original_user_names = [
+                        user for user in snode.original_user_names if user in self.name_mapping]
                     break
         self.ssnodes.append(output_node)
         # breakpoint()
+
         def update_successor_predecessor(ssnode, user_names):
             for user in user_names:
                 user_ssnode = self.name_mapping[user]
@@ -152,7 +161,7 @@ class SSGraph:
                             tmp_queue.append(successor)
                         # Yueming TODO: This can be delayed.
                         tmp_queue.append(cur_node)
-                    break;
+                    break
             else:
                 first_successor = list(cur_node.successors.values())[0]
                 max_value = self.reverse_level[first_successor]
@@ -177,7 +186,7 @@ class SSGraph:
         #     if level > buf0_level:
         #         log.info(f"node {ssnode.get_name()} is in level {level}")
         cur_node = self.ssnodes[0]
-        while(cur_node.get_name() != "OUTPUT"):
+        while (cur_node.get_name() != "OUTPUT"):
             self.critical_path.append(cur_node)
             cur_node = self.reverse_level_predecessors[cur_node]
         self.critical_path.append(cur_node)
@@ -194,7 +203,7 @@ class SSGraph:
             self.stream_pool[min_stream] += 1
         return min_stream
 
-    def dig_node(self, cur_node:SSNode):
+    def dig_node(self, cur_node: SSNode):
         """
         use DFS to assign the stream_id to each node.
         """
@@ -232,7 +241,37 @@ class SSGraph:
         self.stream_pool[0] = len(self.ssnodes) + 2
         self.dig_node(self.ssnodes[0])
         self.event_assign()
-    
+
+    def dfs_search(self, cur_node: SSNode):
+        # sort the predecessors by their stream_id and sort from large to small
+        if len(cur_node.predecessors) != 0:
+            sorted_predecessors = sorted(cur_node.predecessors.values(), key=lambda x: x.stream_id, reverse=True)
+            for predecesor in sorted_predecessors:
+                if predecesor not in self.final_order:
+                    self.dfs_search(predecesor)
+        if cur_node not in self.final_order:
+            self.final_order.append(cur_node)
+        if len(cur_node.successors) != 0:
+            sorted_successors = sorted(cur_node.successors.values(), key=lambda x: x.stream_id, reverse=True)
+            if self.name_mapping["OUTPUT"] in sorted_successors:
+                sorted_successors.remove(self.name_mapping["OUTPUT"])
+                sorted_successors.append(self.name_mapping["OUTPUT"])
+            
+            for successor in sorted_successors:
+                if successor not in self.final_order:
+                    self.dfs_search(successor)
+    """
+    For current global order, the nodes off the critical path are usually the adjacent nodes before the next common successor. It will block the critical path if we don't reorder them.
+    """
+
+    def reorder(self):
+        self.dfs_search(self.ssnodes[0])
+        self.final_order.remove(self.name_mapping["OUTPUT"])
+        log.info("=====findhao debug final order=====")
+        for node in self.final_order:
+            log.info(node.get_name())
+        log.info("=====findhao debug final order=====")
+
     def print_graph(self):
         import datetime
         current_time = datetime.datetime.now().strftime("%Y%m%d%H%M")
@@ -254,7 +293,7 @@ class SSGraph:
                 log.info(tmp_str)
         log.info("=====findhao debug end=====")
         log.info("=====findhao debug reverse level=====")
-        
+
         for node in self.reverse_level.keys():
             log.info(f"{node.get_name()} {self.reverse_level[node]}")
             # also print the predecessors
@@ -282,12 +321,12 @@ class SSGraph:
             log.info(f"{node.get_name()} {node.stream_id} {event_str}")
         log.info("=====findhao debug stream allocation end=====")
 
-
         reset_log_path()
 
 
 def stream_schedule(snodes):
     ssgraph = SSGraph(snodes)
+    ssgraph.reorder()
     import os
     if os.getenv("TORCHINDUCTOR_STREAM_PRINT_GRAPH", "0") == "1":
         ssgraph.print_graph()
