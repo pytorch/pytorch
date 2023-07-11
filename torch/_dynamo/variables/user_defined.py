@@ -1,5 +1,7 @@
 import collections
 import contextlib
+
+import dataclasses
 import functools
 import importlib
 import inspect
@@ -12,7 +14,7 @@ from typing import Dict, List
 import torch.nn
 
 from .. import variables
-from ..allowed_functions import is_allowed
+from ..allowed_functions import is_allowed, is_builtin_callable
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
@@ -152,6 +154,54 @@ class UserDefinedClassVariable(UserDefinedVariable):
             ):
                 tx.output.side_effects.store_attr(
                     var, "__call_nn_module_init", variables.ConstantVariable(True)
+                )
+                return var
+            elif dataclasses.is_dataclass(self.value):
+                user_cls = self.value
+
+                keys = [f.name for f in dataclasses.fields(user_cls)]
+                bound = inspect.signature(user_cls).bind(*args, **kwargs)
+                bound.apply_defaults()
+                assert set(bound.arguments.keys()) == set(keys)
+                items = collections.OrderedDict()
+
+                init_freevars = user_cls.__init__.__code__.co_freevars
+                init_closure = user_cls.__init__.__closure__ or ()
+                defaults_map = {}
+                for name, cell in zip(init_freevars, init_closure):
+                    defaults_map[name] = cell.cell_contents
+
+                for key in keys:
+                    val = bound.arguments[key]
+                    if isinstance(val, VariableTracker):
+                        items[key] = val
+                    elif isinstance(val, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+                        # This indicates that dataclass has a default factory
+                        # function for a field. We can look at the defaults map
+                        # to find the factory fn.
+                        dataclass_default_prefix = "_dflt_"
+                        default_key = dataclass_default_prefix + key
+                        assert default_key in defaults_map
+                        default_val = defaults_map[default_key]
+                        if is_builtin_callable(default_val):
+                            items[key] = variables.BuiltinVariable(
+                                default_val
+                            ).call_function(tx, (), {})
+                        else:
+                            unimplemented(
+                                "unsupport default factory fn for dataclasses"
+                            )
+                    elif variables.ConstantVariable.is_literal(val):
+                        items[key] = variables.ConstantVariable(val)
+                    else:
+                        unimplemented("Unknown field for dataclass")
+
+                var.value.__init__(**items)
+
+                # for name, value in items.items():
+                #     setattr(var.value, name, value)
+                tx.output.side_effects.store_attr(
+                    var, "__dataclass_init", variables.ConstantVariable(True)
                 )
                 return var
             else:
@@ -402,7 +452,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
-        if isinstance(subobj, property):
+        if isinstance(subobj, VariableTracker):
+            return subobj
+        elif isinstance(subobj, property):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source, **options
             ).call_function(tx, [], {})
