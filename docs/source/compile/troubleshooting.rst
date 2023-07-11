@@ -717,8 +717,8 @@ File an Issue
 If you experience problems with TorchDynamo, `file a GitHub
 issue <https://github.com/pytorch/torchdynamo/issues>`__.
 
-Before filing an issue, read over the `README <../README.md>`__,
-`TROUBLESHOOTING <./TROUBLESHOOTING.md>`__, and search for similar
+Before filing an issue, read over the `README <.../README.md>`__,
+`TROUBLESHOOTING <./TROUBLESHOOTING.rst>`__, and search for similar
 issues.
 
 When filing an issue, include the information about your
