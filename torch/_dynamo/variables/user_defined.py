@@ -133,11 +133,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.NamedTupleVariable(
                 items, self.value, **VariableTracker.propagate(self, items)
             )
-        elif variables.DataClassVariable.is_matching_cls(self.value):
-            options["mutable_local"] = MutableLocal()
-            return variables.DataClassVariable.create(
-                tx, self.value, args, kwargs, options
-            )
         elif (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
             and SideEffects.cls_supports_mutation_side_effects(self.value)
@@ -161,6 +156,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return var
             else:
                 return var.add_options(var.call_method(tx, "__init__", args, kwargs))
+        elif variables.DataClassVariable.is_matching_cls(self.value):
+            options["mutable_local"] = MutableLocal()
+            return variables.DataClassVariable.create(self.value, args, kwargs, options)
 
         return super().call_function(tx, args, kwargs)
 

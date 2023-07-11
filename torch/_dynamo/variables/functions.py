@@ -1,4 +1,5 @@
 import abc
+import dataclasses
 import enum
 import functools
 import inspect
@@ -42,7 +43,9 @@ def wrap_bound_arg(tx, val, options, source=None):
             **options,
         )
 
-    if variables.ConstantVariable.is_literal(val) or istype(
+    if source is None and isinstance(val, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+        return variables.UserDefinedObjectVariable(val)
+    elif variables.ConstantVariable.is_literal(val) or istype(
         val, (torch.Size, torch.device, torch.dtype)
     ):
         return variables.ConstantVariable(val, **options)
@@ -269,7 +272,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     result[name] = out
 
                 else:
-                    unimplemented("inline with __closure__")
+                    val = cell.cell_contents
+                    if isinstance(val, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+                        result[name] = variables.UserDefinedObjectVariable(val)
+                    elif is_builtin_callable(val):
+                        result[name] = variables.BuiltinVariable(val)
+                    else:
+                        unimplemented("inline with __closure__")
 
         return result, closure_cells
 

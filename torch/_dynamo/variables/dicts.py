@@ -9,7 +9,6 @@ import torch
 from torch.utils import _pytree as pytree
 
 from .. import variables
-from ..allowed_functions import is_builtin_callable
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
@@ -309,27 +308,27 @@ class DataClassVariable(ConstDictVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _patch_once():
-        has_transformers = True
-        try:
-            from transformers.file_utils import ModelOutput
-        except ImportError:
-            has_transformers = False
+        from transformers.file_utils import ModelOutput
 
-        if has_transformers:
-            for obj in ModelOutput.__dict__.values():
-                if callable(obj):
-                    skip_code(obj.__code__)
+        for obj in ModelOutput.__dict__.values():
+            if callable(obj):
+                skip_code(obj.__code__)
 
     @staticmethod
     def is_matching_cls(cls):
-        return dataclasses.is_dataclass(cls)
+        try:
+            from transformers.file_utils import ModelOutput
+
+            return issubclass(cls, ModelOutput)
+        except ImportError:
+            return False
 
     @classmethod
     def is_matching_object(cls, obj):
         return cls.is_matching_cls(type(obj))
 
     @classmethod
-    def create(cls, tx, user_cls, args, kwargs, options):
+    def create(cls, user_cls, args, kwargs, options):
         DataClassVariable._patch_once()
 
         skip_code(user_cls.__init__.__code__)
@@ -338,15 +337,6 @@ class DataClassVariable(ConstDictVariable):
         bound.apply_defaults()
         assert set(bound.arguments.keys()) == set(keys)
         items = collections.OrderedDict()
-
-        # For default values as factory functions, there are sitting in a
-        # init_closure environment
-        init_freevars = user_cls.__init__.__code__.co_freevars
-        init_closure = user_cls.__init__.__closure__ or ()
-        defaults_map = {}
-        for name, cell in zip(init_freevars, init_closure):
-            defaults_map[name] = cell.cell_contents
-
         for key in keys:
             val = bound.arguments[key]
             if isinstance(val, VariableTracker):
@@ -356,26 +346,7 @@ class DataClassVariable(ConstDictVariable):
                     assert variables.ConstantVariable.is_literal(val)
                     items[key] = variables.ConstantVariable(val)
                 else:
-                    if isinstance(val, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
-                        # This indicates that dataclass has a default factory
-                        # function for a field. We can look at the defaults map
-                        # to find the factory fn.
-                        dataclass_default_prefix = "_dflt_"
-                        default_key = dataclass_default_prefix + key
-                        assert default_key in defaults_map
-                        default_val = defaults_map[default_key]
-                        if is_builtin_callable(default_val):
-                            items[key] = variables.BuiltinVariable(
-                                default_val
-                            ).call_function(tx, (), {})
-                        else:
-                            unimplemented(
-                                "unsupport default factory fn for dataclasses"
-                            )
-                    elif variables.ConstantVariable.is_literal(val):
-                        items[key] = variables.ConstantVariable(val)
-                    else:
-                        assert val is None, f"unexpected {val}"
+                    assert val is None, f"unexpected {val}"
 
         if len(items) == 1 and not isinstance(items[keys[0]], variables.TensorVariable):
             unimplemented("DataClassVariable iterator constructor")
@@ -443,14 +414,6 @@ class DataClassVariable(ConstDictVariable):
             return variables.TupleVariable(list(self.items.values()), **options)
         elif name == "__setattr__":
             name = "__setitem__"
-        elif hasattr(self.user_cls, name):
-            # Inline methods on Dataclass variable
-            return variables.UserMethodVariable(
-                getattr(self.user_cls, name),
-                self,
-                **options,
-            ).call_function(tx, args, kwargs)
-
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
