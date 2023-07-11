@@ -211,7 +211,7 @@ std::unordered_map<KeyType, std::pair<cudnn_frontend::ExecutionPlan, typename st
 // no mutexes here as caches are now thread local for v8, can also return a pointer
 // to the Execution Plan if we know it will not be invalidated by another thread
 cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
-  int lru_cache_limit = getLRUCacheLimit();
+  const int lru_cache_limit = getLRUCacheLimit();
   if (lru_cache_limit < 0) {
     return nullptr;
   }
