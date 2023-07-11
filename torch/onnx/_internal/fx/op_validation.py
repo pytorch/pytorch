@@ -97,13 +97,7 @@ def validate_op_between_ort_torch(
                 fill_defaults=False,
                 allow_extra_kwargs=True,
             )
-            # NOTE: Apply args/kwargs preprocessing AFTER they are split
-            function_args = [
-                _convert_tensor_to_numpy(x)
-                if isinstance(x, (torch.Tensor, torch.dtype, list, tuple))
-                else x
-                for x in onnx_args
-            ]
+            # NOTE: Apply kwargs preprocessing AFTER they are split
             function_kwargs = (
                 fx_onnx_interpreter.filter_incompatible_and_dtype_convert_kwargs(
                     onnx_kwargs
@@ -119,7 +113,7 @@ def validate_op_between_ort_torch(
             diagnostic.level = diagnostics.levels.WARNING
             return
         try:
-            ort_outputs = symbolic_fn(*function_args, **function_kwargs)
+            ort_outputs = symbolic_fn(*onnx_args, **function_kwargs)
         except RuntimeError as runtime_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
@@ -296,12 +290,12 @@ def _tag_arguments_with_param_schemas(
             args = []
             continue
         if i < len(args):
-            if param.is_input:
+            if param.is_input or isinstance(args[i], torch.dtype):
                 tagged_args.append(_convert_tensor_to_numpy(args[i]))
             else:
                 tagged_args.append(args[i])
         elif param.name in kwargs:
-            if param.is_input:
+            if param.is_input or isinstance(kwargs[param.name], torch.dtype):
                 tagged_kwargs[param.name] = _convert_tensor_to_numpy(kwargs[param.name])
             else:
                 tagged_kwargs[param.name] = kwargs[param.name]
