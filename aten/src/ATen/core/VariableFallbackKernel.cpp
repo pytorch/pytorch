@@ -27,36 +27,49 @@ namespace {
 // NB: But not the private use ones; maybe the extension wants
 // to override it themselves!
 
+static void redispatchAutograd(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet dispatch_keys,
+    torch::jit::Stack* stack) {
+  op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
+}
+
+static torch::CppFunction autogradRedispatchFallback() {
+  return torch::CppFunction::makeFromBoxedFunction<&redispatchAutograd>();
+}
+
+#define AUTOGRAD_FALLBACK autogradRedispatchFallback()
+
 TORCH_LIBRARY_IMPL(_, AutogradOther, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(AUTOGRAD_FALLBACK);
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradCPU, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(AUTOGRAD_FALLBACK);
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradXPU, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(AUTOGRAD_FALLBACK);
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradCUDA, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(AUTOGRAD_FALLBACK);
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradXLA, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(AUTOGRAD_FALLBACK);
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradLazy, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(AUTOGRAD_FALLBACK);
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradMPS, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(AUTOGRAD_FALLBACK);
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradMeta, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(AUTOGRAD_FALLBACK);
 }
 
 // see Note [ADInplaceOrView key]
@@ -65,7 +78,9 @@ TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradHPU, m) {
-  m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(AUTOGRAD_FALLBACK);
 }
+
+#undef AUTOGRAD_FALLBACK
 
 }
