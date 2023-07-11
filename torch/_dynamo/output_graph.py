@@ -68,6 +68,7 @@ from .utils import (
     graph_break_reasons,
     lazy_format_graph_code,
     lazy_format_graph_tabular,
+    LazyString,
     nnmodule_doc_url_msg,
     nnmodule_has_hooks,
     same,
@@ -841,7 +842,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
 
-    def log_graph_sizes(self, name):
+    def get_graph_sizes_log_str(self, name):
         graph_sizes_str = "TRACED GRAPH TENSOR SIZES\n"
         graph_sizes_str += f"===== {name} =====\n"
         for node in self.graph.nodes:
@@ -864,7 +865,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         graph_sizes_str += (
                             f"{node.name} (concrete): {tuple(concrete_size)}\n"
                         )
-        graph_sizes_log.debug(graph_sizes_str)
+        return graph_sizes_str
 
     @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
@@ -898,8 +899,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
-        if torch._logging._internal.log_state.is_artifact_enabled("graph_sizes"):
-            self.log_graph_sizes(name)
+        graph_sizes_log.debug(
+            "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
+        )
 
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
@@ -1147,18 +1149,21 @@ class SubgraphTracer(fx.Tracer):
         tx = self.output_graph.current_tx
 
         # log detailed location of line of code in 3.11
-        if (
-            torch._logging._internal.log_state.is_artifact_enabled("trace_call")
-            and sys.version_info >= (3, 11)
-            and kind in ("call_function", "call_method", "call_module")
+        if sys.version_info >= (3, 11) and kind in (
+            "call_function",
+            "call_method",
+            "call_module",
         ):
             cur_inst = tx.current_instruction
             if cur_inst is not self.prev_inst and cur_inst.positions.lineno is not None:
-                line = get_instruction_source_311(tx.f_code, cur_inst).rstrip()
+                tx_code = tx.f_code
                 header = tx.get_line_of_code_header(lineno=cur_inst.positions.lineno)
-                trace_call_log.debug(
-                    "TRACE call %s from %s\n%s", rv.node.name, header, line
-                )
+
+                def get_trace_call_log_str():
+                    line = get_instruction_source_311(tx_code, cur_inst).rstrip()
+                    return f"TRACE FX call {rv.node.name} from {header}\n{line}"
+
+                trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
                 self.prev_inst = cur_inst
 
         nn_module_stack = tx.nn_module_stack

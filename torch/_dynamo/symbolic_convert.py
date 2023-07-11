@@ -62,6 +62,7 @@ from .utils import (
     get_instruction_source_311,
     graph_break_dup_warning_checker,
     istype,
+    LazyString,
     proxy_args_kwargs,
 )
 from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
@@ -612,13 +613,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
         return f"{self.f_code.co_name} {self.f_code.co_filename}:{lineno}{inline_depth_str}"
 
-    def log_starts_line(self):
-        if not torch._logging._internal.log_state.is_artifact_enabled("trace_source"):
-            return
+    def get_log_starts_line_log_str(self):
         log_str = f"TRACE starts_line {self.get_line_of_code_header()}\n"
         line = linecache.getline(self.f_code.co_filename, self.lineno).rstrip()
         log_str += f"    {line}"
-        trace_source_log.debug(log_str)
+        return log_str
+
+    def log_starts_line(self):
+        trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
@@ -2238,15 +2240,16 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # with a single alias
         if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
-        if torch._logging._internal.log_state.is_artifact_enabled(
-            "trace_call"
-        ) and sys.version_info >= (3, 11):
+        if sys.version_info >= (3, 11):
             cur_inst = parent.current_instruction
-            line = get_instruction_source_311(parent.f_code, cur_inst).rstrip()
+            parent_code = parent.f_code
             header = parent.get_line_of_code_header(lineno=cur_inst.positions.lineno)
-            trace_call_log.debug(
-                "TRACE inlined call %s from %s\n%s", code.co_name, header, line
-            )
+
+            def get_trace_call_log_str():
+                line = get_instruction_source_311(parent_code, cur_inst).rstrip()
+                return f"TRACE inlined call {code.co_name} from {header}\n{line}"
+
+            trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s", code, suffix)
 
         tracer: InliningInstructionTranslator
