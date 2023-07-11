@@ -482,6 +482,11 @@ class TracingContext:
         # this is only set after aot_autograd
         self.fw_metadata = None
         self.params_flat = None
+        # this is for extended return calling convention from backend
+        # compiler to aot_autograd
+        # Per output, what the compiler specified stride of the output is,
+        # or None if no stride is known
+        self.output_strides: Optional[List[Optional[List[int]]]] = None
 
     @staticmethod
     def extract_stack():
@@ -519,6 +524,20 @@ class TracingContext:
             yield
         finally:
             tc.frame_summary_stack.pop()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def report_output_strides():
+        tc = TracingContext.get()
+        if tc is None:
+            yield None
+            return
+        old_output_strides = tc.output_strides
+        tc.output_strides = []
+        try:
+            yield tc.output_strides
+        finally:
+            tc.output_strides = old_output_strides
 
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):
