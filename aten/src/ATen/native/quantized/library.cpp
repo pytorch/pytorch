@@ -264,5 +264,4 @@ TORCH_LIBRARY(onednn, m) {
 
   // Conv2D with binary postop
   m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv2d_pointwise.binary(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str binary_attr, Scalar? alpha, str? unary_attr, Scalar?[] unary_scalars, str? unary_algorithm) -> Tensor"));
-  m.def(TORCH_SELECTIVE_SCHEMA("onednn::dynamic_quant_qconv.tensor(Tensor x, float x_scale, int x_zero_point, Tensor prepacked_w, Tensor w_scale, Tensor w_zero_point, int w_axis, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed,  int[] output_padding, int groups) -> Tensor"));
 }
