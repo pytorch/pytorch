@@ -168,10 +168,11 @@ def _validate_frozen_params(
                         " We do not recommend wrapping such modules since "
                         "the gradient memory usage will be higher than expected "
                         f"({total_param_numel} numel instead of {nonfrozen_param_numel} numel "
-                        "before sharding via reduce-scatter).\n"
+                        "before sharding via reduce-scatter). "
                     )
                 else:
-                    msg += " FSDP does not support wrapping such modules when use_orig_params=False.\n"
+                    msg += " FSDP does not support wrapping such modules when use_orig_params=False. "
+                msg += "If possible, wrap the frozen parameters with FSDP separately.\n"
                 msg += (
                     f"The following parameters have requires_grad=True:\n{nonfrozen_param_fqns}\n"
                     f"The following parameters have requires_grad=False:\n{frozen_param_fqns}"
