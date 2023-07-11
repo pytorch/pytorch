@@ -1,4 +1,9 @@
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/mm.h>
+#endif
+
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 
