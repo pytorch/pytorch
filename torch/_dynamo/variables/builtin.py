@@ -1120,6 +1120,11 @@ class BuiltinVariable(VariableTracker):
                 and obj.is_buffer(tx, name_var)
                 and SideEffects.cls_supports_mutation_side_effects(obj.module_type)
             ):
+                # This guard checks that the names of the buffers remain intact
+                obj.guards.add(
+                    obj.source.make_guard(GuardBuilder.NN_MODULE_BUFFER_NAMES)
+                )
+
                 # Its a buffer, so we can mutate the buffer in the graph module itself
                 name = name_var.value
                 buffer_var = obj.var_getattr(tx, name)

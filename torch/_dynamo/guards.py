@@ -445,6 +445,18 @@ class GuardBuilder(GuardBuilderBase):
     def WEAKREF_ALIVE(self, guard):
         self._produce_guard_code(guard, [f"{self.arg_ref(guard)} is not None"])
 
+    def NN_MODULE_BUFFER_NAMES(self, guard):
+        ref = self.arg_ref(guard)
+        value = self.get(guard.name)
+        t = type(value)
+        keys = {k for k, v in value.named_buffers()}
+
+        code = list()
+        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+        if keys:
+            code.append(f"{{k for k, v in {ref}.named_buffers()}} == {keys!r}")
+        self._produce_guard_code(guard, code)
+
     def NN_MODULE_PARAM_NAMES(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
@@ -453,8 +465,8 @@ class GuardBuilder(GuardBuilderBase):
 
         code = list()
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
-
+        if keys:
+            code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
         self._produce_guard_code(guard, code)
 
     def ODICT_KEYS(self, guard):
