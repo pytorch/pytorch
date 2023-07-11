@@ -882,7 +882,11 @@ class TestOptim(TestCase):
             optimizer.step()
 
     def test_peak_mem_multi_tensor_optimizers(self):
-        configs = [(o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ == "Adam"]
+        configs = [
+            (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
+                "Adam", "AdamW"
+            ]
+        ]
         self._test_foreach_memory(configs)
 
     @property
