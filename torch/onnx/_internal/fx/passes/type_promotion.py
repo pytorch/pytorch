@@ -255,7 +255,7 @@ class ReductionTypePromotionRule(TypePromotionRule):
         Args:
             namespace: Namespace of the op. E.g. 'aten' in 'torch.ops.aten.sum'.
             op_name: Name of the op. E.g. 'sum' in 'torch.ops.aten.sum'.
-            promotion_kind: Type promotion kind. Checkout _prims_common.reduction_dtypes for explanation.
+            promotion_kind: Type promotion kind. Refer to [_prims_common.reduction_dtypes]((https://github.com/pytorch/pytorch/blob/main/torch/_prims_common/__init__.py)) for detail.  # noqa: B950
         """
         super().__init__(namespace, op_name)
         self.promotion_kind = promotion_kind

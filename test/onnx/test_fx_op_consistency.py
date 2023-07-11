@@ -140,7 +140,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "square",
         "sum",
         "unflatten",
-        "var_mean",
+        # "var_mean",  # Segfault during onnx shape inference. Need to bump onnx version.
         "vstack",  # aten::cat is invoked instead
     ]
 )
