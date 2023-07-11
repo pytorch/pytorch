@@ -187,13 +187,14 @@ class ModuleWrapPolicy(_FSDPPolicy):
     using the kwargs passed to the root.
     """
 
-    def __init__(self, module_classes: Set[Type[nn.Module]]):
+    def __init__(self, module_classes: Iterable[Type[nn.Module]]):
+        module_classes_set = set(module_classes)
         self._policy: Callable = functools.partial(
             _module_wrap_policy,
-            module_classes=module_classes,
+            module_classes=module_classes_set,
         )
-        self._module_classes = module_classes
-        self._module_classes_str = str(module_classes)
+        self._module_classes = module_classes_set
+        self._module_classes_str = str(module_classes_set)
 
     def run_policy(
         self,
