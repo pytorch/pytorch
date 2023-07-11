@@ -14,6 +14,7 @@ import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
+from .functions import CleanDiv, FloorDiv, ModularIndexing
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -21,10 +22,12 @@ import torch
 
 @functools.lru_cache(None)
 def handlers():
-    from torch._inductor.ir import CleanDiv
-    from torch.fx.experimental.symbolic_shapes import FloorDiv, Pow, TrueDiv
+    from torch.fx.experimental.symbolic_shapes import Pow, TrueDiv
 
-    # TODO: CeilDiv, ModularIndexing
+    # TODO add CeilDiv (it doesn't appear in the index_expr)
+
+    # TODO default to some decompositions if the interpreter doesn't have them
+    # like decomposing ModularIndexing or implementing Le(a,b) as Ge(b, a)
 
     HANDLERS = {
         sympy.Or: "or_",
@@ -37,7 +40,7 @@ def handlers():
         sympy.Ge: "ge",
         sympy.Not: "not_",
         TrueDiv: "truediv",
-        FloorDiv: "div",
+        FloorDiv: "floordiv",
         CleanDiv: "div",
         sympy.Add: "add",
         sympy.Mul: "mul",
@@ -51,6 +54,7 @@ def handlers():
         sympy.ceiling: "ceil",
         sympy.Min: "minimum",
         sympy.Max: "maximum",
+        ModularIndexing: "modular_indexing",
     }
     return HANDLERS
 
