@@ -1162,8 +1162,6 @@ class TritonKernel(Kernel):
                 self.size_map = size_map
 
             def __call__(self):
-                # The conditions need to be in parens because of Python's operator precedence.
-                # It'd be less # error-prone to use and/or/not, which is suported by triton
                 size, size_str = self.size_map[(self.var, self.mask)]
 
                 assert_min = (var.bounds.lower < 0) == sympy.true
@@ -1210,18 +1208,6 @@ class TritonKernel(Kernel):
                     else f"({' & '.join(str(v) for v in mask_vars)})"
                 )
 
-            # TODO test here how well are we doing with the value range analysis
-            # see if we can manage to detect all the constants by looking at lower == upper
-
-            # tl.device_assert doesn't work for constexpr values, and we can't
-            # tell from here if a var is constexpr or not, so promote everything
-            var = self.cse.generate(
-                self.compute,
-                f"triton_helpers.promote_to_tensor({var})",
-                bounds=var.bounds,
-            )
-
-            # An assertion line may have been written already, if so just
             # update the max size.
             map_key = (var, mask)
             existing_size, _ = self.indirect_max_sizes.get(map_key, (None, None))
@@ -1233,10 +1219,7 @@ class TritonKernel(Kernel):
                     IndirectAssertLine(line, var, mask, self.indirect_max_sizes)
                 )
 
-            self.indirect_max_sizes[map_key] = (
-                size,
-                texpr(self.rename_indexing(self.codegen_indexing(size))),
-            )
+            self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
 
         return sympy_symbol(str(var))
 
