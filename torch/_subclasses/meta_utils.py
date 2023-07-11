@@ -392,11 +392,32 @@ class MetaConverter:
                 else:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides, storage_offset = sym_sizes_strides_storage_offset(t)
-                    r = callback(
-                        lambda: torch.empty_strided(
-                            sizes, strides, dtype=t.dtype, device="meta"
+
+                    # If we have a subclass that desugars into dense tensors,
+                    # perform our callback on each inner tensor.
+                    if supports_mode_tracing(t):
+
+                        def empty_create(inner_t):
+                            is_leaf = safe_is_leaf(inner_t)
+                            (
+                                sizes,
+                                strides,
+                                storage_offset,
+                            ) = sym_sizes_strides_storage_offset(inner_t)
+                            return torch.empty_strided(
+                                sizes, strides, dtype=inner_t.dtype, device="meta"
+                            )
+
+                        r = transform_subclass(
+                            t,
+                            lambda inner: callback(lambda: empty_create(inner)),
                         )
-                    )
+                    else:
+                        r = callback(
+                            lambda: torch.empty_strided(
+                                sizes, strides, dtype=t.dtype, device="meta"
+                            )
+                        )
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = t.requires_grad
@@ -456,8 +477,20 @@ class MetaConverter:
                             in_kernel_invocation_manager,
                         )
 
-                        if isinstance(r, FakeTensor):
-                            maybe_fake_mgr = in_kernel_invocation_manager(r.fake_mode)
+                        def maybe_get_fake_mode(t):
+                            if isinstance(t, FakeTensor):
+                                return t.fake_mode
+                            if supports_mode_tracing(t):
+                                inner_tensors, _ = t.__tensor_flatten__()
+                                modes = [maybe_get_fake_mode(x) for x in inner_tensors]
+                                m = modes[0]
+                                assert all(m is x for x in modes)
+                                return m
+                            return None
+
+                        mb_fake_mode = maybe_get_fake_mode(r)
+                        if mb_fake_mode is not None:
+                            maybe_fake_mgr = in_kernel_invocation_manager(mb_fake_mode)
                         with maybe_fake_mgr, torch.no_grad():
                             r.set_(r_s, storage_offset, sizes, strides)
 
@@ -499,6 +532,7 @@ class MetaConverter:
             type(t) is torch.Tensor
             or type(t) is torch.nn.Parameter
             or (ignore_subclass and isinstance(t, torch.Tensor))
+            or supports_mode_tracing(t)
             or isinstance(t, FakeTensor)
         ):
             if t.device.type != "xla" and any(
@@ -547,14 +581,6 @@ class MetaConverter:
                     r._is_param = True
                 return r
         elif torch.overrides.is_tensor_like(t):
-            if supports_mode_tracing(t):
-                out = transform_subclass(
-                    t,
-                    lambda t: self.meta_tensor(
-                        t, shape_env=shape_env, callback=callback, source=source
-                    ),
-                )
-                return out
             self.miss += 1
             return NotImplemented
         else:

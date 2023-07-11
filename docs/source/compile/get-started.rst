@@ -36,9 +36,9 @@ CUDA graphs help eliminate the overhead from launching individual
 kernels from a Python program which is especially relevant for newer GPUs.
 
 TorchDynamo supports many different backends but inductor specifically works
-by generating `Triton <https://github.com/openai/triton>`__ kernels and
-we can inspect them by running ``TORCH_COMPILE_DEBUG=1 python trig.py``
-with the actual generated kernel being
+by generating `Triton <https://github.com/openai/triton>`__ kernels. Suppose our example above
+was called ``trig.py`` we can inspect the code generated triton kernels by
+running ``TORCH_COMPILE_DEBUG=1 python trig.py`` with the actual generated kernel being
 
 .. code-block:: python
 
@@ -47,16 +47,17 @@ with the actual generated kernel being
    def kernel(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr):
        xnumel = 10000
        xoffset = tl.program_id(0) * XBLOCK
-       xindex = xoffset + tl.reshape(tl.arange(0, XBLOCK), [XBLOCK])
+       xindex = xoffset + tl.arange(0, XBLOCK)[:]
        xmask = xindex < xnumel
        x0 = xindex
        tmp0 = tl.load(in_ptr0 + (x0), xmask)
-       tmp1 = tl.sin(tmp0)
-       tmp2 = tl.sin(tmp1)
-       tl.store(out_ptr0 + (x0 + tl.zeros([XBLOCK], tl.int32)), tmp2, xmask)
+       tmp1 = tl.cos(tmp0)
+       tmp2 = tl.sin(tmp0)
+       tmp3 = tmp1 + tmp2
+       tl.store(out_ptr0 + (x0), tmp3, xmask)
 
-And you can verify that fusing the two ``sin`` did actually occur
-because the two ``sin`` operations occur within a single Triton kernel
+And you can verify that fusing the ``cos`` and ``sin`` did actually occur
+because the ``cos`` and ``sin`` operations occur within a single Triton kernel
 and the temporary variables are held in registers with very fast access.
 
 You can read up a lot more on Triton’s performance

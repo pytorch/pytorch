@@ -2767,14 +2767,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 torch._guards.TracingContext.get().fw_metadata = fw_metadata
 
 
-            # the compiler need to use this field to find the original modol outputs
-            # from the AOTAutograd fwd module's outputs. Thus compiler can make sure
-            # optimizations like layout optimization does not change those tensors'
-            # layout.
-            # TODO once https://github.com/pytorch/pytorch/pull/100652/files#r1212002707 is in
-            # change to access fw_metadata from the global tracing context.
-            fw_module.meta["original_output_start_index"] = fw_metadata.num_mutated_inputs
-
             compiled_fw_func = aot_config.fw_compiler(
                 fw_module, adjusted_flat_args
             )
@@ -2807,12 +2799,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             )
 
             num_outputs = CompiledFunction.metadata.num_outputs
-            num_outputs_aliased_to_inputs = (
-                CompiledFunction.metadata.num_outputs_aliased_to_inputs
-            )
-            num_outputs_aliased_to_intermediates = (
-                CompiledFunction.metadata.num_outputs_aliased_to_intermediates
-            )
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
@@ -2987,10 +2973,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # Add the seed and offset to args
                 rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
-            all_args = (
-                list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args) + list(rng_args)
-            )
-
+            all_args = [
+                *ctx.symints,
+                *ctx.saved_tensors,
+                *contiguous_args,
+                *rng_args
+            ]
             del contiguous_args
 
             def call_compiled_backward():
@@ -3176,9 +3164,11 @@ def create_aot_dispatcher_function(
                 if shape_env is not None:
                     from torch._dynamo.source import ConstantSource
                     if isinstance(x, int):
+                        source = ConstantSource(f"sym_{idx}")
                         return shape_env.create_symintnode(
-                            shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")),
-                            hint=x
+                            shape_env.create_symbol(x, source),
+                            hint=x,
+                            source=source
                         )
                 if not isinstance(x, torch.Tensor):
                     return x
