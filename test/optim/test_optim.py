@@ -813,6 +813,9 @@ class TestOptim(TestCase):
             if 'capturable' in kwargs_with_flags and kwargs_with_flags['capturable']:
                 # with capturable in Adam, we have 2 extra intermediates for the bias_corrections
                 nintermediates = 3
+            elif optimizer_constructor.__name__ == "NAdam":
+                # NAdam uses two intermediates at the same time (grouped_grads & exp_avg_sq_sqrt)
+                nintermediates = 2
 
             self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
 
@@ -884,7 +887,7 @@ class TestOptim(TestCase):
     def test_peak_mem_multi_tensor_optimizers(self):
         configs = [
             (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
-                "Adam", "AdamW", "RAdam",
+                "Adam", "AdamW", "RAdam", "NAdam"
             ]
         ]
         self._test_foreach_memory(configs)
