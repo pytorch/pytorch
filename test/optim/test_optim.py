@@ -862,6 +862,8 @@ class TestOptim(TestCase):
             (optim.ASGD, dict(weight_decay=1)),
             (optim.Adamax, dict(weight_decay=0)),
             (optim.Adamax, dict(weight_decay=1)),
+            (optim.Adamax, dict(weight_decay=0, maximize=True)),
+            (optim.Adamax, dict(weight_decay=1, maximize=True)),
             (optim.Adadelta, dict(weight_decay=0)),
             (optim.Adadelta, dict(weight_decay=1)),
             (optim.Adadelta, dict(weight_decay=0, maximize=True)),
@@ -894,7 +896,7 @@ class TestOptim(TestCase):
     def test_peak_mem_multi_tensor_optimizers(self):
         configs = [
             (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
-                "Adadelta", "Adagrad", "Adam", "AdamW", "RAdam", "NAdam"
+                "Adadelta", "Adagrad", "Adamax", "Adam", "AdamW", "RAdam", "NAdam"
             ]
         ]
         self._test_foreach_memory(configs)
