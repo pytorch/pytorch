@@ -221,19 +221,16 @@ class VariableBuilder:
         # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
         # leave unsourced - like a local list created and discharged entirely within a local scope.
         if deduped_object.source and deduped_object.source != self.source:
-            ser_source_is_local = is_from_local_source(deduped_object.source)
-            source_is_local = is_from_local_source(self.source)
             # Note - both must be local, or global, or we will run afoul of a lack of merging in how we currently
             # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
             # so maybe we should do this refactor before we land this...
             # TODO(voz): Combine local and global guard builders.
-            if ser_source_is_local == source_is_local:
-                # Note - this is a little agressive - these being duplicate input does not always matter.
-                # However, this should always be a sound guard to add here.
-                dup_guard = functools.partial(
-                    GuardBuilder.DUPLICATE_INPUT, source_b=deduped_object.source
-                )
-                return dup_guard
+            # Note - this is a little agressive - these being duplicate input does not always matter.
+            # However, this should always be a sound guard to add here.
+            dup_guard = functools.partial(
+                GuardBuilder.DUPLICATE_INPUT, source_b=deduped_object.source
+            )
+            return dup_guard
         return None
 
     def _can_lift_attrs_to_inputs(self, vt):
