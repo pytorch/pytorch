@@ -234,7 +234,7 @@ def _is_dropout_filter(
         torch.ops.aten.div_.Scalar,
         torch.ops.aten.mul.Tensor,
     }
-    for _, n in match.nodes_map.items():
+    for n in match.nodes_map.values():
         if n.target in ops_to_match:
             ops_to_match.remove(n.target)
     return len(ops_to_match) == 0
