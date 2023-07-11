@@ -727,6 +727,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # Initializers are saved to tmp_folder/onnx_initializer_location/*.onnx
             onnx_model_location = model_name + "_external_data.onnx"
             onnx_initializer_location = model_name + "_initializers"
+            # TODO: We are using the internal `save_model_with_external_data` instead of public
+            # `ExportOutput.save` because we need to rename ONNX initializers before saving.
+            # This is only needed/allowed because we are using `fx_tracer=FXSymbolicTracer`,
+            # which is not an official FX tracer.
             fx_serialization.save_model_with_external_data(
                 tmp_folder,
                 onnx_model_location,
