@@ -832,25 +832,26 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         model_name: str,
         create_model: Callable,
         create_args: Callable,
-        create_pytorch_only_kwargs: Callable,
+        create_kwargs: Callable,
     ):
-        """Test helper for large-scale exporter.
+        """Test helper for FakeTensorMode-enabled exporter.
 
         Arguments:
             model_name: Name of the model. It used to name temporary files.
             create_model: A function that creates a model. It should always create the same model.
             create_args: A function that creates random input arguments for the model.
-            create_pytorch_only_kwargs: A function that creates kwargs for calling PyTorch model with real tensors.
+            create_kwargs: A function that creates kwargs for calling PyTorch model with real tensors.
 
         This test contains several steps.
 
         1. Create a toy model.
         2. Save the toy's state (parameters) to a file. This is for simulating a checkpoint file.
-        3. Load it back and export it to ONNX with large-scale exporter.
-            All operations (including model loading) are done under
-            FakeTensorMode so no real tensor is created and no real
-            computation happens.
-        4. Run PyTorch and ONNX models and compare their results.
+        3. Load it back and export it to ONNX with Fake Mode enabled.
+            Because all operations (including model and input loading) are done under
+            FakeTensorMode, no real tensor are created and no real computation happens.
+        4. The ONNX model generated in step 3 doesn't contain parameters,
+            and this step adds them as external data on an ONNX model.
+        5. Run PyTorch and ONNX models and compare their results.
         """
 
         # Create the toy model with real weight.
@@ -865,7 +866,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
             with torch.onnx.enable_fake_mode() as fake_context:
                 fake_args = create_args()
-                fake_kwargs = create_pytorch_only_kwargs()
+                fake_kwargs = create_kwargs()
                 fake_model = create_model()
 
             # Export the model with fake inputs and parameters
@@ -886,16 +887,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
                 # Generate random inputs.
                 args = create_args()
-                kwargs = create_pytorch_only_kwargs()
+                kwargs = create_kwargs()
                 # Original outputs.
-
                 ref_outputs = export_output.adapt_torch_outputs_to_onnx(
                     real_model(*args, **kwargs)
                 )
                 # ORT outputs.
                 args_not_none = export_output.adapt_torch_inputs_to_onnx(*args)
-                # Drop Parameters and buffers added by fx_serialization.save_model_with_external_data
-                args_not_none = args_not_none[: len(args) - len(kwargs)]
 
                 ort_outputs = onnx_test_common.run_ort(
                     tmp_onnx_file.name,
