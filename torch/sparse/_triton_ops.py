@@ -1,4 +1,3 @@
-import math
 import torch
 from torch._inductor.cuda_properties import get_device_capability
 
@@ -852,7 +851,7 @@ if _has_triton():
         attn_mask: Optional[torch.Tensor],
         dropout_p: float = 0.0,
         is_causal: bool = False,
-        scale: Optional[float]
+        scale: Optional[float] = None
     ):
         f_name = "_scaled_dot_product_attention"
         check(
