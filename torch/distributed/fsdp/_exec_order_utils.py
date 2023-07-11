@@ -37,8 +37,6 @@ class _ExecOrderData:
         # Tracks the (static) pre-forward order for execution order validation
         # and forward prefetching
         self.handles_pre_forward_order: List[FlatParamHandle] = []
-        # Maps each handles key to its index in `handles_pre_forward_order`
-        self.handles_to_pre_forward_order_index: Dict[FlatParamHandle, int] = {}
         # Tracks the post-forward order for pre-backward prefetching
         self.handles_post_forward_order: List[FlatParamHandle] = []
         # Maps each handles key to its index in `handles_post_forward_order`
@@ -124,9 +122,7 @@ class _ExecOrderData:
         prefetch given the current handles key. If there are no valid handles
         keys to prefetch, then this returns an empty :class:`list`.
         """
-        current_index = self.handles_to_pre_forward_order_index.get(
-            current_handles_key, None
-        )
+        current_index = current_handles_key._pre_forward_order_index
         if current_index is None:
             return None
         target_index = current_index + 1
@@ -172,10 +168,10 @@ class _ExecOrderData:
         self._check_order(handle, is_training)
         # Fix the order after the first iteration and only record the first
         # usage of a handles key
-        if not self.is_first_iter or handle in self.handles_to_pre_forward_order_index:
+        if not self.is_first_iter or handle._pre_forward_order_index
             return
         index = len(self.handles_pre_forward_order)
-        self.handles_to_pre_forward_order_index[handle] = index
+        handle._pre_forward_order_index = index
         self.handles_pre_forward_order.append(handle)
 
     def _check_order(self, handles_key: FlatParamHandle, is_training: bool) -> None:

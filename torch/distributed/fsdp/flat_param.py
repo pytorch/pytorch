@@ -504,10 +504,12 @@ class FlatParamHandle:
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
         self._fully_sharded_module = fully_sharded_module
-        # Maps each handle to its index in `all_handles`, which must be the
+        # The index in the state's `all_handles`, which must be the
         # same across ranks for the execution order validation to work
         self._handle_index = None
-        
+        # Index in handles_to_pre_forward_order
+        self._pre_forward_order_index = None
+
         # NOTE: For the code path using this flag, we only skip calling
         # `_use_sharded_views()` and do not skip switching to the sharded flat
         # parameter since whether `self.flat_param` uses the sharded or
