@@ -1,3 +1,5 @@
+import math
+
 import torch
 from torch._inductor.cuda_properties import get_device_capability
 
