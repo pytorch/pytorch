@@ -607,3 +607,37 @@ class TestTyping(JitTestCase):
         # note the " +" is regex (i.e. "at least one space")
         with self.assertRaisesRegex(ValueError, "at +File"):
             torch.jit.script(fn)
+
+    def test_inherited_annotations_python_310(self):
+        # See #104484
+        # In python >=3.10, inspect.get_annotations doesn't always return the same values.
+        # Sometimes it will show all annotations; other times it will show only annotations
+        # that show in that class, not classes it inherits fro.
+        class BaseModule(torch.nn.Module):
+            state: List[int]
+
+            def forward(self, x):
+                pass
+
+        def do_something_with_list(x: List[int]):
+            if x:
+                return x[-1]
+            return 5
+
+        class Submodule(BaseModule):
+            def __init__(self, self_x_value):
+                super().__init__()
+                self.x = self_x_value
+                self.state = []
+
+            def forward(self, x):
+                return self.x + x + do_something_with_list(self.state)
+
+        class LowestModule(Submodule):
+            def __init__(self):
+                super().__init__(123)
+
+        mod = LowestModule()
+        mod2 = LowestModule()
+        mod_s = torch.jit.script(mod)
+        mod2_s = torch.jit.script(mod2)
