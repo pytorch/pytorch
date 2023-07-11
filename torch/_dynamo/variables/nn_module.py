@@ -335,15 +335,21 @@ class NNModuleVariable(VariableTracker):
                     **options,
                 )
 
+            # Note [inline_nn_modules config and callback]
+            #
+            # Try inlining instead of adding call_method/call_module to the
+            # graph, and if we failed to inline we fallback to the logic as if
+            # `config.inline_nn_modules=False`
             if is_allowed(mod.__class__):
                 if torch._dynamo.config.inline_nn_modules:
                     try:
                         return inline(args)
                     except Unsupported as e:
-                        if torch._dynamo.config.disable_inline_nn_modules_fallback:
-                            raise
-                        if isinstance(e.__cause__, fake_tensor_exceptions):
+                        if (
+                            isinstance(e.__cause__, fake_tensor_exceptions)
                             # We would've raised below anyway, but catch explicitly
+                            or torch._dynamo.config.disable_inline_nn_modules_fallback
+                        ):
                             raise
                         return do_call_module()
                 else:
