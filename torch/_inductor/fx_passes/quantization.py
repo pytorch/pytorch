@@ -227,7 +227,7 @@ def _register_qconv_weight_prepack_pass(pattern):
                 groups,
                 x_shape,
             )
-            packed_weight_op = torch.ops.onednn.qconv_prepack_pt2e
+            packed_weight_op = torch.ops.onednn.qconv_prepack
             prepack_weight_node = graph.call_function(
                 packed_weight_op, args=packed_weight_inputs
             )

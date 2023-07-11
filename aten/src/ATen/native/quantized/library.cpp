@@ -255,15 +255,14 @@ TORCH_LIBRARY(_quantized, m) {
 TORCH_LIBRARY(onednn, m) {
   // New OP definition for Quantization in PyTorch 2.0 Export
   // Weight Prepack
-  m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv_prepack_pt2e(Tensor weight, Tensor w_scales, float x_scale, int x_zp, int[] stride, int[] padding, int[] dilation, int groups, int[]? x_shape=None) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv_prepack(Tensor weight, Tensor w_scales, float x_scale, int x_zp, int[] stride, int[] padding, int[] dilation, int groups, int[]? x_shape=None) -> Tensor"));
 
   // Conv1D/2D/3D with unary postop
-  m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv1d_pointwise_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str attr, Scalar?[] scalars, str? algorithm) -> Tensor"));
-  m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv2d_pointwise_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str attr, Scalar?[] scalars, str? algorithm) -> Tensor"));
-  m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv3d_pointwise_pt2e(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str attr, Scalar?[] scalars, str? algorithm) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv1d_pointwise(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str attr, Scalar?[] scalars, str? algorithm) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv2d_pointwise(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str attr, Scalar?[] scalars, str? algorithm) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv3d_pointwise(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str attr, Scalar?[] scalars, str? algorithm) -> Tensor"));
 
   // Conv2D with binary postop
-  m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv2d_pointwise_pt2e.binary(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str binary_attr, Scalar? alpha, str? unary_attr, Scalar?[] unary_scalars, str? unary_algorithm) -> Tensor"));
-
+  m.def(TORCH_SELECTIVE_SCHEMA("onednn::qconv2d_pointwise.binary(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point, bool fp32_output, str binary_attr, Scalar? alpha, str? unary_attr, Scalar?[] unary_scalars, str? unary_algorithm) -> Tensor"));
   m.def(TORCH_SELECTIVE_SCHEMA("onednn::dynamic_quant_qconv.tensor(Tensor x, float x_scale, int x_zero_point, Tensor prepacked_w, Tensor w_scale, Tensor w_zero_point, int w_axis, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed,  int[] output_padding, int groups) -> Tensor"));
 }
