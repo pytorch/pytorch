@@ -3116,13 +3116,14 @@ def grid_sampler_2d(
 
     N, C, iH, iW = a.shape
     _, oH, oW, two = grid.shape
+    assert two == 2
 
     # Let's expand grid to [N, C, oH, oW, 2]
     # This allows to generate a single triton cuda kernel instead of two kernels.
     # Two kernels are due source indices, weights have shape (N, 1, oH, oW), xnumel=N*oH*oW
     # and output has shape (N, C, oH, oW), xnumel=N*C*oH*oW
     # Expanding grid to (N, C, oH, oW, two) unifies xnumel to N*C*oH*oW
-    grid = grid.view(N, 1, oH, oW, two).expand(N, C, oH, oW, two)
+    grid = grid.view(N, 1, oH, oW, two).expand(N, C, oH, oW, 2)
 
     def in_bounds_cond(xs: Tensor, ys: Tensor) -> Tensor:
         return torch.logical_and(
@@ -3190,10 +3191,7 @@ def grid_sampler_2d(
         # - bicubic f32, CL, BS=2:  1233.0
         # - bicubic f32, CL, BS=1:  34.9
         # - bicubic f32, CF, BS=2:  51.2
-
-        to_channels_last = False
         if len(a) > 1 and a.is_contiguous(memory_format=torch.channels_last):
-            to_channels_last = True
             a = a.contiguous()
 
         ix = unnormalize(x, iW)
@@ -3221,10 +3219,10 @@ def grid_sampler_2d(
             return _upsample_cubic_interp1d(cs, tx)
 
         coeffs = tuple((get_coeff(ofs) for ofs in range(4)))
-        output = _upsample_cubic_interp1d(coeffs, ty)
-        if to_channels_last:
-            output = output.contiguous(memory_format=torch.channels_last)
-        return output
+        # As aten version does not respect memory_format for the output
+        # we do not return back to channels last memory format
+        # even if the input is channels last
+        return _upsample_cubic_interp1d(coeffs, ty)
 
 
 @register_decomposition(aten.mv)
