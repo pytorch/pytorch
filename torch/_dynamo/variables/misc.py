@@ -845,13 +845,15 @@ class NumpyVariable(VariableTracker):
         # this handles numpy dtype attribute such as np.float32.
         if isinstance(self.value, type) and config.numpy_ndarray_as_tensor:
             # retrieve attribute str. E.g., "float32" if given np.float32
-            import numpy as np
             import torch_np
 
             try:
-                attr = next(a for a in dir(np) if getattr(np, a) is self.value)
+                attr = self.value.__name__
                 # get torch_np equivalent
                 tnp_dtype = torch_np.dtype(attr)
+                # returning a string here because we are assuming all `dtype` kwargs for numpy
+                # functions can take an equivalent string and the behavior of the function would
+                # be the same as taking a numpy dtype.
                 return tnp_dtype.name
             except StopIteration:
                 unimplemented(f"Can't find {self.value} in numpy module!")
