@@ -33,6 +33,7 @@ ignored_attributes = [
     "_forward_hooks_with_kwargs",
     "_forward_pre_hooks",
     "_forward_pre_hooks_with_kwargs",
+    "_forward_hooks_always_called",
     "_state_dict_hooks",
     "_state_dict_pre_hooks",
     "_load_state_dict_pre_hooks",

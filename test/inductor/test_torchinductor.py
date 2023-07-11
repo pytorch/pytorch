@@ -4756,18 +4756,20 @@ class CommonTemplate:
         )
 
     def test_scatter_reduce2(self):
-        def fn(a, dim, index, b):
-            return aten.scatter_reduce(a, dim, index, b, "sum", include_self=False)
+        def fn(a, dim, index, b, reduce):
+            return aten.scatter_reduce(a, dim, index, b, reduce, include_self=False)
 
-        self.common(
-            fn,
-            [
-                torch.randn(2, 3),
-                0,
-                torch.zeros((2, 3), dtype=torch.int64),
-                torch.randn(2, 3),
-            ],
-        )
+        for reduce in ["sum", "amax"]:
+            self.common(
+                fn,
+                [
+                    torch.randn(2, 3),
+                    0,
+                    torch.zeros((2, 3), dtype=torch.int64),
+                    torch.randn(2, 3),
+                    reduce,
+                ],
+            )
 
     def test_scatter_reduce3(self):
         def fn(a, dim, index, b, reduce):
