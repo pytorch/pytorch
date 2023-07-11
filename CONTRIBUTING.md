@@ -186,7 +186,7 @@ into the repo directory.
 
 ## Codebase structure
 
-A diagram of the important parts of the codebase  
+A diagram of the important parts of the codebase
 ![code base structure](simplified-codebase-structure.svg)
 
 
