@@ -1191,17 +1191,9 @@ class TritonKernel(Kernel):
                     else f"({' & '.join(str(v) for v in mask_vars)})"
                 )
 
-            # tl.device_assert doesn't work for constexpr values, and we can't
-            # tell from here if a var is constexpr or not, so promote everything
-            var_str = str(
-                self.cse.generate(
-                    self.compute, f"triton_helpers.promote_to_tensor({var})"
-                )
-            )
-
             # An assertion line may have been written already, if so just
             # update the max size.
-            map_key = (var_str, mask)
+            map_key = (str(var), mask)
             existing_size = self.indirect_max_sizes_expr.get(map_key)
             if existing_size is not None:
                 size = sympy.Min(size, existing_size)
@@ -1209,7 +1201,7 @@ class TritonKernel(Kernel):
                 line = 'tl.device_assert({cond}, "index out of bounds: {cond_print}")'
                 self.compute.writeline(
                     IndirectAssertLine(
-                        line, var_str, mask, self.indirect_max_sizes_printed
+                        line, str(var), mask, self.indirect_max_sizes_printed
                     )
                 )
 
