@@ -40,9 +40,9 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.fx.immutable_collections import immutable_list
 from torch.fx.operator_schemas import get_signature_for_torch_op
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -2678,7 +2678,11 @@ class ExternKernel(InputsKernel):
         schema = None
         # For cpp wrapper, when kwargs is not empty, for OpOverloadPacket kernel, we need to
         # know the exact overload schema to handle the kwargs properly when calling the cpp kernel.
-        if V.graph.cpp_wrapper and kwargs and isinstance(kernel, torch._ops.OpOverloadPacket):
+        if (
+            V.graph.cpp_wrapper
+            and kwargs
+            and isinstance(kernel, torch._ops.OpOverloadPacket)
+        ):
             schema = try_find_schema(schemas, args, kwargs)
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)

@@ -2675,6 +2675,7 @@ class CommonTemplate:
             random_rotations = torch.randn(
                 rotations_shape, device=vectors.device, dtype=vectors.dtype
             )
+            random_rotations += 1
             return random_rotations
 
         self.common(
