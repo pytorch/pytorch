@@ -60,13 +60,27 @@ void cpu_flash_attention(
     const Tensor& philox_seed,
     const Tensor& philox_offset,
     const Tensor& debug_attn_mask,
-    const at::Tensor& query,
-    const at::Tensor& key,
-    const at::Tensor& value,
+    const at::Tensor& q,
+    const at::Tensor& k,
+    const at::Tensor& v,
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
+
+  bool is_training =
+      (q.requires_grad() || k.requires_grad() ||
+      v.requires_grad());
+
+  // Query (Batch x Num_heads  x Q_seq_len  x Dim_per_head)
+  //    -> (Batch x Q_seq_len  x Num_heads  x Dim_per_head)
+  // Key   (Batch x Num_heads  x KV_seq_len x Dim_per_head)
+  //    -> (Batch x KV_seq_len x Num_heads  x Dim_per_head)
+  // Value (Batch x Num_heads  x KV_seq_len x Dim_per_head)
+  //    -> (Batch x KV_seq_len x Num_heads  x Dim_per_head)
+  at::Tensor query = q.transpose(1, 2);
+  at::Tensor key = k.transpose(1, 2);
+  at::Tensor value = v.transpose(1, 2);
 
   constexpr bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
   using accum_t = at::opmath_type<scalar_t>;
@@ -75,9 +89,6 @@ void cpu_flash_attention(
       sdp::calculate_scale(query, scale).as_float_unchecked();
 
   // Sizes
-  // Query (Batch x Q_seq_len  x Num_heads x Dim_per_head)
-  // Key   (Batch x KV_seq_len x Num_heads x Dim_per_head)
-  // Value (Batch x KV_seq_len x Num_heads x Dim_per_head)
   int64_t batchSize = query.size(0);
   int64_t qSize = query.size(1);
   int64_t kvSize = value.size(1);
@@ -118,7 +129,7 @@ void cpu_flash_attention(
   scalar_t* k_data = key.data_ptr<scalar_t>();
   scalar_t* v_data = value.data_ptr<scalar_t>();
   scalar_t* out_data = output.data_ptr<scalar_t>();
-  accum_t* lse_data = logsumexp.data_ptr<accum_t>();
+  accum_t* lse_data = is_training ? logsumexp.data_ptr<accum_t>() : nullptr;
   accum_t* qk_data = qk.data_ptr<accum_t>();
   scalar_t* qk_reduced_data = is_reduced_type ? qk_reduced.data_ptr<scalar_t>() : nullptr;
   accum_t* qk_max_data = qk_max.data_ptr<accum_t>();
@@ -241,10 +252,12 @@ void cpu_flash_attention(
           headSize);
       }
       // Store logsumexp for backward
-      accum_t* lse_ptr = lse_data + i * lStrideB + j * lStrideH + m * lStrideM;
-      for (const auto row : c10::irange(qBlockSize)) {
-        lse_ptr[row * lStrideM] = qk_max_data[ompIdx * qSplitSize + row]
-            + std::log(qk_sum_data[ompIdx * qSplitSize + row]);
+      if (is_training) {
+        accum_t* lse_ptr = lse_data + i * lStrideB + j * lStrideH + m * lStrideM;
+        for (const auto row : c10::irange(qBlockSize)) {
+          lse_ptr[row * lStrideM] = qk_max_data[ompIdx * qSplitSize + row]
+              + std::log(qk_sum_data[ompIdx * qSplitSize + row]);
+        }
       }
       // Move to the next query
       data_index_step(i, batchSize, j, num_head, k, qSlice);
