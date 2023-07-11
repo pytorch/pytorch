@@ -544,6 +544,8 @@ class TorchLogsFormatter(logging.Formatter):
             )
             if artifact_formatter is not None:
                 r = artifact_formatter.format(record)
+            else:
+                r = super().format(record)
         else:
             r = super().format(record)
 
