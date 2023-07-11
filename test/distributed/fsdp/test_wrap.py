@@ -58,6 +58,56 @@ class BatchNormNet(nn.Module):
         self.sync_bn = nn.SyncBatchNorm(10)
 
 
+class LoraModel(nn.Module):
+    """This is a toy LoRA decoder model."""
+
+    def __init__(self):
+        super().__init__()
+        self.embed_tokens = nn.Embedding(100, 32)
+        self.layers = nn.ModuleList([LoraDecoder() for _ in range(4)])
+        self.norm = nn.LayerNorm(32)
+        self.embed_tokens.weight.requires_grad_(False)
+        self.norm.weight.requires_grad_(False)
+        self.norm.bias.requires_grad_(False)
+
+
+class LoraDecoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.attn = LoraAttention()
+        self.mlp = LoraMLP()
+        self.inp_layernorm = nn.LayerNorm(32)
+        self.post_attn_layernorm = nn.LayerNorm(32)
+        self.inp_layernorm.weight.requires_grad_(False)
+        self.inp_layernorm.bias.requires_grad_(False)
+        self.post_attn_layernorm.weight.requires_grad_(False)
+        self.post_attn_layernorm.bias.requires_grad_(False)
+
+
+class LoraAttention(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.q_proj = nn.Linear(32, 32, bias=False)
+        self.lora_A = nn.Linear(32, 8, bias=False)
+        self.lora_B = nn.Linear(8, 32, bias=False)
+        self.k_proj = nn.Linear(32, 32, bias=False)
+        self.v_proj = nn.Linear(32, 32, bias=False)
+        self.o_proj = nn.Linear(32, 32, bias=False)
+        self.q_proj.weight.requires_grad_(False)
+        self.k_proj.weight.requires_grad_(False)
+        self.v_proj.weight.requires_grad_(False)
+        self.o_proj.weight.requires_grad_(False)
+
+
+class LoraMLP(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.proj1 = nn.Linear(32, 128, bias=False)
+        self.proj2 = nn.Linear(128, 32, bias=False)
+        self.proj1.weight.requires_grad_(False)
+        self.proj2.weight.requires_grad_(False)
+
+
 class WrapMethod(Enum):
     FSDP_CTOR = auto()
     # FSDP_CTOR is the supported way forward, but keep WRAP_API in case we miss
@@ -651,64 +701,41 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model.module[2][0], nn.Linear))
         self.assertTrue(isinstance(model.module[2][1], nn.Linear))
 
+    @skip_if_lt_x_gpu(2)
+    def test_frozen_params(self):
+        """
+        Tests that mixing frozen/non-frozen parameters in an FSDP instance
+        raises for ``use_orig_params=False`` and warns for ``True``.
+        """
+        for use_orig_params in [True, False]:
+            self._test_frozen_params(use_orig_params)
 
-class LoraModel(nn.Module):
-    """This is a toy LoRA decoder model."""
-
-    def __init__(self):
-        super().__init__()
-        self.embed_tokens = nn.Embedding(100, 32)
-        self.layers = nn.ModuleList([LoraDecoder() for _ in range(4)])
-        self.norm = nn.LayerNorm(32)
-        self.embed_tokens.weight.requires_grad_(False)
-        self.norm.weight.requires_grad_(False)
-        self.norm.bias.requires_grad_(False)
-
-
-class LoraDecoder(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.attn = LoraAttention()
-        self.mlp = LoraMLP()
-        self.inp_layernorm = nn.LayerNorm(32)
-        self.post_attn_layernorm = nn.LayerNorm(32)
-        self.inp_layernorm.weight.requires_grad_(False)
-        self.inp_layernorm.bias.requires_grad_(False)
-        self.post_attn_layernorm.weight.requires_grad_(False)
-        self.post_attn_layernorm.bias.requires_grad_(False)
-
-
-class LoraAttention(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.q_proj = nn.Linear(32, 32, bias=False)
-        self.lora_A = nn.Linear(32, 8, bias=False)
-        self.lora_B = nn.Linear(8, 32, bias=False)
-        self.k_proj = nn.Linear(32, 32, bias=False)
-        self.v_proj = nn.Linear(32, 32, bias=False)
-        self.o_proj = nn.Linear(32, 32, bias=False)
-        self.q_proj.weight.requires_grad_(False)
-        self.k_proj.weight.requires_grad_(False)
-        self.v_proj.weight.requires_grad_(False)
-        self.o_proj.weight.requires_grad_(False)
-
-
-class LoraMLP(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.proj1 = nn.Linear(32, 128, bias=False)
-        self.proj2 = nn.Linear(128, 32, bias=False)
-        self.proj1.weight.requires_grad_(False)
-        self.proj2.weight.requires_grad_(False)
+    def _test_frozen_params(self, use_orig_params: bool):
+        model = LoraModel().cuda()
+        policy = ModuleWrapPolicy({LoraAttention, LoraMLP, LoraDecoder})
+        msg = "layers.0.attn has both parameters with requires_grad=True and False. "
+        if use_orig_params:
+            msg += "We do not recommend wrapping such modules"
+            ctx = self.assertWarnsRegex(UserWarning, msg)
+        else:
+            msg += "FSDP does not support wrapping such modules when use_orig_params=False."
+            ctx = self.assertRaisesRegex(ValueError, msg)
+        with ctx:
+            FSDP(
+                model,
+                process_group=self.process_group,
+                auto_wrap_policy=policy,
+                use_orig_params=use_orig_params,
+            )
 
 
 class TestWrapUtils(TestCase):
     def test_validate_frozen_params(self):
         """Tests the method ``_validate_frozen_params()``."""
-        for strict in [True, False]:
-            self._test_validate_frozen_params(strict)
+        for use_orig_params in [True, False]:
+            self._test_validate_frozen_params(use_orig_params)
 
-    def _test_validate_frozen_params(self, strict: bool):
+    def _test_validate_frozen_params(self, use_orig_params: bool):
         model = LoraModel()
         # Wrap only LoRA modules
         modules_to_wrap = {
@@ -716,29 +743,52 @@ class TestWrapUtils(TestCase):
             for module_name, module in model.named_modules()
             if "lora_A" in module_name or "lora_B" in module_name
         }
-        _validate_frozen_params(model, modules_to_wrap, set(), strict)
+        _validate_frozen_params(model, modules_to_wrap, set(), use_orig_params)
         # Additionally wrap attention
         for module in model.modules():
             if isinstance(module, LoraAttention):
                 modules_to_wrap.add(module)
-        _validate_frozen_params(model, modules_to_wrap, set(), strict)
+        _validate_frozen_params(model, modules_to_wrap, set(), use_orig_params)
         # Additionally wrap decoders
         for module in model.modules():
             if isinstance(module, LoraDecoder):
                 modules_to_wrap.add(module)
-        _validate_frozen_params(model, modules_to_wrap, set(), strict)
+        _validate_frozen_params(model, modules_to_wrap, set(), use_orig_params)
         # Do not wrap the LoRA-A modules (meaning mixed frozen/non-frozen)
         for module_name, module in model.named_modules():
             if "lora_A" in module_name:
                 modules_to_wrap.remove(module)
         regex = "layers.0.attn has both parameters with requires_grad=True and False."
-        if strict:
-            regex += " FSDP does not support wrapping such modules.\n"
-        else:
-            regex += (
-                " FSDP does not recommend wrapping such modules since the "
-                "gradient memory usage will be higher than expected.\n"
+        if use_orig_params:
+            # Wrapping the attention manages all parameters except those from
+            # the LoRA-B module, which is separately wrapped and all nonfrozen
+            lorab_numel = sum(
+                p.numel() for p in model.layers[0].attn.lora_B.parameters()
             )
+            attn_frozen_param_numel = sum(
+                p.numel()
+                for p in model.layers[0].attn.parameters()
+                if not p.requires_grad
+            )
+            attn_nonfrozen_param_numel = (
+                sum(
+                    p.numel()
+                    for p in model.layers[0].attn.parameters()
+                    if p.requires_grad
+                )
+                - lorab_numel
+            )
+            attn_total_param_numel = (
+                attn_frozen_param_numel + attn_nonfrozen_param_numel
+            )
+            regex += (
+                " We do not recommend wrapping such modules since the "
+                r"gradient memory usage will be higher than expected \("
+                f"{attn_total_param_numel} numel instead of {attn_nonfrozen_param_numel} numel "
+                r"before sharding via reduce-scatter\).\n"
+            )
+        else:
+            regex += " FSDP does not support wrapping such modules when use_orig_params=False.\n"
         regex += (
             "The following parameters have requires_grad=True:\n"
             r"\['layers.0.attn.lora_A.weight'\]\n"
@@ -746,19 +796,19 @@ class TestWrapUtils(TestCase):
             r"\['layers.0.attn.q_proj.weight', 'layers.0.attn.k_proj.weight', "
             r"'layers.0.attn.v_proj.weight', 'layers.0.attn.o_proj.weight'\]"
         )
-        if strict:
-            ctx = self.assertRaisesRegex(ValueError, regex)
-        else:
+        if use_orig_params:
             ctx = self.assertWarnsRegex(UserWarning, regex)
+        else:
+            ctx = self.assertRaisesRegex(ValueError, regex)
         with ctx:
-            _validate_frozen_params(model, modules_to_wrap, set(), strict)
+            _validate_frozen_params(model, modules_to_wrap, set(), use_orig_params)
         # Now ignore those LoRA-A modules' parameters
         ignored_params = set()
         for module_name, module in model.named_modules():
             if "lora_A" in module_name:
                 for param in module.parameters():
                     ignored_params.add(param)
-        _validate_frozen_params(model, modules_to_wrap, ignored_params, strict)
+        _validate_frozen_params(model, modules_to_wrap, ignored_params, use_orig_params)
 
 
 instantiate_parametrized_tests(TestFSDPWrap)
