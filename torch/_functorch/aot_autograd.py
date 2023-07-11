@@ -2796,9 +2796,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 torch._guards.TracingContext.get().fw_metadata = fw_metadata
 
 
-            compiled_fw_func = aot_config.fw_compiler(
-                fw_module, adjusted_flat_args
-            )
+            with TracingContext.report_output_strides() as fwd_output_strides:
+                compiled_fw_func = aot_config.fw_compiler(
+                    fw_module, adjusted_flat_args
+                )
 
 
     saved_context = TracingContext.get()
@@ -3003,20 +3004,37 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
                     placeholder_list = fx_placeholder_vals(bw_module)
 
+                    forward_saved_for_backwards_strides = None
+                    if fwd_output_strides is not None:
+                        forward_saved_for_backwards_strides = fwd_output_strides[
+                            CompiledFunction.metadata.tensors_saved_for_backwards_slice
+                        ]
+
                     # saved activations can have different stride to eager if
                     # the compiler does layout optimization. We should restride the
                     # tensor passed in for compiling the backward graph using the
                     # saved tensor's stride.
                     for i in range(len(placeholder_list)):
                         ph_arg = placeholder_list[i]
-                        real_arg = all_args[i]
                         if not isinstance(ph_arg, torch.Tensor):
                             continue
 
-                        # Comparing ph_arg.stride() with real_arg.stride() directly may
+                        if forward_saved_for_backwards_strides is None:
+                            continue
+
+                        real_stride = None
+                        # Per all_args calling convention
+                        if len(ctx.symints) <= i < len(ctx.symints) + len(forward_saved_for_backwards_strides):
+                            real_stride = forward_saved_for_backwards_strides[i - len(ctx.symints)]
+                        if real_stride is None:
+                            continue
+
+                        assert _get_hints(real_stride) == all_args[i].stride(), f"{real_stride} {all_args[i].stride()}"
+
+                        # Comparing ph_arg.stride() with real_stride directly may
                         # cause dynamic dimensions in ph_arg being specialized to static
                         # value. Using the hints to avoid that.
-                        if _get_hints(ph_arg.stride()) != real_arg.stride():
+                        if _get_hints(ph_arg.stride()) != _get_hints(real_stride):
                             # Note that here we use the stride of the real tensor to
                             # restride a FakeTensor. This does not cause trouble
                             # for dynamic shape since this code path only get
@@ -3032,7 +3050,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                             # (2408448, 1, 21504, 192). The solution mentioned will
                             # decide a stride of (802816, 1, 7168, 64) for this
                             # tensor which is wrong.
-                            placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_arg.stride())
+                            placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
                     with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
