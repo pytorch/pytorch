@@ -186,6 +186,10 @@ into the repo directory.
 
 ## Codebase structure
 
+A diagram of the important parts of the codebase  
+![code base structure](simplified-codebase-structure.svg)
+
+
 * [c10](c10) - Core library files that work everywhere, both server
   and mobile. We are slowly moving pieces from [ATen/core](aten/src/ATen/core)
   here. This library is intended only to contain essential functionality,
