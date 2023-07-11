@@ -51,7 +51,6 @@ import importlib
 import torch
 import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
-import torch.utils.checkpoint
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
@@ -765,6 +764,21 @@ def is_safe_constant(v):
             torch.dtype,
         ),
     )
+
+
+def guard_if_dyn(arg):
+    from .variables import ConstantVariable, SymNodeVariable
+
+    if isinstance(arg, SymNodeVariable):
+        # This is because SymNodeVariable intentionally doesn't define
+        # as_python_constant to avoid shunting down some codepaths
+        # that expect consts.   In this case, we know we definitely
+        # want to specialize though.
+        return arg.evaluate_expr()
+    elif isinstance(arg, ConstantVariable):
+        return arg.as_python_constant()
+
+    return arg
 
 
 def check_constant_args(args, kwargs):
@@ -1590,9 +1604,9 @@ def nnmodule_has_hooks(
 def to_numpy_helper(value):
     """Convert tensor and torch_np.ndarray to numpy.ndarray."""
     if isinstance(value, torch_np.ndarray):
-        return value.tensor.numpy()
+        return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
-        return value.numpy()
+        return value.cpu().numpy()
     elif isinstance(value, (tuple, list)):
         return type(value)(to_numpy_helper(obj) for obj in value)
     else:
@@ -1680,17 +1694,16 @@ def defake(x):
     return y
 
 
-# NB: The dictionary has to be created lazily after TorchPatcher is called so
-# that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
-# sitting in a separate function.
-# We also need the original untouched/ not disabled torch utils checkpoint
-# becuase distributed checkpointed wrappers import these utils before
-# TorchDynamo TorchPatcher runs.
-untouched_torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
+def is_utils_checkpoint(obj):
+    # Lazy import to avoid circular dependenices
+    import torch.utils.checkpoint
+
+    return obj is torch.utils.checkpoint.checkpoint
 
 
-def higher_order_op_converter():
+def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
+    from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
 
     # TODO - This is a temporary sitaution where we have two versions of
     # checkpointing implemetation. We will converge on one and remove the other.
@@ -1698,15 +1711,7 @@ def higher_order_op_converter():
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
 
-    return {
-        torch.utils.checkpoint.checkpoint: activation_checkpoint_op,
-        untouched_torch_utils_checkpoint: activation_checkpoint_op,
-    }
-
-
-def requires_higher_order_op(obj):
-    return obj in higher_order_op_converter()
-
-
-def get_higher_order_op(obj):
-    return higher_order_op_converter().get(obj)
+    return TorchHigherOrderOperatorVariable.make(
+        activation_checkpoint_op,
+        **options,
+    )

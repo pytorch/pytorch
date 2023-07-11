@@ -1087,7 +1087,7 @@ void LLVMCodeGenImpl::visit(BoolImmPtr v) {
   value_ = llvm::ConstantInt::get(BoolTy_, v->value());
 }
 
-llvm::Type* llvmTypeToVec(llvm::Type* type, int lanes) {
+static llvm::Type* llvmTypeToVec(llvm::Type* type, int lanes) {
   if (lanes > 1) {
     return llvm::VectorType::get(type, ElementCount(lanes));
   } else {
@@ -2024,7 +2024,7 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
         SIMD_UNARY_MATH_CASE(kFloor, "floorf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kCeil, "ceilf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kTrunc, "truncf", FloatTy_)
-        SIMD_UNARY_MATH_CASE(kRound, "roundf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kRound, "nearbyint", FloatTy_)
         SIMD_UNARY_MATH_CASE(kErf, "erff", FloatTy_)
         SIMD_UNARY_MATH_CASE(kErfc, "erfcf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kTan, "tanf", FloatTy_)
@@ -2082,7 +2082,7 @@ void LLVMCodeGenImpl::visit(IntrinsicsPtr v) {
       SIMD_UNARY_MATH_CASE(kFloor, "floor", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kCeil, "ceil", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kTrunc, "trunc", DoubleTy_)
-      SIMD_UNARY_MATH_CASE(kRound, "round", DoubleTy_)
+      SIMD_UNARY_MATH_CASE(kRound, "nearbyint", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kErf, "erf", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kErfc, "erfc", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kTan, "tan", DoubleTy_)

@@ -27,7 +27,7 @@ void registerLayoutObject(THPLayout* thp_layout, at::Layout layout);
 
 TORCH_PYTHON_API PyObject* createPyObject(
     const at::Storage& storage,
-    bool always_create_storage = false);
+    bool always_create_python_storage = false);
 at::Storage createStorage(PyObject* obj);
 at::Storage createStorageGetType(
     PyObject* obj,

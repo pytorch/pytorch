@@ -21,7 +21,7 @@ extern const char* kCudnnDoubleBackwardMsg;
 
 // A simple way to imperatively compute index ranges for slots
 // that have been flattened
-struct IndexRangeGenerator {
+struct TORCH_API IndexRangeGenerator {
   IndexRange range(size_t range_size) {
     i += range_size;
     return {i - range_size, i};
@@ -34,23 +34,34 @@ struct IndexRangeGenerator {
   size_t i = 0;
 };
 
-Tensor toNonOptFwGrad(const c10::optional<Tensor>& t);
-Tensor toNonOptPrimal(const c10::optional<Tensor>& t);
-Tensor toNonOptTensor(const c10::optional<Tensor>& t);
+TORCH_API Tensor toNonOptFwGrad(const c10::optional<Tensor>& t);
+TORCH_API Tensor toNonOptPrimal(const c10::optional<Tensor>& t);
+TORCH_API Tensor toNonOptTensor(const c10::optional<Tensor>& t);
 
-Tensor apply_loss_reduction(const Tensor& unreduced, int64_t reduction);
-bool any_variable_defined(const variable_list& variables);
-void copy_range(variable_list& out, IndexRange range, const at::Tensor& t);
-void copy_range(
+TORCH_API inline c10::optional<Tensor> wrap_opt_if(
+    const Tensor& t,
+    const bool cond) {
+  using OptTensor = c10::optional<Tensor>;
+  return cond ? OptTensor(t) : static_cast<OptTensor>(c10::nullopt);
+}
+
+TORCH_API Tensor
+apply_loss_reduction(const Tensor& unreduced, int64_t reduction);
+TORCH_API bool any_variable_defined(const variable_list& variables);
+TORCH_API void copy_range(
+    variable_list& out,
+    IndexRange range,
+    const at::Tensor& t);
+TORCH_API void copy_range(
     variable_list& out,
     IndexRange range,
     at::ArrayRef<at::Tensor> t);
-at::Tensor copysign_tensor_self_backward(
+TORCH_API at::Tensor copysign_tensor_self_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& result);
-at::Tensor not_implemented(const char* name, const char* reason = "");
-std::vector<Tensor> not_implemented_list(
+TORCH_API at::Tensor not_implemented(const char* name, const char* reason = "");
+TORCH_API std::vector<Tensor> not_implemented_list(
     const char* name,
     const char* reason = "");
 at::Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result);
@@ -292,6 +303,18 @@ at::Tensor mm_mat1_sparse_backward(
     const at::Tensor& mat1,
     const at::Tensor& mat2,
     const at::Scalar& alpha);
+std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const c10::optional<Tensor>& mat1,
+    const c10::optional<Tensor>& mat2,
+    const Scalar& alpha,
+    const Scalar& beta,
+    const std::array<bool, 3>& grad_input_mask);
+at::Tensor sparse_mask_backward(
+    const at::Tensor& grad,
+    const at::Tensor& mask,
+    c10::Layout self_layout);
 at::Tensor sparse_sparse_matmul_backward(
     const at::Tensor& grad,
     const at::Tensor& mat1,
@@ -639,9 +662,9 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
     std::array<bool, 2> output_mask);
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
     const Tensor& grad_out,
-    const Tensor& i1,
-    const Tensor& i2,
-    const Tensor& i3,
+    const c10::optional<Tensor>& i1,
+    const c10::optional<Tensor>& i2,
+    const c10::optional<Tensor>& i3,
     IntArrayRef expand1,
     IntArrayRef expand2,
     IntArrayRef expand3,

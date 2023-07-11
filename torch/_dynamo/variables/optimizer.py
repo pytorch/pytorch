@@ -25,6 +25,11 @@ class GuardInstallException(Exception):
 class OptimizerVariable(UserDefinedObjectVariable):
     def __init__(self, value, grad_to_source=None, **kwargs):
         super().__init__(value, **kwargs)
+
+        for group in self.value.param_groups:
+            if "capturable" in group:
+                group["capturable"] = True
+
         if grad_to_source is None:
             self.grad_to_source = {}
 

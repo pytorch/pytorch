@@ -152,17 +152,9 @@ class MetaConverter:
         # Use a Weak Ref to s in order to not leak memory
         swr = StorageWeakRef(s)
         if swr not in self.storage_memo:
-            if supports_mode_tracing(s):
-                self.storage_memo[swr] = transform_subclass(
-                    s,
-                    lambda inner: callback(
-                        lambda: torch.empty(s.size(), dtype=torch.uint8, device="meta")
-                    ).untyped_storage(),
-                )
-            else:
-                self.storage_memo[swr] = callback(
-                    lambda: torch.empty(s.size(), dtype=torch.uint8, device="meta")
-                ).untyped_storage()
+            self.storage_memo[swr] = callback(
+                lambda: torch.empty(s.size(), dtype=torch.uint8, device="meta")
+            ).untyped_storage()
         return self.storage_memo[swr]
 
     # This function assumes that it's possible to do the conversion
@@ -400,16 +392,25 @@ class MetaConverter:
                 else:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides, storage_offset = sym_sizes_strides_storage_offset(t)
+
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
                     if supports_mode_tracing(t):
+
+                        def empty_create(inner_t):
+                            is_leaf = safe_is_leaf(inner_t)
+                            (
+                                sizes,
+                                strides,
+                                storage_offset,
+                            ) = sym_sizes_strides_storage_offset(inner_t)
+                            return torch.empty_strided(
+                                sizes, strides, dtype=inner_t.dtype, device="meta"
+                            )
+
                         r = transform_subclass(
                             t,
-                            lambda inner: callback(
-                                lambda: torch.empty_strided(
-                                    sizes, strides, dtype=t.dtype, device="meta"
-                                )
-                            ),
+                            lambda inner: callback(lambda: empty_create(inner)),
                         )
                     else:
                         r = callback(
@@ -476,8 +477,20 @@ class MetaConverter:
                             in_kernel_invocation_manager,
                         )
 
-                        if isinstance(r, FakeTensor):
-                            maybe_fake_mgr = in_kernel_invocation_manager(r.fake_mode)
+                        def maybe_get_fake_mode(t):
+                            if isinstance(t, FakeTensor):
+                                return t.fake_mode
+                            if supports_mode_tracing(t):
+                                inner_tensors, _ = t.__tensor_flatten__()
+                                modes = [maybe_get_fake_mode(x) for x in inner_tensors]
+                                m = modes[0]
+                                assert all(m is x for x in modes)
+                                return m
+                            return None
+
+                        mb_fake_mode = maybe_get_fake_mode(r)
+                        if mb_fake_mode is not None:
+                            maybe_fake_mgr = in_kernel_invocation_manager(mb_fake_mode)
                         with maybe_fake_mgr, torch.no_grad():
                             r.set_(r_s, storage_offset, sizes, strides)
 
