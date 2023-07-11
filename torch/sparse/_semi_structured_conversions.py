@@ -37,27 +37,40 @@ def _sparse_semi_structured_from_dense(dense):
     m0, m1, m2, m3 = (dense_4 != 0).unbind(-1)
 
     # Encoding quadruples of True/False values as follows:
-    #     [True, True, False, False] -> 0b0100
-    #     [True, False, True, False] -> 0b1000
-    #     [False, True, True, False] -> 0b1001
-    #     [True, False, False, True] -> 0b1100
-    #     [False, True, False, True] -> 0b1101
-    #     [False, False, True, True] -> 0b1110
+    #     [True,  True,  False, False] -> 0b0100
+    #     [True,  False, True,  False] -> 0b1000
+    #     [False, True,  True,  False] -> 0b1001
+    #     [True,  False, False, True ] -> 0b1100
+    #     [False, True,  False, True ] -> 0b1101
+    #     [False, False, True,  True ] -> 0b1110
     # Thus, lower two bits in the encoding are index of the True value
     # at the lowest index in the quadruple, and the higher two bits in
     # the encoding are index of the other True value in the quadruple.
     # In case there are less than two True values, than False value or
-    # values at the lowest index or indices are considered True for
-    # the encoding.  In case there are more than two True values, then
-    # the excess True value(s) at the higher index or indices are
-    # considered False for the encoding.
-    #
-    # The expressions for individual bits below calculated through
-    # minimization of corresponding Boolean functions.
-    bit0 = ~m0 & m1 & (m2 | m3)
-    bit1 = ~m0 & ~m1 & m2 & m3
-    bit2 = m0 & m1 | ~m0 & ~m1 & m3 | ~m2
-    bit3 = (~m0 | ~m1) & (m2 | m3)
+    # values at some index or indices are considered True for the
+    # encoding.  In case there are more than two True values, then the
+    # excess True value(s) at some indices are considered False for
+    # the encoding.  The exact encodings used for these cases are as
+    # follows:
+    #     [False, False, False, False] -> 0b1110
+    #     [False, False, False, True ] -> 0b1110
+    #     [False, False, True,  False] -> 0b1110
+    #     [False, True,  False, False] -> 0b1101
+    #     [False, True,  True,  True ] -> 0b1001
+    #     [True,  False, False, False] -> 0b1100
+    #     [True,  False, True,  True ] -> 0b1000
+    #     [True,  True,  False, True ] -> 0b0100
+    #     [True,  True,  True,  False] -> 0b1000
+    #     [True,  True,  True,  True ] -> 0b1000
+    # These particular encodings are chosen, with the help of Espresso
+    # logic minimizer software, for the purpose of minimization of
+    # corresponding Boolean functions, that translate non-zero flags
+    # into encoding bits.
+
+    bit0 = ~m0 & m1
+    bit1 = ~m0 & ~m1
+    bit2 = bit1 | ~m2
+    bit3 = bit0 | ~m1 | m2
     idxs0 = bit0 | (bit1.to(torch.int64) << 1)
     idxs1 = bit2 | (bit3.to(torch.int64) << 1)
 
