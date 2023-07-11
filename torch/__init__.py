@@ -700,10 +700,10 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
-        * :func:`torch.empty`, :func:`torch.empty_like`, :func:`torch.empty_strided`,
-          and :func:`torch.empty_permuted` will fill the output tensor with a known
-          value. Floating point or complex dtype tensors are filled with NaN. Integer
-          dtype tensors are filled with the maximum value.
+        * :func:`torch.Tensor.resize_`, when called with a tensor that is not
+          quantized, sets new elements to a known value.  Floating point or
+          complex values are set to NaN. Integer values are set to the maximum
+          value.
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -745,6 +745,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
+        * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -1340,6 +1341,15 @@ for name in dir(_C._VariableFunctions):
     if not name.startswith("_"):
         __all__.append(name)
 
+
+
+################################################################################
+# Import TorchDynamo's lazy APIs to avoid circular dependenices
+################################################################################
+
+# needs to be before from .functional import * to avoid circular dependencies
+from ._compile import _disable_dynamo
+
 ################################################################################
 # Import interface functions defined in Python
 ################################################################################
@@ -1501,7 +1511,14 @@ class _TorchCompileInductorWrapper:
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
             from torch._inductor import list_mode_options
-            self.apply_options(list_mode_options(mode))
+            if mode == "reduce-overhead" and self.dynamic:
+                raise RuntimeError(
+                    "mode=reduce-overhead cannot be used together with dynamic=True! "
+                    "reduce-overhead enables cudagraph. dynamic=True forces recompiliation "
+                    "for each new shape, which defeats the purpose of cudagraph. "
+                    "Please only enable one of them."
+                )
+            self.apply_options(list_mode_options(mode, self.dynamic))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
@@ -1652,7 +1669,6 @@ def compile(model: Optional[Callable] = None, *,
                            disable=disable)
         return fn
 
-    import torch._dynamo
     if mode is not None and options is not None:
         raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
     if mode is None and options is None:
@@ -1743,12 +1759,26 @@ _deprecated_attrs = {
     "has_cudnn": torch.backends.cudnn.is_available,
     "has_mkldnn": torch.backends.mkldnn.is_available,
 }
+
+_lazy_modules = {
+    "_dynamo",
+    "_inductor",
+}
+
 def __getattr__(name):
+    # Deprecated attrs
     replacement = _deprecated_attrs.get(name)
     if replacement is not None:
         import warnings
         warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
         return replacement()
+
+    # Lazy modules
+    if name in _lazy_modules:
+        import importlib
+        return importlib.import_module(f".{name}", __name__)
+
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
 from . import _logging
 _logging._init_logs()

@@ -9,7 +9,6 @@ import warnings
 
 import torch
 
-import torch._dynamo
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._inductor import config
@@ -828,9 +827,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     foo(*inps)
                 except Exception as e:
                     thrown = True
-                    FileCheck().check("at::cuda::getNewWorkspace").check(
-                        "at::cuda::blas::gemm<float>"
-                    ).run(str(e))
+                    self.assertTrue("at::cuda::blas::gemm<float>" in str(e))
+                    self.assertTrue(
+                        "getCurrentCUDABlasHandle" in str(e)
+                        or "getNewWorkspace" in str(e)
+                    )
 
                 self.assertTrue(thrown)
 

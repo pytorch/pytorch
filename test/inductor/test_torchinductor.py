@@ -21,7 +21,6 @@ import numpy as np
 
 import torch
 
-import torch._dynamo
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
@@ -1573,6 +1572,13 @@ class CommonTemplate:
             return ((a + 1).squeeze(-1).squeeze(2) + 2, a.squeeze(0) + 2)
 
         self.common(fn, (torch.randn(1, 2, 1, 2, 2, 2, 1),))
+
+    def test_squeeze_varargs(self):
+        def fn(x):
+            return x.squeeze(1, 2).clone()
+
+        a = torch.randn(1024, 1, 1)
+        self.common(fn, (a,))
 
     def test_simplify_loops(self):
         def fn(a, b):
@@ -3146,6 +3152,7 @@ class CommonTemplate:
             check_lowp=False,  # accuracy issues with relatively large matmuls
         )
 
+    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
@@ -4749,18 +4756,20 @@ class CommonTemplate:
         )
 
     def test_scatter_reduce2(self):
-        def fn(a, dim, index, b):
-            return aten.scatter_reduce(a, dim, index, b, "sum", include_self=False)
+        def fn(a, dim, index, b, reduce):
+            return aten.scatter_reduce(a, dim, index, b, reduce, include_self=False)
 
-        self.common(
-            fn,
-            [
-                torch.randn(2, 3),
-                0,
-                torch.zeros((2, 3), dtype=torch.int64),
-                torch.randn(2, 3),
-            ],
-        )
+        for reduce in ["sum", "amax"]:
+            self.common(
+                fn,
+                [
+                    torch.randn(2, 3),
+                    0,
+                    torch.zeros((2, 3), dtype=torch.int64),
+                    torch.randn(2, 3),
+                    reduce,
+                ],
+            )
 
     def test_scatter_reduce3(self):
         def fn(a, dim, index, b, reduce):
@@ -6510,6 +6519,93 @@ class CommonTemplate:
             return torch.fft.fftn(x).real
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
+
+    def test_inductor_bucketize(self):
+        def fn(input, boundaries, out_int32, right):
+            return torch.ops.prims._inductor_bucketize(
+                input, boundaries, out_int32=out_int32, right=right
+            )
+
+        input = torch.rand((64, 64)) * 2 - 1
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        for out_int32 in [True, False]:
+            for right in [True, False]:
+                out_int32 = True
+                right = False
+                self.common(fn, (input, boundaries, out_int32, right), check_lowp=False)
+
+    def test_inductor_bucketize_default_kwargs(self):
+        def fn(input, offsets):
+            return torch.ops.prims._inductor_bucketize(input, offsets)
+
+        input = torch.tensor(
+            [-1.0, -0.9, -0.8, -0.5, 0.0, 0.1, 0.2, 0.4, 0.5, 0.6, 0.9, 0.91]
+        )
+        offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        self.common(fn, (input, offsets), check_lowp=False)
+
+    def test_inductor_bucketize_int(self):
+        def fn(input, offsets, out_int32, right):
+            return torch.ops.prims._inductor_bucketize(
+                input, offsets, out_int32=out_int32, right=right
+            )
+
+        input = torch.randint(0, 102, (64, 64))
+        offsets = torch.arange(10, dtype=torch.int32) ** 2 + 1
+
+        for out_int32 in [True, False]:
+            for right in [True, False]:
+                self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
+
+    @patch.object(config.triton, "autotune_pointwise", True)
+    def test_inductor_bucketize_add_autotune(self):
+        """
+        Causes a @pointwise(size_hints) where size_hints is 2D
+        """
+
+        def fn(input, offsets, add_value):
+            return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
+
+        input = torch.rand((16, 16, 64, 64))
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+        add_value = torch.randint(0, 1024, (16, 16, 64, 64)).to(
+            memory_format=torch.channels_last
+        )
+
+        self.common(fn, (input, boundaries, add_value), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op(self):
+        import torch.library
+
+        @functools.lru_cache()
+        def define_op(foo):
+            foo.define("custom(Tensor self) -> Tensor")
+
+        foo = torch.library.Library("foo", "DEF")
+        define_op(foo)
+
+        @torch.library.impl(foo, "custom", "CPU")
+        def foo_cpu(x):
+            return 3 * x
+
+        @torch.library.impl(foo, "custom", "CUDA")
+        def foo_cuda(x):
+            return 3 * x
+
+        @torch.library.impl(foo, "custom", "Meta")
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.foo.custom(a)
+            c = torch.cos(b)
+            return c
+
+        self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
 
 
 @dataclasses.dataclass
