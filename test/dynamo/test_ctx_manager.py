@@ -748,6 +748,7 @@ class GraphModule(torch.nn.Module):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
         ones = torch.ones(1)
+
         zeros = torch.zeros(1)
 
         add = ones + zeros;  ones = zeros = None
@@ -785,6 +786,7 @@ class GraphModule(torch.nn.Module):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
         ones = torch.ones(1)
+
         zeros = torch.zeros(1)
 
         add = ones + zeros;  ones = zeros = None
