@@ -80,8 +80,8 @@ def _get_current_dispatch_mode():
 def _get_current_dispatch_mode_stack():
     stack_len = _len_torch_dispatch_stack()
     user_modes = [_get_dispatch_stack_at(i) for i in range(stack_len)]
-    mb_proxy = [] if torch._C._get_proxy_tensor_mode() is None else [torch._C._unset_proxy_tensor_mode()]
-    mb_fake = [] if torch._C._get_fake_tensor_mode() is None else [torch._C._unset_fake_tensor_mode()]
+    mb_proxy = [] if torch._C._get_proxy_tensor_mode() is None else [torch._C._get_proxy_tensor_mode()]
+    mb_fake = [] if torch._C._get_fake_tensor_mode() is None else [torch._C._get_fake_tensor_mode()]
     return user_modes + mb_proxy + mb_fake
 
 def _push_mode(mode, k: Optional[DispatchKey] = None):

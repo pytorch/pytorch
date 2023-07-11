@@ -63,6 +63,12 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
+  TensorMaker& resizeable_storage() noexcept {
+    resizeable_ = true;
+
+    return *this;
+  }
+
   Tensor make_tensor();
 
  private:
@@ -85,6 +91,7 @@ class TORCH_API TensorMaker {
   std::unique_ptr<void, ContextDeleter> ctx_{nullptr, detail::noopDelete};
   c10::optional<Device> device_{};
   TensorOptions opts_{};
+  bool resizeable_{}; // Allows the storage of this tensor to be resized
 };
 
 inline TensorMaker for_blob(void* data, IntArrayRef sizes) noexcept {

@@ -79,8 +79,11 @@ THPLayout* getTHPLayout(at::Layout layout) {
   return thp_layout;
 }
 
-PyObject* createPyObject(const at::Storage& storage) {
-  if (storage.device_type() != at::DeviceType::Meta &&
+PyObject* createPyObject(
+    const at::Storage& storage,
+    always_create_python_storage = false) {
+  if (!always_create_python_storage &&
+      storage.device_type() != at::DeviceType::Meta &&
       storage.data() == nullptr && storage.sym_nbytes() != 0 &&
       // Grabbing storage() from FunctionalTensorWrapper is allowed.
       // This is useful for checking aliasing info from python

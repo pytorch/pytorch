@@ -1,7 +1,7 @@
 from typing import Dict, Optional, Set
 
 import torch
-from torch._ops import OpOverload, OpOverloadPacket
+from torch._ops import OpOverload, OpOverloadPacket, HigherOrderOperator
 from torch._export.error import InternalError
 from torch._export.pass_base import ExportPassBase
 
@@ -62,7 +62,7 @@ class ReplaceViewOpsWithViewCopyOpsPass(ExportPassBase):
                 (_NON_FUNCTIONAL_OPS_TO_FUNCTIONAL_OPS[op]), args, kwargs, meta
             )
 
-        if op in _BLACK_LISTED_OPS:
+        if op in _BLACK_LISTED_OPS or isinstance(op, HigherOrderOperator):
             return super().call_operator(op, args, kwargs, meta)
 
         if view_copy_op := get_view_copy_of_view_op(op._schema):
