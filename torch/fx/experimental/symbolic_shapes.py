@@ -33,6 +33,7 @@ from torch import (  # noqa: F401
     SymInt,
 )
 from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
+from torch.utils._sympy.functions import FloorDiv, LShift, RShift
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame
@@ -50,13 +51,12 @@ class GuardOnDataDependentSymNode(RuntimeError):
 import sympy
 from sympy.printing.str import StrPrinter
 from sympy.printing.precedence import precedence
-from sympy.core.logic import fuzzy_and, fuzzy_or
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
-    "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "guard_scalar", "wrap_node",
+    "SymDispatchMode", "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool",
 ]
@@ -281,7 +281,7 @@ def parallel_or(*args):
     Evaluate the logical OR of several arguments, avoiding guarding on
     unbacked SymInts if another argument is definitely True.
     """
-    if any(definitely_true(args) for a in args):
+    if any(definitely_true(a) for a in args):
         return True
     return any(args)
 
@@ -290,7 +290,7 @@ def parallel_and(*args):
     Evaluate the logical FALSE of several arguments, avoiding guarding on
     unbacked SymInts if another argument is definitely False.
     """
-    if any(definitely_false(args) for a in args):
+    if any(definitely_false(a) for a in args):
         return False
     return all(args)
 
@@ -756,6 +756,12 @@ class SymNode:
     def floordiv(self, other) -> "SymNode":  # noqa: F811
         return self._floordiv(other)  # type: ignore[attr-defined]
 
+    def lshift(self, other) -> "SymNode":  # noqa: F811
+        return self._lshift(other)  # type: ignore[attr-defined]
+
+    def rshift(self, other) -> "SymNode":  # noqa: F811
+        return self._rshift(other)  # type: ignore[attr-defined]
+
     def sym_not(self) -> "SymNode":  # noqa: F811
         return self._sym_not()  # type: ignore[attr-defined]
 
@@ -889,83 +895,6 @@ class TrueDiv(sympy.Function):
         else:
             return base / divisor
 
-class FloorDiv(sympy.Function):
-    """
-    We maintain this so that:
-    1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
-    2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
-    """
-    nargs = (2,)
-    precedence = 50  # precedence of mul  # noqa: F811
-
-    # Default return type for SymPy assumptions.
-    # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
-    is_real = True
-
-    @property
-    def base(self):
-        return self.args[0]
-
-    @property
-    def divisor(self):
-        return self.args[1]
-
-    def _sympystr(self, printer):
-        base = printer.parenthesize(self.base, self.precedence)
-        divisor = printer.parenthesize(self.divisor, self.precedence)
-        return f"({base}//{divisor})"
-
-    # SymPy assumptions based on argument types.
-    def _eval_is_real(self):
-        return fuzzy_or([self.base.is_real, self.divisor.is_real])
-
-    def _eval_is_integer(self):
-        return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
-
-    # Automatic evaluation.
-    # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
-    @classmethod
-    def eval(cls, base, divisor):
-        def check_supported_type(x):
-            if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
-                raise TypeError(
-                    f"unsupported operand type(s) for //: "
-                    f"'{type(base).__name__}' and '{type(divisor).__name__}'"
-                    f", expected integer or real")
-
-        check_supported_type(base)
-        check_supported_type(divisor)
-
-        # We don't provide the same error message as in Python because SymPy
-        # makes it difficult to check the types.
-        if divisor.is_zero:
-            raise ZeroDivisionError("division by zero")
-
-        if base.is_zero:
-            return sympy.S.Zero
-        if base.is_integer and divisor == 1:
-            return base
-        if base.is_real and divisor == 1:
-            return sympy.floor(base)
-        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
-            return base // divisor
-        if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
-            return sympy.floor(base / divisor)
-        if isinstance(base, FloorDiv):
-            return FloorDiv(base.args[0], base.args[1] * divisor)
-
-        if isinstance(base, sympy.Add):
-            for a in base.args:
-                gcd = sympy.gcd(a, divisor)
-                if gcd == divisor:
-                    return FloorDiv(base - a, divisor) + a / gcd
-
-        gcd = sympy.gcd(base, divisor)
-        if gcd != 1:
-            return FloorDiv(
-                sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
-            )
-
 # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
 # Because we do not have the ability to guard on the stride permutation
 # at the moment, it is hard to make further inferences when this is true,
@@ -1017,6 +946,8 @@ reflectable_magic_methods = {
     'or': lambda a, b: sympy.Or(a, b),
     'truediv': lambda a, b: TrueDiv(a, b),
     'floordiv': lambda a, b: FloorDiv(a, b),
+    'lshift': lambda a, b: LShift(a, b),
+    'rshift': lambda a, b: RShift(a, b),
 }
 
 
@@ -2313,6 +2244,21 @@ Target Guards:
                 assert int(sym) == hint
             return int(sym)
         return SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+
+    def create_symint_and_symbol(self, value, source, dynamic_dim):
+        # TODO: This is wrong wrong wrong, create_symbol will
+        # generate something that is non-negative, but this is
+        # not a sound assumption to make.
+        # Not fixing as this was a preexisting condition.
+        return self.create_symintnode(
+            self.create_symbol(
+                value,
+                source=source,
+                dynamic_dim=dynamic_dim,
+            ),
+            hint=value,
+            source=source,
+        )
 
     def create_symboolnode(self, sym: "sympy.Expr"):
         # This function is only being used in serialization, so we do not track it
