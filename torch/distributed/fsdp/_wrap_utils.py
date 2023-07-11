@@ -16,7 +16,6 @@ from torch.distributed.fsdp.wrap import (
     _post_order_apply,
     _recursive_wrap,
     _run_mixed_precision_override_policy,
-    _run_module_wrap_policy,
     _wrap_module_cls_individually,
     ModuleWrapPolicy,
 )
@@ -46,10 +45,9 @@ def _auto_wrap(
 
     # TODO: Start migration to refactored auto wrapping with `ModuleWrapPolicy`
     if isinstance(policy, ModuleWrapPolicy):
-        module_classes = policy._module_classes
         fsdp_kwargs["auto_wrap_policy" if is_wrapper else "policy"] = None
-        target_module_to_kwargs = _run_module_wrap_policy(
-            root_module, module_classes, ignored_modules, fsdp_kwargs
+        target_module_to_kwargs = policy.run_policy(
+            root_module, ignored_modules, fsdp_kwargs
         )
         if mixed_precision is not None:
             target_module_to_kwargs = _run_mixed_precision_override_policy(
