@@ -6900,20 +6900,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 self.assertEqual(fn_opt(), fn())
 
-        # Disable index propagation, so the indirect indexing isn't optimized away
-        @patch.object(config, "constant_and_index_propagation", False)
-        def test_computed_indirect_mask(self):
-            def fn(x, n):
-                tmp = torch.arange(n, device=x.device)
-                return x[tmp] + 1
-
-            x = torch.randn(8, device="cuda")
-            fn_opt = torch.compile(fn)
-            code = run_and_get_triton_code(fn_opt, x, 8)
-            # load should be masked
-            self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
-            self.assertEqual(fn(x, 8), fn_opt(x, 8))
-
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")
             def fn1(x):

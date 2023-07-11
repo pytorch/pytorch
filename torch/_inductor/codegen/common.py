@@ -826,7 +826,8 @@ class Kernel(CodeGen):
                         buf_bounds = self.bounds.get(fx_node, ValueRanges.unknown())
                         # Sanity check: The variable is either bounded or unbounded
                         assert (
-                            buf_bounds is not None or fx_node in self.bounds.unbounded_vars
+                            buf_bounds is not None
+                            or fx_node in self.bounds.unbounded_vars
                         ), fx_node
 
                     csevar = self.cse.generate(
