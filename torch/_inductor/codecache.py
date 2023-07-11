@@ -728,9 +728,13 @@ def cpp_compile_command(
         include_pytorch, vec_isa, cuda, aot_mode
     )
     if config.is_fbcode():
-        # We need to copy any absolute-path torch includes
-        inp_name = os.path.basename(input)
-        out_name = os.path.basename(output)
+        if aot_mode:
+            inp_name = input
+            out_name = output
+        else:
+            # We need to copy any absolute-path torch includes
+            inp_name = os.path.basename(input)
+            out_name = os.path.basename(output)
         linker_path = f"-B{os.path.dirname(build_paths.ld())}"
     else:
         inp_name = input
@@ -786,7 +790,9 @@ class AotCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_so_dir = input_path[:-4]
+                # Place the generated .so into a sub-folder with the full hex-hash to avoid
+                # any name collision.
+                output_so_dir = os.path.splitext(input_path)[0]
                 if not os.path.exists(output_so_dir):
                     os.makedirs(output_so_dir, exist_ok=False)
                 so_name = f"{config.dll_name}.so"

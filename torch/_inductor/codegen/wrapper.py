@@ -111,12 +111,6 @@ def get_cpp_op_schema(kernel):
     return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
 
 
-SUPPORTED_FALLBACK_CPP_WRAPPER = [
-    "repeat_interleave.Tensor",
-    "convert_element_type.default",  # can appear as a fallback if it has a complex input
-]
-
-
 @dataclasses.dataclass
 class SymbolicCallArg:
     inner: Any
@@ -441,6 +435,18 @@ class WrapperCodeGen(CodeGen):
         else:
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
+
+    def generate_scatter_fallback(
+        self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
+    ):
+        line = f"{kernel}({','.join(map(str, inputs))}"
+        if kernel == "aten.scatter_":
+            if reduce:
+                line += f", reduce={repr(reduce)}"
+        else:
+            line += ", ".join([""] + kwargs)
+        line += f"){self.ending}"
+        self.writeline(line)
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
@@ -1058,7 +1064,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         result.writeline("'''\n)")
         # get the hash of the wrapper code to name the extension
-        wrapper_call_hash = codecache.code_hash(self.wrapper_call.getvalue())
+        wrapper_call_hash = codecache.code_hash(result.getvalue())
         result.splice(
             f"""
             module = CppWrapperCodeCache.load(cpp_wrapper_src, '{self.call_func_name}', '{wrapper_call_hash}', {self.cuda})
@@ -1117,6 +1123,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             args.insert(0, f"{codegen_reference}")
         self.writeline(self.wrap_kernel_call(kernel, args))
+
+    def generate_scatter_fallback(
+        self, output, inputs, kernel, fn, src_is_tensor, reduce, kwargs
+    ):
+        # TODO: support other overload for cpp wrapper and remove the below assertions
+        line = f"{kernel}({output}, {','.join(map(str, inputs))}"
+        if fn == "aten.scatter_":
+            if src_is_tensor:
+                if reduce:
+                    line += f", {V.graph.wrapper_code.val_to_str(reduce)}"
+            else:
+                assert (
+                    reduce is None
+                ), "Expect reduce to be None for aten.scatter_ with scalar src"
+        else:
+            line += f", {','.join(kwargs)}"
+        line += f"){self.ending}"
+        self.writeline(line)
 
     def add_benchmark_harness(self, output):
         if V.graph.aot_mode:
@@ -1198,15 +1222,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
     ):
         if cpp_kernel_key not in self.extern_call_ops:
             self.writeline(
-                f"""
-    static auto op_{cpp_kernel_key} =
-    c10::Dispatcher::singleton()
-        .findSchemaOrThrow(
-            \"{kernel}\",
-            \"{cpp_kernel_overload_name}\")
-        .typed<{cpp_op_schema}>();
-            """
+                f"static auto op_{cpp_kernel_key} = c10::Dispatcher::singleton()"
             )
+            self.writeline(
+                f'\t.findSchemaOrThrow("{kernel}", "{cpp_kernel_overload_name}")'
+            )
+            self.writeline(f"\t.typed<{cpp_op_schema}>();")
             self.extern_call_ops.add(cpp_kernel_key)
 
         self.writeline(
