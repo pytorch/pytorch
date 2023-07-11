@@ -268,6 +268,7 @@ test_dynamo_shard() {
       test_package \
       test_legacy_vmap \
       test_custom_op_testing \
+      test_content_store \
       export/test_db \
       functorch/test_dims \
       functorch/test_aotdispatch \
@@ -352,6 +353,8 @@ test_perf_for_dashboard() {
       local target_flag=("--${target}")
       if [[ "$target" == "performance" ]]; then
         target_flag+=( --cold-start-latency)
+      elif [[ "$target" == "accuracy" ]]; then
+        target_flag+=( --no-translation-validation)
       fi
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
