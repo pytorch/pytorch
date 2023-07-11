@@ -29,7 +29,6 @@ from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.fsdp.flat_param import (
     FlatParameter,
     FlatParamHandle,
-    FlatParamHandle,
     HandleShardingStrategy,
     HandleTrainingState,
     RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES,
@@ -640,9 +639,11 @@ def _root_pre_forward(
 def _root_cast_forward_input(
     state: _FSDPState, module: torch.nn.Module, args, kwargs
 ) -> Tuple[Any, Any]:
+    handle_force_precision = (
+        state._handle._force_full_precision if state._handle else True
+    )
     should_cast_forward_inputs = (
-        (module.training or not state._use_full_prec_in_eval)
-        and (state.handle and not state.handle._force_full_precision)
+        (module.training or not state._use_full_prec_in_eval) and handle_force_precision
     ) and state.mixed_precision.cast_root_forward_inputs
 
     if should_cast_forward_inputs:
@@ -1418,8 +1419,13 @@ def _reset_flat_param_grad_info_if_needed(
     overhead is minimal, so we may call it throughout FSDP methods, which serve
     as callsites to free the gradient memory earlier.
     """
-    for handle in handles:
-        if handle._use_orig_params:
+    if isinstance(handles, list):
+        for handle in handles:
+            if handle._use_orig_params:
+                handle._reset_flat_param_grad_info_if_needed()
+    else:
+        handle = handles
+        if handle:
             handle._reset_flat_param_grad_info_if_needed()
 
 

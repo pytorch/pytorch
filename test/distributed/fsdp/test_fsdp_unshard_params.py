@@ -604,9 +604,6 @@ class TestUnshardParams(TestUnshardParamsBase):
                 "sharding_strategy": sharding_strategy,
             },
         )
-        for fsdp_module in FSDP.fsdp_modules(fsdp_model):
-            handle = fsdp_module._handle
-            handle.flat_param.grad is None
         with FSDP.summon_full_params(fsdp_model, with_grads=True):
             for param in fsdp_model.parameters():
                 self.assertTrue(param.grad is None)

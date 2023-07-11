@@ -50,7 +50,6 @@ from torch.distributed.fsdp.flat_param import (
     _FSDP_USE_FULL_PREC_IN_EVAL,
     FlatParameter,
     FlatParamHandle,
-    FlatParamHandle,
     HandleShardingStrategy,
 )
 from torch.distributed.fsdp.wrap import _FSDPPolicy

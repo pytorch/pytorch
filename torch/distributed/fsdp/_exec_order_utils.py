@@ -57,7 +57,7 @@ class _ExecOrderData:
         ]
         self.process_group: Optional[dist.ProcessGroup] = None
         self.world_size: Optional[int] = None
-        self.all_handles: [FlatParamHandle] = []
+        self.all_handles: List[FlatParamHandle] = []
         # Maps each handle to its index in `all_handles`, which must be the
         # same across ranks for the execution order validation to work
         self.handle_to_handle_index: Dict[FlatParamHandle, int] = {}
