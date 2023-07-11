@@ -309,51 +309,38 @@ class UserMethodVariable(UserFunctionVariable):
             return self.obj.call_method(
                 tx, self.fn.__name__, args, kwargs, constant=self.is_constant
             ).add_options(self)
-        # Special case for when function is marked constant
-        # We error for some reason when we go down the super().call_function path.
+        # Special case to ALWAYS do_call_method function is marked constant
+        # We error for some reason when we do super().call_function
         if self.is_constant and isinstance(self.obj, variables.NNModuleVariable):
             return do_call_method()
 
-        # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
-        # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
-        # since we ensure `forward` of allowed modules can be traced by AOT safely.
-        # Note this is not only for allowed modules, as user customized modules can extend from
-        # allowed modules but using parent's `forward` method, which is also covered by this branch.
+        should_call_method = (
+            isinstance(self.obj, variables.NNModuleVariable)
+            and module_attr is not None
+            and module_attr.startswith("torch.nn.")
+        )
+        # See Note [inline_nn_modules config and callback]
         if torch._dynamo.config.inline_nn_modules:
             try:
-                # Try inlining instead of `call_method`, and if we failed to inline
-                # we fallback to the logic as if `config.inline_nn_modules=False`
-                # making sure to still raise if call_method would've resulted in
-                # inlining or if the error is in `fake_tensor_exceptions`.
                 return super().call_function(tx, args, kwargs)
             except Unsupported as e:
-                if torch._dynamo.config.disable_inline_nn_modules_fallback:
-                    raise
-                if isinstance(e.__cause__, fake_tensor_exceptions):
+                if (
+                    isinstance(e.__cause__, fake_tensor_exceptions)
                     # We would've raised below anyway, but catch explicitly
+                    or torch._dynamo.config.disable_inline_nn_modules_fallback
+                ):
                     raise
-
-                if isinstance(self.obj, variables.NNModuleVariable):
-                    mod = tx.output.get_submodule(self.obj.module_key)
-                    if self.fn.__name__ in ("_call_impl", "_wrapped_call_impl") and \
-                       not is_allowed(mod.__class__):
-                        # If we would've inlined anyway, we don't want to hide the
-                        # graph break
-                        raise
-                    if (
-                        module_attr is not None
-                        and module_attr.startswith("torch.nn.")
-                    ):
-                        return do_call_method()
+                if should_call_method:
+                    return do_call_method()
                 raise
         else:
-            if (
-                isinstance(self.obj, variables.NNModuleVariable)
-                and module_attr is not None
-                and module_attr.startswith("torch.nn.")
-            ):
+            # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
+            # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
+            # since we ensure `forward` of allowed modules can be traced by AOT safely.
+            # Note this is not only for allowed modules, as user customized modules can extend from
+            # allowed modules but using parent's `forward` method, which is also covered by this branch.
+            if should_call_method:
                 return do_call_method()
-
             return super().call_function(tx, args, kwargs)
 
     def num_parameters(self):
