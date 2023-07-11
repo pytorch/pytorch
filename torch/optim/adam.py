@@ -355,6 +355,7 @@ def _single_tensor_adam(params: List[Tensor],
             grad = torch.view_as_real(grad)
             exp_avg = torch.view_as_real(exp_avg)
             exp_avg_sq = torch.view_as_real(exp_avg_sq)
+            max_exp_avg_sq = torch.view_as_real(max_exp_avg_sq)
             param = torch.view_as_real(param)
 
         # Decay the first and second moment running average coefficient
