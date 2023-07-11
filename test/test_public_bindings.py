@@ -72,7 +72,6 @@ class TestPublicBindings(TestCase):
             "ConcreteModuleTypeBuilder",
             "cpp",
             "CudaBFloat16TensorBase",
-            "CudaBFloat16TensorBase",
             "CudaBoolTensorBase",
             "CudaBoolTensorBase",
             "CudaByteTensorBase",
