@@ -2851,9 +2851,13 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     # tensor which is wrong.
                     placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
-            compiled_bw_func = aot_config.bw_compiler(
-                bw_module, placeholder_list
-            )
+            compiled_bw_func = None
+            if len(symint_outs_saved_for_bw):
+                context = torch._C._DisableAutocast if disable_amp else nullcontext
+                with context():
+                    compiled_bw_func = aot_config.bw_compiler(
+                        bw_module, placeholder_list
+                    )
 
     saved_context = TracingContext.get()
 
@@ -3052,6 +3056,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
             def call_compiled_backward():
                 ctx.maybe_clear_saved_tensors()
+                if CompiledFunction.compiled_bw is None:
+                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                        bw_module, placeholder_list
+                    )
+
                 out = call_func_with_args(
                     CompiledFunction.compiled_bw,
                     all_args,
