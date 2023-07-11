@@ -782,17 +782,17 @@ class Scheduler:
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
         self.fuse_nodes()
-        self.compute_last_usage()
+
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
         if config.multiple_streams:
             ss_graph = stream_scheduler.stream_schedule(self.nodes)
-            # new_node_list = []
-            # for ssnode in ss_graph.final_order:
-            #     new_node_list.append(ssnode.original_node)
-            # self.nodes = new_node_list
-
+            new_node_list = []
+            for ssnode in ss_graph.final_order:
+                new_node_list.append(ssnode.original_node)
+            self.nodes = new_node_list
+        self.compute_last_usage()
         # used during codegen:
         self.current_device = None
         self.buffer_names_to_free = set()
