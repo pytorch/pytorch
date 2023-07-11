@@ -87,6 +87,8 @@ class ValueRanges:
         # Some invariants
         if other == ValueRanges.unknown():
             return self
+        if self == ValueRanges.unknown():
+            return other
         assert self.is_bool == other.is_bool, (self, other)
         if self.is_bool:
             range = ValueRanges(sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper))
