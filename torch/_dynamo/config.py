@@ -119,6 +119,8 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
+from torch.distributed import _tensor
+
 skipfiles_inline_module_allowlist = {
     torch.nn,
     torch.distributions,
@@ -129,6 +131,7 @@ skipfiles_inline_module_allowlist = {
     torch._decomp,
     torch.utils._contextlib,
     torch.utils._pytree,
+    _tensor,
 }
 
 # If a string representing a PyTorch module is in this ignorelist,
