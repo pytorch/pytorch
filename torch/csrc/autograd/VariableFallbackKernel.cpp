@@ -1,7 +1,7 @@
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <torch/library.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
+#include <torch/library.h>
 
 /*
  * This file implements a variable fallback kernel for custom operators.
@@ -64,7 +64,7 @@ TORCH_LIBRARY_IMPL(_, AutogradMeta, m) {
 
 // see Note [ADInplaceOrView key]
 TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
-      m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(torch::CppFunction::makeFallthrough());
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradHPU, m) {
@@ -73,4 +73,4 @@ TORCH_LIBRARY_IMPL(_, AutogradHPU, m) {
 
 #undef AUTOGRAD_FALLBACK
 
-}
+} // namespace
