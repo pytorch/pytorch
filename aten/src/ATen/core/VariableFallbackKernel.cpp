@@ -1,6 +1,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <torch/library.h>
+#include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 
 /*
  * This file implements a variable fallback kernel for custom operators.
@@ -27,18 +28,7 @@ namespace {
 // NB: But not the private use ones; maybe the extension wants
 // to override it themselves!
 
-static void redispatchAutograd(
-    const c10::OperatorHandle& op,
-    c10::DispatchKeySet dispatch_keys,
-    torch::jit::Stack* stack) {
-  op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
-}
-
-static torch::CppFunction autogradRedispatchFallback() {
-  return torch::CppFunction::makeFromBoxedFunction<&redispatchAutograd>();
-}
-
-#define AUTOGRAD_FALLBACK autogradRedispatchFallback()
+#define AUTOGRAD_FALLBACK torch::autograd::basicAutogradNotImplementedFallback()
 
 TORCH_LIBRARY_IMPL(_, AutogradOther, m) {
   m.fallback(AUTOGRAD_FALLBACK);
