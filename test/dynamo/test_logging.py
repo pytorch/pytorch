@@ -262,16 +262,19 @@ class LoggingTests(LoggingTestCase):
     def test_multiline_format(self, records):
         dynamo_log = logging.getLogger(torch._dynamo.__name__)
         dynamo_log.info("test\ndynamo")
-        self.assertEqual(len(records), 1)
+        dynamo_log.info("%s", "test\ndynamo")
+        dynamo_log.info("test\n%s", "test\ndynamo")
+        self.assertEqual(len(records), 3)
         # unfortunately there's no easy way to test the final formatted log other than
         # to ask the dynamo logger's handler to format it.
         for handler in dynamo_log.handlers:
             if torch._logging._internal._is_torch_handler(handler):
                 break
         self.assertIsNotNone(handler)
-        r = handler.format(records[0])
-        for l in r.splitlines():
-            self.assertIn("[INFO]", l)
+        for record in records:
+            r = handler.format(record)
+            for l in r.splitlines():
+                self.assertIn("[INFO]", l)
 
     test_trace_source_simple = within_range_record_test(1, 100, trace_source=True)
 
