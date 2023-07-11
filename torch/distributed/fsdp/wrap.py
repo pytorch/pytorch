@@ -19,6 +19,7 @@ from typing import (
     Set,
     Tuple,
     Type,
+    Union,
 )
 
 import torch.nn as nn
@@ -30,6 +31,7 @@ __all__ = [
     "size_based_auto_wrap_policy",
     "enable_wrap",
     "wrap",
+    "LambdaWrapPolicy",
     "ModuleWrapPolicy",
 ]
 
@@ -212,6 +214,48 @@ class ModuleWrapPolicy(_FSDPPolicy):
 
     def __repr__(self) -> str:
         return super().__repr__() + f"({self._module_classes_str})"
+
+
+class LambdaWrapPolicy(_FSDPPolicy):
+    """
+    This policy takes in a lambda function that maps a given ``nn.Module`` to
+    either ``False``, ``True``, or a FSDP kwarg dictionary.
+    - If the function returns ``False`` or an empty dictionary, then the module
+      is not wrapped.
+    - If the function returns ``True``, then the module is wrapped using the
+      root's kwargs.
+    - If the function returns a non-empty dictionary, then the module is
+      wrapped, and the dictionary overrides the root's kwargs.
+    """
+
+    def __init__(self, lambda_fn: Callable[[nn.Module], Union[bool, Dict[str, Any]]]):
+        self._lambda_fn = lambda_fn
+
+    def _run_policy(
+        self,
+        root_module: nn.Module,
+        ignored_modules: Set[nn.Module],
+        root_fsdp_kwargs: Dict[str, Any],
+    ) -> Dict[nn.Module, Dict[str, Any]]:
+        target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]] = {}
+        for module in root_module.modules():
+            if module in ignored_modules:
+                continue
+            res = self._lambda_fn(module)
+            if not isinstance(res, (dict, bool)):
+                raise ValueError(
+                    "The lambda_fn passed to LambdaWrapPolicy should return "
+                    f"False/True or an FSDP kwarg dict, but it returned {res}"
+                )
+            if not res:
+                continue
+            fsdp_kwargs = copy.copy(root_fsdp_kwargs)
+            if isinstance(res, dict):
+                # Override the root FSDP kwargs with the ones specified by the
+                # lambda function
+                fsdp_kwargs.update(res)
+            target_module_to_kwargs[module] = fsdp_kwargs
+        return target_module_to_kwargs
 
 
 def lambda_auto_wrap_policy(
