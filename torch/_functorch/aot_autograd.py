@@ -22,7 +22,7 @@ from torch import Tensor
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code, preserve_rng_state
-from torch._guards import detect_fake_mode, tracing
+from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
@@ -2766,17 +2766,25 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             if torch._guards.TracingContext.get():
                 torch._guards.TracingContext.get().fw_metadata = fw_metadata
 
-
             compiled_fw_func = aot_config.fw_compiler(
                 fw_module, adjusted_flat_args
             )
 
+        # NB: It's important to compile backwards ahead of time, as this may
+        # add extra guards which we need to apply to the Dynamo cache at
+        # forwards
+        with track_graph_compiling(aot_config, "backward"):
+            placeholder_list = fx_placeholder_vals(bw_module)
+
+            compiled_bw_func = aot_config.bw_compiler(
+                bw_module, placeholder_list
+            )
 
     saved_context = TracingContext.get()
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
-        compiled_bw = None
+        compiled_bw = compiled_bw_func
         metadata = fw_metadata
         num_symints_saved_for_bw = _num_symints_saved_for_bw
 
@@ -2982,48 +2990,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             del contiguous_args
 
             def call_compiled_backward():
-                if CompiledFunction.compiled_bw is None:
-                    assert all(a is not None for a in all_args)
-                    context = torch._C._DisableAutocast if disable_amp else nullcontext
-
-                    placeholder_list = fx_placeholder_vals(bw_module)
-
-                    # saved activations can have different stride to eager if
-                    # the compiler does layout optimization. We should restride the
-                    # tensor passed in for compiling the backward graph using the
-                    # saved tensor's stride.
-                    for i in range(len(placeholder_list)):
-                        ph_arg = placeholder_list[i]
-                        real_arg = all_args[i]
-                        if not isinstance(ph_arg, torch.Tensor):
-                            continue
-
-                        # Comparing ph_arg.stride() with real_arg.stride() directly may
-                        # cause dynamic dimensions in ph_arg being specialized to static
-                        # value. Using the hints to avoid that.
-                        if _get_hints(ph_arg.stride()) != real_arg.stride():
-                            # Note that here we use the stride of the real tensor to
-                            # restride a FakeTensor. This does not cause trouble
-                            # for dynamic shape since this code path only get
-                            # executed if layout optimization is enabled. And we
-                            # disable layout optimization for dynamic shape right
-                            # now.
-                            #
-                            # A solution that decide stride order based on real
-                            # tensor's stride and then apply that stride order to
-                            # the FakeTensor does not work smoothly since some
-                            # tensor's layout is not 'dense'. E.g. mixnet_l has a
-                            # tensor with size [8, 64, 112, 112] and strides
-                            # (2408448, 1, 21504, 192). The solution mentioned will
-                            # decide a stride of (802816, 1, 7168, 64) for this
-                            # tensor which is wrong.
-                            placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_arg.stride())
-
-                    with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
-                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
-                        )
-
                 ctx.maybe_clear_saved_tensors()
                 out = call_func_with_args(
                     CompiledFunction.compiled_bw,
