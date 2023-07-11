@@ -899,6 +899,22 @@ class VariableBuilder:
         # then the relevant SubgraphTracer will lift it to being an input of
         # the subgraph.
         # See NOTE [HigherOrderOperator tracing design] for more details.
+
+        if not self.tx.output.export:
+            # Export has (supposedly) valid cases for fake tensors as inputs here.
+            # I am not convinced, atm, but out of scope for what this assert was added for (protecting value checks
+            # in real_value_tensor_positive_aliases in the common case)
+            assert not isinstance(value, torch._subclasses.fake_tensor.FakeTensor)
+
+        if value in self.tx.output.real_value_tensor_positive_aliases:
+            stored_value = self.tx.output.real_value_tensor_positive_aliases[value]
+            # TODO(voz): Decently common pattern, refactor at some point.
+            dup_guard = self._make_dupe_guard(stored_value)
+            if dup_guard:
+                stored_value = stored_value.add_guards(self.make_guards(dup_guard))
+            breakpoint()
+            return stored_value
+
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
         )
@@ -911,6 +927,7 @@ class VariableBuilder:
             ignore_subclass=ignore_subclass,
             source=source,
         )
+        self.tx.output.real_value_tensor_positive_aliases[value] = tensor_variable
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
