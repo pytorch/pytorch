@@ -987,7 +987,10 @@ def error_inputs_uniform(op, device, **kwargs):
 
 def error_inputs_linspace(op, device, **kwargs):
     yield ErrorInput(SampleInput(0, args=(3, -1)), error_type=RuntimeError, error_regex='number of steps must be non-negative')
-    yield ErrorInput(SampleInput(0, args=(3, 1.)), error_type=TypeError, error_regex='must be int, not float')
+    yield ErrorInput(
+        ampleInput(0, args=(3, 1.)), error_type=TypeError,
+        error_regex='received an invalid combination of arguments - got \\(int, int, float\\)'
+    )
 
 
 def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
@@ -1003,7 +1006,11 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
         tensor_options = {"dtype": dtype, "device": device}
 
         yield SampleInput(start, args=(end, nstep), kwargs=tensor_options)
-        yield SampleInput(torch.tensor(start, **tensor_options), args=(torch.tensor(end, **tensor_options), nstep), kwargs=tensor_options)
+        yield SampleInput(
+            torch.tensor(start, **tensor_options),
+            args=(torch.tensor(end, **tensor_options), nstep),
+            kwargs=tensor_options
+        )
 
     yield SampleInput(1, args=(3, 1))
 
@@ -1024,10 +1031,18 @@ def sample_inputs_logspace(op, device, dtype, requires_grad, **kwargs):
 
         if base is None:
             yield SampleInput(start, args=(end, nstep), kwargs=tensor_options)
-            yield SampleInput(torch.tensor(start, **tensor_options), args=(torch.tensor(end, **tensor_options), nstep), kwargs=tensor_options)
+            yield SampleInput(
+                torch.tensor(start, **tensor_options),
+                args=(torch.tensor(end, **tensor_options), nstep),
+                kwargs=tensor_options
+            )
         else:
             yield SampleInput(start, args=(end, nstep, base), kwargs=tensor_options)
-            yield SampleInput(torch.tensor(start, **tensor_options), args=(torch.tensor(end, **tensor_options), nstep, base), kwargs=tensor_options)
+            yield SampleInput(
+                torch.tensor(start, **tensor_options),
+                args=(torch.tensor(end, **tensor_options), nstep, base),
+                kwargs=tensor_options
+            )
 
     yield SampleInput(1, args=(3, 1, 2.))
 
