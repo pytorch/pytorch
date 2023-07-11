@@ -201,6 +201,24 @@ class SparseSemiStructuredTensor(torch.Tensor):
         self.original_tensor = None
         self.compressed_tensor = compressed_tensor
         self.transposed = transposed
+        self.original_shape = original_shape
+
+    def __tensor_flatten__(self):
+        return [self.compressed_tensor], (self.original_shape, self.transposed)
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta):
+        original_shape, transposed = meta
+        assert len(inner_tensors) == 1
+        compressed_tensor = inner_tensors[0]
+        return SparseSemiStructuredTensor(
+            None,
+            original_shape=original_shape,
+            mask=None,
+            compressed_tensor=compressed_tensor,
+            transposed=transposed,
+        )
+
 
     def __repr__(self) -> str:
         """Return string representation of SparseSemiStructuredTensor
@@ -242,7 +260,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         # Since this code runs below autograd, a detach corresponds to only returning a new object
         if func is torch.ops.aten.detach.default:
             return SparseSemiStructuredTensor(
-                args[0].original_tensor,
+                None,  #args[0].original_tensor,
                 original_shape=args[0].shape,
                 mask=None,
                 compressed_tensor=args[0].compressed_tensor,
@@ -254,7 +272,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         # is the first or second argument, we expect an even / odd number of calls to transpose respectively.
         if func is torch.ops.aten.t.default:
             return SparseSemiStructuredTensor(
-                args[0].original_tensor,
+                None,  #args[0].original_tensor,
                 original_shape=args[0].shape,
                 mask=None,
                 compressed_tensor=args[0].compressed_tensor,
@@ -278,7 +296,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 result, _ = torch._structured_sparse_linear(
                     input_A, input_B.values(), input_B.indices(), bias=bias
                 )
-                return result
+                return result.contiguous()
 
         # handle mm
         if func is torch.ops.aten.mm.default:
@@ -288,13 +306,13 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 transposed_result, _ = torch._structured_sparse_linear(
                     input_B.t(), input_A.values(), input_A.indices()
                 )
-                return transposed_result.t()
+                return transposed_result.t().contiguous()
 
             elif isinstance(input_B, cls) and input_B.transposed:
                 result, _ = torch._structured_sparse_linear(
                     input_A, input_B.values(), input_B.indices()
                 )
-                return result
+                return result.contiguous()
 
         # When torch is run with inference mode, pytorch does not decompose torch.ops.aten.linear into a .t() and addmm(),
         # so we must match the aten.linear op.
@@ -305,7 +323,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 result, _ = torch._structured_sparse_linear(
                     input_tensor, weight.values(), weight.indices(), bias=bias
                 )
-                return result
+                return result.contiguous()
 
         # handle values
         if func is torch.ops.aten.values.default:

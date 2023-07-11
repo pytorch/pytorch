@@ -183,6 +183,37 @@ class TestSparseSemiStructured(TestCase):
         assert torch.allclose(dense_result, sparse_result, rtol=1e-5, atol=1e-5)
 
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
+    def test_structured_sparse_compile(self, device):
+        """
+        Test nn.Linear + nn.ReLU with SparseSemiStructuredTensor + torch.compile
+        We expect:
+            (1) The sparse tensor subclass should turn nn.Linear into `aten._structured_sparse_linear` + `aten.contiguous()`
+            (2) Inductor should fuse the .contiguous() call into the relu
+        """
+        # TODO: make inference_mode work without having to compile under inference mode
+        with torch.inference_mode():
+            input = torch.rand(128, 128, device=device).half()
+            model = torch.nn.Sequential(
+                torch.nn.Linear(128, 128),
+                torch.nn.ReLU()
+            ).to(device).half()
+
+            mod_linear = getattr(model, '0')
+            m, n = mod_linear.weight.shape
+            mask = torch.Tensor([1, 0, 0, 1]).tile((m, n // 4)).bool().cuda()
+            # set masked weight
+            mod_linear.weight = nn.Parameter(mod_linear.weight * mask)
+
+            dense_result = model(input)
+            mod_linear.weight = nn.Parameter(to_sparse_semi_structured(mod_linear.weight, mask=mask))
+
+            model = torch.compile(model)
+            sparse_result = model(input)
+
+        assert torch.allclose(dense_result, sparse_result, rtol=1e-5, atol=1e-5)
+
+
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     def test_values(self):
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A, mask=A.bool())
