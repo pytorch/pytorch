@@ -345,8 +345,12 @@ class TestObserver(QuantizationTestCase):
         for sign in [-1, 1]:
             obser = HistogramObserver.with_args(reduce_range=False)()
             mask = torch.tensor([-3.4028234663852886 * 10**38, 0, 0, 0]) * sign
+            print("A")
             obser(mask)
+            print("B")
+            print(obser.histogram)
             obser(mask - sign)
+            print("C")
             scale, zp = obser.calculate_qparams()
 
             input = torch.randn(1, 4)

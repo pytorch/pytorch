@@ -195,9 +195,17 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
             if (!skip_elt) {
                 // In the unweighted case, the default weight is 1
                 input_t wt = accessor_wt.has_value() ? accessor_wt.value()[i] : static_cast<input_t>(1);
+                std::cout << std::to_string(i);
+                std::cout << " ";
+                std::cout << std::to_string(hist_index);
+                std::cout << " ";
                 std::cout << std::to_string(wt);
+                std::cout << " ";
                 std::cout << std::to_string(hist_local_data[hist_index]);
+                std::cout << " ";
                 hist_local_data[hist_index] += wt;
+                std::cout << std::to_string(hist_local_data[hist_index]);
+                std::cout << "\n";
             }
         }
     });
