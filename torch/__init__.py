@@ -1717,10 +1717,6 @@ from torch import func as func
 from torch.func import vmap
 
 
-# ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
-from torch import onnx as onnx  # ONNX depends on a bunch of Dynamo stuff
-
-
 # The function _sparse_coo_tensor_unsafe is removed from PyTorch
 # Python API (v. 1.13), here we temporarily provide its replacement
 # with a deprecation warning.
@@ -1763,6 +1759,8 @@ _deprecated_attrs = {
 _lazy_modules = {
     "_dynamo",
     "_inductor",
+    # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+    "onnx",
 }
 
 def __getattr__(name):
