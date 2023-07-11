@@ -817,7 +817,6 @@ class TestOptim(TestCase):
                 # NAdam uses two intermediates at the same time (grouped_grads & exp_avg_sq_sqrt)
                 nintermediates = 2
 
-            print(mt_max_mem, st_max_mem)
             self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
 
     @property
