@@ -790,7 +790,7 @@ class VecISA:
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
     _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
@@ -886,6 +886,25 @@ class VecAVX2(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
 
+@dataclasses.dataclass
+class VecZVECTOR(VecISA):
+    _bit_width = 256
+    _macro = "CPU_CAPABILITY_ZVECTOR"
+    _arch_flags = "-mvx -mzvector"
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
+
+    def __str__(self) -> str:
+        return "vx"
+
+    @functools.lru_cache(None)
+    def __bool__(self):
+        if platform.machine() != "s390x":
+            return False
+        return VecISA.__bool__(self)
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
 class InvalidVecISA(VecISA):
     _bit_width = 0
     _macro = ""
@@ -902,7 +921,7 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2()]
+supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecZVECTOR()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -1058,6 +1077,7 @@ def get_include_and_linking_paths(
     from torch.utils import cpp_extension
 
     macros = ""
+    build_arch_flags = ""
     if sys.platform == "linux" and (
         include_pytorch
         or vec_isa != invalid_vec_isa
@@ -1120,6 +1140,7 @@ def get_include_and_linking_paths(
                 libs += ["cuda"]
             else:
                 libs += ["c10_cuda", "cuda", "torch_cuda"]
+        build_arch_flags = vec_isa.build_arch_flags()
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -1195,7 +1216,7 @@ def get_include_and_linking_paths(
     ipaths_str = " ".join(["-I" + p for p in ipaths])
     lpaths_str = " ".join(["-L" + p for p in lpaths])
     libs_str = " ".join(static_link_libs + ["-l" + p for p in libs])
-    return ipaths_str, lpaths_str, libs_str, macros
+    return ipaths_str, lpaths_str, libs_str, macros, build_arch_flags
 
 
 def cpp_compile_command(
@@ -1210,7 +1231,7 @@ def cpp_compile_command(
     compile_only: bool = False,
     use_absolute_path: bool = False,
 ) -> str:
-    ipaths, lpaths, libs, macros = get_include_and_linking_paths(
+    ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
     )
     if isinstance(input, str):
@@ -1237,7 +1258,8 @@ def cpp_compile_command(
             {cpp_compiler()} {inp_name_str} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
-            {ipaths} {lpaths} {libs} {macros} {linker_paths}
+            {ipaths} {lpaths} {libs} {build_arch_flags}
+            {macros} {linker_paths}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
@@ -1683,15 +1705,21 @@ class CppWrapperCodeCache:
                     _opt_flags = optimization_flags()
                     _shared = get_shared()
                     _warning_all_flag = get_warning_all_flag()
-                    _ipaths, _lpaths, _libs, _macros = get_include_and_linking_paths(
+                    (
+                        _ipaths,
+                        _lpaths,
+                        _libs,
+                        _macros,
+                        _build_arch_flags,
+                    ) = get_include_and_linking_paths(
                         vec_isa=pick_vec_isa(),
                         cuda=cuda,
                     )
                     _use_custom_generated_macros = use_custom_generated_macros()
                     _cpp_wrapper_flags = cpp_wrapper_flags()
 
-                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_cpp_wrapper_flags} \
-                    {_use_custom_generated_macros}"
+                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_build_arch_flags} {_macros} \
+                    {_cpp_wrapper_flags} {_use_custom_generated_macros}"
                     # For CPP wrapper, add -ffast-math during linking to make CPU flush denormals.
                     # CPP wrapper leverages cpp_extension which will do the compilation and linking in two stages.
                     # We need to explicitly add -ffast-math as a linking flag.
