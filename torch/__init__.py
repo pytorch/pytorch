@@ -1511,7 +1511,14 @@ class _TorchCompileInductorWrapper:
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
             from torch._inductor import list_mode_options
-            self.apply_options(list_mode_options(mode))
+            if mode == "reduce-overhead" and self.dynamic:
+                raise RuntimeError(
+                    "mode=reduce-overhead cannot be used together with dynamic=True! "
+                    "reduce-overhead enables cudagraph. dynamic=True forces recompiliation "
+                    "for each new shape, which defeats the purpose of cudagraph. "
+                    "Please only enable one of them."
+                )
+            self.apply_options(list_mode_options(mode, self.dynamic))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"

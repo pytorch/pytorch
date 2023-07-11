@@ -305,6 +305,11 @@ def set_logs(
                 val = default_level
 
             if log_registry.is_artifact(alias):
+                if not isinstance(val, bool):
+                    raise ValueError(
+                        f"Expected bool to enable artifact {alias}, received {val}"
+                    )
+
                 if val:
                     log_state.enable_artifact(alias)
             elif log_registry.is_log(alias) or alias in log_registry.child_log_qnames:
