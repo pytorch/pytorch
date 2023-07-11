@@ -252,6 +252,7 @@ def save_graph_repro(
     command="run",
     accuracy=None,
     tracing_mode=None,
+    check_str=None,
 ):
     fd.write(
         generate_compiler_repro_string(
@@ -271,7 +272,7 @@ def save_graph_repro(
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
         f"    run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
-        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}"
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}"
         ")\n"
     )
 
@@ -323,6 +324,7 @@ def isolate_fails(
     save_dir=None,
     accuracy=None,
     tracing_mode=None,
+    check_str=None,
 ):
     if env is None:
         env = {}
@@ -340,6 +342,7 @@ def isolate_fails(
             command="minifier-query",
             accuracy=accuracy,
             tracing_mode=tracing_mode,
+            check_str=check_str,
         )
     # with open(file_name, "r") as fd:
     #     print(fd.read())
@@ -493,7 +496,9 @@ ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
 
 def repro_minifier_query(options, mod, load_args):
     mod, args = repro_common(options, mod, load_args)
-    fail_fn = ACCURACY_FAILS[options.accuracy]
+    fail_fn = functools.partial(
+        ACCURACY_FAILS[options.accuracy], check_str=options.check_str
+    )
     if fail_fn(mod, args):
         sys.exit(1)
     else:
@@ -525,7 +530,7 @@ def repro_minify(options, mod, load_args):
     minifier(
         mod,
         args,
-        module_fails=module_fails,
+        module_fails=functools.partial(module_fails, check_str=options.check_str),
         dump_state=functools.partial(
             dump_compiler_graph_state, compiler_name=compiler_name
         ),
@@ -708,6 +713,7 @@ def run_repro(
     save_dir=None,
     tracing_mode=None,
     patch_code=None,
+    check_str=None,
     **kwargs,
 ):
     for k in kwargs:
@@ -737,6 +743,7 @@ default settings on this script:
   {accuracy=}
   {tracing_mode=}
   {save_dir=}
+  {check_str=}
 """,
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -862,6 +869,12 @@ divergences--you just might not end up with a useful repro in the end.""",
         default=None,
         help="start at this granularity and work down; must be power of 2",
     )
+    parser_minify.add_argument(
+        "--check-str",
+        type=str,
+        default=check_str,
+        help="require minified program to fail with error containing this string",
+    )
 
     parser_analyze = subparsers.add_parser(
         "analyze", help="run the accuracy analyzer on the repro"
@@ -893,6 +906,12 @@ divergences--you just might not end up with a useful repro in the end.""",
         "minifier-query",
     )
     common_flags(parser_minifier_query)
+    parser_minifier_query.add_argument(
+        "--check-str",
+        type=str,
+        default=check_str,
+        help="require minified program to fail with error containing this string",
+    )
 
     args = None
     if len(sys.argv) <= 1:

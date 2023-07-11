@@ -808,6 +808,39 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(expect, actual)
 
+    @config.patch({"triton.dense_indexing": True})
+    @dynamo_config.patch(automatic_dynamic_shapes=True)
+    def test_bucketize_dynamic_dense(self):
+        """
+        Make sure that ops.bucketize() can handle dense_indexing, which previously
+        caused issues due to incorrect handling of the size of offsets.
+        """
+
+        def fn(values, offsets):
+            return torch.ops.prims._inductor_bucketize(values, offsets)
+
+        values = torch.rand((64, 64), device="cuda")
+        offsets = torch.tensor([0.05, 0.1, 0.5, 0.8, 0.85, 0.95], device="cuda")
+
+        expect = fn(values, offsets)
+
+        opt_fn = torch.compile(fn, dynamic=True)
+        actual = opt_fn(values, offsets)
+
+        self.assertEqual(expect, actual)
+
+    def test_float64_constants(self):
+        def fn():
+            # NOTE: tensors of all the same value are constant folded, so we
+            # need a tensor with two distinct values
+            a = torch.tensor([1 / 10, 2 / 10], dtype=torch.float64, device="cuda")
+            return a * 2e50
+
+        cfn = torch.compile(fn)
+        expect = fn()
+        actual = cfn()
+        self.assertEqual(expect, actual, atol=0, rtol=0)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
