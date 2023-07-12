@@ -49,8 +49,14 @@ class OutDtypeOperator(HigherOrderOperator):
             raise ValueError("out_dtype's first argument must be an OpOverload")
         if op._schema.is_mutable:
             raise ValueError("out_dtype's first argument needs to be a functional operator")
-        if not isinstance(op(*args), torch.Tensor):
-            raise ValueError("out_dtype's can only apply to ops that return a single tensor")
+        if not(
+            len(op._schema.returns) == 1 and
+            isinstance(op._schema.returns[0].type, torch.TensorType)
+        ):
+            raise ValueError(
+                "out_dtype's can only apply to ops that return a single tensor"
+                f"Instead got {[r.type for r in op._schema.returns]}"
+            )
 
         res = super().__call__(op, output_dtype, *args)
 

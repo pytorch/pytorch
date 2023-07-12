@@ -97,7 +97,7 @@ class TestOutDtypeOp(TestCase):
 
         inp = (torch.randint(-128, 127, (5, 5), dtype=torch.int8), 3.0)
 
-        compiled = torch.compile(f, backend="eager")
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
         self.assertTrue(torch.allclose(f(*inp), compiled(*inp)))
 
     def test_out_dtype_mul_scalar_numerical(self):
