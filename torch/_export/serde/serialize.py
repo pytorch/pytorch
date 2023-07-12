@@ -1051,7 +1051,7 @@ class GraphModuleDeserializer:
         self.serialized_name_to_node[fx_node.name] = fx_node
 
     def deserialize_metadata(self, metadata: Dict[str, str]) -> Dict[str, Any]:
-        ret: Dict[str, Any]  = {}
+        ret: Dict[str, Any] = {}
         if stack_trace := metadata.get("stack_trace"):
             ret["stack_trace"] = stack_trace
 
