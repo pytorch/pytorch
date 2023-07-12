@@ -24,16 +24,6 @@ namespace native {
 
 namespace {
 
-inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (a / b) * c + ((a % b) * c) / b;
-}
-
-inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return 1 + ((a + 1) * c - 1) / b;
-}
-
 template <typename scalar_t>
 static void adaptive_avg_pool3d_out_frame(
     scalar_t* input_p,
@@ -137,7 +127,7 @@ void adaptive_avg_pool3d_out_cpu_template(
   if (input.ndimension() == 4) {
     output.resize_({sizeD, osizeT, osizeH, osizeW});
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
           auto input_data = input.data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
@@ -160,7 +150,7 @@ void adaptive_avg_pool3d_out_cpu_template(
     output.resize_({input.size(-5), sizeD, osizeT, osizeH, osizeW});
     int64_t n = input.size(0);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_cpu", [&] {
           auto input_data = input.data_ptr<scalar_t>();
           auto output_data = output.data_ptr<scalar_t>();
@@ -258,7 +248,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
 
   /* backprop */
   if (input.ndimension() == 4) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
           /* get raw pointers */
           scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
@@ -278,7 +268,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
   } else {
     int64_t n = input.size(0);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
         input.scalar_type(), "adaptive_avg_pool3d_backward_cpu", [&] {
           /* get raw pointers */
           scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
