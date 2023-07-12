@@ -14,8 +14,10 @@ from .quantizer import (
     SharedQuantizationSpec,
     QuantizationSpecBase,
 )
-from .utils import _fold_bn_weights_into_conv_node
-from .utils import _get_aten_graph_module
+from .utils import (
+    _fold_bn_weights_into_conv_node,
+    _get_aten_graph_module,
+)
 
 # Example inputs for `_conv2d_bn_pattern`, `_qat_conv2d_bn_pattern`, and `_qat_conv2d_bn_pattern_no_bias`
 _conv2d_bn_pattern_example_inputs = (
@@ -308,7 +310,7 @@ def _has_conv_bias_filter(
     Match filter for the subgraph rewriter that returns True if the conv node in
     the original graph has bias.
     """
-    for _, n in match.nodes_map.items():
+    for n in match.nodes_map.values():
         if n.target == torch.ops.aten.convolution.default:
             return n.args[2] is not None
     raise ValueError("Could not find conv node in matched conv + bn pattern")
@@ -721,7 +723,7 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
         _fold_bn_weights_into_conv_node(conv_node, conv_weight, conv_bias, bn_node, m)
 
         # Copy over literal args for conv
-        for _, original_node in _filter_nodes_map(r.nodes_map).items():
+        for original_node in _filter_nodes_map(r.nodes_map).values():
             if original_node.target == torch.ops.aten.convolution.default:
                 _copy_over_literal_conv_args(original_node, conv_node)
 
