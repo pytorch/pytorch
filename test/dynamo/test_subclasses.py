@@ -126,9 +126,12 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         fn_opt = compile_full_eager(fn)
 
-        input0 = torch.ones(2, 2).as_subclass(PassthroughAddSubclass)
-        input1 = torch.ones(2, 2).as_subclass(PassthroughMulSubclass)
-        fn_opt(input0, input1)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "returned NotImplemented"
+        ):
+            input0 = torch.ones(2, 2).as_subclass(PassthroughAddSubclass)
+            input1 = torch.ones(2, 2).as_subclass(PassthroughMulSubclass)
+            fn_opt(input0, input1)
 
     def test_multi_subclass_dispatch_subclass_tiebreak(self):
         pass
