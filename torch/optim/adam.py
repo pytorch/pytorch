@@ -364,10 +364,8 @@ def _single_tensor_adam(params: List[Tensor],
         if capturable or differentiable:
             step = step_t
 
-            # 1 - beta1 ** step can't be captured in a CUDA graph, even if step is a CUDA tensor
-            # (incurs "RuntimeError: CUDA error: operation not permitted when stream is capturing")
-            bias_correction1 = 1 - torch.pow(beta1, step)
-            bias_correction2 = 1 - torch.pow(beta2, step)
+            bias_correction1 = 1 - beta1 ** step
+            bias_correction2 = 1 - beta2 ** step
 
             step_size = lr / bias_correction1
             step_size_neg = step_size.neg()
