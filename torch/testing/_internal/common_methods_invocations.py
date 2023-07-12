@@ -990,7 +990,7 @@ def error_inputs_linspace(op, device, **kwargs):
     yield ErrorInput(
         SampleInput(0, args=(3, 1.)),
         error_type=TypeError,
-        error_regex="received an invalid combination of arguments - got \(int, int, float\)",
+        error_regex="received an invalid combination of arguments - got \\(int, int, float\\)",
     )
 
 
@@ -1008,8 +1008,19 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(start, args=(end, nstep), kwargs=tensor_options)
         yield SampleInput(
-            torch.tensor(start, **tensor_options),
-            args=(torch.tensor(end, **tensor_options), nstep),
+            torch.tensor(
+                start,
+                dtype=torch.float32 if isinstance(start, float) else torch.int64,
+                device=device
+            ),
+            args=(
+                torch.tensor(
+                    end,
+                    dtype=torch.float32 if isinstance(start, float) else torch.int64,
+                    device=device
+                ),
+                nstep
+            ),
             kwargs=tensor_options
         )
 
@@ -1033,15 +1044,37 @@ def sample_inputs_logspace(op, device, dtype, requires_grad, **kwargs):
         if base is None:
             yield SampleInput(start, args=(end, nstep), kwargs=tensor_options)
             yield SampleInput(
-                torch.tensor(start, **tensor_options),
-                args=(torch.tensor(end, **tensor_options), nstep),
+                torch.tensor(
+                    start,
+                    dtype=torch.float32 if isinstance(start, float) else torch.int64,
+                    device=device
+                ),
+                args=(
+                    torch.tensor(
+                        end,
+                        dtype=torch.float32 if isinstance(start, float) else torch.int64,
+                        device=device
+                    ),
+                    nstep),
                 kwargs=tensor_options
             )
         else:
             yield SampleInput(start, args=(end, nstep, base), kwargs=tensor_options)
             yield SampleInput(
-                torch.tensor(start, **tensor_options),
-                args=(torch.tensor(end, **tensor_options), nstep, base),
+                torch.tensor(
+                    start,
+                    dtype=torch.float32 if isinstance(start, float) else torch.int64,
+                    device=device
+                ),
+                args=(
+                    torch.tensor(
+                        end,
+                        dtype=torch.float32 if isinstance(start, float) else torch.int64,
+                        device=device
+                    ),
+                    nstep,
+                    base,
+                ),
                 kwargs=tensor_options
             )
 
