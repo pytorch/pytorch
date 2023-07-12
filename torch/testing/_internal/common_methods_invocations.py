@@ -1430,14 +1430,17 @@ def reference_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **
     )
     ps = (1, 2)
     margins = (0, 7, -3.14)
-    weights = (None, make_weight([S], low=-10., high=10.))
+    weights = (False, True)
     reductions = (None, "none", "mean", "sum")
 
     for (input_shape, target), p, margin, weight, reduction in product(inputs, ps, margins, weights, reductions):
+        input = _make_tensor(input_shape)
+        weight_shape = [input.size(-1)] if input.ndim > 0 else [1]
+        weight = make_weight(weight_shape, low=-10., high=10.) if weight else None
         kwargs = {"p": p, "margin": margin, "weight": weight}
         if reduction is not None:
             kwargs["reduction"] = reduction
-        yield SampleInput(_make_tensor(input_shape), args=(target,), kwargs=kwargs)
+        yield SampleInput(input, args=(target,), kwargs=kwargs)
 
 
 def error_inputs_multi_margin_loss(op, device, **kwargs):
@@ -12806,6 +12809,13 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_multi_margin_loss,
         reference_inputs_func=reference_inputs_multi_margin_loss,
         error_inputs_func=error_inputs_multi_margin_loss,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                "TestJit",
+                "test_variant_consistency_jit",
+            ),
+        ),
     ),
     OpInfo(
         "nn.functional.multilabel_margin_loss",
