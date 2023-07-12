@@ -788,7 +788,12 @@ class TensorWithTFOverrideVariable(VariableTracker):
                 kwargs,
             )
 
-        return res
+            if res != ConstantVariable(NotImplemented):
+                return res
+
+        unimplemented(
+            f"All __torch_function_overrides__ for call {fn} with args {args} and kwargs {kwargs} returned NotImplemented"
+        )
 
     def call_torch_function(self, tx, fn, types, args, kwargs):
         # signature:

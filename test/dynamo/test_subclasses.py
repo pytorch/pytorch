@@ -121,7 +121,8 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         torch._logging.set_logs(dynamo=logging.DEBUG)
 
         def fn(x, y):
-            return torch.div(x, y)
+            z = torch.add(x, y)
+            return torch.div(x, z)
 
         fn_opt = compile_full_eager(fn)
 
@@ -170,6 +171,12 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         pass
 
     def test_disable_torch_function_context(self):
+        pass
+
+    def test_disable_torch_function_context_recompile(self):
+        pass
+
+    def test_enable_torch_function_context_recompile(self):
         pass
 
 
