@@ -366,7 +366,6 @@ def compile_fx_inner(
                 is_inference=is_inference,
             )
         else:
-            log.debug("disabled cudagraphs because %s", cudagraph_fail_reasons)
             BoxedBool.disable(cudagraphs)
 
             # See [Backward Generation Handling]
@@ -389,21 +388,25 @@ def compile_fx_inner(
                 compiled_graph.current_callable = compiled_artifact
 
             if len(set(compiled_graph.device_types)) > 1:
-                perf_hint_log.info("skipping cudagraphs due to multiple devices")
+                perf_hint_log.warning("skipping cudagraphs due to multiple devices")
             elif set(compiled_graph.device_types) == {"cuda"}:
                 if compiled_graph.mutated_inputs:
-                    perf_hint_log.info("skipping cudagraphs due to input mutation")
+                    perf_hint_log.warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
-                    perf_hint_log.info(
+                    perf_hint_log.warning(
                         "skipping cudagraphs due to complex input striding"
                     )
                 elif (
                     len(compiled_graph.device_idxs) > 1
                     and config.triton.cudagraph_trees
                 ):
-                    perf_hint_log.info(
+                    perf_hint_log.warning(
                         "skipping cudagraphs due to multiple device indexes"
                     )
+                else:
+                    perf_hint_log.warning("skipping cudagraphs for unknown reason")
+            else:
+                perf_hint_log.warning("skipping cudagraphs for unknown reason")
 
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
