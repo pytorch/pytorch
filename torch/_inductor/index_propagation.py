@@ -126,23 +126,6 @@ class SymPyOps:
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(sympy.Max(x.expr, y.expr), result_type)
 
-    @staticmethod
-    def floor(x):
-        return TypedExpr(sympy.Floor(x.expr), x.dtype)
-
-    @staticmethod
-    def ceil(x):
-        return TypedExpr(sympy.Ceil(x.expr), x.dtype)
-
-    @staticmethod
-    def trunc(x):
-        if x.expr.is_nonnegative is True:
-            return SymPyOps.floor(x)
-        if x.expr.is_nonpositive is True:
-            return SymPyOps.ceil(x)
-        # There is no sympy.Trunc
-        return NotImplemented
-
 
 @dataclass
 class IndexPropVar:
@@ -204,7 +187,12 @@ class IndexPropagation:
         new_args = [unwrap(a) for a in args]
         new_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
         new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
-        if new_expr is NotImplemented:
+        is_valid_expr = new_expr is not NotImplemented and (
+            # Inductor doesn't expect floating point in sympy expressions, but
+            # allow floating point constants to be propagated
+            new_expr.expr.is_constant() or is_integer_dtype(new_expr.dtype)
+        )
+        if not is_valid_expr:
             return self.fallback(name, args, kwargs)
         return IndexPropVar.new_symbolic(new_expr)
 

@@ -258,6 +258,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
+        assert dtype in {torch.int32, torch.int64}, "index_expr expected and integer dtype"
+        assert expr.is_integer, "index_expr expected an integer expression"
         index_str, mask_vars, mask, expand_str = V.kernel.indexing(expr)
         var = V.kernel.cse.generate(V.kernel.compute, index_str)
         var.mask_vars = mask_vars

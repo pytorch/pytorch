@@ -2766,7 +2766,7 @@ def upsample_bicubic2d_default(
             return 1 / scale if scale is not None and scale > 0 else in_size / out_size
 
     def compute_source_index(scale, dst_index, align_corners):
-        dst_index_ie = ops.index_expr(dst_index, torch.float32)
+        dst_index_ie = ops.to_dtype(ops.index_expr(dst_index, torch.int32), torch.float32)
         scale = ops.constant(scale, torch.float32)
         if align_corners:
             return ops.mul(scale, dst_index_ie)
