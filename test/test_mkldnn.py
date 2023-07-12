@@ -1379,7 +1379,7 @@ class TestMkldnn(TestCase):
         }
 
         params_list = []
-        for _, value in params_dict.items():
+        for value in params_dict.values():
             params_list.append(value)
         return params_list
 
