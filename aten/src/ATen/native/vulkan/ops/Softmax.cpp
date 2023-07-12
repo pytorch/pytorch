@@ -10,34 +10,103 @@ namespace {
 
 using namespace api::utils;
 
+void set_softmax_kernel_params(
+    const long long num_dims,
+    const long long softmax_dim,
+    const IntArrayRef v_input_sizes,
+    api::ShaderInfo& shader_descriptor,
+    api::utils::ivec4& input_shader_extents,
+    api::utils::ivec4& early_exit,
+    api::utils::ivec4& input_dim_stride,
+    api::utils::ivec4& input_tensor_dims) {
+  if (num_dims == 1) {
+    early_exit.data[0u] = 1;
+    input_dim_stride.data[0u] = 1;
+    shader_descriptor = VK_KERNEL(softmax_batch_height_width);
+  } else if (num_dims == 2) {
+    // for height, width dim case, we can reuse a single shader
+    // with vectorized parameters
+    if (softmax_dim == 0) {
+      early_exit.data[1u] = 1;
+      input_dim_stride.data[1u] = 1;
+      shader_descriptor = VK_KERNEL(softmax_batch_height_width);
+    } else { // dim == 1
+      early_exit.data[0u] = 1;
+      input_dim_stride.data[0u] = 1;
+      shader_descriptor = VK_KERNEL(softmax_batch_height_width);
+    }
+  } else if (num_dims == 3) {
+    // for height, width dim case, we can reuse a single shader
+    // with vectorized parameters
+    for (uint32_t i = 0; i < num_dims; i++) {
+      input_tensor_dims.data[i + 1] = safe_downcast<int32_t>(v_input_sizes[i]);
+    }
+    if (softmax_dim == 0) {
+      early_exit.data[2u] = 1;
+      input_dim_stride.data[2u] = 1;
+      shader_descriptor = VK_KERNEL(softmax_channel);
+    } else if (softmax_dim == 1) {
+      early_exit.data[1u] = 1;
+      input_dim_stride.data[1u] = 1;
+      shader_descriptor = VK_KERNEL(softmax_batch_height_width);
+    } else { // dim == 2
+      early_exit.data[0u] = 1;
+      input_dim_stride.data[0u] = 1;
+      shader_descriptor = VK_KERNEL(softmax_batch_height_width);
+    }
+  } else {
+    // assume num_dims is 4
+    // for batch, height, width dim case, we can reuse a single shader
+    // with vectorized parameters
+    for (uint32_t i = 0; i < num_dims; i++) {
+      input_tensor_dims.data[i] = safe_downcast<int32_t>(v_input_sizes[i]);
+    }
+    if (softmax_dim == 1) {
+      // for 4-rank Tensor, softmax along channel dim case, the memory layout
+      // forces a different shader algorithm than other dims
+      input_shader_extents.data[2u] =
+          v_input_sizes[Layout::Activation4D::batch];
+      shader_descriptor = VK_KERNEL(softmax_channel);
+    } else {
+      if (softmax_dim == 0) {
+        early_exit.data[2u] = safe_downcast<int32_t>(
+            std::ceil(v_input_sizes[Layout::Activation4D::channels] / 4.0));
+        input_dim_stride.data[2u] = safe_downcast<int32_t>(
+            std::ceil(v_input_sizes[Layout::Activation4D::channels] / 4.0));
+      } else if (softmax_dim == 2) {
+        early_exit.data[1u] = 1;
+        input_dim_stride.data[1u] = 1;
+      } else { // dim == 3
+        early_exit.data[0u] = 1;
+        input_dim_stride.data[0u] = 1;
+      }
+      shader_descriptor = VK_KERNEL(softmax_batch_height_width);
+    }
+  }
+}
+
 Tensor softmax_internal(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float,
     const bool log_softmax) {
   TORCH_CHECK(
-      input_arg.dim() == 4, "Vulkan softmax expects 4-dimensional input!");
-
+      input_arg.dim() >= 1 && input_arg.dim() <= 4,
+      "Vulkan softmax expects 1,2,3 or 4-dimensional input!");
+  TORCH_CHECK(
+      dim >= 0 && dim < input_arg.dim(),
+      "Softmax dim input was ", dim, " out of range for Tensor input with dimensions ", input_arg.dim());
   api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
   const IntArrayRef v_input_sizes = v_input.sizes();
-  c10::SmallVector<int64_t, 4u> output_sizes{
-      v_input_sizes[Layout::Activation4D::batch],
-      v_input_sizes[Layout::Activation4D::channels],
-      v_input_sizes[Layout::Activation4D::height],
-      v_input_sizes[Layout::Activation4D::width],
-  };
 
   vTensor v_output{
       context,
-      output_sizes,
+      v_input_sizes,
       input_arg.scalar_type(),
   };
-
-  // we have custom global workgroup extents for softmax to enable
-  // shader algorithms that avoid redundant denominator computations
   const api::utils::uvec3 global_workgroup_extents = v_output.extents();
   api::utils::ivec4 input_shader_extents = {
       safe_downcast<int32_t>(v_input.extents().data[0u]),
@@ -61,6 +130,12 @@ Tensor softmax_internal(
       0,
       0, // zero pad
   };
+  api::utils::ivec4 input_tensor_dims = {
+      0,
+      0,
+      0,
+      0,
+  };
   api::ShaderInfo shader_descriptor;
   if (log_softmax) {
     if (dim == 1) {
@@ -71,29 +146,15 @@ Tensor softmax_internal(
           "Vulkan log_softmax expects 4-dimensional input with dim=1!");
     }
   } else {
-    if (dim == 1) {
-      // for channel dim case, the memory layout forces
-      // a different shader algorithm than other dims
-      input_shader_extents.data[2u] =
-          v_input_sizes[Layout::Activation4D::batch];
-      shader_descriptor = VK_KERNEL(softmax_channel);
-    } else {
-      // for batch, height, width dim case, we can reuse a single shader
-      // with vectorized parameters
-      if (dim == 0) {
-        early_exit.data[2u] = safe_downcast<int32_t>(
-            std::ceil(v_input_sizes[Layout::Activation4D::channels] / 4.0));
-        input_dim_stride.data[2u] = safe_downcast<int32_t>(
-            std::ceil(v_input_sizes[Layout::Activation4D::channels] / 4.0));
-      } else if (dim == 2) {
-        early_exit.data[1u] = 1;
-        input_dim_stride.data[1u] = 1;
-      } else { // dim == 3
-        early_exit.data[0u] = 1;
-        input_dim_stride.data[0u] = 1;
-      }
-      shader_descriptor = VK_KERNEL(softmax_batch_height_width);
-    }
+    set_softmax_kernel_params(
+        input_arg.dim(),
+        dim,
+        v_input_sizes,
+        shader_descriptor,
+        input_shader_extents,
+        early_exit,
+        input_dim_stride,
+        input_tensor_dims);
   }
 
   const struct Block final {
@@ -102,15 +163,7 @@ Tensor softmax_internal(
     ivec4 input_dim_stride;
     ivec4 early_exit;
   } block{
-      input_shader_extents,
-      {
-          safe_downcast<int32_t>(v_input_sizes[Layout::Activation4D::batch]),
-          safe_downcast<int32_t>(v_input_sizes[Layout::Activation4D::channels]),
-          safe_downcast<int32_t>(v_input_sizes[Layout::Activation4D::height]),
-          safe_downcast<int32_t>(v_input_sizes[Layout::Activation4D::width]),
-      }, // input_tensor_dims
-      input_dim_stride,
-      early_exit};
+      input_shader_extents, input_tensor_dims, input_dim_stride, early_exit};
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
 

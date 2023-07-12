@@ -116,6 +116,16 @@ class SymPyOps:
         result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
         return TypedExpr(result_expr, result_type)
 
+    @staticmethod
+    def minimum(x, y):
+        result_type = torch.promote_types(x.dtype, y.dtype)
+        return TypedExpr(sympy.Min(x.expr, y.expr), result_type)
+
+    @staticmethod
+    def maximum(x, y):
+        result_type = torch.promote_types(x.dtype, y.dtype)
+        return TypedExpr(sympy.Max(x.expr, y.expr), result_type)
+
 
 @dataclass
 class IndexPropVar:

@@ -179,7 +179,7 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
                 # We omit if dtype is not provided, because onnxscript handles the
                 # default case.
                 continue
-            elif isinstance(value, torch.dtype):
+            else:
                 value = int(jit_type_utils.JitScalarType.from_dtype(value).onnx_type())
         filtered[key] = value
     return filtered
