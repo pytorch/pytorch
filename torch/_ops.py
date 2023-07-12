@@ -270,7 +270,7 @@ class HigherOrderOperator(OperatorBase):
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
         import torch._dynamo
-        from torch._dynamo.eval_frame import disable
+        from torch._dynamo import disable
 
         @disable
         def wrapper():
