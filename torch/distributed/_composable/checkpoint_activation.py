@@ -1,13 +1,17 @@
 from contextlib import contextmanager
 from functools import partial
-from typing import Any, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from weakref import ref, ReferenceType, WeakKeyDictionary
 
 import torch
 import torch.nn as nn
+from torch.distributed.utils import _pack_kwargs, _unpack_kwargs
 from torch.utils.checkpoint import detach_variable, get_device_states, set_device_states
 
 from .contract import contract
+
+
+__all__ = ["checkpoint"]
 
 
 @contextmanager
@@ -26,7 +30,19 @@ def _no_hook(module: nn.Module):
 
 class _ModuleHookCheckpointFunction(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, module: nn.Module, output: Any, *inputs: Any) -> Any:  # type: ignore[override]
+    def forward(
+        ctx,
+        module_fn_with_flat_args: Callable,
+        module: nn.Module,
+        output: Any,
+        *inputs: Any,
+    ) -> Any:
+        """
+        This requires a separate arg for the module forward function with flat
+        args to handle forward functions with kwargs, which must be flattened
+        into args to work with reentrant checkpointing.
+        """
+        ctx.module_fn_with_flat_args = module_fn_with_flat_args
         ctx.module = module
 
         # Save non-tensor inputs in ctx, keep a placeholder None for tensors
@@ -68,18 +84,19 @@ class _ModuleHookCheckpointFunction(torch.autograd.Function):
         # present at this time during forward.  Restore the surrounding state
         # when we're done.
         rng_devices = []
-        if checkpoint.state(ctx.module).had_cuda_in_fwd:
-            rng_devices = checkpoint.state(ctx.module).fwd_gpu_devices
+        checkpoint_state = checkpoint.state(ctx.module)
+        if checkpoint_state.had_cuda_in_fwd:
+            rng_devices = checkpoint_state.fwd_gpu_devices
         with torch.random.fork_rng(devices=rng_devices, enabled=True):
             torch.set_rng_state(checkpoint.state(ctx.module).fwd_cpu_state)
-            if checkpoint.state(ctx.module).had_cuda_in_fwd:
+            if checkpoint_state.had_cuda_in_fwd:
                 set_device_states(
-                    checkpoint.state(ctx.module).fwd_gpu_devices,
-                    checkpoint.state(ctx.module).fwd_gpu_states,
+                    checkpoint_state.fwd_gpu_devices,
+                    checkpoint_state.fwd_gpu_states,
                 )
             detached_inputs = detach_variable(tuple(inputs))
             with torch.enable_grad(), _no_hook(ctx.module):
-                outputs = ctx.module(*detached_inputs)
+                outputs = ctx.module_fn_with_flat_args(*detached_inputs)
 
         if isinstance(outputs, torch.Tensor):
             outputs = (outputs,)
@@ -108,8 +125,9 @@ class _ModuleHookCheckpointFunction(torch.autograd.Function):
             inp.grad if isinstance(inp, torch.Tensor) else None
             for inp in detached_inputs
         )
-        # The two None is for forward argument module and output respectively.
-        return (None, None) + grads
+        # The three `None`s are for the `module_fn_with_flat_args`, `module`,
+        # and `outputs` args from `forward()`.
+        return (None, None, None) + grads
 
 
 class _Holder:
@@ -132,7 +150,8 @@ def _unpack(
     storage: WeakKeyDictionary,
     weak_holder_list: List[ReferenceType],
     module: nn.Module,
-    inputs: Tuple[Any],
+    flat_args: Tuple[Any, ...],
+    kwarg_keys: Tuple[str, ...],
 ) -> torch.Tensor:
     holder_index = 0
     if len(storage) == 0:
@@ -157,12 +176,13 @@ def _unpack(
                 "Please open an issue."
             )
 
+        unpacked_args, unpacked_kwargs = _unpack_kwargs(flat_args, kwarg_keys)
         with _no_hook(
             module
         ), torch.enable_grad(), torch.autograd.graph.saved_tensors_hooks(
             inner_pack, inner_unpack
         ):
-            _unused = module(*inputs)
+            _unused = module(*unpacked_args, **unpacked_kwargs)
 
     if holder not in storage:
         raise RuntimeError(
@@ -212,9 +232,12 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint")
 
-    def forward_pre_hook(module: nn.Module, inputs: Tuple[Any, ...]) -> None:
+    def forward_pre_hook(
+        module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> None:
         if checkpoint.state(module).enable_hook:
             checkpoint.state(module).orig_grad_enabled = torch.is_grad_enabled()
+            flat_args, kwarg_keys = _pack_kwargs(*args, **kwargs)
             if checkpoint.state(module).use_reentrant:
                 torch.set_grad_enabled(False)
                 checkpoint.state(module).fwd_cpu_state = torch.get_rng_state()
@@ -228,7 +251,7 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
                     (
                         checkpoint.state(module).fwd_gpu_devices,
                         checkpoint.state(module).fwd_gpu_states,
-                    ) = get_device_states(*inputs)
+                    ) = get_device_states(*flat_args)
 
             else:
                 # The Holder object for each of the saved object is saved
@@ -246,17 +269,34 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
                         storage=storage,
                         weak_holder_list=weak_holder_list,
                         module=module,
-                        inputs=inputs,
+                        flat_args=flat_args,
+                        kwarg_keys=kwarg_keys,
                     ),
                 )
                 saved_tensor_hooks.__enter__()
                 checkpoint.state(module).saved_tensor_hooks = saved_tensor_hooks
 
-    def forward_hook(module: nn.Module, inputs: Tuple[Any, ...], output: Any) -> Any:
+    def forward_hook(
+        module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any], output: Any
+    ) -> Any:
         if checkpoint.state(module).enable_hook:
             torch.set_grad_enabled(checkpoint.state(module).orig_grad_enabled)
             if checkpoint.state(module).use_reentrant:
-                return _ModuleHookCheckpointFunction.apply(module, output, *inputs)
+                if len(kwargs) > 0:
+                    flat_args, kwarg_keys = _pack_kwargs(*args, **kwargs)
+
+                    def module_fn_with_flat_args(*inputs):
+                        unpacked_args, unpacked_kwargs = _unpack_kwargs(
+                            inputs, kwarg_keys
+                        )
+                        return module(*unpacked_args, **unpacked_kwargs)
+
+                else:
+                    module_fn_with_flat_args = module
+                    flat_args = args
+                return _ModuleHookCheckpointFunction.apply(
+                    module_fn_with_flat_args, module, output, *flat_args
+                )
             else:
                 checkpoint.state(module).saved_tensor_hooks.__exit__()
                 checkpoint.state(module).saved_tensor_hooks = None
@@ -269,8 +309,8 @@ def checkpoint(module: nn.Module, *, use_reentrant: bool = True) -> nn.Module:
     #    activations during the backward pass.
     checkpoint.state(module).enable_hook = True
     checkpoint.state(module).use_reentrant = use_reentrant
-    module.register_forward_pre_hook(forward_pre_hook)
+    module.register_forward_pre_hook(forward_pre_hook, with_kwargs=True)
     # Use prepend to make sure we restore the original grad enabled state right
     # after the module forward invocation.
-    module.register_forward_hook(forward_hook, prepend=True)
+    module.register_forward_hook(forward_hook, prepend=True, with_kwargs=True)
     return module
