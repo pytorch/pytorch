@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional
 import torch
 from collections import defaultdict
 from torch import nn
@@ -205,7 +205,7 @@ class ActivationSparsifier:
         # or sparsify_hook()
         self.data_groups[name]['hook_state'] = "aggregate"  # aggregate hook is attached
 
-    def get_mask(self, name: str = None, layer: nn.Module = None):
+    def get_mask(self, name: Optional[str] = None, layer: Optional[nn.Module] = None):
         """
         Returns mask associated to the layer.
 
@@ -331,7 +331,7 @@ class ActivationSparsifier:
         If `sparse_coo=True`, then the mask is stored as sparse coo else dense tensor
         """
         states = copy.deepcopy(states_dict)
-        for _, state in states.items():
+        for state in states.values():
             if state['mask'] is not None:
                 if isinstance(state['mask'], List):
                     for idx in range(len(state['mask'])):
