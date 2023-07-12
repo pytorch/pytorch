@@ -123,7 +123,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   c10::optional<int64_t> maybe_as_int() override {
     py::gil_scoped_acquire acquire;
     const auto& r = getPyObj().attr("maybe_as_int")();
-    if (r.ptr() == Py_None) {
+    if (r.is_none()) {
       return c10::nullopt;
     } else {
       return r.cast<int64_t>();
