@@ -13,7 +13,6 @@
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 
 constexpr int64_t kShortStoreTimeoutMillis = 100;
-constexpr int64_t kStoreCallbackTimeoutMillis = 5000;
 constexpr int defaultTimeout = 20;
 
 c10::intrusive_ptr<c10d::TCPStore> _createServer(

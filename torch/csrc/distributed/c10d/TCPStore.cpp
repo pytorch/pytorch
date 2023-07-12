@@ -365,13 +365,11 @@ void TCPStoreMasterDaemon::addHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   int64_t addVal = tcputil::recvValue<int64_t>(socket);
 
-  bool newKey = true;
   auto it = tcpStore_.find(key);
   if (it != tcpStore_.end()) {
     auto buf = reinterpret_cast<const char*>(it->second.data());
     auto len = it->second.size();
     addVal += std::stoll(std::string(buf, len));
-    newKey = false;
   }
   auto addValStr = std::to_string(addVal);
   std::vector<uint8_t> newData =
