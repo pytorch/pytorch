@@ -15,13 +15,13 @@
 #ifdef USE_FBGEMM
 #include <fbgemm/Utils.h>
 #endif
-#include <ATen/ops/zeros.h>
 #include <ATen/OpMathType.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/empty.h>
 #include <ATen/ops/zeros.h>
 #endif
 namespace at::native {
@@ -34,6 +34,12 @@ public:
   template <typename scalar_t>
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data *= *src_data;
+  }
+  template <typename scalar_t,
+            typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+  constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
+    using opmath_t = at::opmath_type<scalar_t>;
+    *self_data *= opmath_t(*src_data);
   }
 
   constexpr void operator() (bool * self_data, bool * src_data) const {
@@ -48,6 +54,12 @@ public:
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data += *src_data;
   }
+  template <typename scalar_t,
+            typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+  constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
+    using opmath_t = at::opmath_type<scalar_t>;
+    *self_data += opmath_t(*src_data);
+  }
 };
 static ReduceAdd reduce_add;
 
@@ -56,6 +68,12 @@ public:
   template <typename scalar_t>
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data += *src_data;
+  }
+  template <typename scalar_t,
+            typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+  constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
+    using opmath_t = at::opmath_type<scalar_t>;
+    *self_data += opmath_t(*src_data);
   }
 };
 static ReduceMean reduce_mean;
@@ -66,6 +84,12 @@ public:
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data = at::_isnan<scalar_t>(*src_data) ? *src_data : std::max(*self_data, *src_data);
   }
+  template <typename scalar_t,
+            typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+  constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
+    using opmath_t = at::opmath_type<scalar_t>;
+    *self_data = at::_isnan<scalar_t>(*src_data) ? opmath_t(*src_data) : std::max(*self_data, opmath_t(*src_data));
+  }
 };
 static ReduceMaximum reduce_maximum;
 
@@ -74,6 +98,12 @@ public:
   template <typename scalar_t>
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data = at::_isnan<scalar_t>(*src_data) ? *src_data : std::min(*self_data, *src_data);
+  }
+  template <typename scalar_t,
+            typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+  constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
+    using opmath_t = at::opmath_type<scalar_t>;
+    *self_data = at::_isnan<scalar_t>(*src_data) ? opmath_t(*src_data) : std::min(*self_data, opmath_t(*src_data));
   }
 };
 static ReduceMinimum reduce_minimum;
@@ -84,6 +114,12 @@ public:
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data = *src_data;
   }
+  template <typename scalar_t,
+            typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+  constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
+    using opmath_t = at::opmath_type<scalar_t>;
+    *self_data = opmath_t(*src_data);
+  }
 };
 static TensorAssign tensor_assign;
 
@@ -92,6 +128,34 @@ struct _cpu_scatter_gather_dim_loop {
   template <typename scalar_t, typename func_t>
   void operator()(
     scalar_t* self_data, int64_t self_dim_stride,
+    int64_t* index_data, int64_t index_dim_stride,
+    scalar_t* src_data, int64_t src_dim_stride,
+    int64_t dim, int64_t index_dim_size,
+    int64_t index_upper_bound,
+    func_t& f
+  ) {
+
+    for (const auto i : c10::irange(index_dim_size)) {
+      int64_t idx_dim = index_data[i * index_dim_stride];
+      // we are not putting idx_dim in the error message because it disables
+      // loop optimization in clang-7
+      TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
+        "index ", index_data[i * index_dim_stride],
+        " is out of bounds for dimension ", dim,
+        " with size ", index_upper_bound
+      );
+
+      f(
+        self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
+        src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride
+      );
+    }
+  }
+
+  template <typename scalar_t, typename func_t,
+            typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+  void operator()(
+    at::opmath_type<scalar_t>* self_data, int64_t self_dim_stride,
     int64_t* index_data, int64_t index_dim_stride,
     scalar_t* src_data, int64_t src_dim_stride,
     int64_t dim, int64_t index_dim_size,
@@ -141,6 +205,33 @@ struct _cpu_scatter_gather_dim_loop {
       );
     }
   }
+
+  template <typename scalar_t, typename func_t,
+            typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+  void operator()(
+    at::opmath_type<scalar_t>* self_data, int64_t self_dim_stride,
+    int64_t* index_data, int64_t index_dim_stride,
+    Scalar value,
+    int64_t dim, int64_t index_dim_size,
+    int64_t index_upper_bound,
+    func_t& f
+  ) {
+
+    for (const auto i : c10::irange(index_dim_size)) {
+      int64_t idx_dim = index_data[i * index_dim_stride];
+      // we are not putting idx_dim in the error message because it disables
+      // loop optimization in clang-7
+      TORCH_CHECK(idx_dim >= 0 && idx_dim < index_upper_bound,
+        "index ", index_data[i * index_dim_stride],
+        " is out of bounds for dimension ", dim,
+        " with size ", index_upper_bound
+      );
+      auto temp = value.to<scalar_t>();
+      f(
+        self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride, &temp
+      );
+    }
+  }
 };
 
 
@@ -150,6 +241,16 @@ struct cpu_scatter_gather_base_kernel {
   void operator()(const Tensor& self, int64_t dim,
     const Tensor& index, const Scalar& value,
     const std::string& method_name, func_t& kernel_func) {
+
+    Tensor buffer;
+    bool need_acc = isReducedFloatingType(self.scalar_type());
+    if (need_acc) {
+      auto acc_type = at::toOpMathType(self.scalar_type());
+      buffer = at::empty(self.sizes(), self.options().dtype(acc_type));
+      buffer.copy_(self);
+    } else {
+      buffer = self;
+    }
 
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
     auto index_strides = ensure_nonempty_vec(index.strides().vec());
@@ -166,12 +267,12 @@ struct cpu_scatter_gather_base_kernel {
       .resize_outputs(false)
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
-      .add_output(self)
+      .add_output(buffer)
       .add_input(index)
       .build();
 
-    auto self_dim_stride = ensure_nonempty_stride(self, dim);
-    auto self_dim_size = ensure_nonempty_size(self, dim);
+    auto self_dim_stride = ensure_nonempty_stride(buffer, dim);
+    auto self_dim_size = ensure_nonempty_size(buffer, dim);
 
     auto index_dim_stride = ensure_nonempty_stride(index, dim);
     auto index_dim_size = ensure_nonempty_size(index, dim);
@@ -183,23 +284,23 @@ struct cpu_scatter_gather_base_kernel {
     int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / index_dim_size);
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
+      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, self.scalar_type(),
       "scatter_gather_scalar_cpu", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
-
+        using opmath_t = at::opmath_type<scalar_t>;
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
           auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
           // we change the order of TensorIterator-dim loop
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
-          if (dim== self.dim() - 1) {
+          if (dim== buffer.dim() - 1) {
             for (const auto nelem C10_UNUSED : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
-                (scalar_t*)self_data_bytes, self_dim_stride,
+                (opmath_t*)self_data_bytes, self_dim_stride,
                 (int64_t*)index_data_bytes, index_dim_stride,
                 value, dim, index_dim_size, index_upper_bound,
                 kernel_func);
@@ -222,7 +323,7 @@ struct cpu_scatter_gather_base_kernel {
                             " with size ", index_upper_bound);
 
                 auto temp = value.to<scalar_t>();
-                kernel_func((scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride, &temp);
+                kernel_func((opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride, &temp);
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
                 index_data += strides[INDEX_ITER_STRIDE_IDX];
@@ -233,6 +334,9 @@ struct cpu_scatter_gather_base_kernel {
         iter.for_each(loop, grain_size);
       }
     );
+    if (need_acc) {
+      self.copy_(buffer);
+    }
   }
 
   template <typename func_t>
@@ -240,18 +344,28 @@ struct cpu_scatter_gather_base_kernel {
     const Tensor& index, const Tensor& src,
     const std::string& method_name, func_t& kernel_func) {
 
+    Tensor buffer;
+    bool need_acc = isReducedFloatingType(self.scalar_type());
+    if (need_acc) {
+      auto acc_type = at::toOpMathType(self.scalar_type());
+      buffer = at::empty(self.sizes(), self.options().dtype(acc_type));
+      buffer.copy_(self);
+    } else {
+      buffer = self;
+    }
+
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
-      .add_output(self)
+      .add_output(buffer)
       .add_input(src)
       .add_input(index)
       .build();
 
-    auto self_dim_stride = ensure_nonempty_stride(self, dim);
-    auto self_dim_size = ensure_nonempty_size(self, dim);
+    auto self_dim_stride = ensure_nonempty_stride(buffer, dim);
+    auto self_dim_size = ensure_nonempty_size(buffer, dim);
 
     auto index_dim_stride = ensure_nonempty_stride(index, dim);
     auto index_dim_size = ensure_nonempty_size(index, dim);
@@ -264,11 +378,12 @@ struct cpu_scatter_gather_base_kernel {
     int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / index_dim_size);
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
+      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(1),
       "scatter_gather_tensor_cpu", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
+        using opmath_t = at::opmath_type<scalar_t>;
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
           auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
@@ -276,12 +391,12 @@ struct cpu_scatter_gather_base_kernel {
           // we change the order of TensorIterator-dim loop
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
-          if (dim== self.dim() - 1) {
+          if (dim== buffer.dim() - 1) {
             for (const auto nelem C10_UNUSED : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
-                 (scalar_t*)self_data_bytes, self_dim_stride,
+                 (opmath_t*)self_data_bytes, self_dim_stride,
                  (int64_t*)index_data_bytes, index_dim_stride,
                  (scalar_t*)src_data_bytes, src_dim_stride,
                  dim, index_dim_size, index_upper_bound,
@@ -308,7 +423,7 @@ struct cpu_scatter_gather_base_kernel {
                             " with size ", index_upper_bound);
 
                 kernel_func(
-                  (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
+                  (opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
                   (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
@@ -321,24 +436,37 @@ struct cpu_scatter_gather_base_kernel {
         iter.for_each(loop, grain_size);
       }
     );
+    if (need_acc) {
+      self.copy_(buffer);
+    }
   }
 
   void operator()(const Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name, ReduceMean& kernel_func) {
 
+    Tensor buffer;
+    bool need_acc = isReducedFloatingType(self.scalar_type());
+    if (need_acc) {
+      auto acc_type = at::toOpMathType(self.scalar_type());
+      buffer = at::empty(self.sizes(), self.options().dtype(acc_type));
+      buffer.copy_(self);
+    } else {
+      buffer = self;
+    }
+
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
-      .add_output(self)
+      .add_output(buffer)
       .add_input(src)
       .add_input(index)
       .build();
 
-    auto self_dim_stride = ensure_nonempty_stride(self, dim);
-    auto self_dim_size = ensure_nonempty_size(self, dim);
+    auto self_dim_stride = ensure_nonempty_stride(buffer, dim);
+    auto self_dim_size = ensure_nonempty_size(buffer, dim);
 
     auto index_dim_stride = ensure_nonempty_stride(index, dim);
     auto index_dim_size = ensure_nonempty_size(index, dim);
@@ -351,11 +479,12 @@ struct cpu_scatter_gather_base_kernel {
     int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / index_dim_size);
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
+      ScalarType::Half, ScalarType::BFloat16, iter.dtype(1),
       "scatter_gather_tensor_cpu_reduce_mean", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
+        using opmath_t = at::opmath_type<scalar_t>;
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
           auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
@@ -363,12 +492,12 @@ struct cpu_scatter_gather_base_kernel {
           // we change the order of TensorIterator-dim loop
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
-          if (dim== self.dim() - 1) {
+          if (dim== buffer.dim() - 1) {
             for (const auto nelem C10_UNUSED : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
-                 (scalar_t*)self_data_bytes, self_dim_stride,
+                 (opmath_t*)self_data_bytes, self_dim_stride,
                  (int64_t*)index_data_bytes, index_dim_stride,
                  (scalar_t*)src_data_bytes, src_dim_stride,
                  dim, index_dim_size, index_upper_bound,
@@ -395,7 +524,7 @@ struct cpu_scatter_gather_base_kernel {
                             " with size ", index_upper_bound);
 
                 kernel_func(
-                  (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
+                  (opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
                   (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
@@ -408,24 +537,36 @@ struct cpu_scatter_gather_base_kernel {
         iter.for_each(loop, grain_size);
       }
     );
+    if (need_acc) {
+      self.copy_(buffer);
+    }
   }
 
   void operator()(const Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name, ReduceMaximum& kernel_func) {
+    Tensor buffer;
+    bool need_acc = isReducedFloatingType(self.scalar_type());
+    if (need_acc) {
+      auto acc_type = at::toOpMathType(self.scalar_type());
+      buffer = at::empty(self.sizes(), self.options().dtype(acc_type));
+      buffer.copy_(self);
+    } else {
+      buffer = self;
+    }
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
-      .add_output(self)
+      .add_output(buffer)
       .add_input(src)
       .add_input(index)
       .build();
 
-    auto self_dim_stride = ensure_nonempty_stride(self, dim);
-    auto self_dim_size = ensure_nonempty_size(self, dim);
+    auto self_dim_stride = ensure_nonempty_stride(buffer, dim);
+    auto self_dim_size = ensure_nonempty_size(buffer, dim);
 
     auto index_dim_stride = ensure_nonempty_stride(index, dim);
     auto index_dim_size = ensure_nonempty_size(index, dim);
@@ -438,11 +579,12 @@ struct cpu_scatter_gather_base_kernel {
     int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / index_dim_size);
 
     AT_DISPATCH_ALL_TYPES_AND3(
-      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
+      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(1),
       "scatter_gather_tensor_cpu_reduce_amax", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
+        using opmath_t = at::opmath_type<scalar_t>;
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
           auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
@@ -450,12 +592,12 @@ struct cpu_scatter_gather_base_kernel {
           // we change the order of TensorIterator-dim loop
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
-          if (dim== self.dim() - 1) {
+          if (dim== buffer.dim() - 1) {
             for (const auto nelem C10_UNUSED : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
-                 (scalar_t*)self_data_bytes, self_dim_stride,
+                 (opmath_t*)self_data_bytes, self_dim_stride,
                  (int64_t*)index_data_bytes, index_dim_stride,
                  (scalar_t*)src_data_bytes, src_dim_stride,
                  dim, index_dim_size, index_upper_bound,
@@ -482,7 +624,7 @@ struct cpu_scatter_gather_base_kernel {
                             " with size ", index_upper_bound);
 
                 kernel_func(
-                  (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
+                  (opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
                   (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
@@ -495,24 +637,37 @@ struct cpu_scatter_gather_base_kernel {
         iter.for_each(loop, grain_size);
       }
     );
+    if (need_acc) {
+      self.copy_(buffer);
+    }
   }
 
   void operator()(const Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name, ReduceMinimum& kernel_func) {
 
+    Tensor buffer;
+    bool need_acc = isReducedFloatingType(self.scalar_type());
+    if (need_acc) {
+      auto acc_type = at::toOpMathType(self.scalar_type());
+      buffer = at::empty(self.sizes(), self.options().dtype(acc_type));
+      buffer.copy_(self);
+    } else {
+      buffer = self;
+    }
+
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
       // NOLINTNEXTLINE(bugprone-argument-comment)
       .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
-      .add_output(self)
+      .add_output(buffer)
       .add_input(src)
       .add_input(index)
       .build();
 
-    auto self_dim_stride = ensure_nonempty_stride(self, dim);
-    auto self_dim_size = ensure_nonempty_size(self, dim);
+    auto self_dim_stride = ensure_nonempty_stride(buffer, dim);
+    auto self_dim_size = ensure_nonempty_size(buffer, dim);
 
     auto index_dim_stride = ensure_nonempty_stride(index, dim);
     auto index_dim_size = ensure_nonempty_size(index, dim);
@@ -525,11 +680,12 @@ struct cpu_scatter_gather_base_kernel {
     int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / index_dim_size);
 
     AT_DISPATCH_ALL_TYPES_AND3(
-      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
+      ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(1),
       "scatter_gather_tensor_cpu_reduce_amin", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
+        using opmath_t = at::opmath_type<scalar_t>;
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
           auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
@@ -537,12 +693,12 @@ struct cpu_scatter_gather_base_kernel {
           // we change the order of TensorIterator-dim loop
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
-          if (dim== self.dim() - 1) {
+          if (dim== buffer.dim() - 1) {
             for (const auto nelem C10_UNUSED : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
-                 (scalar_t*)self_data_bytes, self_dim_stride,
+                 (opmath_t*)self_data_bytes, self_dim_stride,
                  (int64_t*)index_data_bytes, index_dim_stride,
                  (scalar_t*)src_data_bytes, src_dim_stride,
                  dim, index_dim_size, index_upper_bound,
@@ -569,7 +725,7 @@ struct cpu_scatter_gather_base_kernel {
                             " with size ", index_upper_bound);
 
                 kernel_func(
-                  (scalar_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
+                  (opmath_t*)self_data + (is_scatter_like ? idx_dim : i) * self_dim_stride,
                   (scalar_t*)src_data + (is_scatter_like ? i : idx_dim) * src_dim_stride);
 
                 self_data += strides[SELF_ITER_STRIDE_IDX];
@@ -582,6 +738,9 @@ struct cpu_scatter_gather_base_kernel {
         iter.for_each(loop, grain_size);
       }
     );
+    if (need_acc) {
+      self.copy_(buffer);
+    }
   }
 };
 
