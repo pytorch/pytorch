@@ -10,7 +10,7 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _pop_mode_temporarily,
 )
-from torch._C import DispatchKey
+from torch._C import DispatchKey, _ExcludeDispatchKeyGuard, DispatchKeySet
 from torch._functorch.eager_transforms import (
     _unwrap_all_tensors_from_functional,
     _wrap_all_tensors_to_functional,
@@ -20,7 +20,40 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
 
 
-out_dtype = HigherOrderOperator("out_dtype")
+class OutDtypeOperator(HigherOrderOperator):
+    """
+    The out_dtype operator takes an existing ATen functional operator, an
+    `out_dtype` argument, and arguments to the original operator, and executes
+    the original operator and returns a Tensor with the `out_dtype` precision.
+    This operator does not mandate a compute precision so it allows the
+    representation to not be opinionated about the exact implementation.
+
+    The general implementation for all operators will be the following:
+        1. Promote inputs dtypes based on default PyTorch dtype promotion rules,
+            using the dtypes of all input Tensors/Scalars and the `out_dtype`
+            arugument.
+        2. Execute the operator
+        3. Cast the output to `out_dtype`
+    """
+
+
+    def __init__(self):
+        super().__init__("out_dtype")
+        # TODO(ydwu4): Subclassing HigherOrderOperator causes __module__ to
+        # become different (torch._higher_order_ops.out_dtype) which will result
+        # in torch.fx to record the op incorrectly in the graph.
+        self.__module__ = "torch.ops.higher_order"
+
+    def __call__(self, op, output_dtype, *args):
+        if not isinstance(op, torch._ops.OpOverload):
+            raise ValueError("out_dtype's first argument must be an OpOverload")
+        if op._schema.is_mutable:
+            raise ValueError("out_dtype's first argument needs to be a functional operator")
+
+        return super().__call__(op, output_dtype, *args)
+
+
+out_dtype = OutDtypeOperator()
 out_dtype.fallthrough(DispatchKey.PythonDispatcher)
 out_dtype.fallthrough(DispatchKey.PythonTLSSnapshot)
 out_dtype.fallthrough(DispatchKey.ADInplaceOrView)
@@ -29,14 +62,10 @@ out_dtype.fallthrough(DispatchKey.AutocastCPU)
 
 
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
-    if not isinstance(op, torch._ops.OpOverload):
-        raise ValueError("out_dtype's first argument must be an OpOverload")
-
     with disable_proxy_modes_tracing():
-        casted_args = pytree.tree_map_only(
-            torch.Tensor, lambda arg: arg.to(dtype=output_dtype), args
-        )
-        out = op(*casted_args)
+        # This is a simplified implementation of this operator just for tracing.
+        # Actual implementation may also first promote the arguments
+        out = op(*args).to(dtype=output_dtype)
 
     node_args = (op, output_dtype, *args)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
@@ -52,9 +81,6 @@ def out_dtype_dense(
     output_dtype: torch.dtype,
     *args
 ):
-    if not isinstance(op, torch._ops.OpOverload):
-        raise ValueError("out_dtype's first argument must be an OpOverload")
-
     flat_inputs = pytree.tree_flatten(args)[0] + [torch.ones(1, dtype=output_dtype)]
     promote_dtype: torch.dtype = elementwise_dtypes(
         *flat_inputs,
@@ -74,19 +100,15 @@ def out_dtype_autograd(
     output_dtype: torch.dtype,
     *args
 ):
-    if not isinstance(op, torch._ops.OpOverload):
-        raise ValueError("out_dtype's first argument must be an OpOverload")
-
-    # TODO: support autograd
+    # TODO: maybe support autograd
     flat_operands, _ = pytree.tree_flatten(args)
-    assert all(
-        not f.requires_grad for f in flat_operands if isinstance(f, torch.Tensor)
-    ), "Autograd is not supported for out_dtype"
+    if torch.is_grad_enabled() and any(
+        f.requires_grad for f in flat_operands if isinstance(f, torch.Tensor)
+    ):
+        raise RuntimeError("Autograd is not supported for out_dtype")
 
-    _ = torch._C.ExcludeDispatchKeyGuard(
-        torch._C.DispatchKeySet(torch._C.DispatchKey.AutogradCPU)
-    )
-    return out_dtype(op, output_dtype, *args)
+    with torch._C._AutoDispatchBelowAutograd():
+        return out_dtype(op, output_dtype, *args)
 
 
 @out_dtype.py_impl(ProxyTorchDispatchMode)
@@ -95,9 +117,6 @@ def out_dtype_proxy(
     output_dtype: torch.dtype,
     *args
 ):
-    if not isinstance(op, torch._ops.OpOverload):
-        raise ValueError("out_dtype's first argument must be an OpOverload")
-
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
@@ -113,18 +132,11 @@ def out_dtype_fake_tensor_mode(
     output_dtype: torch.dtype,
     *args
 ):
-    if not isinstance(op, torch._ops.OpOverload):
-        raise ValueError("out_dtype's first argument must be an OpOverload")
     return out_dtype_dense(op, output_dtype, *args)
 
 
-@out_dtype.py_impl(torch._C.DispatchKey.Functionalize)
+@out_dtype.py_impl(DispatchKey.Functionalize)
 def out_dtype_func1(op, output_dtype, *args):
-    if not isinstance(op, torch._ops.OpOverload):
-        raise ValueError("out_dtype's first argument must be an OpOverload")
-    if op._schema.is_mutable:
-        raise ValueError("out_dtype's first argument needs to be a functional operator")
-
     reapply_views = torch._C._functionalization_reapply_views_tls()
     # At this point, we will see functionalized tensors, so need to unwrap them first
     unwrapped_args = tuple(
@@ -132,7 +144,7 @@ def out_dtype_func1(op, output_dtype, *args):
         for arg in args
     )
     # pyre-ignore
-    with torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)):
+    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
         res = out_dtype(op, output_dtype, *unwrapped_args)
     return _wrap_all_tensors_to_functional(res, level=0)
 

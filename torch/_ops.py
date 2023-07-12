@@ -224,10 +224,6 @@ class HigherOrderOperator(OperatorBase):
             self.__module__ = self.__module__ + self_name_space
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
-        if self.__class__ is HigherOrderOperator:
-            self_name_space = "." + self.namespace if self.namespace else ""
-            self.__module__ = self.__module__ + self_name_space
-
     @property
     def namespace(self):
         return self._ns

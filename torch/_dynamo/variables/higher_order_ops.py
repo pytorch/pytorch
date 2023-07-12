@@ -858,22 +858,17 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable
         from .builder import wrap_fx_proxy
 
         p_args = tuple(arg.as_proxy() for arg in args)
         op = p_args[0]
         output_dtype = p_args[1]
         real_sub_args = pytree.tree_map_only(
-            torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args[2:]
+            torch.fx.Proxy, lambda a: get_fake_value(a.node, tx), p_args[2:]
         )
         # This is a simplified implementation of this operator just for tracing.
-        # Actual implementation should first promote the arguments
-        example_res = op(*real_sub_args).to(dtype=output_dtype)
-        example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
-
-        self.check_kwargs(kwargs, ConstantVariable)
-        _, p_kwargs = proxy_args_kwargs([], kwargs)
+        # Actual implementation may also first promote the arguments
+        example_value = op(*real_sub_args).to(dtype=output_dtype)
 
         # Store the invocation as a call
         return wrap_fx_proxy(
@@ -882,7 +877,7 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs=p_kwargs,
+                kwargs={},
             ),
             example_value=example_value,
         )
