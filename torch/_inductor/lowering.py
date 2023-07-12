@@ -2907,11 +2907,13 @@ def reflection_pad2d_backward(grad_output, x, padding):
 
             # If the upper bound is less than the lower bound, we can get rid of one accumulation.
             # This happens when the padding size is zero.
-            if index_range1[2] < index_range1[1]:
+            upper_less_than_lower1 = index_range1[2] < index_range1[1]
+            if isinstance(upper_less_than_lower1, bool) and upper_less_than_lower1:
                 return
             cond = index_range_condition(index_range1)
             if index_range2 is not None:
-                if index_range2[2] < index_range2[1]:
+                upper_less_than_lower2 = index_range2[2] < index_range2[1]
+                if isinstance(upper_less_than_lower2, bool) and upper_less_than_lower2:
                     return
                 cond = ops.and_(cond, index_range_condition(index_range2))
             g = ops.masked(cond, lambda: load_from_output(out_x, out_y), 0.0)
