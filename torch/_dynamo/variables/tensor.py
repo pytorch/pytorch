@@ -10,6 +10,8 @@ import torch.fx
 import torch.random
 
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
+from torch.overrides import _get_overloaded_args
+from torch.utils._pytree import tree_flatten
 
 from .. import config, variables
 
@@ -682,14 +684,14 @@ class TensorWithTFOverrideVariable(VariableTracker):
     def create(
         tx,
         tensor_variable,
-        orig_tensor_variable_source,
+        tensor_variable_source,
         torch_function_fn,
         subclass_type,
         **kwargs,
     ):
         var = TensorWithTFOverrideVariable(
             tensor_variable,
-            orig_tensor_variable_source,
+            tensor_variable_source,
             torch_function_fn,
             subclass_type,
             **kwargs,
@@ -703,15 +705,15 @@ class TensorWithTFOverrideVariable(VariableTracker):
     def __init__(
         self,
         tensor_variable,
-        orig_tensor_variable_source,
-        subclass_torch_function__func,
+        tensor_variable_source,
+        torch_function_fn,
         subclass_type,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.tensor_variable = tensor_variable
-        self.orig_tensor_variable_source = orig_tensor_variable_source
-        self.subclass_torch_function__func = subclass_torch_function__func
+        self.tensor_variable_source = tensor_variable_source
+        self.torch_function_fn = torch_function_fn
         self.subclass_type = subclass_type
 
     def as_proxy(self):
@@ -722,6 +724,18 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
     def var_getattr(self, tx, name: str) -> VariableTracker:
         return self.tensor_variable.var_getattr(tx, name)
+
+    def torch_function_var(self, tx):
+        from .builder import VariableBuilder
+
+        source = AttrSource(
+            AttrSource(self.source, "__torch_function__"),
+            "__func__",
+        )
+        return VariableBuilder(tx, source)(self.torch_function_fn)
+
+    def subclass_type_var(self):
+        return variables.UserDefinedClassVariable(self.subclass_type_var)
 
     def call_method(
         self,
@@ -754,58 +768,41 @@ class TensorWithTFOverrideVariable(VariableTracker):
         return f"__subclass_{self.subclass_type.__name__}"
 
     @staticmethod
-    def inline_torch_function_unwrapped(
-        tx,
-        original_func_var,
-        tensor_with_tf_override_source,
-        tf_func,
-        subclass_type,
-        options,
-        args,
-        kwargs,
-    ):
-        """
-        This function inlines the `__torch_function__` override for `original_func_var`.
-        For example, if the user code is
+    def dispatch_torch_function(tx, fn, args, kwargs):
+        """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
 
-           x1 = torch.sigmoid(x0)
-
-        And `x0` has an override, then:
-        * `original_func_var` will be a `VariableTracker` object wrapping `torch.sigmoid`
-        * `tensor_with_tf_override_source` will be the `Source` object from
-          the original tensor override instance in the beginning of the program
-        * `tf_func` will be the custom `__torch_function__` function
-        * `subclass_type` will be `type(x0)`
-
-        The caller is expected to properly massage args and kwargs before
-        passing them into this function.
-
-        The caller is responsible for wrapping the return value, if needed.
-        """
-        from . import UserDefinedClassVariable
-        from .builder import TupleVariable, VariableBuilder
-
-        source = AttrSource(
-            AttrSource(tensor_with_tf_override_source, "__torch_function__"),
-            "__func__",
+        all_args = args + tree_flatten(kwargs)[0]
+        overloaded_args = _get_overloaded_args(
+            [arg for arg in all_args if isinstance(arg, TensorWithTFOverrideVariable)],
+            lambda x: x.subclass_type,
         )
-        tf_func_var = VariableBuilder(tx, source)(tf_func)
-        type_var = UserDefinedClassVariable(subclass_type, **options)
 
+        for arg in overloaded_args:
+            res = arg.call_torch_function(
+                tx,
+                fn,
+                variables.TupleVariable(
+                    list({arg.subclass_type_var() for arg in overloaded_args})
+                ),
+                args,
+                kwargs,
+            )
+
+        return res
+
+    def call_torch_function(self, tx, fn, types, args, kwargs):
         # signature:
         # def __torch_function__(cls, func, types, args=(), kwargs=None):
         tf_args = (
-            type_var,  # cls
-            original_func_var,  # func
-            (type_var,),  # types
-            TupleVariable(args),  # args
-            kwargs,  # kwargs
+            self.subclass_type_var(),  # cls
+            fn,  # func
+            types,
+            variables.TupleVariable(list(args)),
         )
-
-        # Disable __torch_function__ here to prevent the clone of the
-        # example tensor from going into the override.
         with torch._C.DisableTorchFunctionSubclass():
-            return tx.inline_user_function_return(tf_func_var, tf_args, {})
+            return tx.inline_user_function_return(
+                self.torch_function_var(tx), tf_args, kwargs
+            )
 
 
 class NumpyNdarrayVariable(TensorVariable):

@@ -13,7 +13,6 @@ import torch.nn
 import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
 from torch._dynamo.variables.user_defined import ProcessGroupVariable
-from torch.overrides import _get_overloaded_args
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -374,27 +373,9 @@ class TorchVariable(VariableTracker):
         ):
             # This code block implements inlining the __torch_function__
             # override of a tensor.
-
-            overloaded_args = _get_overloaded_args(
-                [arg for arg in args if isinstance(arg, TensorWithTFOverrideVariable)],
-                lambda x: x.subclass_type,
+            return TensorWithTFOverrideVariable.dispatch_torch_function(
+                tx, self, args, kwargs
             )
-
-            for tf_tensor in overloaded_args:
-                unwrapped = (
-                    TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
-                        tx,
-                        self,
-                        tf_tensor.orig_tensor_variable_source,
-                        tf_tensor.subclass_torch_function__func,
-                        tf_tensor.subclass_type,
-                        options,
-                        args,
-                        kwargs,
-                    )
-                )
-
-                return unwrapped
 
         elif self.value in [
             torch.amp.autocast_mode.autocast,
