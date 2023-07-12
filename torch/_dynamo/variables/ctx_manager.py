@@ -168,7 +168,6 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        torch._C._is_torch_function_enabled()
         self.guards = self.guards | self._guards_singleton
 
     def enter(self, tx):

@@ -93,6 +93,7 @@ output_codes = Tracker()
 
 initial_grad_state = None
 initial_deterministic_algorithms_state = None
+initial_torch_function_state = None
 
 
 @functools.wraps(original_forward_from_src)
