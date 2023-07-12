@@ -3029,12 +3029,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         if real_stride is None:
                             continue
 
-                        assert _get_hints(real_stride) == all_args[i].stride(), f"{real_stride} {all_args[i].stride()}"
+                        assert real_stride == all_args[i].stride(), f"{real_stride} {all_args[i].stride()}"
 
                         # Comparing ph_arg.stride() with real_stride directly may
                         # cause dynamic dimensions in ph_arg being specialized to static
                         # value. Using the hints to avoid that.
-                        if _get_hints(ph_arg.stride()) != _get_hints(real_stride):
+                        if _get_hints(ph_arg.stride()) != real_stride:
                             # Note that here we use the stride of the real tensor to
                             # restride a FakeTensor. This does not cause trouble
                             # for dynamic shape since this code path only get
