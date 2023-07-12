@@ -69,6 +69,7 @@ def validate_op_between_ort_torch(
     with evaluator.default_as(evaluator.ort_evaluator):
         try:
             expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
+        # NOTE: randomly generating indices/dim: INT64 could go out of bounds
         except IndexError as index_error:
             # TODO(titaiwang): How to bound indices/dim: INT64
             diagnostic = diagnostic_context.inflight_diagnostic()
@@ -79,6 +80,7 @@ def validate_op_between_ort_torch(
             diagnostic.with_source_exception(index_error)
             diagnostic.level = diagnostics.levels.WARNING
             return
+        # NOTE: Error in torch ops with random inputs generated from FakTensors
         except RuntimeError as runtime_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
@@ -90,7 +92,10 @@ def validate_op_between_ort_torch(
             return
 
         try:
-            onnx_args, onnx_kwargs = _tag_arguments_with_param_schemas(
+            (
+                function_inputs,
+                function_attributes,
+            ) = _split_tangled_arguments_with_param_schemas(
                 symbolic_fn.param_schemas(),
                 torch_args,
                 torch_kwargs,
@@ -98,11 +103,12 @@ def validate_op_between_ort_torch(
                 allow_extra_kwargs=True,
             )
             # NOTE: Apply kwargs preprocessing AFTER they are split
-            function_kwargs = (
+            function_attributes = (
                 fx_onnx_interpreter.filter_incompatible_and_dtype_convert_kwargs(
-                    onnx_kwargs
+                    function_attributes
                 )
             )
+        # NOTE: Imcompatible kwargs or missing required args
         except TypeError as type_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
@@ -113,7 +119,8 @@ def validate_op_between_ort_torch(
             diagnostic.level = diagnostics.levels.WARNING
             return
         try:
-            ort_outputs = symbolic_fn(*onnx_args, **function_kwargs)
+            ort_outputs = symbolic_fn(*function_inputs, **function_attributes)
+        # NOTE: Error in ONNX Runtime with random inputs generated from FakTensors
         except RuntimeError as runtime_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
@@ -248,17 +255,17 @@ def wrap_fx_args_as_torch_args(
     return torch_args, torch_kwargs
 
 
-# NOTE: Referenced from onnxscript internal function.
+# NOTE: Referenced from onnxscript internal function: _tag_arguments_with_param_schemas.
 # Importing this function makes the code less robust, as it is not a public API on onnxscript.
 @_beartype.beartype
-def _tag_arguments_with_param_schemas(
+def _split_tangled_arguments_with_param_schemas(
     param_schemas: Sequence[onnxscript.values.ParamSchema],
     args: List[fx_type_utils.Argument],
     kwargs: Dict[str, fx_type_utils.Argument],
     fill_defaults: bool = False,
     allow_extra_kwargs: bool = False,
 ) -> Tuple[List[Any], Dict[str, Any],]:
-    """Tag Python args and kwargs with matching ONNX ParamSchema.
+    """Split tangled Python args and kwargs with matching ONNX ParamSchema.
 
     Args:
         param_schemas: The parameter schemas of an Op or a OnnxFunction.
@@ -300,7 +307,7 @@ def _tag_arguments_with_param_schemas(
             else:
                 tagged_args.append(args[i])
         elif param.name in kwargs:
-            if param.is_input or isinstance(kwargs[param.name], torch.dtype):
+            if param.is_input:
                 tagged_kwargs[param.name] = _convert_tensor_to_numpy(kwargs[param.name])
             else:
                 tagged_kwargs[param.name] = kwargs[param.name]
