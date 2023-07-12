@@ -1780,6 +1780,9 @@ class QConvoneDNN final {
         attr,
         ".")
     }
+
+    output_scale = 1.0 / output_scale;
+
     return _quantized_convolution_onednn(
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
