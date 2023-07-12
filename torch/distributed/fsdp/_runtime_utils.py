@@ -438,7 +438,7 @@ def _pre_forward(
         # their gradients. They must be re-registered every forward pass in case
         # the `grad_fn` is mutated.
         _register_post_backward_hooks(state, handle)
-
+            
         should_cast_forward_inputs = (
             state._handle and not state._handle._force_full_precision
         )
@@ -634,13 +634,13 @@ def _root_cast_forward_input(
 ) -> Tuple[Any, Any]:
     
     if state._handle:
-        force_full_precision = state._handle._force_full_precision
+        force_full_precision = not state._handle._force_full_precision
     else:
         force_full_precision = True
-        
+
     should_cast_forward_inputs = (
         (module.training or not state._use_full_prec_in_eval)
-        and not force_full_precision
+        and force_full_precision
     ) and state.mixed_precision.cast_root_forward_inputs
 
     if should_cast_forward_inputs:
