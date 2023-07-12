@@ -23,7 +23,7 @@ jobs:
           # Try to merge main onto the current branch
           # The --no-commit and --no-ff flags make sure we don't actually
           # commit a merge or create a merge commit, respectively.
-          git merge --no-commit --no-ff main || MERGE_CONFLICT=1
+          git merge --no-commit --no-ff main --allow-unrelated-histories || MERGE_CONFLICT=1
 
           # Check if there was a merge conflict
           if [[ -z "$MERGE_CONFLICT" ]]; then
