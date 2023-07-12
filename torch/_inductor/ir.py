@@ -2598,8 +2598,10 @@ class ConcatKernel(NopKernel):
         return True
 
 
-def type_match(arg, arg_type):
+def type_match(arg, arg_type, is_optional_arg):
+    # TODO: add a util function to handle Optional
     if isinstance(arg, immutable_list):
+        # TODO: optiona List[int]
         if all(
             isinstance(x, int) or (isinstance(x, sympy.Symbol) and x.is_integer)
             for x in arg
@@ -2609,22 +2611,81 @@ def type_match(arg, arg_type):
         else:
             # TODO: add support here
             return False
+    elif isinstance(arg, torch.dtype):
+        update_type = "Optional[int]" if is_optional_arg else "int"
+        return update_type == str(arg_type)
+    elif isinstance(arg, torch.device):
+        update_type = "Optional[Device]" if is_optional_arg else "Device"
+        return update_type == str(arg_type)
+    elif isinstance(arg, bool):
+        update_type = "Optional[bool]" if is_optional_arg else "bool"
+        return update_type == str(arg_type)
     else:
         # TODO: add support here
         return False
 
 
+def is_optional(arg):
+    return "Optional" in str(arg.type)
+
+
+# torch/csrc/utils/python_arg_parser.cpp:FunctionSignature::parse
 def schema_match(schema, args, arg_types, kwargs, arg_names, kwarg_types):
-    for i, arg in enumerate(args):
-        arg_type = arg_types[i]
-        if not type_match(arg, arg_type):
+    min_args = 0
+    max_pos_args = 0
+    for argument in schema.arguments:
+        if not argument.has_default_value():
+            min_args += 1
+        if not argument.kwarg_only:
+            max_pos_args += 1
+
+    nargs = len(args)
+    remaining_kwargs = len(kwargs)
+    arg_pos = 0
+    # TODO: allow_varargs_intlist and int_list_overload True?
+    allow_varargs_intlist = False
+    int_list_overload = False
+
+    assert (
+        len(args) <= max_pos_args
+    ), f"takes {max_pos_args} positional arguments but {len(args)} were given"
+
+    # TODO: overloaded_args
+
+    for argument in schema.arguments:
+        obj = None
+        is_kwd = False
+        if arg_pos < nargs:
+            if argument.kwarg_only:
+                return False
+            obj = args[arg_pos]
+        elif kwargs:
+            if argument.name in kwargs:
+                obj = kwargs[argument.name]
+                is_kwd = True
+
+        failed_idx = -1
+        if obj is None and not is_optional(argument):
             return False
 
-    # TODO: check kwargs type. support default values. check arg_nums
-    for name, value in kwargs.items():
-        if name not in arg_names:
-            return False
-        # TODO: check if type of value matches with kwarg_types[name]. Might be optional.
+        if obj is not None:
+            if is_kwd:
+                expeced_kwd_type = argument.type
+                if not type_match(obj, expeced_kwd_type, is_optional(argument)):
+                    return False
+            else:
+                expected_arg_type = argument.type
+                if not type_match(obj, expected_arg_type, is_optional(argument)):
+                    return False
+
+        if not is_kwd:
+            arg_pos += 1
+        elif (obj is None and is_optional(argument)) or obj is not None:
+            remaining_kwargs -= 1
+
+    if remaining_kwargs > 0:
+        return False
+
     return True
 
 
@@ -2633,7 +2694,6 @@ def try_find_schema(schemas, args, kwargs):
         arg_types = [x.type for x in schema.arguments]
         arg_names = [x.name for x in schema.arguments if x.kwarg_only]
         kwarg_types = {x.name: x.type for x in schema.arguments if x.kwarg_only}
-        assert len(args) <= len(arg_types)
 
         if schema_match(schema, args, arg_types, kwargs, arg_names, kwarg_types):
             return schema
