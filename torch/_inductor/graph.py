@@ -786,7 +786,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.disable_cpp_wrapper("platform not linux")
 
     def check_input_for_cpp_buffer(self):
-        for _, value in self.graph_inputs.items():
+        for value in self.graph_inputs.values():
             dtype = None
             if isinstance(value, TensorBox):
                 dtype = value.get_dtype()
