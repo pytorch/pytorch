@@ -120,6 +120,7 @@ class ConstantFolder(torch.fx.Interpreter):
             return self.unknown_value
 
         out = super().run_node(node)
+
         # TODO - remove constant from node_replacement when it has no uses
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
             self.node_replacements[node] = out
@@ -147,7 +148,10 @@ def is_impure(node: torch.fx.node.Node):
     ):
         # With the pass of convert_conv_weights_to_channels_last
         # https://github.com/pytorch/pytorch/blob/07107919297db3f8ab37f11c12666b6d6d5f692e/torch/_inductor/freezing.py#L338-L362.
-        # There may has the pattern clone(channel_last) <- quantized_decomposed.dequantize_per_channel.default
+        # There may have the pattern quantized_decomposed.dequantize_per_channel.default->
+        # aten.clone.default(weight, torch.channels_last) depending on the heuristics here
+        # https://github.com/pytorch/pytorch/blob/5913437a40a6e45ab7e164afb7c6ec930dd40b2f/torch/_inductor/graph.py#L213.
+        # We shouldn't do constant folding for this clone node.
         return True
     return False
 

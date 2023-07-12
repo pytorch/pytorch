@@ -100,8 +100,7 @@ class TestPaternMatcher(TestCase):
                 prepare_model = prepare_pt2e_quantizer(export_model, quantizer)
                 prepare_model(*inputs)
                 convert_model = convert_pt2e(prepare_model).eval()
-                expected = convert_model(*inputs)
-                compiled_model = compile_fx(convert_model, inputs)
+                _ = compile_fx(convert_model, inputs)
                 self.assertEqual(
                     counters["inductor"]["pattern_matcher_count"], matcher_count
                 )
@@ -109,7 +108,6 @@ class TestPaternMatcher(TestCase):
                     counters["inductor"]["pattern_matcher_nodes"],
                     matcher_nodes,
                 )
-
         else:
             with torch.no_grad(), maybe_autocast:
                 clone_inputs = self._clone_inputs(inputs)

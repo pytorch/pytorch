@@ -97,6 +97,25 @@ quantize_conv_output_pattern = CallFunction(
 )
 
 
+dequant_per_channel_pattern = CallFunction(
+    quantized_decomposed.dequantize_per_channel.default,  # dequant_per_channel node
+    KeywordArg("q_weight"),
+    KeywordArg("w_scale"),
+    KeywordArg("w_zp"),
+    KeywordArg("w_axis"),
+    KeywordArg("w_quant_min"),
+    KeywordArg("w_quant_max"),
+    KeywordArg("w_dtype"),
+)
+
+
+dequant_per_channel_clone_to_channel_last_pattern = CallFunction(
+    aten.clone.default,
+    dequant_per_channel_pattern,
+    memory_format=KeywordArg("memory_format"),
+)
+
+
 def _register_quantized_conv_lowering(pattern):
     @register_lowering_pattern(pattern)
     def qconv(match: Match, *args, **kwargs):
@@ -147,26 +166,7 @@ def register_quantization_lowerings():
     _register_quantized_conv_lowering(quantize_conv_output_pattern)
 
 
-dequant_per_channel_pattern = CallFunction(
-    quantized_decomposed.dequantize_per_channel.default,  # dequant_per_channel node
-    KeywordArg("q_weight"),
-    KeywordArg("w_scale"),
-    KeywordArg("w_zp"),
-    KeywordArg("w_axis"),
-    KeywordArg("w_quant_min"),
-    KeywordArg("w_quant_max"),
-    KeywordArg("w_dtype"),
-)
-
-
-dequant_per_channel_clone_channel_last_pattern = CallFunction(
-    aten.clone.default,
-    dequant_per_channel_pattern,
-    memory_format=KeywordArg("memory_format"),
-)
-
-
-def _is_dequant_conv2d(match):
+def _is_valid_dequant_conv2d_pattern(match):
     conv_node = match.output_node()
     assert conv_node.target is aten.convolution.default
     input_meta_value = conv_node.args[0].meta.get("val")
@@ -179,9 +179,13 @@ def _is_dequant_conv2d(match):
         ):
             # Only support conv2d now
             return False
-    to_fp32_node = match.nodes[0]
-    sub_node = match.nodes[1]
-    mul_node = match.nodes[2]
+
+    (
+        to_fp32_node,
+        sub_node,
+        mul_node,
+    ) = match.nodes[0:3]
+
     assert to_fp32_node.target is torch.ops.prims.convert_element_type.default
     assert sub_node.target is torch.ops.aten.sub.Tensor
     assert mul_node.target is torch.ops.aten.mul.Tensor
@@ -199,62 +203,60 @@ def _is_dequant_conv2d(match):
 def _register_qconv_weight_prepack_pass(pattern):
     @register_freezing_graph_pattern(
         pattern,
-        extra_check=_is_dequant_conv2d,
+        extra_check=_is_valid_dequant_conv2d_pattern,
         pass_number=1,  # pass_number=1, ensure it's behand dequant promotion pass
     )
     def qconv_weight_prepack(match: Match, *args, **kwargs):
-        print("---- match dequant weight prepack pattern ----", flush=True)
-
-        has_to_channel_last_in_pattern = False
-        for node in match.nodes:
-            if node.target == aten.clone.default:
-                has_to_channel_last_in_pattern = True
-
-        print(
-            "has_to_channel_last_in_pattern is: {}".format(
-                has_to_channel_last_in_pattern
-            ),
-            flush=True,
+        has_clone_to_channel_last_node_in_pattern = any(
+            node.target == aten.clone.default for node in match.nodes
         )
 
-        to_fp32_node = match.nodes[0]
-        sub_node = match.nodes[1]
-        mul_node = match.nodes[2]
-        dequant_per_channel = match.nodes[3]
-        clone_node = match.nodes[4] if has_to_channel_last_in_pattern else None
-        conv_node = match.nodes[5] if has_to_channel_last_in_pattern else match.nodes[4]
+        (
+            to_fp32_node,
+            sub_node,
+            mul_node,
+            dequant_per_channel,
+        ) = match.nodes[0:4]
 
-        bias, stride, padding, dilation, is_transposed, out_padding, groups = (
-            kwargs["b"],
-            kwargs["stride"],
-            kwargs["padding"],
-            kwargs["dilation"],
-            kwargs["is_transposed"],
-            kwargs["out_padding"],
-            kwargs["groups"],
+        clone_node = (
+            match.nodes[4] if has_clone_to_channel_last_node_in_pattern else None
         )
+        conv_node = (
+            match.nodes[5]
+            if has_clone_to_channel_last_node_in_pattern
+            else match.nodes[4]
+        )
+        if clone_node is not None:
+            assert clone_node.target is aten.clone.default
+        assert conv_node.target is aten.convolution.default
 
-        qx, x_dq_dtype, x_zp, x_scale = (
+        # Activation QParams
+        qx, x_zp, x_scale = (
             kwargs["x"],
-            kwargs["x_dq_dtype"],
             kwargs["x_zp"],
             kwargs["x_scale"],
         )
 
-        qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype = (
-            kwargs["q_weight"],  # bias
+        # Weight QParams
+        qw, w_scale, w_zp = (
+            kwargs["q_weight"],
             kwargs["w_scale"],
             kwargs["w_zp"],
-            kwargs["w_axis"],
-            kwargs["w_quant_min"],
-            kwargs["w_quant_max"],
-            kwargs["w_dtype"],
         )
 
-        # Use as scale, zp from dequant node to do weight prepack and requant inside dynamic_qconv_op
+        # Conv Params
+        bias, stride, padding, dilation, groups = (
+            kwargs["b"],
+            kwargs["stride"],
+            kwargs["padding"],
+            kwargs["dilation"],
+            kwargs["groups"],
+        )
+
         x_shape = qx.meta.get("tensor_meta").shape
         graph = match.graph
         with graph.inserting_before(conv_node):
+            # Insert weight prepack node and the QConv node
             packed_weight_inputs = (
                 qw,
                 w_scale,
@@ -293,22 +295,18 @@ def _register_qconv_weight_prepack_pass(pattern):
             new_conv_node = graph.call_function(
                 torch.ops.onednn.qconv2d_pointwise.default, args=new_args
             )
-
             conv_node.replace_all_uses_with(new_conv_node)
             new_conv_node.meta.update(conv_node.meta)
 
             # Erase the original conv node
             graph.erase_node(conv_node)
-
-            if clone_node is not None:
-                graph.erase_node(clone_node)
-
             # Erase the dequant pattern
             graph.erase_node(mul_node)
             graph.erase_node(sub_node)
             graph.erase_node(to_fp32_node)
-
             # Erase the dequant per channel pattern
+            if clone_node is not None:
+                graph.erase_node(clone_node)
             graph.erase_node(dequant_per_channel)
 
 
@@ -328,22 +326,21 @@ def _generate_dequant_convolution_node_pattern(_dequant_per_channel_pattern):
     return dequant_convolution_node_pattern
 
 
-def _generate_weight_prepack_patterns():
-    replacement_weight_prepack_patterns = (
+def _generate_qconv_weight_prepack_patterns():
+    return (
         _generate_dequant_convolution_node_pattern(dequant_per_channel_pattern),
         # There is another pattern due to the pass of convert_conv_weights_to_channels_last
         # https://github.com/pytorch/pytorch/blob/07107919297db3f8ab37f11c12666b6d6d5f692e/torch/_inductor/freezing.py#L338-L362.
         # Depend on some heuristics, it may or may not insert to(channel_last) node
         # between convolution and dequant_per_channel node
         _generate_dequant_convolution_node_pattern(
-            dequant_per_channel_clone_channel_last_pattern
+            dequant_per_channel_clone_to_channel_last_pattern
         ),
     )
-    return replacement_weight_prepack_patterns
 
 
 @functools.lru_cache(None)
-def _quantization_mkldnn_weight_pack_init():
-    weight_prepack_patterns = _generate_weight_prepack_patterns()
+def _register_quantization_weight_pack_pass():
+    weight_prepack_patterns = _generate_qconv_weight_prepack_patterns()
     for weight_prepack_pattern in weight_prepack_patterns:
         _register_qconv_weight_prepack_pass(weight_prepack_pattern)
