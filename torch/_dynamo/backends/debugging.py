@@ -22,6 +22,19 @@ def eager(gm, fake_tensor_inputs):
 
 
 @register_backend
+def pre_dispatch_eager(gm, fake_tensor_inputs):
+    from torch.fx.experimental.proxy_tensor import make_fx
+
+    def runnable_gm(*args):
+        return torch.fx.Interpreter(gm).run(*args)
+
+    pre_dispatch_gm = make_fx(runnable_gm, pre_dispatch=True)(*fake_tensor_inputs)
+    pre_dispatch_gm.print_readable()
+
+    return pre_dispatch_gm
+
+
+@register_backend
 def eager_debug(gm, fake_tensor_inputs):
     from torch._subclasses.schema_check_mode import SchemaCheckMode
 
@@ -51,9 +64,15 @@ def boxed_nop(fx_g, example_inputs):
 
 # Useful for debugging purpose
 # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
-aot_eager = aot_autograd(fw_compiler=boxed_nop)
+aot_eager = aot_autograd(
+    fw_compiler=boxed_nop, partition_fn=min_cut_rematerialization_partition
+)
 register_backend(name="aot_eager", compiler_fn=aot_eager)
 
+aot_eager_default_partitioner = aot_autograd(fw_compiler=boxed_nop)
+register_backend(
+    name="aot_eager_default_partitioner", compiler_fn=aot_eager_default_partitioner
+)
 
 # Uses TorchInductor AOT Autograd decomps and partitioner to isolate aot vs
 # inductor problems.
