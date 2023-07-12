@@ -145,6 +145,24 @@ class TestOutDtypeOp(TestCase):
         with torch.no_grad():
             f(*inp)
 
+    def test_out_dtype_wrong_output(self) -> None:
+        def multiple_out(x):
+            return out_dtype(
+                torch.ops.aten.topk.default, torch.int32, x, 5
+            )
+
+        inp = (torch.randn(10),)
+
+        with self.assertRaisesRegex(ValueError, "out_dtype's can only apply to ops that return a single tensor"):
+            multiple_out(*inp)
+
+        def singleton_list_out(x):
+            return out_dtype(
+                torch.ops.aten.split_copy.Tensor, torch.int32, x, 10
+            )
+
+        with self.assertRaisesRegex(ValueError, "out_dtype's can only apply to ops that return a single tensor"):
+            singleton_list_out(*inp)
 
 if __name__ == '__main__':
     run_tests()
