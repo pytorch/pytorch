@@ -85,6 +85,9 @@ test_failures_cuda_wrapper = {
     "test_custom_op_cuda_dynamic_shapes": test_torchinductor.TestFailure(
         ("cuda_wrapper",), is_skip=True
     ),
+    "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",), is_skip=True
+    ),
 }
 
 
@@ -283,6 +286,11 @@ if RUN_CUDA:
         ),
         BaseTest(
             "test_convolution1",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_mm_plus_mm2",
             device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
