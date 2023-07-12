@@ -563,10 +563,12 @@ def _root_pre_forward(
         # We cast buffers back to full precision if we're forcing full precision. Disjointly, we check if buffers
         # are in full precision and if we should cast them back to lower precision, which happens when
         # exiting eval() mode.
-        should_cast_buffers_to_full_prec = False
         handle = state._handle
-        if handle and handle._force_full_precision:
+        if handle:
+            should_cast_buffers_to_full_prec = handle._force_full_precision
+        else:
             should_cast_buffers_to_full_prec = True
+
 
         if should_cast_buffers_to_full_prec:
             _cast_buffers_to_dtype_and_device(
@@ -630,9 +632,15 @@ def _root_pre_forward(
 def _root_cast_forward_input(
     state: _FSDPState, module: torch.nn.Module, args, kwargs
 ) -> Tuple[Any, Any]:
+    
+    if state._handle:
+        force_full_precision = state._handle._force_full_precision
+    else:
+        force_full_precision = True
+        
     should_cast_forward_inputs = (
         (module.training or not state._use_full_prec_in_eval)
-        and (state._handle is not None and not state._handle._force_full_precision)
+        and not force_full_precision
     ) and state.mixed_precision.cast_root_forward_inputs
 
     if should_cast_forward_inputs:

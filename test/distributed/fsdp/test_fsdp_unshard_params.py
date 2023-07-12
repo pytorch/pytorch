@@ -394,6 +394,9 @@ class TestUnshardParams(TestUnshardParamsBase):
         expected_outer_numel = (
             unsharded_outer_numel if unshard_outer else sharded_outer_numel
         )
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model): 
+            if fsdp_module._handle: 
+                assert handle.flat_param.grad is None
         expected_inner_numel = (
             unsharded_inner_numel
             if recurse or not unshard_outer
