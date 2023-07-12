@@ -79,6 +79,8 @@ class Socket {
 
   std::uint16_t port() const;
 
+  bool waitForInput(std::chrono::milliseconds timeout);
+
  private:
   explicit Socket(std::unique_ptr<SocketImpl>&& impl) noexcept;
 

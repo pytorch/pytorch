@@ -1239,9 +1239,6 @@ class DistributedDataParallel(Module, Joinable):
         }
 
     def _build_debug_param_to_name_mapping(self, parameters):
-        if dist.get_debug_level() == dist.DebugLevel.OFF:
-            return {}
-
         param_to_param_index = {parameters[i]: i for i in range(len(parameters))}
         param_set = set(parameters)
         param_index_to_param_fqn = {}
@@ -1347,6 +1344,7 @@ class DistributedDataParallel(Module, Joinable):
     # for the 'module_to_run' underneath
     # see torch._dynamo/eval_frame.py TorchPatcher.patch for more details
     @contextmanager
+    @torch._disable_dynamo(recursive=False)
     def _inside_ddp_forward(self):
         DistributedDataParallel._active_ddp_module = self
         try:
@@ -2231,3 +2229,6 @@ class DistributedDataParallel(Module, Joinable):
         reducer not finalizing backward.
         """
         self.reducer._check_reducer_finalized()
+
+    def _set_sparse_metadata(self, global_unique_ids):
+        self.reducer._set_sparse_metadata(global_unique_ids)

@@ -140,10 +140,14 @@ const char* toString(DispatchKey t) {
       return "AutocastCPU";
     case DispatchKey::AutocastXPU:
       return "AutocastXPU";
+    case DispatchKey::AutocastIPU:
+      return "AutocastIPU";
     case DispatchKey::AutocastHPU:
       return "AutocastHPU";
     case DispatchKey::AutocastCUDA:
       return "AutocastCUDA";
+    case DispatchKey::AutocastXLA:
+      return "AutocastXLA";
     case DispatchKey::AutocastPrivateUse1:
       return "AutocastPrivateUse1";
 
@@ -179,6 +183,9 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::TESTING_ONLY_GenericMode:
       return "TESTING_ONLY_GenericMode";
+
+    case DispatchKey::PreDispatch:
+      return "PreDispatch";
 
     case DispatchKey::PythonDispatcher:
       return "PythonDispatcher";
@@ -285,8 +292,10 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Tracer", c10::DispatchKey::Tracer},
       {"AutocastCPU", c10::DispatchKey::AutocastCPU},
       {"AutocastXPU", c10::DispatchKey::AutocastXPU},
+      {"AutocastIPU", c10::DispatchKey::AutocastIPU},
       {"AutocastHPU", c10::DispatchKey::AutocastHPU},
       {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
+      {"AutocastXLA", c10::DispatchKey::AutocastXLA},
       {"AutocastPrivateUse1", c10::DispatchKey::AutocastPrivateUse1},
       {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
@@ -300,6 +309,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::TESTING_ONLY_GenericWrapper},
       {"TESTING_ONLY_GenericMode", c10::DispatchKey::TESTING_ONLY_GenericMode},
       {"PythonDispatcher", c10::DispatchKey::PythonDispatcher},
+      {"PreDispatch", c10::DispatchKey::PreDispatch},
 
       {"CPU", c10::DispatchKey::CPU},
       {"CUDA", c10::DispatchKey::CUDA},
