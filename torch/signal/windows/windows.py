@@ -424,7 +424,7 @@ def hamming(M: int,
             sym: bool = True,
             dtype: Optional[torch.dtype] = None,
             layout: torch.layout = torch.strided,
-            device:Optional[ torch.device] = None,
+            device: Optional[torch.device] = None,
             requires_grad: bool = False) -> Tensor:
     return general_hamming(M, sym=sym, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
