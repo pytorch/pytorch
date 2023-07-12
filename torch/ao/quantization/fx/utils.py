@@ -410,7 +410,7 @@ def maybe_get_next_module(
         target_functional_type: Functional type that we want to check
     """
 
-    for user, _ in node.users.items():
+    for user in node.users.keys():
         if user.op == 'call_module' and target_module_type is not None and \
            isinstance(modules[str(user.target)], target_module_type):
             return user
