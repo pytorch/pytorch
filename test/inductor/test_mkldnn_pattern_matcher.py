@@ -386,11 +386,13 @@ class TestPaternMatcher(TestCase):
             #    auto_insert_channel_last_node: [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
             # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
             #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
+            # 4. Quantization fusion in post-grad fusion pass
+            #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
             self._test_common(
                 mod,
                 (v,),
-                3,
-                10 if auto_insert_channel_last_node else 9,
+                4,
+                17 if auto_insert_channel_last_node else 16,
                 check_quantization=True,
             )
 

@@ -58,9 +58,7 @@ aten_conv_pattern = CallFunction(
 
 """
 quantize output:
-    scale = 1 / scale
-    scale = 1.0 * scale
-    output = round(output * scale)
+    output = round(output / scale)
     output = output + zero_point
     output = clamp_min(output, 0)
     output = clamp_max(output, 127)
@@ -77,15 +75,9 @@ quantize_conv_output_pattern = CallFunction(
                 CallFunction(
                     aten.round.default,
                     CallFunction(
-                        aten.mul.Tensor,
+                        aten.div.Tensor,
                         aten_conv_pattern,  # output of conv
-                        CallFunction(
-                            aten.mul.Tensor,
-                            CallFunction(
-                                aten.reciprocal.default, KeywordArg("o_scale")
-                            ),
-                            Arg(),  # 1.0
-                        ),
+                        KeywordArg("o_scale"),
                     ),
                 ),
                 KeywordArg("o_zp"),
@@ -195,9 +187,9 @@ quantize_conv_output_pattern_pt2e = CallFunction(
                 CallFunction(
                     aten.round.default,
                     CallFunction(
-                        aten.mul.Tensor,
+                        aten.div.Tensor,
                         aten_qconv_pt2e_pattern,  # output of conv
-                        KeywordArg("o_inv_scale"),
+                        KeywordArg("o_scale"),
                     ),
                 ),
                 KeywordArg("o_zp"),
@@ -222,9 +214,9 @@ def _register_quantized_conv_lowering_pt2e(pattern):
             kwargs["padding"],
             kwargs["dilation"],
         )
-        groups, o_inv_scale, o_zero_point, o_dtype = (
+        groups, o_scale, o_zero_point, o_dtype = (
             kwargs["groups"],
-            kwargs["o_inv_scale"],
+            kwargs["o_scale"],
             kwargs["o_zp"],
             kwargs["o_dtype"],
         )
@@ -258,7 +250,7 @@ def _register_quantized_conv_lowering_pt2e(pattern):
                 padding,
                 dilation,
                 groups,
-                o_inv_scale,
+                o_scale,
                 o_zero_point,
                 o_dtype,
                 False,  # fp32_output

@@ -4247,7 +4247,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             w_scale, w_zp = args[-2], args[-1]
             const_args = []
             const_args.extend(self.codegen_const_args())
-            # const_args is: [stride, padding, dilation, groups, x_scale, x_zp, w_axis, o_inv_scale, o_zp, o_dtype,
+            # const_args is: [stride, padding, dilation, groups, x_scale, x_zp, w_axis, o_scale, o_zp, o_dtype,
             # fp32_output, unary_attr, unary_scalars, unary_algorithm]
             stride = const_args[0]
             padding = const_args[1]
@@ -4255,7 +4255,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             groups = const_args[3]
             x_scale, x_zp = const_args[4], const_args[5]
             w_axis = const_args[6]
-            o_inv_scale, o_zp = const_args[7], const_args[8]
+            o_scale, o_zp = const_args[7], const_args[8]
             o_dtype = const_args[9]
             fp32_output = const_args[10]
             unary_attr, unary_scalars, unary_algorithm = (
@@ -4271,7 +4271,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             w_scale, w_zp = args[-2], args[-1]
             const_args = []
             const_args.extend(self.codegen_const_args())
-            # const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, w_axis, o_inv_scale, o_zp, o_dtype,
+            # const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, w_axis, o_scale, o_zp, o_dtype,
             # fp32_output, unary_attr, unary_scalars, unary_algorithm]
             bias = const_args[0]
             stride = const_args[1]
@@ -4280,7 +4280,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             groups = const_args[4]
             x_scale, x_zp = const_args[5], const_args[6]
             w_axis = const_args[7]
-            o_inv_scale, o_zp = const_args[8], const_args[9]
+            o_scale, o_zp = const_args[8], const_args[9]
             o_dtype = const_args[10]
             fp32_output = const_args[11]
             unary_attr, unary_scalars, unary_algorithm = (
@@ -4302,7 +4302,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             + ", {}".format(padding)
             + ", {}".format(dilation)
             + ", {}".format(groups)
-            + ", {}".format(o_inv_scale)
+            + ", {}".format(o_scale)
             + ", {}".format(o_zp)
             + ", {}".format(fp32_output)  # not fp32 output
             + ", {}".format(unary_attr)  # no unary postop
@@ -4329,7 +4329,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         padding_: List[int],
         dilation_: List[int],
         groups: int,
-        o_inv_scale: "TensorBox",
+        o_scale: "TensorBox",
         output_zero_point: "TensorBox",
         output_dtype,
         fp32_output,
@@ -4359,7 +4359,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
 
         input_qparams = [x_scale, x_zp]
         weight_qparams = [w_scale, w_zp, w_axis]
-        output_qparams = [o_inv_scale, output_zero_point, output_dtype]
+        output_qparams = [o_scale, output_zero_point, output_dtype]
         return QConvPointWisePT2E(
             layout=kernel_layout,
             inputs=inputs,
