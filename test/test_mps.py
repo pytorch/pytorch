@@ -667,7 +667,7 @@ def mps_ops_modifier(ops):
         'randn_like': [torch.float16, torch.float32],
         'bernoulli': [torch.float16, torch.float32],
         'exponential': [torch.float16, torch.float32],
-        'nn.functional.feature_alpha_dropoutwith_train': [torch.float32],
+        'nn.functional.feature_alpha_dropoutwith_train': [torch.float16, torch.float32],
         'normal': [torch.float16, torch.float32, torch.float16, torch.float32],
         'normalin_place': [torch.float16, torch.float32],
         'normalnumber_mean': [torch.float16, torch.float32],
