@@ -82,9 +82,6 @@ test_failures_cpp_wrapper = {
 }
 
 test_failures_cuda_wrapper = {
-    "test_custom_op_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",), is_skip=True
-    ),
     "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
         ("cuda_wrapper",), is_skip=True
     ),
