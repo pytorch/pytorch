@@ -13,14 +13,9 @@ from .mm_common import mm_args, mm_grid, mm_options
 
 aten = torch.ops.aten
 
-
-def ref_mm_plus_mm(a, b, c, d, out):
-    torch.mm(a, b, out=out)
-    out.addmm_(c, d)
-    return out
-
-
-aten_mm_plus_mm = ExternKernelChoice(ref_mm_plus_mm)
+aten_mm_plus_mm = ExternKernelChoice(
+    torch.ops.inductor._mm_plus_mm, "torch::inductor::_mm_plus_mm"
+)
 
 mm_plus_mm_template = TritonTemplate(
     name="mm_plus_mm",
