@@ -546,7 +546,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
     test_conv2d_binary_dynamic_shapes = TestPatternMatcher.test_conv2d_binary
     test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
 
-    def test_conv_transpose2d_dynamic(self):
+    def test_conv_transpose2d_dynamic_shapes(self):
         # We don't support conv_transpose2d for now.
         class M(torch.nn.Module):
             def __init__(self):
