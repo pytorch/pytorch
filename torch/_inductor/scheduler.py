@@ -135,8 +135,14 @@ class BaseSchedulerNode:
     def get_mutations(self):
         return self.node.get_mutation_names()
 
+    def has_aliasing(self):
+        return bool(self.get_aliases())
+
+    def has_mutation(self):
+        return bool(self.get_mutations())
+
     def has_aliasing_or_mutation(self):
-        return bool(self.get_aliases() or self.get_mutations())
+        return self.has_aliasing() or self.has_mutation()
 
     def set_read_writes(self, rw: dependencies.ReadWrites):
         self.read_writes: dependencies.ReadWrites = rw
@@ -964,8 +970,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
         return self.group[0]
 
     @cache_on_self
-    def has_aliasing_or_mutation(self):
-        return any(x.has_aliasing_or_mutation() for x in self.snodes)
+    def has_aliasing(self):
+        return any(x.has_aliasing() for x in self.snodes)
+
+    @cache_on_self
+    def has_mutation(self):
+        return any(x.has_mutation() for x in self.snodes)
 
     @cache_on_self
     def op_counts(self):
@@ -1575,7 +1585,8 @@ class Scheduler:
         if node1.get_names() & node2.recursive_predecessors:
             # node2 depends on node1 outputs
             return (
-                self.can_fuse_vertical(node1, node2)
+                not node1.has_mutation()
+                and self.can_fuse_vertical(node1, node2)
                 and self.can_fuse_loop_orders(node1, node2)
                 and self.get_backend(device).can_fuse_vertical(node1, node2)
             )

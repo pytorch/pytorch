@@ -5,7 +5,7 @@ import unittest
 
 import torch
 import torch._dynamo.config as dynamo_config
-from torch import nn
+from torch import device, nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
@@ -497,6 +497,54 @@ class CudaReproTests(TestCase):
         ref = mod(*args)
         res = opt_mod(*args)
         self.assertTrue(same(ref, res))
+
+    def test_ormqr_scatter(self):
+        def forward(arg0_1, arg1_1):
+            iota = torch.ops.prims.iota.default(
+                5,
+                start=0,
+                step=1,
+                dtype=torch.int64,
+                device=device(type="cuda", index=0),
+                requires_grad=False,
+            )
+            unsqueeze = torch.ops.aten.unsqueeze.default(iota, -2)
+            unsqueeze_1 = torch.ops.aten.unsqueeze.default(iota, -1)
+            sub = torch.ops.aten.sub.Tensor(unsqueeze, unsqueeze_1)
+            le = torch.ops.aten.le.Scalar(sub, -1)
+            full = torch.ops.aten.full.default(
+                [],
+                0.0,
+                dtype=torch.float32,
+                layout=torch.strided,
+                device=device(type="cuda", index=0),
+                pin_memory=False,
+            )
+            where = torch.ops.aten.where.self(le, arg0_1, full)
+            full_1 = torch.ops.aten.full.default(
+                [5],
+                1.0,
+                dtype=torch.float32,
+                layout=torch.strided,
+                device=device(type="cuda", index=0),
+                pin_memory=False,
+            )
+            diagonal_scatter = torch.ops.aten.diagonal_scatter.default(
+                where, full_1, 0, -2, -1
+            )
+            slice_1 = torch.ops.aten.slice.Tensor(diagonal_scatter, -1, 0, 5)
+            mul = torch.ops.aten.mul.Tensor(slice_1, slice_1)
+            sum_1 = torch.ops.aten.sum.dim_IntList(mul, [-2])
+            mul_1 = torch.ops.aten.mul.Tensor(arg1_1, sum_1)
+            return (mul_1,)
+
+        args = [
+            rand_strided((5, 5), (1, 5), device="cuda").requires_grad_(True),
+            rand_strided((5,), (1,), device="cuda").requires_grad_(True),
+        ]
+        ref = forward(*args)
+        res = torch.compile(forward, fullgraph=True)(*args)
+        self.assertEqual(res, ref)
 
     @config.patch({"triton.autotune_pointwise": True})
     def test_inplace_add_alpha_autotune(self):
