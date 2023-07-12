@@ -13,7 +13,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # This is important to fetch all history
+          fetch-depth: 1
 
       - name: Check for merge conflicts
         run: |
