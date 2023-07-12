@@ -14,6 +14,11 @@ def dummy_fn(x):
     return torch.sigmoid(x + math.pi) / 10.0
 
 
+class DummyModule(torch.nn.Module):
+    def forward(self, x):
+        return dummy_fn(x)
+
+
 class TestInductorConfig(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -113,6 +118,29 @@ class TestInductorConfig(TestCase):
             torch.testing.assert_allclose(
                 opt_fn(x), y, msg=f"torch.compile(..., **{kwargs!r}) failed"
             )
+
+    def test_get_compiler_config(self):
+        from torch._inductor import config as inductor_default_config
+
+        default_cudagraphs = inductor_default_config._default["triton.cudagraphs"]
+
+        # should update default config with a new value
+        model = DummyModule()
+        optimized_module = torch.compile(
+            model, options={"triton.cudagraphs": not default_cudagraphs}
+        )
+        compiler_config = optimized_module.get_compiler_config()
+        self.assertEqual(compiler_config["triton.cudagraphs"], not default_cudagraphs)
+
+        # keep default config
+        model = DummyModule()
+        optimized_module = torch.compile(model)
+        compiler_config = optimized_module.get_compiler_config()
+
+        self.assertEqual(
+            compiler_config["triton.cudagraphs"],
+            default_cudagraphs,
+        )
 
     def test_compile_api_passes_config(self):
         # ensure configs are actually passed down to inductor

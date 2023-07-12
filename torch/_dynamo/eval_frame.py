@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import dis
 import functools
@@ -147,6 +148,13 @@ class OptimizedModule(torch.nn.Module):
         return orig_mod_attrs + [
             attr for attr in super().__dir__() if attr not in orig_mod_attrs
         ]
+
+    def get_compiler_config(self):
+        # the logic should be the same to _inductor/compile_fx.py
+        from torch._inductor import config
+
+        with config.patch(self.dynamo_ctx.config):
+            return copy.deepcopy(config._config)
 
 
 def remove_from_cache(f):
@@ -362,6 +370,7 @@ class OptimizeContext(_TorchDynamoContext):
         *,
         export=False,
         dynamic=False,
+        config=None,
     ):
         def on_enter():
             global most_recent_backend
@@ -377,6 +386,7 @@ class OptimizeContext(_TorchDynamoContext):
             install_generation_tagging_init()
 
         compiler_fn = innermost_fn(callback)
+        self.config = config
         super().__init__(
             callback=callback,
             on_enter=on_enter,
@@ -451,7 +461,12 @@ def catch_errors_wrapper(callback, hooks: Hooks):
 
 
 def _optimize_catch_errors(
-    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, export=False, dynamic=False
+    compile_fn,
+    hooks: Hooks,
+    backend_ctx_ctor=null_context,
+    export=False,
+    dynamic=False,
+    config=None,
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
@@ -459,6 +474,7 @@ def _optimize_catch_errors(
         first_ctx=True,
         export=export,
         dynamic=dynamic,
+        config=config,
     )
 
 
@@ -556,6 +572,7 @@ def optimize(
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
+        config=backend.config if hasattr(backend, "config") else None,
     )
 
 
