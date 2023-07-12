@@ -283,6 +283,11 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
 
 @register_meta(aten.copy_.default)
 def meta_copy_(self, src, non_blocking=False):
+    # Manually running copy_() in the meta function here,
+    # to ensure we run the same assertions that the eager
+    # copy_() kernel would ordinarily run.
+    self_clone = utils.clone_preserve_strides(self)
+    self_clone.copy_(src)
     return self
 
 
