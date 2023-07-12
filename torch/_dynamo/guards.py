@@ -69,6 +69,7 @@ CLOSURE_VARS = collections.OrderedDict(
             "___are_deterministic_algorithms_enabled",
             torch.are_deterministic_algorithms_enabled,
         ),
+        ("___is_torch_function_enabled", torch._C._is_torch_function_enabled),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
@@ -491,6 +492,15 @@ class GuardBuilder(GuardBuilderBase):
             code = "___are_deterministic_algorithms_enabled()"
         else:
             code = "not ___are_deterministic_algorithms_enabled()"
+        self._produce_guard_code(guard, [code])
+
+    def TORCH_FUNCTION_STATE(self, guard: Guard):
+        assert guard.source is GuardSource.GLOBAL
+        code = None
+        if convert_frame.initial_torch_function_state:
+            code = "___is_torch_function_enabled()"
+        else:
+            code = "not ___is_torch_function_enabled()"
         self._produce_guard_code(guard, [code])
 
     def DEFAULT_DEVICE(self, guard: Guard):
