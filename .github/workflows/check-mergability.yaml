@@ -23,15 +23,15 @@ jobs:
           # Try to merge main onto the current branch
           # The --no-commit and --no-ff flags make sure we don't actually
           # commit a merge or create a merge commit, respectively.
-          MERGE_OUTPUT=$(git merge --no-commit --no-ff main) || true
+          git merge --no-commit --no-ff main || MERGE_CONFLICT=1
 
           # Check if there was a merge conflict
-          if [[ "${MERGE_OUTPUT}" == *"Automatic merge failed"* ]]; then
-            echo "Merge conflict detected. Failing the job..."
-            exit 1
-          else
+          if [[ -z "$MERGE_CONFLICT" ]]; then
             echo "No merge conflicts detected."
             exit 0
+          else
+            echo "Merge conflict detected. Failing the job..."
+            exit 1
           fi
 
 concurrency:
