@@ -62,6 +62,26 @@ class TritonPrinter(PythonPrinter):
     def _helper_sqrt(self, expr):
         return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
 
+    def _print_Min(self, expr):
+        nargs = len(expr.args)
+        if len(expr.args) == 1:
+            return self._print(expr.args[0])
+
+        mid = len(expr.args) // 2
+        a = self._print(sympy.Min(*expr.args[:mid]))
+        b = self._print(sympy.Min(*expr.args[mid:]))
+        return f"tl.math.min({a}, {b})"
+
+    def _print_Max(self, expr):
+        nargs = len(expr.args)
+        if len(expr.args) == 1:
+            return self._print(expr.args[0])
+
+        mid = len(expr.args) // 2
+        a = self._print(sympy.Max(*expr.args[:mid]))
+        b = self._print(sympy.Max(*expr.args[mid:]))
+        return f"tl.math.max({a}, {b})"
+
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
@@ -134,18 +154,29 @@ class TritonOverrides(OpOverrides):
     def to_dtype_bitcast(x, dtype: torch.dtype):
         return f"{x}.to({triton_compute_type(dtype)}, bitcast=True)"
 
-    @staticmethod
-    def constant_val(val):
-        return triton_constant(val)
-
-    @staticmethod
-    def constant(value, dtype):
+    @classmethod
+    def constant(cls, value, dtype):
         if dtype == torch.uint8:
-            tmp = ops.constant_val(value)
-            return ops.to_dtype(tmp, dtype)
-        else:
-            type_ = torch._prims_common.dtype_to_type(dtype)
-            return triton_constant(type_(value))
+            # tl.full is broken for uint8, remove once triton is fixed.
+            # See openai/triton#1919
+            tmp = cls.constant(value, torch.int16)
+            return cls.to_dtype(tmp, dtype)
+
+        type_ = torch._prims_common.dtype_to_type(dtype)
+        triton_val = triton_constant(type_(value))
+        triton_type = triton_compute_type(dtype)
+
+        if triton_type == "tl.float32":
+            # Float constants are always f32 in triton
+            return triton_val
+
+        # NOTE: We use a tensor here in order to get the expected type.
+        # Otherwise, e.g. float64 constants would be trunctated to float32.
+        # Also, we could just use shape=[1] here but starting with the correct
+        # ndim avoids extra `tt.expand_dim` ops appearing in the triton IR.
+        ndim = V.kernel.triton_tensor_ndim()
+        shape = [1] * ndim
+        return f"tl.full({shape}, {triton_val}, {triton_type})"
 
     @staticmethod
     def abs(x):
@@ -1023,6 +1054,7 @@ class TritonKernel(Kernel):
                     index = sympy_subs(index, replacements)
 
         index_vars = index.free_symbols
+        index = self.simplify_indexing(index)
         index_str = self.index_to_str(index)
 
         mask_vars: Set[str] = set()
@@ -2440,7 +2472,7 @@ class TritonScheduling:
             if perf_hint_log.level <= logging.WARNING:
                 for node in EnableReduction.filter(node_schedule):
                     if len(cls.candidate_tilings(node)) > 0:
-                        perf_hint_log.warning("reduction over non-contiguous dims")
+                        perf_hint_log.info("reduction over non-contiguous dims")
                         break
             return (numel, reduction_numel)
 
@@ -2479,7 +2511,7 @@ class TritonScheduling:
                     break  # only 1 choice for now
 
         if len(ranked_tilings) > 1:
-            perf_hint_log.warning("possibly bad tiling: %s", ranked_tilings)
+            perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
 
         for tiled_groups in ranked_tilings:
             new_groups = (*tiled_groups, reduction_numel)
