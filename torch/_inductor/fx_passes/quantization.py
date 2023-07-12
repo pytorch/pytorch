@@ -2,7 +2,7 @@ import functools
 
 import torch
 from ..ir import QConv
-from ..pattern_matcher import Arg, CallFunction, KeywordArg, Match
+from ..pattern_matcher import CallFunction, KeywordArg, Match
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 
