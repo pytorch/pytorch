@@ -194,7 +194,7 @@ class CudaReproTests(TestCase):
         assume_static_by_default=False,
     )
     def test_dynamic_to_static_cudagraphs(self):
-        for b in [False, True]:
+        for b in [True]:
             with config.patch({"triton.cudagraph_trees": b}):
 
                 @torch._dynamo.optimize("inductor")

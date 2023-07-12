@@ -342,10 +342,11 @@ def compile_fx_inner(
         cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
 
         if not cudagraph_fail_reasons:
-            # Force specialize all inputs so that CUDA graphs will work
-            for t in example_inputs:
-                if isinstance(t, torch.SymInt):
-                    int(t)  # guard
+            if not config.triton.cudagraph_trees:
+                # Force specialize all inputs so that CUDA graphs will work
+                for t in example_inputs:
+                    if isinstance(t, torch.SymInt):
+                        int(t)  # guard
 
             if (
                 boxed_forward_device_index is not None
@@ -364,7 +365,7 @@ def compile_fx_inner(
                 is_inference=is_inference,
             )
         else:
-            log.debug("disabled cudagraphs because %s", cudagraph_fail_reasons)
+            log.info("disabled cudagraphs because %s", cudagraph_fail_reasons)
             BoxedBool.disable(cudagraphs)
 
             # See [Backward Generation Handling]
