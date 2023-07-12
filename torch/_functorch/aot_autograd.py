@@ -2833,7 +2833,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # Comparing ph_arg.stride() with real_stride directly may
                 # cause dynamic dimensions in ph_arg being specialized to static
                 # value. Using the hints to avoid that.
-                if _get_hints(ph_arg.stride()) != _get_hints(real_stride):
+                if _get_hints(ph_arg.stride()) != real_stride:
                     # Note that here we use the stride of the real tensor to
                     # restride a FakeTensor. This does not cause trouble
                     # for dynamic shape since this code path only get
@@ -2855,9 +2855,15 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             if len(symint_outs_saved_for_bw):
                 context = torch._C._DisableAutocast if disable_amp else nullcontext
                 with context():
-                    compiled_bw_func = aot_config.bw_compiler(
-                        bw_module, placeholder_list
-                    )
+                    try:
+                        compiled_bw_func = aot_config.bw_compiler(
+                            bw_module, placeholder_list
+                        )
+                    except Exception:
+                        log.warning(
+                            "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
+                            exc_info=True
+                        )
 
     saved_context = TracingContext.get()
 

@@ -485,7 +485,12 @@ class TracingContext:
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,
-        # or None if no stride is known
+        # or None if no stride is known.  This is always the HINT, it
+        # is never a SymInt (it would be better if it was a SymInt, but
+        # I can't conveniently get this from Inductor atm.  Also, be
+        # careful not to accidentally induce guards on the SymInt if
+        # you ever do change this in aot_autograd.py; you should check
+        # on permutations preferentially.)
         self.output_strides: Optional[List[Optional[List[int]]]] = None
 
     @staticmethod
