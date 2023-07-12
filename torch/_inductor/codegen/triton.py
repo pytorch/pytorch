@@ -1178,8 +1178,8 @@ class TritonKernel(Kernel):
                 size, size_str = self.size_map[(self.var, self.mask)]
 
                 # We assert if we've not been able to prove the bound
-                assert_min = not (self.var.bounds.lower >= 0)
-                assert_max = not (self.var.bounds.upper < size)
+                assert_min = (self.var.bounds.lower >= 0) != sympy.true
+                assert_max = (self.var.bounds.upper < size) != sympy.true
 
                 # FooBar interview question
                 if not (assert_min or assert_max):
@@ -1212,8 +1212,11 @@ class TritonKernel(Kernel):
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the conde
                 neg = var.bounds & ValueRanges(-sympy.oo, -1)
-                pos = var.bounds & ValueRanges(0, sympy.oo)
-                new_bounds = pos | ValueRanges(neg.lower + size, neg.upper + size)
+                new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
+                # We don't have a good way of representing the empty range
+                if var.bounds.upper >= 0:
+                    pos = var.bounds & ValueRanges(0, sympy.oo)
+                    new_bounds = new_bounds | pos
 
             new_var = self.cse.generate(
                 self.compute,
