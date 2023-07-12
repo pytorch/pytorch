@@ -303,6 +303,7 @@ class VariableTracker(metaclass=HasPostInit):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        breakpoint()
         unimplemented(f"call_function {self} {args} {kwargs}")
 
     def call_method(

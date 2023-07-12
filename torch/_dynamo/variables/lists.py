@@ -797,13 +797,18 @@ class SetVariable(VariableTracker):
 
         unimplemented(f"Sets with {type(vt)} NYI")
 
-    def _add(self, tx, item):
+    @property
+    def _underlying_items(self):
         underlying_items = set()
         for current_item in self.items:
             assert (
                 current_item not in underlying_items
             ), "Items modeling set invariant violated"
-            underlying_items.add(self._as_set_element(tx, current_item))
+            underlying_items.add(self._as_set_element(self.tx, current_item))
+        return underlying_items
+
+    def _add(self, tx, item):
+        underlying_items = self._underlying_items
 
         if isinstance(item, (list, set)):
             items_to_add = item
