@@ -2366,6 +2366,12 @@ class CommonTemplate:
             expected = mod(x)
             self.assertTrue(torch.allclose(res, expected))
 
+    def test_adaptive_avg_pool_with_output_size_0(self):
+        m1 = nn.AdaptiveAvgPool1d(0)
+        self.common(m1, (torch.randn(1, 2),))
+        m2 = nn.AdaptiveAvgPool2d(0)
+        self.common(m2, (torch.randn(1, 2, 3),))
+
     def test_max_pool2d1(self):
         def fn(x):
             return aten.max_pool2d_with_indices(x, [3, 3], [2, 2])
@@ -6782,47 +6788,80 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(inp.grad, inp_ref.grad)
 
         def test_optimize_indexing_assert(self):
+            def has_indirect(code, tl_fn: str):
+                self.assertTrue(
+                    tl_fn in code,
+                    msg=f"{tl_fn} not present:\n{code}",
+                )
+                for line in code.split("\n"):
+                    if tl_fn in line:
+                        stmt = line.split("=")[-1]
+                        # indirect indexing involves a `tmp` variable
+                        self.assertTrue(
+                            "tmp" in stmt,
+                            msg=f"Indirect indexing not present in code:\n{line}",
+                        )
+
+            def has_assert(code, lower: bool, upper: bool):
+                self.assertIn("device_assert", code, msg=f"No device asert found:\n{code}")
+                for line in code.split("\n"):
+                    if "device_assert" in line:
+                        self.assertTrue(
+                            ("0 <= " in line) is lower,
+                            msg=f"Lower bound {'' if lower else 'not '}elided:{line}",
+                        )
+                        self.assertTrue(
+                            (" < " in line) is upper,
+                            msg=f"Upper bound {'' if upper else 'not '}elided:{line}",
+                        )
+
+
             def fn(x: torch.Tensor) -> torch.Tensor:
                 s = 1.0 * torch.arange(x.shape[0], device=x.device)
                 return x[s.long()]
 
-            fn_opt = torch.compile(fn)
+            # aten.index
+            for dynamic in (False, True):
+                fn_opt = torch.compile(fn, dynamic=dynamic)
 
-            x = torch.randn(8, device="cuda")
-            code = run_and_get_triton_code(fn_opt, x)
+                x = torch.randn(8, device="cuda")
+                code = run_and_get_triton_code(fn_opt, x)
+                self.assertEqual(fn_opt(x), fn(x), msg=f"{dynamic=}")
 
-            # Check that there's indirect indexing...
-            for c in code:
-                for line in c.split("\n"):
-                    if "tl.load" in line:
-                        stmt = line.split("=")[-1]
-                        # indirect indexing involves a `tmp` variable
-                        test_case.assertTrue(
-                            "tmp" in stmt,
-                            msg=f"Indirect indexing not present in code:\n{code}",
-                        )
-            # ...but we have managed to elide the assert
-            self.assertFalse("device_assert" in code)
-            self.assertEqual(fn_opt(x), fn(x))
+                # Check that there's indirect indexing...
+                has_indirect(code, tl_fn="tl.load")
+                if not dynamic:
+                    # We elide the assert for static shapes
+                    self.assertNotIn("device_assert", code)
+                else:
+                    # ...but we generate an upper bound for dynamic shapes
+                    has_assert(code, lower=False, upper=True)
 
-            # If we happen to have dynamic shapes
-            fn_opt = torch.compile(fn, dynamic=True)
-            x = torch.randn(8, device="cuda")
-            code = run_and_get_triton_code(fn_opt, x)
+            def fn(a, z, b, idx0, idx1):
+                idx2 = torch.arange(a.shape[-1], device=a.device)
+                a.index_put_((z, idx0, idx1, idx2), b, accumulate=True)
+                return a
 
-            # ...we still have indirect indexing
-            for c in code:
-                for line in c.split("\n"):
-                    if "tl.load" in line:
-                        stmt = line.split("=")[-1]
-                        # indirect indexing involves a `tmp` variable
-                        test_case.assertTrue(
-                            "tmp" in stmt,
-                            msg=f"Indirect indexing not present in code:\n{code}",
-                        )
-            # ...but the assert is now there
-            self.assertTrue("device_assert" in code)
-            self.assertEqual(fn_opt(x), fn(x))
+            # aten.index_put
+            for dynamic in (False, True):
+                fn_opt = torch.compile(fn, dynamic=dynamic)
+                a = torch.randn(1, 32, 32, 4, device="cuda")
+                z = torch.zeros((), dtype=torch.int64, device="cuda")
+                b = torch.randn(33, 1, device="cuda")
+                idx0 = torch.randint(32, (33,), device="cuda").view(33, 1, 1)
+                idx1 = torch.randint(32, (33,), device="cuda").view(33, 1)
+                inps = (a.clone(), z, b, idx0, idx1)
+                code = run_and_get_triton_code(fn_opt, *inps)
+
+                # Correctness
+                out_opt = fn_opt(a.clone(), z, b, idx0, idx1)
+                out = fn(a.clone(), z, b, idx0, idx1)
+                self.assertEqual(out_opt, out, msg=f"{dynamic=}")
+
+                # We have an indirect store via atomic_add
+                has_indirect(code, tl_fn="tl.atomic_add")
+                # We cannot elide he assert in this case
+                has_assert(code, lower=True, upper=True)
 
         def test_not_materialize_pointwise_reduction(self):
             def fn(a, b):
