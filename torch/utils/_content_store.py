@@ -117,7 +117,7 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
         # The dtype-casting view cannot be compiled, and so the
         # padding/reshaping also needs to be done externally even
         # though it could be profitably fused
-        pad = x.numel() % 4
+        pad = -x.numel() % 4
         if pad > 0:
             x = F.pad(x, (0, pad), "constant", 0)
         x = x.view(torch.int32)
