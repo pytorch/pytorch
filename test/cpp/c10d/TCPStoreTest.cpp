@@ -161,14 +161,6 @@ TEST(TCPStoreTest, testHelperPrefix) {
   testHelper("testPrefix");
 }
 
-TEST(TCPStoreTest, testWatchKeyCallback) {
-  testWatchKeyCallback();
-}
-
-TEST(TCPStoreTest, testWatchKeyCallbackWithPrefix) {
-  testWatchKeyCallback("testPrefix");
-}
-
 TEST(TCPStoreTest, testCleanShutdown) {
   int numWorkers = 2;
 

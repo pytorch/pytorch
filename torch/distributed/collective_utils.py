@@ -58,7 +58,7 @@ def broadcast(
         raise AssertionError("Data or Function is expected to be None if not successful")
 
     payload: Optional[T] = None
-    exception : Exception = None
+    exception : Optional[Exception] = None
     # if no pg is passed then execute if rank is 0
     if (pg is None and rank == 0) or (pg is not None and pg.rank() == rank):
         # determine if it is an executable function or data payload only
@@ -119,7 +119,7 @@ def all_gather(
     >> all_ids = all_gather(data_or_fn=allocate_id, pg=ext_pg.my_pg)
     """
     payload: Optional[T] = None
-    exception : Exception = None
+    exception : Optional[Exception] = None
     success = True
     # determine if it is an executable function or data payload only
     if callable(data_or_fn):
@@ -143,7 +143,7 @@ def all_gather(
         total_list = [None] * dist.get_world_size(pg)
         all_gather_object_enforce_type(pg, total_list, sync_obj)
         # Each rank will throw RuntimeError in case of failure on any rank.
-        stage_name: Optional[str] = cast(SyncPayload[T], total_list[0]).stage_name
+        stage_name = cast(SyncPayload[T], total_list[0]).stage_name
         exception_list: List[Tuple[int, Exception]] = []
         ret_list: List[T] = []
         error_msg: str = ""
