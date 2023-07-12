@@ -637,7 +637,7 @@ if torch._C._has_mkldnn:
                 ),
                 KeywordArg("reshape_2"),
             ),
-            pass_number=1,
+            pass_number=2,
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
             reshape_1 = kwargs.get("reshape_1")
@@ -670,7 +670,7 @@ if torch._C._has_mkldnn:
                 CallFunction(mkldnn._linear_pointwise.default, *_linear_args),
                 Arg(),
             ),
-            pass_number=1,
+            pass_number=2,
             extra_check=is_linear_add_bias,
         )
         def linear_bias_pattern(match, *args):
@@ -790,6 +790,7 @@ if torch._C._has_mkldnn:
         @register_freezing_graph_pattern(
             CallFunction(aten.convolution.default, *_aten_conv_args),
             extra_check=_is_packable_convolution,
+            pass_number=1,
         )
         def convolution(match, *args, **kwargs):
             is_transposed = kwargs.get("is_transposed")
@@ -831,10 +832,12 @@ if torch._C._has_mkldnn:
         @register_freezing_graph_pattern(
             CallFunction(aten.addmm.default, Arg(), Arg(), Arg()),
             extra_check=_is_packable_linear,
+            pass_number=1,
         )
         @register_freezing_graph_pattern(
             CallFunction(aten.mm.default, Arg(), Arg()),
             extra_check=_is_packable_linear,
+            pass_number=1,
         )
         def linear(match, *args, **kwargs):
             graph = match.graph

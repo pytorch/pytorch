@@ -1,11 +1,15 @@
 import functools
+import itertools
 
 import torch
 from .. import config
 from ..pattern_matcher import (
     _return_true,
+    Arg,
+    CallFunction,
     inference_graph,
     init_once_fakemode,
+    KeywordArg,
     PatternMatcherPass,
     register_graph_pattern,
     register_replacement,
@@ -43,12 +47,14 @@ def freezing_passes(gm: torch.fx.GraphModule):
 
 @init_once_fakemode
 def lazy_init():
+    """
     if torch._C._has_mkldnn and config.cpp.weight_prepack:
         from .mkldnn_fusion import _mkldnn_weight_pack_init
 
         _mkldnn_weight_pack_init()
-
+    """
     addmm_patterns_init()
+    binary_folding_init()
 
 
 def register_freezing_graph_pattern(pattern, extra_check=_return_true, pass_number=0):
@@ -118,3 +124,139 @@ def addmm_patterns_init():
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2", "w3", "b1", "b2", "b3"),
     )
+
+
+@functools.lru_cache(None)
+def binary_folding_init():
+    _conv_args = [Arg() for _ in range(9)]
+    _computation_ops = [aten.convolution.default]
+    _binary_ops = [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
+    _computation_calls = [CallFunction(aten.convolution.default, *_conv_args)]
+
+    def _binary_folding_patter(computation_call, binary_op):
+        return CallFunction(
+            binary_op,
+            computation_call,
+            KeywordArg("other"),
+        )
+
+    def _check_conv_and_broadcast_op(conv_node, other):
+        if other.op != "get_attr":
+            return False
+        if conv_node.args[1].op != "get_attr" or (
+            conv_node.args[2] is not None and conv_node.args[2].op != "get_attr"
+        ):
+            return False
+
+        weight_meta_value = conv_node.args[1].meta.get("val")
+        other_mata_value = other.meta.get("val")
+        if weight_meta_value is None or other_mata_value is None:
+            return False
+
+        # TODO: other_mata_value.dtype < other_mata_value.dtype?
+        if other_mata_value.dtype != other_mata_value.dtype:
+            return False
+        weight_shape = weight_meta_value.shape
+        other_shape = other_mata_value.shape
+        # make sure len(weight_shape) ==  len(other_shape)(or +1)
+        if (
+            len(weight_shape) != len(other_shape)
+            and len(weight_shape) != len(other_shape) + 1
+        ):
+            return False
+
+        if len(weight_shape) == len(other_shape):
+            for i in reversed(range(len(other_shape))):
+                if i == 1 and weight_shape[0] == other_shape[i]:
+                    continue
+                if other_shape[i] != 1:
+                    return False
+        else:
+            for i in reversed(range(len(other_shape))):
+                if i == 0 and weight_shape[0] == other_shape[i]:
+                    continue
+                if other_shape[i] != 1:
+                    return False
+
+        return True
+
+    def _is_foldable_pattern(match):
+        binary_node = match.output_node()
+        computation_node = binary_node.args[0]
+        other = binary_node.args[1]
+        if binary_node.args[0].target not in _computation_ops:
+            computation_node = binary_node.args[1]
+            other = binary_node.args[0]
+        if binary_node.args[0].target == aten.convolution.default:
+            return _check_conv_and_broadcast_op(computation_node, other)
+
+        return False
+
+    def _create_new_conv_node(graph, conv_node, binary_node, other):
+        assert conv_node.target == aten.convolution.default
+        conv_args = list(conv_node.args)
+        weight_meta_value = conv_node.args[1].meta.get("val")
+        bias = conv_args[2]
+        if binary_node.target in [aten.add.Tensor, aten.sub.Tensor]:
+            other_reshape = graph.create_node(
+                "call_function",
+                aten.reshape.default,
+                (other, (weight_meta_value.size(0),)),
+            )
+            if bias is not None:
+                new_bias = graph.create_node(
+                    "call_function", binary_node.target, (bias, other_reshape)
+                )
+            else:
+                new_bias = graph.create_node(
+                    "call_function", binary_node.target, (0, other_reshape)
+                )
+            conv_args[2] = new_bias
+        else:
+            weight_broad_shape = [1 for _ in range(len(weight_meta_value.shape))]
+            weight_broad_shape[0] = weight_meta_value.size(0)
+            other_reshape1 = graph.create_node(
+                "call_function",
+                aten.reshape.default,
+                (other, tuple(weight_broad_shape)),
+            )
+            conv_args[1] = graph.create_node(
+                "call_function", binary_node.target, (conv_args[1], other_reshape1)
+            )
+            if conv_args[2] is not None:
+                other_reshape = graph.create_node(
+                    "call_function",
+                    aten.reshape.default,
+                    (other, (weight_meta_value.size(0),)),
+                )
+                conv_args[2] = graph.create_node(
+                    "call_function", binary_node.target, (bias, other_reshape)
+                )
+        return graph.create_node("call_function", conv_node.target, tuple(conv_args))
+
+    for _computation_call, binary_op in itertools.product(
+        _computation_calls, _binary_ops
+    ):
+
+        @register_freezing_graph_pattern(
+            CallFunction(binary_op, _computation_call, KeywordArg("other")),
+            extra_check=_is_foldable_pattern,
+        )
+        def folded_op(match, *args, **kwargs):
+            other = kwargs.get("other")
+            binary_node = match.output_node()
+            computation_node = (
+                binary_node.args[0]
+                if binary_node.args[0].target in _computation_ops
+                else binary_node.args[1]
+            )
+            graph = match.graph
+            with graph.inserting_before(binary_node):
+                # TODO: support linear?
+                assert computation_node.target == aten.convolution.default
+                new_computation_node = _create_new_conv_node(
+                    graph, computation_node, binary_node, other
+                )
+                binary_node.replace_all_uses_with(new_computation_node)
+                graph.erase_node(binary_node)
+                graph.erase_node(computation_node)
