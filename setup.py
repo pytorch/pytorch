@@ -1161,7 +1161,6 @@ def main():
         'include/torch/csrc/distributed/autograd/rpc_messages/*.h',
         'include/torch/csrc/dynamo/eval_frame.h',
         'include/torch/csrc/inductor/*.h',
-        'include/torch/csrc/inductor/aot_inductor_interface.cpp',
         'include/torch/csrc/jit/*.h',
         'include/torch/csrc/jit/backends/*.h',
         'include/torch/csrc/jit/generated/*.h',

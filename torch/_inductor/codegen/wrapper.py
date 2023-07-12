@@ -890,15 +890,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def write_header(self):
         if V.graph.aot_mode:
-            self.header.splice(
-                """
-                /* AOTInductor generated code */
-
-                #include <ATen/ScalarOps.h>
-
-                #include <torch/csrc/inductor/aot_inductor_interface.cpp>
-                """
-            )
+            with open(
+                os.path.join(os.path.dirname(__file__), "aot_inductor_interface.cpp"),
+                "r",
+            ) as f:
+                self.header.splice(f.read())
         else:
             self.header.splice(
                 """
