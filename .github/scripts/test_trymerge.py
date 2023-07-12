@@ -11,7 +11,7 @@ import json
 import os
 import warnings
 from hashlib import sha256
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from unittest import main, mock, TestCase
 from urllib.error import HTTPError
 
@@ -194,6 +194,21 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
 
 def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
     raise RuntimeError("testing")
+
+
+def mocked_get_merge_base_gh_fetch_url(
+    url: str,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    data: Optional[Dict[str, Any]] = None,
+    method: Optional[str] = None,
+    reader: Callable[[Any], Any] = lambda x: x.read(),
+) -> Any:
+    return {
+        "merge_base_commit": {
+            "sha": "mocked-sha-value",
+        }
+    }
 
 
 def empty_flaky_rules() -> List[FlakyRule]:
@@ -622,6 +637,22 @@ class TestTryMerge(TestCase):
             self.assertEqual(
                 case["expected"], is_broken_trunk(case["head_job"], case["base_jobs"])
             )
+
+    @mock.patch("trymerge.gh_fetch_url", side_effect=mocked_get_merge_base_gh_fetch_url)
+    def test_get_merge_base(
+        self,
+        mock_gh_fetch_url: Any,
+        mock_gh_graphql: Any,
+        mock_get_rockset_results: Any,
+        mock_read_flaky_rules: Any,
+    ) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 104121)
+        self.assertEqual("mocked-sha-value", pr.get_merge_base())
+
+        # Make sure that consecutive calls will use the same merge base instead of
+        # making another query
+        self.assertEqual("mocked-sha-value", pr.get_merge_base())
+        mock_gh_fetch_url.assert_called_once()
 
 
 @mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)

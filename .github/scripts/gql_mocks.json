@@ -40813,5 +40813,798 @@
         }
       }
     }
+  },
+  "query_sha=987321fccb8ab37e061c69e26e83543eca6f4d1c0a8f8f55d4d34df8f46009b4 name=pytorch number=104121 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "closed": true,
+          "isCrossRepository": false,
+          "author": {
+            "login": "mlazos"
+          },
+          "title": "Enable fused foreach Adam compilation",
+          "body": "Fixes #ISSUE_NUMBER\r\n\n\ncc @voznesenskym @penguinwu @EikanWang @jgong5 @Guobing-Chen @XiaobingSuper @zhuhaozhe @blzheng @Xia-Weiwen @wenzhe-nrv @jiayisunx @peterbell10 @ipiszy @ngimel @yf225 @chenyang78 @kadeng @anijain2305",
+          "headRefName": "mlazos/adam-fused",
+          "headRepository": {
+            "nameWithOwner": "pytorch/pytorch"
+          },
+          "baseRefName": "main",
+          "baseRefOid": "de7b6e55eb0f87f8d822f69bad6b4189a857b460",
+          "baseRepository": {
+            "nameWithOwner": "pytorch/pytorch",
+            "isPrivate": false,
+            "defaultBranchRef": {
+              "name": "main"
+            }
+          },
+          "mergeCommit": null,
+          "commits_with_authors": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "c1f503f8844760e6d01c5c60abdf839479ea7d89"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "96c205bd2c69bbc05b12c0e3f61cfd8e1a6c7898"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "e33ff2f785b1bcb626d1ba02260363ec93528def"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "e069c26206488d0d0feb0930ac7c1888c8fcb2f2"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "445ab884e3251c1a9d64f577d2bfdcb7d8842804"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "298a9820ab85c12a58840c394c98654c83e58e35"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "97d06643e2db71b80ccae303474edc4b90fb3635"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "1da06d8a28565a04e0f25b784e2dae51648e0753"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "6f192d4738f1c712f4e79fafbcc40808e9217369"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos922@gmail.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "3e026ee16798b916d3778fb8329a95e9a1cf914a"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos922@gmail.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "948f6cc42f27bec99df65841917ead4761327538"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos922@gmail.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "827d5ea53a44e7e96bd60f7f6cc1c71695f8f4b2"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "c6d3b40de499b177ea8c700aedc56bad54050304"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos922@gmail.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "d2260eaff5278eb1ab04354c6de7e3f50f04b527"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos922@gmail.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "643e38566f7b2fe1d0aadd69b8d645d1804e093d"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "84402fdf1f896e564c82105bb026204c0451a917"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "8769945d803904f2542c3e6efdd096810036e512"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos@fb.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "d8e6c4540788b5ae1604592a5d60629b11b10430"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "mlazos"
+                    },
+                    "email": "mlazos922@gmail.com",
+                    "name": "Michael Lazos"
+                  },
+                  "oid": "1cb87771c1efef32df7009d75bed08249df8ecad"
+                }
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MTk",
+              "hasNextPage": false
+            },
+            "totalCount": 19
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "checkSuites": {
+                    "edges": [
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Facebook GitHub Tools",
+                            "databaseId": 12274
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "Meta Internal-Only Changes Check",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://opensource.facebook.com/",
+                                "databaseId": 14805593689,
+                                "title": "There is no internal Diff connected, this can be merged now"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAA3J7blk=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAA0eoHA8="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Netlify",
+                            "databaseId": 13473
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAA0eoHDY="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Azure Pipelines",
+                            "databaseId": 9426
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAA0eoHEs="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Dependabot",
+                            "databaseId": 29110
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAA0eoHGo="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Codecov",
+                            "databaseId": 254
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAA0eoHME="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "PyTorch Bot",
+                            "databaseId": 40112
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAA0eoHNU="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "CircleCI Checks",
+                            "databaseId": 18001
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAA0eoHPA="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "copilot4prs",
+                            "databaseId": 299760
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAA0eoHRU="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Check Labels"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/5468219098"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "Check labels",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/5468219098/jobs/9955554646",
+                                "databaseId": 14805594416,
+                                "title": null
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAA3J7cTA=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAA0eoJ3I="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Labeler"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/5468219102"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "triage",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/5468219102/jobs/9955554649",
+                                "databaseId": 14805594425,
+                                "title": null
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAA3J7cTk=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAA0eoJ3g="
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": true
+                    }
+                  },
+                  "status": {
+                    "contexts": [
+                      {
+                        "context": "EasyCLA",
+                        "state": "SUCCESS",
+                        "targetUrl": "https://easycla.lfx.linuxfoundation.org/#/?version=2"
+                      }
+                    ]
+                  },
+                  "pushedDate": null,
+                  "oid": "1cb87771c1efef32df7009d75bed08249df8ecad"
+                }
+              }
+            ]
+          },
+          "changedFiles": 6,
+          "files": {
+            "nodes": [
+              {
+                "path": "test/inductor/test_compiled_optimizers.py"
+              },
+              {
+                "path": "torch/_dynamo/eval_frame.py"
+              },
+              {
+                "path": "torch/_dynamo/variables/optimizer.py"
+              },
+              {
+                "path": "torch/optim/adam.py"
+              },
+              {
+                "path": "torch/optim/adamw.py"
+              },
+              {
+                "path": "torch/optim/optimizer.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "Ng",
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "janeyx99"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "janeyx99"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "janeyx99"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "janeyx99"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "janeyx99"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "janeyx99"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "janeyx99"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mikaylagawarecki"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "janeyx99"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "janeyx99"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "mlazos"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "janeyx99"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "janeyx99"
+                },
+                "state": "APPROVED"
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMy0wNi0yM1QxMzozMTo0Ni0wNzowMLkyMDIzLTA2LTIzVDEzOjMxOjQ2LTA3OjAwzlkqojo=",
+              "hasPreviousPage": false
+            }
+          },
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "Merge started\nYour change will be merged once all checks pass (ETA 0-4 Hours).\nLearn more about merging in the wiki.\nQuestions? Feedback? Please reach out to the PyTorch DevX TeamAdvanced Debugging\nCheck the merge workflow status\nhere",
+                "createdAt": "2023-07-05T19:37:40Z",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1622370727,
+                "url": "https://github.com/pytorch/pytorch/pull/104121#issuecomment-1622370727"
+              },
+              {
+                "bodyText": "Merge failed\nReason: 1 jobs have failed, first few of them are: inductor / cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu)\nDetails for Dev Infra team\nRaised by workflow job",
+                "createdAt": "2023-07-05T23:20:07Z",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1622666234,
+                "url": "https://github.com/pytorch/pytorch/pull/104121#issuecomment-1622666234"
+              },
+              {
+                "bodyText": "@pytorchbot merge -f \"Failures on trunk\"",
+                "createdAt": "2023-07-05T23:38:19Z",
+                "author": {
+                  "login": "mlazos"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1622686974,
+                "url": "https://github.com/pytorch/pytorch/pull/104121#issuecomment-1622686974"
+              },
+              {
+                "bodyText": "Merge started\nYour change will be merged immediately since you used the force (-f) flag, bypassing any CI checks (ETA: 1-5 minutes).\nLearn more about merging in the wiki.\nQuestions? Feedback? Please reach out to the PyTorch DevX TeamAdvanced Debugging\nCheck the merge workflow status\nhere",
+                "createdAt": "2023-07-05T23:39:58Z",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1622687951,
+                "url": "https://github.com/pytorch/pytorch/pull/104121#issuecomment-1622687951"
+              },
+              {
+                "bodyText": "I think this is responsible for a 50s increase in TIMM dynamic shapes compilation time 131s \u2192 180s",
+                "createdAt": "2023-07-07T00:42:31Z",
+                "author": {
+                  "login": "eellison"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1624478330,
+                "url": "https://github.com/pytorch/pytorch/pull/104121#issuecomment-1624478330"
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpHOYLNppw==",
+              "hasPreviousPage": true
+            }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Merged"
+                }
+              },
+              {
+                "node": {
+                  "name": "ciflow/trunk"
+                }
+              },
+              {
+                "node": {
+                  "name": "module: inductor"
+                }
+              },
+              {
+                "node": {
+                  "name": "module: dynamo"
+                }
+              },
+              {
+                "node": {
+                  "name": "ciflow/inductor"
+                }
+              },
+              {
+                "node": {
+                  "name": "release notes: inductor"
+                }
+              },
+              {
+                "node": {
+                  "name": "release notes: optim"
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
   }
 }
