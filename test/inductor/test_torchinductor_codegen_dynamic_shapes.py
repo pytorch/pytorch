@@ -195,6 +195,9 @@ test_failures = {
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linear_float64_dynamic_shapes": TestFailure(("cpu")),
+    "test_adaptive_avg_pool_with_output_size_0_dynamic_shapes": TestFailure(
+        ("cpu", "cuda")
+    ),
     #
     # Tests not using 'common' or directly calling 'assertEqual':
     #
@@ -315,7 +318,7 @@ if HAS_CPU:
     )
 
 
-if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class DynamicShapesCodegenCudaTests(TestCase):
         maxDiff = None
