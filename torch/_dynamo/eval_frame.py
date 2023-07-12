@@ -52,7 +52,7 @@ from . import config, convert_frame, external_utils, skipfiles, utils
 from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
-from .utils import compile_times
+from .utils import checkpoint_params, compile_times
 
 log = logging.getLogger(__name__)
 
@@ -917,7 +917,11 @@ def export(
 
             graph_captured_input = graph_inputs
             assert graph is not None
+            # running the graph can change the state of the module. Therefore,
+            # do a save-restore of params/buffers
+            restore = checkpoint_params(graph)
             graph_captured_result = graph(*graph_inputs)
+            restore()
             return graph_captured_result
 
         return result_capturing_wrapper
@@ -1011,6 +1015,8 @@ def export(
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
+        # Running the graph can mutate the state of the module, so save-restore
+        restore = checkpoint_params(graph)
         with enable_python_dispatcher(), fake_mode:
             try:
                 graph = make_fx(
@@ -1024,6 +1030,7 @@ def export(
             except CondOpArgsMismatchError as e:
                 # Wrap the internal error to the user-facing error
                 raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
+        restore()
 
     new_graph = FlattenInputOutputSignature(
         graph,
