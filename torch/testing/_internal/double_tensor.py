@@ -4,7 +4,7 @@ import torch
 class DoubleTensor(torch.Tensor):
 
     @staticmethod
-    def __new__(cls, a, b, *, requires_grad: bool):
+    def __new__(cls, a, b, *, requires_grad: bool = False):
         assert a.device == b.device and a.layout == b.layout and a.requires_grad == b.requires_grad and a.dtype == b.dtype
         # I guess it would be more accurate to represent the shape as torch.cat(a, b).shape
         shape = a.shape
@@ -17,7 +17,7 @@ class DoubleTensor(torch.Tensor):
             cls, shape, **kwargs
         )
 
-    def __init__(self, a, b, *, requires_grad: bool):
+    def __init__(self, a, b, *, requires_grad: bool = False):
         self.a = a
         self.b = b
         self.requires_grad = requires_grad
@@ -50,7 +50,7 @@ class DoubleTensor(torch.Tensor):
         # TODO: figure out the right way to propagate requires_grad-ness
         any_requires_grad = any(isinstance(x, torch.Tensor) and x.requires_grad for x in args)
         if isinstance(out_a, torch.Tensor):
-            return DoubleTensor(out_a, out_b, requires_grad=any_requires_grad)
+            return DoubleTensor(out_a, out_b)
         # for aten ops that return non-tensors, just assume that
         # our two inner tensors return the same value
         assert out_a == out_b
