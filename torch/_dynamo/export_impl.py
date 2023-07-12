@@ -1,6 +1,7 @@
 import dataclasses
 import inspect
 import logging
+import traceback
 import types
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
@@ -29,14 +30,7 @@ from .hooks import Hooks
 
 log = logging.getLogger(__name__)
 if TYPE_CHECKING:
-    from torch._C._dynamo.eval_frame import (  # noqa: F401
-        reset_code,
-        set_eval_frame,
-        set_guard_error_hook,
-        set_guard_fail_hook,
-        skip_code,
-        unsupported,
-    )
+    from torch._C._dynamo.eval_frame import reset_code  # noqa: F401
 else:
     for name in dir(torch._C._dynamo.eval_frame):
         if name.startswith("__"):
@@ -68,7 +62,7 @@ class ConstraintTarget:
     class directly; instead, use :func:`torch._export.dynamic_dim`.
     """
 
-    w_tensor: weakref.ReferenceType[torch.Tensor]
+    w_tensor: weakref
     # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
     dim: int
@@ -355,7 +349,7 @@ def export(
     constraint_violation_error = None
     if tracing_mode != "symbolic":
         assume_static_by_default = True
-    with patch(f"torch._dynamo.eval_frame.most_recent_backend", None), config.patch(
+    with patch("torch._dynamo.eval_frame.most_recent_backend", None), config.patch(
         summarize_dim_constraints=True,
         specialize_int=True,
         assume_static_by_default=assume_static_by_default,
