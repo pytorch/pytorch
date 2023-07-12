@@ -411,9 +411,7 @@ def _init_core_state(
     )
     # Mapping from fully sharded module to the handles it is responsible to
     # unshard and reshard (see [Note: Fully Sharded Module])
-    _fully_sharded_module_to_handle: Dict[
-        nn.Module, FlatParamHandle
-    ] = collections.defaultdict(None)
+    _fully_sharded_module_to_handle: Dict[nn.Module, FlatParamHandle] = dict()
     state._fully_sharded_module_to_handle = _fully_sharded_module_to_handle
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handle`

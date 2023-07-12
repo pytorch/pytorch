@@ -146,11 +146,11 @@ class TestPureFP16(FSDPTest):
             else:
                 self.assertEqual(handle._reduce_dtype, torch.float16)
 
-            # Check parameter/gradient dtypes
-            for param in fsdp_model.parameters():
-                self.assertEqual(param.dtype, torch.float16)
-                if param.grad is not None:
-                    self.assertEqual(param.grad.dtype, torch.float16)
+        # Check parameter/gradient dtypes
+        for param in fsdp_model.parameters():
+            self.assertEqual(param.dtype, torch.float16)
+            if param.grad is not None:
+                self.assertEqual(param.grad.dtype, torch.float16)
 
 
 instantiate_parametrized_tests(TestPureFP16)

@@ -189,8 +189,6 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
     """
     cpu_device = torch.device("cpu")
     for handle in traversal_utils._get_fsdp_handles(module):
-        if not handle:
-            continue
         if (
             not handle._offload_params
             and handle.flat_param.device != state.compute_device
@@ -353,9 +351,8 @@ def _unshard(
         return
     any_ran_pre_unshard = False
     with state._device_handle.stream(pre_unshard_stream):
-        if handle:
-            ran_pre_unshard = handle.pre_unshard()
-            any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
+        ran_pre_unshard = handle.pre_unshard()
+        any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
     if any_ran_pre_unshard:
         unshard_stream.wait_stream(pre_unshard_stream)
     if state.limit_all_gathers:
@@ -363,9 +360,8 @@ def _unshard(
         if event:
             event.synchronize()
     with state._device_handle.stream(unshard_stream):
-        if handle:
-            handle.unshard()
-            handle.post_unshard()
+        handle.unshard()
+        handle.post_unshard()
 
 
 @no_type_check
@@ -375,9 +371,8 @@ def _reshard(
     free_unsharded_flat_param: bool,
 ):
     """
-    Reshards the handle. ``free_unsharded_flat_params`` should
-    have the same length as ``handles``, and each element should give whether
-    the corresponding handle should free its padded unsharded flat parameter.
+    Reshards the handle. ``free_unsharded_flat_param`` indicates whether to
+    free the handle's padded unsharded flat parameter.
     """
     if not handle:
         return
@@ -528,8 +523,7 @@ def _post_forward_reshard(
     # with the intention that they are immediately used for backward
     # computation (though this may not be true)
     free_unsharded_flat_param = (
-        handle
-        and not state._is_root
+        not state._is_root
         and handle._sharding_strategy in RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
     )
     _reshard(state, handle, free_unsharded_flat_param)
@@ -606,15 +600,12 @@ def _root_pre_forward(
             state._needs_buffer_dtype_restore_check = False
 
         if state.forward_prefetch:
-            handles_keys = []
+            handles = []
             for fsdp_state in state._all_fsdp_states:
-                # TODO: Forward prefetch assumes singleton handles key. For the
-                # composable path, `_handle` may have more than one handle,
-                # whereas for the wrapper path, it has at most one handle.
                 if fsdp_state._handle:
-                    handles_keys.append(fsdp_state._handle)
-            for handles_key in handles_keys:
-                state._needs_pre_forward_unshard[handles_key] = True
+                    handles.append(fsdp_state._handle)
+            for handle in handles:
+                state._needs_pre_forward_unshard[handle] = True
         _wait_for_computation_stream(
             state._device_handle.current_stream(),
             state._streams_unshard,
@@ -1085,16 +1076,16 @@ def _finalize_params(
 @no_type_check
 def _prefetch_handle(
     state: _FSDPState,
-    current_handles_key: FlatParamHandle,
+    current_handle: FlatParamHandle,
     prefetch_mode: _PrefetchMode,
 ) -> None:
     """
     Prefetches the next handles if needed (without synchronization). An empty
     handles key cannot prefetch.
     """
-    if not current_handles_key:
+    if not current_handle:
         return
-    handle = _get_handle_to_prefetch(state, current_handles_key)
+    handle = _get_handle_to_prefetch(state, current_handle)
     if not handle:
         return
     # Temporarily emulate the training state while calling `_unshard` to
@@ -1116,17 +1107,17 @@ def _prefetch_handle(
 @no_type_check
 def _get_handle_to_prefetch(
     state: _FSDPState,
-    current_handles_key: FlatParamHandle,
+    current_handle: FlatParamHandle,
 ) -> FlatParamHandle:
     """
     Returns a :class:`list` of the handles keys to prefetch for the next
-    module(s), where ``current_handles_key`` represents the current module.
+    module(s), where ``current_handle`` represents the current module.
 
     "Prefetching" refers to running the unshard logic early (without
     synchronization), and the "next" modules depend on the recorded execution
     order and the current training state.
     """
-    training_state = _get_training_state(current_handles_key)
+    training_state = _get_training_state(current_handle)
     valid_training_states = (
         HandleTrainingState.BACKWARD_PRE,
         HandleTrainingState.BACKWARD_POST,
@@ -1138,7 +1129,7 @@ def _get_handle_to_prefetch(
         f"currently in {training_state}",
     )
     eod = state._exec_order_data
-    target_handles_key: FlatParamHandle = None
+    target_handle: Optional[FlatParamHandle] = None
     if (
         training_state == HandleTrainingState.BACKWARD_PRE
         and state.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
@@ -1146,34 +1137,30 @@ def _get_handle_to_prefetch(
         training_state == HandleTrainingState.BACKWARD_POST
         and state.backward_prefetch == BackwardPrefetch.BACKWARD_POST
     ):
-        target_handles_key_candidate = eod.get_handle_to_backward_prefetch(
-            current_handles_key
-        )
+        target_handle_candidate = eod.get_handle_to_backward_prefetch(current_handle)
         if state._needs_pre_backward_unshard.get(
-            target_handles_key_candidate, False
-        ) and not state._handles_prefetched.get(target_handles_key_candidate, False):
-            target_handles_key = target_handles_key_candidate
+            target_handle_candidate, False
+        ) and not state._handles_prefetched.get(target_handle_candidate, False):
+            target_handle = target_handle_candidate
         else:
-            target_handles_key = None
+            target_handle = None
     elif training_state == HandleTrainingState.FORWARD and state.forward_prefetch:
-        target_handles_key_candidate = eod.get_handle_to_forward_prefetch(
-            current_handles_key
-        )
+        target_handle_candidate = eod.get_handle_to_forward_prefetch(current_handle)
         if state._needs_pre_forward_unshard.get(
-            target_handles_key_candidate, False
-        ) and not state._handles_prefetched.get(target_handles_key_candidate, False):
-            target_handles_key = target_handles_key_candidate
+            target_handle_candidate, False
+        ) and not state._handles_prefetched.get(target_handle_candidate, False):
+            target_handle = target_handle_candidate
         else:
-            target_handles_key = None
+            target_handle = None
 
-    return target_handles_key
+    return target_handle
 
 
 def _get_training_state(
     handle: FlatParamHandle,
 ) -> HandleTrainingState:
-    """Returns the training state of the handles in ``handles_key``."""
-    _p_assert(handle, "Expects a non-empty handles key")
+    """Returns the training state of the handles in ``handle``."""
+    _p_assert(handle, "Expects a non-empty handle")
     return handle._training_state
 
 
@@ -1188,9 +1175,9 @@ def _register_pre_forward_hook(
     for forward_handle in state._pre_forward_handles:
         forward_handle.remove()
     state._pre_forward_handles.clear()
-    module_param_handles = state._fully_sharded_module_to_handle.get(module, None)
+    module_param_handle = state._fully_sharded_module_to_handle.get(module, None)
     hook = functools.partial(
-        _pre_forward, state, module_param_handles, _pre_forward_unshard
+        _pre_forward, state, module_param_handle, _pre_forward_unshard
     )
     state._pre_forward_handles.append(
         module.register_forward_pre_hook(hook, prepend=True, with_kwargs=True)
@@ -1210,11 +1197,11 @@ def _register_post_forward_hook(
     for forward_handle in state._post_forward_handles:
         forward_handle.remove()
     state._post_forward_handles.clear()
-    module_param_handles = state._fully_sharded_module_to_handle.get(module, None)
+    module_param_handle = state._fully_sharded_module_to_handle.get(module, None)
     hook = functools.partial(
         _post_forward,
         state,
-        module_param_handles,
+        module_param_handle,
         _post_forward_reshard,
     )
     state._post_forward_handles.append(module.register_forward_hook(hook))
@@ -1271,19 +1258,18 @@ def _register_pre_backward_hooks(
     if state._is_root:
         state._post_backward_callback_queued = False  # only defined on the root
 
-    handles_key = handle
-    if handles_key:
-        state._needs_pre_backward_unshard[handles_key] = False
+    if handle:
+        state._needs_pre_backward_unshard[handle] = False
         # Since these handles' `FlatParameter`s participated in a forward, we
         # conservatively assume that they will be used in the backward
-        state._ran_pre_backward_hook[handles_key] = False
+        state._ran_pre_backward_hook[handle] = False
 
     def _register_hook(t: torch.Tensor) -> torch.Tensor:
         if t.requires_grad:
             t.register_hook(
                 functools.partial(_pre_backward_hook, state, module, handle)
             )
-            state._needs_pre_backward_unshard[handles_key] = True
+            state._needs_pre_backward_unshard[handle] = True
         return t
 
     return _apply_to_tensors(_register_hook, outputs)
@@ -1417,13 +1403,10 @@ def _reset_flat_param_grad_info_if_needed(
     overhead is minimal, so we may call it throughout FSDP methods, which serve
     as callsites to free the gradient memory earlier.
     """
-    if isinstance(handles, list):
-        for handle in handles:
-            if handle._use_orig_params:
-                handle._reset_flat_param_grad_info_if_needed()
-    else:
-        handle = handles
-        if handle:
+    if not isinstance(handles, list):
+        handles = [handles]
+    for handle in handles:
+        if handle._use_orig_params:
             handle._reset_flat_param_grad_info_if_needed()
 
 

@@ -173,11 +173,9 @@ def _unshard_fsdp_state_params(
     state._device_handle.synchronize()
     # If handles are shared by other module(s), the handle may be already unsharded.
     handle = _module_handle(state, module)
-    if not handle:
+    if not handle or handle._training_state == HandleTrainingState.SUMMON_FULL_PARAMS:
         yield
         return
-    if handle._training_state == HandleTrainingState.SUMMON_FULL_PARAMS:
-        handle = None
 
     assert (
         handle._training_state == HandleTrainingState.IDLE
