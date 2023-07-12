@@ -2044,13 +2044,12 @@ class TritonScheduling:
         return self.can_fuse(node1, node2)
 
     def can_fuse_horizontal(self, node1, node2):
-        if not config.aggressive_fusion:
-            common_deps_without_reorder = self.deps_from_active_loop_order(
-                node1
-            ) & self.deps_from_active_loop_order(node2)
-            if len(common_deps_without_reorder) == 0:
-                return False
-
+        # if not config.aggressive_fusion:
+        #     common_deps_without_reorder = self.deps_from_active_loop_order(
+        #         node1
+        #     ) & self.deps_from_active_loop_order(node2)
+        #     if len(common_deps_without_reorder) == 0:
+        #         return False
         return self.can_fuse(node1, node2)
 
     def is_loop_order_valid(self, nodes):

@@ -7,7 +7,7 @@ import math
 import re
 import sys
 from copy import copy, deepcopy
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy
 import sympy
@@ -27,6 +27,7 @@ from ..scheduler import SchedulerNode
 from ..utils import (
     cache_on_self,
     get_fused_kernel_name,
+    sympy_dot,
     sympy_product,
     sympy_subs,
     sympy_symbol,
@@ -1213,10 +1214,16 @@ class CppKernel(Kernel):
                 argmax_argmin_prefix(reduction_type, src_dtype, acc)
             )
             compare_op = "<" if reduction_type == "argmax" else ">"
+            index = sympy_dot(
+                ir.FlexibleLayout.contiguous_strides(
+                    self.ranges[self.reduction_depth :]
+                ),
+                self.itervars[self.reduction_depth :],
+            )
             self.stores.writelines(
                 [
                     f"if ({acc}.value {compare_op} {value}) {{",
-                    f"    {acc}.index = {self.itervars[-1]}; {acc}.value = {value};",
+                    f"    {acc}.index = {cexpr_index(index)}; {acc}.value = {value};",
                     "}",
                 ],
             )
