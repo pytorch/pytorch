@@ -81,7 +81,7 @@ THPLayout* getTHPLayout(at::Layout layout) {
 
 PyObject* createPyObject(
     const at::Storage& storage,
-    always_create_python_storage = false) {
+    bool always_create_python_storage) {
   if (!always_create_python_storage &&
       storage.device_type() != at::DeviceType::Meta &&
       storage.data() == nullptr && storage.sym_nbytes() != 0 &&
