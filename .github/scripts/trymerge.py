@@ -1487,7 +1487,7 @@ where
         return []
 
 
-REMOVE_JOB_NAME_SUFFIX_REGEX = re.compile(r", [0-9]+, [0-9]+, .+\)")
+REMOVE_JOB_NAME_SUFFIX_REGEX = re.compile(r", [0-9]+, [0-9]+, .+\)$")
 
 
 def remove_job_name_suffix(name: str, replacement: str = ")") -> str:
@@ -1500,14 +1500,11 @@ def is_broken_trunk(
     if not head_job or not base_jobs:
         return False
 
-    for base_job in base_jobs.values():
-        if (
-            head_job["conclusion"] == base_job["conclusion"]
-            and head_job["failure_captures"] == base_job["failure_captures"]
-        ):
-            return True
-
-    return False
+    return any(
+        head_job["conclusion"] == base_job["conclusion"]
+        and head_job["failure_captures"] == base_job["failure_captures"]
+        for base_job in base_jobs.values()
+    )
 
 
 def get_classifications(
