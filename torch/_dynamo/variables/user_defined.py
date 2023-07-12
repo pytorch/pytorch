@@ -610,7 +610,7 @@ class TensorSubclassVariable(UserDefinedClassVariable):
     ) -> VariableTracker:
         from .tensor import TensorVariable, TensorWithTFOverrideVariable
 
-        if len(args) == 0 and isinstance(args[0], TensorVariable):
+        if len(args) == 1 and len(kwargs) == 0 and isinstance(args[0], TensorVariable):
             return TensorWithTFOverrideVariable.create(
                 tx,
                 args[-1],
