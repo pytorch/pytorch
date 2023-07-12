@@ -257,7 +257,7 @@ def _tag_arguments_with_param_schemas(
     kwargs: Dict[str, fx_type_utils.Argument],
     fill_defaults: bool = False,
     allow_extra_kwargs: bool = False,
-) -> tuple[list[Any], dict[str, Any],]:
+) -> Tuple[List[Any], Dict[str, Any],]:
     """Tag Python args and kwargs with matching ONNX ParamSchema.
 
     Args:
