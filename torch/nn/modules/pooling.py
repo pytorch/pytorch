@@ -741,6 +741,8 @@ class FractionalMaxPool2d(Module):
     step size determined by the target output size.
     The number of output features is equal to the number of input planes.
 
+    .. note:: Exactly one of ``output_size`` or ``output_ratio`` must be defined.
+
     Args:
         kernel_size: the size of the window to take a max over.
                      Can be a single number k (for a square kernel of k x k) or a tuple `(kh, kw)`
@@ -810,6 +812,8 @@ class FractionalMaxPool3d(Module):
     The max-pooling operation is applied in :math:`kT \times kH \times kW` regions by a stochastic
     step size determined by the target output size.
     The number of output features is equal to the number of input planes.
+
+    .. note:: Exactly one of ``output_size`` or ``output_ratio`` must be defined.
 
     Args:
         kernel_size: the size of the window to take a max over.

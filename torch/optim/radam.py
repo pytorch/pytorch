@@ -264,7 +264,7 @@ def _single_tensor_radam(
             grad = grad.add(param, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
-        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+        exp_avg.lerp_(grad, 1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
         # correcting bias for the first moving moment
@@ -331,17 +331,17 @@ def _multi_tensor_radam(
         rho_t_list = [rho_inf - 2 * _get_value(step) * (beta2 ** _get_value(step)) /
                       (1 - beta2 ** _get_value(step)) for step in grouped_state_steps]
 
-        bias_correction1 = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
-        bias_correction2 = [1 - beta2 ** _get_value(step) for step in grouped_state_steps]
         if weight_decay != 0:
             grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
-        torch._foreach_mul_(grouped_exp_avgs, beta1)
-        torch._foreach_add_(grouped_exp_avgs, grouped_grads, alpha=1 - beta1)
+        torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
 
         torch._foreach_mul_(grouped_exp_avg_sqs, beta2)
         torch._foreach_addcmul_(grouped_exp_avg_sqs, grouped_grads, grouped_grads, 1 - beta2)
+
+        # Delete the local intermediate since it won't be used anymore to save on peak memory
+        del grouped_grads
 
         rect = [
             _dispatch_sqrt(
@@ -356,14 +356,18 @@ def _multi_tensor_radam(
         ]
         unrectified = [0 if rect > 0 else 1.0 for rect in rect]
 
-        exp_avg_sq_sqrt = torch._foreach_sqrt(grouped_exp_avg_sqs)
-        torch._foreach_add_(exp_avg_sq_sqrt, eps)
-        bias_correction_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
-        denom = torch._foreach_div(exp_avg_sq_sqrt, bias_correction_sqrt)
-        step_size = _stack_if_compiling([(lr * rect / bc) * -1 for rect, bc in zip(rect, bias_correction1)])
+        bias_correction1 = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
+        unrect_step_size = _stack_if_compiling([(lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)])
+        bias_correction2_sqrt_times_rect_step_size = [
+            _dispatch_sqrt(1 - beta2 ** _get_value(step)) * (lr * rect / bc) * -1
+            for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)
+        ]
 
-        torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, denom, step_size)
+        buffer = torch._foreach_sqrt(grouped_exp_avg_sqs)
+        torch._foreach_add_(buffer, eps)
+        torch._foreach_div_(buffer, bias_correction2_sqrt_times_rect_step_size)
+        torch._foreach_reciprocal_(buffer)
+        torch._foreach_add_(buffer, unrect_step_size)
 
-        denom = [torch.ones_like(exp_av, memory_format=torch.preserve_format) for exp_av in grouped_exp_avgs]
-        step_size = _stack_if_compiling([(lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)])
-        torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, denom, step_size)
+        # Here, buffer = sqrt(1 - beta2^t) * rect_step_size / (sqrt(v) + eps) + unrect_step_size
+        torch._foreach_addcmul_(grouped_params, grouped_exp_avgs, buffer)

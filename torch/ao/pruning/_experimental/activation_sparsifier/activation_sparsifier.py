@@ -331,7 +331,7 @@ class ActivationSparsifier:
         If `sparse_coo=True`, then the mask is stored as sparse coo else dense tensor
         """
         states = copy.deepcopy(states_dict)
-        for _, state in states.items():
+        for state in states.values():
             if state['mask'] is not None:
                 if isinstance(state['mask'], List):
                     for idx in range(len(state['mask'])):

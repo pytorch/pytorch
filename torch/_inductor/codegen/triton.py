@@ -62,6 +62,16 @@ class TritonPrinter(PythonPrinter):
     def _helper_sqrt(self, expr):
         return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
 
+    def _print_Min(self, expr):
+        a = self._print(expr.args[0])
+        b = self._print(expr.args[1])
+        return f"tl.math.min({a}, {b})"
+
+    def _print_Max(self, expr):
+        a = self._print(expr.args[0])
+        b = self._print(expr.args[1])
+        return f"tl.math.max({a}, {b})"
+
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
