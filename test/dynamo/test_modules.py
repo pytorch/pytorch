@@ -915,7 +915,7 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
             self.add_module("l@yer-%d" % (i + 1), BasicModule())
 
     def forward(self, x):
-        for _, layer in self.items():
+        for layer in self.values():
             x = layer(x)
         return x
 
