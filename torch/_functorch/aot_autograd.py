@@ -477,11 +477,11 @@ class ViewAndMutationMeta:
     # pass once, and re-use the output throughout AOTAutograd
     traced_tangents: List[Any]
 
-    num_symints_saved_for_bw: Optional[int] = None
-
     subclass_inp_meta: List[Union[int, SubclassCreationMeta]]
 
     subclass_out_meta: List[Union[int, SubclassCreationMeta]]
+
+    num_symints_saved_for_bw: Optional[int] = None
 
     def __post_init__(self):
         mutated_inp_indices = [
