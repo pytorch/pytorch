@@ -4,11 +4,10 @@ import multiprocessing as mp
 import os
 import re
 import tempfile
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-import rockset
+import rockset  # type: ignore[import]
 
 LOGS_QUERY = """
 with
@@ -67,25 +66,26 @@ def parse_args() -> Any:
 def query_rockset(
     query: str, params: Optional[Dict[str, Any]] = None
 ) -> List[Dict[str, Any]]:
-    res: List[Dict[str, Any]] = rockset.RocksetClient(
+    res = rockset.RocksetClient(
         host="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
     ).sql(query, params)
-    return res.results
+    results: List[Dict[str, Any]] = res.results
+    return results
 
 
-def _download_log_worker(temp_dir: str, id: int, name: str):
+def download_log_worker(temp_dir: str, id: int, name: str) -> None:
     url = f"https://ossci-raw-job-status.s3.amazonaws.com/log/{id}"
     data = requests.get(url).text
     with open(f"{temp_dir}/{name.replace('/', '_')} {id}.txt", "x") as f:
         f.write(data)
 
 
-def printer(item, extra):
+def printer(item: Tuple[str, Tuple[int, str, List[Any]]], extra: str) -> None:
     test, (_, link, _) = item
     print(f"{link:<55} {test:<120} {extra}")
 
 
-def close_issue(num: int):
+def close_issue(num: int) -> None:
     headers = {
         "Accept": "application/vnd.github.v3+json",
         "Authorization": f"token {os.environ['GITHUB_TOKEN']}",
@@ -110,28 +110,29 @@ if __name__ == "__main__":
         ).text
     )
 
-    al = []
+    all_logs = []
+    jobs = query_rockset(LOGS_QUERY)
     with tempfile.TemporaryDirectory() as temp_dir:
-        jobs = query_rockset(LOGS_QUERY)
-        os.mkdir("tempdir")
-        print(len(jobs))
         pool = mp.Pool(20)
-        for r in jobs:
-            id = r["id"]
-            name = r["name"]
-            pool.apply_async(_download_log_worker, args=(temp_dir, id, name))
+        for job in jobs:
+            id = job["id"]
+            name = job["name"]
+            pool.apply_async(download_log_worker, args=(temp_dir, id, name))
         pool.close()
         pool.join()
-        assert len(os.listdir(temp_dir)) == len(jobs)
 
         for filename in os.listdir(temp_dir):
             with open(f"{temp_dir}/{filename}") as f:
-                al.append(f.read())
+                all_logs.append(f.read())
+
+    # If its less than 100 something definitely went wrong
+    assert len(os.listdir(temp_dir)) == len(jobs)
+    assert len(all_logs) > 100
 
     to_be_closed = []
     for item in disabled_tests_json.items():
         test, (num, link, _) = item
-        reg = re.match("(\S+) \((\S*)\)", test)
+        reg = re.match(r"(\S+) \((\S*)\)", test)
         if reg is None:
             printer(item, "poorly formed")
             to_be_closed.append(item)
@@ -139,21 +140,21 @@ if __name__ == "__main__":
         name = reg[1]
         classname = reg[2].split(".")[-1]
         present = False
-        for a in al:
-            if link in a:
+        for log in all_logs:
+            if link in log:
                 present = True
                 break
-            if f"{classname}::{name}" in a:
+            if f"{classname}::{name}" in log:
                 present = True
                 break
         if present:
             printer(item, "found in logs")
             continue
 
-        r = query_rockset(
+        count = query_rockset(
             TEST_EXISTS_QUERY, {"name": f"{name}%", "classname": f"{classname}%"}
         )
-        if r[0]["c"] == 0:
+        if count[0]["c"] == 0:
             printer(item, "not found")
             to_be_closed.append(item)
         else:
