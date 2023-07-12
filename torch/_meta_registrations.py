@@ -1057,7 +1057,7 @@ def _linalg_svd_meta(
     A: Tensor,
     full_matrices: bool = False,
     compute_uv: bool = True,
-    driver: str = None,
+    driver: Optional[str] = None,
 ):
     checkIsMatrix(A, "linalg.svd")
     checkFloatingOrComplex(A, "linalg.svd")
@@ -1200,7 +1200,7 @@ def linalg_solve_triangular_meta(
     upper: bool,
     left: bool = True,
     unitriangular: bool = False,
-    out: Tensor = None,
+    out: Optional[Tensor] = None,
 ) -> Tensor:
     if out is None:
         out = A.new_empty([0])
@@ -2805,6 +2805,15 @@ def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
         len(self) == len(tensor1) and len(self) == len(tensor2),
         lambda: "All input tensor lists must have the same length",
     )
+
+
+@register_meta(
+    [
+        aten._foreach_lerp_.Scalar,
+    ]
+)
+def meta__foreach_lerp__scalar(self, other, scalar=1):
+    _check_foreach_binop_tensor_lists(self, other)
 
 
 @register_meta(
@@ -4739,8 +4748,8 @@ def upsample_nearest2d_backward(
     grad_output: Tensor,
     output_size: Sequence[Union[int, torch.types.SymInt]],
     input_size: Sequence[Union[int, torch.types.SymInt]],
-    scales_h: float = None,
-    scales_w: float = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
 ):
     full_output_size = upsample_common_check(
         input_size, output_size, num_spatial_dims=2

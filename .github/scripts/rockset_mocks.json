@@ -15909,5 +15909,3637 @@
       "failure_captures": null,
       "steps": 9
     }
+  ],
+  "dd52521aa51e4d609fb97b6a4cf657fc89c49308 436d035dc74db9c703297a62163b0cad0c546665": [
+    {
+      "workflow_name": "trunk",
+      "id": 14578163743,
+      "name": "macos-12-py3-arm64-mps / test (default, 1, 1)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:52:21Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775916037",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 14
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571859043,
+      "name": "check-api-rate",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:50:27Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383795766/jobs/9770971879",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "linux-binary-manywheel",
+      "id": 14571651065,
+      "name": "manywheel-py3_8-cuda11_8-build / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:07:07Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725743/jobs/9770817910",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571859173,
+      "name": "get_workflow_conclusion",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:50:29Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383795766/jobs/9770971971",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14571859977,
+      "name": "linux-focal-cpu-py3.8-gcc7-inductor / test (inductor_torchbench_cpu_accuracy, 1, 1, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:38:59Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9770972583",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "windows-binary-libtorch-release",
+      "id": 14571994567,
+      "name": "libtorch-cpu-shared-with-deps-release-test",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:01:24Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725606/jobs/9771072710",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 18
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571909031,
+      "name": "Upload test stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}",
+      "conclusion": "skipped",
+      "completed_at": "2023-06-26T22:53:24Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383811775/jobs/9771008750",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 0
+    },
+    {
+      "workflow_name": "linux-binary-libtorch-pre-cxx11",
+      "id": 14571650894,
+      "name": "libtorch-cpu-shared-with-deps-pre-cxx11-build / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:19:43Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725742/jobs/9770817781",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571906196,
+      "name": "get_workflow_conclusion",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:53:23Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383811775/jobs/9771006691",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14572547143,
+      "name": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_timm_dynamic, 2, 2, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:18:45Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9771501022",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: query: last dimension must be contiguous"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14571650896,
+      "name": "linux-focal-cpu-py3.8-gcc7-inductor / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:50:22Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9770817783",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571903518,
+      "name": "check-api-rate",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:53:09Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383811005/jobs/9771004773",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14571860214,
+      "name": "linux-focal-cpu-py3.8-gcc7-inductor / test (inductor_timm_dynamic_cpu_accuracy, 1, 2, linux.12xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:10:30Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9770972757",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "linux-binary-libtorch-cxx11-abi",
+      "id": 14571650940,
+      "name": "libtorch-cpu-shared-with-deps-cxx11-abi-build / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:13:59Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725783/jobs/9770817820",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14572546870,
+      "name": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T01:40:00Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9771500812",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "",
+        "fail_accuracy"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571694347,
+      "name": "get_workflow_conclusion",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:40:39Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383741989/jobs/9770850108",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578324025,
+      "name": "win-vs2019-cpu-py3 / test (default, 2, 3, windows.4xlarge.nonephemeral)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:14:37Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9776040411",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578156978,
+      "name": "macos-12-py3-arm64 / test (default, 3, 3, macos-m1-12)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:14:02Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775910609",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 21
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14572546498,
+      "name": "cuda11.8-py3.10-gcc7-sm86 / test (inductor, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T01:16:53Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9771500548",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "AttributeError: 'MultiOutputLayout' object has no attribute 'storage_size'"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578027489,
+      "name": "libtorch-linux-bionic-cuda12.1-py3.7-gcc9-debug / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:45:32Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775807787",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "Validate and merge PR",
+      "id": 14571787090,
+      "name": "try_merge_pr_104160",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:48:05Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383771789/jobs/9770918495",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 10
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578157098,
+      "name": "macos-12-py3-arm64-mps / filter",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:34:24Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775910697",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578027962,
+      "name": "win-vs2019-cuda11.8-py3 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:06:27Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775808151",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 15
+    },
+    {
+      "workflow_name": "linux-binary-libtorch-pre-cxx11",
+      "id": 14572421986,
+      "name": "libtorch-cpu-shared-with-deps-pre-cxx11-test / test",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:30:51Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725742/jobs/9771405188",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 22
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571799601,
+      "name": "Upload test stats for 5382878937, attempt 1",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:49:54Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383775353/jobs/9770927546",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 9
+    },
+    {
+      "workflow_name": "Check Labels",
+      "id": 14578172622,
+      "name": "Check labels",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:35:21Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386167780/jobs/9775923410",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 8
+    },
+    {
+      "workflow_name": "windows-binary-libtorch-debug",
+      "id": 14571650630,
+      "name": "libtorch-cpu-shared-with-deps-debug-build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:21:22Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725599/jobs/9770817571",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "sccache: error: couldn't connect to server"
+      ],
+      "steps": 18
+    },
+    {
+      "workflow_name": "linux-binary-manywheel",
+      "id": 14573191012,
+      "name": "manywheel-py3_8-cuda11_8-test / test",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:25:24Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725743/jobs/9771987812",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 22
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14571859622,
+      "name": "linux-focal-cpu-py3.8-gcc7-inductor / test (inductor_huggingface_cpu_accuracy, 1, 1, linux.12xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:20:33Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9770972309",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578156882,
+      "name": "macos-12-py3-arm64 / test (default, 2, 3, macos-m1-12)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:17:26Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775910533",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "Got exit code -11, retrying (retries left=2)"
+      ],
+      "steps": 21
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578027741,
+      "name": "pytorch-linux-focal-py3-clang7-android-ndk-r19c-build / filter",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:25:47Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775807992",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14571859865,
+      "name": "linux-focal-cpu-py3.8-gcc7-inductor / test (inductor_timm_cpu_accuracy, 2, 2, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:12:56Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9770972501",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571653988,
+      "name": "get_workflow_conclusion",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:38:26Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383726941/jobs/9770820053",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14572547236,
+      "name": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench_dynamic, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:45:33Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9771501091",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "",
+        "fail_accuracy"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571907512,
+      "name": "check-api-rate",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:53:24Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383812211/jobs/9771007644",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578340249,
+      "name": "linux-focal-rocm5.4.2-py3.8 / test (default, 3, 3, linux.rocm.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:32:56Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9776052982",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571694480,
+      "name": "check-api-rate",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:41:04Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383741989/jobs/9770850206",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578340019,
+      "name": "linux-focal-rocm5.4.2-py3.8 / test (default, 1, 3, linux.rocm.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:20:58Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9776052803",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578027881,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-no-ops / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:12:53Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775808102",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "linux-binary-libtorch-cxx11-abi",
+      "id": 14572318543,
+      "name": "libtorch-cpu-shared-with-deps-cxx11-abi-test / test",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:24:12Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725783/jobs/9771325769",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "undefined reference to `c10::detail::torchInternalAssertFail(char const*, char const*, unsigned int, char const*, std::string const&)'"
+      ],
+      "steps": 22
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571903650,
+      "name": "get_workflow_conclusion",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:53:14Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383811005/jobs/9771004870",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14572547406,
+      "name": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_distributed, 1, 1, linux.g5.12xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:40:46Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9771501217",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571797339,
+      "name": "check-api-rate",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:46:48Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383775353/jobs/9770925963",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14572546599,
+      "name": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_huggingface, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:32:28Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9771500625",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "",
+        "fail_accuracy"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578156766,
+      "name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-12)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:18:31Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775910441",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "ModuleNotFoundError: No module named 'sympy'"
+      ],
+      "steps": 21
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571907674,
+      "name": "get_workflow_conclusion",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:53:28Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383812211/jobs/9771007751",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578027551,
+      "name": "macos-12-py3-arm64 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:33:54Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775807837",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 18
+    },
+    {
+      "workflow_name": "linux-binary-manywheel",
+      "id": 14572784785,
+      "name": "manywheel-py3_8-cuda12_1-with-pypi-cudnn-test / test",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:00:43Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725743/jobs/9771680405",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 22
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578031805,
+      "name": "pytorch-linux-focal-py3-clang7-android-ndk-r19c-build / build (default, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:33:00Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775811269",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 19
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14571860100,
+      "name": "linux-focal-cpu-py3.8-gcc7-inductor / test (inductor_huggingface_dynamic_cpu_accuracy, 1, 1, linux.12xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:20:34Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9770972670",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "linux-binary-manywheel",
+      "id": 14571650895,
+      "name": "manywheel-py3_8-cuda12_1-with-pypi-cudnn-build / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:42:35Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725743/jobs/9770817784",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14572547041,
+      "name": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_timm_dynamic, 1, 2, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:18:44Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9771500941",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "BC Lint",
+      "id": 14579065212,
+      "name": "bc_linter",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:27:49Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386500701/jobs/9776629321",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 4
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571657634,
+      "name": "Upload test stats for 5383725602, attempt 1",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:41:30Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383726941/jobs/9770822743",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 9
+    },
+    {
+      "workflow_name": "Create Release",
+      "id": 14571650621,
+      "name": "Create Release",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:41:34Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725611/jobs/9770817564",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 9
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14571859741,
+      "name": "linux-focal-cpu-py3.8-gcc7-inductor / test (inductor_timm_cpu_accuracy, 1, 2, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:11:00Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9770972400",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Validate and merge PR",
+      "id": 14571750286,
+      "name": "try_merge_pr_104160",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:45:31Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383759778/jobs/9770891603",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: This PR needs a `release notes:` label"
+      ],
+      "steps": 10
+    },
+    {
+      "workflow_name": "BC Lint",
+      "id": 14595854460,
+      "name": "bc_linter",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T15:57:20Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5391966888/jobs/9789628229",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 4
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571861559,
+      "name": "Upload test stats for 5383351846, attempt 1",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:53:33Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383795766/jobs/9770973804",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 9
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571797217,
+      "name": "get_workflow_conclusion",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:46:49Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383775353/jobs/9770925888",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14572546690,
+      "name": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_timm, 1, 2, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:14:38Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9771500682",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571697709,
+      "name": "Upload test stats for 5382246637, attempt 1",
+      "conclusion": "failure",
+      "completed_at": "2023-06-26T22:46:19Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383741989/jobs/9770852556",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "AttributeError: 'list' object has no attribute 'get'"
+      ],
+      "steps": 9
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578840078,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (nogpu_NO_AVX2, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:42:31Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9776450960",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f5423f65270>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Check Labels",
+      "id": 14578024856,
+      "name": "Check labels",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:25:50Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107302/jobs/9775805641",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 8
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14571651062,
+      "name": "cuda11.8-py3.10-gcc7-sm86 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:27:23Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9770817905",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571654121,
+      "name": "check-api-rate",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:38:22Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383726941/jobs/9770820150",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "TorchBench CI (pytorch-linux-py3.8-cu116)",
+      "id": 14578024905,
+      "name": "run-torchbench",
+      "conclusion": "skipped",
+      "completed_at": "2023-06-27T05:25:19Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107342/jobs/9775805686",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 0
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14572546957,
+      "name": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_huggingface_dynamic, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:29:49Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9771500875",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "",
+        "fail_accuracy"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571910257,
+      "name": "Upload test stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}",
+      "conclusion": "skipped",
+      "completed_at": "2023-06-26T22:53:29Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383812211/jobs/9771009655",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 0
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578323918,
+      "name": "win-vs2019-cpu-py3 / test (default, 1, 3, windows.4xlarge.nonephemeral)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:37:33Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9776040324",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "[  FAILED  ] IOptTensorListRefTest.Unboxed_Iterate"
+      ],
+      "steps": 23
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14572546774,
+      "name": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_timm, 2, 2, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:15:16Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9771500745",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: query: last dimension must be contiguous"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14571860333,
+      "name": "linux-focal-cpu-py3.8-gcc7-inductor / test (inductor_timm_dynamic_cpu_accuracy, 2, 2, linux.12xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:11:55Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9770972852",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578028031,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:14:21Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775808204",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14571651272,
+      "name": "cuda11.8-py3.10-gcc7-sm80 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:25:58Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9770818074",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "BC Lint",
+      "id": 14578172542,
+      "name": "bc_linter",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:36:49Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386167770/jobs/9775923341",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 4
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14572524996,
+      "name": "cuda11.8-py3.10-gcc7-sm80 / test (inductor_torchbench_smoketest_perf, 1, 1, linux.gcp.a100)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:47:10Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9771484402",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 28
+    },
+    {
+      "workflow_name": "windows-binary-libtorch-release",
+      "id": 14571650628,
+      "name": "libtorch-cpu-shared-with-deps-release-build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:58:43Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725606/jobs/9770817567",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "sccache: error: couldn't connect to server"
+      ],
+      "steps": 18
+    },
+    {
+      "workflow_name": "inductor",
+      "id": 14571860433,
+      "name": "linux-focal-cpu-py3.8-gcc7-inductor / test (inductor_torchbench_dynamic_cpu_accuracy, 1, 1, linux.12xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:35:54Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725740/jobs/9770972929",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571906596,
+      "name": "Upload test stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}",
+      "conclusion": "skipped",
+      "completed_at": "2023-06-26T22:53:15Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383811005/jobs/9771006977",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 0
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578027811,
+      "name": "win-vs2019-cpu-py3 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:45:21Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775808048",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 15
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571906306,
+      "name": "check-api-rate",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:53:19Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383811775/jobs/9771006769",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578839928,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (nogpu_AVX512, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:41:10Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9776450838",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f979a736ec0>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578324115,
+      "name": "win-vs2019-cpu-py3 / test (default, 3, 3, windows.4xlarge.nonephemeral)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:13:00Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9776040476",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578027416,
+      "name": "linux-focal-rocm5.4.2-py3.8 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:46:30Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775807736",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "windows-binary-libtorch-debug",
+      "id": 14572450725,
+      "name": "libtorch-cpu-shared-with-deps-debug-test",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:24:59Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725599/jobs/9771427239",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 18
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578030884,
+      "name": "linux-bionic-cpu-py3.10-gcc9-bazel-test / build-and-test (default, 1, 1, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:04:45Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775810493",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 19
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578026548,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test / filter",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:25:43Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775807031",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "Update viable/strict",
+      "id": 14571825304,
+      "name": "do_update_viablestrict",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:50:26Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383784513/jobs/9770946879",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 9
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578027651,
+      "name": "caffe2-linux-focal-py3.8-gcc7 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:39:26Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9775807914",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578198621,
+      "name": "linux-focal-py3.8-clang10-onnx / test (default, 2, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:55:46Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775943810",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: at::functionalization::impl::isFunctionalTensor(self_) INTERNAL ASSERT FAILED at \"/var/lib/jenkins/workspace/torch/csrc/autograd/python_torch_functions_manual.cpp\":509, please report a bug to PyTorch. "
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578215640,
+      "name": "linux-focal-py3.8-gcc7 / test (backwards_compat, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:50:32Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775956992",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578340138,
+      "name": "linux-focal-rocm5.4.2-py3.8 / test (default, 2, 3, linux.rocm.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:17:46Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9776052894",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f57da0a1be0>"
+      ],
+      "steps": 23
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14578840211,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (jit_legacy, 1, 1, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:37:03Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108476/jobs/9776451067",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571701650,
+      "name": "get_workflow_conclusion",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:41:04Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383744527/jobs/9770855585",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571704933,
+      "name": "Upload test stats for 5382279915, attempt 1",
+      "conclusion": "failure",
+      "completed_at": "2023-06-26T22:46:25Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383744527/jobs/9770858055",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "AttributeError: 'list' object has no attribute 'get'"
+      ],
+      "steps": 9
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571701766,
+      "name": "check-api-rate",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:41:07Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383744527/jobs/9770855683",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578214948,
+      "name": "linux-docs / build-docs-functorch-false",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:43:51Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775956446",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571705963,
+      "name": "get_workflow_conclusion",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:41:17Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383745754/jobs/9770858790",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578216400,
+      "name": "linux-focal-py3.9-clang7-asan / test (default, 5, 6, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:23:30Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775957569",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14572013170,
+      "name": "win-vs2019-cpu-py3 / test (default, 1, 3, windows.4xlarge.nonephemeral)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:58:30Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9771087318",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "[  FAILED  ] IOptTensorListRefTest.Unboxed_Iterate"
+      ],
+      "steps": 23
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578216136,
+      "name": "linux-focal-py3.9-clang7-asan / test (default, 2, 6, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:19:38Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775957367",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578211647,
+      "name": "linux-bionic-py3.8-clang9 / test (default, 1, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:21:43Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775953825",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f903078a6a0>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Check Labels",
+      "id": 14595854207,
+      "name": "Check labels",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T15:55:17Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5391967157/jobs/9789628019",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 8
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578026300,
+      "name": "linux-jammy-cuda11.8-cudnn8-py3.8-clang12 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:09:53Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775806837",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571785796,
+      "name": "macos-12-py3-arm64-mps / filter",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:46:23Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770917607",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571785453,
+      "name": "macos-12-py3-arm64 / test (default, 2, 3, macos-m1-12)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:28:28Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770917379",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x13756dd90>"
+      ],
+      "steps": 21
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571708928,
+      "name": "Upload test stats for 5382339228, attempt 1",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:44:26Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383745754/jobs/9770860957",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 9
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571900602,
+      "name": "check-api-rate",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:52:59Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383809961/jobs/9771002555",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571792267,
+      "name": "macos-12-py3-arm64-mps / test (default, 1, 1)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:01:35Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770922108",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 14
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578216315,
+      "name": "linux-focal-py3.9-clang7-asan / test (default, 4, 6, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:15:02Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775957501",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f38bdbc51f0>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578214827,
+      "name": "linux-docs / build-docs-python-false",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:03:24Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775956356",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578212087,
+      "name": "linux-bionic-py3.8-clang9 / test (crossref, 2, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:15:14Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775954169",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578215295,
+      "name": "linux-focal-py3.8-gcc7 / test (default, 3, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:12:53Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775956734",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14572015438,
+      "name": "linux-focal-rocm5.4.2-py3.8 / test (default, 2, 3, linux.rocm.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:40:32Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9771089060",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571652069,
+      "name": "caffe2-linux-focal-py3.8-gcc7 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:52:16Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770818693",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578025633,
+      "name": "linux-bionic-py3_8-clang8-xla / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:40:50Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775806291",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578215102,
+      "name": "linux-focal-py3.8-gcc7 / test (default, 1, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:24:23Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775956578",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571706087,
+      "name": "check-api-rate",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:41:14Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383745754/jobs/9770858878",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "linux-binary-libtorch-cxx11-abi",
+      "id": 14578027331,
+      "name": "libtorch-cpu-shared-with-deps-cxx11-abi-build / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:01:06Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108472/jobs/9775807671",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14572015319,
+      "name": "linux-focal-rocm5.4.2-py3.8 / test (default, 1, 3, linux.rocm.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:33:43Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9771088970",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571651253,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:24:59Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770818054",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14572015576,
+      "name": "linux-focal-rocm5.4.2-py3.8 / test (default, 3, 3, linux.rocm.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:46:55Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9771089155",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f0a9a607d00>"
+      ],
+      "steps": 23
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571785624,
+      "name": "macos-12-py3-arm64 / test (default, 3, 3, macos-m1-12)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:27:43Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770917497",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "Process completed with exit code 1."
+      ],
+      "steps": 21
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578216240,
+      "name": "linux-focal-py3.9-clang7-asan / test (default, 3, 6, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:46:06Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775957449",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578216014,
+      "name": "linux-focal-py3.9-clang7-asan / test (default, 1, 6, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:08:06Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775957270",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578027358,
+      "name": "linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single / filter",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:25:49Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775807691",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "Revert merged PR",
+      "id": 14571880429,
+      "name": "try_revert_pr_102135",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:54:24Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383802750/jobs/9770987746",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 10
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578869071,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 4, 5, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:28:56Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776474355",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "linux-binary-manywheel",
+      "id": 14579639844,
+      "name": "manywheel-py3_8-cuda11_8-test / test",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:14:28Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108471/jobs/9777076172",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "An error occurred while attempting to read the response stream"
+      ],
+      "steps": 22
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572534095,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (default, 2, 5, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T01:08:54Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771491016",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: CUDA error: device-side assert triggered"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571911647,
+      "name": "linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.12xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:35:04Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771010662",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "ModuleNotFoundError: No module named 'torch.version'"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578215867,
+      "name": "linux-focal-py3.8-gcc7 / test (distributed, 2, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:43:47Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775957165",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "AttributeError: Can't get attribute 'foo_add' on <module 'torch.testing._internal.distributed.rpc.rpc_test' from '/opt/conda/envs/py_3.8/lib/python3.8/site-packages/torch/testing/_internal/distributed/rpc/rpc_test.py'> Default RPC pickler does not serialize"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571903897,
+      "name": "Upload test stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}",
+      "conclusion": "skipped",
+      "completed_at": "2023-06-26T22:53:04Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383809961/jobs/9771005052",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 0
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572542259,
+      "name": "linux-bionic-cuda11.8-py3.10-gcc9 / test (distributed, 2, 3, linux.8xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:50:31Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771497444",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: barrier timeout"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571880773,
+      "name": "Upload test stats for 5382334339, attempt 1",
+      "conclusion": "failure",
+      "completed_at": "2023-06-26T22:55:45Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383801930/jobs/9770987979",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "AttributeError: 'list' object has no attribute 'get'"
+      ],
+      "steps": 9
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14572013303,
+      "name": "win-vs2019-cpu-py3 / test (default, 2, 3, windows.4xlarge.nonephemeral)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:28:04Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9771087423",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "BC Lint",
+      "id": 14595845290,
+      "name": "bc_linter",
+      "conclusion": "cancelled",
+      "completed_at": "2023-06-27T15:54:46Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5391964701/jobs/9789621288",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "##[error]The operation was canceled."
+      ],
+      "steps": 4
+    },
+    {
+      "workflow_name": "linux-binary-manywheel",
+      "id": 14579138688,
+      "name": "manywheel-py3_8-cuda12_1-with-pypi-cudnn-test / test",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:47:21Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108471/jobs/9776686334",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 22
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571659320,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test / build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:10:42Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770824026",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 19
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578819484,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (default, 1, 5, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T08:30:56Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776434291",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: CUDA error: device-side assert triggered"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571862314,
+      "name": "linux-bionic-py3.11-clang9 / test (crossref, 1, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:42:16Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770974356",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571654285,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test / filter",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:38:32Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770820271",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578031009,
+      "name": "linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit / build-and-test (default, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:54:25Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775810598",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 13
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571652188,
+      "name": "libtorch-linux-bionic-cuda12.1-py3.7-gcc9-debug / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:55:12Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770818791",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572534354,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (default, 5, 5, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:57:35Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771491205",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571878011,
+      "name": "check-api-rate",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:51:36Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383801930/jobs/9770985949",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571862420,
+      "name": "linux-bionic-py3.11-clang9 / test (crossref, 2, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:32:01Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770974431",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578221017,
+      "name": "linux-bionic-py3.11-clang9 / test (default, 1, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:20:36Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775961118",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578026757,
+      "name": "linux-focal-py3.8-clang10-onnx / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:36:33Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775807197",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578026655,
+      "name": "linux-bionic-py3.8-clang9 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:37:25Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775807111",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578025359,
+      "name": "linux-focal-rocm5.4.2-py3.8 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:46:41Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775806074",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571861160,
+      "name": "linux-bionic-py3.8-clang9 / test (crossref, 2, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:30:08Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770973498",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578262030,
+      "name": "linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.12xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:23:19Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775992923",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "ModuleNotFoundError: No module named 'torch.version'"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578221134,
+      "name": "linux-bionic-py3.11-clang9 / test (default, 2, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:07:36Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775961215",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f0311248850>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571651765,
+      "name": "pytorch-linux-focal-py3-clang7-android-ndk-r19c-build / filter",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:38:27Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770818451",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571858056,
+      "name": "linux-focal-py3.9-clang7-asan / test (default, 4, 6, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:23:11Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770971162",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f401471f6d0>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571857825,
+      "name": "linux-focal-py3.9-clang7-asan / test (default, 2, 6, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:39:30Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770970991",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14571676800,
+      "name": "quick-checks / linux-job",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:42:49Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725653/jobs/9770837243",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 21
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14571651243,
+      "name": "Test collect_env (with_torch)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:40:48Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725653/jobs/9770818044",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 9
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578025744,
+      "name": "linux-focal-py3.8-gcc7-no-ops / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:36:57Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775806386",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14572508165,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (nogpu_AVX512, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:57:26Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9771471420",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7fb4288e6800>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571861059,
+      "name": "linux-bionic-py3.8-clang9 / test (crossref, 1, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:45:35Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770973413",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578214727,
+      "name": "linux-docs / build-docs-cpp-false",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:47:52Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775956276",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578027183,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:13:18Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775807548",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571652325,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-no-ops / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:25:17Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770818901",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571862207,
+      "name": "linux-bionic-py3.11-clang9 / test (default, 3, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:22:04Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770974275",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f1487dfa510>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571859112,
+      "name": "linux-focal-py3.8-gcc7 / test (default, 2, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:21:11Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770971932",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571652290,
+      "name": "linux-focal-py3.9-clang7-asan / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:50:15Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770818873",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571654151,
+      "name": "linux-focal-py3-clang7-mobile-custom-build-static / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:46:32Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770820170",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571653844,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:26:33Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770819948",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578819745,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (default, 3, 5, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:59:43Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776434528",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571651620,
+      "name": "linux-focal-rocm5.4.2-py3.8 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:59:53Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770818338",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578221257,
+      "name": "linux-bionic-py3.11-clang9 / test (default, 3, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:04:15Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775961311",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14572508266,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (nogpu_NO_AVX2, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:55:09Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9771471494",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f9ece5ae800>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572534258,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (default, 4, 5, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:52:35Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771491139",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f497dff3670>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571858702,
+      "name": "linux-docs / build-docs-python-false",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:09:34Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770971644",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571661392,
+      "name": "Upload test stats for 5382279913, attempt 1",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:43:33Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383728597/jobs/9770825616",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 9
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578868824,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 2, 5, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:55:31Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776474149",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "Got exit code -6, retrying (retries left=2)"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14578025272,
+      "name": "Test collect_env (older_python_version)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:26:09Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107416/jobs/9775806002",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 9
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571857948,
+      "name": "linux-focal-py3.9-clang7-asan / test (default, 3, 6, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:13:17Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770971084",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571653145,
+      "name": "linux-bionic-py3.11-clang9 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:50:30Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770819465",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578819900,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (default, 4, 5, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:55:09Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776434651",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: CUDA error: device-side assert triggered"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578025935,
+      "name": "linux-focal-py3.8-gcc7 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:37:38Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775806541",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14578045793,
+      "name": "lintrunner / linux-job",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:39:52Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107416/jobs/9775822358",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 21
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572534456,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (deploy, 1, 1, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:38:18Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771491277",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571858844,
+      "name": "linux-docs / build-docs-functorch-false",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:55:53Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770971751",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14571676514,
+      "name": "workflow-checks / linux-job",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:42:21Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725653/jobs/9770837035",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 21
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578026862,
+      "name": "linux-bionic-py3.11-clang9 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:38:04Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775807285",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578025111,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:15:47Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775805865",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571785274,
+      "name": "macos-12-py3-arm64 / test (default, 1, 3, macos-m1-12)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:26:57Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770917261",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "Got exit code -11, retrying (retries left=2)"
+      ],
+      "steps": 21
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571860934,
+      "name": "linux-bionic-py3.8-clang9 / test (default, 3, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:25:45Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770973321",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14571676671,
+      "name": "Test tools / linux-job",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:43:33Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725653/jobs/9770837144",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 21
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571653285,
+      "name": "linux-jammy-cuda11.8-cudnn8-py3.8-clang12 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:21:34Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770819555",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571651446,
+      "name": "macos-12-py3-arm64 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:45:50Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770818202",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 18
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14571651049,
+      "name": "Test `run_test.py` is usable without boto3/rockset",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:39:54Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725653/jobs/9770817894",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 8
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578868703,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T08:03:07Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776474053",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578027081,
+      "name": "linux-bionic-cuda11.8-py3.10-gcc9 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:13:22Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775807467",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571839844,
+      "name": "linux-focal-py3.8-clang10-onnx / test (default, 1, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:12:00Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770957860",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571651921,
+      "name": "linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single / filter",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:38:33Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770818584",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578212304,
+      "name": "linux-bionic-py3.8-clang9 / test (dynamo, 2, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:14:34Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775954344",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "AttributeError: 'NoneType' object has no attribute 'make_guard'"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571651487,
+      "name": "linux-bionic-cuda11.8-py3.10-gcc9 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:27:03Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770818240",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578211982,
+      "name": "linux-bionic-py3.8-clang9 / test (crossref, 1, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:32:16Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775954082",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571651058,
+      "name": "win-vs2019-cuda11.8-py3 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:20:36Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770817901",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 15
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571859222,
+      "name": "linux-focal-py3.8-gcc7 / test (default, 3, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:25:17Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770972008",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f9549f71520>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Check Labels",
+      "id": 14595845309,
+      "name": "Check labels",
+      "conclusion": "cancelled",
+      "completed_at": "2023-06-27T15:54:45Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5391964726/jobs/9789621303",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "##[error]The operation was canceled."
+      ],
+      "steps": 8
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571651931,
+      "name": "win-vs2019-cpu-py3 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:59:45Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770818581",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 15
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571861973,
+      "name": "linux-bionic-py3.11-clang9 / test (default, 1, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:34:36Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770974101",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571861361,
+      "name": "linux-bionic-py3.8-clang9 / test (dynamo, 2, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:39:12Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770973649",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "AttributeError: 'NoneType' object has no attribute 'make_guard'"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578032496,
+      "name": "linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single / build-and-test (default, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:45:48Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775811842",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 13
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578027270,
+      "name": "linux-focal-py3.8-gcc7-pch / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:37:29Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775807621",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578025857,
+      "name": "win-vs2019-cpu-py3 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:45:09Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775806477",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 15
+    },
+    {
+      "workflow_name": "unstable",
+      "id": 14571650609,
+      "name": "introduction",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:38:12Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725602/jobs/9770817558",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572534176,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (default, 3, 5, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:58:46Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771491082",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14571651500,
+      "name": "Test collect_env (older_python_version)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:39:46Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725653/jobs/9770818247",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "You are using pip version 20.3.4, however version 23.1.2 is available."
+      ],
+      "steps": 9
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578821028,
+      "name": "linux-bionic-cuda11.8-py3.10-gcc9 / test (distributed, 3, 3, linux.8xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:30:51Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776435552",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "linux-binary-libtorch-pre-cxx11",
+      "id": 14578691232,
+      "name": "libtorch-cpu-shared-with-deps-pre-cxx11-test / test",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:17:55Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108496/jobs/9776331259",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 22
+    },
+    {
+      "workflow_name": "linux-binary-libtorch-cxx11-abi",
+      "id": 14578561818,
+      "name": "libtorch-cpu-shared-with-deps-cxx11-abi-test / test",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:11:03Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108472/jobs/9776225665",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "undefined reference to `c10::detail::torchInternalAssertFail(char const*, char const*, unsigned int, char const*, std::string const&)'"
+      ],
+      "steps": 22
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14571658056,
+      "name": "pytorch-linux-focal-py3-clang7-android-ndk-r19c-build / build (default, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:44:32Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9770823048",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 19
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571658594,
+      "name": "get_workflow_conclusion",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:38:40Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383728597/jobs/9770823469",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "linux-binary-libtorch-pre-cxx11",
+      "id": 14578027393,
+      "name": "libtorch-cpu-shared-with-deps-pre-cxx11-build / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:06:57Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108496/jobs/9775807715",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14578045901,
+      "name": "quick-checks / linux-job",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:29:22Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107416/jobs/9775822445",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 21
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578868938,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 3, 5, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "failure",
+      "completed_at": "2023-06-27T06:25:16Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776474242",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "test_sparse_semi_structured.py::TestSparseSemiStructuredCUDA::test_mm_sparse_first_NT_cuda_int8"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578820162,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (deploy, 1, 1, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:31:27Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776434866",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578216570,
+      "name": "linux-focal-py3.9-clang7-asan / test (default, 6, 6, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:02:53Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775957691",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "BC Lint",
+      "id": 14578024879,
+      "name": "bc_linter",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:27:54Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107345/jobs/9775805663",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 4
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572539309,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "failure",
+      "completed_at": "2023-06-26T23:36:18Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771495107",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "test_sparse_semi_structured.py::TestSparseSemiStructuredCUDA::test_mm_sparse_first_NT_cuda_int8"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578221504,
+      "name": "linux-bionic-py3.11-clang9 / test (crossref, 2, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:14:52Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775961510",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578215461,
+      "name": "linux-focal-py3.8-gcc7 / test (docs_test, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:44:22Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775956857",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578211748,
+      "name": "linux-bionic-py3.8-clang9 / test (default, 2, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:10:47Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775953901",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578026061,
+      "name": "linux-focal-py3-clang7-mobile-custom-build-static / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:33:33Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775806647",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571860811,
+      "name": "linux-bionic-py3.8-clang9 / test (default, 2, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:21:30Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770973220",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578819619,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (default, 2, 5, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T08:12:12Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776434413",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f7fd0daed70>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578030794,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test / build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:56:36Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775810415",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 19
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571900742,
+      "name": "get_workflow_conclusion",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:53:04Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383809961/jobs/9771002672",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571653428,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:26:53Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770819649",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578820921,
+      "name": "linux-bionic-cuda11.8-py3.10-gcc9 / test (distributed, 2, 3, linux.8xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:33:34Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776435466",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: hello"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578221746,
+      "name": "linux-bionic-py3.11-clang9 / test (dynamo, 2, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:07:29Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775961713",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "AttributeError: 'ListVariable' object has no attribute 'value'"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578025499,
+      "name": "linux-bionic-cpu-py3.10-gcc9-bazel-test / filter",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:25:43Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775806181",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "Upload Alerts to AWS/Rockset",
+      "id": 14571900762,
+      "name": "upload-alerts",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:53:21Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383809987/jobs/9771002685",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 8
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14571650690,
+      "name": "docker-image",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:39:30Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725653/jobs/9770817617",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 7
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578820805,
+      "name": "linux-bionic-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T08:13:14Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776435376",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578820039,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (default, 5, 5, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:46:00Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776434761",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578026427,
+      "name": "linux-focal-py3-clang7-mobile-build / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:33:20Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775806934",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "linux-binary-manywheel",
+      "id": 14578027440,
+      "name": "manywheel-py3_8-cuda12_1-with-pypi-cudnn-build / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:29:18Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108471/jobs/9775807753",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571654010,
+      "name": "linux-focal-py3.8-gcc7-no-ops / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:49:49Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770820067",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578215757,
+      "name": "linux-focal-py3.8-gcc7 / test (distributed, 1, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:56:11Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775957083",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: hello"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578215187,
+      "name": "linux-focal-py3.8-gcc7 / test (default, 2, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:09:48Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775956645",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f4edb5f9520>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14578025533,
+      "name": "pr-sanity-checks",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:27:33Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107416/jobs/9775806211",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578212198,
+      "name": "linux-bionic-py3.8-clang9 / test (dynamo, 1, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:09:59Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775954262",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "AttributeError: 'ListVariable' object has no attribute 'value'"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14572013406,
+      "name": "win-vs2019-cpu-py3 / test (default, 3, 3, windows.4xlarge.nonephemeral)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:41:13Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9771087498",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572542360,
+      "name": "linux-bionic-cuda11.8-py3.10-gcc9 / test (distributed, 3, 3, linux.8xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:43:41Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771497515",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578221619,
+      "name": "linux-bionic-py3.11-clang9 / test (dynamo, 1, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:15:40Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775961609",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "AttributeError: '_CachedForward' object has no attribute '__code__'"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578215542,
+      "name": "linux-focal-py3.8-gcc7 / test (jit_legacy, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:45:15Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775956915",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578198497,
+      "name": "linux-focal-py3.8-clang10-onnx / test (default, 1, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:58:55Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775943713",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572542135,
+      "name": "linux-bionic-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:49:31Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771497350",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: hello"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578869185,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 5, 5, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:24:13Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9776474451",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": [
+        "RuntimeError: CUDA error: device-side assert triggered"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "trunk",
+      "id": 14572508343,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (jit_legacy, 1, 1, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:40:15Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725786/jobs/9771471548",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578026996,
+      "name": "linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit / filter",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:25:43Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775807396",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14578045546,
+      "name": "Test tools / linux-job",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:30:04Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107416/jobs/9775822142",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 21
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14578025061,
+      "name": "Test collect_env (with_torch)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:27:48Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107416/jobs/9775805827",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 9
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572539629,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 4, 5, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:35:15Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771495381",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: CUDA error: device-side assert triggered"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578221381,
+      "name": "linux-bionic-py3.11-clang9 / test (crossref, 1, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:27:38Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775961414",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578211864,
+      "name": "linux-bionic-py3.8-clang9 / test (default, 3, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T07:08:15Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775953994",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578026182,
+      "name": "linux-focal-py3.9-clang7-asan / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:37:39Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775806739",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14578025243,
+      "name": "linux-focal-py3.8-gcc7-mobile-lightweight-dispatch-build / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:33:48Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107383/jobs/9775805978",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571860710,
+      "name": "linux-bionic-py3.8-clang9 / test (default, 1, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:37:13Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770973147",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f6b34ab3640>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload Alerts to AWS/Rockset",
+      "id": 14571760053,
+      "name": "upload-alerts",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:44:55Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383762933/jobs/9770898789",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 8
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571652686,
+      "name": "linux-focal-py3.8-gcc7-pch / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:50:21Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770819144",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572539534,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 3, 5, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:47:20Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771495300",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: incorrect results of backend <torch._dynamo.output_graph.WrapperBackend object at 0x7f585cac7670>"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571858303,
+      "name": "linux-focal-py3.9-clang7-asan / test (default, 6, 6, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:26:19Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770971353",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571652846,
+      "name": "linux-bionic-py3_8-clang8-xla / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:53:32Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770819254",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572539721,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 5, 5, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:36:50Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771495461",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "ossf-scorecard",
+      "id": 14571650447,
+      "name": "Scorecards analysis",
+      "conclusion": "skipped",
+      "completed_at": "2023-06-26T22:38:05Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725607/jobs/9770817436",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 0
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14578045655,
+      "name": "workflow-checks / linux-job",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:28:56Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107416/jobs/9775822233",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 21
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571862676,
+      "name": "linux-bionic-py3.11-clang9 / test (dynamo, 2, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:39:53Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770974615",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "AttributeError: 'ListVariable' object has no attribute 'value'"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571653563,
+      "name": "linux-bionic-py3.8-clang9 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:50:24Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770819754",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571861258,
+      "name": "linux-bionic-py3.8-clang9 / test (dynamo, 1, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:10:23Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770973573",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "AttributeError: 'ListVariable' object has no attribute 'value'"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571859793,
+      "name": "linux-focal-py3.8-gcc7 / test (distributed, 2, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:52:23Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770972439",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "AttributeError: Can't get attribute 'foo_add' on <module 'torch.testing._internal.distributed.rpc.rpc_test' from '/opt/conda/envs/py_3.8/lib/python3.8/site-packages/torch/testing/_internal/distributed/rpc/rpc_test.py'> Default RPC pickler does not serialize"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14571676397,
+      "name": "toc / linux-job",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:42:22Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725653/jobs/9770836955",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 21
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571653710,
+      "name": "linux-focal-py3-clang7-mobile-build / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:46:19Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770819848",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "linux-binary-manywheel",
+      "id": 14578027342,
+      "name": "manywheel-py3_8-cuda11_8-build / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:54:41Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386108471/jobs/9775807680",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 23
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14578045401,
+      "name": "toc / linux-job",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:28:57Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107416/jobs/9775822016",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 21
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14578025403,
+      "name": "Test `run_test.py` is usable without boto3/rockset",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:26:31Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107416/jobs/9775806107",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 8
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571862563,
+      "name": "linux-bionic-py3.11-clang9 / test (dynamo, 1, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:11:47Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770974535",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "AttributeError: 'NoneType' object has no attribute 'make_guard'"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571858990,
+      "name": "linux-focal-py3.8-gcc7 / test (default, 1, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:42:03Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770971846",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572539426,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 2, 5, linux.g5.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T01:05:16Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771495210",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "[  FAILED  ] NVFuserTest.FusionWelfordPersistence2_CUDA"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571858193,
+      "name": "linux-focal-py3.9-clang7-asan / test (default, 5, 6, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:17:12Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770971261",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571839977,
+      "name": "linux-focal-py3.8-clang10-onnx / test (default, 2, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:11:46Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770957975",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: at::functionalization::impl::isFunctionalTensor(self_) INTERNAL ASSERT FAILED at \"/var/lib/jenkins/workspace/torch/csrc/autograd/python_torch_functions_manual.cpp\":509, please report a bug to PyTorch. "
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14572533998,
+      "name": "linux-bionic-cuda12.1-py3.10-gcc9 / test (default, 1, 5, linux.4xlarge.nvidia.gpu)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T01:46:02Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9771490934",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: CUDA error: device-side assert triggered"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "Validate and merge PR",
+      "id": 14571882354,
+      "name": "try_merge_pr_104138",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:53:50Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383803361/jobs/9770989162",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 10
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571658026,
+      "name": "linux-bionic-cpu-py3.10-gcc9-bazel-test / build-and-test (default, 1, 1, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:19:00Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770823026",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 19
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571652410,
+      "name": "linux-focal-py3.8-gcc7 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:50:18Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770818957",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571859327,
+      "name": "linux-focal-py3.8-gcc7 / test (docs_test, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:56:47Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770972090",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571858542,
+      "name": "linux-docs / build-docs-cpp-false",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:00:14Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770971528",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571659583,
+      "name": "linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single / build-and-test (default, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:59:10Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770824233",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 13
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571653011,
+      "name": "linux-focal-py3.8-clang10-onnx / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:49:11Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770819376",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "Check Labels",
+      "id": 14579065226,
+      "name": "Check labels",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T06:26:15Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386500709/jobs/9776629332",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 8
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14578025172,
+      "name": "Test collect_env (without_torch)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:26:12Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107416/jobs/9775805914",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 9
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14578024947,
+      "name": "docker-image",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:26:38Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107416/jobs/9775805719",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 7
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571859548,
+      "name": "linux-focal-py3.8-gcc7 / test (backwards_compat, 1, 1, linux.2xlarge)",
+      "conclusion": "failure",
+      "completed_at": "2023-06-26T23:03:01Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770972259",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "The PR is introducing backward incompatible changes to the operator library."
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571652549,
+      "name": "linux-focal-py3.8-gcc7-mobile-lightweight-dispatch-build / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:46:57Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770819056",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 16
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571652154,
+      "name": "linux-bionic-cpu-py3.10-gcc9-bazel-test / filter",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:38:28Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770818762",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14571651361,
+      "name": "Test collect_env (without_torch)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:39:44Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725653/jobs/9770818131",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 9
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571862104,
+      "name": "linux-bionic-py3.11-clang9 / test (default, 2, 3, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:21:50Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770974187",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571857675,
+      "name": "linux-focal-py3.9-clang7-asan / test (default, 1, 6, linux.4xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:34:03Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770970886",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571658731,
+      "name": "check-api-rate",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:38:37Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383728597/jobs/9770823573",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571651279,
+      "name": "linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit / filter",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:38:33Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770818078",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 5
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571651043,
+      "name": "linux-focal-rocm5.4.2-py3.8",
+      "conclusion": "skipped",
+      "completed_at": "2023-06-26T22:38:07Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770817891",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 0
+    },
+    {
+      "workflow_name": "Labeler",
+      "id": 14578024858,
+      "name": "triage",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T05:25:31Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5386107304/jobs/9775805642",
+      "head_sha": "dd52521aa51e4d609fb97b6a4cf657fc89c49308",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571651683,
+      "name": "win-vs2019-cpu-py3 / build",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:57:01Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770818390",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 15
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571859669,
+      "name": "linux-focal-py3.8-gcc7 / test (distributed, 1, 2, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-27T00:08:06Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770972342",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": [
+        "RuntimeError: simulation"
+      ],
+      "steps": 26
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571659696,
+      "name": "linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit / build-and-test (default, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T23:07:48Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770824316",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 13
+    },
+    {
+      "workflow_name": "Upload test stats",
+      "id": 14571877870,
+      "name": "get_workflow_conclusion",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:51:38Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383801930/jobs/9770985844",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 3
+    },
+    {
+      "workflow_name": "pull",
+      "id": 14571859446,
+      "name": "linux-focal-py3.8-gcc7 / test (jit_legacy, 1, 1, linux.2xlarge)",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:57:28Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725747/jobs/9770972176",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 26
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14571676962,
+      "name": "lintrunner / linux-job",
+      "conclusion": "success",
+      "completed_at": "2023-06-26T22:53:09Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725653/jobs/9770837363",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 21
+    },
+    {
+      "workflow_name": "Lint",
+      "id": 14571650879,
+      "name": "pr-sanity-checks",
+      "conclusion": "skipped",
+      "completed_at": "2023-06-26T22:38:06Z",
+      "html_url": "https://github.com/pytorch/pytorch/actions/runs/5383725653/jobs/9770817766",
+      "head_sha": "436d035dc74db9c703297a62163b0cad0c546665",
+      "failure_captures": null,
+      "steps": 0
+    }
   ]
 }
