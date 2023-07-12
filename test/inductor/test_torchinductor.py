@@ -6847,7 +6847,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         )
 
             def has_assert(code, lower: bool, upper: bool):
-                self.assertIn("device_assert", code, msg=f"No device asert found:\n{code}")
+                self.assertIn(
+                    "device_assert", code, msg=f"No device asert found:\n{code}"
+                )
                 for line in code.split("\n"):
                     if "device_assert" in line:
                         self.assertTrue(
@@ -6858,7 +6860,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                             (" < " in line) is upper,
                             msg=f"Upper bound {'' if upper else 'not '}elided:{line}",
                         )
-
 
             def fn(x: torch.Tensor) -> torch.Tensor:
                 s = 1.0 * torch.arange(x.shape[0], device=x.device)
