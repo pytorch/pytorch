@@ -157,7 +157,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return var
             else:
                 return var.add_options(var.call_method(tx, "__init__", args, kwargs))
-        elif config.enable_custom_dict and variables.CustomizedDictVariable.is_matching_cls(self.value):
+        elif variables.CustomizedDictVariable.is_matching_cls(self.value):
             options["mutable_local"] = MutableLocal()
             return variables.CustomizedDictVariable.create(self.value, args, kwargs, options)
         elif variables.DataClassVariable.is_matching_cls(self.value):
