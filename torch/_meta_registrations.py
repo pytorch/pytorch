@@ -1943,15 +1943,9 @@ if torch._C._has_mkldnn:
         scalars,
         algorithm,
     ):
-        if len(x.shape) == 3 and len(w.shape) == 4:
-            # For conv1d, x and w should both have rank 3
-            # But if weight is prepacked, it's rank is 4 by unsqueeze(2)
-            qw_squeezed = torch.squeeze(w, 2)
-        else:
-            qw_squeezed = w
         shape_out = calc_conv_nd_return_shape(
             x,
-            qw_squeezed,
+            w,
             stride,
             padding,
             dilation,
@@ -1959,18 +1953,8 @@ if torch._C._has_mkldnn:
             groups,
             None,
         )
-        out_format = torch.channels_last
-        if len(shape_out) == 5:
-            out_format = torch.channels_last_3d
-        out = x.new_empty(shape_out)
-        if fp32_output:
-            # If case of int8-in, fp32-out
-            out = out.to(torch.float32)
-        if len(shape_out) == 3:
-            out = out.unsqueeze(2)
-        out = out.to(memory_format=out_format)
-        if len(shape_out) == 3:
-            out = out.squeeze(2)
+        out = x.new_empty(shape_out, dtype=(torch.float32 if fp32_output else None))
+        out = out.to(memory_format=torch.channels_last)
         return out
 
 
