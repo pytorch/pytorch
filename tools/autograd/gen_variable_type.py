@@ -25,6 +25,7 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
+import re
 from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from torchgen.api import cpp
@@ -297,7 +298,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "addr",
     "linalg_householder_product",
     "ormqr",
-    "constant_pad_nd",
     "reflection_pad1d",
     "reflection_pad2d",
     "reflection_pad3d",
@@ -315,7 +315,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "replication_pad1d",
     "replication_pad2d",
     "replication_pad3d",
-    "take",
     "put",
     "put_",
     "_to_copy",
@@ -351,6 +350,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "scatter_add",
     "sigmoid",
     "sigmoid_backward",
+    "sparse_mask",
     "trapezoid",
     "cumulative_trapezoid",
     "conj_physical_",
@@ -961,7 +961,7 @@ def gen_variable_type_func(
                 result[f"type_derived_method_definitions_{key}"] = [type_definition]
                 result[f"wrapper_registrations_{key}"] = [wrapper_registration]
             else:
-                for key, _ in fn.info.items():
+                for key in fn.info.keys():
                     type_definition = METHOD_DEFINITION.substitute(
                         return_type=cpp.returns_type(
                             f.func.returns, symint=True
@@ -1201,17 +1201,42 @@ def emit_body(
             if len(used_in) != 1:
                 return None
             derivative = used_in[0]
+
+            # Case with multioutput formulas
+            # TODO: process all derivative formulas!!!
             if len(derivative.var_names) != 1:
-                return None
-            derivative_var_name = derivative.var_names[0]
+                wrap_opt_if_start = derivative.formula.find(
+                    f"wrap_opt_if({arg.nctype.name}"
+                )
+                if wrap_opt_if_start == -1:
+                    return None
+
+                wrap_opt_if_match = re.match(
+                    rf"wrap_opt_if\({arg.nctype.name},(.*?)\)",
+                    derivative.formula[wrap_opt_if_start:],
+                )
+                assert wrap_opt_if_match is not None
+
+                # Condition is between 'wrap_opt_if(var_name,' and ')'.
+                condition_slice = slice(len(rf"wrap_opt_if\({arg.nctype.name},"), -1)
+                wrap_opt_if_condition = wrap_opt_if_match.group(0)[
+                    condition_slice
+                ].strip()
+                # replace 'grad_input_mask[num]' with 'grad_fn->should_compute_output(num)'
+                wrap_opt_if_condition = re.sub(
+                    r"grad_input_mask\[(\d+)\]",
+                    r"grad_fn->should_compute_output(\1)",
+                    wrap_opt_if_condition,
+                )
+                return f"{wrap_opt_if_condition}"
 
             # Figure out the offset of the edge that uses this variable
+            derivative_var_name = derivative.var_names[0]
             for edge_off, a in enumerate(args_with_derivatives):
                 if a.name == derivative_var_name:
                     break
             else:
                 raise AssertionError()
-
             return f"grad_fn->should_compute_output({edge_off})"
 
         if is_inplace_foreach:

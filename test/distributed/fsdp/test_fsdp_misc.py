@@ -482,20 +482,44 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_multi_device_not_supported(self):
-        """Tests that wrapping a multi-device module (i.e. with submodules on
-        both GPU and CPU) with FSDP raises an error."""
+    def test_cpu_gpu_module(self):
+        """Tests a CPU + GPU module supported if device_id is passed
+        in, errors if device_id is not.
+        """
+        torch.cuda.set_device(self.rank)
 
-        class MultiDeviceModule(nn.Module):
+        class CPUGPUModule(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.a = nn.Linear(1, 1).cuda()
                 self.b = nn.Linear(1, 1)
 
+        cpu_gpu = CPUGPUModule()
+        fsdp = FSDP(cpu_gpu, device_id=torch.cuda.current_device())
+        for param in fsdp.parameters():
+            self.assertEqual(param.device, torch.device(torch.cuda.current_device()))
+
+        # without device_id, we hit an error
+        with self.assertRaisesRegex(RuntimeError, "please pass in device_id"):
+            FSDP(CPUGPUModule())
+
+    @skip_if_lt_x_gpu(2)
+    def test_multigpu_module(self):
+        """
+        Module on multiple GPUs wrapped in FSDP should raise an error.
+        """
+
+        class MultiGPUModule(nn.Module):
+            def __init__(self, rank):
+                super().__init__()
+                self.rank = rank
+                self.a = nn.Linear(1, 1).cuda(self.rank)
+                self.b = nn.Linear(1, 1).cuda((self.rank + 1) % dist.get_world_size())
+
         with self.assertRaisesRegex(
             RuntimeError, "FSDP only supports single device modules"
         ):
-            FSDP(MultiDeviceModule())
+            FSDP(MultiGPUModule(self.rank))
 
     @skip_if_lt_x_gpu(2)
     def test_no_params(self):
@@ -582,6 +606,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         all_attr_name_and_values = [
             ("_use_orig_params", False, True),
             ("limit_all_gathers", False, True),
+            ("_use_full_prec_in_eval", False, True),
         ]
         self.assertEqual(
             [
@@ -604,10 +629,16 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             {},
         )
         attr_name = attr_name_and_values[0]
-        fsdp_kwargs_inner = {attr_name.lstrip("_"): attr_name_and_values[1]}
-        fsdp_kwargs_outer = {attr_name.lstrip("_"): attr_name_and_values[2]}
-        model.module[1] = FSDP(model.module[1], **fsdp_kwargs_inner)
-        fsdp_model = FSDP(model, **fsdp_kwargs_outer)
+
+        if "_use_full_prec_in_eval" == attr_name:
+            model.module[1] = FSDP(model.module[1])
+            os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = "1"
+            fsdp_model = FSDP(model)
+        else:
+            fsdp_kwargs_inner = {attr_name.lstrip("_"): attr_name_and_values[1]}
+            fsdp_kwargs_outer = {attr_name.lstrip("_"): attr_name_and_values[2]}
+            model.module[1] = FSDP(model.module[1], **fsdp_kwargs_inner)
+            fsdp_model = FSDP(model, **fsdp_kwargs_outer)
 
         # Run a forward to trigger lazy initialization and the error
         with self.assertRaisesRegex(

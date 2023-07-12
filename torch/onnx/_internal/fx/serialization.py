@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import io
 import os
-from typing import Tuple, TYPE_CHECKING
+from typing import Tuple, TYPE_CHECKING, Union
 
 import torch
+from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
 
 if TYPE_CHECKING:
@@ -38,9 +40,9 @@ def _create_tensor_proto_with_external_data(
 
     tensor_proto = onnx.TensorProto()
     tensor_proto.name = name
-    tensor_proto.data_type = torch.onnx._type_utils._SCALAR_TYPE_TO_ONNX[  # type: ignore[assignment]
-        torch.onnx._type_utils._DTYPE_TO_SCALAR_TYPE[tensor.dtype]
-    ]
+    tensor_proto.data_type = jit_type_utils.JitScalarType.from_dtype(
+        tensor.dtype
+    ).onnx_type()
     tensor_proto.dims.extend(tensor.shape)
     tensor_proto.data_location = onnx.TensorProto.EXTERNAL
 
@@ -83,7 +85,7 @@ def save_model_with_external_data(
     basepath: str,
     model_location: str,
     initializer_location: str,
-    torch_load_paths: Tuple[str, ...],
+    torch_load_paths: Tuple[Union[str, io.BytesIO], ...],
     onnx_model: onnx.ModelProto,
 ) -> None:
     """Load PyTorch tensors from files and add to "onnx_model" as external initializers.
@@ -118,8 +120,8 @@ def save_model_with_external_data(
     onnx_input_names = [input.name for input in onnx_model.graph.input]
 
     for path in torch_load_paths:
-        state_ditc = torch.load(path)
-        for name, tensor in state_ditc.items():
+        state_dict = torch.load(path)
+        for name, tensor in state_dict.items():
             # Basically, "transformer.attention.self.query.weight" is mapped
             # to "transformer_attention_self_query_weight" for mimicking the
             # name-modifying code in FX-to-ONNX exporter.
