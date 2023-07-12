@@ -1,9 +1,9 @@
 import copyreg
+import functools
 import sys
 import traceback
 import warnings
 from collections import defaultdict
-import functools
 from typing import Any, DefaultDict, List, Optional
 
 import torch
