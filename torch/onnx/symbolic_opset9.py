@@ -214,6 +214,8 @@ __all__ = [
     "prim_uninitialized",
     "rand_like",
     "rand",
+    "randint_like",
+    "randint",
     "randn_like",
     "randn",
     "reciprocal",
@@ -5124,33 +5126,6 @@ def _pad_packed_sequence(
     return data, lengths
 
 
-@_onnx_symbolic("aten::randn")
-@_beartype.beartype
-def randn(g: jit_utils.GraphContext, shapes, dtype, *options):
-    dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-    if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
-    else:
-        scalar_type = _type_utils.JitScalarType(dtype)
-    shape = symbolic_helper._maybe_get_const(shapes, "is")
-    if symbolic_helper._is_value(shape):
-        shape_const = g.op(
-            "ConstantOfShape",
-            shapes,
-            value_t=torch.tensor([0], dtype=torch.float),
-        )
-        return g.op(
-            "RandomNormalLike",
-            shape_const,
-            dtype_i=scalar_type.onnx_type(),
-        )
-    return g.op(
-        "RandomNormal",
-        shape_i=shape,
-        dtype_i=scalar_type.onnx_type(),
-    )
-
-
 @_onnx_symbolic("aten::randint")
 @_beartype.beartype
 def randint(g: jit_utils.GraphContext, low, high, shapes, dtype, *options):
@@ -5193,6 +5168,63 @@ def randint(g: jit_utils.GraphContext, low, high, shapes, dtype, *options):
     if int_dtype != scalar_type:
         randint = g.op("Cast", randint, to_i=scalar_type.onnx_type())
     return randint
+
+
+@_onnx_symbolic("aten::randint_like")
+@_beartype.beartype
+def randint_like(g: jit_utils.GraphContext, self, low, high, dtype, *options):
+    dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+    low_i = symbolic_helper._get_const(low, "i", "low")
+    high_i = symbolic_helper._get_const(high, "i", "high")
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.INT64
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
+    if low_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", low)
+    if high_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", high)
+
+    randn = g.op(
+        "RandomUniformLike",
+        self,
+        low_f=low_i,
+        high_f=high_i,
+    )
+
+    # cast to integer type
+    int_dtype = _type_utils.JitScalarType.INT64
+    randint = g.op("Cast", randn, to_i=int_dtype.onnx_type())
+    if int_dtype != scalar_type:
+        randint = g.op("Cast", randint, to_i=scalar_type.onnx_type())
+    return randint
+
+
+@_onnx_symbolic("aten::randn")
+@_beartype.beartype
+def randn(g: jit_utils.GraphContext, shapes, dtype, *options):
+    dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
+    shape = symbolic_helper._maybe_get_const(shapes, "is")
+    if symbolic_helper._is_value(shape):
+        shape_const = g.op(
+            "ConstantOfShape",
+            shapes,
+            value_t=torch.tensor([0], dtype=torch.float),
+        )
+        return g.op(
+            "RandomNormalLike",
+            shape_const,
+            dtype_i=scalar_type.onnx_type(),
+        )
+    return g.op(
+        "RandomNormal",
+        shape_i=shape,
+        dtype_i=scalar_type.onnx_type(),
+    )
 
 
 @_onnx_symbolic("aten::rand")
