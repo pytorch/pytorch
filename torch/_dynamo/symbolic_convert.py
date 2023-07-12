@@ -61,6 +61,7 @@ from .utils import (
     get_fake_value,
     graph_break_dup_warning_checker,
     istype,
+    LazyString,
     proxy_args_kwargs,
 )
 from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
@@ -602,16 +603,19 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.restore_graphstate(state)
             raise
 
-    def log_starts_line(self):
-        if not torch._logging._internal.log_state.is_artifact_enabled("trace_source"):
-            return
+    def get_log_starts_line_log_str(self):
         inline_depth_str = (
             f" (inline depth: {self.inline_depth})" if self.inline_depth > 0 else ""
         )
         log_str = f"TRACE starts_line {self.f_code.co_name} {self.f_code.co_filename}:{self.lineno}{inline_depth_str}\n"
         line = linecache.getline(self.f_code.co_filename, self.lineno).rstrip()
         log_str += f"    {line}"
-        trace_source_log.debug(log_str)
+        return log_str
+
+    def log_starts_line(self):
+        trace_source_log.debug(
+            "%s", LazyString(lambda: self.get_log_starts_line_log_str())
+        )
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
