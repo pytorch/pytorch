@@ -109,7 +109,7 @@ class TestPatternMatcherBase(TestCase):
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
-    def test_conv2d_unary(self):
+    def test_conv2d_unary_cpu(self):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -389,7 +389,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn(1, 3, 28, 28)
             self._test_common(mod, (v,), 1, 1)
 
-    def test_conv2d_binary_inplace_fusion_pass(
+    def test_conv2d_binary_inplace_fusion_pass_cpu(
         self, include_ops=None, exclude_ops=None
     ):
         class Model(torch.nn.Module):
@@ -416,7 +416,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         self._test_code_common(mod, inputs, include_ops, exclude_ops)
 
-    def test_conv2d_binary_inplace_fusion_failed(
+    def test_conv2d_binary_inplace_fusion_failed_cpu(
         self, include_ops=None, exclude_ops=None
     ):
         # Written buffer is graph input, we can't fuse inplace.
@@ -542,9 +542,26 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
-    test_conv2d_unary_dynamic_shapes = TestPatternMatcher.test_conv2d_unary
+    test_conv2d_unary_dynamic_shapes = TestPatternMatcher.test_conv2d_unary_cpu
     test_conv2d_binary_dynamic_shapes = TestPatternMatcher.test_conv2d_binary
     test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
+
+    def test_conv_transpose2d_dynamic(self):
+        # We don't support conv_transpose2d for now.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_transpose2d = torch.nn.ConvTranspose2d(
+                    3, 16, 3, stride=2, padding=1
+                )
+
+            def forward(self, x):
+                return self.conv_transpose2d(x)
+
+        x_shape = (1, 3, 28, 28)
+        mod = M().eval()
+        v = torch.randn(x_shape, dtype=torch.float32)
+        self._test_common(mod, (v,), 0, 0)
 
 
 if __name__ == "__main__":
