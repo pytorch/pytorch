@@ -17,6 +17,10 @@ jobs:
 
       - name: Check for merge conflicts
         run: |
+
+          git config --global user.email "fakeUser@example.com"
+          git config --global user.name "Fakey McFakeFace"
+
           # Fetch the main branch
           git fetch origin main:main
 
