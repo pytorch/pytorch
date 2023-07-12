@@ -768,6 +768,7 @@ def mps_ops_error_inputs_modifier(ops):
         # Exceptions are not raised
         '__rmod__',
         '__rsub__',
+        '__rpow__',
         'bernoulli',
         'clamp_max',
         'clamp_min',
