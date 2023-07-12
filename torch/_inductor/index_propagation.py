@@ -136,9 +136,9 @@ class SymPyOps:
 
     @staticmethod
     def trunc(x):
-        if x.expr.is_positive == True:
+        if x.expr.is_positive is True:
             return SymPyOps.floor(x)
-        if x.expr.is_positive == False:
+        if x.expr.is_positive is False:
             return SymPyOps.ceil(x)
         # There is no sympy.Trunc
         return NotImplemented
