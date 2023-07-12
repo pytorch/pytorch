@@ -6776,7 +6776,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def test(fn, inps, has_assert: bool):
                 fn_opt = torch.compile(fn)
                 code = run_and_get_triton_code(fn_opt, *inps)
-                print(code)
                 self.assertTrue(("device_assert" in code) is has_assert)
                 self.assertEqual(fn(*inps), fn_opt(*inps))
 
