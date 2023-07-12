@@ -3,6 +3,7 @@ import json
 import multiprocessing as mp
 import os
 import re
+import tempfile
 import time
 from typing import Any, Dict, List, Optional
 
@@ -72,25 +73,11 @@ def query_rockset(
     return res.results
 
 
-def _download_log_worker(id: int, name: str):
+def _download_log_worker(temp_dir: str, id: int, name: str):
     url = f"https://ossci-raw-job-status.s3.amazonaws.com/log/{id}"
     data = requests.get(url).text
-    with open(f"tempdir/{name.replace('/', '_')} {id}.txt", "x") as f:
+    with open(f"{temp_dir}/{name.replace('/', '_')} {id}.txt", "x") as f:
         f.write(data)
-
-
-def download_logs():
-    res = query_rockset(LOGS_QUERY)
-    os.mkdir("tempdir")
-    print(len(res))
-    pool = mp.Pool(20)
-    for r in res:
-        id = r["id"]
-        name = r["name"]
-        pool.apply_async(_download_log_worker, args=(id, name))
-    pool.close()
-    pool.join()
-    assert len(os.listdir("tempdir")) == len(res)
 
 
 def printer(item, extra):
@@ -117,9 +104,6 @@ def close_issue(num: int):
 
 if __name__ == "__main__":
     args = parse_args()
-    start_time = time.time()
-
-    # download_logs()
     disabled_tests_json = json.loads(
         requests.get(
             "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/disabled-tests-condensed.json"
@@ -127,9 +111,22 @@ if __name__ == "__main__":
     )
 
     al = []
-    for filename in os.listdir("tempdir"):
-        with open(f"tempdir/{filename}") as f:
-            al.append(f.read())
+    with tempfile.TemporaryDirectory() as temp_dir:
+        jobs = query_rockset(LOGS_QUERY)
+        os.mkdir("tempdir")
+        print(len(jobs))
+        pool = mp.Pool(20)
+        for r in jobs:
+            id = r["id"]
+            name = r["name"]
+            pool.apply_async(_download_log_worker, args=(temp_dir, id, name))
+        pool.close()
+        pool.join()
+        assert len(os.listdir(temp_dir)) == len(jobs)
+
+        for filename in os.listdir(temp_dir):
+            with open(f"{temp_dir}/{filename}") as f:
+                al.append(f.read())
 
     to_be_closed = []
     for item in disabled_tests_json.items():
