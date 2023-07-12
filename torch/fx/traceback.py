@@ -1,6 +1,5 @@
 import traceback
 from contextlib import contextmanager
-from torch.autograd import get_sequence_nr
 from typing import List, Any, Dict
 from ._compatibility import compatibility
 
