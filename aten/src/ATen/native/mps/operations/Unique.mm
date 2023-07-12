@@ -57,6 +57,20 @@ std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
   MPSGraphTensor* inverseIndicesTensor = nil;
   MPSGraphTensor* countTensor = nil;
   MPSGraphTensor* lengthTensor = nil;
+
+  const bool needsFlatten = !(dimOpt.has_value() || [shape count] == 1);
+  if (needsFlatten) {
+    inputTensor = [graph reshapeTensor:inputTensor withShape:@[ @-1 ] name:nil];
+    length = 1;
+    for (const auto i : c10::irange([shape count])) {
+      if (c10::mul_overflows(length, [shape[i] unsignedIntValue], &length)) {
+        TORCH_CHECK(false, "RuntimeError: Tensor size overflow");
+      }
+    }
+
+    destShape = @[ [NSNumber numberWithUnsignedInteger:length] ];
+  }
+
   if (length <= 1) {
     // Trivial case, only 1 element everything is unique
     resultTensor = inputTensor;
@@ -74,19 +88,6 @@ std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
   if (dataType != MPSDataTypeInt32 && dataType != MPSDataTypeFloat32 && dataType != MPSDataTypeFloat16) {
     dataType = (dataType & MPSDataTypeFloatBit) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
     inputTensor = [graph castTensor:inputTensor toType:dataType name:@"castInputTensor"];
-  }
-
-  bool needsFlatten = !(dimOpt.has_value() || [shape count] == 1);
-  if (needsFlatten) {
-    inputTensor = [graph reshapeTensor:inputTensor withShape:@[ @-1 ] name:nil];
-    length = 1;
-    for (const auto i : c10::irange([shape count])) {
-      if (c10::mul_overflows(length, [shape[i] unsignedIntValue], &length)) {
-        TORCH_CHECK(false, "RuntimeError: Tensor size overflow");
-      }
-    }
-
-    destShape = @[ [NSNumber numberWithUnsignedInteger:length] ];
   }
 
   MPSGraphTensor* sortedInput = nil;

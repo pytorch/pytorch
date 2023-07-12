@@ -317,12 +317,12 @@ def _multi_tensor_nadam(params: List[Tensor],
         exp_avg_sq_sqrt = torch._foreach_sqrt(grouped_exp_avg_sqs)
         bias_correction_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
         torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
-        denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
+        torch._foreach_add_(exp_avg_sq_sqrt, eps)
 
         step_size_grads = _stack_if_compiling([(lr * (1. - mu) / (1. - _get_value(mu_product))) * -1
                                                for mu_product, mu in zip(grouped_mu_products, mus)])
         step_size_expavg = _stack_if_compiling([(lr * mu_next / (1. - _get_value(mu_product) * mu_next)) * -1
                                                 for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)])
 
-        torch._foreach_addcdiv_(grouped_params, grouped_grads, denom, step_size_grads)
-        torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, denom, step_size_expavg)
+        torch._foreach_addcdiv_(grouped_params, grouped_grads, exp_avg_sq_sqrt, step_size_grads)
+        torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, exp_avg_sq_sqrt, step_size_expavg)
