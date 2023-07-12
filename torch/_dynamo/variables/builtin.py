@@ -1104,6 +1104,8 @@ class BuiltinVariable(VariableTracker):
     ):
         if isinstance(obj, variables.DataClassVariable):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
+        if isinstance(obj, variables.CustomizedDictVariable):
+            return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()

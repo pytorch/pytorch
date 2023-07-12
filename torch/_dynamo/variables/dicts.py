@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import functools
+import types
 import inspect
 from typing import Any, Dict, List, Tuple
 
@@ -18,6 +19,7 @@ from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
 
+from ..exc import TorchRuntimeError
 
 class ConstDictVariable(VariableTracker):
     def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
@@ -428,6 +430,100 @@ class DataClassVariable(ConstDictVariable):
                 return variables.ConstantVariable(defaults[name]).add_options(self)
         super().var_getattr(tx, name)
 
+
+class CustomizedDictVariable(ConstDictVariable):
+    @staticmethod
+    @functools.lru_cache(None)
+    def _patch_once(user_cls):
+        for attr_name in ('__init__', '__post_init__', '__setattr__', '__setitem__'):
+            if hasattr(user_cls, attr_name):
+                fn = getattr(user_cls, attr_name)
+                assert callable(fn), f"expect callable attr {attr_name}"
+                skip_code(fn.__code__)
+
+    @staticmethod
+    def is_matching_cls(cls):
+        try:
+            return issubclass(cls, collections.OrderedDict)
+        except ImportError:
+            return False
+
+    @classmethod
+    def is_matching_object(cls, obj):
+        return cls.is_matching_cls(type(obj))
+
+    # called from user_defined.py
+    # when is_matching_cls(cls) is true
+    @classmethod
+    def create(cls, user_cls, args, kwargs, options):
+        CustomizedDictVariable._patch_once(user_cls)
+        keys = [f.name for f in dataclasses.fields(user_cls)]
+        bound = inspect.signature(user_cls).bind(*args, **kwargs)
+        bound.apply_defaults()
+        assert set(bound.arguments.keys()) == set(keys)
+        items = collections.OrderedDict()
+        for key in keys:
+            val = bound.arguments[key]
+            if isinstance(val, VariableTracker):
+                items[key] = val
+            else:
+                assert variables.ConstantVariable.is_literal(val)
+                items[key] = variables.ConstantVariable(val)
+
+        return cls(items, user_cls, **options)
+
+    # called from builder.py
+    @classmethod
+    def wrap(cls, builder, obj):
+        raise TorchRuntimeError("custom dict: wrap unimplemented")
+
+    def __init__(self, items, user_cls, **options):
+        super().__init__(items, user_cls, **options)
+        assert self.is_matching_cls(user_cls)
+
+    def as_proxy(self):
+        raise TorchRuntimeError("custom dict: as_proxy unimplemented")
+
+    # 'RETURN_VALUE triggered compile' 
+    # called from torch/_dynamo/codegen.py
+    def reconstruct(self, codegen):
+        codegen.extend_output([codegen._create_load_const(self.user_cls)])
+        keys = tuple(self.items.keys())
+        for key in keys:
+            codegen(self.items[key])
+        return codegen.create_call_function_kw(len(keys), keys, True)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if name in ("__getitem__", "to_tuple", "__setitem__", "__setattr__"):
+            # TODO add arg check
+            fn = getattr(self.user_cls, name)
+            source = (
+                None
+                if self.source is None
+                else AttrSource(self.source, name)
+            )
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, source=source, **options),
+                [self] + list(args),
+                kwargs,
+            )
+        elif name in ("keys", "items") :
+            return super().call_method(tx, name, args, kwargs)
+        raise TorchRuntimeError("custom dict: call_method unimplemented name=%s", name)
+
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        if name in self.items:
+            return self.call_method(
+                tx, "__getitem__", [variables.ConstantVariable(name)], {}
+            )
+        super().var_getattr(tx, name)
 
 class HFPretrainedConfigVariable(VariableTracker):
     """
