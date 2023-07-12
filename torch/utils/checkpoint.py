@@ -447,15 +447,19 @@ def checkpoint(
             )
         return CheckpointFunction.apply(function, preserve, *args)
     else:
-        return _checkpoint_without_reentrant(
-            function,
-            preserve,
-            context_fn,
-            determinism_check,
-            debug,
-            *args,
-            **kwargs,
+        gen = _checkpoint_without_reentrant_generator(
+            function, preserve, context_fn, determinism_check, debug, *args, **kwargs
         )
+        # Runs pre-forward logic
+        next(gen)
+        ret = function(*args, **kwargs)
+        # Runs post-forward logic
+        try:
+            next(gen)
+        except StopIteration:
+            return ret
+        except BaseException:
+            raise
 
 
 def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwargs):
@@ -1095,7 +1099,8 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
 #     saving/restoring of global state is handled here.
-def _checkpoint_without_reentrant(
+
+def _checkpoint_without_reentrant_generator(
     fn,
     preserve_rng_state=True,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
@@ -1198,10 +1203,11 @@ def _checkpoint_without_reentrant(
 
     # When ambient grad_mode is False
     if new_frame.input_saver.grad_fn is None:
-        return fn(*args, **kwargs)
+        yield
+        return
 
     with _checkpoint_hook(new_frame), forward_context:
-        ret = fn(*args, **kwargs)
+        yield
     new_frame.forward_completed = True
 
     if getattr(device_module, "_initialized", False) and \
@@ -1214,4 +1220,4 @@ def _checkpoint_without_reentrant(
             "if you need this feature."
         )
 
-    return ret
+    return
