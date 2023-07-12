@@ -346,6 +346,24 @@ class CppPrinter(ExprPrinter):
         r = f"std::ceil({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
+    def _print_Min(self, expr):
+        args = [self._print(a) for a in expr.args]
+        if len(args) == 2:
+            return f"std::min({args[0]}, {args[1]})"
+        else:
+            # Initializer list overload
+            il = "{" + ", ".join(args) + "}"
+            return f"std::min({il})"
+
+    def _print_Max(self, expr):
+        args = [self._print(a) for a in expr.args]
+        if len(args) == 2:
+            return f"std::max({args[0]}, {args[1]})"
+        else:
+            # Initializer list overload
+            il = "{" + ", ".join(args) + "}"
+            return f"std::max({il})"
+
 
 cexpr = CppPrinter().doprint
 

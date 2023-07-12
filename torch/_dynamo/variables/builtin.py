@@ -844,6 +844,12 @@ class BuiltinVariable(VariableTracker):
         else:
             raise AssertionError("call_dict_helper with illegal arg")
 
+    def call_cast(self, _, *args, **kwargs):
+        if len(args) == 2:
+            return args[1]
+
+        unimplemented(f"unsupported args to builtin cast(): {args} {kwargs}")
+
     def call_dict(self, tx, *args, **kwargs):
         if not (args or kwargs):
             return self.call_dict_helper(tx, dict, None)
