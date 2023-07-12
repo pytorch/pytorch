@@ -7,6 +7,7 @@ from ._compatibility import compatibility
 from . import config
 import torch.fx.traceback as fx_traceback
 import torch
+from torch.autograd import get_sequence_nr
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
 from contextlib import contextmanager
@@ -189,6 +190,8 @@ class Interpreter:
             Any: The result of executing ``n``
         """
         with self._set_current_node(n):
+            # Sets the seq_nr for the fwd pass
+            fx_traceback.set_seq_nr(get_sequence_nr())
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             assert isinstance(args, tuple)
             assert isinstance(kwargs, dict)

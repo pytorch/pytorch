@@ -778,6 +778,51 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 elif seq_nr_list[-1] >= seq_nr:
                     bwd_seq_nr_set.add(seq_nr)
 
+        """ Expected output from walking fx_g.graph.nodes using this code
+        print(f"SeqNr|OrigAten|SrcFn")
+        for node in fx_g.graph.nodes:
+            if "call_" in node.op and "getitem" not in str(node.target):
+                seq_nr = node.meta.get("seq_nr", -1)
+                mod_name = node.meta.get("source_fn", "")
+                orig_aten = node.meta.get("original_aten", "")
+                if isinstance(mod_name, tuple):
+                    mod_name = mod_name[0]
+                print(f"{seq_nr}|{orig_aten}|{mod_name}")
+
+        SeqNr|OrigAten|SrcFn
+        53|aten.convolution.default|l__self___conv1
+        54|aten.add.Tensor|l__self___bn1
+        54|aten._native_batch_norm_legit_functional.default|l__self___bn1
+        55|aten.relu.default|l__self___relu1
+        56|aten.add.Tensor|add
+        57|aten.view.default|flatten
+        58|aten.t.default|l__self___fc1
+        59|aten.unsqueeze.default|l__self___fc1
+        60|aten.mm.default|l__self___fc1
+        61|aten.squeeze.dim|l__self___fc1
+        62|aten.add.Tensor|l__self___fc1
+        63|aten.sub.Tensor|l__self___loss_fn
+        64|aten.abs.default|l__self___loss_fn
+        65|aten.mean.default|l__self___loss_fn
+        -1|aten.ones_like.default|
+        65|aten.expand.default|
+        65|aten.div.Scalar|
+        64|aten.sgn.default|
+        64|aten.mul.Tensor|
+        61|aten.unsqueeze.default|
+        60|aten.t.default|
+        60|aten.mm.default|
+        60|aten.t.default|
+        60|aten.t.default|
+        60|aten.mm.default|
+        59|aten.squeeze.dim|
+        58|aten.t.default|
+        57|aten.view.default|
+        55|aten.threshold_backward.default|
+        54|aten.native_batch_norm_backward.default|
+        53|aten.convolution_backward.default|
+        53|aten.add.Tensor|
+        """
         # There are 10 common ops in this test:  conv, bn, relu, flatten, fc
         # loss
         common_ops = fwd_seq_nr_set.intersection(bwd_seq_nr_set)

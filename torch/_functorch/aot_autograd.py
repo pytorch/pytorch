@@ -154,13 +154,14 @@ def setup_stacktrace_preservation_hooks(roots: List):
                 callback_set = True
 
             fx_traceback.set_stack_trace(stack_)
-            fx_traceback.set_bwd_seq_nr(seq_nr)
+            fx_traceback.set_seq_nr(seq_nr)
 
         return prehook
 
     def get_posthook(special_stack_):
         def posthook(grad_input, grad_output):
             fx_traceback.set_stack_trace(special_stack_)
+
         return posthook
 
     for node in iter_graph(roots):
@@ -1252,7 +1253,6 @@ def create_joint(
 
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
-
         backward_out = []
         # Call the backwards pass
         if grad_primals:
@@ -3584,7 +3584,6 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
-
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
         return torch.func.functional_call(mod, params_and_buffers, args, kwargs)
@@ -3745,6 +3744,9 @@ def aot_export_module(
     # If trace_joint is True, we expect your module to return a scalar loss.
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
+    # For debug purposes the user may want to inspect the joint graph.
+    # Skipping the flatten_joint stage perserves the node.meta information
+    # available in the joint fwd/bwd graph fx_g.
     skip_flatten_joint: int = False,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
@@ -3856,11 +3858,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             no_tangents=True,
         )
 
-    # For debug purposes the user may want to inspect the joint graph.
-    # Skipping the flatten_joint stage perserves the node.meta information
-    # available in the joint fwd/bwd graph fx_g.
-    if skip_flatten_joint:
-        trace_joint = False
+    trace_joint = not skip_flatten_joint
 
     if trace_joint:
         def flattened_joint(*args):
