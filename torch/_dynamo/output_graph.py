@@ -394,10 +394,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def save_global_state(self):
         global_state = self.tracing_context.global_context.global_state
 
-        # Note: for simulated states like torch_function_enabled, we don't query
-        # this in the usual way because we don't care about the torch state,
-        # the global state dict is queried/modified directly.
-
         global_state["torch_function_enabled"] = (
             self.set_torch_function_state,
             self.torch_function_enabled,
