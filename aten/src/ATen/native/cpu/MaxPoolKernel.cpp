@@ -24,6 +24,43 @@ bool is_nan(scalar_t v) {
   return std::isnan(v);
 }
 
+template <typename scalar_t>
+vec::Vectorized<scalar_t> is_nan_vec(vec::Vectorized<scalar_t> vec) {
+  return vec.isnan();
+}
+
+// TODO: use is_integeral/is_same to check the scalar_t and simplify the implementation
+// currently it does not work
+template <>
+vec::Vectorized<unsigned char> is_nan_vec<unsigned char>(vec::Vectorized<unsigned char> vec) {
+  Vectorized<unsigned char> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<signed char> is_nan_vec<signed char>(vec::Vectorized<signed char> vec) {
+  Vectorized<signed char> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<short> is_nan_vec<short>(vec::Vectorized<short> vec) {
+  Vectorized<short> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<int> is_nan_vec<int>(vec::Vectorized<int> vec) {
+  Vectorized<int> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<int64_t> is_nan_vec<int64_t>(vec::Vectorized<int64_t> vec) {
+  Vectorized<int64_t> ret(false);
+  return ret;
+}
+
 template <typename scalar_t, typename opmath_t>
 inline
 typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
@@ -311,43 +348,6 @@ void cpu_max_pool(
   if (!indices_.is_contiguous()) {
     indices_.copy_(indices);
   }
-}
-
-template <typename scalar_t>
-vec::Vectorized<scalar_t> is_nan_vec(vec::Vectorized<scalar_t> vec) {
-  return vec.isnan();
-}
-
-// TODO: use is_integeral/is_same to check the scalar_t and simplify the implementation
-// currently it does not work
-template <>
-vec::Vectorized<unsigned char> is_nan_vec<unsigned char>(vec::Vectorized<unsigned char> vec) {
-  Vectorized<unsigned char> ret(false);
-  return ret;
-}
-
-template <>
-vec::Vectorized<signed char> is_nan_vec<signed char>(vec::Vectorized<signed char> vec) {
-  Vectorized<signed char> ret(false);
-  return ret;
-}
-
-template <>
-vec::Vectorized<short> is_nan_vec<short>(vec::Vectorized<short> vec) {
-  Vectorized<short> ret(false);
-  return ret;
-}
-
-template <>
-vec::Vectorized<int> is_nan_vec<int>(vec::Vectorized<int> vec) {
-  Vectorized<int> ret(false);
-  return ret;
-}
-
-template <>
-vec::Vectorized<int64_t> is_nan_vec<int64_t>(vec::Vectorized<int64_t> vec) {
-  Vectorized<int64_t> ret(false);
-  return ret;
 }
 
 template <typename scalar_t, bool is_3d>
