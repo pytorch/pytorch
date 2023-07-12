@@ -2129,10 +2129,7 @@ class CppVecKernelChecker(CppVecKernel):
                     if any(v == 0 for v in sizes.values()):
                         return True
 
-                    vars_ranges = {
-                        k: ValueRanges(0, v - 1)
-                        for k, v in sizes.items()
-                    }
+                    vars_ranges = {k: ValueRanges(0, v - 1) for k, v in sizes.items()}
                     if not vars_ranges or len(vars_ranges) != len(free_symbols):
                         i32_iinfo = numpy.iinfo(numpy.int32)
                         return (
