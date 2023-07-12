@@ -1348,7 +1348,7 @@ def define_buck_targets(
 
     pt_xplat_cxx_library(
         name = "torch_mobile_core",
-        srcs = core_trainer_sources,
+        srcs = [],
         header_namespace = "",
         exported_headers = [],
         compiler_flags = get_pt_compiler_flags(),
