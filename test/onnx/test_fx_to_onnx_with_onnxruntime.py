@@ -576,9 +576,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return input.view(1, -1)
 
         x = torch.ones(2)
+        another_x = torch.empty((0,))
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             ViewModel(),
             (x,),
+            additional_test_inputs=[((another_x,),)],
         )
 
     @pytorch_test_common.skip_min_ort_version(
