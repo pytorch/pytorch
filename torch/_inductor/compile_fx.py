@@ -203,7 +203,8 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                 compiled = inner_compile(
                     clone_graph(gm), example_inputs, **kwargs_patched
                 )
-                torch._guards.TracingContext.get().output_strides.clear()
+                if torch._guards.TracingContext.get().output_strides:
+                    torch._guards.TracingContext.get().output_strides.clear()
 
                 def materialize(x):
                     if isinstance(x, (torch.SymInt, torch.SymFloat)):

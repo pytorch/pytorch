@@ -3029,8 +3029,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         if real_stride is None:
                             continue
 
-                        assert real_stride == all_args[i].stride(), f"{real_stride} {all_args[i].stride()}"
-
                         # Comparing ph_arg.stride() with real_stride directly may
                         # cause dynamic dimensions in ph_arg being specialized to static
                         # value. Using the hints to avoid that.
@@ -3050,6 +3048,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                             # (2408448, 1, 21504, 192). The solution mentioned will
                             # decide a stride of (802816, 1, 7168, 64) for this
                             # tensor which is wrong.
+                            #
+                            # NB: Occasionally, we will do a restride even
+                            # though it is not necessarily.  This concretely
+                            # happens in XLNetLMHeadModel where inductor
+                            # thinks that the tensor will have (1024, 1024, 1)
+                            # stride but it actually gets (1024, 524288, 1).
+                            # The stride difference here is non-substantive
+                            # as dim 1's size is 1.
                             placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
                     with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
