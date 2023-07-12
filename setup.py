@@ -903,7 +903,8 @@ def configure_extension_build():
         elif macos_target_arch == '':
             report('-- no target architecture found. Please ensure CMAKE_OSX_ARCHITECTURES environment variable is set.')
         else:
-            report('-- unrecognised macos target architecture ' + macos_target_arch + '. CMAKE_OSX_ARCHITECTURES environment variable does not contain a valid target architecture name.')
+            # This could be a watch architecture like armv7k-arm64-32.  
+            report('-- macos target architecture is ' + macos_target_arch + '.')
 
     def make_relative_rpath_args(path):
         if IS_DARWIN:
