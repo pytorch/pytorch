@@ -2,7 +2,7 @@ import functools
 
 import torch
 from ..ir import QConv
-from ..pattern_matcher import CallFunction, KeywordArg, Match
+from ..pattern_matcher import Arg, CallFunction, KeywordArg, Match
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 
@@ -57,7 +57,9 @@ aten_conv_pattern = CallFunction(
 
 """
 quantize output:
-    output = round(output / scale)
+    scale = 1 / scale
+    scale = 1.0 * scale
+    output = round(output * scale)
     output = output + zero_point
     output = clamp_min(output, 0)
     output = clamp_max(output, 127)
@@ -74,9 +76,15 @@ quantize_conv_output_pattern = CallFunction(
                 CallFunction(
                     aten.round.default,
                     CallFunction(
-                        aten.div.Tensor,
+                        aten.mul.Tensor,
                         aten_conv_pattern,  # output of conv
-                        KeywordArg("o_scale"),
+                        CallFunction(
+                            aten.mul.Tensor,
+                            CallFunction(
+                                aten.reciprocal.default, KeywordArg("o_scale")
+                            ),
+                            Arg(),  # 1.0
+                        ),
                     ),
                 ),
                 KeywordArg("o_zp"),
