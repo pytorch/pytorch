@@ -689,24 +689,26 @@ class TestDynamoDTensor(torch._dynamo.test_case.TestCase):
             gm.print_readable()
             return gm
 
-        opt_fn = torch._dynamo.optimize(grab_graph_backend, nopython=True)(fn)
+        # XXX: if apply https://github.com/pytorch/pytorch/pull/104482/files
+        # then remove the `eager` backend, fakification crashed in the aot_autograd
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.ones(1)
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
-    # def test_dynamo_dtensor(self):
-    #     mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+    def test_dynamo_dtensor(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-    #     def fn(x):
-    #         return x.redistribute(mesh, [Replicate()]).to_local()
+        def fn(x):
+            return x.redistribute(mesh, [Replicate()]).to_local()
 
-    #     x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False)
-    #     ref = fn(x)
+        x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False)
+        ref = fn(x)
 
-    #     opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-    #     res = opt_fn(x)
-    #     self.assertEqual(res, ref)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
 
 
 if __name__ == "__main__":

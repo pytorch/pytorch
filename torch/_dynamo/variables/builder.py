@@ -380,7 +380,7 @@ class VariableBuilder:
         value = inspect.getattr_static(value, "_torchdynamo_inline", value)
 
         # Everything else (NB: order matters!)
-        if istype(value, config.traceable_tensor_subclasses):
+        if is_traceable_wrapper_subclass(value) or istype(value, config.traceable_tensor_subclasses):
             return self.wrap_tensor(value)
         elif is_namedtuple(value):
             return self.wrap_listlike(value)
