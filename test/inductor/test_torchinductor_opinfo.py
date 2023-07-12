@@ -192,7 +192,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "masked_select": {b8, f16, f32, f64, i32, i64},
     ("max", "reduction_with_dim"): {b8},
     ("min", "reduction_with_dim"): {b8},
-    "multinomial": {f32, f64},
+    "multinomial": {f16, f32, f64},
     "nanquantile": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
