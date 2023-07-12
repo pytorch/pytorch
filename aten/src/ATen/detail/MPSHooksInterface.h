@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <ATen/detail/DeviceHooksInterface.h>
 #include <c10/core/Allocator.h>
 #include <ATen/core/Generator.h>
 #include <c10/util/Exception.h>
@@ -16,7 +17,7 @@ class Context;
 
 namespace at {
 
-struct TORCH_API MPSHooksInterface {
+struct TORCH_API MPSHooksInterface : public at::DeviceHooksInterface {
   // this fails the implementation if MPSHooks functions are called, but
   // MPS backend is not present.
   #define FAIL_MPSHOOKS_FUNC(func) \

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/detail/DeviceHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
@@ -11,7 +12,7 @@ constexpr const char* ORT_HELP =
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
 
-struct TORCH_API ORTHooksInterface {
+struct TORCH_API ORTHooksInterface : public at::DeviceHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   virtual ~ORTHooksInterface() = default;

@@ -17,6 +17,7 @@
 #include <ATen/ops/abs_native.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
+#include <ATen/detail/DeviceHooksInterface.h>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
@@ -337,6 +338,42 @@ void set_custom_device_index(c10::DeviceIndex device_index) {
   custom_device_index = device_index;
 }
 
+
+struct TORCH_API PrivateUse1HooksInterface : public at::DeviceHooksInterface {
+    virtual ~PrivateUse1HooksInterface() = default;
+    const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) {
+      static auto device_gen = make_generator_privateuse1(device_index);
+      return device_gen;
+    }
+};
+
+struct TORCH_API PrivateUse1HooksArgs : public at::DeviceHooksArgs {};
+
+TORCH_DECLARE_REGISTRY(PrivateUse1HooksRegistry, PrivateUse1HooksInterface, PrivateUse1HooksArgs);
+#define REGISTER_PRIVATEUSE1_HOOKS(clsname) \
+  C10_REGISTER_CLASS(PrivateUse1HooksRegistry, clsname, clsname)
+
+C10_DEFINE_REGISTRY(PrivateUse1HooksRegistry, PrivateUse1HooksInterface, PrivateUse1HooksArgs)
+
+static at::DeviceHooksInterface* get_private_hooks() {
+  static at::DeviceHooksInterface* privateuse1_hooks;
+  static c10::once_flag once;
+  c10::call_once(once, [] {
+    privateuse1_hooks = PrivateUse1HooksRegistry()->Create("PrivateUse1Hooks", {}).release();
+    if (!privateuse1_hooks) {
+      privateuse1_hooks = new PrivateUse1HooksInterface();
+    }
+  });
+  return privateuse1_hooks;
+}
+
+void register_hook() {
+  at::SetDeviceHooksInterface(c10::DeviceType::PrivateUse1, get_private_hooks());
+}
+
+const at::Generator& default_generator(c10::DeviceIndex device_index) {
+  return at::globalContext().defaultGenerator(at::Device(c10::DeviceType::PrivateUse1, device_index));;
+}
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -352,4 +389,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_set_backend_meta", &custom_set_backend_meta, "a fake set tensor BackendMeta function");
     m.def("check_backend_meta", &check_backend_meta, "check if BackendMeta serialization correctly");
     m.def("custom_serialization_registry", &custom_serialization_registry, "register custom serialization function");
+    m.def("register_hook", &register_hook, "register_hook for privateuse1");
+    m.def("default_generator", &default_generator, "default_generator for privateuse1");
 }

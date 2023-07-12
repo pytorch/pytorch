@@ -7,6 +7,7 @@
 #include <ATen/core/Generator.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/detail/DeviceHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/detail/MTIAHooksInterface.h>
@@ -43,6 +44,9 @@ class TORCH_API Context {
       return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
     } else if (device_type == at::kMPS) {
       return at::detail::getMPSHooks().getDefaultMPSGenerator();
+    } else if (device_type == at::kPrivateUse1) {
+      return GetDeviceHooksInterface(device_type)
+          ->getDefaultGenerator(device.index());
     } else {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
@@ -54,6 +58,8 @@ class TORCH_API Context {
       return c10::DeviceType::CPU;
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDeviceFromPtr(data);
+    } else if (device_type == at::kPrivateUse1) {
+      return GetDeviceHooksInterface(device_type)->getDeviceFromPtr(data);
     } else {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }

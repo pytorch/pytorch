@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/detail/DeviceHooksInterface.h>
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
 
@@ -27,7 +28,7 @@ constexpr const char* XPU_HELP =
     "loaded for some reason. The Intel Extension for Pytorch MUST "
     "be loaded, EVEN IF you don't directly use any symbols from that!";
 
-struct TORCH_API XPUHooksInterface {
+struct TORCH_API XPUHooksInterface : public at::DeviceHooksInterface {
   virtual ~XPUHooksInterface() {}
 
   virtual void initXPU() const {
