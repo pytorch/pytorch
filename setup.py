@@ -208,7 +208,8 @@
 #
 #   USE_SYSTEM_LIBS (work in progress)
 #      Use system-provided libraries to satisfy the build dependencies.
-#      When turned on, the following cmake variables will be toggled as well:
+#      When turned on, the following
+#      cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 #
 #   USE_MIMALLOC
@@ -569,6 +570,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         setuptools.command.build_ext.build_ext.run(self)
 
         if IS_DARWIN and package_type != 'conda':
+            report('-- Building libiomp')
             self._embed_libiomp()
 
         # Copy the essential export library to compile C++ extensions.
@@ -887,8 +889,11 @@ def configure_extension_build():
 
     # Cross-compile for M1
     if IS_DARWIN:
+        report('-- detected IS_DARWIN')
         macos_target_arch = os.getenv('CMAKE_OSX_ARCHITECTURES', '')
+
         if macos_target_arch in ['arm64', 'x86_64']:
+            report('-- detected macos target architecture ' + macos_target_arch)
             macos_sysroot_path = os.getenv('CMAKE_OSX_SYSROOT')
             if macos_sysroot_path is None:
                 macos_sysroot_path = subprocess.check_output([
@@ -896,7 +901,10 @@ def configure_extension_build():
                 ]).decode('utf-8').strip()
             extra_compile_args += ['-arch', macos_target_arch, '-isysroot', macos_sysroot_path]
             extra_link_args += ['-arch', macos_target_arch]
-
+        elif macos_target_arch == '':
+            report('-- no target architecture found. Please ensure CMAKE_OSX_ARCHITECTURES environment variable is set.')
+        else:
+            report('-- unrecognised macos target architecture ' + macos_target_arch + '. CMAKE_OSX_ARCHITECTURES environment variable does not contain a valid target architecture name.')
 
     def make_relative_rpath_args(path):
         if IS_DARWIN:
