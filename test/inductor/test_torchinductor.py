@@ -6766,6 +6766,50 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        def test_neg_index(self):
+            def test(fn, inps, has_assert: bool):
+                fn_opt = torch.compile(fn)
+                code = run_and_get_triton_code(fn_opt, *inps)
+                print(code)
+                self.assertTrue(("device_assert" in code) is has_assert)
+                self.assertEqual(fn(*inps), fn_opt(*inps))
+
+            def indirect(A, b):
+                return A[b - 1]
+
+            a = torch.rand(1024, device="cuda")
+            b = torch.zeros(4, dtype=torch.long, device="cuda")
+            test(indirect, (a, b), has_assert=True)
+
+            def direct(x):
+                return x[:, -1]
+
+            a = torch.rand(1, 64, 32, device="cuda")
+            test(direct, (a,), has_assert=False)
+
+            def flip(A, b):
+                return A[b]
+
+            a = torch.rand(1024, device="cuda")
+            b = -torch.arange(start=-a.numel() + 1, end=-1, device="cuda")
+            test(flip, (a, b), has_assert=True)
+
+            def flip_with_index(A):
+                b = -torch.arange(start=-a.numel() + 1, end=-1, device="cuda")
+                return A[b]
+
+            a = torch.rand(1024, device="cuda")
+            test(flip_with_index, (a,), has_assert=False)
+
+            # We currently don't do constant propagation with float constants
+            def flip_with_non_sympy_index(A):
+                b = -torch.arange(start=-a.numel() + 1, end=-1, device="cuda")
+                b = (1.0 * b).int()
+                return A[b]
+
+            a = torch.rand(1024, device="cuda")
+            test(flip_with_non_sympy_index, (a,), has_assert=False)
+
         # See https://github.com/pytorch/pytorch/issues/100348
         def test_inductor_detach_view(self):
             def fn(x: torch.Tensor) -> torch.Tensor:

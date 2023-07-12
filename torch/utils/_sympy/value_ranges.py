@@ -83,9 +83,12 @@ class ValueRanges:
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
-    def tighten(self, other: "ValueRanges"):
+    def tighten(self, other):
         """Given two ValueRanges, returns their intersection"""
-        # Some invariants
+        return self & other
+
+    # Intersection
+    def __and__(self, other):
         if other == ValueRanges.unknown():
             return self
         if self == ValueRanges.unknown():
@@ -97,9 +100,16 @@ class ValueRanges:
             range = ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
         return range
 
-    # Intersection
-    def __and__(self, other):
-        return ValueRanges(lower=max(self.lower, other.lower), upper=min(self.upper, other.upper))
+    # Union
+    def __or__(self, other):
+        if ValueRanges.unknown() in (self, other):
+            return ValueRanges.unknown
+        assert self.is_bool == other.is_bool, (self, other)
+        if self.is_bool:
+            range = ValueRanges(sympy.And(self.lower, other.lower), sympy.Or(self.upper, other.upper))
+        else:
+            range = ValueRanges(sympy.Min(self.lower, other.lower), sympy.Max(self.upper, other.upper))
+        return range
 
     def is_singleton(self) -> bool:
         return self.lower == self.upper
