@@ -2670,6 +2670,9 @@ class CommonTemplate:
 
     @config.patch(fallback_random=True)
     def test_randn_with_dtype_and_device(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu randn_with_dtype_and_device test")
+
         def fn(vectors):
             rotations_shape = (12, vectors.shape[-1], 1, 64)
             random_rotations = torch.randn(
