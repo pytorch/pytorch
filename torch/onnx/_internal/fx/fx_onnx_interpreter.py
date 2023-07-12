@@ -139,11 +139,11 @@ def _retrieve_or_adapt_input_to_graph_set(
         output.shape = [len(sequence_mixed_elements)]
         return output
     elif isinstance(onnx_tensor, (tuple, list)) and all(
-        isinstance(node, torch.fx.Node) for node in onnx_tensor
+        isinstance(node, torch.fx.Node) or node is None for node in onnx_tensor
     ):
         sequence_elements: List[
             Union[
-                onnxscript_graph_building.TorchScriptTensor,
+                Optional[onnxscript_graph_building.TorchScriptTensor],
                 Tuple[
                     onnxscript_graph_building.TorchScriptTensor,
                     ...,
@@ -151,7 +151,9 @@ def _retrieve_or_adapt_input_to_graph_set(
             ]
         ] = []
         for tensor in onnx_tensor:
-            sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
+            sequence_elements.append(
+                fx_name_to_onnxscript_value[tensor.name] if tensor is not None else None
+            )
         return sequence_elements
     if isinstance(onnx_tensor, torch.dtype):
         onnx_tensor = int(
