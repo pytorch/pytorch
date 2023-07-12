@@ -3,8 +3,6 @@ name: Check mergability onto main
 
 on:
   pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
