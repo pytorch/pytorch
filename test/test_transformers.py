@@ -2033,7 +2033,7 @@ class TestSDPA(NNTestCase):
     @parametrize("seq_len_k", [4, 8, 64, 65, 128, 256, 408, 512, 1024, 2048] if SM80OrLater else [4, 8, 37, 64, 128, 256, 512])
     @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128] if SM80OrLater else [8, 16, 32, 64])
     @parametrize("is_causal", [False])
-    @parametrize("dropout_p", [0.0])
+    @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
                  SM80OrLater else [torch.float16, torch.float32])
     @parametrize("scale", [None, "l1"])
