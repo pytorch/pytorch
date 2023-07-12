@@ -14,6 +14,7 @@ from typing import (
     OrderedDict,
     Sequence,
     Set,
+    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -588,7 +589,7 @@ def _separate_input_attributes_from_arguments(
     args,
     kwargs,
     fill_defaults: bool = True,
-) -> tuple[list[Any], OrderedDict[str, Any]]:
+) -> Tuple[List[Any], OrderedDict[str, Any]]:
     """Separate Python args and kwargs into ONNX inputs and attributes.
 
     Args:
