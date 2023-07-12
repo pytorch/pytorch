@@ -133,15 +133,8 @@ def binary_folding_init():
     _binary_ops = [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
     _computation_calls = [CallFunction(aten.convolution.default, *_conv_args)]
 
-    def _binary_folding_patter(computation_call, binary_op):
-        return CallFunction(
-            binary_op,
-            computation_call,
-            KeywordArg("other"),
-        )
-
     def _check_conv_and_broadcast_op(conv_node, other):
-        if other.op != "get_attr":
+        if not (isinstance(other, torch.fx.Node) and other.op != "get_attr"):
             return False
         if conv_node.args[1].op != "get_attr" or (
             conv_node.args[2] is not None and conv_node.args[2].op != "get_attr"
