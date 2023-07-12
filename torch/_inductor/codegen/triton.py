@@ -1629,6 +1629,12 @@ class TritonKernel(Kernel):
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
+
+                    # Force the seed_offset to be 0 so calls to the same kernel
+                    # using different seed offset will have the same benchmark harness.
+                    # We can dedup kernel definitions in this case.
+                    if "seed_offset" in arg_sig.name:
+                        symval_hint = 0
                     result.writeline(f"{var_name} = {symval_hint}")
                 else:
                     raise KeyError(
