@@ -1173,7 +1173,7 @@ class Module:
         The hook will be called every time the gradients for the module are computed.
         The hook should have the following signature::
 
-            hook(module, grad_output) -> Tensor or None
+            hook(module, grad_output) -> tuple[Tensor] or None
 
         The :attr:`grad_output` is a tuple. The hook should
         not modify its arguments, but it can optionally return a new gradient with
