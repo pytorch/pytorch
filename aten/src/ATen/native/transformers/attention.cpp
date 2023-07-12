@@ -513,26 +513,6 @@ int64_t _fused_sdp_choice_meta(
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 
-//  !!!!!! TODO: THIS NEEDS TO BE REMOVED BUT PEOPLE HAVE TRAINED THEIR MODELS
-//  WITH THIS OP BUILTIN !!!!!!
-std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
-    const Tensor& query_,
-    const Tensor& key,
-    const Tensor& value,
-    const c10::optional<Tensor>& attn_mask_,
-    double dropout_p,
-    bool need_attn_weights,
-    bool is_causal) {
-  if (!need_attn_weights) {
-    return std::make_tuple(
-        at::scaled_dot_product_attention(
-            query_, key, value, attn_mask_, dropout_p, is_causal, c10::nullopt),
-        Tensor());
-  }
-  return at::_scaled_dot_product_attention_math(
-      query_, key, value, attn_mask_, dropout_p, is_causal, c10::nullopt);
-}
-
 inline void validate_sdpa_input(
     const Tensor& query_,
     const Tensor& key,
