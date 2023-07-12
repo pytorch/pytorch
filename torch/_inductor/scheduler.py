@@ -511,9 +511,10 @@ class LoopOrder:
 
 def _all_swaps(original_order):
     """
-    Yield permuations of original_order with a single swap applied
+    Yield permutations of original_order with a single swap applied
     """
     n = len(original_order)
+    yield original_order
     for i in range(n):
         for j in range(i + 1, n):
             order = list(original_order)
@@ -580,27 +581,28 @@ class SchedulerNode(BaseSchedulerNode):
             LoopOrder.permute(self, self._body, self._sizes, default_order, priority=1)
         ]
         if (
-            config.loop_ordering_search_limit <= 1
+            not config.pick_loop_orders
+            or config.loop_ordering_search_limit <= 1
             or
-            # reordering CPU reductions leads to some subtle bugs in vectorization
-            # in tests like test_transpose_sum_outer
-            self.get_device().type == "cpu"
-            and self.is_reduction()
+            # TODO(jansel): this workarounds reordering CPU reductions leading
+            # to some subtle bugs in vectorization, see test_transpose_sum_outer
+            (self.get_device().type == "cpu" and self.is_reduction())
         ):
             return choices
 
-        permute = functools.partial(LoopOrder.permute, self, self._body, self._sizes)
+        def visit(order):
+            assert isinstance(order, tuple)
+            if order not in tried and len(choices) < config.loop_ordering_search_limit:
+                choices.append(LoopOrder.permute(self, self._body, self._sizes, order))
+                tried.add(order)
+
         iter_sizes, reduce_sizes = self._sizes
         n = len(iter_sizes)
         tried = {default_order}
         if len(iter_sizes) >= 2:
-            order = (1, *range(2, n), 0)
-            choices.append(permute(order))
-            tried.add(order)
+            visit((1, *range(2, n), 0))
         if len(iter_sizes) >= 3:
-            order = (0, *range(2, n), 1)
-            choices.append(permute(order))
-            tried.add(order)
+            visit((0, *range(2, n), 1))
 
         if math.factorial(n) <= config.loop_ordering_search_limit:
             # for small n use all n! permutations
@@ -610,10 +612,9 @@ class SchedulerNode(BaseSchedulerNode):
             find_choices = _all_swaps
 
         for order in find_choices(tuple(range(n))):
-            if order not in tried:
-                choices.append(permute(order))
-                if len(choices) >= config.loop_ordering_search_limit:
-                    break
+            visit(order)
+            if len(choices) >= config.loop_ordering_search_limit:
+                break
         return choices
 
     def active_loop_orders(self):
@@ -1112,7 +1113,8 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
     if len(priority_idx) > 0:
         # if we have priority node, only use that node's order
         stride_lengths = [stride_lengths[pi] for pi in priority_idx]
-    order.sort(key=index_cmp)
+    if config.pick_loop_orders:
+        order.sort(key=index_cmp)
     return order
 
 
@@ -1580,11 +1582,11 @@ class Scheduler:
         elif node1.is_foreach() and node2.is_foreach():
             return False
         else:  # nodes don't depend on each other, but may have common reads
-            if self.can_fusion_increase_peak_memory(node1, node2):
-                return False
-            return self.can_fuse_loop_orders(node1, node2) and self.get_backend(
-                device
-            ).can_fuse_horizontal(node1, node2)
+            return (
+                not self.can_fusion_increase_peak_memory(node1, node2)
+                and self.can_fuse_loop_orders(node1, node2)
+                and self.get_backend(device).can_fuse_horizontal(node1, node2)
+            )
 
     def can_fuse_vertical(self, node1, node2):
         """
@@ -1594,7 +1596,6 @@ class Scheduler:
         corresponding writes in node1, or are written by nodes that can
         be scheduled before the fusion of node1 and node2.
         """
-
         node1_names = node1.get_names()
         computed_deps = set()
 
@@ -1619,17 +1620,16 @@ class Scheduler:
         Check if the loop ordering algorithm can find a loop order that
         works for both node1 and node2.
         """
-        if node1.is_foreach() or node2.is_foreach():
-            if (
-                node1.is_foreach()
-                and node2.is_foreach()
-                and len(node1.get_nodes()) == len(node2.get_nodes())
-            ):
-                for a, b in zip(node1.get_nodes(), node2.get_nodes()):
-                    if not self.can_fuse_loop_orders(a, b):
-                        return False
-                return True
-            return False
+        if node1.is_foreach() and node2.is_foreach():
+            return len(node1.get_nodes()) == len(node2.get_nodes()) and all(
+                self.can_fuse_loop_orders(a, b)
+                for a, b in zip(node1.get_nodes(), node2.get_nodes())
+            )
+        elif node1.is_foreach():
+            return all(self.can_fuse_loop_orders(a, node2) for a in node1.get_nodes())
+        elif node2.is_foreach():
+            return all(self.can_fuse_loop_orders(node1, b) for b in node2.get_nodes())
+
         try:
             FusedSchedulerNode.select_loop_orders((node1, node2))
         except FusionFailed as e:

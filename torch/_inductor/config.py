@@ -24,7 +24,10 @@ static_weight_shapes = True
 # put correctness assertions in generated code
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 
-# maximum number of candidate loop orderings to explore, 1 to disable
+# enable loop reordering based on input orders
+pick_loop_orders = True
+
+# maximum number of candidate loop orderings to explore
 loop_ordering_search_limit = 120
 
 # break up loops ranges to allow more fusion
@@ -309,7 +312,7 @@ class triton:
     autotune_cublasLt = True
 
     # should we stop a fusion to allow better tiling?
-    tiling_prevents_pointwise_fusion = True
+    tiling_prevents_pointwise_fusion = False
     tiling_prevents_reduction_fusion = True
 
     # assert that indirect indexing does not read / write out of bounds
