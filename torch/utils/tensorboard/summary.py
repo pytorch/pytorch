@@ -47,6 +47,36 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+# type maps: torch.Tensor type -> (protobuf type, protobuf val field)
+_TENSOR_TYPE_MAP = {
+    torch.half: ("DT_HALF", "half_val"),
+    torch.float16: ("DT_HALF", "half_val"),
+    torch.bfloat16: ("DT_BFLOAT", "float_val"),
+    torch.float32: ("DT_FLOAT", "float_val"),
+    torch.float: ("DT_FLOAT", "float_val"),
+    torch.float64: ("DT_DOUBLE", "double_val"),
+    torch.double: ("DT_DOUBLE", "double_val"),
+    torch.int8: ("DT_INT8", "int_val"),
+    torch.uint8: ("DT_UINT8", "int_val"),
+    torch.qint8: ("DT_UINT8", "int_val"),
+    torch.int16: ("DT_INT16", "int_val"),
+    torch.short: ("DT_INT16", "int_val"),
+    torch.int: ("DT_INT32", "int_val"),
+    torch.int32: ("DT_INT32", "int_val"),
+    torch.qint32: ("DT_INT32", "int_val"),
+    torch.int64: ("DT_INT64", "int64_val"),
+    torch.complex32: ("DT_COMPLEX32", "scomplex_val"),
+    torch.chalf: ("DT_COMPLEX32", "scomplex_val"),
+    torch.complex64: ("DT_COMPLEX64", "scomplex_val"),
+    torch.cfloat: ("DT_COMPLEX64", "scomplex_val"),
+    torch.bool: ("DT_BOOL", "bool_val"),
+    torch.complex128: ("DT_COMPLEX128", "dcomplex_val"),
+    torch.cdouble: ("DT_COMPLEX128", "dcomplex_val"),
+    torch.uint8: ("DT_UINT8", "uint32_val"),
+    torch.quint8: ("DT_UINT8", "uint32_val"),
+    torch.quint4x2: ("DT_UINT8", "uint32_val"),
+}
+
 
 def _calc_scale_factor(tensor):
     converted = tensor.numpy() if not isinstance(tensor, np.ndarray) else tensor
@@ -344,49 +374,20 @@ def tensor_proto(tag, tensor):
             "tensor is bigger than protocol buffer's hard limit of 2GB in size"
         )
 
-    # type maps: torch.Tensor type -> (protobuf type, protobuf val field)
-    type_map = {
-        torch.half: ("DT_HALF", "half_val"),
-        torch.float16: ("DT_HALF", "half_val"),
-        torch.bfloat16: ("DT_BFLOAT", "float_val"),
-        torch.float32: ("DT_FLOAT", "float_val"),
-        torch.float: ("DT_FLOAT", "float_val"),
-        torch.float64: ("DT_DOUBLE", "double_val"),
-        torch.double: ("DT_DOUBLE", "double_val"),
-        torch.int8: ("DT_INT8", "int_val"),
-        torch.uint8: ("DT_UINT8", "int_val"),
-        torch.qint8: ("DT_UINT8", "int_val"),
-        torch.int16: ("DT_INT16", "int_val"),
-        torch.short: ("DT_INT16", "int_val"),
-        torch.int: ("DT_INT32", "int_val"),
-        torch.int32: ("DT_INT32", "int_val"),
-        torch.qint32: ("DT_INT32", "int_val"),
-        torch.int64: ("DT_INT64", "int64_val"),
-        torch.complex32: ("DT_COMPLEX32", "scomplex_val"),
-        torch.chalf: ("DT_COMPLEX32", "scomplex_val"),
-        torch.complex64: ("DT_COMPLEX64", "scomplex_val"),
-        torch.cfloat: ("DT_COMPLEX64", "scomplex_val"),
-        torch.bool: ("DT_BOOL", "bool_val"),
-        torch.complex128: ("DT_COMPLEX128", "dcomplex_val"),
-        torch.cdouble: ("DT_COMPLEX128", "dcomplex_val"),
-        torch.uint8: ("DT_UINT8", "uint32_val"),
-        torch.quint8: ("DT_UINT8", "uint32_val"),
-        torch.quint4x2: ("DT_UINT8", "uint32_val"),
-    }
+    if tensor.dtype in _TENSOR_TYPE_MAP:
+        proto_val_field = _TENSOR_TYPE_MAP[tensor.dtype][1]
 
-    if tensor.dtype in type_map:
-        proto_val_field = type_map[tensor.dtype][1]
-        proto_val_contents = (
-            torch.view_as_real(tensor).flatten().tolist()
-            if proto_val_field == "scomplex_val" or proto_val_field == "dcomplex_val"
-            else [tensor.item()]
-            if tensor.numel() == 1
-            else []
-            if tensor.numel() == 0
-            else tensor.flatten().tolist()
-        )
+        if proto_val_field == "scomplex_val" or proto_val_field == "dcomplex_val":
+            proto_val_contents = torch.view_as_real(tensor).flatten().tolist()
+        elif tensor.numel() == 1:
+            proto_val_contents = [tensor.item()]
+        elif tensor.numel() == 0:
+            proto_val_contents = []
+        else:
+            proto_val_contents = tensor.flatten().tolist()
+
         tensor_proto_args = {
-            "dtype": type_map[tensor.dtype][0],
+            "dtype": _TENSOR_TYPE_MAP[tensor.dtype][0],
             "tensor_shape": TensorShapeProto(
                 dim=[
                     TensorShapeProto.Dim(size=tensor.shape[i])
@@ -395,6 +396,7 @@ def tensor_proto(tag, tensor):
             ),
             proto_val_field: proto_val_contents,
         }
+
         tensor_proto = TensorProto(**tensor_proto_args)
     else:
         raise ValueError(f"{tag} has unsupported tensor dtype {tensor.dtype}")
