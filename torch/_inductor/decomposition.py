@@ -308,9 +308,8 @@ def quantize_per_tensor_default_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    inv_scale = 1.0 / scale
     return torch.clamp(
-        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
+        torch.round(input / scale) + zero_point, quant_min, quant_max
     ).to(dtype)
 
 
@@ -337,9 +336,8 @@ def quantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    inv_scale = 1.0 / scale
     return torch.clamp(
-        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
+        torch.round(input / scale) + zero_point, quant_min, quant_max
     ).to(dtype)
 
 

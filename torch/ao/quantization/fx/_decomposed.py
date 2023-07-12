@@ -59,8 +59,7 @@ def quantize_per_tensor(
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
 
-    inv_scale = 1.0 / scale
-    return torch.clamp(torch.round(input * inv_scale) + zero_point, quant_min, quant_max).to(dtype)
+    return torch.clamp(torch.round(input / scale) + zero_point, quant_min, quant_max).to(dtype)
 
 quantized_decomposed_lib.define(
     "quantize_per_tensor.tensor(Tensor input, Tensor scale, Tensor zero_point, "
