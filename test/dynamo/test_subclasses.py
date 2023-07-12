@@ -115,7 +115,24 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res = fn(input)
         self.assertIsInstance(res, LocalSubclass)
 
-    def test_unique_multi_subclass_dispatch(self):
+    def test_multi_subclass_dispatch_notimpl(self):
+        import logging
+
+        torch._logging.set_logs(dynamo=logging.DEBUG)
+
+        def fn(x, y):
+            return torch.div(x, y)
+
+        fn_opt = compile_full_eager(fn)
+
+        input0 = torch.ones(2, 2).as_subclass(PassthroughAddSubclass)
+        input1 = torch.ones(2, 2).as_subclass(PassthroughMulSubclass)
+        fn_opt(input0, input1)
+
+    def test_multi_subclass_dispatch_subclass_tiebreak(self):
+        pass
+
+    def test_multi_subclass_dispatch_ordering_tiebreak(self):
         pass
 
     def test_torch_function_trace(self):

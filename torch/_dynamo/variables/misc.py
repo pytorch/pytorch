@@ -531,58 +531,6 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from .builder import wrap_fx_proxy
-
-        # This variable is True when it corresponds to user code such as
-        #
-        #   super().__torch_function__(...)
-        #
-        # and the super().__torch_function__ attribute resolves
-        # to torch.Tensor.__torch_function__.
-        is_original_tensor_torch_function = (
-            self.name == "__torch_function__"
-            and isinstance(self.obj, SuperVariable)
-            # for now, only support one level of inheritance
-            and len(self.obj.objvar.value.__mro__) > 1
-            and self.obj.objvar.value.__mro__[1] == torch.Tensor
-        )
-        if is_original_tensor_torch_function:
-            # Instead of tracing inside torch.Tensor.__torch_function__,
-            # record the `call_function` or `call_method` call into the graph.
-            from . import TorchVariable
-
-            original_torch_or_getattr_variable = args[0]
-            new_args = args[2].items
-            new_kwargs = args[3].items
-            options = VariableTracker.propagate(self, new_args, new_kwargs.values())
-            # Disable __torch_function__ here to prevent the clone of the
-            # example tensor from going into the override.
-            with torch._C.DisableTorchFunctionSubclass():
-                if isinstance(args[0], TorchVariable):
-                    return wrap_fx_proxy(
-                        tx=tx,
-                        proxy=tx.output.create_proxy(
-                            "call_function",
-                            original_torch_or_getattr_variable.value,
-                            *proxy_args_kwargs(new_args, new_kwargs),
-                        ),
-                        **options,
-                    )
-                elif isinstance(args[0], GetAttrVariable):
-                    return wrap_fx_proxy(
-                        tx=tx,
-                        proxy=tx.output.create_proxy(
-                            "call_method",
-                            original_torch_or_getattr_variable.name,
-                            *proxy_args_kwargs(new_args, new_kwargs),
-                        ),
-                        **options,
-                    )
-                else:
-                    unimplemented(
-                        f"GetAttrVariable.call_function original __torch_function__ {args}"
-                    )
-
         if isinstance(self.obj, AutogradFunctionVariable) and self.name == "apply":
             return self.obj.call_apply(tx, args, kwargs).add_options(self)
         # calling parent class‘s non classmethod from child class

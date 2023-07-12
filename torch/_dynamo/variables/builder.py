@@ -105,7 +105,6 @@ from .optimizer import OptimizerVariable
 from .tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
-    TensorSubclassVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
@@ -113,6 +112,7 @@ from .tensor import (
 from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
 from .user_defined import (
     ProcessGroupVariable,
+    TensorSubclassVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )

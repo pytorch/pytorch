@@ -599,3 +599,24 @@ class ProcessGroupVariable(UserDefinedObjectVariable):
 
             return istype(value, ProcessGroup)
         return False
+
+
+class TensorSubclassVariable(UserDefinedClassVariable):
+    def __init__(self, value, *args, **kwargs):
+        super().__init__(value, *args, **kwargs)
+
+    def call_function(
+        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        from .tensor import TensorVariable, TensorWithTFOverrideVariable
+
+        if len(args) == 0 and isinstance(args[0], TensorVariable):
+            return TensorWithTFOverrideVariable.create(
+                tx,
+                args[-1],
+                args[-1].source,
+                self.value.__torch_function__.__func__,
+                self.value,
+            )
+
+        return super().call_function(tx, args, kwargs)

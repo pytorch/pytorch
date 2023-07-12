@@ -735,7 +735,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
         return VariableBuilder(tx, source)(self.torch_function_fn)
 
     def subclass_type_var(self):
-        return variables.UserDefinedClassVariable(self.subclass_type_var)
+        return variables.UserDefinedClassVariable(self.subclass_type)
 
     def call_method(
         self,
@@ -954,26 +954,3 @@ class FakeItemVariable(TensorVariable):
     @classmethod
     def from_tensor_variable(cls, tensor_variable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
-
-
-class TensorSubclassVariable(VariableTracker):
-    def __init__(self, value, *args, **kwargs):
-        self.value = value
-        super().__init__(*args, **kwargs)
-
-    def as_python_constant(self):
-        return self.value
-
-    def call_function(
-        self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
-    ) -> VariableTracker:
-        if len(args) == 1 and isinstance(args[0], TensorVariable):
-            return TensorWithTFOverrideVariable.create(
-                tx,
-                args[0],
-                args[0].source,
-                self.value.__torch_function__.__func__,
-                self.value,
-            )
-
-        return super().call_function(tx, args, kwargs)
