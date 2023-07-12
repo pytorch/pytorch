@@ -5,6 +5,7 @@ name: Upload Alerts to AWS/Rockset
 on:
   schedule:
     - cron: '*/10 * * * *'
+  workflow_dispatch:
 
 jobs:
   upload-alerts:
@@ -39,5 +40,5 @@ jobs:
           organization: "pytorch"
           repo: "pytorch"
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
