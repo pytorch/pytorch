@@ -51,7 +51,7 @@ class _StorageBase:
     def _share_filename_cpu_(self, *args, **kwargs): ...  # noqa: E704
     def _share_fd_cpu_(self, *args, **kwargs): ...  # noqa: E704
     @classmethod
-    def _new_using_filename_cpu(cls: Type[T], size: int) -> T: ...  #type: ignore[empty-body] # noqa: E704
+    def _new_using_filename_cpu(cls: Type[T], size: int) -> T: ...  # type: ignore[empty-body] # noqa: E704
     @classmethod
     def _new_using_fd_cpu(cls: Type[T], size: int) -> T: ...  # type: ignore[empty-body] # noqa: E704
     @classmethod

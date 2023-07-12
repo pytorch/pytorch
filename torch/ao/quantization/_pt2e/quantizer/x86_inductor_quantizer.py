@@ -222,17 +222,17 @@ class X86InductorQuantizer(Quantizer):
         """
         conv_gemm_node_idx = None
         extra_input_node_idx = None
-        if (binary_node.args[0].op == "call_function") and (  #type: ignore[union-attr]
+        if (binary_node.args[0].op == "call_function") and (  # type: ignore[union-attr]
             binary_node.args[0] == conv_gemm_node
         ):
             conv_gemm_node_idx = 0
             extra_input_node_idx = 1
-        elif (binary_node.args[1].op == "call_function") and (  #type: ignore[union-attr]
+        elif (binary_node.args[1].op == "call_function") and (  # type: ignore[union-attr]
             binary_node.args[1] == conv_gemm_node
         ):
             conv_gemm_node_idx = 1
             extra_input_node_idx = 0
-        extra_input_node = binary_node.args[extra_input_node_idx]  #type: ignore[index]
+        extra_input_node = binary_node.args[extra_input_node_idx]  # type: ignore[index]
         assert isinstance(extra_input_node, Node)
         return conv_gemm_node_idx, extra_input_node_idx
 

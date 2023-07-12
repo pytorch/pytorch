@@ -1,5 +1,5 @@
 import torch
-from typing import cast, Iterable, List, Union
+from typing import Iterable, List, Union
 from . import _lazy_init, _lazy_call, device_count, current_device
 from .. import Tensor
 
