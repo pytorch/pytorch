@@ -283,9 +283,20 @@ dequant_node_pattern = CallFunction(
 )
 
 
+def _is_valid_dequant_promotion_pattern(match):
+    to_fp32_node = match.nodes[0]
+    sub_node = match.nodes[1]
+    mul_node = match.nodes[2]
+    assert mul_node.target is torch.ops.aten.mul.Tensor
+    # dequant pattern has more than 1 users to be promoted
+    return len(list(mul_node.users)) > 1
+
+
 def _register_dequant_promotion_pass(pattern):
     @register_freezing_graph_pattern(
-        pattern, pass_number=0
+        pattern,
+        extra_check=_is_valid_dequant_promotion_pattern,
+        pass_number=0,
     )  # pass_number=0, so it will run before insert weight prepack node
     def dequant_promotion(match: Match, *args, **kwargs):
         to_fp32_node = match.nodes[0]
