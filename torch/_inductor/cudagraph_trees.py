@@ -353,7 +353,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs, *args, **kwargs):
     fn_cache = {}
 
     # Detect int inputs: we need to index on these
-    int_key = (i for i, v in enumerate(inputs) if isinstance(v, int))
+    int_key = [i for i, v in enumerate(inputs) if isinstance(v, int)]
     get_ints = operator.itemgetter(*int_key) if int_key else lambda _: None
 
     del inputs
