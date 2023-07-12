@@ -129,8 +129,8 @@ class _RemoteModule(nn.Module):
         self,
         remote_device: str,
         module_cls: Type[nn.Module],
-        args: Tuple = None,
-        kwargs: Dict[str, Any] = None,
+        args: Optional[Tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
         _module_interface_cls: Any = None,
     ):
         """
@@ -685,8 +685,8 @@ class RemoteModule(_RemoteModule):
         self,
         remote_device: str,
         module_cls: Type[nn.Module],
-        args: Tuple = None,
-        kwargs: Dict[str, Any] = None,
+        args: Optional[Tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(remote_device, module_cls, args, kwargs)
 
