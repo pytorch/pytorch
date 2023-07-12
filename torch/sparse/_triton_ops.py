@@ -870,7 +870,7 @@ if _has_triton():
             attn_mask.layout == torch.sparse_bsr,
             f"{f_name}(): "
             f"attn_mask.layout must be {torch.sparse_bsr}, but got "
-            f"attn_mask.layout == {attn_mask.layout}"
+            f"attn_mask.layout == {attn_mask.layout}."
         )
 
         check_device(f_name, key, query.device)
@@ -883,6 +883,12 @@ if _has_triton():
             check_dtype(f_name, attn_mask, query.dtype)
 
         sdpa = sampled_addmm(attn_mask, query, key.transpose(-2, -1), beta=0.0, skip_checks=False)
+        if scale is None and query.size(-1) == 0 or scale == 0.0:
+            check(
+                False,
+                f"{f_name}(): current value of scale == {scale} "
+                "results in division by zero."
+            )
         scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
         sdpa.values().mul_(scale_factor)
         sdpa = bsr_softmax(sdpa)
