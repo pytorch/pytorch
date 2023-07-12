@@ -8,8 +8,8 @@ import json
 import logging
 import multiprocessing
 import os
-import platform
 import pathlib
+import platform
 import re
 import shutil
 import signal
