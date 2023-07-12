@@ -203,12 +203,6 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     def test_disable_torch_function_context(self):
         pass
 
-    def test_disable_torch_function_context_recompile(self):
-        pass
-
-    def test_enable_torch_function_context_recompile(self):
-        pass
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
