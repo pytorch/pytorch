@@ -387,19 +387,19 @@ def compile_fx_inner(
                 compiled_graph.current_callable = compiled_artifact
 
             if len(set(compiled_graph.device_types)) > 1:
-                perf_hint_log.warning("skipping cudagraphs due to multiple devices")
+                perf_hint_log.info("skipping cudagraphs due to multiple devices")
             elif set(compiled_graph.device_types) == {"cuda"}:
                 if compiled_graph.mutated_inputs:
-                    perf_hint_log.warning("skipping cudagraphs due to input mutation")
+                    perf_hint_log.info("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
-                    perf_hint_log.warning(
+                    perf_hint_log.info(
                         "skipping cudagraphs due to complex input striding"
                     )
                 elif (
                     len(compiled_graph.device_idxs) > 1
                     and config.triton.cudagraph_trees
                 ):
-                    perf_hint_log.warning(
+                    perf_hint_log.info(
                         "skipping cudagraphs due to multiple device indexes"
                     )
 
@@ -479,9 +479,7 @@ def fx_codegen_and_compile(
 
     with V.set_fake_mode(fake_mode):
         # has some issues with memory in training
-        locality_reorder = is_inference and config.reordering
-
-        post_grad_passes(gm, locality_reorder=locality_reorder)
+        post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):

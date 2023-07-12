@@ -14,8 +14,10 @@ from .quantizer import (
     SharedQuantizationSpec,
     QuantizationSpecBase,
 )
-from .utils import _fold_bn_weights_into_conv_node
-from .utils import _get_aten_graph_module
+from .utils import (
+    _fold_bn_weights_into_conv_node,
+    _get_aten_graph_module,
+)
 
 # Example inputs for `_conv2d_bn_pattern`, `_qat_conv2d_bn_pattern`, and `_qat_conv2d_bn_pattern_no_bias`
 _conv2d_bn_pattern_example_inputs = (
