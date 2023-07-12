@@ -1,9 +1,8 @@
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, register_backend
 from .convert_frame import replay
+from .decorators import assume_constant_result, disable, run
 from .eval_frame import (
-    assume_constant_result,
-    disable,
     explain,
     export,
     is_dynamo_supported,
@@ -11,7 +10,6 @@ from .eval_frame import (
     optimize_assert,
     OptimizedModule,
     reset_code,
-    run,
 )
 from .exc import IncorrectUsage
 from .external_utils import is_compiling

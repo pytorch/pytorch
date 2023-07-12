@@ -686,7 +686,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         """
         assert reason is not None
 
-        from .eval_frame import disable
+        from .decorators import disable
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
@@ -871,7 +871,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
         """
-        from .eval_frame import disable
+        from .decorators import disable
 
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
