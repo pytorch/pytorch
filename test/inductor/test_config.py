@@ -176,6 +176,12 @@ class TestInductorConfig(TestCase):
         self.assertEqual(max_autotune_opts["max_autotune"], True)
         self.assertEqual(max_autotune_opts["triton.cudagraphs"], True)
 
+        max_autotune_opts = torch._inductor.list_mode_options(
+            "max-autotune", dynamic=True
+        )
+        self.assertEqual(max_autotune_opts["max_autotune"], True)
+        self.assertEqual(max_autotune_opts["triton.cudagraphs"], False)
+
         max_autotune_no_cudagraphs_opts = torch._inductor.list_mode_options(
             "max-autotune-no-cudagraphs"
         )

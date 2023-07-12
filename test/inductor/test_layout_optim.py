@@ -1,12 +1,13 @@
 # Owner(s): ["module: inductor"]
 import copy
 import os
+import random
 
 import torch
 from torch import nn
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
+from torch._inductor import config
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
@@ -37,10 +38,23 @@ class TestLayoutOptim(TestCase):
 
         import torch.distributed as dist
 
-        port = 10001
-        dist.init_process_group(
-            backend="nccl", init_method=f"tcp://localhost:{port}", world_size=1, rank=0
-        )
+        # not use a fixed port for stress test
+        tot_retry = 5
+        for retry_no in range(tot_retry):
+            try:
+                port = random.randint(10000, 60000)
+                dist.init_process_group(
+                    backend="nccl",
+                    init_method=f"tcp://localhost:{port}",
+                    world_size=1,
+                    rank=0,
+                )
+                break
+            except RuntimeError:
+                if retry_no == tot_retry - 1:
+                    raise
+                else:
+                    continue
 
     def verify_accuracy(
         self, model_class, use_ddp_wrapper=USE_DDP_WRAPPER, is_train=False
@@ -135,6 +149,7 @@ class TestLayoutOptim(TestCase):
 
         self.verify_accuracy_for_infer(Model)
 
+    @torch.no_grad()
     def test_keep_output_layout_infer(self):
         class Model(nn.Module):
             def __init__(self):
@@ -163,6 +178,14 @@ class TestLayoutOptim(TestCase):
         # We should be able to do view on the output of the optimized module
         # Note that if the output is channels last, the view op will fail.
         opt_out.view(5, -1)
+
+    def test_keep_output_layout_with_freezing(self):
+        with config.patch(
+            {
+                "freezing": True,
+            }
+        ):
+            self.test_keep_output_layout_infer()
 
     def test_training_acc(self):
         self.verify_accuracy_for_train(Model2Conv)
@@ -262,5 +285,5 @@ class TestLayoutOptim(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA and not TEST_WITH_ROCM:
+    if HAS_CUDA:
         run_tests()

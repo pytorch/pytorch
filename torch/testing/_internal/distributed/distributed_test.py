@@ -9750,15 +9750,15 @@ class DistributedTest:
             # Abort pg in background thread.
             running = True
 
-            def abort():
+            def abort(device):
                 pg = _get_default_group()
                 while running:
-                    pg._get_backend(torch.device(0))._abort()
+                    pg._get_backend(torch.device(device))._abort()
                     time.sleep(1)
 
             if self.rank != 1:
                 import threading
-                t = threading.Thread(target=abort)
+                t = threading.Thread(target=abort, args=(self.rank,))
                 t.start()
                 with self.assertRaises(RuntimeError):
                     # First collective triggers initialization via ncclCommInitRank.

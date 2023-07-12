@@ -473,10 +473,10 @@ class Node:
                 return None
             maybe_typename = f'{_type_repr(self.type)} ' if self.type else ''
             default_val = '(default=' + str(self.args[0]) + ')' if self.args else ''
-            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = {self.op}[target={self.target}]{default_val}'
+            return f'%{self.name} : {maybe_typename}[num_users={len(self.users)}] = {self.op}[target={self.target}]{default_val}'
         elif self.op == 'get_attr':
             maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
-            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = ' \
+            return f'%{self.name} : {maybe_typename}[num_users={len(self.users)}] = ' \
                    f'{self.op}[target={self._pretty_print_target(self.target)}]'
         elif self.op == 'output':
             if self.type and maybe_return_typename:
@@ -484,7 +484,7 @@ class Node:
             return f'return {self.args[0]}'
         else:
             maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
-            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = ' \
+            return f'%{self.name} : {maybe_typename}[num_users={len(self.users)}] = ' \
                    f'{self.op}[target={self._pretty_print_target(self.target)}](' \
                    f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
 
