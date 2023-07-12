@@ -37,6 +37,16 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
     def tearDownClass(cls):
         cls._exit_stack.close()
 
+    def test_torch_function_state_tracing(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            with torch._C.DisableTorchFunctionSubclass():
+                torch.add(x, 1.0)
+
+        input = torch.ones(2, 2)
+
+        res = fn(input)
+
     def test_return_subclass(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
