@@ -9,7 +9,7 @@
 import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
-    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS, skipIfRocm
+    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS
 )
 import torch
 import torch.nn as nn
@@ -4737,7 +4737,6 @@ def traceable(f):
 class TestCompileTransforms(TestCase):
     # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.
-    @skipIfRocm
     @expectedFailureIf(IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
