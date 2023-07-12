@@ -81,7 +81,7 @@ DOCUMENTED_IN_FLAKE8RULES: Set[str] = {
 DOCUMENTED_IN_FLAKE8COMPREHENSIONS: Set[str] = {
     "C400", "C401", "C402", "C403", "C404", "C405", "C406", "C407", "C408", "C409",
     "C410",
-    "C411", "C412", "C413", "C413", "C414", "C415", "C416",
+    "C411", "C412", "C413", "C414", "C415", "C416",
 }
 
 # https://github.com/PyCQA/flake8-bugbear#list-of-warnings
