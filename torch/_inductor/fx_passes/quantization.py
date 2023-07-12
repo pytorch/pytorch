@@ -207,6 +207,19 @@ def _register_qconv_weight_prepack_pass(pattern):
         pass_number=1,  # pass_number=1, ensure it's behand dequant promotion pass
     )
     def qconv_weight_prepack(match: Match, *args, **kwargs):
+        """
+        Macth the pattern:
+        int8 activation
+          |
+        dequant_per_tensor
+          |
+        Conv2d <- optional(aten.clone.default) <- dequant_per_channel
+
+        Insert weight prepack node and change the pattern to:
+        int8 activation
+          |
+        onednn.qconv2d_pointwise <- onednn.qconv_prepack <- optional(aten.clone.default) <- dequant_per_channel
+        """
         has_clone_to_channel_last_node_in_pattern = any(
             node.target == aten.clone.default for node in match.nodes
         )
