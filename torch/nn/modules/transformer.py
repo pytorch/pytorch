@@ -196,22 +196,21 @@ class TransformerEncoder(Module):
         self.use_nested_tensor = enable_nested_tensor
         self.mask_check = mask_check
 
-        first_layer = self.layers[0]
-        str_first_layer = "self.layers[0]"
+        enc_layer = "encoder_layer"
         why_not_sparsity_fast_path = ''
-        if not isinstance(first_layer, torch.nn.TransformerEncoderLayer):
-            why_not_sparsity_fast_path = f"{str_first_layer} was not TransformerEncoderLayer"
-        elif first_layer.norm_first :
-            why_not_sparsity_fast_path = f"{str_first_layer}.norm_first was True"
-        elif not first_layer.self_attn.batch_first:
-            why_not_sparsity_fast_path = f" {str_first_layer}.self_attn.batch_first was not True"
-        elif not first_layer.self_attn._qkv_same_embed_dim:
-            why_not_sparsity_fast_path = f"{str_first_layer}.self_attn._qkv_same_embed_dim was not True"
-        elif not first_layer.activation_relu_or_gelu:
-            why_not_sparsity_fast_path = f" {str_first_layer}.activation_relu_or_gelu was not True"
-        elif not (first_layer.norm1.eps == first_layer.norm2.eps) :
-            why_not_sparsity_fast_path = f"{str_first_layer}.norm1.eps was not equal to {str_first_layer}.norm2.eps"
-        elif first_layer.self_attn.num_heads % 2 == 1:
+        if not isinstance(encoder_layer, torch.nn.TransformerEncoderLayer):
+            why_not_sparsity_fast_path = f"{enc_layer} was not TransformerEncoderLayer"
+        elif encoder_layer.norm_first :
+            why_not_sparsity_fast_path = f"{enc_layer}.norm_first was True"
+        elif not encoder_layer.self_attn.batch_first:
+            why_not_sparsity_fast_path = f" {enc_layer}.self_attn.batch_first was not True"
+        elif not encoder_layer.self_attn._qkv_same_embed_dim:
+            why_not_sparsity_fast_path = f"{enc_layer}.self_attn._qkv_same_embed_dim was not True"
+        elif not encoder_layer.activation_relu_or_gelu:
+            why_not_sparsity_fast_path = f" {enc_layer}.activation_relu_or_gelu was not True"
+        elif not (encoder_layer.norm1.eps == encoder_layer.norm2.eps) :
+            why_not_sparsity_fast_path = f"{enc_layer}.norm1.eps was not equal to {enc_layer}.norm2.eps"
+        elif encoder_layer.self_attn.num_heads % 2 == 1:
             why_not_sparsity_fast_path = "num_head is odd"
 
         if enable_nested_tensor and why_not_sparsity_fast_path:
