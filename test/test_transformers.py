@@ -1528,6 +1528,29 @@ class TestSDPA(NNTestCase):
         value_ref = value.clone().detach().to(dtype).requires_grad_(value.requires_grad)
         return query_ref, key_ref, value_ref
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @parametrize("mask_dim", [1, 2, 3, 4])
+    def test_mem_efficient_attetntion_mask_variants(self, device, mask_dim: List[int]):
+        dtype = torch.float16
+        make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
+        batch, num_heads, head_dim = 8, 8, 64
+        seq_len_q, seq_len_kv = 64, 32
+        query = make_tensor((batch, num_heads, seq_len_q, head_dim))
+        kv_shape = (batch, num_heads, seq_len_kv, head_dim)
+        key, value = make_tensor(kv_shape), make_tensor(kv_shape)
+
+        if mask_dim == 1:
+            mask = torch.randn((seq_len_kv,), device=device, dtype=dtype)
+        elif mask_dim == 2:
+            mask = torch.randn((seq_len_q, seq_len_kv), device=device, dtype=dtype)
+        elif mask_dim == 3:
+            mask = torch.randn((num_heads, seq_len_q, seq_len_kv), device=device, dtype=dtype)
+        elif mask_dim == 4:
+            mask = torch.randn((batch, num_heads, seq_len_q, seq_len_kv), device=device, dtype=dtype)
+        with sdp_kernel(**backend_map[SDPBackend.EFFICIENT_ATTENTION]):
+            F.scaled_dot_product_attention(query, key, value, mask)
+
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
