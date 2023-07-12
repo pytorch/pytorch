@@ -437,8 +437,8 @@ def _pre_forward(
         # Register post-backward hooks to reshard the parameters and reduce-scatter
         # their gradients. They must be re-registered every forward pass in case
         # the `grad_fn` is mutated.
-        _register_post_backward_hooks(state, handle)
-            
+        _register_post_backward_hook(state, handle)
+
         should_cast_forward_inputs = (
             state._handle and not state._handle._force_full_precision
         )
@@ -447,7 +447,7 @@ def _pre_forward(
             # Recursively convert args and kwargs to specified precision.
             input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
             args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
-        _register_post_backward_reshard_only_hooks(state, handle, args, kwargs)
+        _register_post_backward_reshard_only_hook(state, handle, args, kwargs)
         return args, kwargs
 
 
@@ -569,7 +569,6 @@ def _root_pre_forward(
         else:
             should_cast_buffers_to_full_prec = True
 
-
         if should_cast_buffers_to_full_prec:
             _cast_buffers_to_dtype_and_device(
                 buffers=dict(module.named_buffers()).values(),
@@ -632,15 +631,13 @@ def _root_pre_forward(
 def _root_cast_forward_input(
     state: _FSDPState, module: torch.nn.Module, args, kwargs
 ) -> Tuple[Any, Any]:
-    
     if state._handle:
         force_full_precision = not state._handle._force_full_precision
     else:
         force_full_precision = True
 
     should_cast_forward_inputs = (
-        (module.training or not state._use_full_prec_in_eval)
-        and force_full_precision
+        (module.training or not state._use_full_prec_in_eval) and force_full_precision
     ) and state.mixed_precision.cast_root_forward_inputs
 
     if should_cast_forward_inputs:
@@ -1283,7 +1280,7 @@ def _register_pre_backward_hooks(
     return _apply_to_tensors(_register_hook, outputs)
 
 
-def _register_post_backward_hooks(
+def _register_post_backward_hook(
     state: _FSDPState,
     handle: FlatParamHandle,
 ) -> None:
@@ -1330,7 +1327,7 @@ def _register_post_backward_hooks(
     flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
 
 
-def _register_post_backward_reshard_only_hooks(
+def _register_post_backward_reshard_only_hook(
     state: _FSDPState,
     handle: FlatParamHandle,
     args: Tuple[Any, ...],
@@ -1361,7 +1358,7 @@ def _register_post_backward_reshard_only_hooks(
     hook_handle = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
-    handle.flat_param._post_backward_hook_state = hook_handle  # type: ignore[attr-defined]
+    handle.flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined]
 
 
 @no_type_check
