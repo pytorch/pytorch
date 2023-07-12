@@ -2835,7 +2835,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 assert all(
                     isinstance(x, (int, float, torch.SymInt, torch.SymFloat))
                     for x in symint_outs
-                )
+                ), str([type(x) for x in symint_outs])
                 ctx.symints = symint_outs
             else:
                 tensors_saved_for_backwards = fw_outs[num_forward:]

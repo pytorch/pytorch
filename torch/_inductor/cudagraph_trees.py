@@ -882,7 +882,7 @@ class CUDAGraphNode:
                     self._tensor_metadata(out, ignore_storage_offset=False)
                 )
             else:
-                self.outputs_metadata.append(None)
+                self.outputs_metadata.append(out)
 
         self.graph.replay()
 
@@ -946,8 +946,8 @@ class CUDAGraphNode:
         for i, (storage_info, metadata) in enumerate(
             zip(self.output_storage_alias, self.outputs_metadata)
         ):
-            if metadata is None:
-                outputs.append(None)
+            if not isinstance(metadata, dict):  # tensor metadata
+                outputs.append(metadata)
                 continue
 
             cached_t = self.cached_tensor_outputs[i]
