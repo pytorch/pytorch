@@ -3858,7 +3858,12 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             no_tangents=True,
         )
 
-    trace_joint = not skip_flatten_joint
+    # When skip_flatten_join is set we want to preserve
+    # fx_g above by skipping the call to make_fx(flattened_joint).
+    # trace_joint needs to be updated because it is passed to
+    # create_graph_signature() and needs to be False when
+    # flatten_joint is skipped.
+    trace_joint = trace_joint and not skip_flatten_joint
 
     if trace_joint:
         def flattened_joint(*args):
