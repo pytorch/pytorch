@@ -183,7 +183,7 @@ struct CacheKeyFusedWrapper : ParamsWrapper<CacheKeyFused> {
 
 static int getLRUCacheLimit() {
   constexpr int DEFAULT_LIMIT = 10000; // roughly corresponds to 2GiB assuming 200KiB per ExecutionPlan
-  static int limit = [] {
+  static int limit = [&] {
     const char * val = getenv("TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT");
     if (!val) {
        return DEFAULT_LIMIT;
