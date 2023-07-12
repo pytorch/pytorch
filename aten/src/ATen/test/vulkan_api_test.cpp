@@ -3388,29 +3388,34 @@ TEST_F(VulkanAPITest, sigmoid_) {
   ASSERT_TRUE(check);
 }
 
-void test_softmax_4d(int64_t dim) {
+
+TEST_F(VulkanAPITest, softmax) {
   c10::InferenceMode mode;
-
-  at::Tensor test_in[] = {
-    at::rand({1, 3, 4, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({4, 8, 5, 7}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({9, 11, 12, 12}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+  std::vector<std::vector<int64_t>> test_in_dims = {
+    {1, 3, 4, 2},
+    {4, 8, 5, 7},
+    {9, 11, 12, 12},
   };
-  for (auto in_cpu : test_in) {
-      const auto out_cpu = at::softmax(in_cpu, dim);
-      const auto in_vulkan = in_cpu.vulkan();
-      const auto out_vulkan = at::softmax(in_vulkan, dim);
-      const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-      if (!check) {
-        showRtol(out_cpu, out_vulkan.cpu());
+  for (const std::vector<int64_t >& dim_vec : test_in_dims) {
+    for (uint32_t trunc = 0; trunc < dim_vec.size(); trunc++) {
+      const std::vector<int64_t> trunc_dim_vec = std::vector<int64_t>(dim_vec.begin(), dim_vec.end() - trunc);
+      at::Tensor in_cpu = at::rand(trunc_dim_vec, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      for (uint32_t dim = 0; dim < trunc_dim_vec.size(); dim++) {
+        const at::Tensor out_cpu = at::softmax(in_cpu, dim);
+        const at::Tensor in_vulkan = in_cpu.vulkan();
+        const at::Tensor out_vulkan = at::softmax(in_vulkan, dim);
+        const bool check = almostEqual(out_cpu, out_vulkan.cpu());
+        if (!check) {
+          std::cout << "Softmax test failed on axis " << dim << "for tensor dims {";
+          for (uint32_t place = 0; place < trunc_dim_vec.size() - 1; place++) {
+            std::cout << trunc_dim_vec[place] << " ";
+          }
+          std::cout << trunc_dim_vec.back() << "}" << std::endl;
+          showRtol(out_cpu, out_vulkan.cpu());
+        }
+        ASSERT_TRUE(check);
       }
-      ASSERT_TRUE(check);
-  }
-}
-
-TEST_F(VulkanAPITest, softmax_4d) {
-  for (int dim = 0; dim < 4; dim++) {
-    test_softmax_4d(dim);
+    }
   }
 }
 
