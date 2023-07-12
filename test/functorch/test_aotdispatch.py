@@ -1489,8 +1489,9 @@ def forward(self, tangents_1):
         f = aot_function(foo, nop, get_graph_size)
         with torch.set_grad_enabled(True):
             out = f(*inps)
-            self.assertTrue(graph_size > 2)
+            self.assertIsNone(graph_size)
             out.sum().backward()
+            self.assertTrue(graph_size > 2)
 
     def test_output_dict(self):
         def f(x):
@@ -1564,7 +1565,7 @@ def forward(self, tangents_1):
         f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
-        self.assertEqual(count, [(['0_forward'], 4), (['0_backward'], 8), (['1_inference'], 4)])
+        self.assertExpectedInline(str(count), """[(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)]""")
 
     def test_dupe_arg(self):
         def f(x, y):

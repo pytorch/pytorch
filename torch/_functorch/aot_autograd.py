@@ -22,7 +22,7 @@ from torch import Tensor
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code, preserve_rng_state
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, tracing
 from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
@@ -3063,9 +3063,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             def call_compiled_backward():
                 ctx.maybe_clear_saved_tensors()
                 if CompiledFunction.compiled_bw is None:
-                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                        bw_module, placeholder_list
-                    )
+                    context = torch._C._DisableAutocast if disable_amp else nullcontext
+                    with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
+                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                            bw_module, placeholder_list
+                        )
 
                 out = call_func_with_args(
                     CompiledFunction.compiled_bw,
