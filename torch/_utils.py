@@ -3,6 +3,7 @@ import sys
 import traceback
 import warnings
 from collections import defaultdict
+import functools
 from typing import Any, DefaultDict, List, Optional
 
 import torch
@@ -852,6 +853,7 @@ def is_compiling():
     return False
 
 
+@functools.lru_cache(2)
 def _get_device_module(device_type: str):
     device_module = getattr(torch, device_type, None)
     if device_module is None:
