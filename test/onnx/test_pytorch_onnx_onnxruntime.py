@@ -2632,6 +2632,37 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor(np.arange(6.0).reshape(2, 3))
         self.run_test(MyModule(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_randint(self):
+        class RandInt(torch.nn.Module):
+            def forward(self, x):
+                randint = torch.randint(1, 10, x.shape)
+                x = 0 * randint + x
+                return x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandInt(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_randint_value(self):
+        class RandInt(torch.nn.Module):
+            def forward(self, x):
+                # This randint call always returns 3
+                return torch.randint(3, 4, x.shape) + x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandInt(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_randint_like(self):
+        class RandInt(torch.nn.Module):
+            def forward(self, x):
+                # This randint call always returns 3
+                return torch.randint_like(x, 3, 4) + x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandInt(), x)
+
     def test_randn(self):
         class RandN(torch.nn.Module):
             def forward(self, x):
