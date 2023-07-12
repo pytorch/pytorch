@@ -2,7 +2,7 @@ import copy
 import functools
 
 import torch
-from ..ir import QConv, QConvPointWisePT2E, TensorBox
+from ..ir import QConvPointWisePT2E, TensorBox
 from ..pattern_matcher import Arg, CallFunction, KeywordArg, Match
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -10,7 +10,6 @@ from .post_grad import register_lowering_pattern
 aten = torch.ops.aten
 prims = torch.ops.prims
 quantized_decomposed = torch.ops.quantized_decomposed
-dequantize_per_channel = quantized_decomposed.dequantize_per_channel.default
 
 """
 dequantize activation:
@@ -18,7 +17,7 @@ dequantize activation:
     x = x - zero_point
     x = x * scale
 """
-dequantize_activation_pattern = CallFunction(
+dequantize_per_tensor_activation_pattern = CallFunction(
     aten.mul.Tensor,
     CallFunction(
         aten.sub.Tensor,
@@ -32,66 +31,8 @@ dequantize_activation_pattern = CallFunction(
     KeywordArg("x_scale"),
 )
 
-dequantize_weight_pattern = CallFunction(
-    dequantize_per_channel,
-    KeywordArg("w"),
-    KeywordArg("w_scale"),
-    KeywordArg("w_zp"),
-    KeywordArg("w_axis"),  # axis for quantization
-    KeywordArg("w_qmin"),  # quant clamp min
-    KeywordArg("w_qmax"),  # quant clamp max
-    KeywordArg("qw_dtype"),  # dtype=torch.int8
-)
-
-aten_conv_pattern = CallFunction(
-    aten.convolution.default,
-    dequantize_activation_pattern,
-    dequantize_weight_pattern,
-    KeywordArg("b"),  # bias
-    KeywordArg("stride"),
-    KeywordArg("padding"),
-    KeywordArg("dilation"),
-    KeywordArg("transposed"),
-    KeywordArg("o_padding"),
-    KeywordArg("groups"),
-)
-
-"""
-quantize output:
-    output = round(output / scale)
-    output = output + zero_point
-    output = clamp_min(output, 0)
-    output = clamp_max(output, 127)
-    output = output.to(uint8)
-"""
-quantize_conv_output_pattern = CallFunction(
-    prims.convert_element_type.default,
-    CallFunction(
-        aten.clamp_max.default,
-        CallFunction(
-            aten.clamp_min.default,
-            CallFunction(
-                aten.add.Tensor,
-                CallFunction(
-                    aten.round.default,
-                    CallFunction(
-                        aten.div.Tensor,
-                        aten_conv_pattern,  # output of conv
-                        KeywordArg("o_scale"),
-                    ),
-                ),
-                KeywordArg("o_zp"),
-            ),
-            KeywordArg("o_qmin"),  # 0
-        ),
-        KeywordArg("o_qmax"),  # 127
-    ),
-    KeywordArg("o_dtype"),  # dtype=torch.uint8
-)
-
-
-dequant_per_channel_pattern = CallFunction(
-    quantized_decomposed.dequantize_per_channel.default,  # dequant_per_channel node
+dequantize_per_channel_weight_pattern = CallFunction(
+    quantized_decomposed.dequantize_per_channel.default,
     KeywordArg("q_weight"),
     KeywordArg("w_scale"),
     KeywordArg("w_zp"),
@@ -102,60 +43,13 @@ dequant_per_channel_pattern = CallFunction(
 )
 
 
-dequant_per_channel_clone_to_channel_last_pattern = CallFunction(
+dequantize_per_channel_clone_weight_pattern = CallFunction(
     aten.clone.default,
-    dequant_per_channel_pattern,
+    dequantize_per_channel_weight_pattern,
     memory_format=KeywordArg("memory_format"),
 )
 
-
-def _register_quantized_conv_lowering(pattern):
-    @register_lowering_pattern(pattern)
-    def qconv(match: Match, *args, **kwargs):
-        x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
-        w, w_scale, w_zp, w_axis = (
-            kwargs["w"],
-            kwargs["w_scale"],
-            kwargs["w_zp"],
-            kwargs["w_axis"],
-        )
-        b, stride, padding, dilation = (
-            kwargs["b"],
-            kwargs["stride"],
-            kwargs["padding"],
-            kwargs["dilation"],
-        )
-        groups, o_scale, o_zero_point, o_dtype = (
-            kwargs["groups"],
-            kwargs["o_scale"],
-            kwargs["o_zp"],
-            kwargs["o_dtype"],
-        )
-        weight_shape = w.get_size()
-        dim = len(weight_shape) - 2
-        return QConv.create(
-            dim,
-            x,
-            x_scale,
-            x_zp,
-            w,
-            w_scale,
-            w_zp,
-            w_axis,
-            b,
-            stride,
-            padding,
-            dilation,
-            groups,
-            o_scale,
-            o_zero_point,
-            o_dtype,
-        )
-
-    return qconv
-
-
-aten_qconv_pt2e_pattern = CallFunction(
+dequantize_qconv_pt2e_pattern = CallFunction(
     torch.ops.onednn.qconv2d_pointwise.default,
     KeywordArg("x"),
     KeywordArg("x_scale"),  # x_scale
@@ -168,14 +62,24 @@ aten_qconv_pt2e_pattern = CallFunction(
     KeywordArg("padding"),
     KeywordArg("dilation"),
     KeywordArg("groups"),
-    Arg(),  # output_scale
-    Arg(),  # output_zero_point
-    Arg(),  # fp32_output
-    Arg(),  # attr
+    KeywordArg("output_scale"),  # output_scale
+    KeywordArg("output_zero_point"),  # output_zero_point
+    KeywordArg("fp32_output"),  # fp32_output
+    KeywordArg("attr"),  # attr
     Arg(),  # scalars
     Arg(),  # algorithm
 )
 
+"""
+quantize output:
+    scale = 1 / scale
+    scale = 1.0 * scale
+    output = round(output * scale)
+    output = output + zero_point
+    output = clamp_min(output, 0)
+    output = clamp_max(output, 127)
+    output = output.to(uint8)
+"""
 quantize_conv_output_pattern_pt2e = CallFunction(
     prims.convert_element_type.default,
     CallFunction(
@@ -187,9 +91,9 @@ quantize_conv_output_pattern_pt2e = CallFunction(
                 CallFunction(
                     aten.round.default,
                     CallFunction(
-                        aten.div.Tensor,
-                        aten_qconv_pt2e_pattern,  # output of conv
-                        KeywordArg("o_scale"),
+                        aten.mul.Tensor,
+                        dequantize_qconv_pt2e_pattern,
+                        KeywordArg("o_inv_scale"),
                     ),
                 ),
                 KeywordArg("o_zp"),
@@ -204,7 +108,7 @@ quantize_conv_output_pattern_pt2e = CallFunction(
 pattern_match_count = 0
 
 
-def _register_quantized_conv_lowering_pt2e(pattern):
+def _register_quantized_conv_lowering(pattern):
     @register_lowering_pattern(pattern)
     def qconv(match: Match, *args, **kwargs):
         x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
@@ -214,9 +118,9 @@ def _register_quantized_conv_lowering_pt2e(pattern):
             kwargs["padding"],
             kwargs["dilation"],
         )
-        groups, o_scale, o_zero_point, o_dtype = (
+        groups, o_inv_scale, o_zero_point, o_dtype = (
             kwargs["groups"],
-            kwargs["o_scale"],
+            kwargs["o_inv_scale"],
             kwargs["o_zp"],
             kwargs["o_dtype"],
         )
@@ -232,6 +136,13 @@ def _register_quantized_conv_lowering_pt2e(pattern):
         print(
             "---- matched the pattern ----: {}".format(pattern_match_count), flush=True
         )
+
+        assert (
+            kwargs["fp32_output"] is True
+        )  # Expected int8-in fp32-out qconv in weight prepack phase
+        assert (
+            kwargs["attr"] == "none"
+        )  # Expected no post op fused in weight prepack phase
 
         weight_shape = packed_weight.get_size()
         dim = len(weight_shape) - 2
@@ -250,7 +161,7 @@ def _register_quantized_conv_lowering_pt2e(pattern):
                 padding,
                 dilation,
                 groups,
-                o_scale,
+                o_inv_scale,
                 o_zero_point,
                 o_dtype,
                 False,  # fp32_output
@@ -264,8 +175,7 @@ def _register_quantized_conv_lowering_pt2e(pattern):
 
 
 def register_quantization_lowerings():
-    _register_quantized_conv_lowering(quantize_conv_output_pattern)
-    _register_quantized_conv_lowering_pt2e(quantize_conv_output_pattern_pt2e)
+    _register_quantized_conv_lowering(quantize_conv_output_pattern_pt2e)
 
 
 dequant_node_pattern = CallFunction(
@@ -501,7 +411,7 @@ def _register_qconv_weight_prepack_pass(pattern):
 def _generate_dequant_convolution_node_pattern(_dequant_per_channel_pattern):
     dequant_convolution_node_pattern = CallFunction(
         aten.convolution.default,
-        dequantize_activation_pattern,
+        dequantize_per_tensor_activation_pattern,
         _dequant_per_channel_pattern,
         KeywordArg("b"),
         KeywordArg("stride"),
@@ -516,13 +426,15 @@ def _generate_dequant_convolution_node_pattern(_dequant_per_channel_pattern):
 
 def _generate_qconv_weight_prepack_patterns():
     return (
-        _generate_dequant_convolution_node_pattern(dequant_per_channel_pattern),
+        _generate_dequant_convolution_node_pattern(
+            dequantize_per_channel_weight_pattern
+        ),
         # There is another pattern due to the pass of convert_conv_weights_to_channels_last
         # https://github.com/pytorch/pytorch/blob/07107919297db3f8ab37f11c12666b6d6d5f692e/torch/_inductor/freezing.py#L338-L362.
         # Depend on some heuristics, it may or may not insert to(channel_last) node
         # between convolution and dequant_per_channel node
         _generate_dequant_convolution_node_pattern(
-            dequant_per_channel_clone_to_channel_last_pattern
+            dequantize_per_channel_clone_weight_pattern
         ),
     )
 
