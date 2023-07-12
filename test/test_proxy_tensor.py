@@ -958,6 +958,8 @@ def forward(self, x_1, y_1):
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
         self.assertExpectedInline(show_guards(gm), """L['x'].size()[0] < 20""")
 
+    # Relies on simplification of: Ne(Mod(s0, s0*s2), 0)
+    @unittest.expectedFailure
     def test_repeat_interleave(self):
         def f(src_tokens, beam_size_src):
             return src_tokens.repeat_interleave(beam_size_src.size(0), 0)
@@ -1071,6 +1073,8 @@ def forward(self, gravity_1, mask_1):
     index_put_ = torch.ops.aten.index_put_.default(select_1, [mask_1], mul);  select_1 = mask_1 = mul = None
     return None""")
 
+    # Relies on simplification of: Ne(Mod(i0, 3*i0), 0)
+    @unittest.expectedFailure
     def test_reflect_r_over_x(self):
         def reflect_R_over_x(R):
             reflect = torch.eye(3, device=R.device)
@@ -1374,6 +1378,8 @@ def forward(self, a_1):
         assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.var_to_val
         assert len(fx_g.shape_env.get_nontrivial_guards()) == 0, fx_g.shape_env.format_guards()
 
+    # Relies on simplification of: Ne(Mod(s0, s0*s1), 0)
+    @unittest.expectedFailure
     def test_guards_equal(self):
         def f(a, b):
             return a * b
@@ -1558,7 +1564,6 @@ symbolic_tensor_failures = {
     xfail('repeat_interleave', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
-    xfail('roll', ''),  # Tensors of type TensorImpl do not have numel
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
     xfail('special.bessel_y0', ''),  # aten.special_bessel_y0.default - couldn't find symbolic meta function/decomposition

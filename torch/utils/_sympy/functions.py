@@ -173,13 +173,13 @@ class Mod(sympy.Function):
 
     def _eval_is_integer(self):
         p, q = self.args
-        return fuzzy_and([p.is_integer, q.is_integer, fuzzy_not(q.is_zero)])
+        return fuzzy_and([p.is_integer, q.is_integer, fuzzy_not(q.is_zero)])  # type: ignore[attr-defined]
 
     def _eval_is_nonnegative(self):
-        return True if self.args[1].is_positive else None
+        return True if self.args[1].is_positive else None  # type: ignore[attr-defined]
 
     def _eval_is_nonpositive(self):
-        return True if self.args[1].is_negative else None
+        return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
 
 class CleanDiv(FloorDiv):

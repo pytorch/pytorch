@@ -280,6 +280,8 @@ class SymPyValueRangeAnalysis:
         y = ValueRanges.wrap(y)
         if x.is_singleton() and y.is_singleton() and y.lower != 0:
             return ValueRanges.wrap(x.lower % y.lower)
+        if x.is_singleton() and x.lower // y.lower == 0:
+            return x
         if y.lower <= 0:
             return ValueRanges.unknown()
         return ValueRanges(0, y.upper)

@@ -3310,9 +3310,12 @@ Target Guards:
                         ''.join(traceback.format_list(user_tb))
                     )
                 self.log.info(
-                    "eval %s [guard added]%s",
+                    "eval %s [guard added]%s (%s)%s",
                     g,
                     maybe_user_loc,
+                    format_frame(frame),
+                    maybe_extra_debug,
+                    stack_info=is_debug,
                 )
         else:
             self.log.debug("eval %s [guard suppressed]", g)
