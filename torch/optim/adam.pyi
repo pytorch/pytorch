@@ -1,11 +1,11 @@
 from typing import Optional, Tuple
 
-from .optimizer import _params_t, Optimizer
+from .optimizer import Optimizer, params_t
 
 class Adam(Optimizer):
     def __init__(
         self,
-        params: _params_t,
+        params: params_t,
         lr: float = ...,
         betas: Tuple[float, float] = ...,
         eps: float = ...,
