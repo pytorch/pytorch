@@ -372,7 +372,7 @@ void adaptive_avg_pool2d_kernel_impl(
     IntArrayRef output_size) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "adaptive_avg_pool2d", [&] {
+      AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "adaptive_avg_pool2d", [&] {
         using param_t = at::opmath_type<scalar_t>;
         if (at::isReducedFloatingType(input.scalar_type())) {
           cpu_adaptive_avg_pool<scalar_t, /*opmath_t*/param_t>(output, input, output_size);
@@ -383,7 +383,7 @@ void adaptive_avg_pool2d_kernel_impl(
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "adaptive_avg_pool2d_channels_last", [&]{
+      AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "adaptive_avg_pool2d_channels_last", [&]{
         cpu_adaptive_avg_pool_channels_last<scalar_t>(output, input, output_size);
       });
       break;

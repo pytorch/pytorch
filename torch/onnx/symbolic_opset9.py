@@ -1672,8 +1672,8 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
                 g,
                 flattened_indices,
                 axes=[2 + i for i in range(ndims)],
-                starts=tuple_fn(0),
-                ends=tuple_fn(1),
+                starts=list(tuple_fn(0)),
+                ends=list(tuple_fn(1)),
             )
             indices = sub(g, indices, s)
             return r, indices
@@ -5292,6 +5292,10 @@ def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
             input,
         )
 
+    if dim == 0:
+        return symbolic_helper._reshape_helper(g, input, [1])
+    if dim == 1:
+        return g.op("Identity", input)
     # TODO: remove this as onnx opset 11 spec allows negative axes
     if end_dim < 0:
         end_dim = dim + end_dim
