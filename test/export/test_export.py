@@ -294,7 +294,11 @@ class TestExport(TestCase):
 
         ep = export(Foo(), (torch.randn(20, 16, 50, 100),))
         for node in ep.graph.nodes:
-            if node.op == "placeholder" and (node.name in ep.graph_signature.inputs_to_buffers or node.name in ep.graph_signature.inputs_to_parameters):
+            if (
+                node.op == "placeholder" and
+                node.name in ep.graph_signature.inputs_to_buffers or
+                node.name in ep.graph_signature.inputs_to_parameters
+            ):
                 self.assertTrue("source_fn" in node.meta)
                 self.assertTrue("nn_module_stack" in node.meta)
 
