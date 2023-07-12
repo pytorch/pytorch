@@ -59,10 +59,12 @@ struct TORCH_API VariableHooksInterface {
   virtual bool retains_grad(const TensorBase&) const = 0;
   virtual void _backward(const Tensor&, TensorList, const c10::optional<Tensor>&, c10::optional<bool>, bool) const = 0;
   virtual void requires_grad_(const TensorBase&, bool) const = 0;
+  virtual void basic_autograd_not_implemented_fallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) const = 0;
 };
 
 TORCH_API void SetVariableHooks(VariableHooksInterface* hooks);
 TORCH_API VariableHooksInterface* GetVariableHooks();
+TORCH_API bool HasVariableHooks();
 
 struct TORCH_API VariableHooksRegisterer {
   explicit VariableHooksRegisterer(VariableHooksInterface* hooks) {

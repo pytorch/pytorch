@@ -223,6 +223,13 @@ torch::CppFunction basicAutogradNotImplementedFallback() {
       &basicAutogradNotImplementedFallbackImpl>();
 }
 
+void VariableHooks::basic_autograd_not_implemented_fallback(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet dispatch_keys,
+    torch::jit::Stack* stack) const {
+  basicAutogradNotImplementedFallbackImpl(op, dispatch_keys, stack);
+}
+
 static void autogradNotImplementedFallbackImpl(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatch_keys,

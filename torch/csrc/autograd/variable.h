@@ -10,6 +10,7 @@
 
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
 
 #include <cstdint>
@@ -795,6 +796,40 @@ inline Variable make_variable(
   }
   return Variable();
 }
+
+struct VariableHooks final : at::impl::VariableHooksInterface {
+  at::TensorBase tensor_data(const at::TensorBase&) const override;
+  at::TensorBase variable_data(const at::TensorBase&) const override;
+  const std::shared_ptr<torch::autograd::Node>& grad_fn(
+      const at::TensorBase&) const override;
+  unsigned _register_hook(
+      const at::TensorBase&,
+      std::function<at::TensorBase(const at::TensorBase&)> hook) const override;
+  void remove_hook(const at::TensorBase&, unsigned pos) const override;
+  bool is_view(const at::TensorBase&) const override;
+  const at::TensorBase& base(const at::TensorBase&) const override;
+  const std::string& name(const at::TensorBase&) const override;
+  bool is_leaf(const at::TensorBase&) const override;
+  int64_t output_nr(const at::TensorBase&) const override;
+  void set_data(const at::TensorBase& self, const at::TensorBase& new_data)
+      const override;
+  at::TensorBase data(const at::TensorBase& self) const override;
+  int64_t _version(const at::TensorBase& self) const override;
+  void retain_grad(const at::TensorBase& self) const override;
+  bool retains_grad(const at::TensorBase& self) const override;
+  void _backward(
+      const at::Tensor& self,
+      at::TensorList inputs,
+      const c10::optional<at::Tensor>& gradient,
+      c10::optional<bool> keep_graph,
+      bool create_graph) const override;
+  void requires_grad_(const at::TensorBase& self, bool _requires_grad)
+      const override;
+  void basic_autograd_not_implemented_fallback(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet dispatch_keys,
+      torch::jit::Stack* stack) const override;
+};
 
 namespace utils {
 
