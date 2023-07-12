@@ -2144,7 +2144,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
-    @skipIfRocm
     @requires_multigpu()
     def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
@@ -5284,7 +5283,6 @@ class CommonTemplate:
             ],
         )
 
-    @skipIfRocm
     def test_avg_pool2d_backward2(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -5976,7 +5974,6 @@ class CommonTemplate:
     # test fails
     @expectedFailureCodegenDynamic
     @requires_cuda()
-    @skipIfRocm
     @torch._inductor.config.patch("shape_padding", True)
     def test_shape_padding(self):
         dtypes = [
