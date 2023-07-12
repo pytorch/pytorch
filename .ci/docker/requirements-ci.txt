@@ -124,7 +124,7 @@ opt-einsum==3.3
 #Pinned versions: 3.3
 #test that import: test_linalg.py
 
-pillow==9.2.0 ; python_version <= "3.8"
+pillow==9.3.0 ; python_version <= "3.8"
 pillow==9.5.0 ; python_version > "3.8"
 #Description:  Python Imaging Library fork
 #Pinned versions:
