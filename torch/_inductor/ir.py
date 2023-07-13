@@ -2220,6 +2220,7 @@ class ComputedBuffer(Buffer):
             ]
             # only consider reads to buffer of same size
             # ignore StarDeps because they don't contribute stride information
+            assert all(isinstance(r, (dependencies.StarDep, dependencies.MemoryDep)) for r in reads)
             reads = [
                 sympy_subs(
                     r.index, {v: sympy.Integer(0) for v in reduction_vars if v != 0}
