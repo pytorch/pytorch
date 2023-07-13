@@ -1726,13 +1726,19 @@ class TestSDPA(NNTestCase):
 
     @onlyCPU
     @parametrize("type", ["dense", "nested"])
-    def test_fused_sdp_choice_cpu(self, device, type: str):
+    @parametrize("dropout", [0.0, 0.7])
+    def test_fused_sdp_choice_cpu(self, device, type: str, dropout: float):
         # Test that cpu and nestedtensor cpu return MATH backend
-        for dtype in floating_types_and_half():
+        for dtype in floating_types_and_half() + (torch.bfloat16,):
             make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
-            size = (2, 2, 3, 4)
+            size = (2, 128, 8, 64)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-            assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
+            if type == "nested" \
+                    or dropout > 0.0 \
+                    or dtype not in [torch.float32, torch.float64, torch.bfloat16]:
+                assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.MATH
+            else:
+                assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION
 
     @onlyCUDA
     @parametrize("type", ["dense", "nested"])
