@@ -56,7 +56,6 @@ from .source import (
     ShapeEnvSource,
     TensorProperty,
     TensorPropertySource,
-    TorchFunctionStateSource,
 )
 from .utils import (
     checkpoint_params,
@@ -267,10 +266,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.guards.add(DefaultDeviceSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
 
-        self.guards.add(
-            TorchFunctionStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
-        )
-
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
         # will get added to TrackedFakes, but TrackedFakes also contains
@@ -306,7 +301,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.should_exit = False
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
-        self.torch_function_enabled = torch._C._is_torch_function_enabled()
 
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
@@ -393,11 +387,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def save_global_state(self):
         global_state = self.tracing_context.global_context.global_state
-
-        global_state["torch_function_enabled"] = (
-            self.set_torch_function_state,
-            self.torch_function_enabled,
-        )
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
         global_state["autocast_enabled"] = (
             torch.set_autocast_enabled,
@@ -1059,9 +1048,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
-
-    def set_torch_function_state(self, enabled: bool) -> None:
-        self.torch_function_enabled = enabled
 
 
 class SubgraphTracer(fx.Tracer):

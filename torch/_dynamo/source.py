@@ -467,15 +467,6 @@ class GradModeSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class TorchFunctionStateSource(Source):
-    def name(self):
-        return ""
-
-    def guard_source(self) -> GuardSource:
-        return GuardSource.GLOBAL
-
-
-@dataclasses.dataclass(frozen=True)
 class DefaultDeviceSource(Source):
     def name(self):
         return ""

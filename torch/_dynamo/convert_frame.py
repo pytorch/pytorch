@@ -346,9 +346,6 @@ def convert_frame_assert(
             torch.are_deterministic_algorithms_enabled()
         )
 
-        global initial_torch_function_state
-        initial_torch_function_state = torch._C._is_torch_function_enabled()
-
         signpost_event(
             "dynamo",
             "_convert_frame_assert._compile",
