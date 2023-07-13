@@ -64,13 +64,23 @@ class TritonPrinter(PythonPrinter):
         return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
 
     def _print_Min(self, expr):
-        a = self._print(expr.args[0])
-        b = self._print(expr.args[1])
+        nargs = len(expr.args)
+        if len(expr.args) == 1:
+            return self._print(expr.args[0])
+
+        mid = len(expr.args) // 2
+        a = self._print(sympy.Min(*expr.args[:mid]))
+        b = self._print(sympy.Min(*expr.args[mid:]))
         return f"tl.math.min({a}, {b})"
 
     def _print_Max(self, expr):
-        a = self._print(expr.args[0])
-        b = self._print(expr.args[1])
+        nargs = len(expr.args)
+        if len(expr.args) == 1:
+            return self._print(expr.args[0])
+
+        mid = len(expr.args) // 2
+        a = self._print(sympy.Max(*expr.args[:mid]))
+        b = self._print(sympy.Max(*expr.args[mid:]))
         return f"tl.math.max({a}, {b})"
 
 
@@ -753,7 +763,7 @@ class TritonKernel(Kernel):
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
         # Upper bounds for indirect_indexing and their str representation
-        self.indirect_max_sizes: Dict[Tuple[str, str] : [sympy.Expr, str]] = {}
+        self.indirect_max_sizes: Dict[Tuple[str, str], [sympy.Expr, str]] = {}
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
