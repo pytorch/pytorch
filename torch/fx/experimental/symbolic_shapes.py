@@ -2950,6 +2950,9 @@ Target Guards:
 
         # Check if the range can solve it statically
         out = bound_sympy(new_expr, new_range_env, unbounded_symbols=False)
+        assert out.lower.is_Boolean or out.lower.is_rational or not out.lower.is_finite, (out, new_expr)
+        assert out.upper.is_Boolean or out.upper.is_rational or not out.upper.is_finite, (out, new_expr)
+
         if out.is_singleton():
             return out.lower
 
@@ -3403,6 +3406,8 @@ Target Guards:
             lower, upper = vr.lower, vr.upper
 
             rhs_vr = bound_sympy(expr.rhs, self.var_to_range, unbounded_symbols=False)
+            assert rhs_vr.lower.is_Boolean or rhs_vr.lower.is_rational or not rhs_vr.lower.is_finite, (rhs_vr, expr.rhs)
+            assert rhs_vr.upper.is_Boolean or rhs_vr.upper.is_rational or not rhs_vr.upper.is_finite, (rhs_vr, expr.rhs)
             lower_guard, upper_guard = self.var_to_guards.get(symbol, (None, None))
 
             # Let's suppose that we have a preexisting range for x [0, 100].
