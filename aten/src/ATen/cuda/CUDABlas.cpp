@@ -1457,12 +1457,24 @@ void getrsBatched<c10::complex<double>>(CUDABLAS_GETRS_ARGTYPES(c10::complex<dou
 #ifdef USE_ROCM
 template <>
 void geqrfBatched<float>(HIPBLAS_GEQRF_BATCHED_ARGTYPES(float)) {
+#if ROCM_VERSION >= 50700 && ROCM_VERSION < 50800
+  if (batchsize == 0) {
+    *info = 0;
+    return ;
+  }
+#endif
   TORCH_HIPBLAS_CHECK(cublasSgeqrfBatched(
       handle, m, n, A_array, lda, tau_array, info, batchsize));
 }
 
 template <>
 void geqrfBatched<double>(HIPBLAS_GEQRF_BATCHED_ARGTYPES(double)) {
+#if ROCM_VERSION >= 50700 && ROCM_VERSION < 50800
+  if (batchsize == 0) {
+    *info = 0;
+    return ;
+  }
+#endif
   TORCH_HIPBLAS_CHECK(cublasDgeqrfBatched(
       handle, m, n, A_array, lda, tau_array, info, batchsize));
 }
@@ -1472,6 +1484,12 @@ void geqrfBatched<double>(HIPBLAS_GEQRF_BATCHED_ARGTYPES(double)) {
 template <>
 void geqrfBatched<c10::complex<float>>(
     HIPBLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<float>)) {
+#if ROCM_VERSION >= 50700 && ROCM_VERSION < 50800
+  if (batchsize == 0) {
+    *info = 0;
+    return ;
+  }
+#endif
   TORCH_HIPBLAS_CHECK(cublasCgeqrfBatched(
       handle,
       m,
@@ -1486,6 +1504,12 @@ void geqrfBatched<c10::complex<float>>(
 template <>
 void geqrfBatched<c10::complex<double>>(
     HIPBLAS_GEQRF_BATCHED_ARGTYPES(c10::complex<double>)) {
+#if ROCM_VERSION >= 50700 && ROCM_VERSION < 50800
+  if (batchsize == 0) {
+    *info = 0;
+    return ;
+  }
+#endif
   TORCH_HIPBLAS_CHECK(cublasZgeqrfBatched(
       handle,
       m,
