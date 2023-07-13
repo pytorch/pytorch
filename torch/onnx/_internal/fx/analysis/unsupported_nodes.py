@@ -56,11 +56,8 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
             if node.op == "call_function":
                 try:
                     # NOTE: OPSchema matcher is not in this analysis scope.
-                    aten_name = self.onnxfunction_dispatcher.get_aten_name(
-                        node, self.diagnostic_context
-                    )
                     self.onnxfunction_dispatcher.get_function_overloads(
-                        node, aten_name, self.diagnostic_context
+                        node, self.diagnostic_context
                     )
                 except diagnostics.RuntimeErrorWithDiagnostic as e:
                     errors.append(e)

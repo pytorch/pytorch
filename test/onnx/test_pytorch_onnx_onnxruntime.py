@@ -1923,6 +1923,30 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.rand((22, 256))
         self.run_test(InputIndexSlice(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipScriptTest()  # Torchscript doesn't support 1d index.
+    def test_slice_with_1d_input_index(self):
+        class InputIndexSlice(torch.nn.Module):
+            def forward(self, x, y):
+                x[:y, 0, :] = y
+                return x
+
+        x = torch.zeros((56, 6, 256))
+        y = torch.tensor([5], dtype=torch.int64)
+        self.run_test(InputIndexSlice(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_slice_with_input_step_size(self):
+        class InputIndexSlice(torch.nn.Module):
+            def forward(self, x, y, z):
+                x[:y:z, 0::z, :] = 1
+                return x
+
+        x = torch.zeros((56, 6, 256))
+        y = torch.tensor(5, dtype=torch.int64)
+        z = torch.tensor(2, dtype=torch.int64)
+        self.run_test(InputIndexSlice(), (x, y, z))
+
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # scripting tuple/list append
     def test_slice_dynamic(self):

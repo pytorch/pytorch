@@ -315,7 +315,7 @@ if HAS_CPU:
     )
 
 
-if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class DynamicShapesCodegenCudaTests(TestCase):
         maxDiff = None

@@ -251,11 +251,20 @@ class TestInitialization(FSDPTest):
         Tests that nested applications of ``fully_shard`` share the expected
         data structure state.
         """
+        self.run_subtests(
+            {"use_policy": [False, True]},
+            self._test_nested_fully_shard_shared_state,
+        )
+
+    def _test_nested_fully_shard_shared_state(self, use_policy: bool):
         device = torch.device("cuda")
         composable_module = CompositeParamModel(device=device)
-        fully_shard(composable_module.u1)
-        fully_shard(composable_module.u2)
-        fully_shard(composable_module)
+        if use_policy:
+            fully_shard(composable_module, policy=ModuleWrapPolicy({UnitModule}))
+        else:
+            fully_shard(composable_module.u1)
+            fully_shard(composable_module.u2)
+            fully_shard(composable_module)
 
         # Run a forward pass to trigger lazy initialization
         inp = torch.randn((2, 100), device=device)

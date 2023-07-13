@@ -65,6 +65,7 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_is_full_backward_hook",
     "_forward_hooks",
     "_forward_hooks_with_kwargs",
+    "_forward_hooks_always_called",
     "_forward_pre_hooks",
     "_forward_pre_hooks_with_kwargs",
     "_state_dict_hooks",
