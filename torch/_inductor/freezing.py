@@ -203,6 +203,11 @@ def freeze(
         Tuple[torch.fx.GraphModule, List[int]]: A tuple containing the frozen GraphModule and a list of indices
         of the inputs that were preserved (not turned into constants).
     """
+    # We have convert conv's weight to channels last which may meet error for .view
+    # when doing fake_tensor_prop. So we need to convert view to reshape first.
+    # See the details in fx_codegen_and_compile of compile_fx.py.
+    view_to_reshape(aot_autograd_gm)
+
     fw_metadata = torch._guards.TracingContext.get().fw_metadata
     params_flat = torch._guards.TracingContext.get().params_flat
     assert fw_metadata is not None and params_flat is not None
@@ -214,10 +219,6 @@ def freeze(
     constant_fold(aot_autograd_gm)
 
     fuse_conv_bn(aot_autograd_gm)
-    # We have convert conv's weight to channels last which may meet error for .view
-    # when doing fake_tensor_prop. So we need to convert view to reshape first.
-    # See the details in fx_codegen_and_compile of compile_fx.py.
-    view_to_reshape(aot_autograd_gm)
     # now, decomp batch norm if we were unable to fuse it
     aot_autograd_gm = decompose_unfused_batchnorms(
         aot_autograd_gm, example_inputs, preserved_arg_indices
