@@ -300,8 +300,6 @@ To use these ops, simply pass the output of ``to_sparse_semi_structured(tensor)`
     >>> torch.allclose(c, torch.mm(a_sparse, b))
     True
 
-Under the hood, SparseSemiStructuredTensor will call ``torch._structured_sparse_linear`` for accelerated inference using CUTLASS sparse kernels.
-
 Accelerating nn.Linear with semi-structured sparsity
 ----------------------------------------------------
 You can accelerate the linear layers in your model if the weights are already semi-structured sparse with just a few lines of code:
