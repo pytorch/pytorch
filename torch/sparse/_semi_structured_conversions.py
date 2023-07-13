@@ -1,9 +1,7 @@
 import torch
 
-import torch._inductor.config as cfg
 
-@torch.compile
-def _sparse_semi_structured_from_dense(dense):
+def sparse_semi_structured_from_dense(dense):
     if dense.dim() != 2:
         raise RuntimeError(
             f"Expected 2-dimensional dense tensor, got {dense.dim()}-dimensional tensor"
@@ -207,8 +205,7 @@ def _sparse_semi_structured_from_dense(dense):
     return (sparse, meta_reordered)
 
 
-@torch.compile
-def _sparse_semi_structured_to_dense(sparse, meta_reordered):
+def sparse_semi_structured_to_dense(sparse, meta_reordered):
     if sparse.dim() != 2:
         raise RuntimeError(
             f"Expected 2-dimensional sparse tensor, got {sparse.dim()}-dimensional tensor"
@@ -320,25 +317,3 @@ def _sparse_semi_structured_to_dense(sparse, meta_reordered):
     dense.scatter_(0, dense_offsets, sparse.view(-1))
 
     return dense.view(m, 2 * k)
-
-
-def sparse_semi_structured_from_dense(dense):
-    aggressive_fusion_prev = cfg.aggressive_fusion
-    cfg.aggressive_fusion = True
-
-    result = _sparse_semi_structured_from_dense(dense)
-
-    cfg.aggressive_fusion = aggressive_fusion_prev
-
-    return result
-
-
-def sparse_semi_structured_to_dense(sparse, meta_reordered):
-    aggressive_fusion_prev = cfg.aggressive_fusion
-    cfg.aggressive_fusion = True
-
-    result = _sparse_semi_structured_to_dense(sparse, meta_reordered)
-
-    cfg.aggressive_fusion = aggressive_fusion_prev
-
-    return result
