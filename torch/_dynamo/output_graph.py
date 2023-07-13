@@ -47,16 +47,13 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
     ConstantSource,
-    DefaultDeviceSource,
-    DeterministicAlgorithmsSource,
-    GradModeSource,
+    GlobalStateSource,
     is_constant_source,
     LocalSource,
     ParamBufferSource,
     ShapeEnvSource,
     TensorProperty,
     TensorPropertySource,
-    TorchFunctionStateSource,
 )
 from .utils import (
     checkpoint_params,
@@ -258,17 +255,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
 
         self.guards.add(
-            DeterministicAlgorithmsSource().make_guard(
-                GuardBuilder.DETERMINISTIC_ALGORITHMS
-            )
+            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
         )
 
-        self.guards.add(GradModeSource().make_guard(GuardBuilder.GRAD_MODE))
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
 
-        self.guards.add(DefaultDeviceSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
 
         self.guards.add(
-            TorchFunctionStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
+            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
         # tracked_fakes says where any tensor that was wrapped to fake came

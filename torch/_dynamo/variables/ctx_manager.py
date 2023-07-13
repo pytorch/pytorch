@@ -161,6 +161,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
             initial_values=[torch._C._is_torch_function_enabled()],
             **kwargs,
         )
+        # mlazos: I think this is here to make sure we don't reinvoke on clone()
         var._call_func(tx, [False])
         return var
 
