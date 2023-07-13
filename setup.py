@@ -901,9 +901,10 @@ def configure_extension_build():
             extra_compile_args += ['-arch', macos_target_arch, '-isysroot', macos_sysroot_path]
             extra_link_args += ['-arch', macos_target_arch]
         elif macos_target_arch == '':
-            report('-- no target architecture found. Please ensure CMAKE_OSX_ARCHITECTURES environment variable is set.')
+            # We are adding no extra compile and link args. Can this ever be valid?
+            report('-- no target architecture found.')
         else:
-            # This could be a watch architecture like armv7k-arm64-32.  
+            # This could be a watch architecture like armv7k-arm64-32. We are adding no extra compile and link args. is this valid?
             report('-- macos target architecture is ' + macos_target_arch + '.')
 
     def make_relative_rpath_args(path):
