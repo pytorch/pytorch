@@ -78,6 +78,7 @@ from torch._inductor.compile_fx import (
 )
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
+from torch.types import _bool
 from torch.utils import _pytree as pytree
 from torch.utils.weak import TensorWeakRef
 
@@ -95,7 +96,7 @@ else:
     class AllocatorState:  # type: ignore[no-redef]
         pass
 
-    def _set_cached_tensors_enabled(enabled: bool) -> None:
+    def _set_cached_tensors_enabled(enabled: _bool) -> None:
         pass
 
 
@@ -2033,8 +2034,6 @@ class CUDAGraphTreeManager:
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
         for node in self.current_node._path_from_root:
-            if not len(node.tensor_weakrefs) == len(node.stack_traces):
-                breakpoint()
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()
