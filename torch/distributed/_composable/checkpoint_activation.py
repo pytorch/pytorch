@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 from torch.utils.checkpoint import (
     _checkpoint_without_reentrant_generator,
+    _DEFAULT_DETERMINISM_MODE,
 )
 
 from .contract import contract
@@ -71,7 +72,7 @@ def checkpoint(module: nn.Module) -> nn.Module:
                 module,
                 True,
                 context_fns,
-                "default",
+                _DEFAULT_DETERMINISM_MODE,
                 False,
                 *inputs
             )
