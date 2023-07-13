@@ -23,6 +23,17 @@ enum class CustomMaskType {
   NumCustomMaskTypes,
 };
 
+struct sdp_params {
+  const at::Tensor& query;
+  const at::Tensor& key;
+  const at::Tensor& value;
+  bool has_attn_mask;
+  double dropout;
+  bool is_causal;
+};
+
+SDPBackend select_sdp_backend_cpp(sdp_params kernel_params);
+
 inline c10::SymFloat calculate_scale(
     const at::Tensor& query,
     c10::optional<double> scale) {
