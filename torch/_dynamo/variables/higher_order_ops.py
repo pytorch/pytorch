@@ -57,7 +57,12 @@ def are_tensors(var):
 def validate_args_and_maybe_create_graph_inputs(
     sub_args, tracer, tx, manually_set_subgraph_inputs
 ):
-    from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
+    from . import (
+        AutogradFunctionContextVariable,
+        ConstantVariable,
+        NNModuleVariable,
+        TensorVariable,
+    )
     from .builder import wrap_fx_proxy
 
     args = []
@@ -90,7 +95,9 @@ def validate_args_and_maybe_create_graph_inputs(
             if manually_set_subgraph_inputs:
                 tracer.create_graph_input(subarg.as_proxy().node.name)
             new_arg = subarg
-        elif subarg.has_unpack_var_sequence(tx):
+        elif not isinstance(
+            subarg, NNModuleVariable
+        ) and subarg.has_unpack_var_sequence(tx):
             new_arg = []
             for sub_a in subarg.unpack_var_sequence(tx):
                 new_arg.append(add_subarg(sub_a))
@@ -228,6 +235,19 @@ def add_subgraph(tx, source, name, gm):
     gm.torchdynamo_force_dynamic = False
     tx.output.register_attr_or_module(gm, next_name, source=src)
     return next_name
+
+
+def _unpack(tx, item):
+    from . import NNModuleVariable, TensorVariable
+
+    if isinstance(item, TensorVariable):
+        return item.as_proxy().node.meta["example_value"].contiguous()
+    if not isinstance(item, NNModuleVariable) and item.has_unpack_var_sequence(tx):
+        r_items = []
+        for sub_item in item.unpack_var_sequence(tx):
+            r_items.append(_unpack(tx, sub_item))
+        return item.python_type()(r_items)
+    raise RuntimeError("Unsupported autograd w/ grad return type.")
 
 
 class TorchHigherOrderOperatorVariable(VariableTracker):
@@ -674,27 +694,10 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # For has_aux=True, Tuple[Tuple[gradients of inputs indicated by argnums], aux values]
         # NOTE: example_value should match `grad_output`.
         if isinstance(argnums.value, int):
-            from . import TensorVariable
-
             arg = args[argnums.value]
-
-            def _unpack(item):
-                if isinstance(item, TensorVariable):
-                    return item.as_proxy().node.meta["example_value"].contiguous()
-                if item.has_unpack_var_sequence(tx):
-                    r_items = []
-                    for sub_item in item.unpack_var_sequence(tx):
-                        r_items.append(_unpack(sub_item))
-                    return item.python_type()(r_items)
-                raise RuntimeError("Unsupported autograd w/ grad return type.")
-
-            example_value = _unpack(arg)
-
+            example_value = _unpack(tx, arg)
         else:
-            example_value = tuple(
-                args[idx].as_proxy().node.meta["example_value"].contiguous()
-                for idx in argnums.value
-            )
+            example_value = tuple(_unpack(tx, args[idx]) for idx in argnums.value)
 
         if has_aux.value:
             # case : has_aux = True
@@ -795,19 +798,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             *(arg for arg in body_lifted_freevars.keys()),
         )
 
-        from . import TensorVariable
-
-        def _unpack(item):
-            if isinstance(item, TensorVariable):
-                return item.as_proxy().node.meta["example_value"]
-            if item.has_unpack_var_sequence(tx):
-                r_items = []
-                for sub_item in item.unpack_var_sequence(tx):
-                    r_items.append(_unpack(sub_item))
-                return item.python_type()(r_items)
-            raise RuntimeError("Unsupported autograd w/ grad return type.")
-
-        example_value = _unpack(body_r)
+        example_value = _unpack(tx, body_r)
 
         _, p_kwargs = proxy_args_kwargs([], kwargs)
 

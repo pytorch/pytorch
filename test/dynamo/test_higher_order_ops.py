@@ -2018,10 +2018,6 @@ class GraphModule(torch.nn.Module):
             (x1, x2)
         )
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"HigherOrderOperator with body that accepts non-Tensors as input": 2},
-        )
         self.assertEqual(actual, expected)
 
     def test_grad_non_tensor_input(self):
