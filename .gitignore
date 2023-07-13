@@ -1,5 +1,5 @@
 # READ THIS BEFORE YOU REFACTOR ME
-#
+
 # setup.py uses the list of patterns in this file to decide
 # what to delete, but it's not 100% sound.  So, for example,
 # if you delete aten/build/ because it's redundant with build/,
