@@ -3480,6 +3480,7 @@ def multi_margin_loss(
         lambda: f"inconsistent target size, expected {nframe} but got {target.shape}",
     )
     if weight is not None:
+        weight = torch.atleast_1d(weight)
         torch._check(
             weight.ndim == 1 and weight.numel() == dim,
             lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",
@@ -3490,7 +3491,6 @@ def multi_margin_loss(
     z = z.clamp_min(0)
     z = z if p == 1 else z * z
     if weight is not None:
-        weight = torch.atleast_1d(weight)
         z = z * weight[target]
     idx = torch.arange(dim, device=input.device)
     z = torch.where(idx != target, z, 0)
