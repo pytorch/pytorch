@@ -6017,7 +6017,8 @@ class TestTorch(TestCase):
             if device == 'cuda':
                 self.assertEqual(out, ref_out, atol=1e-2, rtol=1e-2)
             else:
-                self.assertEqual(out, ref_out.to(dtype=dtype))
+                # scatter_add uses fp32 as accumulate type, while index_add doesn't.
+                self.assertEqual(out, ref_out.to(dtype=dtype), atol=1e-2, rtol=1e-2)
 
         for dim in [-1, -2, -3]:
             for dtype in all_types_and_complex_and(torch.half, torch.bfloat16):
