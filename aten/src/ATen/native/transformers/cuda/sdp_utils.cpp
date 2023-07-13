@@ -409,4 +409,30 @@ SDPBackend select_sdp_backend(sdp_params kernel_params) {
   return SDPBackend::error;
 }
 
+bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
+  // When this function is called we are assured that the nt is dim==4
+  if (!params.query.is_nested()) {
+    return true;
+  }
+
+  const auto nt_q_tensor_impl =
+      at::native::get_nested_tensor_impl(params.query);
+  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_sizes();
+  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  const int64_t n_tensors = params.query.size(0);
+  const int64_t size_tensor_stride = sizes.stride(0);
+
+  // This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
+  for (const auto i : c10::irange(n_tensors)) {
+    if (sizes_ptr[(i * size_tensor_stride) + 1] <= 1) {
+      if (debug) {
+        TORCH_WARN(
+            "Packed projection for fused kernels does not support sequence_length <= 1");
+      }
+      return false;
+    }
+  }
+
+  return true;
+}
 } // namespace sdp

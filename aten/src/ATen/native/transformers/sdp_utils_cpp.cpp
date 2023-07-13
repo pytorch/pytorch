@@ -17,13 +17,6 @@
 #include <functional>
 
 namespace sdp {
-namespace {
-// This helper function creates a constexpr std::array
-// From a compile time list of values
-template <typename V, typename... T>
-constexpr auto array_of(T&&... t) -> std::array<V, sizeof...(T)> {
-  return {{std::forward<T>(t)...}};
-}
 
 bool input_requires_grad(sdp_params params) {
   const bool any_inputs_require_grad = params.query.requires_grad() ||
@@ -234,6 +227,17 @@ bool check_for_attn_mask(sdp_params params, bool debug) {
   return true;
 }
 
+bool check_for_noncontiguous(sdp_params params, bool debug) {
+  if (!(params.query.stride(3) == 1 && params.key.stride(3) == 1 &&
+        params.value.stride(3) == 1)) {
+    if (debug) {
+      TORCH_WARN("Both fused kernels do not support non-contiguous embedding.");
+    }
+    return false;
+  }
+  return true;
+}
+
 bool check_tensor_shapes(sdp_params params, bool debug) {
   auto query_dim = params.query.dim();
   if (!(query_dim == params.key.dim() && query_dim == params.value.dim() &&
@@ -382,6 +386,7 @@ bool use_flash_attention_cpp(sdp_params params, bool debug) {
       check_nested_tensor,
       check_for_dropout,
       check_tensor_shapes,
+      check_for_noncontiguous,
       check_batch_size_and_num_heads_cpp,
       check_for_attn_mask,
       check_head_dim_size_cpp);
@@ -404,6 +409,7 @@ bool use_mem_efficient_attention_cpp(sdp_params params, bool debug) {
       check_nested_tensor,
       check_for_dropout,
       check_tensor_shapes,
+      check_for_noncontiguous,
       check_batch_size_and_num_heads_cpp,
       check_for_attn_mask,
       check_head_dim_size_mem_efficient_cpp);
@@ -415,7 +421,6 @@ bool use_mem_efficient_attention_cpp(sdp_params params, bool debug) {
 
   return check_tensor_dtype(params, cpp_supported_mem_efficient_dtypes, debug);
 }
-} // namespace
 
 SDPBackend select_sdp_backend_cpp(sdp_params kernel_params) {
   // This function defines the priority order of the different sdp backends
@@ -469,32 +474,4 @@ SDPBackend select_sdp_backend_cpp(sdp_params kernel_params) {
   TORCH_CHECK(!print_debug, "No available kernel.  Aborting execution.")
   return SDPBackend::error;
 }
-
-bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
-  // When this function is called we are assured that the nt is dim==4
-  if (!params.query.is_nested()) {
-    return true;
-  }
-
-  const auto nt_q_tensor_impl =
-      at::native::get_nested_tensor_impl(params.query);
-  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_sizes();
-  auto* sizes_ptr = sizes.data_ptr<int64_t>();
-  const int64_t n_tensors = params.query.size(0);
-  const int64_t size_tensor_stride = sizes.stride(0);
-
-  // This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
-  for (const auto i : c10::irange(n_tensors)) {
-    if (sizes_ptr[(i * size_tensor_stride) + 1] <= 1) {
-      if (debug) {
-        TORCH_WARN(
-            "Packed projection for fused kernels does not support sequence_length <= 1");
-      }
-      return false;
-    }
-  }
-
-  return true;
-}
-
 } // namespace sdp
