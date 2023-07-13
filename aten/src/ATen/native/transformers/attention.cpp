@@ -31,7 +31,6 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
-// REGISTER_NO_CPU_DISPATCH(_fused_sdp_choice_stub);
 
 DEFINE_DISPATCH(flash_attention_kernel);
 DEFINE_DISPATCH(flash_attention_backward_kernel);
