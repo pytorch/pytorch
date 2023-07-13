@@ -3455,29 +3455,6 @@ def arange_start(
     )
 
 
-def _multi_margin_loss_shape_check(ndims, input, target):
-    valid_inputs = (
-        (ndims == 2 and input.size(1) != 0)
-        or (ndims == 1 and input.size(0) != 0)
-        or ndims == 0
-    )
-    if ndims <= 1:
-        nframe = 1
-        dim = 1 if ndims == 0 else input.size(0)
-    else:
-        nframe = input.size(0)
-        dim = input.size(1)
-    torch._check(
-        valid_inputs,
-        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
-    )
-    torch._check(
-        valid_inputs and target.ndim <= 1 and target.numel() == nframe,
-        lambda: f"inconsistent target size, got: {target.shape}",
-    )
-    return nframe, dim
-
-
 @register_decomposition(aten.multi_margin_loss)
 @aten.multi_margin_loss.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
@@ -3489,23 +3466,40 @@ def multi_margin_loss(
     weight: Optional[Tensor] = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
-    ndims = input.ndim
-    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
-    _multi_margin_loss_shape_check(ndims, input, target)
     input = torch.atleast_2d(input)
-    target = torch.atleast_1d(target).unsqueeze(1)
+    target = torch.atleast_1d(target)
+    nframe = input.shape[0]
+    dim = input.shape[1]
+    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
+    torch._check(
+        input.ndim == 2 and dim != 0,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+    )
+    torch._check(
+        target.ndim == 1 and target.numel() == nframe,
+        lambda: f"inconsistent target size, expected {nframe} but got {target.shape}",
+    )
     if weight is not None:
-        weight = torch.atleast_1d(weight)
-    size = input.size(1)
-    mask = torch.arange(size, device=input.device) != target
+        torch._check(
+            weight.ndim == 1 and weight.numel() == dim,
+            lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",
+        )
+    target = target.unsqueeze(1)
     u = torch.gather(input, dim=1, index=target)
     z = margin - u + input
     z = z.clamp_min(0)
     z = z if p == 1 else z * z
     if weight is not None:
+        weight = torch.atleast_1d(weight)
         z = z * weight[target]
-    loss = z.where(mask, 0).mean(dim=1)
-    return apply_loss_reduction(loss, reduction)
+    idx = torch.arange(dim, device=input.device)
+    z = torch.where(idx != target, z, 0)
+    if reduction == Reduction.MEAN.value:
+        return z.mean()
+    elif reduction == Reduction.SUM.value:
+        return z.sum() / z.shape[1]
+    else:
+        return z.mean(dim=1)
 
 
 def register_inplace(aten_op, outplace_op):

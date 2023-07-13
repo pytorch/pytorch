@@ -732,13 +732,6 @@ class TestTorchDeviceType(TestCase):
                     self.assertRaises(RuntimeError,
                                       lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum'))
 
-        # multi_margin_loss
-        for input in (zero_d, one_d, torch.randn(1, 1, device=device)):
-            for target in (torch.tensor(0, device=device), torch.tensor([0], device=device)):
-                self.assertEqual(target.shape, torch.nn.functional.multi_margin_loss(input, target, reduction='none').shape)
-                self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
-                self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
-
     # Test that `torch._check_tensor_all` raises errors in the correct cases
     def test_check_tensor_all(self, device):
         default_message = 'Expected cond to be True'
@@ -8553,7 +8546,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         device_set = {'cpu', 'cpu:0', 'cuda', 'cuda:0', 'cuda:1', 'cuda:10', 'cuda:100'}
         device_hash_set = set()
-        for device in list(device_set):
+        for device in device_set:
             device_hash_set.add(hash(torch.device(device)))
         self.assertEqual(len(device_set), len(device_hash_set))
 
