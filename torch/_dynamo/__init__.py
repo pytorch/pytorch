@@ -28,7 +28,7 @@ __all__ = [
     "forbid_in_graph",
     "graph_break",
     "mark_dynamic",
-    "mark_weak_dynamic",
+    "maybe_mark_dynamic",
     "mark_static",
     "optimize",
     "optimize_assert",
@@ -190,7 +190,7 @@ def mark_dynamic(t, index):
 
 
 @forbid_in_graph
-def mark_weak_dynamic(t, index):
+def maybe_mark_dynamic(t, index):
     """
     Mark a tensor as having a dynamic dim, but don't enforce it (i.e., if this
     dimension ends up getting specialized, don't error).
@@ -204,7 +204,7 @@ def mark_weak_dynamic(t, index):
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_weak_dynamic(t, i)
+        maybe_mark_dynamic(t, i)
 
 
 @forbid_in_graph
