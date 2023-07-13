@@ -16,6 +16,7 @@ import os
 import re
 import time
 import urllib.parse
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
@@ -1486,6 +1487,26 @@ where
         return []
 
 
+REMOVE_JOB_NAME_SUFFIX_REGEX = re.compile(r", [0-9]+, [0-9]+, .+\)$")
+
+
+def remove_job_name_suffix(name: str, replacement: str = ")") -> str:
+    return re.sub(REMOVE_JOB_NAME_SUFFIX_REGEX, replacement, name)
+
+
+def is_broken_trunk(
+    head_job: Optional[Dict[str, Any]], base_jobs: Optional[Dict[str, Dict[str, Any]]]
+) -> bool:
+    if not head_job or not base_jobs:
+        return False
+
+    return any(
+        head_job["conclusion"] == base_job["conclusion"]
+        and head_job["failure_captures"] == base_job["failure_captures"]
+        for base_job in base_jobs.values()
+    )
+
+
 def get_classifications(
     checks: Dict[str, JobCheckState],
     head_sha: str,
@@ -1493,17 +1514,23 @@ def get_classifications(
     flaky_rules: List[FlakyRule],
     ignore_current_checks: Optional[List[str]],
 ) -> Dict[str, JobCheckState]:
-    head_sha_jobs: Dict[str, Dict[str, Any]] = {}
-    merge_base_jobs: Dict[str, Dict[str, Any]] = {}
+    # Group by job name without shard id and suffix to correctly identify broken
+    # trunk failures, i.e. linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default)
+    head_sha_jobs: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
+    merge_base_jobs: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
 
     if merge_base is not None:
 
-        def insert(d: Dict[str, Dict[str, Any]], key: str, val: Dict[str, Any]) -> None:
-            if key not in d:
-                d[key] = val
+        def insert(
+            d: Dict[str, Dict[str, Dict[str, Any]]], key: str, val: Dict[str, Any]
+        ) -> None:
+            key_no_suffix = remove_job_name_suffix(key)
+            if key not in d[key_no_suffix]:
+                d[key_no_suffix][key] = val
                 return
-            if d[key]["id"] < val["id"]:
-                d[key] = val
+
+            if d[key_no_suffix][key]["id"] < val["id"]:
+                d[key_no_suffix][key] = val
 
         rockset_results = get_rockset_results(head_sha, merge_base)
         for rockset_result in rockset_results:
@@ -1537,14 +1564,11 @@ def get_classifications(
                 check.title,
             )
             continue
-        head_sha_job = head_sha_jobs.get(name)
-        merge_base_job = merge_base_jobs.get(name)
-        if (
-            head_sha_job is not None
-            and merge_base_job is not None
-            and head_sha_job["conclusion"] == merge_base_job["conclusion"]
-            and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
-        ):
+
+        name_no_suffix = remove_job_name_suffix(name)
+        head_sha_job = head_sha_jobs.get(name_no_suffix, {}).get(name)
+
+        if is_broken_trunk(head_sha_job, merge_base_jobs.get(name_no_suffix)):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
