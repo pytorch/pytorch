@@ -663,10 +663,15 @@ class TestBypassFailures(TestCase):
             FlakyRule("distributed", ["##[error]The operation was canceled."])
         ]
         pr = GitHubPR("pytorch", "pytorch", 92863)
-        checks = pr.get_checkrun_conclusions()
-        checks = get_classifications(
-            checks, pr.last_commit()["oid"], pr.get_merge_base(), flaky_rules, []
-        )
+        with mock.patch(
+            "trymerge.gh_fetch_url",
+            return_value={"merge_base_commit": {"sha": pr.info["baseRefOid"]}},
+        ) as mocked_gh_fetch_url:
+            checks = pr.get_checkrun_conclusions()
+            checks = get_classifications(
+                checks, pr.last_commit()["oid"], pr.get_merge_base(), flaky_rules, []
+            )
+
         self.assertTrue(
             checks[
                 "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.4xlarge)"
@@ -690,6 +695,7 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 2)
 
+    @mock.patch("trymerge.gh_fetch_url", side_effect=mocked_get_merge_base_gh_fetch_url)
     def test_get_classifications_unstable(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 104312)
         checks = pr.get_checkrun_conclusions()
@@ -711,10 +717,15 @@ class TestBypassFailures(TestCase):
         # This PR had one broken trunk failure but it was run on a different shard
         # than the one on the base commit. This should still count as broken trunk
         pr = GitHubPR("pytorch", "pytorch", 104214)
-        checks = pr.get_checkrun_conclusions()
-        checks = get_classifications(
-            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
-        )
+        with mock.patch(
+            "trymerge.gh_fetch_url",
+            return_value={"merge_base_commit": {"sha": pr.info["baseRefOid"]}},
+        ) as mocked_gh_fetch_url:
+            checks = pr.get_checkrun_conclusions()
+            checks = get_classifications(
+                checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
+            )
+
         pending, failed = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
@@ -727,6 +738,7 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 1)
 
+    @mock.patch("trymerge.gh_fetch_url", side_effect=mocked_get_merge_base_gh_fetch_url)
     def test_ignore_current(self, *args: Any) -> None:
         # Test various interactions of the failure classifier, mostly that
         # ignore current checks takes precedence over classifications for flaky
@@ -754,10 +766,15 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(len(failed) == 1)
 
-        # No flaky rules
-        checks = get_classifications(
-            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], [flaky]
-        )
+        with mock.patch(
+            "trymerge.gh_fetch_url",
+            return_value={"merge_base_commit": {"sha": pr.info["baseRefOid"]}},
+        ) as mocked_gh_fetch_url:
+            # No flaky rules
+            checks = get_classifications(
+                checks, pr.last_commit()["oid"], pr.get_merge_base(), [], [flaky]
+            )
+
         self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
         self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
         _, failed = categorize_checks(
@@ -782,6 +799,7 @@ class TestBypassFailures(TestCase):
 
     @mock.patch("trymerge.read_flaky_rules", side_effect=xla_is_flaky_rules)
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
+    @mock.patch("trymerge.gh_fetch_url", side_effect=mocked_get_merge_base_gh_fetch_url)
     def test_dont_ignore_flaky_failures(self, *args: Any) -> None:
         """Regression test for https://github.com/pytorch/test-infra/issues/4126"""
         pr = GitHubPR("pytorch", "pytorch", 100369)
