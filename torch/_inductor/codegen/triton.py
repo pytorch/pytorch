@@ -18,6 +18,7 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path
+from ..dependencies import MemoryDep
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..triton_heuristics import AutotuneHint
@@ -2409,7 +2410,7 @@ class TritonScheduling:
         deps = [
             dep
             for dep in itertools.chain(rw.reads, rw.writes)
-            if dep.name not in V.graph.removed_buffers
+            if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
         ]
         write_names = {dep.name for dep in rw.writes}
 
