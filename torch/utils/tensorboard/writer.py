@@ -434,7 +434,7 @@ class SummaryWriter:
                 scalar_value = workspace.FetchBlob(scalar_value)
             fw.add_summary(scalar(main_tag, scalar_value), global_step, walltime)
 
-def add_tensor(
+    def add_tensor(
         self,
         tag,
         tensor,
