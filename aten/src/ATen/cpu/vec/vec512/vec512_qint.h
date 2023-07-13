@@ -130,13 +130,13 @@ inline Vectorized<uint8_t> convert_float_to_uint8(at::vec::Vectorized<float> src
 template <typename T>
 inline void __attribute__((always_inline)) QuantizeAvx512(
     const float* src,
-    typename T::underlying* dst,
+    T* dst,
     int len,
     float inverse_scale,
     int64_t zero_point) {
   constexpr int VLEN = 16;
-  constexpr auto min_val = std::numeric_limits<typename T::underlying>::min();
-  constexpr auto max_val = std::numeric_limits<typename T::underlying>::max();
+  constexpr auto min_val = std::numeric_limits<T>::min();
+  constexpr auto max_val = std::numeric_limits<T>::max();
   const __m512i min_v = _mm512_set1_epi32(min_val);
   const __m512i max_v = _mm512_set1_epi32(max_val);
   // This is the largest int32 value < int32_max exactly representable in float
@@ -167,8 +167,8 @@ inline void __attribute__((always_inline)) QuantizeAvx512(
       _mm512_set_epi32(0x0f, 0x0b, 0x07, 0x03, 0x0e, 0x0a, 0x06, 0x02,
                        0x0d, 0x09, 0x05, 0x01, 0x0c, 0x08, 0x04, 0x00);
   __m512i permute_mask_l8_v =
-      _mm512_set_epi32(0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0c, 0x08,
-                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00);
+      _mm512_set_epi32(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                       0x00, 0x00, 0x00, 0x00, 0x0c, 0x08, 0x04, 0x00);
   int len_aligned = len / (VLEN * 4) * (VLEN * 4);
   for (; i < len_aligned; i += 4 * VLEN) {
     // x
@@ -208,8 +208,8 @@ inline void __attribute__((always_inline)) QuantizeAvx512(
 
     __m512i xy_packed_v = _mm512_packs_epi32(x_rounded_v, y_rounded_v);
     __m512i zw_packed_v = _mm512_packs_epi32(z_rounded_v, w_rounded_v);
-    __m512i xyzw_clamped_v = pack_saturate_and_clamp<typename T::underlying>(
-        xy_packed_v, zw_packed_v, min_val, max_val);
+    __m512i xyzw_clamped_v =
+        pack_saturate_and_clamp<T>(xy_packed_v, zw_packed_v, min_val, max_val);
 
     xyzw_clamped_v =
         _mm512_permutexvar_epi32(permute_mask_v, xyzw_clamped_v);
@@ -538,7 +538,7 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
       float inverse_scale) {
     auto* rhs_data = (float*)rhs.data();
     int8_t quantized_values[64];
-    QuantizeAvx512<c10::qint8>(
+    QuantizeAvx512<value_type>(
         rhs_data, quantized_values, 64, inverse_scale, zero_point);
     return Vectorized<c10::qint8>::loadu(quantized_values);
   }
@@ -715,7 +715,7 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
       float inverse_scale) {
     auto* rhs_data = (float*)rhs.data();
     uint8_t quantized_values[64];
-    QuantizeAvx512<c10::quint8>(
+    QuantizeAvx512<value_type>(
         rhs_data, quantized_values, 64, inverse_scale, zero_point);
     return Vectorized<c10::quint8>::loadu(quantized_values);
   }

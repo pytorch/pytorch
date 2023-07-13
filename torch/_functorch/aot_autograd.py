@@ -1884,7 +1884,7 @@ def create_synthetic_base_metadata(
     # generate the requires_grad info on those same mutated inputs, but after constructing synthetic bases.
     input_infos = []
     mutated_inp_require_grad_info = []
-    for _, outer_indices in synthetic_base_to_indices.items():
+    for outer_indices in synthetic_base_to_indices.values():
         # leaf-ness should be all-or-nothing for aliased tensor.
         # (aka if "a" and "b" are views, then a.is_leaf == b.is_leaf)
         any_leaf = any(m.input_info[x].is_leaf for x in outer_indices)
@@ -2799,12 +2799,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             )
 
             num_outputs = CompiledFunction.metadata.num_outputs
-            num_outputs_aliased_to_inputs = (
-                CompiledFunction.metadata.num_outputs_aliased_to_inputs
-            )
-            num_outputs_aliased_to_intermediates = (
-                CompiledFunction.metadata.num_outputs_aliased_to_intermediates
-            )
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
@@ -2979,10 +2973,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # Add the seed and offset to args
                 rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
-            all_args = (
-                list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args) + list(rng_args)
-            )
-
+            all_args = [
+                *ctx.symints,
+                *ctx.saved_tensors,
+                *contiguous_args,
+                *rng_args
+            ]
             del contiguous_args
 
             def call_compiled_backward():
