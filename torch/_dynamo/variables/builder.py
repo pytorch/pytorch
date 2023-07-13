@@ -988,11 +988,8 @@ class VariableBuilder:
                 and not is_constant_source(self.get_source())
                 and not isinstance(self.get_source(), RandomValueSource)
             ):
-                if value < 0 or torch._dynamo.config.specialize_int:
-                    # Negative values don't create_symbol correctly,
-                    # so make sure we do a constant in this case.
-                    #
-                    # Also, if specialize_int is False, also return
+                if torch._dynamo.config.specialize_int:
+                    # If specialize_int is False, also return
                     # a constant (but this should have been handled
                     # in the caller, TBH)
                     return ConstantVariable(
@@ -1037,11 +1034,12 @@ class VariableBuilder:
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
 
-                wrapped_value = shape_env.create_symint_and_symbol(
+                wrapped_value = shape_env.create_unspecified_symint_and_symbol(
                     value,
                     source=self.source,
                     dynamic_dim=dynamic_dim,
                 )
+
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
                 )
