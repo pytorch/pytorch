@@ -879,7 +879,7 @@ class CUDAGraphNode:
         self.recording_outputs: Optional[
             OutputList[Union[torch.Tensor, int]]
         ] = self._record(wrapped_function.model, recording_inputs)
-        self.outputs_metadata: OutputList[Union[Dict[str, Any], int]] = []
+        self.outputs_metadata: OutputList[Union[Dict[str, Any], int, None]] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
         # their memory being reclaimed in subsequent cuda graph recordings. We record the tensor metadata
