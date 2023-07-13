@@ -443,6 +443,18 @@ def _pre_forward(
         kwargs (Dict[str, Any]): Module forward ``kwargs``.
     """
     with torch.profiler.record_function("FullyShardedDataParallel._pre_forward"):
+        # Land as part of https://github.com/pytorch/pytorch/pull/105090
+        # For `fully_shard` + `checkpoint`, skip pre-forward logic in the
+        # recomputed forward
+        if any(
+            handle._training_state == HandleTrainingState.BACKWARD_PRE
+            for handle in handles
+        ):
+            # For both checkpoint implementations, we do not need to re-cast
+            # inputs here since they will be checkpointed in the low precision
+            # either by AC or normally by autograd as long as the AC region is
+            # nested within FSDP
+            return args, kwargs
         state.training_state = TrainingState.FORWARD_BACKWARD
         state._exec_order_data.record_pre_forward(handles, module.training)
         for handle in handles:
