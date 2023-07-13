@@ -29,6 +29,7 @@ from .summary import (
     pr_curve,
     pr_curve_raw,
     scalar,
+    tensor_proto,
     text,
     video,
 )
@@ -383,6 +384,42 @@ class SummaryWriter:
         summary = scalar(
             tag, scalar_value, new_style=new_style, double_precision=double_precision
         )
+        self._get_file_writer().add_summary(summary, global_step, walltime)
+
+    def add_tensor(
+        self,
+        tag,
+        tensor,
+        global_step=None,
+        walltime=None,
+    ):
+        """Add tensor data to summary.
+
+        Args:
+            tag (str): Data identifier
+            tensor (torch.Tensor): tensor to save
+            global_step (int): Global step value to record
+        Examples::
+
+            from torch.utils.tensorboard import SummaryWriter
+            writer = SummaryWriter()
+            x = torch.tensor([1,2,3])
+            writer.add_scalar('x', x)
+            writer.close()
+
+        Expected result:
+            Summary::tensor::float_val [1,2,3]
+                   ::tensor::shape [3]
+                   ::tag 'x'
+
+        """
+        torch._C._log_api_usage_once("tensorboard.logging.add_tensor")
+        if self._check_caffe2_blob(tensor):
+            from caffe2.python import workspace
+
+            tensor = torch.tensor(workspace.FetchBlob(tensor))
+
+        summary = tensor_proto(tag, tensor)
         self._get_file_writer().add_summary(summary, global_step, walltime)
 
     def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
