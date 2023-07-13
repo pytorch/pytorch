@@ -599,7 +599,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
     UsageStream to_record{stream.stream(), stream.device_index()};
     if (to_record == it->second.creation_stream) {
-      TORCH_WARN(
+      TORCH_WARN_ONCE(
           "Called record_stream on tensor whose original creation stream "
           "matches the recorded stream. This is unnecessary and has no effect.");
     } else {
