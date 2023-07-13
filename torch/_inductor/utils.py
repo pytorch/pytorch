@@ -1158,6 +1158,13 @@ def blue_text(msg):
     return _color_text(msg, "blue")
 
 
+PYTHON_TYPE_TO_SCHEMA_TYPE = {
+    torch.dtype: "int",
+    torch.device: "Device",
+    bool: "bool",
+}
+
+
 def type_match(arg, arg_type, is_optional_arg):
     # TODO: add a util function to handle Optional
     if isinstance(arg, immutable_list):
@@ -1171,26 +1178,31 @@ def type_match(arg, arg_type, is_optional_arg):
         else:
             # TODO: add support here
             return False
-    elif isinstance(arg, torch.dtype):
-        update_type = "Optional[int]" if is_optional_arg else "int"
-        return update_type == str(arg_type)
-    elif isinstance(arg, torch.device):
-        update_type = "Optional[Device]" if is_optional_arg else "Device"
-        return update_type == str(arg_type)
-    elif isinstance(arg, bool):
-        update_type = "Optional[bool]" if is_optional_arg else "bool"
-        return update_type == str(arg_type)
-    else:
-        # TODO: add support here
-        return False
+
+    if arg.__class__ in PYTHON_TYPE_TO_SCHEMA_TYPE:
+        schema_type = PYTHON_TYPE_TO_SCHEMA_TYPE[arg.__class__]
+        may_optional_schema_type = (
+            f"Optional[{schema_type}]" if is_optional_arg else schema_type
+        )
+        return may_optional_schema_type == str(arg_type)
+
+    # TODO: add support here
+    return False
 
 
 def is_optional(arg):
     return "Optional" in str(arg.type)
 
 
+def args_error_message(nargs, max_pos_args, min_args):
+    if min_args != max_pos_args:
+        return f"takes from {min_args} to {max_pos_args} positional arguments but {nargs} were given"
+    else:
+        return f"takes {max_pos_args} positional arguments but {nargs} were given"
+
+
 # torch/csrc/utils/python_arg_parser.cpp:FunctionSignature::parse
-def schema_match(schema, args, arg_types, kwargs, arg_names, kwarg_types):
+def schema_match(schema, args, kwargs):
     min_args = 0
     max_pos_args = 0
     for argument in schema.arguments:
@@ -1202,15 +1214,10 @@ def schema_match(schema, args, arg_types, kwargs, arg_names, kwarg_types):
     nargs = len(args)
     remaining_kwargs = len(kwargs)
     arg_pos = 0
-    # TODO: allow_varargs_intlist and int_list_overload True?
-    allow_varargs_intlist = False
-    int_list_overload = False
 
-    assert (
-        len(args) <= max_pos_args
-    ), f"takes {max_pos_args} positional arguments but {len(args)} were given"
-
-    # TODO: overloaded_args
+    assert len(args) <= max_pos_args, args_error_message(
+        len(args), max_pos_args, min_args
+    )
 
     for argument in schema.arguments:
         obj = None
@@ -1224,19 +1231,13 @@ def schema_match(schema, args, arg_types, kwargs, arg_names, kwarg_types):
                 obj = kwargs[argument.name]
                 is_kwd = True
 
-        failed_idx = -1
         if obj is None and not is_optional(argument):
             return False
 
         if obj is not None:
-            if is_kwd:
-                expeced_kwd_type = argument.type
-                if not type_match(obj, expeced_kwd_type, is_optional(argument)):
-                    return False
-            else:
-                expected_arg_type = argument.type
-                if not type_match(obj, expected_arg_type, is_optional(argument)):
-                    return False
+            expected_type = argument.type
+            if not type_match(obj, expected_type, is_optional(argument)):
+                return False
 
         if not is_kwd:
             arg_pos += 1
@@ -1251,11 +1252,7 @@ def schema_match(schema, args, arg_types, kwargs, arg_names, kwarg_types):
 
 def try_find_schema(schemas, args, kwargs):
     for schema in schemas:
-        arg_types = [x.type for x in schema.arguments]
-        arg_names = [x.name for x in schema.arguments if x.kwarg_only]
-        kwarg_types = {x.name: x.type for x in schema.arguments if x.kwarg_only}
-
-        if schema_match(schema, args, arg_types, kwargs, arg_names, kwarg_types):
+        if schema_match(schema, args, kwargs):
             return schema
 
     # TODO: should we ever return None here?
