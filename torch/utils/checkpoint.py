@@ -460,8 +460,6 @@ def checkpoint(
             next(gen)
         except StopIteration:
             return ret
-        except BaseException:
-            raise
 
 
 def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwargs):
