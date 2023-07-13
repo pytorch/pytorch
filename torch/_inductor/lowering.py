@@ -3436,6 +3436,9 @@ def _adaptive_avg_pool2d(x, output_size):
     if h_in == h_out and w_in == w_out:
         return clone(x)
 
+    if h_out == 0 or w_out == 0:
+        o_size = [*batch, h_out, w_out]
+        return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
     if h_in % h_out == 0 and w_in % w_out == 0:
         kernel_size = [h_in // h_out, w_in // w_out]
         return avg_pool2d(x, kernel_size)
