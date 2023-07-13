@@ -1,7 +1,7 @@
+#include <ATen/ATen.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
-#include <ATen/ops/not_equal.h>
 
 #ifndef USE_ROCM
 #include <cuda_runtime.h>
@@ -962,7 +962,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
 
   const auto dense_cpu = dense.to("cpu");
 
-  const auto mask_cpu = at::not_equal(dense_cpu, 0);
+  const auto mask_cpu = dense_cpu != at::zeros({1}, dense_cpu.options());
 
   const auto sparse_cpu =
     dense_cpu.masked_select(mask_cpu).view({dense_nrows, dense_ncols / 2});
