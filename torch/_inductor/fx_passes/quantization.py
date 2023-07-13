@@ -213,12 +213,12 @@ def _register_qconv_weight_prepack_pass(pattern):
           |
         dequant_per_tensor
           |
-        Conv2d <- optional(aten.clone.default) <- dequant_per_channel
+        Conv2d <- optional(aten.clone.default) <- dequant_per_channel <- int8_weight
 
         Insert weight prepack node and change the pattern to:
         int8 activation
           |
-        onednn.qconv2d_pointwise <- onednn.qconv_prepack <- optional(aten.clone.default) <- dequant_per_channel
+        onednn.qconv2d_pointwise <- onednn.qconv_prepack <- int8_weight
         """
         has_clone_to_channel_last_node_in_pattern = any(
             node.target == aten.clone.default for node in match.nodes
@@ -298,7 +298,7 @@ def _register_qconv_weight_prepack_pass(pattern):
                 padding,
                 dilation,
                 groups,
-                1.0,  # output_scale
+                1.0,  # inv_output_scale
                 0,  # output_zero_point
                 True,  # fp32_output
                 "none",  # attr
