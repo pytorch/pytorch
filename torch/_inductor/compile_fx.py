@@ -366,7 +366,6 @@ def compile_fx_inner(
                 is_inference=is_inference,
             )
         else:
-            log.debug("disabled cudagraphs because %s", cudagraph_fail_reasons)
             BoxedBool.disable(cudagraphs)
 
             # See [Backward Generation Handling]
@@ -404,6 +403,10 @@ def compile_fx_inner(
                     perf_hint_log.warning(
                         "skipping cudagraphs due to multiple device indexes"
                     )
+                else:
+                    perf_hint_log.warning("skipping cudagraphs for unknown reason")
+            else:
+                perf_hint_log.warning("skipping cudagraphs for unknown reason")
 
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
@@ -481,9 +484,7 @@ def fx_codegen_and_compile(
 
     with V.set_fake_mode(fake_mode):
         # has some issues with memory in training
-        locality_reorder = is_inference and config.reordering
-
-        post_grad_passes(gm, locality_reorder=locality_reorder)
+        post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):
@@ -979,6 +980,7 @@ def compile_fx(
                     original_output_start_index : original_output_start_index
                     + num_orig_model_outputs
                 ]
+                if isinstance(n, torch.fx.Node)
             }
 
         return inner_compile(
