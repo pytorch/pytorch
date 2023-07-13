@@ -515,7 +515,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def to_dtype(x: TensorBox, dtype: torch.dtype):
     if x.get_dtype() == dtype:
-        return x
+        return clone(x)
 
     def _to_dtype(x):
         return ops.to_dtype(x, dtype)
@@ -551,7 +551,7 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
 def to_device(x: TensorBox, device: torch.device):
     device = decode_device(device)
     if x.get_device() == device:
-        return x
+        return clone(x)
     return TensorBox.create(ir.DeviceCopy.create(x, device))
 
 
@@ -710,7 +710,7 @@ def isnan(x):
 @register_lowering(aten.ceil)
 def ceil(x):
     if is_integer_type(x):
-        return x
+        return clone(x)
     fn = ops_wrapper("ceil")
     return make_pointwise(fn)(x)
 
@@ -718,7 +718,7 @@ def ceil(x):
 @register_lowering(aten.floor)
 def floor(x):
     if is_integer_type(x):
-        return x
+        return clone(x)
     fn = ops_wrapper("floor")
     return make_pointwise(fn)(x)
 
@@ -726,7 +726,7 @@ def floor(x):
 @register_lowering(aten.round)
 def round(x):
     if is_integer_type(x):
-        return x
+        return clone(x)
     fn = ops_wrapper("round")
     return make_pointwise(fn)(x)
 
@@ -734,7 +734,7 @@ def round(x):
 @register_lowering(aten.trunc)
 def trunc(x):
     if is_integer_type(x):
-        return x
+        return clone(x)
     fn = ops_wrapper("trunc")
     return make_pointwise(fn)(x)
 
@@ -4054,7 +4054,7 @@ def pow(a, b):
     elif isinstance(b, float) and b == 0.5:
         return sqrt(a)
     elif isinstance(b, int) and b == 1:
-        return a
+        return clone(a)
 
     # Type promotion ensures all tensor arguments have the same type
     dtype = next(x.get_dtype() for x in (a, b) if isinstance(x, ir.TensorBox))
