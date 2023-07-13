@@ -66,15 +66,15 @@ def sympy_interp(
     analysis, env: Dict[sympy.Symbol, Any], expr: Union[sympy.Expr, SympyBoolean]
 ):
     # Handle base cases
-    if isinstance(expr, sympy.Expr) and expr.is_constant():
-        if isinstance(expr, BooleanAtom):
-            dtype = torch.bool
-        elif isinstance(expr, sympy.Integer):
-            dtype = torch.int64
-        elif isinstance(expr, sympy.Number):
-            dtype = torch.double
-        else:
-            raise RuntimeError(f"Unknown constant type: {expr}")
+    dtype = None
+    if isinstance(expr, BooleanAtom):
+        dtype = torch.bool
+    elif isinstance(expr, sympy.Integer):
+        dtype = torch.int64
+    elif isinstance(expr, sympy.Number):
+        dtype = torch.double
+
+    if dtype is not None:
         return analysis.constant(expr, dtype)
     elif isinstance(expr, sympy.Symbol):
         return env[expr]
