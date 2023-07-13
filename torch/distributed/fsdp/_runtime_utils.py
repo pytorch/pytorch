@@ -251,7 +251,7 @@ def _share_state_and_init_handle_attrs(
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
     root_state._device_mesh = _init_device_mesh(root_state)
     # Update _has_optim_in_backward for each handle.
-    for handle in root_state._all_fsdp_handles:
+    for handle in root_state._all_handles:
         flat_param = handle.flat_param
         if hasattr(flat_param, "_in_backward_optimizers"):
             raise RuntimeError(
