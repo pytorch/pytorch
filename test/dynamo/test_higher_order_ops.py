@@ -2048,12 +2048,12 @@ class GraphModule(torch.nn.Module):
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_, 3.0);  grad_proxy = l_x_ = None
+        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
         contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, const):
+        def forward(self, l_x_):
             _set_grad_enabled = torch._C._set_grad_enabled(True)
 
             sin = l_x_.sin();  l_x_ = None
@@ -2100,7 +2100,7 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(actual, expected)
 
     def test_grad_fn_with_kwargs(self):
-        def fn(x, y):
+        def fn(x, *, y):
             return (x + y).sum()
 
         def wrapper_fn(x, y):
@@ -2108,14 +2108,37 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3)
         y = torch.randn(3, 3)
-        actual = wrapper_fn(x, y)
-        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"torch.func.grad: kwargs arguments are currently unsupported.": 2},
-        )
-        self.assertEqual(actual, expected)
+
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, l_y_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
+            add = l_x_ + l_y_;  l_x_ = l_y_ = None
+            sum_1 = add.sum();  add = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+            return sum_1
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
 
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):

@@ -595,12 +595,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # get arguments
         func, argnums, has_aux = grad_args
-        kwargs = args[4].items
-        if len(kwargs) > 0:
-            # Since speculate_subgraph doesn't support kwargs, we can't handle this for now.
-            unimplemented(
-                "torch.func.grad: kwargs arguments are currently unsupported."
-            )
+        grad_fn_kwargs = args[4].items
 
         # Trace through the `func`
         # NOTE [HACK: Enable autograd while tracing function]
@@ -620,12 +615,13 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         body_r, body_graph, body_lifted_freevars = speculate_subgraph(
             tx,
             func,
-            args[3].items,
-            {},
+            args[3].items,  # args
+            grad_fn_kwargs,  # kwargs
             graph_checkpoint,
             checkpoint,
             # See NOTE [HACK: Enable autograd while tracing function]
             enable_grad=True,
+            manually_set_subgraph_inputs=False,
         )
 
         body_name = add_subgraph(
@@ -649,11 +645,8 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             name="grad_proxy",
         )
 
-        # Pass lifted freevars to the call to `grad_fn`
-        args = args[3].items
-        grad_fn_args = tuple(arg.as_proxy() for arg in args) + tuple(
-            body_lifted_freevars
-        )
+        # All args and kwargs are lifted in `speculate_subgraph`.
+        grad_fn_args = tuple(body_lifted_freevars)
 
         # Call grad_fn with inputs.
         # grad_output = grad_fn(*grad_fn_args, **grad_fn_kwargs)
@@ -664,6 +657,8 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # For has_aux=False, Tuple[gradients of inputs indicated by argnums].
         # For has_aux=True, Tuple[Tuple[gradients of inputs indicated by argnums], aux values]
         # NOTE: example_value should match `grad_output`.
+        #
+        args = args[3].items
         if isinstance(argnums.value, int):
             example_value = (
                 args[argnums.value].as_proxy().node.meta["example_value"].contiguous()
