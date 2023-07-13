@@ -147,6 +147,38 @@ class GradModeVariable(ContextWrappingVariable):
         return "set_grad_enabled"
 
 
+class TorchFunctionDisableVariable(ContextWrappingVariable):
+    """represents whether torch function overrides are enabled or not"""
+
+    _guards_singleton = {
+        Guard("", GuardSource.GLOBAL, GuardBuilder.TORCH_FUNCTION_STATE)
+    }
+
+    @staticmethod
+    def create(tx, **kwargs):
+        var = TorchFunctionDisableVariable(
+            target_values=[False],
+            initial_values=[torch._C._is_torch_function_enabled()],
+            **kwargs,
+        )
+        # mlazos: I think this is here to make sure we don't reinvoke on clone()
+        var._call_func(tx, [False])
+        return var
+
+    def __init__(self, target_values, initial_values=None, **kwargs):
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.guards = self.guards | self._guards_singleton
+
+    def enter(self, tx):
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+
+    def _call_func(self, tx, values):
+        assert len(values) == 1
+        tx.output.set_torch_function_state(values[0])
+
+
 class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     """represents torch.{are_deterministic_algorithms_enabled,use_deterministic_algorithms}()"""
 

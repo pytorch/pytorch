@@ -162,13 +162,13 @@ class OnnxFunctionDispatcher:
             Raises:
                 RuntimeError: If there are no overloaded functions available for the given FX node.
         """
-        # TODO(justinchuby): Cache the OpSchemaWrapper so we don't need to run the init logic everytime
+        # TODO(justinchuby): Cache the OnnxSchemaChecker  so we don't need to run the init logic everytime
         overload_match_ranking: Dict[registration.SymbolicFunction, int] = {}
 
         # Iterate the overloaded functions in reverse order to prioritize the custom ones
         # over the default ones, and find the perfect match.
         for symbolic_function in reversed(default_and_custom_functions):
-            function_opschema = _OpSchemaWrapper(symbolic_function.onnx_function)
+            function_opschema = _OnnxSchemaChecker(symbolic_function.onnx_function)
 
             if function_opschema.perfect_match_inputs(onnx_args, onnx_kwargs):
                 # If the perfect match is found, return the function
@@ -356,9 +356,9 @@ def _symint_symfloat_builtin_to_exporter_key_table(
     return _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE.get(target)
 
 
-class _OpSchemaWrapper:
+class _OnnxSchemaChecker:
     """
-    The OpSchemaWrapper class is a wrapper for ONNX OpSchema.
+    The OnnxSchemaChecker class is a checker for ONNX OpSchema and param schema.
 
     It provides methods to check for input compatibility based on the OpSchema. It also
     provides a matching score to indicate how well the OpSchema matches the input and
@@ -379,25 +379,7 @@ class _OpSchemaWrapper:
             ...
     ```
 
-    2. Optional dim: caused by unsupported op.OptionalHasElement (will support on opset
-        version == 20). dim could be "None"
-
-        ```python
-        @torch_op("aten::argmax", trace_only=True)
-        def aten_argmax(
-            self: TrealOrUInt8, dim: Optional[int] = None, keepdim: bool = False
-        ) -> TrealOrUInt8:
-            ...
-
-        @torch_op("aten::argmax", private=True)
-        def _aten_argmax_dim(self: TrealOrUInt8, dim: int, keepdim: bool = False) -> TrealOrUInt8:
-            ...
-        ```
-
-        This case is impossible to differentiate, as they both might have dim in kwargs, so
-        in this case, please make sure you turn the one with `dim: int` to private function.
-
-    3. Optional dtype: dtype could be "unprovided". The difference from 2 is that dtype
+    2. Optional dtype: dtype could be "unprovided". The difference from 2 is that dtype
         would not be None.
 
         ```python
@@ -414,13 +396,17 @@ class _OpSchemaWrapper:
         the correct one.
 
     Attributes:
-        schema: The ONNX OpSchema.
+        onnxfunction: The OnnxFunction.
+        param_schema: The parameter schema defined in the OnnxFunction.
+        op_schema: The ONNX OpSchema.
         type_constraints: The type constraints defined in the OpSchema.
+        attributes: The attributes defined in the OpSchema.
+        _matching_score: The matching score of the OnnxSchemaChecker .
 
     """
 
     def __init__(self, onnxfunction: "onnxscript.OnnxFunction"):
-        """Initialize the OpSchemaWrapper.
+        """Initialize the OnnxSchemaChecker .
 
         Args:
             onnxfunction: The OnnxFunction.
@@ -438,10 +424,10 @@ class _OpSchemaWrapper:
 
     @property
     def match_score(self) -> int:
-        """The matching score of the OpSchemaWrapper.
+        """The matching score of the OnnxSchemaChecker .
 
         Returns:
-            The matching score of the OpSchemaWrapper.
+            The matching score of the OnnxSchemaChecker .
         """
         return self._matching_score
 
