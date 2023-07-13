@@ -13,7 +13,9 @@ import torch
 
 import torch._dynamo as torchdynamo
 import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+import torch.nn.functional as F
 from torch import nn
+
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import override_lowering, run_and_get_code
