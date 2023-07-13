@@ -440,11 +440,16 @@ def _pre_forward(
         kwargs (Dict[str, Any]): Module forward ``kwargs``.
     """
     with torch.profiler.record_function("FullyShardedDataParallel._pre_forward"):
-        # For `fully_shard` + `checkpoint`, do not re-run pre/post-forward
+        # For `fully_shard` + `checkpoint`, skip pre-forward logic in the
+        # recomputed forward
         if any(
             handle._training_state == HandleTrainingState.BACKWARD_PRE
             for handle in handles
         ):
+            # For both checkpoint implementations, we do not need to re-cast
+            # inputs here since they will be checkpointed in the low precision
+            # either by AC or normally by autograd as long as the AC region is
+            # nested within FSDP
             return args, kwargs
         state.training_state = TrainingState.FORWARD_BACKWARD
         state._exec_order_data.record_pre_forward(handles, module.training)
@@ -460,7 +465,6 @@ def _pre_forward(
         should_cast_forward_inputs = len(state._handles) > 0 and all(
             not handle._force_full_precision for handle in state._handles
         )
-
         if should_cast_forward_inputs and state.mixed_precision.cast_forward_inputs:
             # Recursively convert args and kwargs to specified precision.
             input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
@@ -518,7 +522,8 @@ def _post_forward(
     parameter.
     """
     with torch.profiler.record_function("FullyShardedDataParallel._post_forward"):
-        # For `fully_shard` + `checkpoint`, do not re-run pre/post-forward
+        # For `fully_shard` + `checkpoint`, skip post-forward logic in the
+        # recomputed forward
         if any(
             handle._training_state == HandleTrainingState.BACKWARD_PRE
             for handle in handles
