@@ -1383,7 +1383,7 @@ static at::Tensor _quantized_convolution_onednn(
     torch::List<int64_t> dilation,
     bool transposed,
     int64_t groups,
-    double output_scale,
+    double inv_output_scale,  // inv_output_scale is the reciprocal of scale in fake quant
     int64_t output_zero_point,
     c10::optional<at::Tensor> accum, // accum to fused with conv add
     double accum_scale,
@@ -1397,13 +1397,17 @@ static at::Tensor _quantized_convolution_onednn(
   /*********************************/
   /*          Checks               */
   /*********************************/
-
+  // Due the constant folding inside Inductor freeze,
+  // https://github.com/pytorch/pytorch/blob/b99d605a3070de35677cc43f0196c2f2e807b822/torch/ao/quantization/fx/_decomposed.py#L62-L63
+  // inv_scale = 1.0 / scale will be folded.
+  // So, we can only get inv_scale from quant node which is used as
+  // output_scale of this op.
   if (fp32_output) {
     // When fp32_output, oneDNN expects op_attr doesn't set_scales and set_zero_points.
-    // So, we will use default output_scale as 1.0 and output_zero_point as 0, since
-    // when output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep;
+    // So, we will use default inv_output_scale as 1.0 and output_zero_point as 0, since
+    // when inv_output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep;
     // when output_zero_point is 0, we will skip invoking of op_attr.set_zero_points in ideep.
-    TORCH_CHECK(output_scale == 1.0,  " (ONEDNN): fp32 output, output_scale must be 1.0.");
+    TORCH_CHECK(inv_output_scale == 1.0,  " (ONEDNN): fp32 output, inv_output_scale must be 1.0.");
     TORCH_CHECK(output_zero_point == 0,  " (ONEDNN): fp32 output, output_zero_point must be 0");
   }
 
@@ -1468,7 +1472,6 @@ static at::Tensor _quantized_convolution_onednn(
   // Parameters
   // Scales of ONEDNN and PyTorch are reciprocal
   const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0 / act_scale);
-  double inv_output_scale = 1.0 / output_scale;
 
   // TODO (leslie): optimize the performance here:
   // 1. Remove the reciprocal of weight scale, we have done the reciprocal of weight scale back in Ideep:
@@ -1756,7 +1759,7 @@ class QConvoneDNN final {
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      double output_scale,
+      double inv_output_scale,  // inv_output_scale is the reciprocal of scale in fake quant
       int64_t output_zero_point,
       bool fp32_output,
       c10::string_view attr,
@@ -1784,7 +1787,7 @@ class QConvoneDNN final {
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
         bias, stride, padding, dilation, /*transposed*/false,
-        groups, output_scale, output_zero_point,
+        groups, inv_output_scale, output_zero_point,
         /*accum*/c10::nullopt, /*accum_scale*/0.0, /*accum_zero_point*/0,
         /*fp32_output*/fp32_output, /*binary_attr*/c10::nullopt, /*binary_alpha*/c10::nullopt,
         /*unary_attr*/attr, /*unary_scalars*/scalars, /*unary_algorithm*/algorithm
@@ -1808,7 +1811,7 @@ class QConvoneDNN final {
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      double output_scale,
+      double inv_output_scale,  // inv_output_scale is the reciprocal of scale in fake quant
       int64_t output_zero_point,
       bool fp32_output,
       c10::string_view binary_attr,
@@ -1836,7 +1839,7 @@ class QConvoneDNN final {
         act, act_scale, act_zero_point,
         weight, weight_scales, weight_zero_points,
         bias, stride, padding, dilation, /*transposed*/false,
-        groups, output_scale, output_zero_point,
+        groups, inv_output_scale, output_zero_point,
         accum, accum_scale, accum_zero_point,
         /*fp32_output*/false, binary_attr, alpha,
         unary_attr, unary_scalars, unary_algorithm
