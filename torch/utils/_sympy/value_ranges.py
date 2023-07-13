@@ -414,6 +414,14 @@ class SymPyValueRangeAnalysis:
     def ceil(cls, x):
         return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
 
+    # It's used in some models on symints
+    @staticmethod
+    def sqrt(x):
+        x = ValueRanges.wrap(x)
+        if x.lower < 0:
+            return ValueRanges.unknown()
+        return ValueRanges.increasing_map(x, sympy.sqrt)
+
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def __init__(self):
@@ -508,13 +516,6 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         return cls.add(a, cls.neg(b))
 
     @staticmethod
-    def sqrt(x):
-        x = ValueRanges.wrap(x)
-        if x.lower < 0:
-            return ValueRanges.unknown()
-        return ValueRanges.increasing_map(x, sympy.sqrt)
-
-    @staticmethod
     def where(a, b, c):
         b = ValueRanges.wrap(b)
         c = ValueRanges.wrap(c)
@@ -533,7 +534,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
 def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> ValueRanges:
     unbounded_vars = expr.free_symbols - ranges.keys()
     if unbounded_vars:
-        dynamic_shapes = {s for s in unbounded_vars if s.name[0] == "s"}
+        dynamic_shapes = {s for s in unbounded_vars if s.name[0] == "s"}  # type: ignore[attr-defined]
         if dynamic_shapes != unbounded_vars:
             return ValueRanges.unknown()
         else:
