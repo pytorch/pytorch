@@ -299,11 +299,11 @@ class OptimizeForInferenceTemplate(TestCase):
 
     def test_folded_conv_binary(self):
         class M(torch.nn.Module):
-            def __init__(self, binary_fn, other_shape):
+            def __init__(self, binary_fn, other_shape, device):
                 super().__init__()
-                self.conv1 = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
+                self.conv1 = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1).to(device)
                 self.binary_fn = binary_fn
-                self.other = torch.randn(other_shape)
+                self.other = torch.randn(other_shape).to(device)
 
             def forward(self, x):
                 x = self.conv1(x)
@@ -323,7 +323,7 @@ class OptimizeForInferenceTemplate(TestCase):
         other_shapes = [[1, 16, 1, 1], [16, 1, 1]]
         x = torch.rand(3, 3, 32, 32).to(self.device)
         for binary_fn, other_shape in itertools.product(binary_list, other_shapes):
-            mod = M(binary_fn, other_shape).eval().to(self.device)
+            mod = M(binary_fn, other_shape, device).eval()
             with torch.no_grad():
                 out_eager = mod(x)
                 out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
