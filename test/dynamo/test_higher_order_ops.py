@@ -1561,6 +1561,8 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
+
+class FunctorchHigherOrderOperatorTest(torch._dynamo.test_case.TestCase):
     def _grad_compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
         actual = fn(*inputs)
