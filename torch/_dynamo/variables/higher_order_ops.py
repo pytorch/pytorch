@@ -860,6 +860,9 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
+        if len(kwargs) != 0:
+            unimplemented("out_dtype does not handle kwargs")
+
         p_args = tuple(arg.as_proxy() for arg in args)
         op = p_args[0]
         output_dtype = p_args[1]
