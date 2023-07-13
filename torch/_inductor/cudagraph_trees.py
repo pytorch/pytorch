@@ -46,7 +46,6 @@ import operator
 import sys
 import threading
 import traceback
-import types
 import warnings
 import weakref
 from collections import defaultdict
@@ -892,7 +891,7 @@ class CUDAGraphNode:
                     self._tensor_metadata(out, ignore_storage_offset=False)
                 )
             else:
-                assert isinstance(out, (int, types.NoneType)), type(out)
+                assert isinstance(out, (int, type(None))), type(out)
                 self.outputs_metadata.append(out)
 
         self.graph.replay()
@@ -958,7 +957,7 @@ class CUDAGraphNode:
             zip(self.output_storage_alias, self.outputs_metadata)
         ):
             if not isinstance(metadata, dict):  # tensor metadata
-                assert isinstance(metadata, (int, types.NoneType))
+                assert isinstance(metadata, (int, type(None)))
                 outputs.append(metadata)
                 continue
 
@@ -998,7 +997,10 @@ class CUDAGraphNode:
         out_alias_info: Optional[OutputAliasInfo],
         metadata: Union[Dict[str, Any], int],
     ) -> Union[UntypedStorage, None, int]:
-        if isinstance(metadata, (int, types.NoneType)) or out_alias_info is UnaliasedStorage:
+        if (
+            isinstance(metadata, (int, type(None)))
+            or out_alias_info is UnaliasedStorage
+        ):
             return None
 
         if isinstance(out_alias_info, AliasesPriorGraphOutput):
