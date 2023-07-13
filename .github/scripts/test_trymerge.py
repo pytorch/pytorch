@@ -11,7 +11,7 @@ import json
 import os
 import warnings
 from hashlib import sha256
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from unittest import main, mock, TestCase
 from urllib.error import HTTPError
 
@@ -194,21 +194,6 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
 
 def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
     raise RuntimeError("testing")
-
-
-def mocked_get_merge_base_gh_fetch_url(
-    url: str,
-    *,
-    headers: Optional[Dict[str, str]] = None,
-    data: Optional[Dict[str, Any]] = None,
-    method: Optional[str] = None,
-    reader: Callable[[Any], Any] = lambda x: x.read(),
-) -> Any:
-    return {
-        "merge_base_commit": {
-            "sha": "mocked-sha-value",
-        }
-    }
 
 
 def empty_flaky_rules() -> List[FlakyRule]:
@@ -638,40 +623,39 @@ class TestTryMerge(TestCase):
                 case["expected"], is_broken_trunk(case["head_job"], case["base_jobs"])
             )
 
-    @mock.patch("trymerge.gh_fetch_url", side_effect=mocked_get_merge_base_gh_fetch_url)
     def test_get_merge_base(
         self,
-        mock_gh_fetch_url: Any,
         mock_gh_graphql: Any,
         mock_get_rockset_results: Any,
         mock_read_flaky_rules: Any,
     ) -> None:
         pr = GitHubPR("pytorch", "pytorch", 104121)
-        self.assertEqual("mocked-sha-value", pr.get_merge_base())
 
-        # Make sure that consecutive calls will use the same merge base instead of
-        # making another query
-        self.assertEqual("mocked-sha-value", pr.get_merge_base())
-        mock_gh_fetch_url.assert_called_once()
+        mocked_merged_base = "mocked-sha"
+        with mock.patch(
+            "trymerge.gh_fetch_merge_base", return_value=mocked_merged_base
+        ) as mocked_gh_fetch_merge_base:
+            self.assertEqual(mocked_merged_base, pr.get_merge_base())
+
+            # Make sure that consecutive calls will use the same merge base instead of
+            # making another query
+            self.assertEqual(mocked_merged_base, pr.get_merge_base())
+            mocked_gh_fetch_merge_base.assert_called_once()
 
 
 @mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+@mock.patch("trymerge.gh_fetch_merge_base", return_value="")
 class TestBypassFailures(TestCase):
     def test_get_classifications(self, *args: Any) -> None:
         flaky_rules = [
             FlakyRule("distributed", ["##[error]The operation was canceled."])
         ]
         pr = GitHubPR("pytorch", "pytorch", 92863)
-        with mock.patch(
-            "trymerge.gh_fetch_url",
-            return_value={"merge_base_commit": {"sha": pr.info["baseRefOid"]}},
-        ) as mocked_gh_fetch_url:
-            checks = pr.get_checkrun_conclusions()
-            checks = get_classifications(
-                checks, pr.last_commit()["oid"], pr.get_merge_base(), flaky_rules, []
-            )
-
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            checks, pr.last_commit()["oid"], pr.get_merge_base(), flaky_rules, []
+        )
         self.assertTrue(
             checks[
                 "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.4xlarge)"
@@ -695,7 +679,6 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 2)
 
-    @mock.patch("trymerge.gh_fetch_url", side_effect=mocked_get_merge_base_gh_fetch_url)
     def test_get_classifications_unstable(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 104312)
         checks = pr.get_checkrun_conclusions()
@@ -717,15 +700,10 @@ class TestBypassFailures(TestCase):
         # This PR had one broken trunk failure but it was run on a different shard
         # than the one on the base commit. This should still count as broken trunk
         pr = GitHubPR("pytorch", "pytorch", 104214)
-        with mock.patch(
-            "trymerge.gh_fetch_url",
-            return_value={"merge_base_commit": {"sha": pr.info["baseRefOid"]}},
-        ) as mocked_gh_fetch_url:
-            checks = pr.get_checkrun_conclusions()
-            checks = get_classifications(
-                checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
-            )
-
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
+        )
         pending, failed = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
@@ -738,7 +716,6 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 1)
 
-    @mock.patch("trymerge.gh_fetch_url", side_effect=mocked_get_merge_base_gh_fetch_url)
     def test_ignore_current(self, *args: Any) -> None:
         # Test various interactions of the failure classifier, mostly that
         # ignore current checks takes precedence over classifications for flaky
@@ -766,15 +743,10 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(len(failed) == 1)
 
-        with mock.patch(
-            "trymerge.gh_fetch_url",
-            return_value={"merge_base_commit": {"sha": pr.info["baseRefOid"]}},
-        ) as mocked_gh_fetch_url:
-            # No flaky rules
-            checks = get_classifications(
-                checks, pr.last_commit()["oid"], pr.get_merge_base(), [], [flaky]
-            )
-
+        # No flaky rules
+        checks = get_classifications(
+            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], [flaky]
+        )
         self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
         self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
         _, failed = categorize_checks(
@@ -799,7 +771,6 @@ class TestBypassFailures(TestCase):
 
     @mock.patch("trymerge.read_flaky_rules", side_effect=xla_is_flaky_rules)
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
-    @mock.patch("trymerge.gh_fetch_url", side_effect=mocked_get_merge_base_gh_fetch_url)
     def test_dont_ignore_flaky_failures(self, *args: Any) -> None:
         """Regression test for https://github.com/pytorch/test-infra/issues/4126"""
         pr = GitHubPR("pytorch", "pytorch", 100369)

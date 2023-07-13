@@ -27,6 +27,7 @@ from warnings import warn
 import yaml
 from github_utils import (
     gh_fetch_json_list,
+    gh_fetch_merge_base,
     gh_fetch_url,
     gh_post_commit_comment,
     gh_post_pr_comment,
@@ -711,23 +712,19 @@ class GitHubPR:
             return self.merge_base
 
         last_commit_oid = self.last_commit()["oid"]
-        # Get the merge base using the GitHub REST API. This is the same as using
-        # git merge-base without the need to have git
-        json_data = gh_fetch_url(
-            f"https://api.github.com/repos/{self.org}/{self.project}/compare/{last_commit_oid}...{self.base_ref()}",
-            headers={"Accept": "application/vnd.github.v3+json"},
-            reader=json.load,
+        self.merge_base = gh_fetch_merge_base(
+            self.org, self.project, last_commit_oid, self.base_ref()
         )
-
-        if "merge_base_commit" in json_data:
-            self.merge_base = str(json_data["merge_base_commit"]["sha"])
 
         # Fallback to baseRefOid if the API call fails, i.e. rate limit. Note that baseRefOid
         # points to the base ref associated with the PR or, in other words, the head of main
         # when the PR is created or rebased. This is not necessarily the merge base commit,
         # but it could serve as a fallback in most cases and it's readily available as part
         # of the PR info
-        return self.merge_base if self.merge_base else str(self.info["baseRefOid"])
+        if not self.merge_base:
+            self.merge_base = cast(str, self.info["baseRefOid"])
+
+        return self.merge_base
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
