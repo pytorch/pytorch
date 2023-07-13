@@ -214,6 +214,24 @@ class ModuleWithGradFunc(torch.nn.Module):
         return self.f(x)
 
 
+class CustomTupleResultAutogradFunc(torch.autograd.Function):
+    # Test tuple return
+    @staticmethod
+    def forward(ctx, foo):
+        result = foo + foo
+        result = result + foo
+        return (result, result, result)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output
+
+
+class CustomTupleResultModule(torch.nn.Module):
+    def forward(self, foo):
+        return CustomTupleResultAutogradFunc().apply(foo)
+
+
 class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
     # Sound behaviors, tested for working capture
     def test_autograd_function_equivalence(self):
@@ -318,6 +336,16 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         compiled_model = torch._dynamo.optimize("eager")(mod)
+        after = compiled_model(*args, **kwargs)
+        self.assertEqual(before, after)
+
+    def test_function_custom_tuple_return(self):
+        mod = CustomTupleResultModule()
+        args, kwargs = ([torch.rand([1], requires_grad=True)], {})
+        before = mod(*args, **kwargs)
+
+        torch._dynamo.reset()
+        compiled_model = torch._dynamo.optimize("eager", nopython=True)(mod)
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 

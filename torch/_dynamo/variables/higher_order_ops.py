@@ -61,39 +61,44 @@ def validate_args_and_maybe_create_graph_inputs(
     from .builder import wrap_fx_proxy
 
     args = []
-    for a in sub_args:
-        assert isinstance(a, VariableTracker)
+
+    # One argument to graph per sub_args
+    def add_subarg(subarg):
+        assert not isinstance(
+            subarg, torch.Tensor
+        ), "Tensors should already be tracked?"
+        if subarg is None:
+            subarg = ConstantVariable(None)
 
         if isinstance(a, ConstantVariable):
+            # This arg is not used in the body of the higher order op.
+            # Currently, this new input is added to make the calls
+            # happy, which expect a fixed number of arguments. In
+            # future, we can clean this up.
+            tracer.create_graph_input("const")
             # Ensures that we recompile when the constant value changes
-            a.add_guard(GuardBuilder.CONSTANT_MATCH)
-
-            if manually_set_subgraph_inputs:
-                # This arg is not used in the body of the higher order op.
-                # Currently, this new input is added to make the calls
-                # happy, which expect a fixed number of arguments. In
-                # future, we can clean this up.
-                tracer.create_graph_input("const")
-            new_arg = a
-        elif isinstance(a, TensorVariable):
-            if manually_set_subgraph_inputs:
-                new_proxy = tracer.create_graph_input(a.as_proxy().node.name)
-                example_value = a.as_proxy().node.meta["example_value"]
-                new_arg = wrap_fx_proxy(
-                    tx=tx, proxy=new_proxy, example_value=example_value
-                )
-            else:
-                new_arg = a
-        elif isinstance(a, AutogradFunctionContextVariable):
-            if manually_set_subgraph_inputs:
-                tracer.create_graph_input(a.as_proxy().node.name)
-            new_arg = a
+            subarg.add_guard(GuardBuilder.CONSTANT_MATCH)
+            new_arg = subarg
+        elif isinstance(subarg, TensorVariable):
+            new_proxy = tracer.create_graph_input(subarg.as_proxy().node.name)
+            example_value = subarg.as_proxy().node.meta["example_value"]
+            new_arg = wrap_fx_proxy(tx=tx, proxy=new_proxy, example_value=example_value)
+        elif isinstance(subarg, AutogradFunctionContextVariable):
+            tracer.create_graph_input(subarg.as_proxy().node.name)
+            new_arg = subarg
+        elif subarg.has_unpack_var_sequence(tx):
+            new_arg = []
+            for sub_a in subarg.unpack_var_sequence(tx):
+                new_arg.append(add_subarg(sub_a))
+            new_arg = subarg.python_type()(new_arg)
         else:
             raise unimplemented(
                 "HigherOrderOperator with body that accepts non-Tensors as input"
             )
+        return new_arg
 
-        args.append(new_arg)
+    for a in sub_args:
+        args.append(add_subarg(a))
     return args
 
 
@@ -772,8 +777,20 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             *(arg.as_proxy() for arg in args),
             *(arg for arg in body_lifted_freevars.keys()),
         )
-        r = body_r.as_proxy().node.meta["example_value"]
-        example_value = r
+
+        from . import TensorVariable
+
+        def _unpack(item):
+            if isinstance(item, TensorVariable):
+                return item.as_proxy().node.meta["example_value"]
+            if item.has_unpack_var_sequence(tx):
+                r_items = []
+                for sub_item in body_r.unpack_var_sequence(tx):
+                    r_items.append(_unpack(sub_item))
+                return item.python_type()(r_items)
+            raise RuntimeError("Unsupported autograd w/ grad return type.")
+
+        example_value = _unpack(body_r)
 
         _, p_kwargs = proxy_args_kwargs([], kwargs)
 
