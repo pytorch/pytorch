@@ -147,9 +147,6 @@ Tensor masked_softmax(
     return at::_nested_tensor_softmax_with_shape(attn_scores, query);
   }
   if (attn_mask && attn_mask->dtype() != at::kBool) {
-    TORCH_WARN(
-        "Converting mask without torch.bool dtype to bool; this will "
-        "negatively affect performance. Prefer to use a boolean mask directly.");
     attn_mask = attn_mask->to(at::kBool);
   }
   if (attn_mask) {
