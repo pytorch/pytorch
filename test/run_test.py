@@ -24,13 +24,13 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_report_path,
     IS_CI,
-    is_slow_gradcheck_env,
     parser as common_parser,
     retry_shell,
     set_cwd,
     shell,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW_GRADCHECK,
 )
 from torch.utils import cpp_extension
 
@@ -1397,7 +1397,7 @@ def get_selected_tests(options) -> List[ShardedTest]:
             "PyTorch is built without LAPACK support.",
         )
 
-    if is_slow_gradcheck_env():
+    if TEST_WITH_SLOW_GRADCHECK:
         selected_tests = exclude_tests(
             TESTS_NOT_USING_GRADCHECK,
             selected_tests,

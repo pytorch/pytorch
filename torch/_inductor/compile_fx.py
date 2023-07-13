@@ -203,6 +203,8 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                 compiled = inner_compile(
                     clone_graph(gm), example_inputs, **kwargs_patched
                 )
+                if torch._guards.TracingContext.get().output_strides:
+                    torch._guards.TracingContext.get().output_strides.clear()
 
                 def materialize(x):
                     if isinstance(x, (torch.SymInt, torch.SymFloat)):
@@ -364,7 +366,6 @@ def compile_fx_inner(
                 is_inference=is_inference,
             )
         else:
-            log.debug("disabled cudagraphs because %s", cudagraph_fail_reasons)
             BoxedBool.disable(cudagraphs)
 
             # See [Backward Generation Handling]
@@ -402,6 +403,10 @@ def compile_fx_inner(
                     perf_hint_log.warning(
                         "skipping cudagraphs due to multiple device indexes"
                     )
+                else:
+                    perf_hint_log.warning("skipping cudagraphs for unknown reason")
+            else:
+                perf_hint_log.warning("skipping cudagraphs for unknown reason")
 
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
@@ -494,6 +499,19 @@ def fx_codegen_and_compile(
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
+            context = torch._guards.TracingContext.get()
+            if context is not None and context.output_strides is not None:
+                # Return the output strides to the caller via TracingContext
+                assert len(context.output_strides) == 0
+                for out in graph.graph_outputs:
+                    if hasattr(out, "layout"):
+                        context.output_strides.append(
+                            tuple(
+                                V.graph.sizevars.size_hint(s) for s in out.layout.stride
+                            )
+                        )
+                    else:
+                        context.output_strides.append(None)
             compiled_fn = graph.compile_to_fn()
             compiled_graph = CompiledFxGraph(
                 compiled_artifact=compiled_fn,
@@ -962,6 +980,7 @@ def compile_fx(
                     original_output_start_index : original_output_start_index
                     + num_orig_model_outputs
                 ]
+                if isinstance(n, torch.fx.Node)
             }
 
         return inner_compile(
