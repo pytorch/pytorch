@@ -745,15 +745,15 @@ _scaled_dot_product_flash_attention_cpu(
   at::Tensor output = at::empty({batchSize, qSize, num_head, headSize}, query.options());
   const auto dtype = query.scalar_type();
   const auto accumulate_dtype = toOpMathType(dtype);
-  at::Tensor logsumexp = at::empty({batchSize, is_training ? qSize : 0, num_head, num_head},
+  at::Tensor logsumexp = at::empty({batchSize, is_training ? qSize : 0, num_head},
       query.options().dtype(accumulate_dtype));
-  at::Tensor cum_seq_q = Tensor();
-  at::Tensor cum_seq_k = Tensor();
+  at::Tensor cum_seq_q = at::empty({0}, at::kLong);
+  at::Tensor cum_seq_k = at::empty({0}, at::kLong);
   int64_t max_q = 0;
   int64_t max_k = 0;
-  at::Tensor philox_seed = Tensor();
-  at::Tensor philox_offset = Tensor();
-  at::Tensor debug_attn_mask = Tensor();
+  at::Tensor philox_seed = at::empty({0}, at::kLong);
+  at::Tensor philox_offset = at::empty({0}, at::kLong);
+  at::Tensor debug_attn_mask = at::empty({0}, query.options());
 
   flash_attention_kernel(kCPU, output, logsumexp, cum_seq_q, cum_seq_k,
       max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
@@ -763,8 +763,8 @@ _scaled_dot_product_flash_attention_cpu(
   logsumexp = logsumexp.transpose(1, 2);
 
   return std::make_tuple(std::move(output), std::move(logsumexp),
-      cum_seq_q, cum_seq_k, max_q, max_k,
-      philox_seed, philox_offset, debug_attn_mask);
+      std::move(cum_seq_q), std::move(cum_seq_k), max_q, max_k,
+      std::move(philox_seed), std::move(philox_offset), std::move(debug_attn_mask));
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor>
