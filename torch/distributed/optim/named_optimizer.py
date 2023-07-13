@@ -63,8 +63,8 @@ class _NamedOptimizer(optim.Optimizer):
         self,
         named_parameters: Mapping[str, Union[torch.Tensor, ShardedTensor]],
         optimizer_class: optim.Optimizer,
-        param_groups: Collection[Mapping[str, Any]] = None,
-        module: nn.Module = None,
+        param_groups: Optional[Collection[Mapping[str, Any]]] = None,
+        module: Optional[nn.Module] = None,
         *args,
         **kwargs,
     ) -> None:
@@ -303,7 +303,7 @@ class _NamedOptimizer(optim.Optimizer):
 
         This allows doing in-place loading of optimizer state from a checkpoint.
         """
-        for _, param in self.named_parameters.items():
+        for param in self.named_parameters.values():
             if param.requires_grad:
                 t = torch.zeros_like(param)
                 param.grad = torch.autograd.Variable(t)
