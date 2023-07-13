@@ -6215,6 +6215,35 @@ class CommonTemplate:
             (torch.randn(32), torch.randn(32)),
         )
 
+    def test_conv_with_unfold(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.kv = torch.nn.Conv2d(
+                    256, 384, kernel_size=(1, 1), stride=(1, 1), bias=False
+                )
+
+            def forward(self, x):
+                B, _, H, W = x.shape
+                num_h_blocks = H // 8
+                num_w_blocks = W // 8
+                num_blocks = num_h_blocks * num_w_blocks
+
+                kv = self.kv(x)
+                kv = F.pad(kv, [2, 2, 2, 2])
+                kv = (
+                    kv.unfold(2, 12, 8)
+                    .unfold(3, 12, 8)
+                    .reshape(B * 8, 48, num_blocks, -1)
+                    .permute(0, 2, 3, 1)
+                )
+                return kv
+
+        self.common(
+            Model(),
+            (torch.randn(8, 256, 16, 16),),
+        )
+
     def test_inplace_where_pointwise(self):
         # https://github.com/pytorch/pytorch/issues/96446
         def fn(a, b):
