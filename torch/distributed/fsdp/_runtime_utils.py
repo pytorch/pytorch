@@ -349,11 +349,10 @@ def _unshard(
     """
     if not handle:
         return
-    any_ran_pre_unshard = False
+    ran_pre_unshard = False
     with state._device_handle.stream(pre_unshard_stream):
         ran_pre_unshard = handle.pre_unshard()
-        any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
-    if any_ran_pre_unshard:
+    if ran_pre_unshard:
         unshard_stream.wait_stream(pre_unshard_stream)
     if state.limit_all_gathers:
         event = state._free_event_queue.dequeue_if_needed()

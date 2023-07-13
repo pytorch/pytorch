@@ -352,9 +352,8 @@ class _ExecOrderData:
         fqns: List[List[str]] = []
         if handle:
             flat_param = handle.flat_param
-            if flat_param not in self.param_to_fqn:
-                return
-            fqns.append(self.param_to_fqn[flat_param])
+            if flat_param in self.param_to_fqn:
+                fqns.append(self.param_to_fqn[flat_param])
         return fqns
 
     def next_iter(self):
