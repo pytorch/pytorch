@@ -898,6 +898,7 @@ def _post_backward_hook(
                 # reduce-scatter instead of immediately after resharding
                 handle._use_sharded_grad_views()
                 if handle._has_optim_in_backward:
+                    handle.prepare_gradient_for_optim()
                     for orig_param in handle.flat_param._params:
                         # checking grad for None also filters out params
                         # that don't belong to this rank
@@ -910,17 +911,9 @@ def _post_backward_hook(
                             # GPU after refactoring.
                             for optim in orig_param._in_backward_optimizers:
                                 optim.step()
-                            # Set orig param gradient to None to maintain the
-                            # invariant that if flat_param.grad is None, then
-                            # each orig param grad is None.
-                            orig_param.grad = None
-                    # flat_param.grad is set to None for sharded strategies, set it here
-                    # for no_shard.
-                    # TODO (rohan-varma): see if this can be absorbed into a sharded_grad setter,
-                    # similar to sharded_grad property.
-                    if not handle.uses_sharded_strategy:
-                        handle.flat_param.grad = None
-                    handle.flat_param._saved_grad_shard = None
+
+                            optim.zero_grad(set_to_none=True)
+                    handle._reset_flat_param_grad_info_if_needed()
                     if handle._offload_params:
                         handle.flat_param._cpu_grad = None
 
@@ -1132,9 +1125,10 @@ def _finalize_params(
                 # `no_sync()` iterations, and `_saved_grad_shard` remains the
                 # sharded gradient from the last synchronized iteration
                 continue
-            # When optim runs in backward, this is basically a noop, since handle's
-            # grad is set to None.
-            handle.prepare_gradient_for_optim()
+            # Skip call to prepare_gradient_for_optim if we've already run the
+            # optimizer in backward pass.
+            if not handle._has_optim_in_backward:
+                handle.prepare_gradient_for_optim()
             _p_assert(
                 hasattr(flat_param, "_post_backward_called"),
                 "Expects `_post_backward_called` to be set on the `FlatParameter`",
