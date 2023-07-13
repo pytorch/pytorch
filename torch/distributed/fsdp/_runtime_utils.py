@@ -14,7 +14,6 @@ from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed import get_backend, get_world_size
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
-from torch.distributed.distributed_c10d import _get_group_tag
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
     _FSDPState,
@@ -221,13 +220,7 @@ def _init_device_mesh(
 
     device_type = root_state.compute_device.type
     mesh_tensor = torch.arange(get_world_size(root_state.process_group))
-    device_mesh = DeviceMesh(device_type, mesh_tensor, _init_process_groups=False)
-    device_mesh._dim_group_infos = [
-        (
-            _get_group_tag(root_state.process_group),
-            mesh_tensor.tolist(),
-        )
-    ]
+    device_mesh = DeviceMesh(device_type, mesh_tensor, _validate_mesh=False)
     return device_mesh
 
 

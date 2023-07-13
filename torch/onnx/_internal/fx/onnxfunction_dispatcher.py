@@ -433,7 +433,7 @@ class _OpSchemaWrapper:
             constraint.type_param_str: set(constraint.allowed_type_strs)
             for constraint in self.op_schema.type_constraints
         }
-        self.attributes = set(self.op_schema.attributes)
+        self.attributes = self.op_schema.attributes
         self._matching_score: int = 0
 
     @property
@@ -494,11 +494,20 @@ class _OpSchemaWrapper:
                 # of this input defined in the OpSchema, we know the function
                 # and the input are not compatible
                 return False
-        # TODO: attributes dtype is not supported right now, so we just check their existence.
-        if set(function_attributes) != self.attributes:
+        # Check attributes numbers are the same
+        if set(function_attributes) != set(self.attributes):
             # If the attributes of the OpSchema and the attributes don't match,
             # we know the function and the input are not compatible
             return False
+        # Check attribute dtypes
+        for attribute_name, attribute in function_attributes.items():
+            attribute_onnx_type = fx_type_utils.from_python_type_to_onnx_attribute_type(
+                type(attribute)
+            )
+            if attribute_onnx_type != self.attributes[attribute_name].type:
+                # If the attribute type of the OpSchema and the attribute type don't match,
+                # we know the function and the input are not compatible
+                return False
         return True
 
     @_beartype.beartype
@@ -538,9 +547,25 @@ class _OpSchemaWrapper:
                 # of this input defined in the OpSchema, we know the function
                 # and the input are compatible
                 self._matching_score += 1
-        # The penalty is applied to those functions which have different attributes.
-        diff = self.attributes.symmetric_difference(set(attributes))
-        self._matching_score -= len(diff)
+        # NOTE: The penalty is applied to those functions which have different attributes.
+        for attribute_name, attribute_proto in self.attributes.items():
+            if attribute_name not in attributes:
+                # If the attribute of the OpSchema and the attribute don't match,
+                # we know the function and the input are not compatible
+                self._matching_score -= 1
+                continue
+            attribute = attributes[attribute_name]
+            attribute_onnx_type = fx_type_utils.from_python_type_to_onnx_attribute_type(
+                type(attribute)
+            )
+            if attribute_onnx_type != attribute_proto.type:
+                # If the attribute type of the OpSchema and the attribute type don't match,
+                # we know the function and the input are not compatible
+                self._matching_score -= 1
+        # If there is any unexpected attribute in attributes, we know the function
+        # and the input are not compatible
+        extra_attrbute_counts = set(attributes).difference(set(self.attributes))
+        self._matching_score -= len(extra_attrbute_counts)
 
     # NOTE: Referenced from onnxscript internal function.
     # Importing this function makes the code less robust, as it is not a public API.

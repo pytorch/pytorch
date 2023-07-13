@@ -317,6 +317,10 @@ class TestOpSchemaWrapper(common_utils.TestCase):
                 name="non_perfect_match_due_to_non_tensor_inputs",
             ),
             common_utils.subtest(
+                ([torch.randn(3, 4), torch.randn(3, 4), torch.randn(3, 4)], {}, False),
+                name="non_perfect_match_due_to_too_many_inputs",
+            ),
+            common_utils.subtest(
                 ([torch.randn(3, 4), torch.randn(3, 4)], {"wrong_kwargs": 2.0}, False),
                 name="non_perfect_match_due_to_wrong_kwargs",
             ),
@@ -383,7 +387,7 @@ class TestOpSchemaWrapper(common_utils.TestCase):
             common_utils.subtest(
                 (
                     [torch.randn(3, 4), torch.tensor(3)],
-                    {"dtype": torch.float},
+                    {"dtype": 2},  # at this point, dtype should be converted to int
                     ops.core.aten_new_full,
                     1,
                 ),
@@ -401,7 +405,7 @@ class TestOpSchemaWrapper(common_utils.TestCase):
             common_utils.subtest(
                 (
                     [torch.randn(3, 4), torch.tensor(3)],
-                    {"dtype": torch.float},
+                    {"dtype": 2},  # at this point, dtype should be converted to int
                     ops.core.aten_new_full_dtype,
                     2,
                 ),
