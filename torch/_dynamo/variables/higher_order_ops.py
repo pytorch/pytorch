@@ -67,6 +67,7 @@ def validate_args_and_maybe_create_graph_inputs(
         assert isinstance(a, VariableTracker)
 
         if isinstance(a, ConstantVariable):
+            # Ensures that we recompile when the constant value changes
             subarg.add_guard(GuardBuilder.CONSTANT_MATCH)
 
             if manually_set_subgraph_inputs:
@@ -75,7 +76,6 @@ def validate_args_and_maybe_create_graph_inputs(
                 # happy, which expect a fixed number of arguments. In
                 # future, we can clean this up.
                 tracer.create_graph_input("const")
-            # Ensures that we recompile when the constant value changes
             new_arg = subarg
         elif isinstance(subarg, TensorVariable):
             if manually_set_subgraph_inputs:
