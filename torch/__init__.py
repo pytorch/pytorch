@@ -417,7 +417,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type]
+        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type, call-overload]
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
@@ -1316,7 +1316,7 @@ if TYPE_CHECKING:
     # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
-    from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
+    from torch._C._VariableFunctions import *  # type: ignore[assignment, misc] # noqa: F403
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
     del segment_reduce
