@@ -6497,7 +6497,7 @@ class TestQuantizedConv(TestCase):
                 pads,
                 dilations,
                 groups,
-                Y_scale,
+                1.0 / Y_scale,  # Kernel expects pass in reciprocal of scale in fake quant
                 Y_zero_point,
                 fp32_output,
                 post_op.binary_attr,
@@ -6519,7 +6519,7 @@ class TestQuantizedConv(TestCase):
                 pads,
                 dilations,
                 groups,
-                Y_scale,
+                1.0 / Y_scale,  # Kernel expects pass in reciprocal of scale in fake quant
                 Y_zero_point,
                 fp32_output,
                 post_op.unary_attr,
