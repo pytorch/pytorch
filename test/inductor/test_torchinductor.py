@@ -36,6 +36,7 @@ from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
+    IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -76,6 +77,8 @@ skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
 vec_dtypes = [torch.float, torch.bfloat16]
+
+libfoo = None
 
 
 def run_fw_bw_and_get_code(fn):
@@ -6583,24 +6586,22 @@ class CommonTemplate:
     def test_custom_op(self):
         import torch.library
 
-        @functools.lru_cache()
-        def define_op(foo):
-            foo.define("custom(Tensor self) -> Tensor")
-
-        foo = torch.library.Library("foo", "DEF")
-        define_op(foo)
-
-        @torch.library.impl(foo, "custom", "CPU")
         def foo_cpu(x):
             return 3 * x
 
-        @torch.library.impl(foo, "custom", "CUDA")
         def foo_cuda(x):
             return 3 * x
 
-        @torch.library.impl(foo, "custom", "Meta")
         def foo_meta(x):
             return torch.empty_like(x)
+
+        global libfoo
+        if libfoo is None:
+            libfoo = torch.library.Library("foo", "DEF")
+            libfoo.define("custom(Tensor self) -> Tensor")
+            libfoo.impl("custom", foo_cpu, "CPU")
+            libfoo.impl("custom", foo_cuda, "CUDA")
+            libfoo.impl("custom", foo_meta, "Meta")
 
         def fn(x):
             a = torch.nn.functional.relu(x)
@@ -7074,6 +7075,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     fn_opt(inps)
 
         @skipIfRocm
+        @unittest.skipIf(IS_FBCODE, "fbcode system python does not provide torch")
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")
