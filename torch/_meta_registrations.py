@@ -318,26 +318,31 @@ def meta_index_select_out(self, dim, index, out):
     return out.copy_(torch.index_select(self, dim, index))
 
 
-def _multi_margin_loss_shape_check(ndims, input, target):
-    valid_inputs = (
+def _multi_margin_loss_shape_check(ndims, input, target, weight):
+    torch._check(
         (ndims == 2 and input.size(1) != 0)
         or (ndims == 1 and input.size(0) != 0)
-        or ndims == 0
+        or ndims == 0,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
     )
+
     if ndims <= 1:
         nframe = 1
         dim = 1 if ndims == 0 else input.size(0)
     else:
         nframe = input.size(0)
         dim = input.size(1)
+
     torch._check(
-        valid_inputs,
-        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+        target.dim() <= 1 and target.numel() == nframe,
+        lambda: f"inconsistent target size, expected {nframe} but got {target.shape}",
     )
-    torch._check(
-        valid_inputs and target.ndim <= 1 and target.numel() == nframe,
-        lambda: f"inconsistent target size, got: {target.shape}",
-    )
+    if weight is not None:
+        torch._check(
+            weight.ndim <= 1 and weight.numel() == dim,
+            lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",
+        )
+
     return nframe, dim
 
 
@@ -353,7 +358,7 @@ def meta_multi_margin_loss(
 ) -> Tensor:
     ndims = input.ndim
     torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
-    nframe, _ = _multi_margin_loss_shape_check(ndims, input, target)
+    nframe, _ = _multi_margin_loss_shape_check(ndims, input, target, weight)
     if reduction == Reduction.NONE.value and target.ndim > 0:
         return input.new_empty(nframe)
     else:
@@ -373,7 +378,7 @@ def meta_multi_margin_loss_backward(
 ) -> Tensor:
     ndims = input.ndim
     torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
-    _multi_margin_loss_shape_check(ndims, input, target)
+    _multi_margin_loss_shape_check(ndims, input, target, weight)
     return input.new_empty(input.shape)
 
 
@@ -1057,7 +1062,7 @@ def _linalg_svd_meta(
     A: Tensor,
     full_matrices: bool = False,
     compute_uv: bool = True,
-    driver: str = None,
+    driver: Optional[str] = None,
 ):
     checkIsMatrix(A, "linalg.svd")
     checkFloatingOrComplex(A, "linalg.svd")
@@ -1200,7 +1205,7 @@ def linalg_solve_triangular_meta(
     upper: bool,
     left: bool = True,
     unitriangular: bool = False,
-    out: Tensor = None,
+    out: Optional[Tensor] = None,
 ) -> Tensor:
     if out is None:
         out = A.new_empty([0])
@@ -4748,8 +4753,8 @@ def upsample_nearest2d_backward(
     grad_output: Tensor,
     output_size: Sequence[Union[int, torch.types.SymInt]],
     input_size: Sequence[Union[int, torch.types.SymInt]],
-    scales_h: float = None,
-    scales_w: float = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
 ):
     full_output_size = upsample_common_check(
         input_size, output_size, num_spatial_dims=2
