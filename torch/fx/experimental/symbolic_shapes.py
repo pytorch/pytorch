@@ -34,7 +34,7 @@ from torch import (  # noqa: F401
 )
 from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
 from torch.utils._sympy.functions import FloorDiv, LShift, RShift
-from torch.utils._sympy.value_ranges import SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
+from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame
 from torch._utils_internal import signpost_event
 
