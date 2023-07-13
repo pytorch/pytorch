@@ -1259,5 +1259,4 @@ def try_find_schema(schemas, args, kwargs):
         if schema_match(schema, args, kwargs):
             return schema
 
-    # TODO: should we ever return None here?
     return None
