@@ -26,11 +26,13 @@ from trymerge import (
     gh_get_team_members,
     gh_graphql,
     GitHubPR,
+    is_broken_trunk,
     main as trymerge_main,
     MandatoryChecksMissingError,
     MergeRule,
     PostCommentError,
     read_merge_rules,
+    remove_job_name_suffix,
     validate_revert,
 )
 
@@ -490,6 +492,137 @@ class TestTryMerge(TestCase):
         self.assertEqual(pr.get_changed_submodules(), ["third_party/kineto"])
         self.assertFalse(pr.has_invalid_submodule_updates())
 
+    def test_remove_job_name_suffix(self, *args: Any) -> None:
+        test_cases = [
+            {
+                "name": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default, 1, 5, linux.g5.4xlarge.nvidia.gpu)",
+                "expected": "linux-bionic-cuda12.1-py3.10-gcc9-sm86 / test (default)",
+            },
+            {
+                "name": "android-emulator-build-test / build-and-test (default, 1, 1, ubuntu-20.04-16x)",
+                "expected": "android-emulator-build-test / build-and-test (default)",
+            },
+            {
+                "name": "linux-focal-rocm5.4.2-py3.8 / build",
+                "expected": "linux-focal-rocm5.4.2-py3.8 / build",
+            },
+            {
+                "name": "libtorch-cpu-shared-with-deps-release-build",
+                "expected": "libtorch-cpu-shared-with-deps-release-build",
+            },
+            {
+                "name": "manywheel-py3_8-cuda11_8-test / test",
+                "expected": "manywheel-py3_8-cuda11_8-test / test",
+            },
+            {
+                "name": "lintrunner / linux-job",
+                "expected": "lintrunner / linux-job",
+            },
+            {
+                "name": "Test `run_test.py` is usable without boto3/rockset",
+                "expected": "Test `run_test.py` is usable without boto3/rockset",
+            },
+        ]
+
+        for case in test_cases:
+            self.assertEqual(case["expected"], remove_job_name_suffix(case["name"]))
+
+    def test_is_broken_trunk(self, *args: Any) -> None:
+        test_cases: List[Dict[str, Any]] = [
+            {
+                "head_job": None,
+                "base_jobs": {
+                    "job_a": {
+                        "conclusion": "success",
+                        "failure_captures": ["a", "b"],
+                    },
+                    "job_b": {
+                        "conclusion": "failure",
+                        "failure_captures": ["a", "b"],
+                    },
+                },
+                "expected": False,
+                "description": "Invalid input - head job",
+            },
+            {
+                "head_job": {
+                    "conclusion": "failure",
+                    "failure_captures": ["a", "b"],
+                },
+                "base_jobs": None,
+                "expected": False,
+                "description": "Invalid input - base jobs",
+            },
+            {
+                "head_job": {
+                    "conclusion": "failure",
+                    "failure_captures": ["a", "b"],
+                },
+                "base_jobs": {},
+                "expected": False,
+                "description": "Invalid input - empty base jobs",
+            },
+            {
+                "head_job": {
+                    "conclusion": "failure",
+                    "failure_captures": ["x", "y"],
+                },
+                "base_jobs": {
+                    "job_a": {
+                        "conclusion": "success",
+                        "failure_captures": ["a", "b"],
+                    },
+                    "job_b": {
+                        "conclusion": "failure",
+                        "failure_captures": ["x", "y"],
+                    },
+                },
+                "expected": True,
+                "description": "Found a match",
+            },
+            {
+                "head_job": {
+                    "conclusion": "success",
+                    "failure_captures": ["x", "y"],
+                },
+                "base_jobs": {
+                    "job_a": {
+                        "conclusion": "success",
+                        "failure_captures": ["a", "b"],
+                    },
+                    "job_b": {
+                        "conclusion": "failure",
+                        "failure_captures": ["x", "y"],
+                    },
+                },
+                "expected": False,
+                "description": "Not found - different conclusion",
+            },
+            {
+                "head_job": {
+                    "conclusion": "failure",
+                    "failure_captures": ["a", "b"],
+                },
+                "base_jobs": {
+                    "job_a": {
+                        "conclusion": "success",
+                        "failure_captures": ["a", "b"],
+                    },
+                    "job_b": {
+                        "conclusion": "failure",
+                        "failure_captures": ["x", "y"],
+                    },
+                },
+                "expected": False,
+                "description": "Not found - different captured failures",
+            },
+        ]
+
+        for case in test_cases:
+            self.assertEqual(
+                case["expected"], is_broken_trunk(case["head_job"], case["base_jobs"])
+            )
+
 
 @mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
@@ -542,6 +675,26 @@ class TestBypassFailures(TestCase):
         )
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 0)
+
+    def test_get_classifications_broken_trunk(self, *args: Any) -> None:
+        # This PR had one broken trunk failure but it was run on a different shard
+        # than the one on the base commit. This should still count as broken trunk
+        pr = GitHubPR("pytorch", "pytorch", 104214)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
+        )
+        pending, failed = categorize_checks(checks, list(checks.keys()))
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+
+        # When the ok_failed_checks_threshold is set to 0, the broken trunk failure
+        # won't be ignored
+        pending, failed = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=0
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 1)
 
     def test_ignore_current(self, *args: Any) -> None:
         # Test various interactions of the failure classifier, mostly that
