@@ -51,7 +51,6 @@ class TestSelectAlgorithm(TestCase):
             # cpp_wrapper for the CUDA backend runs two passes
             self.assertEqual(counter, 2 * expected)
 
-    @skipIfRocm
     @expectedFailureDynamicWrapper
     @patches
     def test_linear_relu(self):
@@ -140,7 +139,6 @@ class TestSelectAlgorithm(TestCase):
         # float64 not supported by tl.dot()
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
 
-    @skipIfRocm
     @patches
     def test_bmm(self):
         @torch.compile
@@ -154,7 +152,6 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
     @patches
     def test_mm_not_even_k(self):
         @torch.compile
@@ -167,7 +164,6 @@ class TestSelectAlgorithm(TestCase):
         )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
     @patches
     def test_baddbmm(self):
         @torch.compile
@@ -196,6 +192,21 @@ class TestSelectAlgorithm(TestCase):
         )
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_mm_plus_mm2(self):
+        @torch.compile
+        def foo(a, b, c, d):
+            return (a @ b) + (c @ d)
+
+        foo(
+            torch.randn(512, 512, device="cuda"),
+            torch.randn(512, 512, device="cuda"),
+            torch.randn(512, 512, device="cuda"),
+            torch.randn(512, 512, device="cuda"),
+        )
+        # Autotuning checks correctness of each version
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @skipIfRocm
     @expectedFailureDynamicWrapper
@@ -266,7 +277,6 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
     @patches
     @torch._inductor.config.patch(conv_1x1_as_mm=True)
     def test_convolution_as_mm(self):

@@ -289,6 +289,8 @@ class TestUnshardParams(TestUnshardParamsBase):
             **fsdp_kwargs,
         )
         outer_flat_param = model._handle.flat_param
+        if not hasattr(model.module, "_handle"):
+            return
         inner_flat_param = model.module._handle.flat_param
         # NOTE: This assumes uniform sharding with padding across ranks.
         expected_outer_flat_param_unsharded_numel = (

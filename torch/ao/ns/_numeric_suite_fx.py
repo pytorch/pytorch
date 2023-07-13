@@ -732,8 +732,8 @@ def extend_logger_results_with_comparison(
         comparison_name: string name of model to use for
           layer names in the output
     """
-    for _, results_type_to_results in results.items():
-        for _, model_name_to_results in results_type_to_results.items():
+    for results_type_to_results in results.values():
+        for model_name_to_results in results_type_to_results.values():
             assert model_name_1 in model_name_to_results, \
                 f"{model_name_1} not found in results"
             assert model_name_2 in model_name_to_results, \
