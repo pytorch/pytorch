@@ -86,6 +86,12 @@ private:
   friend class OperatorHandle;
   template<class> friend class TypedOperatorHandle;
 
+  struct Guard final {
+    Guard() : alive(true), mutex() {}
+    std::atomic<bool> alive;
+    std::mutex mutex;
+  };
+
 public:
   ~Dispatcher();
 
@@ -313,9 +319,6 @@ private:
 
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
 
-  // This mutex protects concurrent access to the dispatcher
-  std::mutex mutex_;
-
   // This condition variable gets notified whenever we add a new def/impl to the
   // dispatch table.  This is primarily used by multipy/torchdeploy, when
   // we have multiple interpreters trying to register to the dispatch table.
@@ -329,6 +332,12 @@ private:
   // variable.  This is mostly just to help give better diagnostics if
   // something goes horribly wrong
   std::condition_variable cond_var_;
+
+  // Protect concurrent access to the dispatcher.  We store this in a
+  // `shared_ptr` as we return callbacks that call back into dispatcher methods,
+  // and we need to be able to handle and guard against the event when the
+  // `Dispatcher` has been destroyed before the callbacks fire.
+  std::shared_ptr<Guard> guard_;
 };
 
 /**

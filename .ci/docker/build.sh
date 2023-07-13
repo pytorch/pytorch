@@ -264,16 +264,6 @@ case "$image" in
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
-    ANACONDA_PYTHON_VERSION=3.8
-    CUDA_VERSION=11.7
-    CUDNN_VERSION=8
-    CLANG_VERSION=12
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    TRITON=yes
-    ;;
   pytorch-linux-jammy-cuda11.8-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
     CUDA_VERSION=11.8

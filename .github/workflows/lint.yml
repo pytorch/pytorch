@@ -236,6 +236,31 @@ jobs:
         python3 -m unittest discover -vs tools/test -p 'test_*.py'
         python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
 
+  test_run_test:
+    name: Test `run_test.py` is usable without boto3/rockset
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    runs-on: linux.20_04.4x
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          fetch-depth: 1
+      - name: Setup Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+          cache: pip
+      - name: Install dependencies
+        run: |
+          pip install pytest-rerunfailures==11.1.* pytest-shard==0.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.1.* numpy==1.24.*
+          pip install torch --pre --index-url https://download.pytorch.org/whl/nightly/cpu/
+      - name: Run run_test.py (nonretryable)
+        run: |
+          # Run test_weak, which is very fast
+          python3 test/run_test.py --include test_weak --verbose
+
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env

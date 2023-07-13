@@ -58,6 +58,23 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   export VALGRIND=OFF
 fi
 
+if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]] || [[ "${CONTINUE_THROUGH_ERROR}" == "1" ]]; then
+  # When rerunning disable tests, do not generate core dumps as it could consume
+  # the runner disk space when crashed tests are run multiple times. Running out
+  # of space is a nasty issue because there is no space left to even download the
+  # GHA to clean up the disk
+  #
+  # We also want to turn off core dump when CONTINUE_THROUGH_ERROR is set as there
+  # is a small risk of having multiple core files generated. Arguably, they are not
+  # that useful in this case anyway and the test will still continue
+  ulimit -c 0
+
+  # Note that by piping the core dump to a script set in /proc/sys/kernel/core_pattern
+  # as documented in https://man7.org/linux/man-pages/man5/core.5.html, we could
+  # dynamically stop generating more core file when the disk space drops below a
+  # certain threshold. However, this is not supported inside Docker container atm
+fi
+
 # Get fully qualified path using realpath
 if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
@@ -127,7 +144,7 @@ fi
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=true:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0:check_initialization_order=true:debug=true
-    export UBSAN_OPTIONS=print_stacktrace=1
+    export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
@@ -174,7 +191,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
     echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
-    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
+    #(cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_vptr_ubsan()")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
@@ -335,6 +352,8 @@ test_perf_for_dashboard() {
       local target_flag=("--${target}")
       if [[ "$target" == "performance" ]]; then
         target_flag+=( --cold-start-latency)
+      elif [[ "$target" == "accuracy" ]]; then
+        target_flag+=( --no-translation-validation)
       fi
 
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then

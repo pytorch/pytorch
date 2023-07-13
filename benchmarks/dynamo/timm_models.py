@@ -169,7 +169,7 @@ def refresh_model_names():
             fw.write(model_name + "\n")
 
 
-class TimmRunnner(BenchmarkRunner):
+class TimmRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
@@ -339,7 +339,7 @@ class TimmRunnner(BenchmarkRunner):
 def timm_main():
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
-    main(TimmRunnner())
+    main(TimmRunner())
 
 
 if __name__ == "__main__":

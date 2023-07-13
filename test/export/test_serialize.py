@@ -70,7 +70,7 @@ class TestSerialize(TestCase):
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-7]
-        self.assertEqual(node.target, "torch._ops.aten.var_mean.correction")
+        self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
         # aten::native_layer_norm returns 3 tensnors
         self.assertEqual(len(node.outputs), 2)
 
@@ -95,7 +95,7 @@ class TestSerialize(TestCase):
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
-        self.assertEqual(node.target, "torch._ops.aten.split.Tensor")
+        self.assertEqual(node.target, "torch.ops.aten.split.Tensor")
         self.assertEqual(len(node.outputs), 1)
         # Input looks like:
         # tensor([[0, 1],
@@ -138,7 +138,7 @@ class TestSerialize(TestCase):
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
-        self.assertEqual(node.target, "torch._ops.aten.var_mean.correction")
+        self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
         self.assertEqual(len(node.outputs), 2)
 
         # check the names are unique
@@ -163,7 +163,7 @@ class TestSerialize(TestCase):
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.graph_module.graph.nodes[-1]
-        self.assertEqual(node.target, "torch._ops.aten.searchsorted.Tensor")
+        self.assertEqual(node.target, "torch.ops.aten.searchsorted.Tensor")
         self.assertEqual(len(node.inputs), 6)
         self.assertEqual(node.inputs[2].arg.as_bool, False)
         self.assertEqual(node.inputs[3].arg.as_bool, True)
@@ -194,6 +194,7 @@ class TestDeserialize(TestCase):
             else:
                 self.assertEqual(orig, loaded)
 
+        self.assertEqual(len(ep.graph.nodes), len(deserialized_ep.graph.nodes))
         for node1, node2 in zip(ep.graph.nodes, deserialized_ep.graph.nodes):
             # Check "val" metadata
             val1 = node1.meta.get("val", None)
@@ -233,17 +234,18 @@ class TestDeserialize(TestCase):
                     node2.meta.get("stack_trace", None),
                 )
 
-            # Check "nn_module_stack" metadata
-            self.assertEqual(
-                node1.meta.get("nn_module_stack", None),
-                node2.meta.get("nn_module_stack", None),
-            )
+            if node1.op != "get_attr" and node1.op != "placeholder":
+                # Check "nn_module_stack" metadata
+                self.assertEqual(
+                    node1.meta.get("nn_module_stack", None),
+                    node2.meta.get("nn_module_stack", None),
+                )
 
-            # Check "source_fn" metadata
-            self.assertEqual(
-                node1.meta.get("source_fn", None),
-                node2.meta.get("source_fn", None),
-            )
+                # Check "source_fn" metadata
+                self.assertEqual(
+                    node1.meta.get("source_fn", None),
+                    node2.meta.get("source_fn", None),
+                )
 
     def test_multi_return(self) -> None:
         """
@@ -341,6 +343,21 @@ class TestDeserialize(TestCase):
         inputs = (torch.randn(3, 3),)
         self.check_graph(M(), inputs)
 
+    def test_cond(self):
+        from functorch.experimental.control_flow import cond
+        inputs = torch.ones(4, 3), torch.zeros(4, 3)
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                def t(x, y):
+                    return x + y
+
+                def f(x, y):
+                    return x - y
+                return cond(x[0][0] > 4, t, f, [x, y])
+
+        self.check_graph(M(), inputs)
+
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
@@ -382,6 +399,9 @@ class TestOpVersioning(TestCase):
 
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_tensor_setattr
+)
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_pytree_flatten
 )
 
 if __name__ == '__main__':

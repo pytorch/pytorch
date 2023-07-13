@@ -21,7 +21,6 @@ import numpy as np
 
 import torch
 
-import torch._dynamo
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
@@ -37,6 +36,7 @@ from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
+    IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -1574,6 +1574,13 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 2, 1, 2, 2, 2, 1),))
 
+    def test_squeeze_varargs(self):
+        def fn(x):
+            return x.squeeze(1, 2).clone()
+
+        a = torch.randn(1024, 1, 1)
+        self.common(fn, (a,))
+
     def test_simplify_loops(self):
         def fn(a, b):
             return a + b
@@ -2138,7 +2145,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
-    @skipIfRocm
     @requires_multigpu()
     def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
@@ -2360,6 +2366,12 @@ class CommonTemplate:
             res = opt_mod(x)
             expected = mod(x)
             self.assertTrue(torch.allclose(res, expected))
+
+    def test_adaptive_avg_pool_with_output_size_0(self):
+        m1 = nn.AdaptiveAvgPool1d(0)
+        self.common(m1, (torch.randn(1, 2),))
+        m2 = nn.AdaptiveAvgPool2d(0)
+        self.common(m2, (torch.randn(1, 2, 3),))
 
     def test_max_pool2d1(self):
         def fn(x):
@@ -3146,6 +3158,7 @@ class CommonTemplate:
             check_lowp=False,  # accuracy issues with relatively large matmuls
         )
 
+    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
@@ -4749,18 +4762,20 @@ class CommonTemplate:
         )
 
     def test_scatter_reduce2(self):
-        def fn(a, dim, index, b):
-            return aten.scatter_reduce(a, dim, index, b, "sum", include_self=False)
+        def fn(a, dim, index, b, reduce):
+            return aten.scatter_reduce(a, dim, index, b, reduce, include_self=False)
 
-        self.common(
-            fn,
-            [
-                torch.randn(2, 3),
-                0,
-                torch.zeros((2, 3), dtype=torch.int64),
-                torch.randn(2, 3),
-            ],
-        )
+        for reduce in ["sum", "amax"]:
+            self.common(
+                fn,
+                [
+                    torch.randn(2, 3),
+                    0,
+                    torch.zeros((2, 3), dtype=torch.int64),
+                    torch.randn(2, 3),
+                    reduce,
+                ],
+            )
 
     def test_scatter_reduce3(self):
         def fn(a, dim, index, b, reduce):
@@ -5275,7 +5290,6 @@ class CommonTemplate:
             ],
         )
 
-    @skipIfRocm
     def test_avg_pool2d_backward2(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -5716,8 +5730,7 @@ class CommonTemplate:
         self.common(forward, inps, atol=1e-05, rtol=2e-05)
 
     @unittest.skipIf(
-        TEST_WITH_ASAN
-        or os.environ.get("BUILD_ENVIRONMENT", "").startswith("parallelnative"),
+        os.environ.get("BUILD_ENVIRONMENT", "").startswith("parallelnative"),
         "TODO: debug this with asan",
     )
     def test_tmp_not_defined_issue2(self):
@@ -5968,7 +5981,6 @@ class CommonTemplate:
     # test fails
     @expectedFailureCodegenDynamic
     @requires_cuda()
-    @skipIfRocm
     @torch._inductor.config.patch("shape_padding", True)
     def test_shape_padding(self):
         dtypes = [
@@ -6482,10 +6494,12 @@ class CommonTemplate:
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
 
+        # The first two values should be the same, attention output
+        # and logsumexp since dropout is not being set
         def fn(q, k, v, compute_log_sumexp):
             return aten._scaled_dot_product_efficient_attention(
                 q, k, v, compute_log_sumexp
-            )
+            )[:2]
 
         self.common(
             fn,
@@ -6509,6 +6523,93 @@ class CommonTemplate:
             return torch.fft.fftn(x).real
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
+
+    def test_inductor_bucketize(self):
+        def fn(input, boundaries, out_int32, right):
+            return torch.ops.prims._inductor_bucketize(
+                input, boundaries, out_int32=out_int32, right=right
+            )
+
+        input = torch.rand((64, 64)) * 2 - 1
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        for out_int32 in [True, False]:
+            for right in [True, False]:
+                out_int32 = True
+                right = False
+                self.common(fn, (input, boundaries, out_int32, right), check_lowp=False)
+
+    def test_inductor_bucketize_default_kwargs(self):
+        def fn(input, offsets):
+            return torch.ops.prims._inductor_bucketize(input, offsets)
+
+        input = torch.tensor(
+            [-1.0, -0.9, -0.8, -0.5, 0.0, 0.1, 0.2, 0.4, 0.5, 0.6, 0.9, 0.91]
+        )
+        offsets = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        self.common(fn, (input, offsets), check_lowp=False)
+
+    def test_inductor_bucketize_int(self):
+        def fn(input, offsets, out_int32, right):
+            return torch.ops.prims._inductor_bucketize(
+                input, offsets, out_int32=out_int32, right=right
+            )
+
+        input = torch.randint(0, 102, (64, 64))
+        offsets = torch.arange(10, dtype=torch.int32) ** 2 + 1
+
+        for out_int32 in [True, False]:
+            for right in [True, False]:
+                self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
+
+    @patch.object(config.triton, "autotune_pointwise", True)
+    def test_inductor_bucketize_add_autotune(self):
+        """
+        Causes a @pointwise(size_hints) where size_hints is 2D
+        """
+
+        def fn(input, offsets, add_value):
+            return torch.ops.prims._inductor_bucketize(input, offsets) + add_value
+
+        input = torch.rand((16, 16, 64, 64))
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+        add_value = torch.randint(0, 1024, (16, 16, 64, 64)).to(
+            memory_format=torch.channels_last
+        )
+
+        self.common(fn, (input, boundaries, add_value), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op(self):
+        import torch.library
+
+        @functools.lru_cache()
+        def define_op(foo):
+            foo.define("custom(Tensor self) -> Tensor")
+
+        foo = torch.library.Library("foo", "DEF")
+        define_op(foo)
+
+        @torch.library.impl(foo, "custom", "CPU")
+        def foo_cpu(x):
+            return 3 * x
+
+        @torch.library.impl(foo, "custom", "CUDA")
+        def foo_cuda(x):
+            return 3 * x
+
+        @torch.library.impl(foo, "custom", "Meta")
+        def foo_meta(x):
+            return torch.empty_like(x)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.foo.custom(a)
+            c = torch.cos(b)
+            return c
+
+        self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
 
 
 @dataclasses.dataclass
@@ -6860,6 +6961,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     fn_opt(inps)
 
         @skipIfRocm
+        @unittest.skipIf(IS_FBCODE, "fbcode system python does not provide torch")
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")

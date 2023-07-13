@@ -51,7 +51,6 @@ class OutputNode:
 
 def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
     if node1.is_foreach():
-        assert node2.is_foreach()
         return ForeachKernelSchedulerNode.fuse(node1, node2)
     else:
         return FusedSchedulerNode.fuse(node1, node2)
@@ -629,9 +628,25 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     @classmethod
     def fuse(cls, node1, node2):
-        fused_nodes = [
-            FusedSchedulerNode.fuse(l, r) for l, r in zip(node1.snodes, node2.snodes)
-        ]
+        assert node1.is_foreach() or node2.is_foreach()
+        if node1.is_foreach() and node2.is_foreach():
+            fused_nodes = [
+                FusedSchedulerNode.fuse(l, r)
+                for l, r in zip(node1.snodes, node2.snodes)
+            ]
+        else:
+            non_foreach_node = node1 if node2.is_foreach() else node2
+            foreach_node = node2 if node2.is_foreach() else node1
+            fused_nodes = []
+            fusion_completed = False
+            for node in foreach_node.snodes:
+                if not fusion_completed and node1.scheduler.can_fuse(
+                    node, non_foreach_node
+                ):
+                    fused_nodes.append(FusedSchedulerNode.fuse(node, non_foreach_node))
+                    fusion_completed = True
+                else:
+                    fused_nodes.append(node)
         return cls(node1.scheduler, fused_nodes)
 
     def __init__(self, scheduler: "Scheduler", nodes: List[SchedulerNode]):
@@ -639,6 +654,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         # TODO: ensure all buffers are on the same device in lowerings
         self.group = (nodes[0].get_device(), 0)
         self.snodes = nodes
+        self.node_set = set(nodes)
         self.origins = set()
 
     def mark_run(self):
@@ -662,10 +678,17 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
         return list(itertools.chain(*[x.get_nodes() for x in self.snodes]))
 
-    def can_fuse(self, other: "ForeachKernelSchedulerNode"):
-        return len(self.snodes) == len(other.snodes) and all(
-            self.scheduler.can_fuse(l, r) for l, r in zip(self.snodes, other.snodes)
-        )
+    def can_fuse(self, other: SchedulerNode):
+        if other.is_foreach():
+            return len(self.snodes) == len(other.snodes) and all(
+                self.scheduler.can_fuse(l, r) for l, r in zip(self.snodes, other.snodes)
+            )
+        else:
+            # the == 1 check is overly conservative, but this is meant purely for epilogue copy fusion
+            # at the moment
+            return len(other.inverse_users) == 1 and any(
+                self.scheduler.can_fuse(l, other) for l in self.snodes
+            )
 
 
 def pick_loop_order(stride_lengths, sizes, priority_idx=()):
@@ -1032,8 +1055,12 @@ class Scheduler:
 
                     if self.can_fuse(node1, node2):
                         possible_fusions.append(key)
-                    elif node2.is_template() and self.can_fuse(node2, node1):
-                        # epilogue fusions are order dependent
+                    elif (
+                        node2.is_template()
+                        or node2.is_foreach()
+                        and self.can_fuse(node2, node1)
+                    ):
+                        # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
 
         buffer_names_grouping = collections.defaultdict(list)
@@ -1084,6 +1111,33 @@ class Scheduler:
         ) - combined_names
         return any(check(self.name_to_fused_node[n]) for n in combined_predecessors)
 
+    def can_fusion_increase_peak_memory(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ):
+        """
+        This function prevents fusion for nodes that can increase memory
+        footprint. This problem is more common in horizontal fusion, where nodes
+        that are far apart in the original order get fused, lengthening the live
+        intervals of tensors. This is very evident in models with activation
+        checkpointing, where the recomputed nodes from different checkpointed
+        regions get fused and significantly increase the memory footprint.
+
+        The current attempt is a quick, possibly hacky, heuristic to prevent the
+        fusion of nodes that are far away in the original order.
+
+        A better but difficult to implement heursitic would be to use live
+        intervals of the buffers, find region of peak pressure in the original
+        program and prevent fusion that crosses that peak region. We might need
+        special care or good approximation in this implementation, as fusion of
+        node changes live intervals, and re-computing live intervals and peak
+        memory after each fusion can introduce large compilation overhead.
+        """
+        proximity_score = max(
+            abs(node1.min_order - node2.max_order),
+            abs(node2.min_order - node1.max_order),
+        )
+        return proximity_score > 64
+
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
         Determine if it is possible to combine node1 and node2 into a
@@ -1112,11 +1166,6 @@ class Scheduler:
         ):
             return False
 
-        node1_is_foreach = isinstance(node1, ForeachKernelSchedulerNode)
-        node2_is_foreach = isinstance(node2, ForeachKernelSchedulerNode)
-        if node1_is_foreach is not node2_is_foreach:
-            return False
-
         device = node1.get_device()
         if device != node2.get_device():
             return False  # wrong device
@@ -1127,7 +1176,11 @@ class Scheduler:
         ):
             return False  # heuristic not needed for correctness
 
-        if len(node1.get_nodes()) + len(node2.get_nodes()) > config.max_fusion_size:
+        if (
+            not node1.is_foreach()
+            and not node2.is_foreach()
+            and len(node1.get_nodes()) + len(node2.get_nodes()) > config.max_fusion_size
+        ):
             return False  # heuristic not needed for correctness
 
         if node1.get_names() & node2.recursive_predecessors:
@@ -1135,9 +1188,11 @@ class Scheduler:
             if not self.can_fuse_vertical(node1, node2):
                 return False
             return self.get_backend(device).can_fuse_vertical(node1, node2)
-        elif node1_is_foreach and node2_is_foreach:
+        elif node1.is_foreach() and node2.is_foreach():
             return False
         else:  # nodes don't depend on each other, but may have common reads
+            if self.can_fusion_increase_peak_memory(node1, node2):
+                return False
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 
     def can_fuse_vertical(self, node1, node2):

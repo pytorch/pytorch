@@ -23,13 +23,14 @@ from ..guards import GuardBuilder
 from ..replay_record import DummyModule
 from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
+    build_checkpoint_variable,
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
-    get_higher_order_op,
+    guard_if_dyn,
+    is_utils_checkpoint,
     istype,
     proxy_args_kwargs,
-    requires_higher_order_op,
     specialize_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
@@ -171,12 +172,18 @@ class BuiltinVariable(VariableTracker):
             operator.mod: (["__mod__", "__rmod__", "__imod__"], operator.imod),
             pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
             operator.pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
+            operator.lshift: (
+                ["__lshift__", "__rlshift__", "__ilshift__"],
+                operator.ilshift,
+            ),
+            operator.rshift: (
+                ["__rshift__", "__rrshift__", "__irshift__"],
+                operator.irshift,
+            ),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
             # operator.matmul
             # divmod
-            # operator.lshift
-            # operator.rshift
             # operator.and_
             # operator.or_
             # operator.xor
@@ -725,14 +732,6 @@ class BuiltinVariable(VariableTracker):
             args, _ = specialize_args_kwargs(tx, args, {})
             return variables.RangeVariable(args)
         elif self._dynamic_args(*args):
-
-            def guard_if_dyn(arg):
-                if isinstance(arg, SymNodeVariable):
-                    return arg.evaluate_expr(tx.output)
-                elif isinstance(arg, ConstantVariable):
-                    return arg.as_python_constant()
-                return arg
-
             args = [variables.ConstantVariable(guard_if_dyn(arg)) for arg in args]
             return variables.RangeVariable(args)
         # None no-ops this handler and lets the driving function proceed
@@ -844,6 +843,12 @@ class BuiltinVariable(VariableTracker):
             ).add_options(options)
         else:
             raise AssertionError("call_dict_helper with illegal arg")
+
+    def call_cast(self, _, *args, **kwargs):
+        if len(args) == 2:
+            return args[1]
+
+        unimplemented(f"unsupported args to builtin cast(): {args} {kwargs}")
 
     def call_dict(self, tx, *args, **kwargs):
         if not (args or kwargs):
@@ -999,7 +1004,6 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
-            TorchHigherOrderOperatorVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1067,10 +1071,9 @@ class BuiltinVariable(VariableTracker):
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
-            if requires_higher_order_op(member):
-                return TorchHigherOrderOperatorVariable(
-                    get_higher_order_op(member), **options
-                )
+            if is_utils_checkpoint(member):
+                options["source"] = source
+                return build_checkpoint_variable(**options)
             elif is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):
@@ -1226,6 +1229,7 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             NNModuleVariable,
             TensorVariable,
+            UserDefinedObjectVariable,
             UserFunctionVariable,
         )
         from .lists import SizeVariable
@@ -1301,6 +1305,16 @@ class BuiltinVariable(VariableTracker):
 
         if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
             return ConstantVariable(op(left.value, right.value))
+
+        if isinstance(left, UserDefinedObjectVariable) and isinstance(
+            right, UserDefinedObjectVariable
+        ):
+            return ConstantVariable(op(left.value, right.value))
+
+        if op.__name__ == "is_":
+            # If the two objects are of different type, we can safely return False
+            if type(left) is not type(right):
+                return ConstantVariable(False)
 
         _unimplemented()
 

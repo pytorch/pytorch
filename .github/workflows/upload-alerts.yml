@@ -5,7 +5,10 @@ name: Upload Alerts to AWS/Rockset
 on:
   schedule:
     - cron: '*/10 * * * *'
-  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tools/alerts/create_alerts.py'
+      - '.github/workflows/upload-alerts.yml'
 
 jobs:
   upload-alerts:
@@ -25,7 +28,7 @@ jobs:
 
       - name: Create alerts
         run: |
-          output=$(python3 "tools/alerts/create_alerts.py")
+          output=$(PYTHONPATH=$PYTHONPATH:$(pwd) python3 "tools/alerts/create_alerts.py")
           echo "uploading following alerts"
           echo "$output"
           echo "script-output=$output" >> "$GITHUB_OUTPUT"

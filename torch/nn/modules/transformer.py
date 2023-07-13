@@ -196,22 +196,21 @@ class TransformerEncoder(Module):
         self.use_nested_tensor = enable_nested_tensor
         self.mask_check = mask_check
 
-        first_layer = self.layers[0]
-        str_first_layer = "self.layers[0]"
+        enc_layer = "encoder_layer"
         why_not_sparsity_fast_path = ''
-        if not isinstance(first_layer, torch.nn.TransformerEncoderLayer):
-            why_not_sparsity_fast_path = f"{str_first_layer} was not TransformerEncoderLayer"
-        elif first_layer.norm_first :
-            why_not_sparsity_fast_path = f"{str_first_layer}.norm_first was True"
-        elif not first_layer.self_attn.batch_first:
-            why_not_sparsity_fast_path = f" {str_first_layer}.self_attn.batch_first was not True"
-        elif not first_layer.self_attn._qkv_same_embed_dim:
-            why_not_sparsity_fast_path = f"{str_first_layer}.self_attn._qkv_same_embed_dim was not True"
-        elif not first_layer.activation_relu_or_gelu:
-            why_not_sparsity_fast_path = f" {str_first_layer}.activation_relu_or_gelu was not True"
-        elif not (first_layer.norm1.eps == first_layer.norm2.eps) :
-            why_not_sparsity_fast_path = f"{str_first_layer}.norm1.eps was not equal to {str_first_layer}.norm2.eps"
-        elif first_layer.self_attn.num_heads % 2 == 1:
+        if not isinstance(encoder_layer, torch.nn.TransformerEncoderLayer):
+            why_not_sparsity_fast_path = f"{enc_layer} was not TransformerEncoderLayer"
+        elif encoder_layer.norm_first :
+            why_not_sparsity_fast_path = f"{enc_layer}.norm_first was True"
+        elif not encoder_layer.self_attn.batch_first:
+            why_not_sparsity_fast_path = f" {enc_layer}.self_attn.batch_first was not True"
+        elif not encoder_layer.self_attn._qkv_same_embed_dim:
+            why_not_sparsity_fast_path = f"{enc_layer}.self_attn._qkv_same_embed_dim was not True"
+        elif not encoder_layer.activation_relu_or_gelu:
+            why_not_sparsity_fast_path = f" {enc_layer}.activation_relu_or_gelu was not True"
+        elif not (encoder_layer.norm1.eps == encoder_layer.norm2.eps) :
+            why_not_sparsity_fast_path = f"{enc_layer}.norm1.eps was not equal to {enc_layer}.norm2.eps"
+        elif encoder_layer.self_attn.num_heads % 2 == 1:
             why_not_sparsity_fast_path = "num_head is odd"
 
         if enable_nested_tensor and why_not_sparsity_fast_path:
@@ -301,11 +300,11 @@ class TransformerEncoder(Module):
                 first_layer.linear2.weight,
                 first_layer.linear2.bias,
             )
-
+            _supported_device_type = ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
-            elif not (src.is_cuda or 'cpu' in str(src.device)):
-                why_not_sparsity_fast_path = "src is neither CUDA nor CPU"
+            elif src.device.type not in _supported_device_type:
+                why_not_sparsity_fast_path = f"src device is neither one of {_supported_device_type}"
             elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
                 why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
                                               "input/output projection weights or biases requires_grad")
@@ -604,10 +603,12 @@ class TransformerEncoderLayer(Module):
 
             # We have to use list comprehensions below because TorchScript does not support
             # generator expressions.
+            _supported_device_type = ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
-            elif not all((x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args):
-                why_not_sparsity_fast_path = "some Tensor argument is neither CUDA nor CPU"
+            elif not all((x.device.type in _supported_device_type) for x in tensor_args):
+                why_not_sparsity_fast_path = ("some Tensor argument's device is neither one of "
+                                              f"{_supported_device_type}")
             elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
                 why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
                                               "input/output projection weights or biases requires_grad")

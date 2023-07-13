@@ -1,5 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 
+import io
+from copy import deepcopy
+
 import torch
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
@@ -11,8 +14,12 @@ from torch.distributed.fsdp.api import (
     ShardedStateDictConfig,
     StateDictType,
 )
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 
-from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -20,6 +27,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+# Simple and boring model to test interface and some corner cases that do not
+# require complicated wrapping strategy.
 class TestDummyModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -57,9 +66,6 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
-            state_dict_config=ShardedStateDictConfig(
-                use_dtensor=True, offload_to_cpu=False
-            ),
             optim_state_dict_config=ShardedOptimStateDictConfig(
                 use_dtensor=False, offload_to_cpu=False
             ),
@@ -80,12 +86,92 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
                 if isinstance(v1, DTensor) and isinstance(v2, ShardedTensor):
                     self.assertEqual(k1, k2)
                     # check whether local_tensor are the same
-                    self.assertEqual(v1.to_local(), v2.local_shards()[0].tensor)
+                    self.assertEqual(v1.to_local(), v2.local_tensor())
                     # check whether device are the same
-                    self.assertEqual(
-                        v1.to_local().device, v2.local_shards()[0].tensor.device
-                    )
+                    self.assertEqual(v1.to_local().device, v2.local_tensor().device)
 
 
+# TODO: consolidate test cases once we test all DTensor usage
+class TestDtensorShardedModelStateDict(DTensorTestBase):
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    @parametrize("offload_to_cpu", [True, False])
+    def test_dtensor_sharded_model_state_dict(self, offload_to_cpu):
+        model = FSDP(TestDummyModel().cuda())
+        model(model.get_input()).sum().backward()
+
+        FSDP.set_state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(
+                use_dtensor=True,
+                offload_to_cpu=offload_to_cpu,
+            ),
+        )
+        dtensor_sd = model.state_dict()
+
+        FSDP.set_state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(
+                use_dtensor=False,
+                offload_to_cpu=offload_to_cpu,
+            ),
+        )
+        sharded_tensor_sd = model.state_dict()
+
+        for dtensor_sd, sharded_tensor_sd in zip(
+            dtensor_sd.items(), sharded_tensor_sd.items()
+        ):
+            k1, v1 = dtensor_sd
+            k2, v2 = sharded_tensor_sd
+            if isinstance(v1, DTensor) and isinstance(v2, ShardedTensor):
+                self.assertEqual(k1, k2)
+                # check whether local_tensor are the same
+                self.assertEqual(v1.to_local(), v2.local_tensor())
+                # check whether device are the same
+                self.assertEqual(v1.to_local().device, v2.local_tensor().device)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    @parametrize("map_location", ["cpu", "cuda"])
+    def test_dtensor_sharded_model_load_state_dict(self, map_location):
+        model = FSDP(TestDummyModel().cuda())
+        optim = torch.optim.Adam(model.parameters(), lr=0.1)
+
+        FSDP.set_state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(
+                use_dtensor=True,
+                offload_to_cpu=False,
+            ),
+        )
+
+        checkpoint = io.BytesIO()
+        torch.save(model.state_dict(), checkpoint)
+        # Deepcopy to save current state_dict to compare with the loaded state dict below.
+        ref_state_dict = deepcopy(model.state_dict())
+
+        # Update the parameters so model.state_dict() will be different from ref_dtensor_sd.
+        model(model.get_input()).sum().backward()
+        optim.step()
+
+        # Load ref_state_dict back.
+        checkpoint.seek(0)
+        # Test both parameters in state_dict are loaded to CPU and GPU.
+        load_ref_state_dict = torch.load(checkpoint, map_location=map_location)
+        model.load_state_dict(load_ref_state_dict)
+        new_state_dict = model.state_dict()
+
+        # Check whether new_state_dict is the same as ref_state_dict.
+        for (k1, v1), (k2, v2) in zip(ref_state_dict.items(), new_state_dict.items()):
+            # check whether fqn are the same
+            self.assertEqual(k1, k2)
+            # check whether DTensor are the same
+            self.assertEqual(v1, v2)
+
+
+instantiate_parametrized_tests(TestDtensorShardedModelStateDict)
 if __name__ == "__main__":
     run_tests()

@@ -335,7 +335,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         at::relu_(const_cast<Tensor&>(*result_));
         break;
       case Activation::GELU:
-        at::gelu_(const_cast<Tensor&>(*result_));
+        at::gelu_(const_cast<Tensor&>(*result_), "tanh");
         break;
       default: break;
     }
@@ -347,7 +347,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 // epilogue above.
 #if !defined(CUDA_VERSION) || CUDA_VERSION < 11080
   if (useLtInterface && activation == Activation::GELU) {
-    at::gelu_(const_cast<Tensor&>(*result_));
+    at::gelu_(const_cast<Tensor&>(*result_), "tanh");
   }
 #endif
 

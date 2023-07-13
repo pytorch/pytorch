@@ -1,7 +1,7 @@
 from typing import Dict
 
 import torch
-from torch.fx.passes.infra.pass_base import PassBase
+from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
 replacements: Dict[torch._ops.OpOverloadPacket, torch._ops.OpOverload] = {
     torch.ops.aten.sym_size: torch.ops.aten.sym_size.int,
@@ -16,10 +16,13 @@ class _ReplaceSymSizeOpPass(PassBase):
     and torch.ops.aten.sym_stride with torch.ops.aten.sym_stride.int
     """
 
-    def call(self, graph_module):
+    def call(self, graph_module) -> PassResult:
+        modified = False
         for module in graph_module.modules():
             if not isinstance(module, torch.fx.GraphModule):
                 continue
             for node in module.graph.nodes:
                 if node.target in replacements:
                     node.target = replacements[node.target]
+                    modified = True
+        return PassResult(graph_module, modified)

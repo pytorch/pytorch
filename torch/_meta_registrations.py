@@ -10,6 +10,7 @@ from torch._decomp import (
     global_decomposition_table,
     meta_table,
 )
+from torch._decomp.decompositions import Reduction
 from torch._ops import OpOverload
 from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
@@ -19,6 +20,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
     make_contiguous_strides_for,
+    NumberType,
     TensorLike,
 )
 
@@ -281,6 +283,13 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
 
 @register_meta(aten.copy_.default)
 def meta_copy_(self, src, non_blocking=False):
+    # This code simulates the original decomp from inductor,
+    # which runs most of the meta checks that we care about.
+    # In theory, we should make this more robust by carefully
+    # auditing our C++ copy_() kernel and copying the checks here.
+    intermediate = src.to(self, non_blocking)
+    if self.size() != intermediate.size():
+        aten.expand_copy.default(intermediate, self.size())
     return self
 
 
@@ -314,6 +323,137 @@ def meta_index_select(self, dim, index):
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
+
+
+def _multi_margin_loss_shape_check(ndims, input, target):
+    valid_inputs = (
+        (ndims == 2 and input.size(1) != 0)
+        or (ndims == 1 and input.size(0) != 0)
+        or ndims == 0
+    )
+    if ndims <= 1:
+        nframe = 1
+        dim = 1 if ndims == 0 else input.size(0)
+    else:
+        nframe = input.size(0)
+        dim = input.size(1)
+    torch._check(
+        valid_inputs,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+    )
+    torch._check(
+        valid_inputs and target.ndim <= 1 and target.numel() == nframe,
+        lambda: f"inconsistent target size, got: {target.shape}",
+    )
+    return nframe, dim
+
+
+@register_meta(aten.multi_margin_loss)
+@out_wrapper()
+def meta_multi_margin_loss(
+    input: Tensor,
+    target: Tensor,
+    p: NumberType = 1,
+    margin: NumberType = 1,
+    weight: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    ndims = input.ndim
+    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
+    nframe, _ = _multi_margin_loss_shape_check(ndims, input, target)
+    if reduction == Reduction.NONE.value and target.ndim > 0:
+        return input.new_empty(nframe)
+    else:
+        return input.new_empty(())
+
+
+@register_meta(aten.multi_margin_loss_backward)
+@out_wrapper()
+def meta_multi_margin_loss_backward(
+    grad_output: Tensor,
+    input: Tensor,
+    target: Tensor,
+    p: NumberType,
+    margin: NumberType,
+    weight: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+) -> Tensor:
+    ndims = input.ndim
+    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
+    _multi_margin_loss_shape_check(ndims, input, target)
+    return input.new_empty(input.shape)
+
+
+def _multilabel_margin_loss_shape_check(ndims, target_arg, input, target):
+    valid_inputs = (
+        (ndims == 2 and input.size(1) != 0)
+        or (ndims == 1 and input.size(0) != 0)
+        or ndims == 0
+    )
+    torch._check(
+        valid_inputs,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+    )
+    if ndims <= 1:
+        nframe = 1
+        dim = 1 if ndims == 0 else input.size(0)
+        torch._check(
+            valid_inputs and target.ndim <= 1 and target.numel() == dim,
+            lambda: f"inconsistent size {target.shape} for {target_arg}",
+        )
+    else:
+        nframe = input.size(0)
+        dim = input.size(1)
+        torch._check(
+            valid_inputs
+            and target.ndim == 2
+            and target.size(0) == nframe
+            and target.size(1) == dim,
+            lambda: f"inconsistent size {target.shape} for {target_arg}",
+        )
+    return nframe, dim
+
+
+@register_meta(aten.multilabel_margin_loss_forward)
+@out_wrapper("output", "is_target")
+def meta_multilabel_margin_loss_forward(
+    input: Tensor,
+    target: Tensor,
+    reduction: int,
+) -> Tuple[Tensor, Tensor]:
+    target_arg = "argument #2 'target'"
+    ndims = input.ndim
+    nframe, _ = _multilabel_margin_loss_shape_check(ndims, target_arg, input, target)
+    if reduction != Reduction.NONE.value or target.ndim <= 1:
+        output = input.new_empty(())
+    else:
+        output = input.new_empty(nframe)
+    is_target = input.new_empty(target.shape)
+    return output, is_target
+
+
+@register_meta(aten.multilabel_margin_loss_backward)
+@out_wrapper()
+def meta_multilabel_margin_loss_backward(
+    grad_output: Tensor,
+    input: Tensor,
+    target: Tensor,
+    reduction: int,
+    is_target: Tensor,
+) -> Tensor:
+    target_arg = "argument #3 'target'"
+    is_target_arg = "argument #5 'is_target'"
+    ndims = input.ndim
+    _multilabel_margin_loss_shape_check(ndims, target_arg, input, target)
+    torch._check(
+        target.shape == is_target.shape,
+        lambda: (
+            f"Expected tensor for {target_arg} to have same size as tensor for {is_target_arg}"
+            f"; but {target.shape} does not equal {is_target.shape}"
+            f" (while checking arguments for multilabel_margin_loss_backward)"
+        ),
+    )
+    return input.new_empty(input.shape)
 
 
 @register_meta([aten.max.default, aten.max.unary_out])
@@ -376,9 +516,32 @@ def assert_async_meta(val, assert_msg):
     return
 
 
+@register_meta(aten._make_dep_token.default)
+def make_dep_token(
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    memory_format=None,
+):
+    return torch.empty([], device="meta")
+
+
 @register_meta(aten.sym_constrain_range.default)
 def sym_constrain_range(size, min, max):
     constrain_range(size, min=min, max=max)
+
+
+@register_meta(aten._functional_sym_constrain_range.default)
+def functional_sym_constrain_range(size, min, max, dep_token):
+    aten.sym_constrain_range(size, min=min, max=max)
+    return dep_token
+
+
+@register_meta(aten._functional_assert_async.msg)
+def functional_assert_async_meta(val, assert_msg, dep_token):
+    return dep_token
 
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h
@@ -901,7 +1064,7 @@ def _linalg_svd_meta(
     A: Tensor,
     full_matrices: bool = False,
     compute_uv: bool = True,
-    driver: str = None,
+    driver: Optional[str] = None,
 ):
     checkIsMatrix(A, "linalg.svd")
     checkFloatingOrComplex(A, "linalg.svd")
@@ -1044,7 +1207,7 @@ def linalg_solve_triangular_meta(
     upper: bool,
     left: bool = True,
     unitriangular: bool = False,
-    out: Tensor = None,
+    out: Optional[Tensor] = None,
 ) -> Tensor:
     if out is None:
         out = A.new_empty([0])
@@ -1077,13 +1240,203 @@ def _linalg_det_meta(A):
     return det, LU, pivots
 
 
-# From aten/src/ATen/native/ReflectionPad.cpp
+def _padding_check_valid_input(input, padding, *, dim):
+    torch._check(
+        len(padding) == 2 * dim,
+        lambda: f"padding size is expected to be {2 * dim}, but got: {len(padding)}",
+    )
+
+    input_dim = input.ndim
+
+    is_batch_mode = input_dim == (dim + 2)
+
+    valid_batch_mode = is_batch_mode
+    valid_non_batch_mode = not is_batch_mode
+
+    if is_batch_mode:
+        # allow batch size of 0-dim.
+        for d in range(1, input_dim):
+            valid_batch_mode = valid_batch_mode and input.size(d) != 0
+    else:
+        for d in range(0, input_dim):
+            valid_non_batch_mode = valid_non_batch_mode and input.size(d) != 0
+
+    # allow empty batch size but not other dimensions.
+    torch._check(
+        valid_batch_mode or valid_non_batch_mode,
+        lambda: (
+            f"Expected {dim + 1}D or {dim + 2}D (batch mode) tensor with possibly 0 batch size "
+            f"and other non-zero dimensions for input, but got: {input.shape}"
+        ),
+    )
+
+
+def _pad1d_common(input, padding, *, is_reflection):
+    dim_plane = 0
+    dim_w = 1
+    nbatch = 1
+
+    if input.ndim == 3:
+        nbatch = input.size(0)
+        dim_w += 1
+        dim_plane += 1
+
+    _padding_check_valid_input(input, padding, dim=1)
+
+    pad_l, pad_r = padding
+
+    nplane = input.size(dim_plane)
+    input_w = input.size(dim_w)
+    output_w = input_w + pad_l + pad_r
+
+    if is_reflection:
+        torch._check(
+            pad_l < input_w and pad_r < input_w,
+            lambda: (
+                f"Argument #4: Padding size should be less than the corresponding input dimension, "
+                f"but got: padding ({pad_l}, {pad_r}) at dimension {dim_w} of input {input.shape}"
+            ),
+        )
+
+    torch._check(
+        output_w >= 1,
+        lambda: f"input (W: {input_w}) is too small. Calculated output W: {output_w}",
+    )
+
+    if input.ndim == 2:
+        return input.new_empty((nplane, output_w))
+    else:
+        return input.new_empty((nbatch, nplane, output_w))
+
+
+@register_meta(aten.reflection_pad1d)
+@out_wrapper()
+def meta_reflection_pad1d(input, padding):
+    return _pad1d_common(input, padding, is_reflection=True)
+
+
+@register_meta(aten.replication_pad1d)
+@out_wrapper()
+def meta_replication_pad1d(input, padding):
+    return _pad1d_common(input, padding, is_reflection=False)
+
+
+def _pad1d_backward_common(grad_output, input, padding, *, is_reflection):
+    dim_w = 1
+    if not is_reflection:
+        torch._check(len(padding) == 2, lambda: "padding size is expected to be 2")
+
+    if input.ndim == 3:
+        dim_w += 1
+
+    pad_l, pad_r = padding
+
+    input_w = input.size(dim_w)
+    output_w = input_w + pad_l + pad_r
+
+    if is_reflection:
+        torch._check(
+            pad_l < input_w and pad_r < input_w,
+            lambda: (
+                f"Argument #4: Padding size should be less than the corresponding input dimension, "
+                f"but got: padding ({pad_l}, {pad_r}) at dimension {dim_w} of input {input.shape}"
+            ),
+        )
+
+    torch._check(
+        output_w == grad_output.size(dim_w),
+        lambda: f"grad_output width unexpected. Expected: {output_w}, Got: {grad_output.size(dim_w)}",
+    )
+
+    return input.new_empty(input.shape)
+
+
+@register_meta(aten.reflection_pad1d_backward)
+@out_wrapper()
+def meta_reflection_pad1d_backward(grad_output, input, padding):
+    return _pad1d_backward_common(grad_output, input, padding, is_reflection=True)
+
+
+@register_meta(aten.replication_pad1d_backward)
+@out_wrapper()
+def meta_replication_pad1d_backward(grad_output, input, padding):
+    return _pad1d_backward_common(grad_output, input, padding, is_reflection=False)
+
+
+def _pad2d_common(input, padding, *, is_reflection):
+    dim_w = 2
+    dim_h = 1
+    dim_slices = 0
+    nbatch = 1
+
+    _padding_check_valid_input(input, padding, dim=2)
+
+    ndim = input.ndim
+    if ndim == 4:
+        nbatch = input.size(0)
+        dim_w += 1
+        dim_h += 1
+        dim_slices += 1
+
+    pad_l, pad_r, pad_t, pad_b = padding
+
+    nplane = input.size(dim_slices)
+    input_h = input.size(dim_h)
+    input_w = input.size(dim_w)
+    output_h = input_h + pad_t + pad_b
+    output_w = input_w + pad_l + pad_r
+
+    if is_reflection:
+        torch._check(
+            pad_l < input_w and pad_r < input_w,
+            lambda: (
+                f"Argument #4: Padding size should be less than the corresponding input dimension, "
+                f"but got: padding ({pad_l}, {pad_r}) at dimension {dim_w} of input {input.shape}"
+            ),
+        )
+        torch._check(
+            pad_t < input_h and pad_b < input_h,
+            lambda: (
+                f"Argument #6: Padding size should be less than the corresponding input dimension, "
+                f"but got: padding ({pad_t}, {pad_b}) at dimension {dim_h} of input {input.shape}"
+            ),
+        )
+
+    torch._check(
+        output_w >= 1 or output_h >= 1,
+        lambda: (
+            f"input (H: {input_h} W: {input_w}) is too small. "
+            f"Calculated output H: {output_h} W: {output_w}"
+        ),
+    )
+
+    if input.ndim == 3:
+        return input.new_empty((nplane, output_h, output_w))
+    else:
+        return input.new_empty((nbatch, nplane, output_h, output_w))
+
+
+@register_meta(aten.reflection_pad2d)
+@out_wrapper()
+def meta_reflection_pad2d(input, padding):
+    return _pad2d_common(input, padding, is_reflection=True)
+
+
+@register_meta(aten.replication_pad2d)
+@out_wrapper()
+def meta_replication_pad2d(input, padding):
+    return _pad2d_common(input, padding, is_reflection=False)
+
+
 @register_meta(
     [
         aten.reflection_pad2d_backward.default,
+        aten.reflection_pad2d_backward.grad_input,
         aten.replication_pad2d_backward.default,
+        aten.replication_pad2d_backward.grad_input,
     ]
 )
+@out_wrapper()
 def meta_pad2d_backward(grad_output, self, padding):
     dim_w = 2
     dim_h = 1
@@ -1097,10 +1450,7 @@ def meta_pad2d_backward(grad_output, self, padding):
         dim_h += 1
         dim_plane += 1
 
-    pad_l = padding[0]
-    pad_r = padding[1]
-    pad_t = padding[2]
-    pad_b = padding[3]
+    pad_l, pad_r, pad_t, pad_b = padding
 
     nplane = self_shape[dim_plane]
     input_h = self_shape[dim_h]
@@ -1109,39 +1459,164 @@ def meta_pad2d_backward(grad_output, self, padding):
     output_w = input_w + pad_l + pad_r
 
     torch._check(
-        output_w == grad_output.shape[dim_w],
-        lambda: f"gradOutput width unexpected. Expected: {output_w}, Got: {grad_output.shape[dim_w]}",
+        output_w == grad_output.size(dim_w),
+        lambda: f"grad_output width unexpected. Expected: {output_w}, Got: {grad_output.size(dim_w)}",
     )
     torch._check(
-        output_h == grad_output.shape[dim_h],
-        lambda: f"gradOutput height unexpected. Expected: {output_h}, Got: {grad_output.shape[dim_h]}",
+        output_h == grad_output.size(dim_h),
+        lambda: f"grad_output height unexpected. Expected: {output_h}, Got: {grad_output.size(dim_h)}",
     )
     return self.new_empty(self.shape)
 
 
-@register_meta(aten.reflection_pad2d.default)
-def meta_pad2d(self, padding):
-    valid_dims = self.size(1) != 0 and self.size(2) != 0
-    torch._check(
-        (self.ndim == 3 and valid_dims)
-        or (self.ndim == 4 and valid_dims and self.size(3) != 0),
-        lambda: f"3D or 4D (batch mode) tensor expected for input, but got: {self}",
-    )
-    if self.ndim == 4:
-        nbatch, nplane, input_h, input_w = self.shape
-    else:
-        nbatch = 1
-        nplane, input_h, input_w = self.shape
+def _pad3d_common(input, padding, *, is_reflection):
+    dim_w = 3
+    dim_h = 2
+    dim_d = 1
+    dim_plane = 0
 
-    pad_l, pad_r, pad_t, pad_b = padding
+    _padding_check_valid_input(input, padding, dim=3)
 
+    batch_mode = input.ndim == 5
+    if batch_mode:
+        nbatch = input.size(0)
+        dim_w += 1
+        dim_h += 1
+        dim_d += 1
+        dim_plane += 1
+
+    pad_l, pad_r, pad_t, pad_b, pad_f, pad_bk = padding
+
+    nplane = input.size(dim_plane)
+    input_d = input.size(dim_d)
+    input_h = input.size(dim_h)
+    input_w = input.size(dim_w)
+    output_d = input_d + pad_f + pad_bk
     output_h = input_h + pad_t + pad_b
     output_w = input_w + pad_l + pad_r
 
-    if self.ndim == 3:
-        return self.new_empty((nplane, output_h, output_w))
+    if is_reflection:
+        torch._check(
+            pad_l < input_w and pad_r < input_w,
+            lambda: (
+                f"Argument #4: Padding size should be less than the corresponding input dimension, "
+                f"but got: padding ({pad_l}, {pad_r}) at dimension {dim_w} of input {input.shape}"
+            ),
+        )
+        torch._check(
+            pad_t < input_h and pad_b < input_h,
+            lambda: (
+                f"Argument #6: Padding size should be less than the corresponding input dimension, "
+                f"but got: padding ({pad_t}, {pad_b}) at dimension {dim_h} of input {input.shape}"
+            ),
+        )
+        torch._check(
+            pad_f < input_d and pad_bk < input_d,
+            lambda: (
+                f"Argument #8: Padding size should be less than the corresponding input dimension, "
+                f"but got: padding ({pad_f}, {pad_bk}) at dimension {dim_d} of input {input.shape}"
+            ),
+        )
+
+    torch._check(
+        output_w >= 1 or output_h >= 1 or output_d >= 1,
+        lambda: (
+            f"input (D: {input_d} H: {input_h} W: {input_w}) is too small. "
+            f"Calculated output D: {output_d} H: {output_h} W: {output_w}"
+        ),
+    )
+
+    if batch_mode:
+        return input.new_empty((nbatch, nplane, output_d, output_h, output_w))
     else:
-        return self.new_empty((nbatch, nplane, output_h, output_w))
+        return input.new_empty((nplane, output_d, output_h, output_w))
+
+
+@register_meta(aten.reflection_pad3d)
+@out_wrapper()
+def meta_reflection_pad3d(input, padding):
+    return _pad3d_common(input, padding, is_reflection=True)
+
+
+@register_meta(aten.replication_pad3d)
+@out_wrapper()
+def meta_replication_pad3d(input, padding):
+    return _pad3d_common(input, padding, is_reflection=False)
+
+
+@register_meta(
+    [
+        aten.reflection_pad3d_backward.default,
+        aten.reflection_pad3d_backward.grad_input,
+        aten.replication_pad3d_backward.default,
+        aten.replication_pad3d_backward.grad_input,
+    ]
+)
+@out_wrapper()
+def meta_pad3d_backward(grad_output, input, padding):
+    torch._check(len(padding) == 6, lambda: "padding size is expected to be 6")
+    assert input.ndim > 3
+    assert grad_output.ndim == input.ndim
+
+    dim_w = 3
+    dim_h = 2
+    dim_d = 1
+
+    if input.ndim == 5:
+        dim_w += 1
+        dim_h += 1
+        dim_d += 1
+
+    pad_l, pad_r, pad_t, pad_b, pad_f, pad_bk = padding
+
+    input_d = input.size(dim_d)
+    input_h = input.size(dim_h)
+    input_w = input.size(dim_w)
+    output_d = input_d + pad_f + pad_bk
+    output_h = input_h + pad_t + pad_b
+    output_w = input_w + pad_l + pad_r
+
+    torch._check(
+        output_w == grad_output.size(dim_w),
+        lambda: f"grad_output width unexpected. Expected: {output_w}, Got: {grad_output.size(dim_w)}",
+    )
+    torch._check(
+        output_h == grad_output.size(dim_h),
+        lambda: f"grad_output height unexpected. Expected: {output_h}, Got: {grad_output.size(dim_h)}",
+    )
+    torch._check(
+        output_d == grad_output.size(dim_d),
+        lambda: f"grad_output depth unexpected. Expected: {output_d}, Got: {grad_output.size(dim_d)}",
+    )
+
+    return input.new_empty(input.shape)
+
+
+@register_meta(aten._pdist_forward)
+@out_wrapper()
+def meta__pdist_forward(self: Tensor, p: float = 2) -> Tensor:
+    torch._check(
+        self.is_contiguous(), lambda: "_pdist_forward requires contiguous input"
+    )
+    n = self.size(0)
+    if n <= 1:
+        return self.new_empty([0]).to(memory_format=torch.legacy_contiguous_format)  # type: ignore[call-overload]
+    else:
+        return self.new_empty((n * (n - 1) // 2,)).to(
+            memory_format=torch.legacy_contiguous_format
+        )  # type: ignore[call-overload]
+
+
+@register_meta(aten._pdist_backward)
+@out_wrapper()
+def meta__pdist_backward(grad: Tensor, self: Tensor, p: float, pdist: Tensor) -> Tensor:
+    torch._check(
+        self.is_contiguous(), lambda: "_pdist_backward requires self to be contiguous"
+    )
+    torch._check(
+        pdist.is_contiguous(), lambda: "_pdist_backward requires pdist to be contiguous"
+    )
+    return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
 
 
 @register_meta([aten.baddbmm.default, aten.baddbmm.out])
@@ -1872,6 +2347,137 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
     return self.new_empty(self.shape).to(memory_format=memory_format)
 
 
+def _adaptive_pool_empty_output_check(grad_output: Tensor, arg_name: str):
+    ndim = grad_output.ndim
+    for i in range(1, ndim):
+        torch._check(
+            grad_output.size(i) > 0,
+            lambda: (
+                f"{arg_name}(): Expected grad_output to have non-zero size for non-batch dimensions, "
+                f"but grad_output has sizes {grad_output.shape} with dimension {i} being empty"
+            ),
+        )
+
+
+@register_meta(aten.adaptive_max_pool2d)
+@out_wrapper("out", "indices")
+def meta_adaptive_max_pool2d(input, output_size):
+    ndim = input.ndim
+    torch._check(
+        ndim in (3, 4),
+        lambda: f"adaptive_max_pool2d(): Expected 3D or 4D tensor, but got: {input.shape}",
+    )
+    for i in range(1, ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                f"adaptive_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
+                f"but input has sizes {input.shape} with dimension {i} being empty"
+            ),
+        )
+
+    torch._check(
+        len(output_size) == 2,
+        lambda: "adaptive_max_pool2d(): internal error: output_size.size() must be 2",
+    )
+
+    dimH = 1
+    sizeB = 1
+    sizeD = 0
+
+    if input.ndim == 4:
+        sizeB = input.size(0)
+        dimH += 1
+
+    sizeD = input.size(dimH - 1)
+    osizeH, osizeW = output_size
+
+    if input.ndim == 3:
+        out_shape = (sizeD, osizeH, osizeW)
+        out = input.new_empty(out_shape)
+        indices = input.new_empty(out_shape, dtype=torch.int64)
+        return out, indices
+    else:
+        out_shape = (sizeB, sizeD, osizeH, osizeW)  # type: ignore[assignment]
+        memory_format = utils.suggest_memory_format(input)
+        out = input.new_empty(out_shape).to(memory_format=memory_format)
+        indices = input.new_empty(out_shape, dtype=torch.int64).to(
+            memory_format=memory_format
+        )
+        return out, indices
+
+
+@register_meta(aten.adaptive_max_pool2d_backward)
+@out_wrapper()
+def meta_adaptive_max_pool2d_backward(grad_output, input, indices):
+    ndim = grad_output.ndim
+    torch._check(
+        ndim in (3, 4),
+        lambda: f"adaptive_max_pooling2d_backward(): Expected 3D or 4D grad_output, but got: {grad_output.shape}",
+    )
+
+    _adaptive_pool_empty_output_check(grad_output, "adaptive_max_pool2d_backward")
+
+    torch._check(
+        input.dtype == grad_output.dtype,
+        lambda: f"expected dtype {input.dtype} for `grad_output` but got dtype {grad_output.dtype}",
+    )
+
+    memory_format = utils.suggest_memory_format(input)
+    return input.new_empty(input.shape).to(memory_format=memory_format)
+
+
+@register_meta(aten.adaptive_max_pool3d)
+@out_wrapper("out", "indices")
+def meta_adaptive_max_pool3d(input, output_size):
+    ndim = input.ndim
+    torch._check(
+        ndim in (4, 5),
+        lambda: f"adaptive_max_pool3d(): Expected 4D or 5D tensor, but got: {input.shape}",
+    )
+    for i in range(1, ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                f"adaptive_max_pool3d(): Expected input to have non-zero size for non-batch dimensions, "
+                f"but input has sizes {input.shape} with dimension {i} being empty"
+            ),
+        )
+
+    torch._check(
+        len(output_size) == 3,
+        lambda: "adaptive_max_pool3d(): internal error: output_size.size() must be 3",
+    )
+
+    dimD = 0
+    sizeB = 1
+    sizeD = 0
+
+    if ndim == 5:
+        sizeB = input.size(0)
+        dimD += 1
+
+    sizeD = input.size(dimD)
+    osizeT, osizeH, osizeW = output_size
+
+    if ndim == 4:
+        out_shape = (sizeD, osizeT, osizeH, osizeW)
+    else:
+        out_shape = (sizeB, sizeD, osizeT, osizeH, osizeW)  # type: ignore[assignment]
+
+    out = input.new_empty(out_shape)
+    indices = input.new_empty(out_shape, dtype=torch.int64)
+
+    return out, indices
+
+
+@register_meta(aten.adaptive_max_pool3d_backward)
+@out_wrapper()
+def meta_adaptive_max_pool3d_backward(grad_output, input, indices):
+    _adaptive_pool_empty_output_check(grad_output, "adaptive_max_pool3d_backward")
+    return input.new_empty(input.shape)
+
+
 @register_meta(aten.repeat_interleave.Tensor)
 def meta_repeat_interleave_Tensor(repeats, output_size=None):
     if output_size is None:
@@ -2075,6 +2681,7 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     [
         aten._foreach_neg_.default,
         aten._foreach_reciprocal_.default,
+        aten._foreach_sqrt_.default,
     ]
 )
 def meta__foreach_unaop_(self):
@@ -2133,7 +2740,7 @@ def meta__foreach_add__list(self, other, alpha=1):
     _check_foreach_binop_tensor_lists(self, other)
 
 
-@register_meta([aten._foreach_div_.List])
+@register_meta([aten._foreach_mul_.List, aten._foreach_div_.List])
 def meta__foreach_binop__list(self, other):
     _check_foreach_binop_tensor_lists(self, other)
 
@@ -2160,6 +2767,7 @@ def meta__foreach_binop_list(self, other):
         aten._foreach_add_.Scalar,
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,
+        aten._foreach_div_.Scalar,
     ]
 )
 def meta__foreach_binop__scalar(self, scalar=1):
@@ -2204,6 +2812,15 @@ def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
         len(self) == len(tensor1) and len(self) == len(tensor2),
         lambda: "All input tensor lists must have the same length",
     )
+
+
+@register_meta(
+    [
+        aten._foreach_lerp_.Scalar,
+    ]
+)
+def meta__foreach_lerp__scalar(self, other, scalar=1):
+    _check_foreach_binop_tensor_lists(self, other)
 
 
 @register_meta(
@@ -2918,6 +3535,68 @@ def pool3d_shape_check(
     )
 
 
+def max_pool3d_backward_shape_check(
+    input,
+    grad_output,
+    indices,
+    nslices,
+    kT,
+    kH,
+    kW,
+    dT,
+    dH,
+    dW,
+    pT,
+    pH,
+    pW,
+    dilationT,
+    dilationH,
+    dilationW,
+    itime,
+    iheight,
+    iwidth,
+    otime,
+    oheight,
+    owidth,
+    fn_name,
+):
+    ndim = input.ndim
+
+    pool3d_shape_check(
+        input,
+        nslices,
+        kT,
+        kH,
+        kW,
+        dT,
+        dH,
+        dW,
+        pT,
+        pH,
+        pW,
+        dilationT,
+        dilationH,
+        dilationW,
+        itime,
+        iheight,
+        iwidth,
+        otime,
+        oheight,
+        owidth,
+        fn_name,
+    )
+
+    check_dim_size(grad_output, ndim, ndim - 4, nslices)
+    check_dim_size(grad_output, ndim, ndim - 3, otime)
+    check_dim_size(grad_output, ndim, ndim - 2, oheight)
+    check_dim_size(grad_output, ndim, ndim - 1, owidth)
+
+    check_dim_size(indices, ndim, ndim - 4, nslices)
+    check_dim_size(indices, ndim, ndim - 3, otime)
+    check_dim_size(indices, ndim, ndim - 2, oheight)
+    check_dim_size(indices, ndim, ndim - 1, owidth)
+
+
 def avg_pool3d_backward_shape_check(
     input: Tensor,
     grad_output: Tensor,
@@ -3121,6 +3800,342 @@ def meta_max_pool2d_with_indices(
     )
 
 
+@register_meta(aten.max_unpool2d)
+@out_wrapper()
+def meta_max_unpool2d(self_, indices, output_size):
+    utils.alert_not_deterministic("max_unpooling2d_forward_out")
+
+    torch._check(
+        indices.dtype == torch.int64,
+        lambda: f"elements in indices should be type int64 but got: {indices.dtype}",
+    )
+    torch._check(
+        len(output_size) == 2,
+        lambda: (
+            f"There should be exactly two elements (height, width) in output_size, "
+            f"but got {len(output_size)} elements."
+        ),
+    )
+
+    oheight, owidth = output_size
+
+    torch._check(
+        self_.ndim in (3, 4),
+        lambda: (
+            f"Input to max_unpooling2d should be a 3d or 4d Tensor, "
+            f"but got a tensor with {self_.ndim} dimensions."
+        ),
+    )
+    torch._check(
+        self_.shape == indices.shape,
+        lambda: (
+            f"Expected shape of indices to be same as that of the input tensor ({self_.shape}) "
+            f"but got indices tensor with shape: {indices.shape}"
+        ),
+    )
+
+    for i in range(1, self_.ndim):
+        torch._check(
+            self_.size(i) > 0,
+            lambda: (
+                f"max_unpooling2d(): "
+                f"Expected input to have non-zero size for non-batch dimensions, "
+                f"but got {self_.shape} with dimension {i} being empty."
+            ),
+        )
+
+    self = self_.contiguous()
+
+    if self_.ndim == 3:
+        nchannels = self.size(0)
+        result = self.new_empty((nchannels, oheight, owidth))
+    else:
+        nbatch = self.size(0)
+        nchannels = self.size(1)
+        result = self.new_empty((nbatch, nchannels, oheight, owidth))
+
+    return result
+
+
+def _max_unpooling3d_shape_check(input, indices, output_size, stride, padding, fn_name):
+    torch._check(
+        indices.dtype == torch.int64, lambda: "elements in indices should be type int64"
+    )
+    torch._check(
+        input.ndim in (4, 5),
+        lambda: f"Input to max_unpooling3d should be a 4d or 5d Tensor, but got a tensor with {input.ndim} dimensions.",
+    )
+    torch._check(
+        len(output_size) == 3,
+        lambda: (
+            f"There should be exactly three elements (depth, height, width) in output_size, "
+            f"but got {len(output_size)} elements."
+        ),
+    )
+    torch._check(
+        len(stride) == 3,
+        lambda: f"There should be exactly three elements (depth, height, width) in stride, but got: {len(stride)} elements.",
+    )
+    torch._check(
+        len(padding) == 3,
+        lambda: f"There should be exactly three elements (depth, height, width) in padding, but got: {len(padding)} elements.",
+    )
+    torch._check(
+        input.shape == indices.shape,
+        lambda: (
+            f"Expected shape of indices to be same as that of the input tensor ({input.shape}) "
+            f"but got indices tensor with shape: {indices.shape}"
+        ),
+    )
+
+    for i in range(1, input.ndim):
+        torch._check(
+            input.size(i) > 0,
+            lambda: (
+                f"{fn_name}: "
+                f"Expected input to have non-zero size for non-batch dimensions, "
+                f"but got {input.shape} with dimension {i} being empty."
+            ),
+        )
+
+    torch._check(
+        stride[0] > 0 and stride[1] > 0 and stride[2] > 0,
+        lambda: f"strides should be greater than zero, but got stride: {stride}",
+    )
+
+
+@register_meta(aten.max_unpool3d)
+@out_wrapper()
+def meta_max_unpool3d(self_, indices, output_size, stride, padding):
+    utils.alert_not_deterministic("max_unpooling3d_forward_out")
+
+    _max_unpooling3d_shape_check(
+        self_, indices, output_size, stride, padding, "max_unpooling3d()"
+    )
+
+    self = self_.contiguous()
+
+    odepth, oheight, owidth = output_size
+
+    if self_.ndim == 4:
+        nchannels = self.size(0)
+        result = self.new_empty((nchannels, odepth, oheight, owidth))
+    else:
+        nbatch = self.size(0)
+        nchannels = self.size(1)
+        result = self.new_empty((nbatch, nchannels, odepth, oheight, owidth))
+
+    return result
+
+
+@register_meta(aten.max_pool3d_with_indices)
+@out_wrapper("out", "indices")
+def meta_max_pool3d_with_indices(
+    input,
+    kernel_size,
+    stride=(),
+    padding=(0,),
+    dilation=(1,),
+    ceil_mode=False,
+):
+    torch._check(
+        len(kernel_size) in (1, 3),
+        lambda: "max_pool3d: kernel_size must either be a single int, or a tuple of three ints",
+    )
+    kT = kernel_size[0]
+    kH = kT if len(kernel_size) == 1 else kernel_size[1]
+    kW = kT if len(kernel_size) == 1 else kernel_size[2]
+
+    torch._check(
+        not stride or len(stride) in (1, 3),
+        lambda: "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints",
+    )
+    dT = kT if not stride else stride[0]
+    dH = kH if not stride else (dT if len(stride) == 1 else stride[1])
+    dW = kW if not stride else (dT if len(stride) == 1 else stride[2])
+
+    torch._check(
+        len(padding) in (1, 3),
+        lambda: "max_pool3d: padding must either be a single int, or a tuple of three ints",
+    )
+    pT = padding[0]
+    pH = pT if len(padding) == 1 else padding[1]
+    pW = pT if len(padding) == 1 else padding[2]
+
+    torch._check(
+        len(dilation) in (1, 3),
+        lambda: "max_pool3d: dilation must be either a single int, or a tuple of three ints",
+    )
+    dilationT = dilation[0]
+    dilationH = dilationT if len(dilation) == 1 else dilation[1]
+    dilationW = dilationT if len(dilation) == 1 else dilation[2]
+
+    torch._check(
+        input.ndim in (4, 5),
+        lambda: "non-empty 4D or 5D (batch mode) tensor expected for input",
+    )
+
+    nbatch = input.size(-5) if input.ndim == 5 else 1
+    nslices = input.size(-4)
+    itime = input.size(-3)
+    iheight = input.size(-2)
+    iwidth = input.size(-1)
+
+    otime = pooling_output_shape(itime, kT, pT, dT, dilationT, ceil_mode)
+    oheight = pooling_output_shape(iheight, kH, pH, dH, dilationH, ceil_mode)
+    owidth = pooling_output_shape(iwidth, kW, pW, dW, dilationW, ceil_mode)
+
+    pool3d_shape_check(
+        input,
+        nslices,
+        kT,
+        kH,
+        kW,
+        dT,
+        dH,
+        dW,
+        pT,
+        pH,
+        pW,
+        dilationT,
+        dilationH,
+        dilationW,
+        itime,
+        iheight,
+        iwidth,
+        otime,
+        oheight,
+        owidth,
+        "max_pool3d_with_indices()",
+    )
+
+    channels_last = (
+        input.ndim == 5 and utils.suggest_memory_format(input) == torch.channels_last_3d
+    )
+    if input.ndim == 4:
+        input_channels_last_check = input.unsqueeze(0)
+        channels_last = (
+            not input_channels_last_check.is_contiguous()
+        ) and input_channels_last_check.is_contiguous(
+            memory_format=torch.channels_last_3d
+        )
+        out_shape = (nslices, otime, oheight, owidth)
+    else:
+        out_shape = (nbatch, nslices, otime, oheight, owidth)  # type: ignore[assignment]
+
+    out = input.new_empty(out_shape)
+    indices = input.new_empty(out_shape, dtype=torch.int64)
+
+    if channels_last:
+        out = out.to(memory_format=torch.channels_last_3d)
+        indices = indices.to(memory_format=torch.channels_last_3d)
+
+    return out, indices
+
+
+@register_meta(aten.max_pool3d_with_indices_backward)
+@out_wrapper()
+def meta_max_pool3d_with_indices_backward(
+    grad_output,
+    input,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode,
+    indices,
+):
+    torch._check(
+        len(kernel_size) in (1, 3),
+        lambda: "max_pool3d: kernel_size must either be a single int, or a tuple of three ints",
+    )
+    kT = kernel_size[0]
+    kH = kT if len(kernel_size) == 1 else kernel_size[1]
+    kW = kT if len(kernel_size) == 1 else kernel_size[2]
+
+    torch._check(
+        not stride or len(stride) in (1, 3),
+        lambda: "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints",
+    )
+    dT = kT if not stride else stride[0]
+    dH = kH if not stride else (dT if len(stride) == 1 else stride[1])
+    dW = kW if not stride else (dT if len(stride) == 1 else stride[2])
+
+    torch._check(
+        len(padding) in (1, 3),
+        lambda: "max_pool3d: padding must either be a single int, or a tuple of three ints",
+    )
+    pT = padding[0]
+    pH = pT if len(padding) == 1 else padding[1]
+    pW = pT if len(padding) == 1 else padding[2]
+
+    torch._check(
+        len(dilation) in (1, 3),
+        lambda: "max_pool3d: dilation must be either a single int, or a tuple of three ints",
+    )
+    dilationT = dilation[0]
+    dilationH = dilationT if len(dilation) == 1 else dilation[1]
+    dilationW = dilationT if len(dilation) == 1 else dilation[2]
+
+    torch._check(
+        input.ndim in (4, 5),
+        lambda: "non-empty 4D or 5D (batch mode) tensor expected for input",
+    )
+
+    nslices = input.size(-4)
+    itime = input.size(-3)
+    iheight = input.size(-2)
+    iwidth = input.size(-1)
+
+    otime = grad_output.size(-3)
+    oheight = grad_output.size(-2)
+    owidth = grad_output.size(-1)
+
+    max_pool3d_backward_shape_check(
+        input,
+        grad_output,
+        indices,
+        nslices,
+        kT,
+        kH,
+        kW,
+        dT,
+        dH,
+        dW,
+        pT,
+        pH,
+        pW,
+        dilationT,
+        dilationH,
+        dilationW,
+        itime,
+        iheight,
+        iwidth,
+        otime,
+        oheight,
+        owidth,
+        "max_pool3d_with_indices_backward()",
+    )
+
+    channels_last = (
+        input.ndim == 5 and utils.suggest_memory_format(input) == torch.channels_last_3d
+    )
+    if input.ndim == 4:
+        input_channels_last_check = input.unsqueeze(0)
+        channels_last = (
+            not input_channels_last_check.is_contiguous()
+        ) and input_channels_last_check.is_contiguous(
+            memory_format=torch.channels_last_3d
+        )
+
+    grad_input = input.new_empty(input.shape)
+
+    if channels_last:
+        grad_input = grad_input.to(memory_format=torch.channels_last_3d)
+
+    return grad_input
+
+
 @register_meta(aten.grid_sampler_2d_backward.default)
 def grid_sampler_2d_backward_meta(
     grad_output,
@@ -3142,6 +4157,10 @@ def grid_sampler_2d_backward_meta(
 
 @register_meta([aten.full.default])
 def full(size, fill_value, *args, **kwargs):
+    dtype = kwargs.get("dtype", None)
+    if not dtype:
+        dtype = utils.get_dtype(fill_value)
+    kwargs["dtype"] = dtype
     return torch.empty(size, *args, **kwargs)
 
 
@@ -3482,9 +4501,9 @@ def meta__scaled_dot_product_flash(
     else:
         debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
 
-    # note: device for seed and offset below depends on whether we are
+    # Note [Seed and Offset]: device for seed and offset below depends on whether we are
     # capturing or not, but at the time of tracing we don't know if we
-    # are going to use cudagraphs or not, so we return cpu tensors here
+    # are going to use cudagraphs or not, so we return meta tensors here
     # it's possible we'll need to have some special handling in inductor for sdpa
 
     return (
@@ -3518,8 +4537,8 @@ def meta__scaled_dot_product_flash_backward(
     max_k: int,
     dropout_p: float,
     is_causal: bool,
-    philox_seed: int,
-    philox_offset: int,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
     scale: Optional[float] = None,
 ):
     batch_size = query.size(0)
@@ -3558,6 +4577,7 @@ def meta__scaled_dot_product_efficient(
     key: Tensor,
     value: Tensor,
     compute_log_sumexp: bool,
+    dropout_p=0.0,
     is_causal: bool = False,
     scale: Optional[float] = None,
 ):
@@ -3583,7 +4603,11 @@ def meta__scaled_dot_product_efficient(
 
     res = res.transpose(1, 2)
 
-    return res, logsum_exp
+    # See Note [Seed and Offset]:
+    seed = torch.empty((), dtype=torch.long, device="meta")
+    offset = torch.empty((), dtype=torch.long, device="meta")
+
+    return res, logsum_exp, seed, offset
 
 
 @register_meta(
@@ -3598,39 +4622,39 @@ def meta__scaled_dot_product_efficient_backward(
     value: Tensor,
     out: Tensor,
     logsumexp: Tensor,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    dropout_p: float,
     is_causal: bool = False,
-    chunk_grad_outputs=False,
     scale: Optional[float] = None,
 ):
-    grad_out = grad_out.transpose(1, 2)
-    query = query.transpose(1, 2)
-    key = key.transpose(1, 2)
-    value = value.transpose(1, 2)
+    batch_size = query.size(0)
+    num_heads = query.size(1)
+    max_q = query.size(2)
+    head_dim = query.size(3)
 
-    B = query.size(0)
-    M = query.size(1)
-    N = key.size(1)
-    nH = query.size(2)
-    K = query.size(3)
+    max_k = key.size(2)
 
-    grad_kv_needs_init = is_causal and N > M
+    grad_q = torch.empty_permuted(
+        (batch_size, num_heads, max_q, head_dim),
+        (0, 2, 1, 3),
+        dtype=query.dtype,
+        device=query.device,
+    )
+    grad_k = torch.empty_permuted(
+        (batch_size, num_heads, max_k, head_dim),
+        (0, 2, 1, 3),
+        dtype=key.dtype,
+        device=key.device,
+    )
+    grad_v = torch.empty_permuted(
+        (batch_size, num_heads, max_k, head_dim),
+        (0, 2, 1, 3),
+        dtype=value.dtype,
+        device=value.device,
+    )
 
-    grad_q = torch.empty(query.shape, dtype=query.dtype, device=query.device)
-    grad_k = (
-        torch.zeros(key.shape, dtype=key.dtype, device=key.device)
-        if grad_kv_needs_init
-        else torch.empty(key.shape, dtype=key.dtype, device=key.device)
-    )
-    grad_v = (
-        torch.zeros(value.shape, dtype=value.dtype, device=value.device)
-        if grad_kv_needs_init
-        else torch.empty(value.shape, dtype=value.dtype, device=value.device)
-    )
-    return (
-        grad_q.transpose(1, 2),
-        grad_k.transpose(1, 2),
-        grad_v.transpose(1, 2),
-    )
+    return grad_q, grad_k, grad_v
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
@@ -3731,8 +4755,8 @@ def upsample_nearest2d_backward(
     grad_output: Tensor,
     output_size: Sequence[Union[int, torch.types.SymInt]],
     input_size: Sequence[Union[int, torch.types.SymInt]],
-    scales_h: float = None,
-    scales_w: float = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
 ):
     full_output_size = upsample_common_check(
         input_size, output_size, num_spatial_dims=2

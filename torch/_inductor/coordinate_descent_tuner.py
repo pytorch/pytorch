@@ -264,8 +264,10 @@ class CoordescTuner:
                 if cur_val is None:
                     continue
 
+                # It's possible that candidate_values is empty.
+                # E.g., if XBLOCK is 1 initially and size_hint for x is also 1.
+                # We would not try either larger or smaller XBLOCK in this case.
                 candidate_values = self.get_neighbour_values(name, cur_val)
-                assert len(candidate_values) > 0
 
                 for next_val in candidate_values:
                     candidate_config = copy.deepcopy(best_config)

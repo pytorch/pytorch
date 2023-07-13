@@ -1,4 +1,5 @@
 import dataclasses
+import inspect
 import weakref
 import re
 from collections import OrderedDict
@@ -22,13 +23,16 @@ from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import torch.utils._pytree as pytree
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
+    ShapeEnv,
     StrictMinMaxConstraint,
 )
+
 from torch._dynamo.exc import UserError, UserErrorType
 from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
 
@@ -120,6 +124,7 @@ def export(
     constraints: Optional[List[Constraint]] = None,
     *,
     _add_runtime_assertions=True,
+    _functionalize_runtime_assertions=False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -139,6 +144,11 @@ def export(
     if constraints is None:
         constraints = []
 
+    if not isinstance(f, torch.nn.Module):
+        for parameter in inspect.signature(f).parameters.values():
+            if parameter.kind == parameter.VAR_KEYWORD:
+                raise UserError(UserErrorType.INVALID_INPUT, "Kwargs to torch.export is not supported")
+
     with torch._dynamo.config.patch(dataclasses.asdict(ExportDynamoConfig())):  # type: ignore[attr-defined]
         try:
             gm_torch_level, _ = torch._dynamo.export(
@@ -155,13 +165,46 @@ def export(
             for name, buffer in gm_torch_level.named_buffers(recurse=True, remove_duplicate=False):
                 params_buffers[name] = buffer
 
+
+            # When aot_export lifts the params, we lose the nn_module_stack
+            # and source_fn from the param nodes as they are treated as fresh inputs
+            # Therefore, we manually extract them before calling into aot_export
+            params_buffers_to_node_meta = OrderedDict()
+            for node in gm_torch_level.graph.nodes:
+                target = node.target
+                meta = node.meta
+                if node.op == "call_module":
+                    submodule = getattr(gm_torch_level, target)
+                    if isinstance(submodule, torch.nn.Module):
+                        for name, _ in submodule.named_parameters(recurse=True, remove_duplicate=False):
+                            params_buffers_to_node_meta[target + "." + name] = meta
+
+                        for name, _ in submodule.named_buffers(recurse=True, remove_duplicate=False):
+                            params_buffers_to_node_meta[target + "." + name] = meta
+
+                # If the call_function uses param as input, we also need to capture the meta for it
+                # This is basically the same flow as torch.fx.traceback.preserve_meta()
+                if node.op == "call_function" and not isinstance(node.target, torch._ops.HigherOrderOperator):
+                    for n in node._input_nodes:
+                        if n.op == "get_attr":
+                            params_buffers_to_node_meta[n.target] = meta
+
             fake_inps = []
             for node in gm_torch_level.graph.nodes:
                 if node.op == "placeholder" and "val" in node.meta:
                     fake_val = node.meta["val"]
                     fake_inps.append(fake_val)
 
-            fake_mode = detect_fake_mode(fake_inps)
+            fake_mode = FakeTensorMode(
+                allow_fallback_kernels=False,
+                allow_non_fake_inputs=True,
+                shape_env=ShapeEnv(
+                    assume_static_by_default=True,
+                ),
+            )
+
+            if detected_fake_mode := detect_fake_mode(fake_inps):
+                fake_mode = detected_fake_mode
 
             fake_args = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args)
 
@@ -171,7 +214,7 @@ def export(
             flat_args, in_spec = pytree.tree_flatten(args)
             out_spec = orig_out_spec = gm_torch_level._out_spec
             # this means it is scalar return value, so will make it tuple
-            if not isinstance(return_val, (list, tuple, dict)):
+            if not isinstance(return_val, (list, tuple)):
                 out_spec = pytree.tree_flatten((return_val,))[1]
 
             orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
@@ -218,6 +261,22 @@ def export(
                 if re.match(r"^[if]\d+$", str(k))
             }
 
+            # After aot_export, set the param/buffer metadata back into placeholders
+            # Technically, users can still construct this data from param names
+            # without relying on this metadata
+            for node in gm.graph.nodes:
+                if node.op == "placeholder":
+                    if node.target in export_graph_signature.inputs_to_parameters:
+                        param_name = export_graph_signature.inputs_to_parameters[node.target]
+                        if param_name in params_buffers_to_node_meta:
+                            for k, v in params_buffers_to_node_meta[param_name].items():
+                                node.meta[k] = v
+                    if node.target in export_graph_signature.inputs_to_buffers:
+                        buffer_name = export_graph_signature.inputs_to_buffers[node.target]
+                        if buffer_name in params_buffers_to_node_meta:
+                            for k, v in params_buffers_to_node_meta[buffer_name].items():
+                                node.meta[k] = v
+
             range_constraints, equality_constraints = _process_constraints(
                 gm,
                 export_graph_signature,
@@ -235,7 +294,9 @@ def export(
             )
 
             if _add_runtime_assertions:
-                exported_program = exported_program._add_runtime_assertions()
+                exported_program = exported_program._add_runtime_assertions(
+                    functionalize=_functionalize_runtime_assertions,
+                )
 
             return exported_program.transform(_ReplaceSymSizeOpPass())
 
