@@ -155,14 +155,6 @@ enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
 enum class WaitResponseType : uint8_t { STOP_WAITING, WAIT_CANCELED };
 
-enum class WatchResponseType : uint8_t {
-  KEY_UPDATED,
-  KEY_CREATED,
-  KEY_DELETED,
-  KEY_CALLBACK_REGISTERED,
-  KEY_APPENDED,
-};
-
 // Separate thread that is only launched on master
 class TCPStoreMasterDaemon : public BackgroundThread {
  public:
