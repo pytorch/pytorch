@@ -2949,7 +2949,7 @@ Target Guards:
             return new_expr
 
         # Check if the range can solve it statically
-        out = bound_sympy(new_expr, new_range_env, unbounded_symbols=False)
+        out = bound_sympy(new_expr, new_range_env)
         if out.is_singleton():
             return out.lower
 
@@ -3402,7 +3402,7 @@ Target Guards:
             vr = self.var_to_range[symbol]
             lower, upper = vr.lower, vr.upper
 
-            rhs_vr = bound_sympy(expr.rhs, self.var_to_range, unbounded_symbols=False)
+            rhs_vr = bound_sympy(expr.rhs, self.var_to_range)
             lower_guard, upper_guard = self.var_to_guards.get(symbol, (None, None))
 
             # Let's suppose that we have a preexisting range for x [0, 100].
