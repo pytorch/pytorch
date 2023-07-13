@@ -1884,7 +1884,7 @@ def create_synthetic_base_metadata(
     # generate the requires_grad info on those same mutated inputs, but after constructing synthetic bases.
     input_infos = []
     mutated_inp_require_grad_info = []
-    for _, outer_indices in synthetic_base_to_indices.items():
+    for outer_indices in synthetic_base_to_indices.values():
         # leaf-ness should be all-or-nothing for aliased tensor.
         # (aka if "a" and "b" are views, then a.is_leaf == b.is_leaf)
         any_leaf = any(m.input_info[x].is_leaf for x in outer_indices)

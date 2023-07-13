@@ -4513,6 +4513,19 @@ def fn():
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_cast(self):
+        from typing import cast
+
+        def fn(x):
+            return cast(torch.Tensor, torch.add(x, 1.0))
+
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        ref = fn(torch.ones(2, 2))
+        res = opt_fn(torch.ones(2, 2))
+
+        self.assertTrue(same(ref, res))
+
     def test_T_tensor_attribute(self):
         def fn(x, y):
             a = x.T
@@ -5929,7 +5942,6 @@ def ___make_guard_fn():
                 (op(s0, s1), op(z0, z1))
                 for op in (
                     operator.add,
-                    operator.mod,
                     operator.mul,
                     operator.pow,
                 )
@@ -5955,9 +5967,18 @@ def ___make_guard_fn():
                 s0 / s1,
                 z3.ToReal(z0) * (z1**-1),
             ),
-            (s2 % (s0 / s1), z2 % z3.ToInt(z3.ToReal(z0) * (z1**-1))),
-            (s2 % (s0**3), z2 % z3.ToInt(z0**3)),
             (FloorDiv(s0, s1), z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))),
+            (s0 % s1, z0 - z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1)) * z1),
+            (
+                s2 % (s0 / s1),
+                z2
+                - z3.ToReal(z3.ToInt(z3.ToReal(z2) / (z3.ToReal(z0) * z1**-1)))
+                * (z3.ToReal(z0) * z1**-1),
+            ),
+            (
+                s2 % (s0**3),
+                z2 - z3.ToReal(z3.ToInt(z3.ToReal(z2) / z0**3)) * z0**3,
+            ),
         ]
 
         toZ3 = SympyToZ3(validator)

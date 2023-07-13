@@ -2001,8 +2001,6 @@ class CUDAGraphTreeManager:
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
         for node in self.current_node._path_from_root:
-            if not len(node.tensor_weakrefs) == len(node.stack_traces):
-                breakpoint()
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()

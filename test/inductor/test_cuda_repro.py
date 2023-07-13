@@ -841,6 +841,75 @@ class CudaReproTests(TestCase):
         actual = cfn()
         self.assertEqual(expect, actual, atol=0, rtol=0)
 
+    def test_issue104759(self):
+        def fn(arg7_1, add_1, permute_2, select_scatter, slice_8):
+            slice_scatter_4 = torch.ops.aten.slice_scatter.default(
+                permute_2, select_scatter, 0, 1, 9223372036854775807
+            )
+            permute_3 = torch.ops.aten.permute.default(slice_scatter_4, [1, 3, 0, 2, 4])
+            view_6 = torch.ops.aten.view.default(permute_3, [1, 1000, 48])
+            view_7 = torch.ops.aten.view.default(view_6, [1000, 48])
+            view_8 = torch.ops.aten.view.default(view_7, [1, 1000, 48])
+            view_9 = torch.ops.aten.view.default(view_8, [1, 1000, 3, 4, 4])
+            permute_4 = torch.ops.aten.permute.default(view_9, [2, 0, 3, 1, 4])
+            slice_7 = torch.ops.aten.slice.Tensor(permute_4, 0, 1, 9223372036854775807)
+            slice_scatter_5 = torch.ops.aten.slice_scatter.default(
+                slice_8, slice_7, 4, 0, 9223372036854775807
+            )
+            slice_scatter_6 = torch.ops.aten.slice_scatter.default(
+                arg7_1, slice_scatter_5, 3, 0, 1000
+            )
+            mul_8 = torch.ops.aten.mul.Scalar(add_1, 0.7071067811865476)
+            slice_9 = torch.ops.aten.slice.Tensor(slice_scatter_6, 3, 0, 1000)
+            slice_10 = torch.ops.aten.slice.Tensor(slice_9, 4, 0, 9223372036854775807)
+            select_2 = torch.ops.aten.select.int(slice_10, 0, 0)
+            permute_5 = torch.ops.aten.permute.default(select_2, [0, 1, 3, 2])
+            mul_9 = torch.ops.aten.mul.Scalar(permute_5, 0.7071067811865476)
+            expand = torch.ops.aten.expand.default(mul_8, [1, 4, 1000, 4])
+            view_10 = torch.ops.aten.view.default(expand, [4, 1000, 4])
+            expand_1 = torch.ops.aten.expand.default(mul_9, [1, 4, 4, 1000])
+            view_11 = torch.ops.aten.view.default(expand_1, [4, 4, 1000])
+            bmm = torch.ops.aten.bmm.default(view_10, view_11)
+            return (bmm,)
+
+        args = []
+        args.append(torch.randn((2, 1, 4, 1200, 4), dtype=torch.float16, device="cuda"))
+        args.append(
+            rand_strided(
+                (1, 4, 1000, 4), (16000, 4, 16, 1), dtype=torch.float16, device="cuda"
+            )
+        )
+        args.append(
+            rand_strided(
+                (3, 1, 4, 1000, 4),
+                (16, 48000, 4, 48, 1),
+                dtype=torch.float16,
+                device="cuda",
+            )
+        )
+        args.append(
+            rand_strided(
+                (2, 1, 4, 1000, 4),
+                (16, 48000, 4, 48, 1),
+                dtype=torch.float16,
+                device="cuda",
+            )
+        )
+        args.append(
+            rand_strided(
+                (2, 1, 4, 1000, 4),
+                (19200, 19200, 4800, 4, 1),
+                dtype=torch.float16,
+                device="cuda",
+            )
+        )
+
+        correct = fn(*args)
+        mod = make_fx(fn, tracing_mode="real")(*args)
+        compiled = compile_fx_inner(mod, args)
+        ref = compiled(list(args))
+        assert same(ref, correct)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
