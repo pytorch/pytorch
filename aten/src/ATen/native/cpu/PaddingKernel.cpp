@@ -231,6 +231,84 @@ void cpu_padding(
 }
 
 template <typename scalar_t, typename PaddingType>
+void cpu_padding_channels_last(
+    const Tensor& output_,
+    const Tensor& input_,
+    PaddingParams& p) {
+
+  auto memory_format = p.ndim == 2
+      ? at::MemoryFormat::ChannelsLast
+      : at::MemoryFormat::ChannelsLast3d;
+
+  auto input = input_.contiguous(memory_format);
+  auto output = output_.contiguous(memory_format);
+
+  auto input_data = input.data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
+
+  int64_t nbatch = p.nbatch;
+  int64_t channels = p.channels;
+
+  int ndim = p.ndim;
+  int64_t input_depth = ndim == 3 ? p.ishape[ndim - 3] : 1;
+  int64_t input_height = ndim >=2 ? p.ishape[ndim - 2] : 1;
+  int64_t input_width = p.ishape[ndim - 1];
+  int64_t output_depth = ndim == 3 ? p.oshape[ndim - 3] : 1;
+  int64_t output_height = ndim >= 2 ? p.oshape[ndim - 2] : 1;
+  int64_t output_width = p.oshape[ndim - 1];
+  int64_t pad_d = ndim == 3 ? p.pads[ndim - 3] : 0;
+  int64_t pad_h = ndim >= 2 ? p.pads[ndim - 2] : 0;
+  int64_t pad_w = p.pads[ndim - 1];
+  int64_t offset_d = ndim == 3 ? p.offsets[ndim - 3] : 0;
+  int64_t offset_h = ndim >= 2 ? p.offsets[ndim - 2] : 0;
+  int64_t offset_w = p.offsets[ndim - 1];
+
+  if (ndim == 2) {
+    // parallel on N,H,W, vectorize on C
+    at::parallel_for(0, nbatch * output_height * output_width, 1, [&](int64_t begin, int64_t end) {
+      int64_t n{0}, oh{0}, ow{0};
+      data_index_init(begin, n, nbatch, oh, output_height, ow, output_width);
+
+      for (const auto i : c10::irange(begin, end)) {
+        int64_t ih = PaddingType::index(oh, input_height, pad_h, offset_h);
+        int64_t iw = PaddingType::index(ow, input_width, pad_w, offset_w);
+
+        scalar_t* output_ptr = output_data + i * channels;
+        scalar_t* input_ptr = input_data + (n * input_height * input_width + ih * input_width + iw) * channels;
+        copy_stub(output_ptr, input_ptr, channels);
+
+        data_index_step(n, nbatch, oh, output_height, ow, output_width);
+      }
+    });
+  } else if (ndim == 3) {
+    // parallel on N,D,H,W, vectorize on C
+    at::parallel_for(0, nbatch * output_depth * output_height * output_width, 1, [&](int64_t begin, int64_t end) {
+      int64_t n{0}, od{0}, oh{0}, ow{0};
+      data_index_init(begin, n, nbatch, od, output_depth, oh, output_height, ow, output_width);
+
+      for (const auto i : c10::irange(begin, end)) {
+        int64_t id = PaddingType::index(od, input_depth, pad_d, offset_d);
+        int64_t ih = PaddingType::index(oh, input_height, pad_h, offset_h);
+        int64_t iw = PaddingType::index(ow, input_width, pad_w, offset_w);
+
+        scalar_t* output_ptr = output_data + i * channels;
+        scalar_t* input_ptr = input_data + (n * input_depth * input_height * input_width +
+            id * input_height * input_width + ih * input_width + iw) * channels;
+        copy_stub(output_ptr, input_ptr, channels);
+
+        data_index_step(n, nbatch, od, output_depth, oh, output_height, ow, output_width);
+      }
+    });
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "expect input dim to be 2d or 3d.");
+  }
+
+  if (!output_.is_contiguous(memory_format)) {
+    output_.copy_(output);
+  }
+}
+
+template <typename scalar_t, typename PaddingType>
 void cpu_padding_backward(
     const Tensor& grad_input_,
     const Tensor& grad_output_,
@@ -314,6 +392,92 @@ void cpu_padding_backward(
   }
 }
 
+template <typename scalar_t, typename PaddingType>
+void cpu_padding_backward_channels_last(
+    const Tensor& grad_input_,
+    const Tensor& grad_output_,
+    PaddingParams& p) {
+
+  auto memory_format = p.ndim == 2
+      ? at::MemoryFormat::ChannelsLast
+      : at::MemoryFormat::ChannelsLast3d;
+
+  auto grad_input = grad_input_.contiguous(memory_format);
+  auto grad_output = grad_output_.contiguous(memory_format);
+
+  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+
+  int64_t nbatch = p.nbatch;
+  int64_t channels = p.channels;
+
+  int ndim = p.ndim;
+  int64_t input_depth = ndim == 3 ? p.ishape[ndim - 3] : 1;
+  int64_t input_height = ndim >=2 ? p.ishape[ndim - 2] : 1;
+  int64_t input_width = p.ishape[ndim - 1];
+  int64_t output_depth = ndim == 3 ? p.oshape[ndim - 3] : 1;
+  int64_t output_height = ndim >= 2 ? p.oshape[ndim - 2] : 1;
+  int64_t output_width = p.oshape[ndim - 1];
+  int64_t pad_d = ndim == 3 ? p.pads[ndim - 3] : 0;
+  int64_t pad_h = ndim >= 2 ? p.pads[ndim - 2] : 0;
+  int64_t pad_w = p.pads[ndim - 1];
+  int64_t offset_d = ndim == 3 ? p.offsets[ndim - 3] : 0;
+  int64_t offset_h = ndim >= 2 ? p.offsets[ndim - 2] : 0;
+  int64_t offset_w = p.offsets[ndim - 1];
+
+  if (ndim == 2) {
+    // parallel on N, sequential on H,W, vectorize on C
+    at::parallel_for(0, nbatch, 1, [&](int64_t begin, int64_t end) {
+      for (const auto n : c10::irange(begin, end)) {
+        for (const auto oh : c10::irange(output_height)) {
+          int64_t ih = PaddingType::index(oh, input_height, pad_h, offset_h);
+          for (const auto ow : c10::irange(output_width)) {
+            int64_t iw = PaddingType::index(ow, input_width, pad_w, offset_w);
+            scalar_t* grad_input_ptr = grad_input_data +
+                (n * input_height * input_width + ih * input_width + iw) * channels;
+            scalar_t* grad_output_ptr = grad_output_data +
+                (n * output_height * output_width + oh * output_width + ow) * channels;
+            add_stub(grad_input_ptr, grad_output_ptr, channels);
+          }
+        }
+      }
+    });
+  } else if (ndim == 3) {
+    // parallel on N, sequential on D,H,W, vectorize on C
+    at::parallel_for(0, nbatch, 1, [&](int64_t begin, int64_t end) {
+      for (const auto n : c10::irange(begin, end)) {
+        for (const auto od : c10::irange(output_depth)) {
+          int64_t id = PaddingType::index(od, input_depth, pad_d, offset_d);
+          for (const auto oh : c10::irange(output_height)) {
+            int64_t ih = PaddingType::index(oh, input_height, pad_h, offset_h);
+            for (const auto ow : c10::irange(output_width)) {
+              int64_t iw = PaddingType::index(ow, input_width, pad_w, offset_w);
+              scalar_t* grad_input_ptr = grad_input_data +
+                  (n * input_depth * input_height * input_width + id * input_height * input_width +
+                   ih * input_width + iw) * channels;
+              scalar_t* grad_output_ptr = grad_output_data +
+                  (n * output_depth * output_height * output_width + od * output_height * output_width +
+                   oh * output_width + ow) * channels;
+              add_stub(grad_input_ptr, grad_output_ptr, channels);
+            }
+          }
+        }
+      }
+    });
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "expect input dim to be 2d or 3d.");
+  }
+
+  if (!grad_input_.is_contiguous(memory_format)) {
+    grad_input_.copy_(grad_input);
+  }
+}
+
+// non-batch mode 4d input will be considered as Contiguous in format of CDHW
+at::MemoryFormat padding_memory_format_3d(const Tensor& input) {
+  return input.dim() == 4 ? at::MemoryFormat::Contiguous : input.suggest_memory_format();
+}
+
 // reflection padding
 void reflection_pad1d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
   PaddingParams param{input, output, padding};
@@ -345,35 +509,89 @@ void reflection_pad2d_kernel_impl(const Tensor& output, const Tensor& input, Int
       cpu_padding<scalar_t, ReflectionPad>(output, input, param);
     });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
-      cpu_padding<scalar_t, ReflectionPad>(output, input, param);
-    });
+    switch (input.suggest_memory_format()) {
+      case at::MemoryFormat::Contiguous: {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
+          cpu_padding<scalar_t, ReflectionPad>(output, input, param);
+        });
+        break;
+      }
+      case at::MemoryFormat::ChannelsLast: {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d_channels_last", [&]{
+          cpu_padding_channels_last<scalar_t, ReflectionPad>(output, input, param);
+        });
+        break;
+      }
+      default:
+        TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+    }
   }
 }
 
 void reflection_pad2d_backward_kernel_impl(
     const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
   PaddingParams param{grad_input, grad_output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "reflection_pad2d_backward", [&] {
-    cpu_padding_backward<scalar_t, ReflectionPad>(grad_input, grad_output, param);
-  });
+  switch (grad_output.suggest_memory_format()) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "reflection_pad2d_backward", [&] {
+        cpu_padding_backward<scalar_t, ReflectionPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "reflection_pad2d_backward_channels_last", [&]{
+        cpu_padding_backward_channels_last<scalar_t, ReflectionPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+  }
 }
 
 void reflection_pad3d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
   PaddingParams param{input, output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
-      "reflection_pad3d", [&] {
-    cpu_padding<scalar_t, ReflectionPad>(output, input, param);
-  });
+  switch (padding_memory_format_3d(input)) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
+          "reflection_pad3d", [&] {
+        cpu_padding<scalar_t, ReflectionPad>(output, input, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast3d: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
+          "reflection_pad3d_channels_last", [&]{
+        cpu_padding_channels_last<scalar_t, ReflectionPad>(output, input, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+  }
 }
 
 void reflection_pad3d_backward_kernel_impl(
     const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
   PaddingParams param{grad_input, grad_output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, grad_output.scalar_type(),
-      "reflection_pad3d_backward", [&] {
-    cpu_padding_backward<scalar_t, ReflectionPad>(grad_input, grad_output, param);
-  });
+  switch (padding_memory_format_3d(grad_output)) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, grad_output.scalar_type(),
+          "reflection_pad3d_backward", [&] {
+        cpu_padding_backward<scalar_t, ReflectionPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast3d: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, grad_output.scalar_type(),
+          "reflection_pad3d_backward_channels_last", [&]{
+        cpu_padding_backward_channels_last<scalar_t, ReflectionPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+  }
 }
 
 // replication padding
