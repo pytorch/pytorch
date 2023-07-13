@@ -11,7 +11,7 @@ from .eval_frame import (
     reset_code,
 )
 from .exc import IncorrectUsage
-from .export_impl import export
+from .export import export
 from .external_utils import is_compiling
 from .utils import (
     compilation_metrics,
