@@ -315,9 +315,9 @@ class OptimizeForInferenceTemplate(TestCase):
 
         binary_list = {
             lambda x, y: torch.add(x, y): "aten.add",
-            lambda x, y: torch.sub(y, x): "aten.sub",
+            lambda x, y: torch.sub(x, y): "aten.sub",
             lambda x, y: torch.mul(x, y): "aten.mul",
-            lambda x, y: torch.div(y, x): "aten.div",
+            lambda x, y: torch.div(x, y): "aten.div",
         }
 
         other_shapes = [[1, 16, 1, 1], [16, 1, 1]]

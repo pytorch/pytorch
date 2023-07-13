@@ -215,18 +215,22 @@ def binary_folding_init():
                 aten.reshape.default,
                 (other, tuple(weight_broadcast_shape)),
             )
-            conv_args[1] = graph.create_node(
+            new_weight = graph.create_node(
                 "call_function", binary_node.target, (conv_args[1], other_reshape1)
             )
-            if conv_args[2] is not None:
+            new_weight.meta.update(conv_args[1].meta)
+            conv_args[1] = new_weight
+            if bias is not None:
                 other_reshape = graph.create_node(
                     "call_function",
                     aten.reshape.default,
                     (other, (weight_meta_value.size(0),)),
                 )
-                conv_args[2] = graph.create_node(
+                new_bias = graph.create_node(
                     "call_function", binary_node.target, (bias, other_reshape)
                 )
+                new_bias.meta.update(bias.meta)
+                conv_args[2] = new_bias
         return graph.create_node("call_function", conv_node.target, tuple(conv_args))
 
     for _computation_call, binary_op in itertools.product(
@@ -252,6 +256,8 @@ def binary_folding_init():
                 new_computation_node = _create_new_conv_node(
                     graph, computation_node, binary_node, other
                 )
+
                 binary_node.replace_all_uses_with(new_computation_node)
+                new_computation_node.meta.update(binary_node.meta)
                 graph.erase_node(binary_node)
                 graph.erase_node(computation_node)
