@@ -1,6 +1,8 @@
 from torch._ops import HigherOrderOperator
 from torch.utils.checkpoint import checkpoint
 from itertools import count
+import inspect
+
 uid = count(1)
 
 # Used for testing the HigherOrderOperator mechanism
@@ -8,7 +10,7 @@ class Wrap(HigherOrderOperator):
     def __init__(self):
         super().__init__("wrap")
 
-    def __call__(self, func, *args):
+    def __call__(self, func, *args, **kwargs):
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
         import torch._dynamo  # noqa: F401
@@ -16,7 +18,7 @@ class Wrap(HigherOrderOperator):
 
         @disable
         def wrapper():
-            result = func(*args)
+            result = func(*args, **kwargs)
             return result
 
         return wrapper()
@@ -73,6 +75,39 @@ class TagActivationCheckpoint(HigherOrderOperator):
 
     def __init__(self):
         super().__init__("tag_activation_checkpoint")
+
+    @staticmethod
+    def divide_kwargs(kwargs):
+        """
+        checkpoint fn can have mixed kwargs between checkpointed fn and
+        checkpoint fn itself. For example
+        >> def gn(x, y, z=None):
+        >>     a = torch.matmul(x, y)
+        >>     if z is not None:
+        >>         return torch.matmul(a, z)
+        >>     return a
+        >> def fn(x, y, z):
+        >>     return torch.cos(checkpoint(gn, x, y, use_reentrant=False, z=z))
+        In the above case, z belongs to checkpointed function gn, but
+        use_reentrant belongs to the checkpoint function. This function splits
+        the kwargs into checkpoint_kwargs and gmod_kwargs (or
+        checkpointed_fn_kwargs).
+        We do sorting to ensure same graph from run to run for better
+        debuggability. It is not required for correctness.
+        """
+        ckpt_signature = inspect.signature(checkpoint)
+        checkpoint_keys = set()
+        for name in ckpt_signature.parameters:
+            if name in ("function", "args", "kwargs"):
+                continue
+            checkpoint_keys.add(name)
+
+        # `preserve_rng_state` is not a regular kwarg
+        checkpoint_keys.add("preserve_rng_state")
+
+        checkpoint_kwargs = {name: kwargs[name] for name in kwargs.keys() if name in checkpoint_keys}
+        gmod_kwargs = {name: kwargs[name] for name in kwargs.keys() if name not in checkpoint_keys}
+        return checkpoint_kwargs, gmod_kwargs
 
     def tag_nodes(self, gmod):
         # TODO - This needs major investigation. Currently, we are tagging all

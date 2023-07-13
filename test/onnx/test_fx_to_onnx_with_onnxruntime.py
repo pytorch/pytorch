@@ -20,8 +20,8 @@ from torch import nn
 from torch._subclasses import fake_tensor
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import (
-    context as fx_context,
     fx_symbolic_graph_extractor,
+    patcher,
     serialization as fx_serialization,
 )
 from torch.testing._internal import common_utils
@@ -639,7 +639,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @_beartype.beartype
-    def _test_large_scale_exporter(
+    def _test_fx_symbolic_tracer_large_scale_exporter(
         self,
         model_name: str,
         create_model: Callable,
@@ -682,7 +682,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             ftm = fake_tensor.FakeTensorMode(
                 allow_non_fake_inputs=True, allow_fallback_kernels=False
             )
-            ctx = fx_context.FxToOnnxContext()
+            ctx = patcher.ONNXTorchPatcher()
             # NOTE: FakeTensorMode disallows symbolic shape of fx graph
             # The following coed block does several things.
             #  1. Create a model whose parameters and buffers are all FakeTensor's.
@@ -734,7 +734,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 tuple(ctx.paths),
                 onnx_model,
             )
-
             # Generate random inputs.
             args = create_args()
             kwargs = create_pytorch_only_kwargs()
@@ -761,7 +760,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @pytorch_test_common.skip_dynamic_fx_test(
         "FakeTensor exporting is not supported by dynamic axes."
     )
-    def test_large_scale_exporter_with_toy_mlp(self):
+    def test_fx_symbolic_tracer_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -789,7 +788,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_pytorch_only_extra_kwargs():
             return {}
 
-        self._test_large_scale_exporter(
+        self._test_fx_symbolic_tracer_large_scale_exporter(
             "toy_mlp1",
             create_model,
             create_args,
@@ -815,7 +814,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_pytorch_only_extra_kwargs():
             return {"return_dict": False}
 
-        self._test_large_scale_exporter(
+        self._test_fx_symbolic_tracer_large_scale_exporter(
             "tiny_gpt2",
             create_model,
             create_args,
