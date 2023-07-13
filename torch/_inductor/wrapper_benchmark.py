@@ -1,8 +1,10 @@
 import dataclasses
-import torch
 import tempfile
 from collections import defaultdict
+
+import torch
 from torch.autograd import DeviceType
+
 
 @dataclasses.dataclass
 class ProfileEvent:
@@ -12,6 +14,7 @@ class ProfileEvent:
     # the benchmark is run multiple times and we average the count across all the
     # runs. It should be an integer but define a float just in case.
     count: float
+
 
 def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
     def get_self_cuda_time(ev):
@@ -111,6 +114,7 @@ def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
         print(tabulate_line)
 
     report()
+
 
 def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
     """

@@ -124,9 +124,6 @@ conv_1x1_as_mm = False
 # being reduced over is large (by splitting it)
 split_reductions = True
 
-# Only save random seed for backwards rather than full mask
-lowmem_dropout = True
-
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
 # Enable constant and index_expr folding
@@ -334,9 +331,10 @@ class triton:
     )
 
     # 0: disable
-    # 1: enable, pick the original kernel
-    # 2: enable, pick the alternative kernel
-    multi_kernel = int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "1"))
+    # 1: enable, use tuning to pick between different subkernels
+    # 2: enable, force using persistent reduction
+    # 3: enable, force using regular reduction
+    multi_kernel = int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "0"))
 
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = True

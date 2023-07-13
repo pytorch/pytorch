@@ -1,8 +1,11 @@
-from ..virtualized import V
+import builtins
+
+import sympy
+
 from ..codecache import TritonFuture
 from ..utils import do_bench
-import sympy
-import builtins
+from ..virtualized import V
+
 
 class MultiKernel:
     """
@@ -14,6 +17,7 @@ class MultiKernel:
     multi_kernel_kernel1 = MultiKernelCall([kernel1, kernel2])
     ```
     """
+
     def __init__(self, kernels):
         assert len(kernels) >= 2
 
@@ -21,12 +25,14 @@ class MultiKernel:
         multi_kernel_name = f"multi_kernel_{kernels[0].kernel_name}"
 
         wrapper = V.graph.wrapper_code
-        # TODO dedup...
-        wrapper.header.splice(f"""
+        # TODO dedupliate the kernel definition
+        wrapper.header.splice(
+            f"""
         {multi_kernel_name} = MultiKernelCall([
             {", ".join([kernel.kernel_name for kernel in kernels])},
         ])
-        """)
+        """
+        )
         self.kernels = kernels
         self.kernel_name = multi_kernel_name
 
@@ -43,12 +49,12 @@ class MultiKernel:
         Collect the union of arguments from all subkernels as the arguments
         for the multi-kernel.
         """
-        call_args_list = [
-            self.get_call_args(kernel) for kernel in self.kernels
-        ]
+        call_args_list = [self.get_call_args(kernel) for kernel in self.kernels]
         call_args = call_args_list[0]
         for other_call_args in call_args_list[1:]:
-            assert set(call_args) == set(other_call_args), f"call_args: {call_args}, other call args: {other_call_args}"
+            assert set(call_args) == set(
+                other_call_args
+            ), f"call_args: {call_args}, other call args: {other_call_args}"
 
         # TODO dedup the code with TritonKernel class
         grid = []
@@ -63,7 +69,6 @@ class MultiKernel:
             if tree.prefix != "r":
                 grid.append(expr)
 
-
         V.graph.wrapper_code.generate_kernel_call(
             self.kernel_name,
             call_args,
@@ -75,7 +80,10 @@ class MultiKernel:
 class MultiKernelCall:
     """
     This class is called at run time to actually run the kernel
+
+    TODO: we could add cache for the choices piced by the MultiKernelCall
     """
+
     def __init__(self, kernels):
         assert len(kernels) >= 2
         if isinstance(kernels[0], TritonFuture):
@@ -94,8 +102,7 @@ class MultiKernelCall:
     def run(self, *args, **kwargs):
         if self.picked_kernel is None:
             timings = {
-                kernel: self.bench(kernel, *args, **kwargs)
-                for kernel in self.kernels
+                kernel: self.bench(kernel, *args, **kwargs) for kernel in self.kernels
             }
             self.picked_kernel = builtins.min(timings, key=timings.get)
         self.picked_kernel.run(*args, **kwargs)

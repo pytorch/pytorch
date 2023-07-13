@@ -1,6 +1,5 @@
 import collections
 import contextlib
-import dataclasses
 import functools
 import inspect
 import itertools
@@ -13,7 +12,6 @@ import sys
 import tempfile
 import textwrap
 import time
-from collections import defaultdict
 from io import StringIO
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Union
 from unittest import mock
@@ -21,7 +19,6 @@ from unittest import mock
 import sympy
 
 import torch
-from torch.autograd import DeviceType
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 

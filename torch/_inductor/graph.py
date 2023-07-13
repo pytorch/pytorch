@@ -1,9 +1,10 @@
+import copy
+import dataclasses
+import hashlib
 import logging
 import operator
 import os
 import re
-import copy
-import dataclasses
 import sys
 import time
 from contextlib import contextmanager
@@ -99,12 +100,14 @@ def is_magic_method(op):
     magic_ops = {method_to_operator(m) for m in magic_methods}
     return op in magic_ops
 
+
 @dataclasses.dataclass
 class GraphState:
     removed_buffers: Set[str]
     wrapper_allocated: Set[str]
     wrapper_freed: Set[str]
     wrapper_num_lines: int
+
 
 class GraphLowering(torch.fx.Interpreter):
     def symbolic_sizes_strides(self, ex: torch.Tensor):
@@ -185,6 +188,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
+        self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
         self.mutated_buffers: Set[str] = set()
@@ -214,32 +218,31 @@ class GraphLowering(torch.fx.Interpreter):
         ] = (
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
-        self.saved_state = []
+        self.saved_state: List[GraphState] = []
 
     def save_state(self):
-        try:
-            self.saved_state.append(GraphState(
+        assert self.wrapper_code
+        self.saved_state.append(
+            GraphState(
                 removed_buffers=copy.deepcopy(self.removed_buffers),
                 wrapper_allocated=copy.deepcopy(self.wrapper_code.allocated),
                 wrapper_freed=copy.deepcopy(self.wrapper_code.freed),
                 wrapper_num_lines=len(self.wrapper_code.lines),
-            ))
-        except:
-            breakpoint() # TODO
-            raise
+            )
+        )
 
     def restore_state(self):
+        assert self.wrapper_code
         state = self.saved_state[-1]
         self.removed_buffers = state.removed_buffers
         self.wrapper_code.allocated = state.wrapper_allocated
         self.wrapper_code.freed = state.wrapper_freed
         assert len(self.wrapper_code.lines) >= state.wrapper_num_lines
-        self.wrapper_code.lines = self.wrapper_code.lines[:state.wrapper_num_lines]
+        self.wrapper_code.lines = self.wrapper_code.lines[: state.wrapper_num_lines]
         self.drop_state()
 
     def drop_state(self):
         self.saved_state.pop()
-
 
     @staticmethod
     def decide_layout_opt(gm) -> bool:
@@ -402,7 +405,7 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            perf_hint_log.warning("Using FallbackKernel: %s", name)
+            perf_hint_log.info("Using FallbackKernel: %s", name)
 
     def add_device_idx(self, idx: Optional[int]):
         if idx is not None:
@@ -491,7 +494,8 @@ class GraphLowering(torch.fx.Interpreter):
         def allocate():
             for name, value in self.constants.items():
                 if (
-                    data.size() == value.size()
+                    not data.is_mkldnn
+                    and data.size() == value.size()
                     and data.stride() == value.stride()
                     and data.dtype == value.dtype
                     and data.device == value.device
@@ -500,6 +504,9 @@ class GraphLowering(torch.fx.Interpreter):
                     return name
             name = f"constant{len(self.constants)}"
             self.constants[name] = data
+            self.constant_reprs[name] = hashlib.sha256(
+                repr(data).encode("utf-8")
+            ).hexdigest()
             return name
 
         return TensorBox.create(
@@ -630,7 +637,7 @@ class GraphLowering(torch.fx.Interpreter):
                     type(None),
                     ir.ConstantBuffer,
                     sympy.Expr,
-                    sympy.Rel,
+                    sympy.logic.boolalg.Boolean,
                     int,
                 ),
             )
@@ -814,7 +821,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.disable_cpp_wrapper("platform not linux")
 
     def check_input_for_cpp_buffer(self):
-        for _, value in self.graph_inputs.items():
+        for value in self.graph_inputs.values():
             dtype = None
             if isinstance(value, TensorBox):
                 dtype = value.get_dtype()
@@ -931,7 +938,7 @@ class GraphLowering(torch.fx.Interpreter):
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
-        V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
+        V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
 
     def compile_to_fn(self):
