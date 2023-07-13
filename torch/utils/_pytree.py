@@ -62,12 +62,16 @@ def _register_pytree_node(
     to_str_fn: Optional[ToStrFunc] = None,
     maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,
 ) -> None:
-    def _raise_error(_):  # type: ignore[no-untyped-def]
-        raise NotImplementedError(f"Serializing {typ} not implemented")
     if to_str_fn is None:
-        to_str_fn = _raise_error   # type: ignore[assignment, return-value]
+        def _raise_error(spec: "TreeSpec", child_strings: List[str]) -> str:
+            raise NotImplementedError(f"Serializing {typ} not implemented")
+        to_str_fn = _raise_error
+
     if maybe_from_str_fn is None:
-        maybe_from_str_fn = _raise_error  # type: ignore[assignment, return-value]
+        def dummy_to_str(str_spec: str) -> Optional[Tuple[Any, Context, str]]:
+            return None
+        maybe_from_str_fn = dummy_to_str
+
     assert to_str_fn is not None
     assert maybe_from_str_fn is not None
     node_def = NodeDef(typ, flatten_fn, unflatten_fn, to_str_fn, maybe_from_str_fn)
@@ -484,10 +488,11 @@ def str_to_pytree(str_spec: str) -> TreeSpec:
         res = node_def.maybe_from_str_fn(str_spec)
         if res is not None:
             typ, context, child_strings = res
-            children_spec = [
-                str_to_pytree(child_string)
-                for child_string in _split_nested(child_strings)
-            ]
+            children_spec = []
+            for child_string in _split_nested(child_strings):
+                if child_string == "":
+                    continue
+                children_spec.append(str_to_pytree(child_string))
             return TreeSpec(typ, context, children_spec)
     raise NotImplementedError(f"Deserializing {str_spec} in pytree not supported yet")
 
