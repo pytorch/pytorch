@@ -2,6 +2,7 @@ import copy
 from typing import Optional, Any, Union, Callable
 
 import torch
+import warnings
 from torch import Tensor
 from .. import functional as F
 from .module import Module
@@ -189,8 +190,33 @@ class TransformerEncoder(Module):
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
+        # this attribute saves the value providedat object construction
         self.enable_nested_tensor = enable_nested_tensor
+        # this attribute controls whether nested tensors are used
+        self.use_nested_tensor = enable_nested_tensor
         self.mask_check = mask_check
+
+        enc_layer = "encoder_layer"
+        why_not_sparsity_fast_path = ''
+        if not isinstance(encoder_layer, torch.nn.TransformerEncoderLayer):
+            why_not_sparsity_fast_path = f"{enc_layer} was not TransformerEncoderLayer"
+        elif encoder_layer.norm_first :
+            why_not_sparsity_fast_path = f"{enc_layer}.norm_first was True"
+        elif not encoder_layer.self_attn.batch_first:
+            why_not_sparsity_fast_path = f" {enc_layer}.self_attn.batch_first was not True"
+        elif not encoder_layer.self_attn._qkv_same_embed_dim:
+            why_not_sparsity_fast_path = f"{enc_layer}.self_attn._qkv_same_embed_dim was not True"
+        elif not encoder_layer.activation_relu_or_gelu:
+            why_not_sparsity_fast_path = f" {enc_layer}.activation_relu_or_gelu was not True"
+        elif not (encoder_layer.norm1.eps == encoder_layer.norm2.eps) :
+            why_not_sparsity_fast_path = f"{enc_layer}.norm1.eps was not equal to {enc_layer}.norm2.eps"
+        elif encoder_layer.self_attn.num_heads % 2 == 1:
+            why_not_sparsity_fast_path = "num_head is odd"
+
+        if enable_nested_tensor and why_not_sparsity_fast_path:
+            warnings.warn(f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}")
+            self.use_nested_tensor = False
+
 
     def forward(
             self,
@@ -203,10 +229,14 @@ class TransformerEncoder(Module):
         Args:
             src: the sequence to the encoder (required).
             mask: the mask for the src sequence (optional).
-            is_causal: If specified, applies a causal mask as mask (optional)
-                and ignores attn_mask for computing scaled dot product attention.
-                Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
+            is_causal: If specified, applies a causal mask as ``mask``.
+                Default: ``None``; try to detect a causal mask.
+                Warning:
+                ``is_causal`` provides a hint that ``mask`` is the
+                causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
 
         Shape:
             see the docs in Transformer class.
@@ -234,24 +264,14 @@ class TransformerEncoder(Module):
         src_key_padding_mask_for_layers = src_key_padding_mask
         why_not_sparsity_fast_path = ''
         str_first_layer = "self.layers[0]"
-        if not isinstance(first_layer, torch.nn.TransformerEncoderLayer):
-            why_not_sparsity_fast_path = f"{str_first_layer} was not TransformerEncoderLayer"
-        elif first_layer.norm_first :
-            why_not_sparsity_fast_path = f"{str_first_layer}.norm_first was True"
+        if not hasattr(self, "use_nested_tensor"):
+            why_not_sparsity_fast_path = "use_nested_tensor attribute not present"
+        elif not self.use_nested_tensor:
+            why_not_sparsity_fast_path = "self.use_nested_tensor (set in init) was not True"
         elif first_layer.training:
             why_not_sparsity_fast_path = f"{str_first_layer} was in training mode"
-        elif not first_layer.self_attn.batch_first:
-            why_not_sparsity_fast_path = f" {str_first_layer}.self_attn.batch_first was not True"
-        elif not first_layer.self_attn._qkv_same_embed_dim:
-            why_not_sparsity_fast_path = f"{str_first_layer}.self_attn._qkv_same_embed_dim was not True"
-        elif not first_layer.activation_relu_or_gelu:
-            why_not_sparsity_fast_path = f" {str_first_layer}.activation_relu_or_gelu was not True"
-        elif not (first_layer.norm1.eps == first_layer.norm2.eps) :
-            why_not_sparsity_fast_path = f"{str_first_layer}.norm1.eps was not equal to {str_first_layer}.norm2.eps"
         elif not src.dim() == 3:
             why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
-        elif not self.enable_nested_tensor:
-            why_not_sparsity_fast_path = "enable_nested_tensor was not True"
         elif src_key_padding_mask is None:
             why_not_sparsity_fast_path = "src_key_padding_mask was None"
         elif (((not hasattr(self, "mask_check")) or self.mask_check)
@@ -261,8 +281,6 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = "NestedTensor input is not supported"
         elif mask is not None:
             why_not_sparsity_fast_path = "src_key_padding_mask and mask were both supplied"
-        elif first_layer.self_attn.num_heads % 2 == 1:
-            why_not_sparsity_fast_path = "num_head is odd"
         elif torch.is_autocast_enabled():
             why_not_sparsity_fast_path = "autocast is enabled"
 
@@ -282,11 +300,11 @@ class TransformerEncoder(Module):
                 first_layer.linear2.weight,
                 first_layer.linear2.bias,
             )
-
+            _supported_device_type = ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
-            elif not (src.is_cuda or 'cpu' in str(src.device)):
-                why_not_sparsity_fast_path = "src is neither CUDA nor CPU"
+            elif src.device.type not in _supported_device_type:
+                why_not_sparsity_fast_path = f"src device is neither one of {_supported_device_type}"
             elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
                 why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
                                               "input/output projection weights or biases requires_grad")
@@ -360,10 +378,21 @@ class TransformerDecoder(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
-            tgt_is_causal: If specified, applies a causal mask as tgt mask.
-                Mutually exclusive with providing tgt_mask. Default: ``False``.
-            memory_is_causal: If specified, applies a causal mask as memory mask.
-                Mutually exclusive with providing memory_mask. Default: ``False``.
+            tgt_is_causal: If specified, applies a causal mask as ``tgt mask``.
+                Default: ``None``; try to detect a causal mask.
+                Warning:
+                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
+                the causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
+            memory_is_causal: If specified, applies a causal mask as
+                ``memory mask``.
+                Default: ``False``.
+                Warning:
+                ``memory_is_causal`` provides a hint that
+                ``memory_mask`` is the causal mask. Providing incorrect
+                hints can result in incorrect execution, including
+                forward and backward compatibility.
 
         Shape:
             see the docs in Transformer class.
@@ -390,6 +419,19 @@ class TransformerEncoderLayer(Module):
     Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
     Neural Information Processing Systems, pages 6000-6010. Users may modify or implement
     in a different way during application.
+
+    TransformerEncoderLayer can handle either traditional torch.tensor inputs,
+    or Nested Tensor inputs.  Derived classes are expected to similarly accept
+    both input formats.  (Not all combinations of inputs are currently
+    supported by TransformerEncoderLayer while Nested Tensor is in prototype
+    state.)
+
+    If you are implementing a custom layer, you may derive it either from
+    the Module or TransformerEncoderLayer class.  If your custom layer
+    supports both torch.Tensors and Nested Tensors inputs, make its
+    implementation a derived class of TransformerEncoderLayer. If your custom
+    Layer supports only torch.Tensor inputs, derive its implementation from
+    Module.
 
     Args:
         d_model: the number of expected features in the input (required).
@@ -493,9 +535,14 @@ class TransformerEncoderLayer(Module):
         Args:
             src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
-            is_causal: If specified, applies a causal mask as src_mask.
-              Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
+            is_causal: If specified, applies a causal mask as ``src mask``.
+                Default: ``False``.
+                Warning:
+                ``is_causal`` provides a hint that ``src_mask`` is the
+                causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
 
         Shape:
             see the docs in Transformer class.
@@ -556,10 +603,12 @@ class TransformerEncoderLayer(Module):
 
             # We have to use list comprehensions below because TorchScript does not support
             # generator expressions.
+            _supported_device_type = ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
-            elif not all((x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args):
-                why_not_sparsity_fast_path = "some Tensor argument is neither CUDA nor CPU"
+            elif not all((x.device.type in _supported_device_type) for x in tensor_args):
+                why_not_sparsity_fast_path = ("some Tensor argument's device is neither one of "
+                                              f"{_supported_device_type}")
             elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
                 why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
                                               "input/output projection weights or biases requires_grad")
@@ -705,10 +754,22 @@ class TransformerDecoderLayer(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
-            tgt_is_causal: If specified, applies a causal mask as tgt mask.
-                Mutually exclusive with providing tgt_mask. Default: ``False``.
-            memory_is_causal: If specified, applies a causal mask as memory mask.
-                Mutually exclusive with providing memory_mask. Default: ``False``.
+            tgt_is_causal: If specified, applies a causal mask as ``tgt mask``.
+                Default: ``False``.
+                Warning:
+                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
+                the causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
+            memory_is_causal: If specified, applies a causal mask as
+                ``memory mask``.
+                Default: ``False``.
+                Warning:
+                ``memory_is_causal`` provides a hint that
+                ``memory_mask`` is the causal mask. Providing incorrect
+                hints can result in incorrect execution, including
+                forward and backward compatibility.
+
         Shape:
             see the docs in Transformer class.
         """

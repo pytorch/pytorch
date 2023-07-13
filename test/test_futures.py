@@ -29,7 +29,7 @@ class TestFuture(TestCase):
             f.wait()
 
         # Exception should also throw on value
-        f = Future()
+        f = Future[T]()
         f.set_exception(value_error)
         with self.assertRaisesRegex(ValueError, "Intentional"):
             f.value()
@@ -37,7 +37,7 @@ class TestFuture(TestCase):
         def cb(fut):
             fut.value()
 
-        f = Future()
+        f = Future[T]()
         f.set_exception(value_error)
 
         with self.assertRaisesRegex(RuntimeError, "Got the following error"):

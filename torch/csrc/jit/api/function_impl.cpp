@@ -55,7 +55,7 @@ T& toGraphFunctionImpl(F& function) {
 
 } // namespace
 
-void placeholderCreator(GraphFunction&) {
+static void placeholderCreator(GraphFunction&) {
   throw RecursiveMethodCallError();
 }
 

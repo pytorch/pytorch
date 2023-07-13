@@ -4,6 +4,12 @@ from typing import List, Optional, Union
 
 __all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backend"]
 
+# TODO: Should use `torch._C._get_privateuse1_backend_name()` to get
+# renamed-backend name for `privateuse1`, but the func will cause an
+# error with torch.jit.script, so we use the global variable named
+# `_privateuse1_backend_name`.
+_privateuse1_backend_name = "privateuseone"
+
 def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
     rename_privateuse1_backend(backend_name) -> None
@@ -77,15 +83,16 @@ def rename_privateuse1_backend(backend_name: str) -> None:
         # to implement torch.ones.
         >>> a = torch.ones(2, device="foo")
         """
-    return _rename_privateuse1_backend(backend_name)
-
+    _rename_privateuse1_backend(backend_name)
+    global _privateuse1_backend_name
+    _privateuse1_backend_name = backend_name
 
 def _check_register_once(module, attr):
     if hasattr(module, attr):
         raise RuntimeError(f"The custom device module of {module} has already been registered with {attr}")
 
 
-def _normalization_device(custom_backend_name: str, device: Optional[Union[int, torch.device]] = None) -> int:
+def _normalization_device(custom_backend_name: str, device: Optional[Union[int, str, torch.device]] = None) -> int:
     def _get_current_device_index():
         _get_device_index = "current_device"
         if hasattr(torch, custom_backend_name) and \
@@ -96,8 +103,14 @@ def _normalization_device(custom_backend_name: str, device: Optional[Union[int, 
             return 0
 
     if device is None:
-        device_idx = _get_current_device_index()
-    elif isinstance(device, torch.device):
+        return _get_current_device_index()
+    # if isinstance(device, str), this means that the parameter passed in is in the string format "foo:0"
+    # convert str object to torch.device object, and then process it uniformly
+    elif isinstance(device, str):
+        device = torch.device(device)
+
+    # variable devcie can only be torch.device type or int type
+    if isinstance(device, torch.device):
         if device.type != custom_backend_name:
             raise RuntimeError(f"Invalid device, must be {custom_backend_name} device")
         elif device.index is None:
@@ -171,7 +184,7 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
 
 
 def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
-                                                      unsupported_dtype: List[torch.dtype] = None) -> None:
+                                                      unsupported_dtype: Optional[List[torch.dtype]] = None) -> None:
     # Attribute is registered in the _StorageBase class
     # and UntypedStorage obtains through inheritance.
     @property  # type: ignore[misc]
@@ -242,7 +255,7 @@ def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
 
 def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module: bool = True,
                                              for_storage: bool = False,
-                                             unsupported_dtype: List[torch.dtype] = None) -> None:
+                                             unsupported_dtype: Optional[List[torch.dtype]] = None) -> None:
     r"""
     generate_methods_for_privateuse1_backend(for_tensor, for_module, for_storage, unsupported_dtype) -> None
 
@@ -286,3 +299,42 @@ def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module
 
     if for_storage:
         _generate_storage_methods_for_privateuse1_backend(custom_backend_name, unsupported_dtype)
+
+def _get_custom_mod_func(func_name: str):
+    r"""
+    Return the func named `func_name` defined in custom device module. If not defined,
+    return `None`. And the func is registered with `torch.utils.rename_privateuse1_backend('foo')`
+    and `torch._register_device_module('foo', BackendModule)`.
+    If the custom device module or the func is not defined, it will give warning or error message.
+    Args:
+        func_name (str): return the callable func named func_name defined in custom device module.
+    Example::
+        class DummyfooModule:
+            @staticmethod
+            def is_available():
+                return True
+            @staticmethod
+            def func_name(*args, **kwargs):
+                ....
+        torch.utils.rename_privateuse1_backend("foo")
+        torch._register_device_module("foo", DummyfooModule)
+        foo_is_available_func = torch.utils.backend_registration._get_custom_mod_func("is_available")
+        if foo_is_available_func:
+            foo_is_available = foo_is_available_func()
+        func_ = torch.utils.backend_registration._get_custom_mod_func("func_name")
+        if func_:
+            result = func_(*args, **kwargs)
+    Attention: This function is not meant to be used directly by users, which is why
+    it is marked as private. It is a convenience function for backend implementers to
+    more easily call the hooks into their backend extensions.
+    """
+    assert isinstance(func_name, str), f"func_name must be `str`, but got `{type(func_name)}`."
+    backend_name = _get_privateuse1_backend_name()
+    custom_device_mod = getattr(torch, backend_name, None)  # type: ignore[arg-type]
+    function = getattr(custom_device_mod, func_name, None)  # type: ignore[arg-type]
+    if custom_device_mod is None or function is None:
+        message = f'Try to call torch.{backend_name}.{func_name}. The backend must register a custom backend '
+        message += f"module with `torch._register_device_module('{backend_name}', BackendModule)`. And "
+        message += f"BackendModule needs to have the following API's:\n `{func_name}(*args, **kwargs)`. \n"
+        raise RuntimeError(message)
+    return function

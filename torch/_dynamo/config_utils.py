@@ -187,6 +187,9 @@ class ContextDecorator(contextlib.ContextDecorator):
                         self.__exit__(None, None, None)
 
             _TestCase.__name__ = func.__name__
+            _TestCase.__qualname__ = func.__qualname__
+            _TestCase.__module__ = func.__module__
+
             return _TestCase
 
         return super().__call__(func)

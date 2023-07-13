@@ -584,7 +584,7 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, [0, 0])(x, y)
         with self.assertRaisesRegex(ValueError, msg):
-            vmap(torch.mul, set({0, 0}))(x, y)
+            vmap(torch.mul, set({0}))(x, y)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, 'lol')(x, y)
         with self.assertRaisesRegex(ValueError, msg):
@@ -3469,6 +3469,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('index_put'),  # dynamic mask
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('nn.functional.scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.multi_head_attention_forward'),  # randomness
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
         xfail('unique', ''),  # dynamic op
@@ -3514,7 +3515,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('histogramdd'),  # expected Tensor as element 0 in argument 0, but got tuple
         xfail('nn.functional.gaussian_nll_loss'),  # data-dependent control flow error
         xfail('nn.functional.embedding_bag'),  # embedding renorm vmap inplace incompatible
-        xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
 
         # required rank 4 tensor to use channels_last format
@@ -3594,13 +3594,14 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('addcmul'),
         xfail('clamp'),
 
+        # TypeError: expected Tensor as element 0 in argument 0, but got float
+        xfail('item'),
+
         # UBSAN: runtime error: shift exponent -1 is negative
         decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # UBSAN: runtime error: -1e+20 is outside the range of representable values of type 'long'
         decorate('special.hermite_polynomial_h', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
-        # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
-        decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error"))
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
@@ -3609,6 +3610,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         self.opinfo_vmap_test(device, dtype, op, check_has_batch_rule=False,
                               skip_inplace=inplace_failure_list)
 
+    @with_tf32_off
     @ops(op_db + additional_op_db + autograd_function_db, dtypes=OpDTypes.any_one)
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', (
         tol1('linalg.det',
@@ -3645,12 +3647,15 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('take'),
         xfail('tensor_split'),
         xfail('to_sparse'),
+        # TypeError: expected Tensor as element 0 in argument 0, but got float
+        xfail('item'),
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         xfail('__getitem__', ''),
         xfail('count_nonzero'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('nn.functional.scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.multi_head_attention_forward'),  # randomness
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
@@ -3740,8 +3745,6 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         # One or more of the overload doesn't have a Batch rule.
         xfail('bincount'),
-        # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
-        decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # RuntimeError: Expected all tensors to be on the same device,
         # but found at least two devices, cuda:0 and cpu!
         xfail('ge', device_type='cuda'),
@@ -4096,6 +4099,19 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         self.assertEqual(vmap(f, in_dims=(0, (None, None), 0))(tensor, idxs[1:], value), expected)
         self.assertEqual(vmap(f, in_dims=(0, (None, None), None))(tensor, idxs[1:], value[0]), expected)
+
+        # boolean mask
+        B = 2
+        x = torch.randn(1, 3, 3)
+        gy = torch.randn(B, 1, 3, 3)
+
+        def f(x, gy):
+            mask = x < 1e-09
+            zeros = torch.zeros([])
+            index_put = torch.ops.aten.index_put.default(gy, [mask], zeros)
+            return index_put
+
+        self.vmap_outplace_test(f, (x, gy), {}, in_dims=(None, 0))
 
     @parametrize('training', [True, False])
     @parametrize('track_running_stats', [True, False])

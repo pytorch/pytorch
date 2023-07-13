@@ -609,8 +609,7 @@ py::object toPyObject(IValue ivalue) {
         !tuple->type()->schema()->name().empty()) {
       auto unqualName = tuple->type()->name()->name();
 
-      const std::vector<Argument>& tuple_args =
-          tuple->type()->schema()->arguments();
+      std::vector<Argument> tuple_args = tuple->type()->schema()->arguments();
 
       std::vector<pybind11::object> defaults;
       auto it = std::find_if(

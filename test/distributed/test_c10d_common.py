@@ -670,25 +670,14 @@ class CommonDistributedDataParallelTest:
             l2 = nn.Linear(20, 20)
             l1.weight = l2.weight
             model = nn.Sequential(l1, l2)
-            # TODO: non-reentrant based checkpointing of DDP module with
-            # static_graph runs into the below issue, see
-            # https://github.com/pytorch/pytorch/issues/70865 and
-            # https://github.com/pytorch/pytorch/issues/58111 for details.
-            err_ctx = (
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "Your training graph has changed in this iteration"
-                ) if static_graph and not use_reentrant else nullcontext()
+            self._test_ddp_checkpointing(
+                model,
+                process_group=process_group,
+                use_bucket_view=use_bucket_view,
+                static_graph=static_graph,
+                run_checkpoint=True,
+                use_reentrant=use_reentrant,
             )
-            with err_ctx:
-                self._test_ddp_checkpointing(
-                    model,
-                    process_group=process_group,
-                    use_bucket_view=use_bucket_view,
-                    static_graph=static_graph,
-                    run_checkpoint=True,
-                    use_reentrant=use_reentrant,
-                )
 
     @skip_if_lt_x_gpu(2)
     def test_ddp_checkpointing_twice_weight_sharing(self):
@@ -1595,11 +1584,20 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy",
             PythonProcessGroupExtensionTest.create_dummy
         )
-        self.assertEqual(dist.Backend.DUMMY, "DUMMY")
+        self.assertEqual(dist.Backend.DUMMY, "dummy")
         self.assertEqual(
             dist.Backend._plugins["DUMMY"].creator_fn,
             PythonProcessGroupExtensionTest.create_dummy
         )
+
+    def test_is_backend_available(self):
+        self.assertEqual(dist.is_ucc_available(), dist.is_backend_available("ucc"))
+        self.assertFalse(dist.is_backend_available("dummy"))
+        dist.Backend.register_backend(
+            "dummy",
+            PythonProcessGroupExtensionTest.create_dummy
+        )
+        self.assertTrue(dist.is_backend_available("dummy"))
 
     def test_backend_config(self):
         dist.Backend.register_backend(
@@ -1610,8 +1608,8 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # Ensure backend config can be created with the following arguments
         backend_config_strings_and_expected_values = [
             (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
-            (dist.Backend.NCCL, "cpu:nccl,cuda:nccl"),
-            (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
+            (dist.Backend.NCCL, "cuda:nccl"),
+            (dist.Backend.MPI, "cpu:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
             (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
             ("DUMMY", "cpu:dummy,cuda:dummy"),
@@ -1620,7 +1618,6 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
             ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
             ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
-            ("cPu:gLoO,cuDa:NcCl", "cpu:gloo,cuda:nccl")
         ]
 
         for config_str, expected_value in backend_config_strings_and_expected_values:

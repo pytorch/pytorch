@@ -758,6 +758,7 @@ if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/lr_scheduler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/step_lr.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/reduce_on_plateau_scheduler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
   )
@@ -821,6 +822,27 @@ if(BUILD_CAFFE2 AND NOT MSVC)
   # Caffe2 has too many signed-unsigned violation, but the framework is dead
   # So no point in fixing those
   target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
+endif()
+
+if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_PYTORCH_METAL AND NOT USE_MPS AND NOT USE_COREML_DELEGATE)
+  target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
+  target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
+  get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
+  foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
+    set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+  endforeach()
+  foreach(source_file IN LISTS TORCH_CPU_SOURCES)
+    get_filename_component(source_file "${source_file}" REALPATH)
+    string(FIND "${source_file}" "${CMAKE_BINARY_DIR}" res)
+    if(res GREATER -1)
+      set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+      continue()
+    endif()
+    string(FIND "${source_file}" "caffe2" res)
+    if(res GREATER -1)
+      set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+    endif()
+  endforeach()
 endif()
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND

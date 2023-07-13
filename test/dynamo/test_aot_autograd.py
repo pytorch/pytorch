@@ -5,8 +5,7 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.test_case
-from torch._dynamo.testing import CompileCounter, rand_strided
-from torch._dynamo.utils import ifdyn, ifdynstaticdefault
+from torch._dynamo.testing import CompileCounter, expectedFailureDynamic, rand_strided
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
 
@@ -378,8 +377,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_arg_dupe_via_dynamo_recompiles(self):
         class F(torch.nn.Module):
             def forward(self, x, y):
-                x = x.t_()
-                y = y.t_()
+                x = x.trunc_()
+                y = y.trunc_()
                 return (x + y,)
 
         x = torch.randn(3, 3, requires_grad=True)
@@ -402,13 +401,12 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         fxy(x1, y1)
         fxy(x2, y2)
 
-        if not torch._dynamo.config.dynamic_shapes:
-            self.assertTrue(failure_reason is None)
+        self.assertTrue(failure_reason is None)
 
         # Reset failure reason
         failure_reason = None
 
-        self.assertEqual(cc.frame_count, ifdyn(ifdynstaticdefault(1, 2), 1))
+        self.assertEqual(cc.frame_count, 1)
 
         torch._dynamo.reset()  # for new backend
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
@@ -420,45 +418,6 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(failure_reason, """L['x'] is L['y']""")
 
     @patch("torch._functorch.config.debug_assert", True)
-    def test_arg_metadata_mutation_on_input_causes_recompile(self):
-        class F(torch.nn.Module):
-            def forward(self, a):
-                a.t_()
-                return (a * 2,)
-
-        a = torch.randn(3, 3, requires_grad=True).clone()
-
-        failure_reason = None
-
-        def guard_fail_fn(failure):
-            nonlocal failure_reason
-            failure_reason = failure[0]
-
-        self.assertTrue(failure_reason is None)
-
-        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-
-        f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        f(a)
-        f(a)
-        self.assertEqual(cc.frame_count, 2)
-        if (
-            torch._dynamo.config.dynamic_shapes
-            and not torch._dynamo.config.assume_static_by_default
-        ):
-            self.assertExpectedInline(
-                failure_reason,
-                """tensor 'L['a']' stride mismatch at index 1. expected 1, actual 3""",
-            )
-        else:
-            self.assertExpectedInline(
-                failure_reason,
-                """tensor 'L['a']' stride mismatch at index 0. expected 3, actual 1""",
-            )
-
-        torch._dynamo.reset()
-
-    @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg(self):
         class F(torch.nn.Module):
             def __init__(self):
@@ -466,10 +425,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
             def forward(self, a, b, c, d, e, f):
-                a.t_()
-                b.t_()
-                c.t_()
-                d.t_()
+                a.trunc_()
+                b.trunc_()
+                c.trunc_()
+                d.trunc_()
                 return (a + b + c + d + self.mean) * e * f
 
         a = torch.randn(3, 3, requires_grad=True)
@@ -518,10 +477,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
             def forward(self, a, b, c, d, e, f):
-                a.t_()
-                b.t_()
-                c.t_()
-                d.t_()
+                a.trunc_()
+                b.trunc_()
+                c.trunc_()
+                d.trunc_()
                 return (a + b + c + d + z + self.mean) * e * f
 
         a = torch.randn(3, 3, requires_grad=True)
@@ -554,10 +513,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
             def forward(self, e, f, a, b, c, d):
-                a.t_()
-                b.t_()
-                c.t_()
-                d.t_()
+                a.trunc_()
+                b.trunc_()
+                c.trunc_()
+                d.trunc_()
                 return (a + b + c + d + self.mean) * e[0] * f[0]
 
         a = torch.randn(3, 3, requires_grad=True)
@@ -603,10 +562,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
             def forward(self, a, b, c, d):
-                a.t_()
-                b.t_()
-                c.t_()
-                d.t_()
+                a.trunc_()
+                b.trunc_()
+                c.trunc_()
+                d.trunc_()
                 return a + b + c + d + self.mean
 
         a = torch.randn(3, 3, requires_grad=True)
@@ -649,10 +608,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_arg_dupe_via_dynamo_recompiles_many_args(self):
         class F(torch.nn.Module):
             def forward(self, a, b, c, d):
-                a.t_()
-                b.t_()
-                c.t_()
-                d.t_()
+                a.trunc_()
+                b.trunc_()
+                c.trunc_()
+                d.trunc_()
                 return (a + b + c + d,)
 
         a = torch.randn(3, 3, requires_grad=True)
@@ -691,8 +650,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cc.frame_count, 2)
         self.assertExpectedInline(failure_reason, """L['c'] is L['d']""")
 
+    @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     @patch("torch._functorch.config.debug_assert", True)
-    @patch("torch._dynamo.config.dynamic_shapes", False)
     def test_multiple_aot_autograd_calls_dupe_args(self):
         # this is just dealing with the fact that
         # aot_module_simplified expects submods to always return tuples/lists
@@ -742,6 +702,18 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         f(torch.ones(4))
         f(torch.ones(6))
+
+    def test_nn_parameter_construction(self):
+        # https://github.com/pytorch/pytorch/issues/99569
+        def fn(x):
+            y = x.sin()
+            z = torch.nn.Parameter(torch.ones(1))
+            return y + z
+
+        x = torch.rand((4, 4))
+
+        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+        self.assertTrue(torch._dynamo.testing.same(fn(x), opt_fn(x)))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 #include <torch/csrc/Dtype.h>
 
+#include <c10/core/ScalarType.h>
 #include <structmember.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -72,6 +74,24 @@ PyObject* THPDtype_reduce(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPDtype_to_real(PyObject* _self, PyObject* noargs) {
+  auto* self = (THPDtype*)_self;
+  auto scalar_type = self->scalar_type;
+  if (!at::isFloatingType(self->scalar_type)) {
+    scalar_type = at::toRealValueType(self->scalar_type);
+  }
+  return (PyObject*)torch::getTHPDtype(scalar_type);
+}
+
+PyObject* THPDtype_to_complex(PyObject* _self, PyObject* noargs) {
+  auto* self = (THPDtype*)_self;
+  auto scalar_type = self->scalar_type;
+  if (!at::isComplexType(self->scalar_type)) {
+    scalar_type = at::toComplexType(self->scalar_type);
+  }
+  return (PyObject*)torch::getTHPDtype(scalar_type);
+}
+
 typedef PyObject* (*getter)(PyObject*, void*);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
@@ -89,6 +109,8 @@ static struct PyGetSetDef THPDtype_properties[] = {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPDtype_methods[] = {
     {"__reduce__", THPDtype_reduce, METH_NOARGS, nullptr},
+    {"to_real", THPDtype_to_real, METH_NOARGS, nullptr},
+    {"to_complex", THPDtype_to_complex, METH_NOARGS, nullptr},
     {nullptr} /* Sentinel */
 };
 

@@ -657,7 +657,7 @@ class GELU(Module):
 
     When the approximate argument is 'tanh', Gelu is estimated with:
 
-    .. math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+    .. math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt{2 / \pi} * (x + 0.044715 * x^3)))
 
     Args:
         approximate (str, optional): the gelu approximation algorithm to use:
@@ -887,11 +887,11 @@ class Softshrink(Module):
         return str(self.lambd)
 
 
-def _arg_cuda_or_cpu(x: Optional[torch.Tensor]) -> bool:
+def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
     if x is None:
         return True
     else:
-        return x.is_cuda or 'cpu' in str(x.device)
+        return x.device.type in ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
 
     return False
 
@@ -1079,6 +1079,9 @@ class MultiheadAttention(Module):
             corresponding position is not allowed to attend. For a float mask, the mask values will be added to
             the attention weight.
             If both attn_mask and key_padding_mask are supplied, their types should match.
+        average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
+            heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
+            effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
         is_causal: If specified, applies a causal mask as attention mask.
             Default: ``False``.
             Warning:
@@ -1086,9 +1089,6 @@ class MultiheadAttention(Module):
             causal mask. Providing incorrect hints can result in
             incorrect execution, including forward and backward
             compatibility.
-        average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
-            heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
-            effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
 
     Outputs:
         - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
@@ -1174,8 +1174,9 @@ class MultiheadAttention(Module):
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
-            elif not all(_arg_cuda_or_cpu(x) for x in tensor_args):
-                why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
+            elif not all(_check_arg_device(x) for x in tensor_args):
+                why_not_fast_path = ("some Tensor argument's device is neither one of "
+                                     f"cpu, cuda or {torch.utils.backend_registration._privateuse1_backend_name}")
             elif torch.is_grad_enabled() and any(_arg_requires_grad(x) for x in tensor_args):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")

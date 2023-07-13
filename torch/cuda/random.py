@@ -48,7 +48,8 @@ def set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'cu
         device (torch.device or int, optional): The device to set the RNG state.
             Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
     """
-    new_state_copy = new_state.clone(memory_format=torch.contiguous_format)
+    with torch._C._DisableFuncTorch():
+        new_state_copy = new_state.clone(memory_format=torch.contiguous_format)
     if isinstance(device, str):
         device = torch.device(device)
     elif isinstance(device, int):

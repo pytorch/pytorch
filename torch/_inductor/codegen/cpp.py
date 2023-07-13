@@ -7,7 +7,6 @@ import math
 import re
 import sys
 from copy import copy, deepcopy
-from pathlib import Path
 from typing import Dict, List
 
 import numpy
@@ -18,17 +17,27 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
+from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
+from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import BaseScheduling, SchedulerNode
-from ..utils import cache_on_self, sympy_product, sympy_subs, sympy_symbol
+from ..utils import (
+    cache_on_self,
+    get_fused_kernel_name,
+    sympy_product,
+    sympy_subs,
+    sympy_symbol,
+)
+
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
-    data_type_propagation,
+    DataTypePropagation,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
@@ -39,6 +48,24 @@ from .common import (
 )
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
+
+DTYPE_TO_COMPUTATION_DTYPE = {
+    torch.bfloat16: torch.float,
+    torch.float16: torch.float,
+    **{
+        dtype: dtype
+        for dtype in [
+            torch.bool,
+            torch.float32,
+            torch.float64,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint8,
+        ]
+    },
+}
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -51,6 +78,7 @@ DTYPE_TO_CPP = {
     torch.uint8: "unsigned char",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
+    torch.complex64: "complex64",
 }
 
 DTYPE_TO_ATEN = {
@@ -64,6 +92,7 @@ DTYPE_TO_ATEN = {
     torch.uint8: "at::kByte",
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
+    torch.complex64: "at::kComplexFloat",
 }
 
 DEVICE_TO_ATEN = {
@@ -73,6 +102,7 @@ DEVICE_TO_ATEN = {
 
 INDEX_TYPE = "long"
 
+NATIVE_OMP_RTYPES = {"+", "*", "^", "||", "min", "max"}
 RTYPE_TO_CPP = {
     "sum": "+",
     "prod": "*",
@@ -82,6 +112,27 @@ RTYPE_TO_CPP = {
     "argmin": "argmin",
     "argmax": "argmax",
     "any": "||",
+    "var_unnormalized": "welford",
+}
+VECTORIZABLE_RTYPES = {
+    "max",
+    "min",
+    "sum",
+    "prod",
+    "xor_sum",
+    "var_unnormalized",
+}
+
+PYTHON_TO_CPP = {
+    "int": "long",
+    "float": "double",
+    "bool": "bool",
+    "ScalarType": "c10::ScalarType",
+}
+
+CONTAINER_PYTHON_TO_CPP = {
+    "List": "std::vector",
+    "Optional": "c10::optional",
 }
 
 
@@ -106,36 +157,80 @@ def reduction_init(reduction_type, dtype):
             if is_float_dtype(dtype)
             else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
         )
+    if reduction_type == "var_unnormalized":
+        return f"Welford<{DTYPE_TO_CPP[dtype]}>()"
     raise AssertionError(reduction_type)
+
+
+def reduction_init_vec(reduction_type, dtype):
+    scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
+    vec_type = f"at::vec::Vectorized<{scalar_type}>"
+
+    if reduction_type == "var_unnormalized":
+        return f"Welford<{vec_type}>()"
+
+    scalar_init = reduction_init(reduction_type, dtype)
+    return f"{vec_type}({scalar_init})"
+
+
+def reduction_acc_type(reduction_type, dtype):
+    assert reduction_type not in {"argmin", "argmax"}
+    scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
+    if reduction_type == "var_unnormalized":
+        return f"Welford<{scalar_type}>"
+
+    return scalar_type
+
+
+def reduction_acc_type_vec(reduction_type, dtype):
+    assert reduction_type not in {"argmin", "argmax"}
+    scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
+    vec_type = f"at::vec::Vectorized<{scalar_type}>"
+    if reduction_type == "var_unnormalized":
+        return f"Welford<{vec_type}>"
+
+    return vec_type
 
 
 def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "sum":
-        return f"{var} += {next_value}"
+        return f"{var} + {next_value}"
     if reduction_type == "prod":
-        return f"{var} *= {next_value}"
+        return f"{var} * {next_value}"
     if reduction_type == "xor_sum":
-        return f"{var} ^= {next_value}"
+        return f"{var} ^ {next_value}"
     if reduction_type == "any":
-        return f"{var} = {var} || {next_value}"
+        return f"{var} || {next_value}"
     if reduction_type in ("min", "max"):
-        return f"{var} = {reduction_type}_propagate_nan({var}, {next_value})"
+        return f"{reduction_type}_propagate_nan({var}, {next_value})"
+    if reduction_type == "var_unnormalized":
+        return f"welford_combine({var}, {next_value})"
     raise AssertionError(reduction_type)
 
 
 def reduction_combine_vec(reduction_type, var, next_value):
     if reduction_type == "max":
-        return f"{var} = at::vec::maximum({var}, {next_value})"
+        return f"at::vec::maximum({var}, {next_value})"
     elif reduction_type == "min":
-        return f"{var} = at::vec::minimum({var}, {next_value})"
+        return f"at::vec::minimum({var}, {next_value})"
     elif reduction_type == "sum":
-        return f"{var} += {next_value}"
+        return f"{var} + {next_value}"
     elif reduction_type == "prod":
-        return f"{var} *= {next_value}"
+        return f"{var} * {next_value}"
     elif reduction_type == "xor_sum":
-        return f"{var} ^= {next_value}"
+        return f"{var} ^ {next_value}"
+    elif reduction_type == "var_unnormalized":
+        return f"welford_combine({var}, {next_value})"
     else:
         raise NotImplementedError()
+
+
+def reduction_project(reduction_type, acc):
+    if reduction_type == "var_unnormalized":
+        return f"{acc}.m2"
+    elif reduction_type in {"argmin", "argmax"}:
+        return f"{acc}.index"
+    return acc
 
 
 index_value_name_counter = 1
@@ -154,19 +249,23 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     if reduction_type == "argmax":
         prefix.extend(
             [
-                f"#pragma omp declare reduction(argmax : struct {struct_name} :\\",
+                "#if !defined(__clang_major__) || __clang_major__ > 9",
+                f"#pragma omp declare reduction(argmax : {struct_name} :\\",
                 "    omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\\",
                 "    omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
+                "#endif",
             ]
         )
     elif reduction_type == "argmin":
         prefix.extend(
             [
-                f"#pragma omp declare reduction(argmin : struct {struct_name} :\\",
+                "#if !defined(__clang_major__) || __clang_major__ > 9",
+                f"#pragma omp declare reduction(argmin : {struct_name} :\\",
                 "    omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\\",
                 "    omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
+                "#endif",
             ]
         )
     return prefix
@@ -186,17 +285,6 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
     return sympy.simplify(new_index - index)
 
 
-@functools.lru_cache()
-def cpp_prefix():
-    path = Path(__file__).parent / "cpp_prefix.h"
-    with path.open() as f:
-        _, filename = codecache.write(
-            f.read(),
-            "h",
-        )
-    return f'#include "{filename}"'
-
-
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr):
         return f"{int(expr)}L"
@@ -204,46 +292,77 @@ class CppPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
         x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
+        if div != 1:
+            div = self.paren(self.doprint(div))
+            if expr.is_integer:
+                x = f"at::native::div_floor_integer({x}, {div})"
+            else:
+                x = f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
         mod = self.paren(self.doprint(mod))
-        if div != "1":
-            x = f"({x} / {div})"
         return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
-        return f"({x} / {div})"
+        if expr.is_integer:
+            return f"at::native::div_floor_integer({x}, {div})"
+        return f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        return f"std::floor({self._print(expr.args[0])})"
+        r = f"std::floor({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
         base, exp = expr.args
         base = self._print(base)
-        if exp == 0.5:
-            return f"std::sqrt({base})"
+
+        if exp == 0.5 or exp == -0.5:
+            r = f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
+            return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
-            return "*".join([self.paren(base)] * exp)
+            r = "*".join([self.paren(base)] * exp)
         elif exp < 0:
-            return "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+            r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
         else:  # exp == 0
-            return "1"
+            r = "1.0"
+
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_Rational(self, expr):
         # Uses float constants to perform FP div
         if expr.q == 1:
-            return f"{expr.p}"
-        return f"{expr.p}.0/{expr.q}.0"
+            r = f"{expr.p}"
+        else:
+            r = f"{expr.p}.0/{expr.q}.0"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
-        return f"std::ceil({self._print(expr.args[0])})"
+        r = f"std::ceil({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_Min(self, expr):
+        args = [self._print(a) for a in expr.args]
+        if len(args) == 2:
+            return f"std::min({args[0]}, {args[1]})"
+        else:
+            # Initializer list overload
+            il = "{" + ", ".join(args) + "}"
+            return f"std::min({il})"
+
+    def _print_Max(self, expr):
+        args = [self._print(a) for a in expr.args]
+        if len(args) == 2:
+            return f"std::max({args[0]}, {args[1]})"
+        else:
+            # Initializer list overload
+            il = "{" + ", ".join(args) + "}"
+            return f"std::max({il})"
 
 
 cexpr = CppPrinter().doprint
@@ -284,12 +403,13 @@ class RecordOptimizationContext:
         return self.current_node
 
 
+def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
+    return node.meta.get(OptimizationContext.key, None)
+
+
 def get_current_node_opt_ctx() -> OptimizationContext:
     assert V.interpreter.current_node
-    if OptimizationContext.key in V.interpreter.current_node.meta:
-        return V.interpreter.current_node.meta[OptimizationContext.key]
-    else:
-        return None
+    return get_opt_ctx(V.interpreter.current_node)
 
 
 class CppVecOverrides(OpOverrides):
@@ -340,6 +460,14 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def erf(x):
         return f"{x}.erf()"
+
+    @staticmethod
+    def erfc(x):
+        return f"{x}.erfc()"
+
+    @staticmethod
+    def erfinv(x):
+        return f"{x}.erfinv()"
 
     @staticmethod
     def sqrt(x):
@@ -414,8 +542,16 @@ class CppVecOverrides(OpOverrides):
         return f"({a} != 0) & ({b} != 0)"
 
     @staticmethod
+    def logical_not(a):
+        return f"{a} == 0"
+
+    @staticmethod
     def logical_or(a, b):
         return f"({a} != 0) | ({b} != 0)"
+
+    @staticmethod
+    def logical_xor(a, b):
+        return f"({a} != 0) ^ ({b} != 0)"
 
     @staticmethod
     def tan(a):
@@ -457,10 +593,6 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.log10()"
 
     @staticmethod
-    def erfc(x):
-        return f"{x}.erfc()"
-
-    @staticmethod
     def nextafter(x):
         return f"{x}.nextafter()"
 
@@ -500,14 +632,10 @@ class CppVecOverrides(OpOverrides):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx
         assert opt_ctx.dtype in [torch.int32, torch.float32, torch.bfloat16]
-        if dtype in [torch.bfloat16]:
-            assert opt_ctx.is_load_bf16_as_fp32 or opt_ctx.is_bf16_mem_copy
         proposed_dtype = opt_ctx.dtype
         if val == float("inf"):
-            assert proposed_dtype == torch.float
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif val == float("-inf"):
-            assert proposed_dtype == torch.float
             quote = f"-std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif math.isnan(val):
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::quiet_NaN()"
@@ -599,6 +727,29 @@ class CppVecOverrides(OpOverrides):
             torch.bfloat16,
             torch.uint8,
         ], f"{__name__} does not support {dtype}"
+        node: torch.fx.Node = V.interpreter.current_node
+        assert node
+        opt_ctx_x = get_opt_ctx(node.args[1])
+        assert opt_ctx_x
+        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bool:
+            return f"vec_convert_to_mask({x})"
+        if opt_ctx_x.dtype == torch.bool and dtype in (torch.float, torch.float32):
+            return f"mask_convert_to_float({x})"
+        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bfloat16:
+            return f"cvt_fp32_to_bf16({x})"
+        if opt_ctx_x.dtype == torch.bfloat16 and dtype in (torch.float, torch.float32):
+            return f"cvt_bf16_to_fp32({x})"
+        if opt_ctx_x.dtype == torch.uint8 and dtype in (torch.float, torch.float32):
+            # Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
+            return f"at::vec::convert_uint8_to_float({x})"
+        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.uint8:
+            # TODO(Leslie): Add fast path to at::vec::convert_float_to_uint8,
+            # if we already handle the saturation previously.
+            # * Pattern match of quantization op in the loop body.
+            # * Skip the explicit saturation and clamp inside at::vec::convert_float_to_uint8.
+            return f"at::vec::convert_float_to_uint8({x})"
+        # TODO(jgong5): support conversion for other types
+        # currently we only allow load/store torch.uint8 and handle conversion there
         return f"({x})"
 
     @staticmethod
@@ -632,9 +783,12 @@ class CppVecOverrides(OpOverrides):
             other_code = (
                 "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
             )
+        elif math.isnan(other):
+            other_code = (
+                "at::vec::Vectorized<float>(std::numeric_limits<float>::quiet_NaN())"
+            )
         else:
             other_code = f"at::vec::Vectorized<float>({other!r})"
-
         type = f"decltype({var}())"
         float_mask = f"to_float_mask({mask})"
         return f"{type}::blendv({other_code}, {var}(), {float_mask})"
@@ -660,6 +814,11 @@ class CppOverrides(OpOverrides):
     def to_dtype(x, dtype):
         assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>({x})"
+
+    @staticmethod
+    def to_dtype_bitcast(x, dtype):
+        assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
+        return f"reinterpret_cast<{DTYPE_TO_CPP[dtype]}&>({x})"
 
     @staticmethod
     def abs(x):
@@ -693,6 +852,14 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def erf(x):
         return f"std::erf({x})"
+
+    @staticmethod
+    def erfc(x):
+        return f"std::erfc({x})"
+
+    @staticmethod
+    def erfinv(x):
+        return f"calc_erfinv({x})"
 
     @staticmethod
     def sqrt(x):
@@ -823,10 +990,6 @@ class CppOverrides(OpOverrides):
         return f"std::hypot({x}, {y})"
 
     @staticmethod
-    def erfc(x):
-        return f"std::erfc({x})"
-
-    @staticmethod
     def log10(x):
         return f"std::log10({x})"
 
@@ -909,6 +1072,8 @@ class CppOverrides(OpOverrides):
             other_code = f"std::numeric_limits<{type}>::infinity()"
         elif isinstance(other, bool):
             other_code = f"static_cast<{type}>({str(other).lower()})"
+        elif math.isnan(other):
+            other_code = f"std::numeric_limits<{type}>::quiet_NaN()"
         else:
             other_code = f"static_cast<{type}>({repr(other)})"
 
@@ -919,32 +1084,52 @@ class CppOverrides(OpOverrides):
         return f"{a} && {b}"
 
     @staticmethod
+    def logical_not(a):
+        return f"!{a}"
+
+    @staticmethod
     def logical_or(a, b):
         return f"{a} || {b}"
 
     @staticmethod
-    def bitwise_and(x, y):
-        return f"decltype({x})({x} & {y})"
+    def logical_xor(a, b):
+        return f"{a} != {b}"
 
     @staticmethod
-    def bitwise_or(x, y):
-        return f"decltype({x})({x} | {y})"
+    def bitwise_and(a, b):
+        return f"decltype({a})({a} & {b})"
 
     @staticmethod
-    def bitwise_xor(x, y):
-        return f"decltype({x})({x} ^ {y})"
+    def bitwise_not(a):
+        return f"decltype({a})(~{a})"
 
     @staticmethod
-    def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
+    def bitwise_or(a, b):
+        return f"decltype({a})({a} | {b})"
 
     @staticmethod
-    def randn(seed: sympy.Expr, offset: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
+    def bitwise_xor(a, b):
+        return f"decltype({a})({a} ^ {b})"
 
     @staticmethod
-    def randint(seed: sympy.Expr, offset: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randint_cpu({seed}, {offset}));"
+    def bitwise_left_shift(a, b):
+        return f"decltype({a})({a} << {b})"
+
+    @staticmethod
+    def bitwise_right_shift(a, b):
+        return f"decltype({a})({a} >> {b})"
+
+    @staticmethod
+    def rand(seed: sympy.Expr, offset: sympy.Expr):
+        return f"normalized_rand_cpu({seed}, {offset})"
+
+    @staticmethod
+    def randn(seed: sympy.Expr, offset: sympy.Expr):
+        return f"randn_cpu({seed}, {offset})"
+
+    @staticmethod
+    def randint64(seed: sympy.Expr, offset: sympy.Expr, low, high):
+        return f"randint64_cpu({seed}, {offset}, {low}, {high})"
 
     @staticmethod
     def sigmoid(x):
@@ -957,8 +1142,10 @@ class CppOverrides(OpOverrides):
         left = V.kernel.cse.newvar()
         right = V.kernel.cse.newvar()
         result = V.kernel.cse.newvar()
-        code.writeline(f"auto {left} = {x} > 0 ? 1 : 0;")
-        code.writeline(f"auto {right} = {x} < 0 ? 1 : 0;")
+        scalar_zero = f"decltype({x})(0)"
+        scalar_one = f"decltype({x})(1)"
+        code.writeline(f"auto {left} = {x} > 0 ? {scalar_one} : {scalar_zero};")
+        code.writeline(f"auto {right} = {x} < 0 ? {scalar_one} : {scalar_zero};")
         code.writeline(f"auto {result} = {left} - {right};")
         V.kernel.compute.splice(code)
         return result
@@ -983,6 +1170,7 @@ class CppKernel(Kernel):
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
+        self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
@@ -991,6 +1179,10 @@ class CppKernel(Kernel):
         replacement = {var: var * scale + offset}
         new_index = sympy_subs(index, replacement)
         return new_index
+
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True):
+        return sympy_symbol(str(index_var))
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1015,47 +1207,66 @@ class CppKernel(Kernel):
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(DeferredLine(name, line))
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
-        tmpvar = self.reduction_cse.generate(
-            self.loads, f"reduction {name} {cexpr_index(index)}", write=False
+
+        reduction_key = src_dtype, reduction_type, value
+        if reduction_key in self.reduction_cse.reduction_cache:
+            return self.reduction_cse.reduction_cache[reduction_key]
+
+        acc = self.reduction_cse.generate(
+            self.loads, f"reduction {reduction_key}", write=False
         )
-        index = self.rename_indexing(index)
-        self.reduction_var_map[tmpvar] = reduction_type
+        self.reduction_var_map[acc] = reduction_type
         if argmax_or_argmin:
             self.reduction_prefix.writelines(
-                argmax_argmin_prefix(reduction_type, src_dtype, tmpvar)
+                argmax_argmin_prefix(reduction_type, src_dtype, acc)
             )
             compare_op = "<" if reduction_type == "argmax" else ">"
             self.stores.writelines(
                 [
-                    f"if ({tmpvar}.value {compare_op} {value}) {{",
-                    f"    {tmpvar}.index = {self.itervars[-1]}; {tmpvar}.value = {value};",
+                    f"if ({acc}.value {compare_op} {value}) {{",
+                    f"    {acc}.index = {self.itervars[-1]}; {acc}.value = {value};",
                     "}",
                 ],
             )
         else:
-            if dtype in (torch.float16, torch.bfloat16):
-                self.reduction_prefix.writeline(
-                    f"float {tmpvar} = {reduction_init(reduction_type, dtype)};"
-                )
-            else:
-                self.reduction_prefix.writeline(
-                    f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
-                )
+            acc_type = reduction_acc_type(reduction_type, dtype)
+
+            if (reduction_type, acc_type) not in self.reduction_omp_dec:
+                if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
+                    # Scalar reduction for other reductions are declared by default
+                    self.reduction_prefix.splice(
+                        f"""\
+    #pragma omp declare reduction(\
+    {RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
+    omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
+    initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
+                """
+                    )
+                self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
+                    reduction_type
+                ]
+
+            self.reduction_prefix.writeline(
+                f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
+            )
             self.stores.writeline(
-                f"{reduction_combine(reduction_type, tmpvar, value)};"
+                f"{acc} = {reduction_combine(reduction_type, acc, value)};"
             )
 
-        if name not in V.graph.removed_buffers:
-            var = self.args.output(name)
-            member_name = ".index" if argmax_or_argmin else ""
-            self.reduction_suffix.writeline(
-                DeferredLine(
-                    name, f"{var}[{cexpr_index(index)}] = {tmpvar}{member_name};"
-                )
-            )
-        self.cse.store_cache[name] = tmpvar
+        result = self.cse.generate(
+            self.reduction_suffix, f"{reduction_project(reduction_type, acc)}"
+        )
+        self.reduction_cse.reduction_cache[reduction_key] = result
+        return result
+
+    def store_reduction(self, name, index, value):
+        index = self.rename_indexing(index)
+        var = self.args.output(name)
+        self.reduction_suffix.writeline(
+            DeferredLine(name, f"{var}[{cexpr_index(index)}] = {value};")
+        )
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
@@ -1204,14 +1415,20 @@ class CppKernel(Kernel):
 class CppVecKernel(CppKernel):
     overrides = CppVecOverrides
 
-    def __init__(self, args, num_threads, tiling_factor=0, tiling_idx=-1):
+    def __init__(
+        self,
+        args,
+        num_threads,
+        tiling_factor=0,
+        tiling_idx=-1,
+        tiling_dtype=torch.float,
+    ):
         super().__init__(args, num_threads)
         assert codecache.pick_vec_isa()
         if tiling_factor == 0:
-            tiling_factor = codecache.pick_vec_isa().nelements()
+            tiling_factor = codecache.pick_vec_isa().nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
-        self.reduction_omp_dec: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
     def load(self, name: str, index: sympy.Expr):
@@ -1236,17 +1453,18 @@ class CppVecKernel(CppKernel):
         if is_broadcast:
             if is_mask:
                 loadbuf = f"flag_to_float_scalar({loadbuf})"
-            line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
+            if dtype in [torch.bfloat16]:
+                line = f"at::vec::Vectorized<bfloat16>({loadbuf})"
+            else:
+                line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
-            line = f"at::vec::load_uint8_as_float({var_expr})"
+            line = f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
         elif is_mask:
             line = f"flag_to_float_vec({loadbuf})"
         elif dtype in [torch.bfloat16]:
-            if opt_ctx.is_load_bf16_as_fp32:
-                line = f"load_bf16_as_float({loadbuf})"
-            else:
-                assert opt_ctx.is_bf16_mem_copy
-                line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+            line = (
+                f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+            )
         else:
             line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
         if non_contiguous:
@@ -1255,7 +1473,7 @@ class CppVecKernel(CppKernel):
             if dtype in [torch.bfloat16]:
                 tmpbufsize += " * 2"
             tmpbufdeclare = f"__at_align__ {tmpbuftype} tmpbuf[{tmpbufsize}];"
-            inner = sympy.symbols(f"{tiling_var}_inner")
+            inner = sympy_symbol(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=inner
             )
@@ -1284,22 +1502,13 @@ class CppVecKernel(CppKernel):
         if non_contiguous:
             var_expr = "tmpbuf"
         if V.graph.get_dtype(name) in [torch.bfloat16]:
-            if opt_ctx.is_store_fp32_as_bf16:
-                line = f"store_float_as_bf16({var_expr}, {value});"
-            else:
-                assert opt_ctx.is_bf16_mem_copy
-                line = f"{value}.store({var_expr}, {self.tiling_factor});"
-        elif (V.graph.get_dtype(name) in [torch.uint8]) and (
-            opt_ctx.is_store_float_as_uint8
-        ):
-            # TODO(Leslie): Optimize the implementation of store_float_as_uint8
-            # * Pattern match of quantization op in the loop body.
-            # * Skip the explicit saturation and clamp inside store_float_as_uint8.
-            line = f"at::vec::store_float_as_uint8({value}, {var_expr});"
+            line = f"{value}.store({var_expr}, {self.tiling_factor});"
+        elif V.graph.get_dtype(name) in [torch.uint8]:
+            line = f"{value}.store({var_expr}, {self.tiling_factor});"
         else:
             line = f"{value}.store({var_expr});"
         if non_contiguous:
-            inner = sympy.symbols(f"{tiling_var}_inner")
+            inner = sympy_symbol(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=inner
             )
@@ -1307,97 +1516,140 @@ class CppVecKernel(CppKernel):
                 f"{self.tiling_factor}*sizeof(float)/sizeof({DTYPE_TO_CPP[dtype]})"
             )
             line = (
-                f"{{ __at_align__ {DTYPE_TO_CPP[dtype]} tmpbuf[{tmp_bufsize}]; {line}; "
+                f"{{ __at_align__ {DTYPE_TO_CPP[dtype]} tmpbuf[{tmp_bufsize}]; {line} "
                 f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
                 f"{var}[{cexpr_index(new_index)}] = tmpbuf[{inner}]; }}"
             )
         self.stores.writeline(DeferredLine(name, line))
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        assert reduction_type in {"max", "min", "sum", "prod", "xor_sum"}
+    def reduction(self, dtype, src_dtype, reduction_type, value):
+        assert reduction_type in {
+            "max",
+            "min",
+            "sum",
+            "prod",
+            "xor_sum",
+            "var_unnormalized",
+        }
         assert dtype == torch.float
         assert src_dtype == torch.float
-        reduce_map = {"max": "maximum", "min": "minimum"}
 
         vec_ns = "at::vec"
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
+        acc_type = reduction_acc_type(reduction_type, dtype)
+        acc_type_vec = reduction_acc_type_vec(reduction_type, dtype)
 
-        if reduction_type not in self.reduction_omp_dec:
-            vec_reduc_prefix = "#pragma omp declare reduction("
-            vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
-            if reduction_type == "sum":
-                vec_reduc_prefix += "omp_out += omp_in"
-            elif reduction_type == "prod":
-                vec_reduc_prefix += "omp_out *= omp_in"
-            elif reduction_type == "xor_sum":
-                vec_reduc_prefix += "omp_out ^= omp_in"
-            else:
-                vec_reduc_prefix += (
-                    f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
+        if (reduction_type, acc_type) not in self.reduction_omp_dec:
+            if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
+                # Scalar reduction for other reductions are declared by default
+                self.reduction_prefix.splice(
+                    f"""\
+#pragma omp declare reduction(\
+{RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
+omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
+initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
+            """
                 )
-            vec_reduc_prefix += ")"
-            vec_reduc_prefix += " initializer("
-            vec_reduc_prefix += "omp_priv={{"
-            vec_reduc_prefix += f"{reduction_init(reduction_type, dtype)}"
-            vec_reduc_prefix += "}})"
-            self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
-            self.reduction_prefix.writeline(vec_reduc_prefix)
+            self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
+                reduction_type
+            ]
 
-        tmpvar = self.reduction_cse.generate(
-            self.loads, f"reduction {name} {cexpr_index(index)}", write=False
-        )
-        tmpvar_vec = f"{tmpvar}_vec"
+        if (reduction_type, acc_type_vec) not in self.reduction_omp_dec:
+            self.reduction_prefix.splice(
+                f"""\
+#pragma omp declare reduction(\
+{RTYPE_TO_CPP[reduction_type]}:{acc_type_vec}:\
+omp_out = {reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
+initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
+            """
+            )
+            self.reduction_omp_dec[reduction_type, acc_type_vec] = RTYPE_TO_CPP[
+                reduction_type
+            ]
 
-        index = self.rename_indexing(index)
-        self.reduction_var_map[tmpvar_vec] = reduction_type
+        reduction_key = src_dtype, reduction_type, value
+        if reduction_key in self.reduction_cse.reduction_cache:
+            return self.reduction_cse.reduction_cache[reduction_key]
+
+        acc = self.reduction_cse.generate(
+            self.loads, f"reduction {reduction_key}", write=False
+        )
+        acc_vec = f"{acc}_vec"
+
+        self.reduction_var_map[acc_vec] = reduction_type
         self.reduction_prefix.writeline(
-            f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+            f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
         )
         self.reduction_prefix.writeline(
-            f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
+            f"{acc_type_vec} {acc_vec} = {reduction_init_vec(reduction_type, dtype)};"
         )
         self.stores.writeline(
-            f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
+            f"{acc_vec} = {reduction_combine_vec(reduction_type, acc_vec, value)};"
         )
 
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
-            reduce_all_body = "{"
-            if reduction_type == "sum":
-                reduce_all_body += "return x + y;"
-            elif reduction_type == "prod":
-                reduce_all_body += "return x * y;"
-            elif reduction_type == "xor_sum":
-                reduce_all_body += "return x ^ y;"
+            if reduction_type == "var_unnormalized":
+                next_value = f"welford_vec_reduce_all({acc_vec})"
             else:
-                reduce_all_body += (
-                    f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
+                reduce_all_body = (
+                    "{ return "
+                    + reduction_combine_vec(reduction_type, "x", "y")
+                    + "; }"
                 )
-            reduce_all_body += "}"
-            vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
-            next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec})"
+                vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+                next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
+
+            self.reduction_suffix.writeline(
+                f"{acc} = {reduction_combine(reduction_type, acc, next_value)};"
+            )
+            tmpvar = acc
+        else:
+            tmpvar = acc_vec
+
+        result = self.cse.generate(
+            self.reduction_suffix, reduction_project(reduction_type, tmpvar)
+        )
+        self.reduction_cse.reduction_cache[reduction_key] = result
+        return result
+
+    def store_reduction(self, name, index, value):
+        index = self.rename_indexing(index)
+        var = self.args.output(name)
+        out_dtype = V.graph.get_dtype(name)
+        # Only float reductions are vectorized currently
+        dtype = torch.float
+        if self.tiling_idx >= self.reduction_depth:
+            # Horizontal reduction
             self.reduction_suffix.writeline(
                 DeferredLine(
-                    name, f"{reduction_combine(reduction_type, tmpvar, next_value)};"
+                    name,
+                    f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});",
                 )
             )
-
-        if name not in V.graph.removed_buffers:
-            var = self.args.output(name)
-            if self.tiling_idx >= self.reduction_depth:
-                # Horizontal reduction
-                self.reduction_suffix.writeline(
-                    DeferredLine(name, f"{var}[{cexpr_index(index)}] = {tmpvar};")
-                )
-            else:
-                # Vertical reduction
-                self.reduction_suffix.writeline(
-                    DeferredLine(
-                        name, f"{tmpvar_vec}.store({var} + {cexpr_index(index)});"
+        else:
+            # Vertical reduction
+            store_lines = [
+                DeferredLine(name, f"{value}.store({var} + {cexpr_index(index)});")
+            ]
+            if out_dtype != dtype:
+                if out_dtype == torch.bfloat16 and dtype == torch.float:
+                    bf16_tmpvar = f"bf16_{value}"
+                    store_lines = [
+                        DeferredLine(
+                            name,
+                            f"auto {bf16_tmpvar} = cvt_fp32_to_bf16({value});",
+                        ),
+                        DeferredLine(
+                            name,
+                            f"{bf16_tmpvar}.store({var} + {cexpr_index(index)}, {self.tiling_factor});",
+                        ),
+                    ]
+                else:
+                    raise AssertionError(
+                        f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
                     )
-                )
-
-        self.cse.store_cache[name] = tmpvar
+            self.reduction_suffix.writelines(store_lines)
 
 
 class CppTile2DKernel(CppVecKernel):
@@ -1431,16 +1683,25 @@ class CppTile2DKernel(CppVecKernel):
             ...
     """
 
-    def __init__(self, args, num_threads, tiling_factor, tiling_indices):
-        super().__init__(args, num_threads, tiling_factor, tiling_indices[1])
+    def __init__(self, args, num_threads, tiling_factor, tiling_indices, tiling_dtype):
+        super().__init__(
+            args, num_threads, tiling_factor, tiling_indices[1], tiling_dtype
+        )
         self.tiling_indices = tiling_indices
 
     def inner_itervar(self):
-        return sympy.symbols(f"{self.itervars[self.outer_idx]}_inner")
+        return sympy_symbol(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
-        return stride_at(self.itervars[self.outer_idx], index) == 1 and index.has(
-            self.itervars[self.tiling_idx]
+        return (
+            stride_at(self.itervars[self.outer_idx], index) == 1
+            and index.has(self.itervars[self.tiling_idx])
+            and not stride_at(self.itervars[self.tiling_idx], index).has(
+                self.itervars[self.tiling_idx]
+            )
+            and not stride_at(self.itervars[self.tiling_idx], index).has(
+                self.itervars[self.outer_idx]
+            )
         )
 
     def gen_transposed_tile_load_store(self, name, var, index, is_store):
@@ -1490,11 +1751,12 @@ class CppTile2DKernel(CppVecKernel):
             # vector load inside the kernel inner loop
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
-                if opt_ctx.is_load_bf16_as_fp32:
-                    line = f"load_bf16_as_float({loadbuf})"
-                else:
-                    assert opt_ctx.is_bf16_mem_copy
-                    line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+                line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+            elif (
+                V.graph.get_dtype(name) in [torch.uint8]
+                and opt_ctx.is_load_uint8_as_float
+            ):
+                line = f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
             else:
                 line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             return self.cse.generate(self.loads, line)
@@ -1521,11 +1783,9 @@ class CppTile2DKernel(CppVecKernel):
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
-                if opt_ctx.is_store_fp32_as_bf16:
-                    line = f"store_float_as_bf16({storebuf}, {value})"
-                else:
-                    assert opt_ctx.is_bf16_mem_copy
-                    line = f"{value}.store({storebuf}, {self.tiling_factor})"
+                line = f"{value}.store({storebuf}, {self.tiling_factor});"
+            elif V.graph.get_dtype(name) in [torch.uint8]:
+                line = f"{value}.store({storebuf}, {self.tiling_factor});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
@@ -1627,34 +1887,6 @@ class CppVecKernelChecker(CppVecKernel):
         else:
             return False
 
-    def can_load_bf16_as_fp32(self, input_node: torch.fx.Node):
-        assert input_node.target in ["load", "constant"]
-        load_type = (
-            V.graph.get_dtype(input_node.args[1])
-            if input_node.target == "load"
-            else input_node.args[-1]
-        )
-        if load_type not in [torch.bfloat16]:
-            return False
-
-        if not all(
-            user.target == "to_dtype" and user.args[-1] == torch.float
-            for user in input_node.users
-        ):
-            return False
-
-        return True
-
-    def can_store_fp32_as_bf16(self, store_var: str, value_node: torch.fx.Node):
-        load_type = V.graph.get_dtype(store_var)
-        if load_type not in [torch.bfloat16]:
-            return False
-
-        if value_node.target == "to_dtype" and value_node.args[-1] == torch.bfloat16:
-            return True
-
-        return False
-
     def is_load_uint8_as_float(self, name: str, users: Dict[torch.fx.Node, None]):
         """
         Check:
@@ -1726,14 +1958,6 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
 
-            if load_dtype in [torch.bfloat16]:
-                opt_ctx.is_load_bf16_as_fp32 = self.can_load_bf16_as_fp32(
-                    node_ctx.get_fx_node()
-                )
-                if not (opt_ctx.is_load_bf16_as_fp32 or opt_ctx.is_bf16_mem_copy):
-                    self.disable_vec("bfloat16 not legalized as float on load")
-                    return var
-
             index = self.rename_indexing(index)
             if self.simd_vec and not self.could_vec(name, index):
                 self.disable_vec(f"not a loop: {index}")
@@ -1753,20 +1977,9 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"{store_dtype} not supported by store")
                 return self.simd_vec
 
-            if store_dtype in [torch.bfloat16]:
+            if store_dtype in [torch.uint8]:
                 value_node = node_ctx.get_fx_node().all_input_nodes[-1]
-                opt_ctx.is_store_fp32_as_bf16 = self.can_store_fp32_as_bf16(
-                    name, value_node
-                )
-                if not (opt_ctx.is_store_fp32_as_bf16 or opt_ctx.is_bf16_mem_copy):
-                    self.disable_vec("bfloat16 not legalized as float on store")
-                    return self.simd_vec
-            elif store_dtype in [torch.uint8]:
-                value_node = node_ctx.get_fx_node().all_input_nodes[-1]
-                opt_ctx.is_store_float_as_uint8 = self.can_store_fp32_as_uint8(
-                    name, value_node
-                )
-                if not opt_ctx.is_store_float_as_uint8:
+                if not self.can_store_fp32_as_uint8(name, value_node):
                     self.disable_vec("not support store float32 as uint8")
                     return self.simd_vec
 
@@ -1781,17 +1994,20 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"not a loop: {index}")
             return self.simd_vec
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
         if (
             dtype == torch.float
             and src_dtype == torch.float
-            and reduction_type in ["max", "min", "sum", "prod", "xor_sum"]
+            and reduction_type in VECTORIZABLE_RTYPES
         ):
             pass
         else:
             self.disable_vec(
                 f"reduction: dtype {dtype}, src_dtype {src_dtype}, reduction_type {reduction_type}"
             )
+        return self.simd_vec
+
+    def store_reduction(self, name, index, value):
         return self.simd_vec
 
     def is_supported_cmp(self, node: torch.fx.Node):
@@ -1867,10 +2083,12 @@ class CppVecKernelChecker(CppVecKernel):
                 return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(name, dtype, src_dtype, reduction_type, index, value):
-                return self.reduction(
-                    name, dtype, src_dtype, reduction_type, index, value
-                )
+            def reduction(dtype, src_dtype, reduction_type, value):
+                return self.reduction(dtype, src_dtype, reduction_type, value)
+
+            @staticmethod
+            def store_reduction(name, index, value):
+                return self.store_reduction(name, index, value)
 
             @staticmethod
             def constant(val, dtype):
@@ -1905,22 +2123,10 @@ class CppVecKernelChecker(CppVecKernel):
                         )
                     ):
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
-
-                    if opt_ctx.dtype in [torch.bfloat16]:
-                        if self.can_load_bf16_as_fp32(node_ctx.get_fx_node()):
-                            opt_ctx.is_load_bf16_as_fp32 = True
-                            opt_ctx.dtype = torch.float
-                        elif not opt_ctx.is_bf16_mem_copy:
-                            self.disable_vec(
-                                "bfloat16 not legalized as float in constant"
-                            )
-
                     return val
 
             @staticmethod
             def index_expr(expr, dtype):
-                current_node: torch.fx.Node = V.interpreter.current_node
-
                 assert len(self.ranges) == len(self.itervars)
                 if not len(self.ranges) or not all(
                     not isinstance(range, sympy.Expr) or sympy.simplify(range).is_number
@@ -1930,43 +2136,34 @@ class CppVecKernelChecker(CppVecKernel):
                     self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
                     return self.cse.newvar()
 
-                def mod_indexing_rep(x, y, z):
-                    if z.is_constant():
-                        return x / y
-
-                    # never really happens, we'll bail on optimizing
-                    return (x / y) % z
-
-                def indexing_div_rep(x, y):
-                    return x / y
+                def can_use_int32():
+                    free_symbols = list(expr.free_symbols)
+                    vars_ranges = {
+                        k: ValueRanges(0, v)
+                        for k, v in zip(self.itervars, self.ranges)
+                        if k in free_symbols
+                    }
+                    if not vars_ranges or len(vars_ranges) != len(free_symbols):
+                        i32_iinfo = numpy.iinfo(numpy.int32)
+                        return (
+                            expr.is_number
+                            and expr <= i32_iinfo.max
+                            and expr >= i32_iinfo.min
+                        )
+                    expr_ranges = bound_sympy(expr, vars_ranges)
+                    if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):
+                        return False
+                    return range_expressable_in_32_bits(
+                        ValueRanges(int(expr_ranges.lower), int(expr_ranges.upper))
+                    )
 
                 with RecordOptimizationContext(__name__) as node_ctx:
                     assert len(self.ranges) == len(self.itervars)
-
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    max_expr = expr.replace(
-                        ir.ModularIndexing, mod_indexing_rep
-                    ).replace(ir.FloorDiv, indexing_div_rep)
-                    min_expr = max_expr
-                    for idx in range(len(self.ranges)):
-                        max_expr = sympy.maximum(
-                            max_expr,
-                            self.itervars[idx],
-                            sympy.Interval(0, self.ranges[idx]),
-                        )
-                        min_expr = sympy.minimum(
-                            min_expr,
-                            self.itervars[idx],
-                            sympy.Interval(0, self.ranges[idx]),
-                        )
-                    i32_iinfo = numpy.iinfo(numpy.int32)
                     if (
                         dtype == torch.int64
-                        and max_expr.is_number
-                        and min_expr.is_number
-                        and max_expr <= i32_iinfo.max
-                        and min_expr >= i32_iinfo.min
+                        and can_use_int32()
                         and all(
                             user.target in VecCheckerProxy.bin_cmp_ops
                             for user in node_ctx.current_node.users
@@ -1988,8 +2185,8 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var, size):
-                return sympy.Symbol(str(index_var))
+            def indirect_indexing(index_var, size, check=True):
+                return sympy_symbol(str(index_var))
 
             @staticmethod
             def masked(mask, body, other):
@@ -2014,15 +2211,8 @@ class CppVecKernelChecker(CppVecKernel):
                                 if input_value.target == "load"
                                 else input_value.args[-1]
                             )
-                            if dtype in [torch.bfloat16]:
-                                opt_ctx.is_load_bf16_as_fp32 = True
-                            elif (dtype == torch.uint8) and (
-                                input_value.target == "load"
-                            ):
-                                # 1. doing uint8 to float.
-                                # 2. the previous node of uint8 to float is load.
-                                opt_ctx.is_load_uint8_as_float = True
-                            elif dtype == torch.float:
+                            if dtype in [torch.bfloat16, torch.float, torch.uint8]:
+                                # Convert from dtype to torch.float
                                 pass
                             elif (
                                 dtype in [torch.int32, torch.int64]
@@ -2054,15 +2244,25 @@ class CppVecKernelChecker(CppVecKernel):
                                 "to_dtype: expecting all stores into bfloat16"
                             )
                             return x
-
-                        opt_ctx.is_store_fp32_as_bf16 = True
                     elif dtype == torch.bool:
                         pass
                     elif dtype == torch.uint8:
-                        opt_ctx.is_store_float_as_uint8 = all(
+                        # Only allow below 2 cases:
+                        # Case 1: to_uint8 and store which corresponding to the single quant node
+                        # at last of fusion pattern.
+                        is_to_uint8_and_store = all(
                             usr.target in ["store"] for usr in cur_node.users
                         )
-                        if not opt_ctx.is_store_float_as_uint8:
+                        # Case 2: to_uint8 and to_float which corresponding to pair of quant/dequant node
+                        # at middle of fusion pattern.
+                        is_to_uint8_and_to_float = all(
+                            (
+                                usr.target in ["to_dtype"]
+                                and usr.args[2] == torch.float32
+                            )
+                            for usr in cur_node.users
+                        )
+                        if not (is_to_uint8_and_store or is_to_uint8_and_to_float):
                             self.disable_vec(f"to_dtype: dtype {dtype}")
                     else:
                         self.disable_vec(f"to_dtype: dtype {dtype}")
@@ -2084,71 +2284,101 @@ class CppKernelProxy(CppKernel):
     def data_type_propagation(self, nodes):
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
-            data_type_propagation(_node)
+            DataTypePropagation.propagate_scheduler_node(_node)
+
+    # Check if all the nodes of a given fx graph can support BF16
+    def is_bf16_scheduler(self, scheduler_node: SchedulerNode):
+        if not isinstance(scheduler_node._body, ir.LoopBody):
+            return True
+
+        scheduler_node.is_bf16 = False
+
+        # Propagate the dtype to check if all the fx node is bf16
+        DataTypePropagation.propagate_scheduler_node(scheduler_node)
+
+        sub_blocks = [scheduler_node._body.root_block] + list(
+            scheduler_node._body.subblocks.values()
+        )
+        for sub_block in sub_blocks:
+            for _node in sub_block.graph.nodes:
+                # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
+                # the data type as well.
+                if _node.op == "placeholder" or _node.target in (
+                    "get_index",
+                    "index_expr",
+                ):
+                    continue
+
+                # Fast path if all operations can support bf16 without converting to fp32
+                if _node.target not in [
+                    "load",
+                    "constant",
+                    "store",
+                    "abs",
+                    "neg",
+                    "output",
+                ]:
+                    return False
+
+                if hasattr(_node, "meta") and _node.meta:
+                    assert OptimizationContext.key in _node.meta
+                    opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
+                    if not opt_ctx.dtype or opt_ctx.dtype is not torch.bfloat16:
+                        return False
+                else:
+                    return False
+
+        scheduler_node.is_bf16 = True
+        return True
 
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
-            def is_bf16_mem_copy(node: torch.fx.Node):
-                if node.target in ["load", "constant"]:
-                    bf16_mem_copy = all(
-                        usr.target == "store"
-                        and V.graph.get_dtype(usr.args[1]) == torch.bfloat16
-                        for usr in node.users
-                    )
-                elif node.target == "store":
-                    stored_node = node.args[3]
-                    bf16_mem_copy = is_bf16_mem_copy(stored_node)
-                else:
-                    bf16_mem_copy = False
-                if bf16_mem_copy:
-                    opt_ctx = OptimizationContext()
-                    opt_ctx.is_bf16_mem_copy = bf16_mem_copy
-                    node.meta[OptimizationContext.key] = opt_ctx
-                return bf16_mem_copy
+            def is_bf16_load_or_constant(node: torch.fx.Node):
+                if node.target not in ["load", "constant"]:
+                    return False
+                assert len(node.args) == 3
+                # If the node is constant, the last arg is dtype
+                load_dtype = (
+                    V.graph.get_dtype(node.args[1])
+                    if node.target == "load"
+                    else node.args[-1]
+                )
+                return load_dtype == torch.bfloat16
 
-            for node in sub_graph.nodes:
-                _node: torch.fx.Node = node
-                if _node.target in ["load", "constant"]:
-                    assert len(_node.args) == 3
-                    if is_bf16_mem_copy(node):
-                        continue
+            def is_bf16_store(node: torch.fx.Node):
+                if node.target != "store":
+                    return False
+                _, store_var, _, _, _ = node.args
+                store_dtype = V.graph.get_dtype(store_var)
+                return store_dtype == torch.bfloat16
+
+            sub_graph_nodes = list(sub_graph.nodes)
+            to_bf16_legalized_nodes = []
+            for _node in sub_graph_nodes:
+                if is_bf16_load_or_constant(_node):
                     ops = _node.args[0]
-                    # If the node is constant, the last arg is dtype
-                    load_dtype = (
-                        V.graph.get_dtype(_node.args[1])
-                        if _node.target == "load"
-                        else _node.args[-1]
-                    )
-
-                    if load_dtype == torch.bfloat16:
-                        with sub_graph.inserting_after(_node):
-                            to_type_node = sub_graph.call_method(
-                                "to_dtype", args=(ops, _node, torch.float)
-                            )
-                            to_type_node_args = to_type_node.args
-                            _node.replace_all_uses_with(to_type_node)
-                            to_type_node.args = to_type_node_args
-                            metrics.cpp_to_dtype_count += 1
-                elif _node.target == "store":
-                    if is_bf16_mem_copy(_node):
-                        continue
-                    ops, store_var, _, value_var, _ = _node.args
-                    store_dtype = V.graph.get_dtype(store_var)
-                    if store_dtype == torch.bfloat16:
-                        with sub_graph.inserting_before(_node):
-                            to_type_node = sub_graph.call_method(
-                                "to_dtype", args=(ops, value_var, torch.bfloat16)
-                            )
-                            _node.replace_input_with(value_var, to_type_node)
-                            metrics.cpp_to_dtype_count += 1
+                    with sub_graph.inserting_after(_node):
+                        to_type_node = sub_graph.call_method(
+                            "to_dtype", args=(ops, _node, torch.float)
+                        )
+                        to_type_node_args = to_type_node.args
+                        _node.replace_all_uses_with(to_type_node)
+                        to_type_node.args = to_type_node_args
+                        metrics.cpp_to_dtype_count += 1
+                elif is_bf16_store(_node):
+                    ops, _, _, value_var, _ = _node.args
+                    with sub_graph.inserting_before(_node):
+                        to_type_node = sub_graph.call_method(
+                            "to_dtype", args=(ops, value_var, torch.bfloat16)
+                        )
+                        _node.replace_input_with(value_var, to_type_node)
+                        metrics.cpp_to_dtype_count += 1
                 elif _node.target == "reduction":
                     (
                         ops,
-                        name,
                         dtype,
                         src_dtype,
                         reduction_type,
-                        index,
                         value,
                     ) = _node.args
                     if src_dtype == torch.bfloat16:
@@ -2160,22 +2390,25 @@ class CppKernelProxy(CppKernel):
                         assert dtype in [torch.float, torch.bfloat16, torch.int64]
                         _node.args = (
                             ops,
-                            name,
                             torch.float if dtype == torch.bfloat16 else dtype,
                             torch.float,
                             reduction_type,
-                            index,
                             value,
                         )
                 elif _node.target == "to_dtype" and _node.args[-1] in [torch.bfloat16]:
                     (ops, x, _) = _node.args
-                    from_load = _node.all_input_nodes[-1].target == "load"
-                    to_store = all(usr.target == "store" for usr in _node.users)
                     # The legalization always loads the BF16 tensor as FP32 for computation and converts
                     # back to BF16 after the computation. Hence, there should be no computation w/ BF16.
                     # Therefore, we update the to_dtype by replacing the bf16 dtype with fp32.
-                    if not (from_load or to_store):
-                        _node.args = (ops, x, torch.float)
+                    # Save the legalized to_dtype node for the elimination(eliminate_to_dtype step):
+                    #  1) Eliminate the redundant to_dtype node if we have a pattern as follows:
+                    #     graph():
+                    #       %bf16_legalized = call_method[target=to_dtype](args = (%ops, %input, torch.float))
+                    #       %to_dtype2 = call_method[target=to_dtype](args = (%ops, %bf16_legalized, torch.bfloat16))
+                    # Regarding the first to_dtype, it is redundant because the second to_type also converts to the torch.bfloat16.
+                    # Hence, we remove the first to_type.
+                    to_bf16_legalized_nodes.append(_node)
+                    _node.args = (ops, x, torch.float)
                 else:
                     pass
 
@@ -2198,7 +2431,15 @@ class CppKernelProxy(CppKernel):
                     ]
                     for node_users in all_to_nodes_and_users:
                         for node, users in node_users.items():
-                            if all(usr.args[-1] == node.args[-1] for usr in users):
+                            if node in sub_graph.nodes and (
+                                all(usr.args[-1] == node.args[-1] for usr in users)
+                                or (
+                                    node in to_bf16_legalized_nodes
+                                    and all(
+                                        usr.args[-1] == torch.bfloat16 for usr in users
+                                    )
+                                )
+                            ):
                                 val_node = node.all_input_nodes[-1]
                                 node.replace_all_uses_with(val_node)
                                 sub_graph.erase_node(node)
@@ -2222,10 +2463,41 @@ class CppKernelProxy(CppKernel):
             for sub_block in sub_blocks:
                 add_to_dtype(sub_block.graph)
 
+        if all(
+            isinstance(_node, SchedulerNode) and self.is_bf16_scheduler(_node)
+            for _node in nodes
+        ):
+            # Mark the load node to load bf16
+            for _node in nodes:
+                sub_blocks = [_node._body.root_block] + list(
+                    _node._body.subblocks.values()
+                )
+                for sub_block in sub_blocks:
+                    for fx_node in sub_block.graph.nodes:
+                        if fx_node.target in ["load", "constant", "store"]:
+                            assert fx_node.meta
+                            assert OptimizationContext.key in fx_node.meta
+                            opt_ctx: OptimizationContext = fx_node.meta[
+                                OptimizationContext.key
+                            ]
+                            assert opt_ctx.dtype is torch.bfloat16
+
+            # Bypass the legalization as the kernel can run with bf16 directly
+            return
+
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
+            assert isinstance(_node._body, ir.LoopBody)
             node: SchedulerNode = _node
-            if isinstance(node._body, ir.LoopBody):
+
+            def is_memory_copy_scheduler_node(node: SchedulerNode):
+                op_counts = node.read_writes.op_counts
+                return (
+                    len(op_counts) == 2 and "load" in op_counts and "store" in op_counts
+                )
+
+            should_legalize = not is_memory_copy_scheduler_node(node)
+            if should_legalize:
                 body: ir.LoopBody = node._body
                 _legalize_bf16(body)
 
@@ -2233,6 +2505,12 @@ class CppKernelProxy(CppKernel):
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_bf16(nodes)
         self.data_type_propagation(nodes)
+
+        vec_dtype = (
+            torch.bfloat16
+            if all(hasattr(_node, "is_bf16") and _node.is_bf16 for _node in nodes)
+            else torch.float
+        )
 
         kernel_group = self.kernel_group
         _, (group, reduction_group) = max(
@@ -2301,6 +2579,9 @@ class CppKernelProxy(CppKernel):
             contig_only = (
                 contig_vars - non_contig_stride_const - non_contig_stride_other
             )
+            if len(contig_vars) == 0:
+                # no contiguous vars
+                return [len(self.itervars) - 1]
             if contig_only:
                 return sorted(contig_only)[-1:]
             contig_and_const_stride = (
@@ -2317,9 +2598,9 @@ class CppKernelProxy(CppKernel):
                 -1:
             ]
 
-        def select_tiling():
+        def select_tiling(dtype: torch.dtype = torch.float):
             # TODO(jgong5): support alternative tiling factors and data types
-            tiling_factor = self.picked_vec_isa.nelements(dtype=torch.float)
+            tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
             tiling_indices = select_tiling_indices()
             if tiling_indices:
                 with CppVecKernelChecker(
@@ -2341,14 +2622,16 @@ class CppKernelProxy(CppKernel):
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-            tiling_factors, tiling_indices = select_tiling()
+            tiling_factors, tiling_indices = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
             if len(tiling_indices) == 1:
                 main_loop, tail_loop = self.loop_nest.split_with_tiling(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
                 main_loop.set_kernel(
-                    codegen_kernel(CppVecKernel, tiling_factors[0], tiling_indices[0])
+                    codegen_kernel(
+                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                    )
                 )
                 tail_loop.set_kernel(scalar_kernel)
                 main_loop.simd_vec = True
@@ -2372,10 +2655,14 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                 )
                 inner_main_loop.set_kernel(
-                    codegen_kernel(CppTile2DKernel, tiling_factors[0], tiling_indices)
+                    codegen_kernel(
+                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
+                    )
                 )
                 inner_tail_loop.set_kernel(
-                    codegen_kernel(CppVecKernel, tiling_factors[0], tiling_indices[0])
+                    codegen_kernel(
+                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                    )
                 )
 
     def codegen_loops(self, code, worksharing):
@@ -2398,8 +2685,7 @@ class CppScheduling(BaseScheduling):
         else:
             self.kernel_group = KernelGroup()
 
-    @staticmethod
-    def can_fuse_horizontal(node1, node2):
+    def _can_fuse_horizontal_impl(self, node1, node2):
         _, (vars1, reduce1) = node1.group
         _, (vars2, reduce2) = node2.group
         if vars1 == vars2 and reduce1 == reduce2:
@@ -2409,9 +2695,17 @@ class CppScheduling(BaseScheduling):
         # TODO(jansel): allow fusion pointwise (vars1, ()) suffix?
         return False
 
-    @classmethod
-    def can_fuse_vertical(cls, node1, node2):
-        return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
+    def can_fuse_horizontal(self, node1, node2):
+        if (
+            len(node1.get_nodes()) + len(node2.get_nodes())
+            > config.cpp.max_horizontal_fusion_size
+        ):
+            return False
+
+        return self._can_fuse_horizontal_impl(node1, node2)
+
+    def can_fuse_vertical(self, node1, node2):
+        return self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
 
     def codegen_nodes(self, nodes):
         """
@@ -2422,7 +2716,7 @@ class CppScheduling(BaseScheduling):
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         cpp_kernel_proxy.codegen_nodes(nodes)
 
-        kernel_group.finalize_kernel(cpp_kernel_proxy, None)
+        kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
     def codegen_sync(self):
         pass
@@ -2440,23 +2734,28 @@ class KernelGroup:
         self.ws = WorkSharing(self.loops_code)
         self.stack = contextlib.ExitStack()
         self.stack.enter_context(self.ws)
-        self.count = 0
+        self.scheduled_nodes = []
 
     def new_kernel(self, cls, *args):
         return cls(self.args, parallel_num_threads(), *args)
 
-    def finalize_kernel(self, new_kernel, scheduler):
-        self.count += 1
+    def finalize_kernel(self, new_kernel, nodes):
+        self.scheduled_nodes += nodes
         code = self.loops_code
         ws = self.ws
         new_kernel.codegen_loops(code, ws)
 
     def codegen_define_and_call(self, wrapper):
         self.stack.close()
-        if self.count == 0:
+        if not self.scheduled_nodes:
             return
 
-        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
+        fused_name = (
+            get_fused_kernel_name(self.scheduled_nodes, config.cpp.descriptive_names)
+            if config.cpp.descriptive_names
+            else ""
+        )
+        kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
         arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
         arg_types = ",".join(arg_types)
@@ -2468,7 +2767,7 @@ class KernelGroup:
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
-        code.writeline(cpp_prefix())
+        code.writeline(codecache.cpp_prefix())
 
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():
@@ -2495,9 +2794,9 @@ class KernelGroup:
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
-        wrapper.define_kernel(kernel_name, codecache_str, cpp=True)
+        wrapper.define_kernel(kernel_name, codecache_str, cuda=False)
         # generate the code to call this
-        wrapper.generate_kernel_call(kernel_name, call_args, cpp=True)
+        wrapper.generate_kernel_call(kernel_name, call_args, cuda=False)
 
 
 class CppWrapperKernelGroup(KernelGroup):
@@ -2613,7 +2912,7 @@ class LoopLevel:
         def do_split_with_tiling():
             sympy_factor = sympy.Integer(factor)
 
-            offset = ir.FloorDiv(self.size, sympy_factor) * sympy_factor
+            offset = FloorDiv(self.size, sympy_factor) * sympy_factor
             main_loop = LoopLevel(self.var, offset)
             main_loop.steps = sympy_factor
             main_loop.parallel = self.parallel

@@ -22,14 +22,9 @@ from .autotune_process import BenchmarkRequest, TensorMeta
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
-from .codegen.triton import (
-    config_of,
-    signature_of,
-    texpr,
-    TritonKernel,
-    TritonPrinter,
-    TritonScheduling,
-)
+from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
+
+from .codegen.triton_utils import config_of, signature_of
 
 from .utils import do_bench, sympy_dot, sympy_product
 from .virtualized import V
@@ -99,6 +94,7 @@ class TritonTemplateKernel(TritonKernel):
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),
             "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -294,28 +290,36 @@ class TritonTemplateKernel(TritonKernel):
         self.body.clear()
         self.indexing_code.clear()
 
-    def call_kernel(self, code, name: str):
+    def call_kernel(self, name: str):
+        wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
 
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
-        call_args = ", ".join(call_args)
 
-        stream_name = code.write_get_cuda_stream(V.graph.scheduler.current_device.index)
+        if V.graph.cpp_wrapper:
+            wrapper.generate_kernel_call(
+                name,
+                call_args,
+                device_index=V.graph.scheduler.current_device.index,
+            )
+        else:
+            call_args = ", ".join(call_args)
+            stream_name = wrapper.write_get_cuda_stream(
+                V.graph.scheduler.current_device.index
+            )
 
-        V.graph.wrapper_code.add_import_once(f"import {self.grid_fn.__module__}")
-        meta = V.graph.wrapper_code.add_meta_once(self.meta)
+            wrapper.add_import_once(f"import {self.grid_fn.__module__}")
+            meta = wrapper.add_meta_once(self.meta)
 
-        grid_call = [texpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes] + [
-            meta
-        ]
-        grid_call = (
-            f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
-        )
-        code.writeline(
-            f"{name}.run({call_args}, grid={grid_call}, stream={stream_name})"
-        )
+            grid_call = [
+                texpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
+            ] + [meta]
+            grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
+            wrapper.writeline(
+                f"{name}.run({call_args}, grid={grid_call}, stream={stream_name})"
+            )
 
 
 @functools.lru_cache(None)
@@ -523,7 +527,6 @@ class ExternKernelChoice:
         self,
         kernel,
         cpp_kernel=None,
-        ordered_kwargs_for_cpp_kernel=(),
         *,
         name=None,
         has_out_variant=True,
@@ -534,7 +537,6 @@ class ExternKernelChoice:
         assert not hasattr(extern_kernels, name), "duplicate extern kernel"
         self.name = name
         self.cpp_kernel = cpp_kernel
-        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
 
@@ -558,7 +560,8 @@ class ExternKernelChoice:
             pass
         return code_hash("-".join(parts))
 
-    def bind(self, input_nodes, layout, **kwargs):
+    def bind(self, input_nodes, layout, ordered_kwargs_for_cpp_kernel=(), **kwargs):
+        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         return ExternKernelCaller(
             self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
         )

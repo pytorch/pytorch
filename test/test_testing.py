@@ -2139,6 +2139,15 @@ instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
 
 
 class TestImports(TestCase):
+    @classmethod
+    def _check_python_output(cls, program) -> str:
+        return subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", program],
+            stderr=subprocess.STDOUT,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+
     def test_circular_dependencies(self) -> None:
         """ Checks that all modules inside torch can be imported
         Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
@@ -2187,14 +2196,14 @@ class TestImports(TestCase):
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
 
+    @unittest.skipIf(IS_WINDOWS, "TODO enable on Windows")
+    def test_lazy_imports_are_lazy(self) -> None:
+        out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")
+        self.assertEqual(out.strip(), "True")
+
     @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     def test_no_warning_on_import(self) -> None:
-        out = subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", "import torch"],
-            stderr=subprocess.STDOUT,
-            # On Windows, opening the subprocess with the default CWD makes `import torch`
-            # fail, so just set CWD to this script's directory
-            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        out = self._check_python_output("import torch")
         self.assertEqual(out, "")
 
     @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
@@ -2212,10 +2221,7 @@ class TestImports(TestCase):
             'logging.root.setLevel(logging.INFO)',
             f'_logger.info("{expected}")'
         ]
-        out = subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", "; ".join(commands)],
-            stderr=subprocess.STDOUT,
-        ).decode("utf-8")
+        out = self._check_python_output("; ".join(commands))
         self.assertEqual(out.strip(), expected)
 
 class TestOpInfos(TestCase):

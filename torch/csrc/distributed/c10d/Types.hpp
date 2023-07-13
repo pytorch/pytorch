@@ -119,6 +119,7 @@ struct BroadcastOptions {
 struct AllreduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  c10::optional<at::Tensor> sparseIndices = c10::nullopt;
 };
 
 struct AllreduceCoalescedOptions : AllreduceOptions {};
@@ -156,6 +157,7 @@ struct AllToAllOptions {
 struct BarrierOptions {
   std::vector<int64_t> device_ids;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  c10::optional<at::Device> device;
 };
 
 struct DistributedBackendOptions {
