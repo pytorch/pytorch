@@ -126,8 +126,8 @@ if __name__ == "__main__":
                 all_logs.append(f.read())
 
     # If its less than 100 something definitely went wrong
-    assert len(os.listdir(temp_dir)) == len(jobs)
     assert len(all_logs) > 100
+    assert len(all_logs) == len(jobs)
 
     to_be_closed = []
     for item in disabled_tests_json.items():
