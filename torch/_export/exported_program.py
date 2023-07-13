@@ -154,7 +154,7 @@ class ExportedProgram:
                 )
             finally:
                 ix = 0
-                for _, buffer in self.graph_signature.buffers_to_mutate.items():
+                for buffer in self.graph_signature.buffers_to_mutate.values():
                     self.state_dict[buffer] = mutated_buffers[ix]
                     ix += 1
         return res
