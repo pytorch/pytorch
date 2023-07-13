@@ -9,6 +9,5 @@ torch.utils
 
     rename_privateuse1_backend
     generate_methods_for_privateuse1_backend
-    ThroughputBenchmark
     get_cpp_backtrace
     set_module
