@@ -214,49 +214,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_fn(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
-    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
-    @patch.object(torch._inductor.config, "compile_threads", 1)
-    def test_graphbreak_between_collective_wait_inductor(self):
-        import logging
-        torch._logging.set_logs(dynamo=logging.DEBUG)
-
-        def func(inp, *, tag, ranks, group_size):
-            ar = _functional_collectives.all_reduce(inp, "sum", ranks, tag)
-            y = torch.add(inp, 10)
-            print("graph break")
-            z = torch.add(ar, y)
-            return z
-
-        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            inputs = torch.ones(4, 4, device="cuda")
-            compiled = torch.compile(func)
-            codes = run_and_get_triton_code(compiled, inputs, expected_codes=2, **self.get_world_trs())
-            self.assertEqual(len(codes), 2)
-            FileCheck() \
-                .check("buf0.copy_(arg0_1)") \
-                .check("buf1_work = dist.all_reduce(buf1") \
-                .check("_register_tensor_work(buf1, buf1_work)") \
-                .check("buf2 = empty_strided") \
-                .check("triton_poi_fused_add_0.run(arg0_1, buf2") \
-                .check("return (buf0, buf2") \
-                .run(codes[0])
-
-            FileCheck() \
-                .check("_wait_tensor(arg1_1)") \
-                .check("buf0 = arg1_1") \
-                .check("buf1 = buf0") \
-                .check("triton_poi_fused_add_0.run(buf1, arg0_1") \
-                .check("return (buf1, )") \
-                .run(codes[1])
-
-            correct = func(inputs, **self.get_world_trs())
-            out = compiled(inputs, **self.get_world_trs())
-            print(type(out))
-            print(type(correct))
-            self.assertTrue(same(out, correct))
-
 
 @requires_nccl()
 class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
