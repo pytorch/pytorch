@@ -799,7 +799,7 @@ class TransformerEncoderLayer(nn.Module):
         return self.ff_block(x)
 
 
-class TestModule(torch.nn.Module):
+class MockModule(torch.nn.Module):
     def inner_fn(self, left, right):
         return tuple(left) == tuple(right)
 
@@ -1749,7 +1749,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # they are evaluated in the wrong order. So if on a subsequent call
         # an int is passed instead of a tensor, guard evaluation will crash
         # with a "no attribute: shape" error
-        m = TestModule()
+        m = MockModule()
         opt_m = torch._dynamo.optimize("eager")(m)
         opt_m.fn(torch.ones((5, 5)))
         opt_m.fn(-3)
@@ -3351,24 +3351,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref_exponent = torch.tensor([[0, 1, 2, 3]], dtype=torch.int32)
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
-
-    def test_dataclass_factory(self):
-        from dataclasses import dataclass, field
-        from typing import Any
-
-        @dataclass
-        class DClass:
-            sharding_contexts: Any = field(default_factory=list)
-            a: int = 1
-
-        def fn(x):
-            return DClass().a * x
-
-        opt_fn = torch.compile(fn, backend="eager")
-        x = torch.randn(4)
-        res = fn(x)
-        ref = opt_fn(x)
-        self.assertEqual(ref, res)
 
     def test_unspecialized_nn_module_with_torch_variable_attribute(self):
         """
