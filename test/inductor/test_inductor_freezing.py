@@ -323,7 +323,7 @@ class OptimizeForInferenceTemplate(TestCase):
         other_shapes = [[1, 16, 1, 1], [16, 1, 1]]
         x = torch.rand(3, 3, 32, 32).to(self.device)
         for binary_fn, other_shape in itertools.product(binary_list, other_shapes):
-            mod = M(binary_fn, other_shape, device).eval()
+            mod = M(binary_fn, other_shape, self.device).eval()
             with torch.no_grad():
                 out_eager = mod(x)
                 out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
