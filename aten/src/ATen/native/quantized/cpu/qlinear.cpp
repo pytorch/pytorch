@@ -847,12 +847,13 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
           params, x, w, b, y,
           src_scales, weights_scales, dst_scales,
           src_zero_point, dst_zero_point, 1.0f, 1.0f, op_attr);
-      get_cache() = LinearPrimitiveCache(cache_key, params);
+      get_cache() = LinearPrimitiveCache(cache_key, params, b);
       w = w.reorder_if_differ_in(params.pd.weights_desc());
   });
   if (get_cache().hit(cache_key)) {
     LinearParams& params = get_cache().get_param();
-    ideep::matmul_forward::compute<false, false>(params, x, w, b, y);
+    auto& expected_bias = get_cache().get_expected_bias();
+    ideep::matmul_forward::compute<false, false>(params, x, w, expected_bias, y);
   } else {
     ideep::matmul_forward::compute(x, w, b, y, src_scales, weights_scales,
                                    dst_scales, src_zero_point, dst_zero_point,
