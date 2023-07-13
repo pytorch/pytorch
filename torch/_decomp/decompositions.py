@@ -3482,8 +3482,8 @@ def multi_margin_loss(
     if weight is not None:
         weight = torch.atleast_1d(weight)
         torch._check(
-            weight.ndim == 1 and weight.numel() == dim,
-            lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",
+            weight.ndim == 1 and weight.numel() == dim,  # type: ignore[union-attr]
+            lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",  # type: ignore[union-attr]
         )
     target = target.unsqueeze(1)
     u = torch.gather(input, dim=1, index=target)
