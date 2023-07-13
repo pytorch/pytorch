@@ -154,7 +154,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
                 callback_set = True
 
             fx_traceback.set_stack_trace(stack_)
-            fx_traceback.set_seq_nr(seq_nr)
+            fx_traceback.set_seq_nr(seq_nr, bwd=True)
 
         return prehook
 

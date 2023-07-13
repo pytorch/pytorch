@@ -108,9 +108,6 @@ class TracerBase:
     # Mapping of node name to module scope
     node_name_to_scope: Dict[str, Tuple[str, type]]
 
-    # Keep track of max observed seq_nr to determine whether in fwd pass or not
-    _max_seq_nr: int = 0
-
     @compatibility(is_backward_compatible=True)
     def create_node(self, kind : str, target : Target,
                     args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None,
@@ -141,24 +138,23 @@ class TracerBase:
                 node.stack_trace = stack_trace
             # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
             # If other meta fields are needed, they can be added here
-            copy_meta_fields = ["nn_module_stack", "source_fn", "original_aten", "recompute", "seq_nr"]
+            copy_meta_fields = ["nn_module_stack", "source_fn", "original_aten", "recompute"]
             for field in copy_meta_fields:
                 if field in current_meta:
                     node.meta[field] = current_meta[field]
 
             # Here we decrement to account for the sequence_nr having
             # just been incremented while tracing this lowered aten op.
-            new_seq = torch.autograd.get_sequence_nr() - 1
-            # In the FWD pass the new_seq number maintained by
+            new_seq_nr = torch.autograd.get_sequence_nr() - 1
+            # In the FWD pass the new_seq_nr number maintained by
             # torch.autograd.get_sequence_nr() keeps increasing.
             # During the bwd pass it should stay the same value as
             # the max_seq_nr. The seq_nr for bwd ops is maintained
             # in the torch::autograd::Node class see NOTE [ Sequence Number ].
-            # Reset node.meta["seq_nr"] to take the new_seq due to
-            # a fwd pass aten op triggered by a call_module aten op
-            if new_seq > self._max_seq_nr:
-                self._max_seq_nr = new_seq
-                node.meta["seq_nr"] = new_seq
+            if current_meta.get("bwd_op", False):
+                new_seq_nr = current_meta["seq_nr"]
+                current_meta["bwd_op"] = False
+            node.meta["seq_nr"] = new_seq_nr
 
         elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)

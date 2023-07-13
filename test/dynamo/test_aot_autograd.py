@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
-from unittest.mock import patch
 from textwrap import dedent
+from unittest.mock import patch
 
 import torch
 
@@ -778,10 +778,13 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                     mod_name = mod_name[0]
                 seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}\n"
 
-        self.assertExpectedInline(seq_table, dedent('''\
+        self.assertExpectedInline(
+            seq_table,
+            dedent(
+                """\
             SeqNr|OrigAten|SrcFn
             53|aten.convolution.default|l__self___conv1
-            54|aten.add.Tensor|l__self___bn1
+            53|aten.add.Tensor|l__self___bn1
             54|aten._native_batch_norm_legit_functional.default|l__self___bn1
             55|aten.relu.default|l__self___relu1
             56|aten.add.Tensor|add
@@ -794,7 +797,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             63|aten.sub.Tensor|l__self___loss_fn
             64|aten.abs.default|l__self___loss_fn
             65|aten.mean.default|l__self___loss_fn
-            66|aten.ones_like.default|
+            65|aten.ones_like.default|
             65|aten.expand.default|
             65|aten.div.Scalar|
             64|aten.sgn.default|
@@ -812,7 +815,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             54|aten.native_batch_norm_backward.default|
             53|aten.convolution_backward.default|
             53|aten.add.Tensor|
-            '''))
+            """
+            ),
+        )
 
 
 if __name__ == "__main__":
