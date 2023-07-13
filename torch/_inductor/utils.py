@@ -1165,24 +1165,28 @@ PYTHON_TYPE_TO_SCHEMA_TYPE = {
 }
 
 
+def may_get_optional_schema_type(schema_type, is_optional_arg):
+    return f"Optional[{schema_type}]" if is_optional_arg else schema_type
+
+
 def type_match(arg, arg_type, is_optional_arg):
-    # TODO: add a util function to handle Optional
     if isinstance(arg, immutable_list):
-        # TODO: optiona List[int]
         if all(
             isinstance(x, int) or (isinstance(x, sympy.Symbol) and x.is_integer)
             for x in arg
         ):
-            update_type = "List[int]"
-            return update_type == str(arg_type)
+            may_optional_schema_type = may_get_optional_schema_type(
+                "List[int]", is_optional_arg
+            )
+            return may_optional_schema_type == str(arg_type)
         else:
             # TODO: add support here
             return False
 
     if arg.__class__ in PYTHON_TYPE_TO_SCHEMA_TYPE:
         schema_type = PYTHON_TYPE_TO_SCHEMA_TYPE[arg.__class__]
-        may_optional_schema_type = (
-            f"Optional[{schema_type}]" if is_optional_arg else schema_type
+        may_optional_schema_type = may_get_optional_schema_type(
+            schema_type, is_optional_arg
         )
         return may_optional_schema_type == str(arg_type)
 
