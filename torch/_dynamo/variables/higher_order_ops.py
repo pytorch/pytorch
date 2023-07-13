@@ -94,7 +94,7 @@ def validate_args_and_maybe_create_graph_inputs(
             new_arg = []
             for sub_a in subarg.unpack_var_sequence(tx):
                 new_arg.append(add_subarg(sub_a))
-            new_arg = subarg.python_type()(new_arg)
+            new_arg = subarg
         else:
             raise unimplemented(
                 "HigherOrderOperator with body that accepts non-Tensors as input"
@@ -674,9 +674,22 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # For has_aux=True, Tuple[Tuple[gradients of inputs indicated by argnums], aux values]
         # NOTE: example_value should match `grad_output`.
         if isinstance(argnums.value, int):
-            example_value = (
-                args[argnums.value].as_proxy().node.meta["example_value"].contiguous()
-            )
+            from . import TensorVariable
+
+            arg = args[argnums.value]
+
+            def _unpack(item):
+                if isinstance(item, TensorVariable):
+                    return item.as_proxy().node.meta["example_value"].contiguous()
+                if item.has_unpack_var_sequence(tx):
+                    r_items = []
+                    for sub_item in item.unpack_var_sequence(tx):
+                        r_items.append(_unpack(sub_item))
+                    return item.python_type()(r_items)
+                raise RuntimeError("Unsupported autograd w/ grad return type.")
+
+            example_value = _unpack(arg)
+
         else:
             example_value = tuple(
                 args[idx].as_proxy().node.meta["example_value"].contiguous()
@@ -789,7 +802,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
                 return item.as_proxy().node.meta["example_value"]
             if item.has_unpack_var_sequence(tx):
                 r_items = []
-                for sub_item in body_r.unpack_var_sequence(tx):
+                for sub_item in item.unpack_var_sequence(tx):
                     r_items.append(_unpack(sub_item))
                 return item.python_type()(r_items)
             raise RuntimeError("Unsupported autograd w/ grad return type.")
