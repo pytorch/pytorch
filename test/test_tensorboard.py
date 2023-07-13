@@ -77,7 +77,6 @@ class BaseTestCase(TestCase):
 
 if TEST_TENSORBOARD:
     from tensorboard.compat.proto.graph_pb2 import GraphDef
-    from tensorboard.compat.proto.types_pb2 import DataType
     from torch.utils.tensorboard import summary, SummaryWriter
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from torch.utils.tensorboard._convert_np import make_np
@@ -557,34 +556,6 @@ def write_proto(str_to_compare, function_ptr):
     expected_file = get_expected_file(function_ptr)
     with open(expected_file, 'w') as f:
         f.write(str(str_to_compare))
-
-class TestTensorProtoSummary(TestCase):
-    def test_float_tensor_proto(self):
-        float_values = [1., 2., 3.]
-        actual_proto = summary.tensor_proto('dummy', torch.tensor(float_values)).value[0].tensor
-        self.assertEqual(actual_proto.float_val, float_values)
-        self.assertTrue(actual_proto.dtype == DataType.DT_FLOAT)
-
-    def test_int_tensor_proto(self):
-        int_values = [1, 2, 3]
-        actual_proto = summary.tensor_proto('dummy', torch.tensor(int_values, dtype=torch.int32)).value[0].tensor
-        self.assertEqual(actual_proto.int_val, int_values)
-        self.assertTrue(actual_proto.dtype == DataType.DT_INT32)
-
-    def test_scalar_tensor_proto(self):
-        scalar_value = 0.1
-        actual_proto = summary.tensor_proto('dummy', torch.tensor(scalar_value)).value[0].tensor
-        self.assertAlmostEqual(actual_proto.float_val[0], scalar_value)
-
-    def test_complex_tensor_proto(self):
-        real = torch.tensor([1., 2.])
-        imag = torch.tensor([3., 4.])
-        actual_proto = summary.tensor_proto('dummy', torch.complex(real, imag)).value[0].tensor
-        self.assertEqual(actual_proto.scomplex_val, [1., 3., 2., 4.])
-
-    def test_empty_tensor_proto(self):
-        actual_proto = summary.tensor_proto('dummy', torch.empty(0)).value[0].tensor
-        self.assertEqual(actual_proto.float_val, [])
 
 class TestTensorBoardPytorchGraph(BaseTestCase):
     def test_pytorch_graph(self):

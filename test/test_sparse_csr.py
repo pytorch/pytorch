@@ -3571,6 +3571,53 @@ class TestSparseCompressedTritonKernels(TestCase):
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @precisionOverride({torch.float16: 1e-3})
+    def test_triton_scaled_dot_product_attention(self, device, dtype, block_size):
+        from functools import partial
+        from torch.sparse._triton_ops import _scaled_dot_product_attention
+
+        # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.3, high=1.2)
+
+        def broadcast_input(*ts):
+            batch_dims = torch.broadcast_shapes(*(t.shape[:-2] for t in ts))
+            yield from (torch.broadcast_to(t, batch_dims + t.shape[-2:]) for t in ts)
+
+        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
+        batches = [(), (2,), (2, 2)]
+        size = [128, 256, 0]
+
+        for bam, bq, bk, bv, m, n, k in itertools.product(batches, batches, batches, batches, size, size, size):
+            query = tensor(bq + (m, k))
+            key = tensor(bk + (n, k))
+            value = tensor(bv + (n, k))
+
+            # We make attn_mask block lower/upper triangular so that BSR and Strided
+            # function variants are directly comparable.
+            attn_mask = torch.ones(bam + (m, n), device=device, dtype=torch.bool)
+            attn_mask = self._to_block_triangular_inplace(attn_mask, block_size, block_size)
+            attn_mask_bsr = attn_mask.to_sparse_bsr(block_size)
+
+            # NOTE: only boolean mask is directly compatible with the Strided version
+            # without any pre-/post-processing. Hence we test against a boolean mask.
+            for scale in (None, 1. / 16):
+                if scale is None and query.size(-1) == 0:
+                    scale = 1
+                expected = torch.nn.functional.scaled_dot_product_attention(
+                    *broadcast_input(query, key, value, attn_mask), scale=scale
+                )
+
+                for mask_dtype in (torch.bool, dtype):
+                    res = _scaled_dot_product_attention(query, key, value, attn_mask_bsr.to(mask_dtype), scale=scale)
+                    self.assertEqual(res, expected)
+
+
+    @parametrize("block_size", [16, 32, 64])
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_sampled_addmm(self, device, dtype, block_size):
         from functools import partial
         from torch.sparse._triton_ops import sampled_addmm, broadcast_batch_dims_bsr
