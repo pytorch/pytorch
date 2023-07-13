@@ -909,12 +909,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
-        self.header.splice(
-            """
-            #include <torch/csrc/inductor/inductor_ops.h>
-            """
-        )
-
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
         from ..ir import ShapeAsConstantBuffer
