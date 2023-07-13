@@ -2733,7 +2733,7 @@ def meta__foreach_add__list(self, other, alpha=1):
     _check_foreach_binop_tensor_lists(self, other)
 
 
-@register_meta([aten._foreach_div_.List])
+@register_meta([aten._foreach_mul_.List, aten._foreach_div_.List])
 def meta__foreach_binop__list(self, other):
     _check_foreach_binop_tensor_lists(self, other)
 
