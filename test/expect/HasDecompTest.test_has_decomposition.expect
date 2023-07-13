@@ -18,8 +18,6 @@ aten::_add_relu.Tensor
 aten::_add_relu.out
 aten::_add_relu_.Scalar
 aten::_add_relu_.Tensor
-aten::_addmm_activation
-aten::_addmm_activation.out
 aten::_aminmax
 aten::_aminmax.dim
 aten::_aminmax.dim_out

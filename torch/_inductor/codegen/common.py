@@ -789,7 +789,7 @@ class Kernel(CodeGen):
         self,
         values,
         offsets_name: str,
-        offsets_size,
+        offsets_size: sympy.Expr,
         indexing_dtype: torch.dtype,
         right: bool,
     ):
@@ -861,7 +861,7 @@ class Kernel(CodeGen):
             def bucketize(
                 values,
                 offsets_name: str,
-                offsets_size,
+                offsets_size: sympy.Expr,
                 indexing_dtype: torch.dtype,
                 right: bool,
             ):

@@ -1,82 +1,13 @@
+import math
 from functools import partial
 from typing import Dict, Optional
 
-import sympy
-
 import torch
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
-from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
+from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 from .ir import InterpreterShim, LoopBody
-from .utils import cache_on_self, dominated_nodes, sympy_subs
+from .utils import cache_on_self, dominated_nodes
 from .virtualized import V
-
-
-def get_expr_range(expr, vars_ranges: dict):
-    free_symbols = list(expr.free_symbols)
-    if len(free_symbols) == 0:
-        return ValueRanges(expr, expr)
-
-    def replace_symbols_for_deriv(expr):
-        # for the purposes of finding local, minimum, maximum, assume smoothness
-        def mod_indexing_rep(x, y, z):
-            if z.is_constant():
-                return x / y
-
-            # never really happens, we'll bail on optimizing
-            return (x / y) % z
-
-        def indexing_div_rep(x, y):
-            return x / y
-
-        return expr.replace(ModularIndexing, mod_indexing_rep).replace(
-            FloorDiv, indexing_div_rep
-        )
-
-    symbols = expr.free_symbols
-    monotonic_increasing = []
-    monotonic_decreasing = []
-    other_symbols = []
-
-    expr_for_deriv = replace_symbols_for_deriv(expr)
-    for symbol in symbols:
-        diff = sympy.diff(expr_for_deriv, symbol)
-        if diff.is_positive:
-            monotonic_increasing.append(symbol)
-        elif diff.is_positive is False:  # can return None
-            monotonic_decreasing.append(symbol)
-        else:
-            # If diff_free_symbols only one symbol and it is the same as symbol,
-            # If this symbol's lower and upper bounds are the same, then it is constant.
-            # Add it to monotonic_increasing or monotonic_decreasing is ok.
-            diff_free_symbols = list(diff.free_symbols)
-            if (
-                len(diff_free_symbols) == 1
-                and symbol in diff_free_symbols
-                and vars_ranges[symbol].lower == vars_ranges[symbol].upper
-            ):
-                monotonic_increasing.append(symbol)
-            else:
-                other_symbols.append(symbol)
-
-    if not other_symbols:
-        max_val = sympy_subs(
-            expr,
-            {
-                k: (v.upper if k in monotonic_increasing else v.lower)
-                for k, v in vars_ranges.items()
-            },
-        )
-        min_val = sympy_subs(
-            expr,
-            {
-                k: (v.lower if k in monotonic_increasing else v.upper)
-                for k, v in vars_ranges.items()
-            },
-        )
-        return ValueRanges(min_val, max_val)
-    else:
-        # bail on optimizing, have not run into this yet
-        return ValueRanges(-math.inf, math.inf)
 
 
 class BoundVars:
@@ -88,7 +19,8 @@ class BoundVars:
     def __init__(self, loop_body: LoopBody):
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges(0, v) for k, v in loop_body.var_ranges.items()
+            k: ValueRanges(0, v if not free_symbols(v) else math.inf)
+            for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
         self.unbounded_vars = dominated_nodes(
@@ -158,6 +90,6 @@ class BoundVars:
         if bound is not None:
             return bound
 
-        bound = self.get_expr_range(expr, self.replacement_vals)
+        bound = bound_sympy(expr, self.replacement_vals)
         self.replacement_vals[name] = bound
         return bound
