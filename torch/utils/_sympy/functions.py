@@ -171,6 +171,15 @@ class Mod(sympy.Function):
             if p.is_odd:
                 return S.One
 
+        # If p is a multiple of q.
+        if (p / q).is_integer:
+            return S.Zero
+
+        # If q is a multiple of p and they have the same sign.
+        r = q / p
+        if r.is_integer and (r.is_positive or r.is_negative):
+            return p
+
     def _eval_is_integer(self):
         p, q = self.args
         return fuzzy_and([p.is_integer, q.is_integer, fuzzy_not(q.is_zero)])  # type: ignore[attr-defined]
