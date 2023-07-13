@@ -902,6 +902,8 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
     VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
+    auto mode = cudaStreamCaptureModeThreadLocal;
+    cudaThreadExchangeStreamCaptureMode(&mode);
     workCleanupLoop();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
