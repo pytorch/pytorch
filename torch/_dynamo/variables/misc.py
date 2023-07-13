@@ -133,7 +133,7 @@ class SuperVariable(VariableTracker):
             return tx.replace_all(
                 self.objvar,
                 self.objvar.modifed(newval, new_rec_contains, **options),
-            )     
+            )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 

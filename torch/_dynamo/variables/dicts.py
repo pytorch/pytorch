@@ -1,7 +1,6 @@
 import collections
 import dataclasses
 import functools
-import types
 import inspect
 from typing import Any, Dict, List, Tuple
 
@@ -12,14 +11,14 @@ from torch.utils import _pytree as pytree
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
-from ..exc import unimplemented
+
+from ..exc import TorchRuntimeError, unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
 
-from ..exc import TorchRuntimeError
 
 class ConstDictVariable(VariableTracker):
     def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
@@ -435,7 +434,7 @@ class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _patch_once(user_cls):
-        for attr_name in ('__init__', '__post_init__', '__setattr__', '__setitem__'):
+        for attr_name in ("__init__", "__post_init__", "__setattr__", "__setitem__"):
             if hasattr(user_cls, attr_name):
                 fn = getattr(user_cls, attr_name)
                 assert callable(fn), f"expect callable attr {attr_name}"
@@ -484,7 +483,7 @@ class CustomizedDictVariable(ConstDictVariable):
     def as_proxy(self):
         raise TorchRuntimeError("custom dict: as_proxy unimplemented")
 
-    # 'RETURN_VALUE triggered compile' 
+    # 'RETURN_VALUE triggered compile'
     # called from torch/_dynamo/codegen.py
     def reconstruct(self, codegen):
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
@@ -504,17 +503,13 @@ class CustomizedDictVariable(ConstDictVariable):
         if name in ("__getitem__", "to_tuple", "__setitem__", "__setattr__"):
             # TODO add arg check
             fn = getattr(self.user_cls, name)
-            source = (
-                None
-                if self.source is None
-                else AttrSource(self.source, name)
-            )
+            source = None if self.source is None else AttrSource(self.source, name)
             return tx.inline_user_function_return(
                 variables.UserFunctionVariable(fn, source=source, **options),
                 [self] + list(args),
                 kwargs,
             )
-        elif name in ("keys", "items") :
+        elif name in ("keys", "items"):
             return super().call_method(tx, name, args, kwargs)
         raise TorchRuntimeError("custom dict: call_method unimplemented name=%s", name)
 
@@ -524,6 +519,7 @@ class CustomizedDictVariable(ConstDictVariable):
                 tx, "__getitem__", [variables.ConstantVariable(name)], {}
             )
         super().var_getattr(tx, name)
+
 
 class HFPretrainedConfigVariable(VariableTracker):
     """

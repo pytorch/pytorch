@@ -2228,9 +2228,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         code: types.CodeType = func.get_code()
         if code.co_name in ("__setitem__", "__setattr__") and not (
-            args is not None and 
-            len(args) > 0 and 
-            isinstance(args[0], variables.CustomizedDictVariable)
+            args is not None
+            and len(args) > 0
+            and isinstance(args[0], variables.CustomizedDictVariable)
         ):
             unimplemented(f"inline {code.co_name}")
 
