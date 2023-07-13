@@ -20,6 +20,14 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
 
 
+# TODO to figure out a more generic approach
+ALLOWABLE_OPS = [
+    torch.ops.aten.mm.default,
+    torch.ops.aten.conv2d.default,
+    torch.ops.aten.mul.Scalar,
+]
+
+
 class OutDtypeOperator(HigherOrderOperator):
     """
     The out_dtype operator takes an existing ATen functional operator, an
@@ -56,6 +64,11 @@ class OutDtypeOperator(HigherOrderOperator):
             raise ValueError(
                 "out_dtype's can only apply to ops that return a single tensor"
                 f"Instead got {[r.type for r in op._schema.returns]}"
+            )
+
+        if op not in ALLOWABLE_OPS:
+            raise ValueError(
+                f"out_dtype only allows the following operators: {ALLOWABLE_OPS}."
             )
 
         res = super().__call__(op, output_dtype, *args)
