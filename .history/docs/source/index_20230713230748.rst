@@ -24,7 +24,7 @@ Features described in this documentation are classified by release status:
 
   *Prototype:*  These features are typically not included in binary distributions such as PyPI or Conda, 
   except occasionally accessible through runtime flags. They are in the early stages of development, 
-  aiming for feedback and testing purposes.
+  aiming for feedback and testing purposes
 
 .. toctree::
    :glob:
