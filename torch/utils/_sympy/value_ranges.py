@@ -163,7 +163,7 @@ class SymPyValueRangeAnalysis:
     def constant(value, dtype):
         # NB: value is NOT a sympy expression, it's a constant!
         is_python = isinstance(value, (int, float, bool))
-        assert is_python or (isinstance(value, sympy.Expr) and value.is_constant())
+        assert is_python or isinstance(value, (BooleanAtom, sympy.Integer, sympy.Number))
 
         # using nan makes subsequent computation throw, and for the purposes of optimization
         # returning -math.inf - math.inf is equivalent to giving up
