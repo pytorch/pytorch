@@ -172,12 +172,15 @@ class Mod(sympy.Function):
                 return S.One
 
         # If p is a multiple of q.
-        if (p / q).is_integer:
+        r = p / q
+        if r.is_integer:
             return S.Zero
 
-        # If q is a multiple of p and they have the same sign.
-        r = q / p
-        if r.is_integer and (r.is_positive or r.is_negative):
+        # If p < q and its ratio is positive, then:
+        #   - floor(p / q) = 0
+        #   - p % q = p - floor(p / q) * q = p
+        less = p < q
+        if less.is_Boolean and bool(less) and r.is_positive:
             return p
 
     def _eval_is_integer(self):
