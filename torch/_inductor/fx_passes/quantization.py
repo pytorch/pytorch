@@ -1,7 +1,7 @@
 import functools
 
 import torch
-from ..ir import QConvPointWisePT2E, TensorBox
+from ..lowering import lowerings as L
 from ..pattern_matcher import Arg, CallFunction, KeywordArg, Match
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
@@ -61,53 +61,55 @@ dequantize_qconv_pt2e_pattern = CallFunction(
     KeywordArg("padding"),
     KeywordArg("dilation"),
     KeywordArg("groups"),
-    KeywordArg("output_scale"),  # output_scale
-    KeywordArg("output_zero_point"),  # output_zero_point
-    KeywordArg("fp32_output"),  # fp32_output
-    KeywordArg("attr"),  # attr
+    KeywordArg("inv_output_scale"),  # inv_output_scale = 1.0
+    KeywordArg("output_zero_point"),  # output_zero_point = 0
+    KeywordArg("fp32_output"),  # fp32_output = True
+    KeywordArg("attr"),  # attr = "none"
     Arg(),  # scalars
     Arg(),  # algorithm
 )
 
-"""
-quantize output:
-    scale = 1 / scale
-    scale = 1.0 * scale
-    output = round(output * scale)
-    output = output + zero_point
-    output = clamp_min(output, 0)
-    output = clamp_max(output, 127)
-    output = output.to(uint8)
-"""
-quantize_conv_output_pattern_pt2e = CallFunction(
-    prims.convert_element_type.default,
-    CallFunction(
-        aten.clamp_max.default,
+
+def generate_pattern_with_output_quant_pattern(computation_call):
+    """
+    quantize output:
+        output = round(output * o_inv_scale)
+        output = output + zero_point
+        output = clamp_min(output, 0)
+        output = clamp_max(output, 127)
+        output = output.to(uint8)
+    """
+    quantize_conv_output_pattern_pt2e = CallFunction(
+        prims.convert_element_type.default,
         CallFunction(
-            aten.clamp_min.default,
+            aten.clamp_max.default,
             CallFunction(
-                aten.add.Tensor,
+                aten.clamp_min.default,
                 CallFunction(
-                    aten.round.default,
+                    aten.add.Tensor,
                     CallFunction(
-                        aten.mul.Tensor,
-                        dequantize_qconv_pt2e_pattern,
-                        KeywordArg("o_inv_scale"),
+                        aten.round.default,
+                        CallFunction(
+                            aten.mul.Tensor,
+                            computation_call,
+                            KeywordArg("o_inv_scale"),
+                        ),
                     ),
+                    KeywordArg("o_zp"),
                 ),
-                KeywordArg("o_zp"),
+                KeywordArg("o_qmin"),  # 0
             ),
-            KeywordArg("o_qmin"),  # 0
+            KeywordArg("o_qmax"),  # 127
         ),
-        KeywordArg("o_qmax"),  # 127
-    ),
-    KeywordArg("o_dtype"),  # dtype=torch.uint8
-)
+        KeywordArg("o_dtype"),  # dtype=torch.uint8
+    )
+    return quantize_conv_output_pattern_pt2e
+
 
 pattern_match_count = 0
 
 
-def _register_quantized_conv_lowering(pattern):
+def _register_quantized_conv_lowering(pattern, computation_op, unary_attr):
     @register_lowering_pattern(pattern)
     def qconv(match: Match, *args, **kwargs):
         x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
@@ -131,9 +133,14 @@ def _register_quantized_conv_lowering(pattern):
             kwargs["w_zp"],
         )
         global pattern_match_count
+
         pattern_match_count += 1
         print(
-            "---- matched the pattern ----: {}".format(pattern_match_count), flush=True
+            "---- matched the pattern v2 post op: {0} ----: {1}".format(
+                unary_attr,
+                pattern_match_count,
+            ),
+            flush=True,
         )
 
         assert (
@@ -142,39 +149,44 @@ def _register_quantized_conv_lowering(pattern):
         assert (
             kwargs["attr"] == "none"
         )  # Expected no post op fused in weight prepack phase
-
         weight_shape = packed_weight.get_size()
         dim = len(weight_shape) - 2
-        return TensorBox.create(
-            QConvPointWisePT2E.create(
-                dim,
-                x,
-                x_scale,
-                x_zp,
-                packed_weight,
-                w_scale,
-                w_zp,
-                -1,  # w_axis delete it later
-                b,
-                stride,
-                padding,
-                dilation,
-                groups,
-                o_inv_scale,
-                o_zero_point,
-                o_dtype,
-                False,  # fp32_output
-                "none",  # unary_attr
-                [],  # unary_scalars
-                "",  # unary_algorithm
-            )
+        computation_args = (
+            dim,
+            x,
+            x_scale,
+            x_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            -1,  # w_axis delete it later
+            b,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zero_point,
+            o_dtype,
+            False,  # fp32_output
+            unary_attr,  # unary_attr
+            [],  # unary_scalars
+            "",  # unary_algorithm
         )
+        return L[computation_op](*computation_args)
 
     return qconv
 
 
 def register_quantization_lowerings():
-    _register_quantized_conv_lowering(quantize_conv_output_pattern_pt2e)
+    quantize_conv_output_pattern_pt2e = generate_pattern_with_output_quant_pattern(
+        dequantize_qconv_pt2e_pattern
+    )
+    _register_quantized_conv_lowering(
+        quantize_conv_output_pattern_pt2e,
+        torch.ops.onednn.qconv2d_pointwise,
+        "none",
+    )
 
 
 def _is_valid_dequant_conv2d_pattern(match):
@@ -224,12 +236,12 @@ def _register_qconv_weight_prepack_pass(pattern):
           |
         dequant_per_tensor
           |
-        Conv2d <- optional(aten.clone.default) <- dequant_per_channel
+        Conv2d <- optional(aten.clone.default) <- dequant_per_channel <- int8_weight
 
         Insert weight prepack node and change the pattern to:
         int8 activation
           |
-        onednn.qconv2d_pointwise <- onednn.qconv_prepack <- optional(aten.clone.default) <- dequant_per_channel
+        onednn.qconv2d_pointwise <- onednn.qconv_prepack <- int8_weight
         """
         has_clone_to_channel_last_node_in_pattern = any(
             node.target == aten.clone.default for node in match.nodes
@@ -309,7 +321,7 @@ def _register_qconv_weight_prepack_pass(pattern):
                 padding,
                 dilation,
                 groups,
-                1.0,  # output_scale
+                1.0,  # inv_output_scale
                 0,  # output_zero_point
                 True,  # fp32_output
                 "none",  # attr
