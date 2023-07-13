@@ -54,6 +54,8 @@ bool input_requires_grad(sdp_params params);
 
 bool has_for_nested_inputs(sdp_params params);
 
+std::array<SDPBackend, num_backends> priority_order_cpp(sdp_params params);
+
 template <typename dtype_vector>
 bool check_tensor_dtype(
     sdp_params params,
