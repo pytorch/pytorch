@@ -76,7 +76,7 @@ def sympy_interp(
 
     if dtype is not None:
         return analysis.constant(expr, dtype)
-    if isinstance(expr, sympy.Symbol):
+    elif isinstance(expr, sympy.Symbol):
         return env[expr]
 
     # Special cases
