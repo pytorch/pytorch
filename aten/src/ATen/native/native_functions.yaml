@@ -7079,6 +7079,11 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_bsc
   autogen: _to_sparse_bsc.out
 
+- func: _to_sparse_semi_structured(Tensor dense) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _to_sparse_semi_structured
+
 - func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
   dispatch:

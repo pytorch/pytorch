@@ -525,6 +525,7 @@ aten::_to_sparse_csc
 aten::_to_sparse_csc.out
 aten::_to_sparse_csr
 aten::_to_sparse_csr.out
+aten::_to_sparse_semi_structured
 aten::_transform_bias_rescale_qkv
 aten::_transform_bias_rescale_qkv.out
 aten::_transformer_encoder_layer_fwd
