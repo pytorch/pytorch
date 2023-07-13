@@ -531,11 +531,14 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
 
 
 def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> ValueRanges:
-    # Add dynamic shapes within the expression as potentially unbounded
-    dynamic_shapes = expr.free_symbols - ranges.keys()
-    if dynamic_shapes:
-        ranges = deepcopy(ranges)
-        for s in dynamic_shapes:
-            ranges[s] = ValueRanges(0, math.inf)  # type: ignore[index]
+    unbounded_vars = expr.free_symbols - ranges.keys()
+    if unbounded_vars:
+        dynamic_shapes = {s for s in unbounded_vars if s.name[0] == "s"}
+        if dynamic_shapes != unbounded_vars:
+            return ValueRanges.unknown()
+        else:
+            ranges = deepcopy(ranges)
+            for s in dynamic_shapes:
+                ranges[s] = ValueRanges(2, math.inf)  # type: ignore[index]
 
     return sympy_interp(SymPyValueRangeAnalysis(), ranges, expr)
