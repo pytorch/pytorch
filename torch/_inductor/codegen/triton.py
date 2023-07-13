@@ -2407,6 +2407,10 @@ class TritonScheduling:
         rw = node.pointwise_read_writes()
         assert len(rw.range_vars) == len(ranges)
 
+        # isinstance(dep, MemoryDep): this filters out StarDeps. StarDeps refer to reads
+        # that need to access the entire tensor; they don't contribute read indexing
+        # information (and practically, they don't have dep.index so they can't be used
+        # for stride_hints below
         deps = [
             dep
             for dep in itertools.chain(rw.reads, rw.writes)
