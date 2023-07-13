@@ -15,10 +15,13 @@ from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorR
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
-from torch._custom_op import custom_op, CustomOp
+from torch._custom_op.impl import custom_op, CustomOp
+from torch._custom_op.functional import register_functional_op
+import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 import typing
-from typing import Optional, Tuple, Union, List, Callable
+import collections
+from typing import Optional, Tuple, Union, List, Callable, Sequence
 from torch import Tensor
 import itertools
 
@@ -38,6 +41,12 @@ class TestDispatcherPythonBindings(TestCase):
 
 
 class TestPythonRegistration(TestCase):
+    test_ns = '_test_python_registration'
+
+    def tearDown(self):
+        if hasattr(torch.ops, self.test_ns):
+            del torch.ops._test_python_registration
+
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
         my_lib1 = Library("aten", "IMPL")
@@ -91,6 +100,45 @@ class TestPythonRegistration(TestCase):
         with self.assertRaisesRegex(TypeError, "Input function is required to be a callable"):
             my_lib = Library("aten", "IMPL")
             my_lib.impl(torch.ops.aten.neg.default, [], "AutogradCPU")
+
+    def test_finalizer(self):
+        impls_refcnt = sys.getrefcount(torch.library._impls)
+        lib = Library(self.test_ns, "FRAGMENT")
+        lib.define("foo123(Tensor x) -> Tensor")
+
+        # 1 for `lib`, 1 for sys.getrefcount
+        self.assertEqual(sys.getrefcount(lib), 2)
+        # We gained an additional reference that gets cleared when the finalizer runs
+        self.assertEqual(sys.getrefcount(torch.library._impls), impls_refcnt + 1)
+        # 1 for `lib`
+        # 1 for the finalizer
+        # 1 for sys.getrefcount
+        self.assertEqual(sys.getrefcount(lib._op_impls), 3)
+
+        def foo123(x):
+            pass
+
+        lib.impl(f"{self.test_ns}::foo123", foo123, "CPU")
+        key = f'{self.test_ns}/foo123/CPU'
+        self.assertTrue(key in torch.library._impls)
+
+        saved_op_impls = lib._op_impls
+
+        # del will definitely work if the following passes
+        self.assertEqual(sys.getrefcount(lib), 2)
+        del lib
+
+        # 1 for saved_op_impls
+        # 1 for sys.getrefcount
+        # This function should be the last user of lib._op_impls:
+        # - lib should not have a reference anymore (it was del'ed)
+        # - lib's finalizer should not have a reference anymore
+        self.assertEqual(sys.getrefcount(saved_op_impls), 2)
+
+        self.assertTrue(key not in torch.library._impls)
+
+        # lib's finalizer should not have a reference anymore
+        self.assertEqual(sys.getrefcount(torch.library._impls), impls_refcnt)
 
     def test_override_cpu_sum(self) -> None:
         # Example 1
@@ -247,7 +295,7 @@ class TestPythonRegistration(TestCase):
         del my_lib1
 
     def test_create_new_library(self) -> None:
-        my_lib1 = Library("foo", "DEF")
+        my_lib1 = Library(self.test_ns, "DEF")
 
         my_lib1.define("sum(Tensor self) -> Tensor")
 
@@ -257,12 +305,13 @@ class TestPythonRegistration(TestCase):
             return args[0].clone()
 
         x = torch.tensor([1, 2])
-        self.assertEqual(torch.ops.foo.sum(x), x)
+        op = getattr(torch.ops, self.test_ns).sum
+        self.assertEqual(op(x), x)
 
-        my_lib2 = Library("foo", "IMPL")
+        my_lib2 = Library(self.test_ns, "IMPL")
 
         # Example 2
-        @torch.library.impl(my_lib2, torch.ops.foo.sum.default, "ZeroTensor")
+        @torch.library.impl(my_lib2, op.default, "ZeroTensor")
         def my_sum_zt(*args, **kwargs):
             if args[0]._is_zerotensor():
                 return torch._efficientzerotensor(args[0].shape)
@@ -270,14 +319,14 @@ class TestPythonRegistration(TestCase):
                 return args[0].clone()
 
         y = torch._efficientzerotensor(3)
-        self.assertTrue(torch.ops.foo.sum(y)._is_zerotensor())
-        self.assertEqual(torch.ops.foo.sum(x), x)
+        self.assertTrue(op(y)._is_zerotensor())
+        self.assertEqual(op(x), x)
 
         del my_lib2
         del my_lib1
 
     def test_create_new_library_fragment_no_existing(self):
-        my_lib = Library("foo", "FRAGMENT")
+        my_lib = Library(self.test_ns, "FRAGMENT")
 
         my_lib.define("sum2(Tensor self) -> Tensor")
 
@@ -286,15 +335,15 @@ class TestPythonRegistration(TestCase):
             return args[0]
 
         x = torch.tensor([1, 2])
-        self.assertEqual(torch.ops.foo.sum2(x), x)
+        self.assertEqual(getattr(torch.ops, self.test_ns).sum2(x), x)
 
         del my_lib
 
     def test_create_new_library_fragment_with_existing(self):
-        my_lib1 = Library("foo", "DEF")
+        my_lib1 = Library(self.test_ns, "DEF")
 
         # Create a fragment
-        my_lib2 = Library("foo", "FRAGMENT")
+        my_lib2 = Library(self.test_ns, "FRAGMENT")
 
         my_lib2.define("sum4(Tensor self) -> Tensor")
 
@@ -303,10 +352,10 @@ class TestPythonRegistration(TestCase):
             return args[0]
 
         x = torch.tensor([1, 2])
-        self.assertEqual(torch.ops.foo.sum4(x), x)
+        self.assertEqual(getattr(torch.ops, self.test_ns).sum4(x), x)
 
         # Create another fragment
-        my_lib3 = Library("foo", "FRAGMENT")
+        my_lib3 = Library(self.test_ns, "FRAGMENT")
 
         my_lib3.define("sum3(Tensor self) -> Tensor")
 
@@ -315,7 +364,7 @@ class TestPythonRegistration(TestCase):
             return args[0]
 
         x = torch.tensor([1, 2])
-        self.assertEqual(torch.ops.foo.sum3(x), x)
+        self.assertEqual(getattr(torch.ops, self.test_ns).sum3(x), x)
 
         del my_lib1
         del my_lib2
@@ -324,7 +373,7 @@ class TestPythonRegistration(TestCase):
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     def test_alias_analysis(self):
         def test_helper(alias_analysis=""):
-            my_lib1 = Library("foo", "DEF")
+            my_lib1 = Library(self.test_ns, "DEF")
 
             called = [0]
 
@@ -334,9 +383,9 @@ class TestPythonRegistration(TestCase):
 
             @torch.jit.script
             def _test():
-                torch.ops.foo._op()
+                torch.ops._test_python_registration._op()
 
-            assert "foo::_op" in str(_test.graph)
+            assert "_test_python_registration::_op" in str(_test.graph)
 
         with self.assertRaises(AssertionError):
             test_helper("")  # alias_analysis="FROM_SCHEMA"
@@ -359,35 +408,177 @@ class TestPythonRegistration(TestCase):
 
         s0, s1 = ft.shape
 
-        tlib = Library("tlib", "DEF")
+        tlib = Library(self.test_ns, "DEF")
         tlib.define("sqsum(SymInt a, SymInt b) -> SymInt")
 
         @impl(tlib, "sqsum", "CompositeExplicitAutograd")
         def sqsum(a: SymInt, b: SymInt):
             return a * a + b * b
 
-        out = torch.ops.tlib.sqsum.default(s0, s1)
+        out = getattr(torch.ops, self.test_ns).sqsum.default(s0, s1)
         out_val = shape_env.evaluate_expr(out.node.expr)
         self.assertEquals(out_val, 13)
 
+    def test_register_functional_op_error_cases(self):
+        lib = Library(self.test_ns, "FRAGMENT")
+        with self.assertRaisesRegex(TypeError, "instance of OpOverload"):
+            register_functional_op(lib, "abs", torch.ops.aten.abs_)
+        with self.assertRaisesRegex(RuntimeError, "Expected op to be mutable"):
+            register_functional_op(lib, "abs", torch.ops.aten.abs_.default)
+        with self.assertRaisesRegex(RuntimeError, "Expected op to be mutable"):
+            register_functional_op(lib, "abs", torch.ops.aten.abs.out)
+
+        schemas = [
+            'foo(Tensor x, Tensor(a!)? y) -> ()',
+            'foo(Tensor x, Tensor(a!)[] y) -> ()',
+            'foo(Tensor x, Tensor(a!) y, Tensor(b) z) -> Tensor(b)',
+            'foo(Tensor x, Tensor(a!) y) -> (Tensor, Tensor(a))',
+        ]
+        del lib
+
+        for schema in schemas:
+            lib = Library(self.test_ns, "FRAGMENT")
+            try:
+                lib.define(schema)
+                with self.assertRaisesRegex(RuntimeError, "NYI"):
+                    register_functional_op(
+                        lib,
+                        "foo_functional",
+                        getattr(torch.ops, self.test_ns).foo.default)
+            finally:
+                del lib
+                delattr(torch.ops, self.test_ns)
+
+    def _check_is_functional_variant(self, mutable_op, functional_op, args):
+        # functional op should not mutate
+        cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+        functional_result = functional_op(*cloned_args)
+        self.assertEqual(cloned_args, args)
+
+        # check functional_result includes mutable_result
+        mutable_result = mutable_op(*cloned_args)
+        if mutable_result is None:
+            flat_mutable_result = []
+        else:
+            flat_mutable_result, _ = pytree.tree_flatten(mutable_result)
+        flat_functional_result, _ = pytree.tree_flatten(functional_result)
+        assert len(flat_functional_result) > len(flat_mutable_result)
+        self.assertEqual(flat_functional_result[:len(flat_mutable_result)], flat_mutable_result)
+
+        # check rest of functional_result is the mutated args
+        mutated_args = [maybe_mutated_arg for maybe_mutated_arg, arg in zip(cloned_args, args)
+                        if not torch.allclose(maybe_mutated_arg, arg)]
+        self.assertEqual(flat_functional_result[len(flat_mutable_result):], mutated_args)
+
+        # check that functionalization kernel was indeed registered
+        def fn(*args):
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            mutable_op(*cloned_args)
+            return cloned_args
+
+        gm = make_fx(torch.func.functionalize(fn))(*args)
+        has_functional_op = False
+        for node in gm.graph.nodes:
+            self.assertFalse(node.target is mutable_op)
+            if node.target is functional_op:
+                has_functional_op = True
+        self.assertTrue(has_functional_op)
+
+    def test_register_functional_op_no_returns(self):
+        lib = Library(self.test_ns, 'FRAGMENT')
+        lib.define('foo(Tensor x, Tensor(a!) y, Tensor z, Tensor(b!) w) -> ()')
+
+        def foo_impl(x, y, z, w):
+            y.fill_(3.14)
+            w.fill_(2.71)
+
+        lib.impl('foo', foo_impl, 'CPU')
+        register_functional_op(
+            lib,
+            'foo_functional',
+            getattr(torch.ops, self.test_ns).foo.default)
+        x = torch.randn([])
+        y = torch.randn([])
+        z = torch.randn([])
+        w = torch.randn([])
+        self._check_is_functional_variant(
+            getattr(torch.ops, self.test_ns).foo.default,
+            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
+
+    def test_register_functional_op_one_return(self):
+        lib = Library(self.test_ns, 'FRAGMENT')
+        lib.define('foo(Tensor x, Tensor(a!) y, Tensor(c!) z, Tensor(b!) w) -> Tensor')
+
+        def foo_impl(x, y, z, w):
+            y.fill_(3.14)
+            w.fill_(2.71)
+            z.fill_(0.99)
+            return x.clone()
+
+        lib.impl('foo', foo_impl, 'CPU')
+        register_functional_op(
+            lib,
+            "foo_functional",
+            getattr(torch.ops, self.test_ns).foo.default)
+        x = torch.randn([])
+        y = torch.randn([])
+        z = torch.randn([])
+        w = torch.randn([])
+        self._check_is_functional_variant(
+            getattr(torch.ops, self.test_ns).foo.default,
+            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
+
+    def test_register_functional_op_multiple_returns(self):
+        lib = Library(self.test_ns, 'FRAGMENT')
+        lib.define('foo(Tensor x, Tensor(a!) y, Tensor z, Tensor(b!) w) -> (Tensor, Tensor)')
+
+        def foo_impl(x, y, z, w):
+            y.fill_(3.14)
+            w.fill_(2.71)
+            return x.clone(), z.clone()
+
+        lib.impl('foo', foo_impl, 'CPU')
+        register_functional_op(
+            lib,
+            'foo_functional',
+            getattr(torch.ops, self.test_ns).foo.default)
+
+        x = torch.randn([])
+        y = torch.randn([])
+        z = torch.randn([])
+        w = torch.randn([])
+        self._check_is_functional_variant(
+            getattr(torch.ops, self.test_ns).foo.default,
+            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
+
 
 class TestCustomOp(TestCase):
+    test_ns = '_test_custom_op'
+
+    def tearDown(self):
+        import torch._custom_op
+        keys = list(torch._custom_op.impl.global_registry.keys())
+        for key in keys:
+            if not key.startswith(f'{TestCustomOp.test_ns}::'):
+                continue
+            torch._custom_op.impl.global_registry[key]._destroy()
+
     def test_invalid_schemas(self):
         # function schmea validation goes through torchgen, so this is just a
         # basic test.
         with self.assertRaisesRegex(AssertionError, 'Invalid function schema: foo'):
-            @custom_op('_torch_testing::foo', "(")
+            @custom_op(f'{TestCustomOp.test_ns}::foo', "(")
             def foo(x):
                 ...
 
     def test_name_must_match(self):
         with self.assertRaisesRegex(ValueError, 'to have name'):
-            @custom_op('_torch_testing::foo', "(Tensor x) -> Tensor")
+            @custom_op(f'{TestCustomOp.test_ns}::foo', "(Tensor x) -> Tensor")
             def bar(x):
                 ...
 
         with self.assertRaisesRegex(ValueError, 'to have name'):
-            @custom_op('_torch_testing::foo')
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def baz(x: Tensor) -> Tensor:
                 ...
 
@@ -396,107 +587,105 @@ class TestCustomOp(TestCase):
             ...
 
         with self.assertRaisesRegex(ValueError, 'does not support non-functional'):
-            custom_op('_torch_testing::foo', '(Tensor(a!) x) -> Tensor(a)')(foo)
+            custom_op(f'{TestCustomOp.test_ns}::foo', '(Tensor(a!) x) -> Tensor(a)')(foo)
         with self.assertRaisesRegex(ValueError, 'does not support view functions'):
-            custom_op('_torch_testing::foo', '(Tensor(a) x) -> Tensor(a)')(foo)
+            custom_op(f'{TestCustomOp.test_ns}::foo', '(Tensor(a) x) -> Tensor(a)')(foo)
         with self.assertRaisesRegex(ValueError, 'no outputs'):
-            custom_op('_torch_testing::foo', '(Tensor x) -> ()')(foo)
+            custom_op(f'{TestCustomOp.test_ns}::foo', '(Tensor x) -> ()')(foo)
         with self.assertRaisesRegex(ValueError, 'self'):
-            custom_op('_torch_testing::foo', '(Tensor self) -> ()')(foo)
+            custom_op(f'{TestCustomOp.test_ns}::foo', '(Tensor self) -> ()')(foo)
 
     def test_schema_matches_signature(self):
         with self.assertRaisesRegex(ValueError, 'signature to match'):
-            @custom_op('_torch_testing::blah', '(Tensor y) -> Tensor')
+            @custom_op(f'{TestCustomOp.test_ns}::blah', '(Tensor y) -> Tensor')
             def blah(x):
                 pass
 
         with self.assertRaisesRegex(ValueError, 'signature to match'):
-            @custom_op('_torch_testing::blah2', '(Tensor x, *, Tensor y) -> Tensor')
+            @custom_op(f'{TestCustomOp.test_ns}::blah2', '(Tensor x, *, Tensor y) -> Tensor')
             def blah2(x, y):
                 pass
 
         with self.assertRaisesRegex(ValueError, 'signature to match'):
-            @custom_op('_torch_testing::blah3', '(Tensor x, *, Tensor w, Tensor z) -> Tensor')
+            @custom_op(f'{TestCustomOp.test_ns}::blah3', '(Tensor x, *, Tensor w, Tensor z) -> Tensor')
             def blah3(x, *, y, z):
                 pass
 
         with self.assertRaisesRegex(ValueError, 'signature to match'):
-            @custom_op('_torch_testing::blah4', '(Tensor x, *, Tensor z, Tensor y) -> Tensor')
+            @custom_op(f'{TestCustomOp.test_ns}::blah4', '(Tensor x, *, Tensor z, Tensor y) -> Tensor')
             def blah4(x, *, y, z):
                 pass
 
         with self.assertRaisesRegex(ValueError, 'not supported'):
-            @custom_op('_torch_testing::blah5', '(Tensor x) -> Tensor')
+            @custom_op(f'{TestCustomOp.test_ns}::blah5', '(Tensor x) -> Tensor')
             def blah5(*args):
                 pass
 
         with self.assertRaisesRegex(ValueError, 'not supported'):
-            @custom_op('_torch_testing::blah6', '(*, Tensor z, Tensor y) -> Tensor')
+            @custom_op(f'{TestCustomOp.test_ns}::blah6', '(*, Tensor z, Tensor y) -> Tensor')
             def blah6(**kwargs):
                 pass
 
         with self.assertRaisesRegex(ValueError, 'default arguments'):
-            @custom_op('_torch_testing::blah7', '(Tensor x, *, Tensor y) -> Tensor')
+            @custom_op(f'{TestCustomOp.test_ns}::blah7', '(Tensor x, *, Tensor y) -> Tensor')
             def blah7(x=1, *, y):
                 pass
 
         with self.assertRaisesRegex(ValueError, 'default arguments'):
-            @custom_op('_torch_testing::blah8', '(Tensor x, *, Tensor y) -> Tensor')
+            @custom_op(f'{TestCustomOp.test_ns}::blah8', '(Tensor x, *, Tensor y) -> Tensor')
             def blah8(x, *, y=1):
                 pass
 
         # kwonly-arg works
-        @custom_op('_torch_testing::blah9', '(Tensor x, *, Tensor y) -> Tensor')
+        @custom_op(f'{TestCustomOp.test_ns}::blah9', '(Tensor x, *, Tensor y) -> Tensor')
         def blah9(x, *, y):
             pass
 
-        blah9._destroy()
-
     def test_unsupported_annotation_categories(self):
         with self.assertRaisesRegex(ValueError, 'varargs'):
-            @custom_op('_torch_testing::foo')
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(*args):
                 ...
             del foo
 
         with self.assertRaisesRegex(ValueError, 'varkwargs'):
-            @custom_op('_torch_testing::foo')
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(**kwargs):
                 ...
             del foo
 
         with self.assertRaisesRegex(ValueError, 'must have a type annotation'):
-            @custom_op('_torch_testing::foo')
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(x):
                 ...
             del foo
 
         with self.assertRaisesRegex(ValueError, 'default value'):
-            @custom_op('_torch_testing::foo')
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(x: Optional[Tensor] = None):
                 ...
             del foo
 
         with self.assertRaisesRegex(ValueError, 'default value'):
-            @custom_op('_torch_testing::foo')
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(x: Optional[Tensor] = None):
                 ...
             del foo
 
         with self.assertRaisesRegex(ValueError, 'either Tensor or a Tuple'):
-            @custom_op('_torch_testing::foo')
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(x: Tensor) -> int:
                 ...
             del foo
 
         with self.assertRaisesRegex(ValueError, 'either Tensor or a Tuple'):
-            @custom_op('_torch_testing::foo')
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(x: Tensor) -> Tuple[Tensor, int]:
                 ...
             del foo
 
         with self.assertRaisesRegex(ValueError, 'either Tensor or a Tuple'):
-            @custom_op('_torch_testing::foo')
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(x: Tensor) -> Tuple[Tensor, ...]:
                 ...
             del foo
@@ -527,15 +716,15 @@ class TestCustomOp(TestCase):
                 assert len(args) == 2 and (args[0] is type(None) or args[1] is type(None))
                 elt = args[0] if args[1] is type(None) else args[1]
                 return generate_examples(elt) + [None]
-            if origin is tuple:
+            if origin is collections.abc.Sequence:
                 args = typing.get_args(typ)
-                assert len(args) == 2 and args[1] == ...
+                assert len(args) == 1
                 examples = generate_examples(args[0])
                 return list(itertools.product(examples, examples)) + []
             raise AssertionError(f"unsupported param type {typ}")
 
-        for typ in torch._custom_op.SUPPORTED_PARAM_TYPES:
-            @custom_op('_torch_testing::foo')
+        for typ in torch._custom_op.impl.SUPPORTED_PARAM_TYPES:
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(x: Tensor, y: typ) -> Tensor:
                 ...
 
@@ -557,31 +746,63 @@ class TestCustomOp(TestCase):
                 del foo
                 del foo_cpu
 
+    def test_sequences(self):
+        # Sequence[int] gets automagically turned into int[] in the schema.
+        # This test checks that we actually do support arbitrary sequence types.
+        class MySequence(collections.abc.Sequence):
+            def __init__(self):
+                self._container = [1, 2, 3]
+
+            def __getitem__(self, idx):
+                return self._container[idx]
+
+            def __len__(self):
+                return len(self._container)
+
+        @custom_op("blah::foo")
+        def foo(x: torch.Tensor, sizes: Sequence[int]) -> torch.Tensor:
+            ...
+
+        called = 0
+
+        @foo.impl('cpu')
+        def foo_cpu(x, sizes):
+            nonlocal called
+            called += 1
+            # Dispatcher will normalize the sequence type into a List
+            self.assertEqual(sizes, [1, 2, 3])
+            return x.clone()
+
+        x = torch.randn([])
+        seq = MySequence()
+        foo(x, seq)
+        self.assertEqual(called, 1)
+
     def test_unsupported_param_types(self):
         # Not comprehensive (it doesn't need to be), just a check that our mechanism works
         with self.assertRaisesRegex(ValueError, 'unsupported type'):
-            @custom_op('_torch_testing::foo')
-            def foo(x: Tensor, y: Tuple[Optional[int], ...]) -> Tensor:
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
+            def foo(x: Tensor, y: List[Optional[int]]) -> Tensor:
                 ...
             del foo
 
         with self.assertRaisesRegex(ValueError, 'unsupported type'):
             # int[N] in Dispatcher is a bit wild, so we don't try to support it.
-            @custom_op('_torch_testing::foo')
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(x: Tensor, y: Tuple[int, int]) -> Tensor:
                 ...
             del foo
 
         with self.assertRaisesRegex(ValueError, 'unsupported type'):
             # We could theoretically support this, but the syntax for suporting
-            # int[] is Tuple[int, ...]
-            @custom_op('_torch_testing::foo')
+            # int[] is Sequence[int]
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(x: Tensor, y: List[int]) -> Tensor:
                 ...
             del foo
 
         with self.assertRaisesRegex(ValueError, 'unsupported type'):
-            @custom_op('_torch_testing::foo')
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(x: Tensor, y: Callable) -> Tensor:
                 ...
             del foo
@@ -629,14 +850,14 @@ class TestCustomOp(TestCase):
             ...
 
         for schema in schemas:
-            op = custom_op('_torch_testing::foo', schema)(foo)
+            op = custom_op(f'{TestCustomOp.test_ns}::foo', schema)(foo)
             op._destroy()
         for schema in other_schemas:
-            op = custom_op('_torch_testing::bar', schema)(bar)
+            op = custom_op(f'{TestCustomOp.test_ns}::bar', schema)(bar)
             op._destroy()
 
     def test_reserved_ns(self):
-        from torch._custom_op import RESERVED_NS
+        from torch._custom_op.impl import RESERVED_NS
 
         for ns in RESERVED_NS:
             with self.assertRaisesRegex(ValueError, 'is a reserved namespace'):
@@ -650,10 +871,10 @@ class TestCustomOp(TestCase):
 
     def test_private_ctor(self):
         with self.assertRaisesRegex(RuntimeError, 'CustomOp constructor is private'):
-            CustomOp(None, None, None, None)
+            CustomOp(None, None, None, None, None)
 
     def test_lifetime(self):
-        @custom_op('_torch_testing::foo')
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
             ...
 
@@ -665,7 +886,7 @@ class TestCustomOp(TestCase):
 
         # We can't define an op multiple times,
         with self.assertRaisesRegex(RuntimeError, 'multiple times'):
-            @custom_op('_torch_testing::foo')
+            @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(x: torch.Tensor) -> torch.Tensor:
                 ...
 
@@ -673,14 +894,14 @@ class TestCustomOp(TestCase):
         foo._destroy()
 
         # Smoke test
-        @custom_op('_torch_testing::foo')
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
             ...
 
         foo._destroy()
 
     def test_autograd_notimplemented(self):
-        @custom_op('_torch_testing::foo')
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
             ...
 
@@ -689,8 +910,8 @@ class TestCustomOp(TestCase):
             foo(x)
         foo._destroy()
 
-        @custom_op('_torch_testing::foo')
-        def foo(x: Tuple[torch.Tensor, ...]) -> torch.Tensor:
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: Sequence[torch.Tensor]) -> torch.Tensor:
             ...
 
         x = torch.randn(3, requires_grad=True)
@@ -699,7 +920,7 @@ class TestCustomOp(TestCase):
             foo([y, x])
         foo._destroy()
 
-        @custom_op('_torch_testing::foo')
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             ...
 
@@ -709,8 +930,23 @@ class TestCustomOp(TestCase):
             foo(y, x)
         foo._destroy()
 
+    def test_autograd_notimplemented_gradmode(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu'])
+        def foo_impl(x, y):
+            return x * y
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3)
+        with torch.no_grad():
+            # Shouldn't raise, because we are in no_grad
+            foo(y, x)
+
     def test_impl_cpu(self):
-        @custom_op('_torch_testing::foo')
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
             ...
 
@@ -721,17 +957,16 @@ class TestCustomOp(TestCase):
         x = torch.randn(3)
         result = foo(x)
         self.assertEqual(result, foo_cpu(x))
-        foo._destroy()
 
     def test_impl_invalid_devices(self):
-        @custom_op('_torch_testing::foo')
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
             ...
 
         def foo_impl(x):
             return x.sin()
 
-        from torch._custom_op import SUPPORTED_DEVICE_TYPE_TO_KEY
+        from torch._custom_op.impl import SUPPORTED_DEVICE_TYPE_TO_KEY
 
         for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY.keys():
             # Smoke test: should not raise error
@@ -745,9 +980,274 @@ class TestCustomOp(TestCase):
                 foo.impl(invalid_type)(foo_impl)
         foo._destroy()
 
+    def test_backward_partially_registered(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x):
+            return x.sin()
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return grad * saved.cos()
+
+        x = torch.randn([], requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "unable to find a 'save_for_backward'"):
+            y = foo(x)
+            y.backward()
+
+    def test_save_for_backward_inputs_are_namedtuple(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x):
+            return x.sin()
+
+        hit = 0
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            nonlocal hit
+            hit += 1
+            self.assertTrue(isinstance(inputs, tuple))
+            self.assertEqual(list(inputs._asdict().keys()), ['x'])
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'x': grad * saved.cos()}
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x)
+        self.assertEqual(hit, 1)
+        y.backward()
+        self.assertEqual(hit, 1)
+
+    def test_backward_returns_dict(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x):
+            return x.sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return grad * saved.cos()
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x)
+        with self.assertRaisesRegex(RuntimeError, 'to be a dict'):
+            y.backward()
+
+    def test_backward_dict_invalid_keys(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x):
+            return x.sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'x': grad * saved.cos(), 'y': None}
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x)
+        with self.assertRaisesRegex(RuntimeError, "to have keys {'x'}"):
+            y.backward()
+
+    def test_backward_dict_grad_for_nontensor(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x, dim):
+            return x.sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'x': grad * saved.cos(), 'dim': None}
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x, 32)
+        with self.assertRaisesRegex(RuntimeError, "non-Tensor-like types"):
+            y.backward()
+
+    def test_backward_dict_requires_keys_for_input_tensors(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x, y):
+            return x.sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'x': grad * saved.cos()}
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x, x)
+        with self.assertRaisesRegex(RuntimeError, r"to have keys {.*'y'.*}"):
+            y.backward()
+
+    def test_backward_dict_requires_keys_for_input_optional_tensors(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor, y: Optional[torch.Tensor]) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x, y):
+            return x.sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'x': grad * saved.cos()}
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x, None)
+        with self.assertRaisesRegex(RuntimeError, r"to have keys {.*'y'.*}"):
+            y.backward()
+
+    def test_backward_grads_are_tensor_or_none(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x):
+            return x.sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'x': (grad * saved.cos(),)}
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x)
+        with self.assertRaisesRegex(RuntimeError, 'either None or a Tensor'):
+            y.backward()
+
+    def test_backward_tensorlist_input_requires_list_grads_with_same_numel(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(xs):
+            return xs[0].sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.xs[0]
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'xs': [grad * saved.cos(), None]}
+
+        xs = [torch.randn([], requires_grad=True) for _ in range(3)]
+        y = foo(xs)
+        with self.assertRaisesRegex(RuntimeError, "3 gradients but got 2"):
+            y.backward()
+
+    def test_backward_tensorlist_input_requires_list_grads_none_or_Tensor(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(xs):
+            return xs[0].sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.xs[0]
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'xs': [grad * saved.cos(), None, (None,)]}
+
+        xs = [torch.randn([], requires_grad=True) for _ in range(3)]
+        y = foo(xs)
+        with self.assertRaisesRegex(RuntimeError, "None or Tensor"):
+            y.backward()
+
+    def test_backward_tensorlist_input_requires_list_grads(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(xs):
+            return xs[0].sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.xs[0]
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'xs': None}
+
+        xs = [torch.randn([], requires_grad=True) for _ in range(3)]
+        y = foo(xs)
+        with self.assertRaisesRegex(RuntimeError, "list of gradients"):
+            y.backward()
+
+    def test_backward_output_differentiability_type(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
+            ...
+
+        with self.assertRaisesRegex(RuntimeError, "output_differentiability"):
+            @foo.impl_backward(output_differentiability=True)
+            def foo_backward(ctx, saved, grad):
+                return {'xs': None}
+
+    def test_backward_output_differentiability_numel(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(xs: Sequence[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+            ...
+
+        with self.assertRaisesRegex(RuntimeError, "output_differentiability"):
+            @foo.impl_backward(output_differentiability=[True])
+            def foo_backward(ctx, saved, grad):
+                return {'xs': None}
+
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_impl_separate(self):
-        @custom_op('_torch_testing::foo')
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
             ...
 
@@ -770,7 +1270,7 @@ class TestCustomOp(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_impl_multiple(self):
-        @custom_op('_torch_testing::foo')
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
             ...
 
@@ -788,7 +1288,7 @@ class TestCustomOp(TestCase):
         foo._destroy()
 
     def test_impl_meta(self):
-        @custom_op('_torch_testing::foo')
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
             ...
 
@@ -803,14 +1303,36 @@ class TestCustomOp(TestCase):
         self.assertEqual(result.shape, foo_meta(x, 1).shape)
         foo._destroy()
 
+    def test_duplicate_impl(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
+            ...
+
+        @foo.impl_abstract()
+        def foo_meta(x, dim):
+            output_shape = list(x.shape)
+            del output_shape[dim]
+            return x.new_empty(output_shape)
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"already has a abstract impl.*at .*test_python_dispatch.py:\d+"):
+            @foo.impl_abstract()
+            def foo_meta2(x, dim):
+                output_shape = list(x.shape)
+                del output_shape[dim]
+                return x.new_empty(output_shape)
+
+        foo._destroy()
+
     def test_new_data_dependent_symint(self):
-        @custom_op('_torch_testing::foo')
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
             ...
 
         @foo.impl_abstract()
         def foo_meta(x):
-            ctx = torch._custom_op.get_ctx()
+            ctx = torch._custom_op.impl.get_ctx()
             with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
                 ctx.create_unbacked_symint(min=1)
             with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
@@ -833,7 +1355,7 @@ class TestCustomOp(TestCase):
     def test_basic_make_fx(self):
         # More serious tests are in our CustomOp opinfo db,
         # this one is just a sanity check.
-        @custom_op('_torch_testing::foo')
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
             ...
 
@@ -843,11 +1365,31 @@ class TestCustomOp(TestCase):
 
         x = torch.randn(3)
         gm = make_fx(foo, tracing_mode='symbolic')(x)
-        self.assertTrue('_torch_testing.foo' in gm.code)
+        self.assertTrue(f'{TestCustomOp.test_ns}.foo' in gm.code)
         foo._destroy()
 
+    def test_not_implemented_error(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(NotImplementedError, "cpu impl registered"):
+            foo(x)
+
+        x = torch.randn(3, device='meta')
+        with self.assertRaisesRegex(NotImplementedError, "abstract impl registered"):
+            foo(x)
+
+        @custom_op(f'{TestCustomOp.test_ns}::bar')
+        def bar(sizes: Sequence[int]) -> torch.Tensor:
+            ...
+
+        with self.assertRaisesRegex(NotImplementedError, "no Tensor inputs"):
+            bar((1, 2, 3))
+
     def test_abstract_registration_location(self):
-        loc = torch.testing._internal.custom_op_db.numpy_nonzero._abstract_impl.location
+        loc = torch.testing._internal.custom_op_db.numpy_nonzero._get_impl('abstract').location
         matches = re.match(r'.*custom_op_db.py:\d+', loc)
         self.assertIsNotNone(matches)
 
@@ -870,6 +1412,21 @@ class TestCustomOp(TestCase):
         x = torch.randn(5, 5)
         with self.assertRaises(torch._subclasses.fake_tensor.DynamicOutputShapeException):
             make_fx(f, tracing_mode='fake')(x)
+
+    def test_symints(self):
+        def f(x):
+            return torch.testing._internal.custom_op_db.numpy_view_copy(x, x.shape)
+        x = torch.randn(2, 3, 4)
+        gm = make_fx(f, tracing_mode='symbolic')(x)
+        result = gm(x)
+        self.assertEqual(result, f(x))
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    sym_size_1 = torch.ops.aten.sym_size(x_1, 1)
+    sym_size_2 = torch.ops.aten.sym_size(x_1, 2)
+    numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size, sym_size_1, sym_size_2]);  x_1 = sym_size = sym_size_1 = sym_size_2 = None
+    return numpy_view_copy""")  # noqa: B950
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
     def test_data_dependent_compile(self):
@@ -928,13 +1485,13 @@ class TestPythonDispatch(TestCase):
             # TODO: figure out why broken
             # self.assertEqual(saved_x._version, x._version)
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = torch._ops.aten.mul.Tensor($0, $0)
-$2 = input('grad_y')
+$0: f32[1] = input('x')
+$1: f32[1] = torch._ops.aten.mul.Tensor($0, $0)
+$2: f32[1] = input('grad_y')
 True = torch._ops.aten.is_same_size.default($1, $2)
-$3 = torch._ops.aten.mul.Tensor($2, $0)
-$4 = torch._ops.aten.mul.Tensor($2, $0)
-$5 = torch._ops.aten.add.Tensor($4, $3)''')
+$3: f32[1] = torch._ops.aten.mul.Tensor($2, $0)
+$4: f32[1] = torch._ops.aten.mul.Tensor($2, $0)
+$5: f32[1] = torch._ops.aten.add.Tensor($4, $3)''')
 
     def test_out(self) -> None:
         with capture_logs() as logs:
@@ -948,9 +1505,9 @@ $5 = torch._ops.aten.add.Tensor($4, $3)''')
         # TODO: arguably this shouldn't pass and we should complain
         # that out isn't a kwarg
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = input('y')
-$2 = torch._ops.aten.abs.out($0, out=$1)''')
+$0: f32[1] = input('x')
+$1: f32[1] = input('y')
+$2: f32[1] = torch._ops.aten.abs.out($0, out=$1)''')
 
     def test_kwarg_only(self) -> None:
         with capture_logs() as logs:
@@ -969,14 +1526,14 @@ $2 = torch._ops.aten.abs.out($0, out=$1)''')
         # The expectation is that beta/alpha don't show up when they're
         # defaulted.  This is even if the user explicitly specified it.
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = input('y')
-$2 = input('z')
-$3 = torch._ops.aten.addmv.default($0, $1, $2)
-$4 = torch._ops.aten.addmv.default($0, $1, $2)
-$5 = torch._ops.aten.addmv.default($0, $1, $2, beta=2)
-$6 = torch._ops.aten.addmv.default($0, $1, $2, alpha=2)
-$7 = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
+$0: f32[1] = input('x')
+$1: f32[1, 1] = input('y')
+$2: f32[1] = input('z')
+$3: f32[1] = torch._ops.aten.addmv.default($0, $1, $2)
+$4: f32[1] = torch._ops.aten.addmv.default($0, $1, $2)
+$5: f32[1] = torch._ops.aten.addmv.default($0, $1, $2, beta=2)
+$6: f32[1] = torch._ops.aten.addmv.default($0, $1, $2, alpha=2)
+$7: f32[1] = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
 
     def test_kwarg_only_and_positional_default(self) -> None:
         with capture_logs() as logs:
@@ -990,11 +1547,11 @@ $7 = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
         # What we are testing here is that we omit arg2
         # if it is defaulted, even if a kwarg is set
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = torch._ops.aten._foobar.default($0)
-$2 = torch._ops.aten._foobar.default($0, False)
-$3 = torch._ops.aten._foobar.default($0, arg3=False)
-$4 = torch._ops.aten._foobar.default($0, False, arg3=False)''')
+$0: f32[1] = input('x')
+$1: f32[1] = torch._ops.aten._foobar.default($0)
+$2: f32[1] = torch._ops.aten._foobar.default($0, False)
+$3: f32[1] = torch._ops.aten._foobar.default($0, arg3=False)
+$4: f32[1] = torch._ops.aten._foobar.default($0, False, arg3=False)''')
 
     def test_produce_real_type(self) -> None:
         with capture_logs() as logs:
@@ -1007,12 +1564,12 @@ $4 = torch._ops.aten._foobar.default($0, False, arg3=False)''')
             # triggerable using tensor subclasses (need to use a mode)
 
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = torch._ops.aten._to_copy.default($0, dtype=torch.float64)
-$2 = torch._ops.aten.cumprod.default($0, 0, dtype=torch.float64)
-$3 = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
-$4 = torch._ops.aten.select.int($3, 1, 1)
-$5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)''')
+$0: f32[2, 2] = input('x')
+$1: f64[2, 2] = torch._ops.aten._to_copy.default($0, dtype=torch.float64)
+$2: f64[2, 2] = torch._ops.aten.cumprod.default($0, 0, dtype=torch.float64)
+$3: f32[2, 2] = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
+$4: f32[2] = torch._ops.aten.select.int($3, 1, 1)
+$5: f32[2] = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)''')
 
     def test_optional_tensor_list(self) -> None:
         def weird(xs):
@@ -1028,9 +1585,8 @@ $5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)'''
             torch.ops.my_lib.weird.default([None, x])
 
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = torch._ops.my_lib.weird.default([None, LoggingTensor(tensor([[1., 1.],
-        [1., 1.]]))])''')
+$0: f32[2, 2] = input('x')
+$1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])''')
 
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
@@ -1082,9 +1638,9 @@ $1 = torch._ops.my_lib.weird.default([None, LoggingTensor(tensor([[1., 1.],
         # this test here to make sure we don't regress even further (it
         # would be bad if calling .detach() once emits 3+ detaches).
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = torch._ops.aten.detach.default($0)
-$2 = torch._ops.aten.detach.default($1)''')
+$0: f32[1] = input('x')
+$1: f32[1] = torch._ops.aten.detach.default($0)
+$2: f32[1] = torch._ops.aten.detach.default($1)''')
 
     def test_storage(self) -> None:
         # For now, just make sure it doesn't crash.  Ideally, we should
@@ -1187,14 +1743,14 @@ $2 = torch._ops.aten.detach.default($1)''')
             # self.assertEqual(escape[0]._version, x._version)
 
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = input('x.grad')
-$2 = torch._ops.aten.pow.Tensor_Scalar($0, 2)
-$3 = input('grad_output')
+$0: f32[1] = input('x')
+$1: f32[1] = input('x.grad')
+$2: f32[1] = torch._ops.aten.pow.Tensor_Scalar($0, 2)
+$3: f32[1] = input('grad_output')
 True = torch._ops.aten.is_same_size.default($2, $3)
-$4 = torch._ops.aten.mul.Tensor($3, 2)
-$5 = torch._ops.aten.mul.Tensor($4, $0)
-$6 = torch._ops.aten.add_.Tensor($1, $5)''')
+$4: f32[1] = torch._ops.aten.mul.Tensor($3, 2)
+$5: f32[1] = torch._ops.aten.mul.Tensor($4, $0)
+$6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_subclass_creation(self):
         # Make sure these statements runs without error
@@ -1377,7 +1933,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
             with LoggingTensorMode():
                 torch.empty([])
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
 
     def test_torch_dispatch_mode_unrelated_tensors(self) -> None:
         x = torch.randn([])
@@ -1385,8 +1941,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
         with capture_logs(is_mode=True) as logs:
             with LoggingTensorMode():
                 x + y
-        self.assertExpectedInline('\n'.join(logs), """\
-$2 = torch._ops.aten.add.Tensor($0, $1)""")
+        self.assertExpectedInline('\n'.join(logs), """$2: f32[] = torch._ops.aten.add.Tensor($0, $1)""")
 
     def test_nested_push_logging_tensor_mode(self):
         x = torch.randn([])
@@ -1398,10 +1953,10 @@ $2 = torch._ops.aten.add.Tensor($0, $1)""")
                     x + y
 
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$3 = torch._ops.aten.add.Tensor($1, $2)
-$3 = torch._ops.aten.add.Tensor($1, $2)""")
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
     def test_capture_logs_with_torch_dispatch_mode(self):
         x = torch.randn([])
@@ -1410,8 +1965,8 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             torch.empty([])
             x + y
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$3 = torch._ops.aten.add.Tensor($1, $2)""")
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
         x = torch.randn([])
         y = torch.randn([])
@@ -1422,10 +1977,10 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
                 x + y
 
         self.assertExpectedInline('\n'.join(logs2), """\
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$3 = torch._ops.aten.add.Tensor($1, $2)
-$3 = torch._ops.aten.add.Tensor($1, $2)""")
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
         self.assertEqual(logs1, logs2)
 
@@ -1562,7 +2117,7 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
     def test_with_nested_modes(self):
         class ErrorA(RuntimeError):
             def __init__(self, msg):
-                return super().__init__(msg)
+                super().__init__(msg)
 
         class A(TorchDispatchMode):
             def __init__(self, msg):
@@ -1681,8 +2236,8 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
                 with reenabled:
                     torch.empty([])
             self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
 
 
     def test_error_using_class_method_on_mode(self):
@@ -2069,7 +2624,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                         return not_contiguous_data.is_contiguous()
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
+            err_msg = "Multiple dispatch failed for 'torch.ops.aten.is_contiguous'"
             e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.is_contiguous()
@@ -2080,7 +2635,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
             self.assertEqual(e.is_contiguous(), True)
             e.contiguous()  # this will just return the original TensorImpl since is_contiguous = True
 
-            err_msg = "no implementation found for"
+            err_msg = "Multiple dispatch failed for"
             e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
             self.assertEqual(e.is_contiguous(), False)
             with self.assertRaisesRegex(TypeError, err_msg):
@@ -2151,7 +2706,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                         return torch.device('meta')
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.prim.device'"
+            err_msg = "Multiple dispatch failed for 'torch.ops.prim.device'"
             with self.assertRaisesRegex(TypeError, err_msg):
                 e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
                 e.device()
@@ -2189,7 +2744,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                         return data.dim()
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.dim'"
+            err_msg = "Multiple dispatch failed for 'torch.ops.aten.dim'"
             e = DimNotImplementedTensor(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.dim()
@@ -2243,7 +2798,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                         return None
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.sym_stride'"
+            err_msg = "Multiple dispatch failed for 'torch.ops.aten.sym_stride'"
             e = StridesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.stride()
@@ -2295,7 +2850,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                         return None
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.sym_size'"
+            err_msg = "Multiple dispatch failed for 'torch.ops.aten.sym_size'"
             e = SizesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.size()
@@ -2305,6 +2860,29 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
 
             e = SizesDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.size(), (4, 2))
+
+    def test_data_ptr_respects_numel_slow_path(self):
+        data = torch.randn(6, 2)
+
+        class NumelDefaultReturn(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, wrapper):
+                return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if func.overloadpacket == torch.ops.aten.dim:
+                    return data.dim()
+                if func.overloadpacket == torch.ops.aten.sym_numel:
+                    numel_called[0] = True
+                    return None
+                return NotImplemented
+
+        for use_wrapper_subclass in (False, True):
+            numel_called = [False]
+            e = NumelDefaultReturn(torch.randn(2, 2), use_wrapper_subclass)
+            e.data_ptr()
+            self.assertTrue(numel_called[0])
 
     def test_layout_slow_path(self):
         for use_wrapper_subclass in [True, False]:
@@ -2341,7 +2919,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                         return data.layout
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.prim.layout'"
+            err_msg = "Multiple dispatch failed for 'torch.ops.prim.layout'"
             e = LayoutNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.layout

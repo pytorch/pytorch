@@ -91,6 +91,8 @@ TABLE = {
         "inductor_max_autotune_no_cudagraphs": (
             "--inference -n50 --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
         ),
+        "torchscript-onnx": "--inference -n5 --torchscript-onnx",
+        "dynamo-onnx": "--inference -n5 --dynamo-onnx",
     },
 }
 
@@ -359,7 +361,7 @@ def get_mode(args):
     return "training"
 
 
-def get_skip_tests(suite):
+def get_skip_tests(suite, is_training: bool):
     """
     Generate -x seperated string to skip the unusual setup training tests
     """
@@ -370,7 +372,7 @@ def get_skip_tests(suite):
 
     if hasattr(module, "SKIP"):
         skip_tests.update(module.SKIP)
-    if hasattr(module, "SKIP_TRAIN"):
+    if is_training and hasattr(module, "SKIP_TRAIN"):
         skip_tests.update(module.SKIP_TRAIN)
 
     skip_tests = (f"-x {name}" for name in skip_tests)
@@ -419,7 +421,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         launcher_cmd = f"python -m torch.backends.xeon.run_cpu {args.cpu_launcher_args}"
                     cmd = f"{launcher_cmd} benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
                     cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
-                    skip_tests_str = get_skip_tests(suite)
+                    skip_tests_str = get_skip_tests(suite, args.training)
                     cmd = f"{cmd} {skip_tests_str}"
 
                     if args.log_operator_inputs:
@@ -714,6 +716,12 @@ class ParsePerformanceLogs(Parser):
                 df = pd.merge(frames[0], frames[1], on=["dev", "name", "batch_size"])
                 for idx in range(2, len(frames)):
                     df = pd.merge(df, frames[idx], on=["dev", "name", "batch_size"])
+
+            if testing == "performance":
+                for compiler in self.compilers:
+                    df[compiler] = pd.to_numeric(df[compiler], errors="coerce").fillna(
+                        0
+                    )
 
             df_copy = df.copy()
             df_copy = df_copy.sort_values(

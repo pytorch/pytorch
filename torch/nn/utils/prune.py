@@ -17,9 +17,6 @@ class BasePruningMethod(ABC):
     """
     _tensor_name: str
 
-    def __init__(self):
-        pass
-
     def __call__(self, module, inputs):
         r"""Multiplies the mask (stored in ``module[name + '_mask']``)
         into the original tensor (stored in ``module[name + '_orig']``)
@@ -1221,7 +1218,7 @@ def is_pruned(module):
         True
     """
     for _, submodule in module.named_modules():
-        for _, hook in submodule._forward_pre_hooks.items():
+        for hook in submodule._forward_pre_hooks.values():
             if isinstance(hook, BasePruningMethod):
                 return True
     return False

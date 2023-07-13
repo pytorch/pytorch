@@ -12,14 +12,11 @@ pip_install \
   mock==5.0.1 \
   ninja==1.10.2 \
   networkx==2.0 \
-  numpy==1.22.4
-
-# TODO: use official onnx package once it's released
-# for now, use the commit from 1.13.1-protobuf4.21 branch
-pip_install "onnx@git+https://github.com/onnx/onnx@389b6bcb05b9479d149d29b2461fbffe8472ed14"
+  numpy==1.22.4 \
+  onnx==1.14.0
 
 pip_install \
-  onnxruntime==1.14.0 \
+  onnxruntime==1.15.0 \
   parameterized==0.8.1 \
   pytest-cov==4.0.0 \
   pytest-subtests==0.10.0 \
@@ -27,12 +24,12 @@ pip_install \
   transformers==4.25.1
 
 # TODO: change this when onnx-script is on testPypi
-pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@99a665546d374af872cf136137b5d8334389b78d"
+pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@2bb3e9f2d094912f81cb63cecb412efb14c65738"
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
 IMPORT_SCRIPT_FILENAME="/tmp/onnx_import_script.py"
-as_jenkins echo 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2");' > "${IMPORT_SCRIPT_FILENAME}"
+as_jenkins echo 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2"); transformers.AutoTokenizer.from_pretrained("sshleifer/tiny-gpt2");' > "${IMPORT_SCRIPT_FILENAME}"
 
 # Need a PyTorch version for transformers to work
 pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu

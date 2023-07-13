@@ -62,7 +62,7 @@ def export_as_test_case(
         shutil.rmtree(data_set_dir)
     os.makedirs(data_set_dir)
 
-    proto = onnx.load_from_string(model_bytes)
+    proto = onnx.load_model_from_string(model_bytes)
 
     for i, (input_proto, input) in enumerate(zip(proto.graph.input, inputs_data)):
         export_data(input, input_proto, os.path.join(data_set_dir, f"input_{i}.pb"))
@@ -227,7 +227,7 @@ def _add_onnxscript_fn(
     # size > 2GB, and if it for some reason did not, the model would fail on
     # serialization anyway in terms of the protobuf limitation. So we don't
     # need to worry about > 2GB model getting here.
-    model_proto = onnx.load_from_string(model_bytes)
+    model_proto = onnx.load_model_from_string(model_bytes)
 
     # Iterate graph nodes to insert only the included custom
     # function_proto into model_proto
@@ -278,9 +278,12 @@ def _find_onnxscript_op(
             if onnx_fn is not None:
                 # TODO(titaiwang): to_function_proto is onnx-script API and can be annotated
                 # after onnx-script is dependency
-                onnx_function_list.append(onnx_fn.to_function_proto())  # type: ignore[attr-defined]
-                included_node_func.add(node_kind)
+                if hasattr(onnx_fn, "to_function_proto"):
+                    onnx_function_proto = onnx_fn.to_function_proto()  # type: ignore[attr-defined]
+                    onnx_function_list.append(onnx_function_proto)
+                    included_node_func.add(node_kind)
                 continue
+
             raise errors.UnsupportedOperatorError(
                 node_kind,
                 specified_version,

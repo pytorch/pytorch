@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import io
 import os
-from typing import Tuple
-
-import onnx
+from typing import Tuple, TYPE_CHECKING, Union
 
 import torch
+from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
+
+if TYPE_CHECKING:
+    import onnx
 
 
 @_beartype.beartype
@@ -32,11 +35,14 @@ def _create_tensor_proto_with_external_data(
         How to set ONNX fields?
         https://github.com/onnx/onnx/blob/5dac81ac0707bdf88f56c35c0a5e8855d3534673/onnx/external_data_helper.py#L88
     """
+    # FIXME: Avoid importing onnx into torch.onnx.
+    import onnx
+
     tensor_proto = onnx.TensorProto()
     tensor_proto.name = name
-    tensor_proto.data_type = torch.onnx._type_utils._SCALAR_TYPE_TO_ONNX[  # type: ignore[assignment]
-        torch.onnx._type_utils._DTYPE_TO_SCALAR_TYPE[tensor.dtype]
-    ]
+    tensor_proto.data_type = jit_type_utils.JitScalarType.from_dtype(
+        tensor.dtype
+    ).onnx_type()
     tensor_proto.dims.extend(tensor.shape)
     tensor_proto.data_location = onnx.TensorProto.EXTERNAL
 
@@ -79,8 +85,9 @@ def save_model_with_external_data(
     basepath: str,
     model_location: str,
     initializer_location: str,
-    torch_load_paths: Tuple[str, ...],
+    torch_load_paths: Tuple[Union[str, io.BytesIO], ...],
     onnx_model: onnx.ModelProto,
+    rename_initializer: bool = False,
 ) -> None:
     """Load PyTorch tensors from files and add to "onnx_model" as external initializers.
 
@@ -105,42 +112,48 @@ def save_model_with_external_data(
         onnx_model: ONNX model to be saved with external initializers.
             If an input name matches a tensor loaded from "torch_load_paths",
             the tensor will be saved as that input's external initializer.
+        rename_initializer: Replaces "." by "_" for all ONNX initializer names.
+            Not needed by the official torch.onnx.dynamo_export. This is a hack
+            for supporting `FXSymbolicTracer` tracer with fake tensor mode.
+            In short, `FXSymbolicTracer` lifts FX parameters (self.linear_weight)
+            as inputs (`def forward(self, linear_weight)`) and therefore, `.` cannot be used.
     """
+    # FIXME: Avoid importing onnx into torch.onnx.
+    import onnx
+
     onnx_model_with_initializers = onnx.ModelProto()
     onnx_model_with_initializers.CopyFrom(onnx_model)
     onnx_input_names = [input.name for input in onnx_model.graph.input]
 
     for path in torch_load_paths:
-        state_ditc = torch.load(path)
-        for name, tensor in state_ditc.items():
-            # Basically, "transformer.attention.self.query.weight" is mapped
-            # to "transformer_attention_self_query_weight" for mimicking the
-            # name-modifying code in FX-to-ONNX exporter.
-            # See function _replace_get_attr_with_placeholder for details.
-            refined_name = name.replace(".", "_")
+        state_dict = torch.load(path)
+        for name, tensor in state_dict.items():
+            if rename_initializer:
+                # Basically, "transformer.attention.self.query.weight" is mapped
+                # to "transformer_attention_self_query_weight" for mimicking the
+                # name-modifying code in FX-to-ONNX exporter.
+                # See function _replace_get_attr_with_placeholder for details.
+                name = name.replace(".", "_")
+                # For each PyTorch tensor name loaded by torch.load,
+                #  1.  Search its best match in ONNX model. E.g., the match of
+                #       "transformer_attention_weight" could be "attention_weight".
+                #  2.  Set "tensor" as the initializer of the matched ONNX input.
+                #      E.g., "tensor" is stored as the initializer of "attention_weight".
+                # Step 1 is required because sometimes, tensor names are stored with prefix the dictionary
+                # loaded by torch.load.
+                for onnx_input_name in onnx_input_names:
+                    if onnx_input_name.endswith(name) or name.endswith(onnx_input_name):
+                        # Find a match. Change name to the matched ONNX input name, so that we
+                        # create initializer with the right ONNX name.
+                        name = onnx_input_name
+                        break
 
-            # For each refined PyTorch tensor name loaded by torch.load,
-            #  1.  Search its best match in ONNX model. E.g., the match of
-            #       "transformer_attention_weight" could be "attention_weight".
-            #  2.  Set "tensor" as the initializer of the matched ONNX input.
-            #      E.g., "tensor" is stored as the initializer of "attention_weight".
-            # Step 1 is required because sometimes, tensor names are stored with prefix the dictionary
-            # loaded by torch.load.
-            for onnx_input_name in onnx_input_names:
-                if onnx_input_name.endswith(refined_name) or refined_name.endswith(
-                    onnx_input_name
-                ):
-                    # Find a match. Change refined_name to the matched ONNX input name, so that we
-                    # create initializer with the right ONNX name.
-                    refined_name = onnx_input_name
-                    break
-
-            relative_tensor_file_path = os.path.join(initializer_location, refined_name)
+            relative_tensor_file_path = os.path.join(initializer_location, name)
             # Create one file per tensor.
             # tensor_proto.raw_data is stored to external file at
             # os.path.join(basepath, relative_tensor_file_path).
             tensor_proto = _create_tensor_proto_with_external_data(
-                tensor, refined_name, relative_tensor_file_path, basepath
+                tensor, name, relative_tensor_file_path, basepath
             )
             # Add the tensor_proto to the ONNX model as an initializer with external data.
             onnx_model_with_initializers.graph.initializer.append(tensor_proto)

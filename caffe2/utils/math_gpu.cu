@@ -1235,7 +1235,7 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext, TensorCoreEngine>(
       CUDA_R_16F,
       N,
       CUDA_R_32F,
-      CUBLAS_GEMM_DFALT_TENSOR_OP));
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 
   // Now disable TensorCore math for subsequent calls to this handle
   if (TensorCoreAvailable()) {

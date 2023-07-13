@@ -1,7 +1,7 @@
 import math
 import warnings
 from numbers import Number
-from typing import Union
+from typing import Optional, Union
 
 import torch
 from torch import nan
@@ -34,15 +34,15 @@ class Wishart(ExponentialFamily):
 
     Example:
         >>> # xdoctest: +SKIP("FIXME: scale_tril must be at least two-dimensional")
-        >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
+        >>> m = Wishart(torch.Tensor([2]), covariance_matrix=torch.eye(2))
         >>> m.sample()  # Wishart distributed with mean=`df * I` and
         >>>             # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
 
     Args:
+        df (float or Tensor): real-valued parameter larger than the (dimension of Square matrix) - 1
         covariance_matrix (Tensor): positive-definite covariance matrix
         precision_matrix (Tensor): positive-definite precision matrix
         scale_tril (Tensor): lower-triangular factor of covariance, with positive-valued diagonal
-        df (float or Tensor): real-valued parameter larger than the (dimension of Square matrix) - 1
     Note:
         Only one of :attr:`covariance_matrix` or :attr:`precision_matrix` or
         :attr:`scale_tril` can be specified.
@@ -72,9 +72,9 @@ class Wishart(ExponentialFamily):
 
     def __init__(self,
                  df: Union[torch.Tensor, Number],
-                 covariance_matrix: torch.Tensor = None,
-                 precision_matrix: torch.Tensor = None,
-                 scale_tril: torch.Tensor = None,
+                 covariance_matrix: Optional[torch.Tensor] = None,
+                 precision_matrix: Optional[torch.Tensor] = None,
+                 scale_tril: Optional[torch.Tensor] = None,
                  validate_args=None):
         assert (covariance_matrix is not None) + (scale_tril is not None) + (precision_matrix is not None) == 1, \
             "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."

@@ -5,6 +5,7 @@ import operator
 
 import torch
 import torch._inductor as inductor
+
 from .. import config, ir, pattern_matcher
 
 from ..lowering import lowerings as L
@@ -15,6 +16,7 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     Ignored,
+    inference_graph,
     init_once_fakemode,
     KeywordArg,
     ListOf,
@@ -22,6 +24,7 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
+    register_replacement,
     stable_topological_sort,
 )
 from ..virtualized import V
@@ -37,9 +40,11 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+# patterns applied only in inference
+inference_patterns = PatternMatcherPass()
 
 
-def post_grad_passes(gm: torch.fx.GraphModule):
+def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -50,8 +55,7 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if config.reordering:
-        # has some issues with mutation in inference mode
+    if is_inference and config.reordering:
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
@@ -59,17 +63,25 @@ def post_grad_passes(gm: torch.fx.GraphModule):
 
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
+        if is_inference:
+            inference_patterns.apply(gm.graph)
 
     stable_topological_sort(gm.graph)
+    gm.recompile()
     gm.graph.lint()
 
 
 @init_once_fakemode
 def lazy_init():
-    if torch._C.has_mkldnn:
+    if torch._C._has_mkldnn:
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
+
+    from .quantization import register_quantization_lowerings
+
+    register_quantization_lowerings()
+    register_addmm_activation_replacement()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -83,8 +95,27 @@ def reorder_for_locality(graph: torch.fx.Graph):
             node.prepend(other_node)
 
     seen_nodes = set()
+
+    # only reorder nodes before the first copy_ in the graph.
+    # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
+    # and this reordering doesnt work well with mutation
+    first_copy = next(
+        (
+            node
+            for node in graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.aten.copy_.default
+        ),
+        None,
+    )
+    past_mutating_epilogue = True if first_copy is None else False
+
     for node in reversed(graph.nodes):
         seen_nodes.add(node)
+        if not past_mutating_epilogue:
+            past_mutating_epilogue = node is first_copy
+            continue
+
         torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
@@ -120,35 +151,32 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     CallFunction(
         aten.cumsum.default,
         CallFunction(
-            prims.convert_element_type.default,
-            CallFunction(
-                torch.ops.aten.full.default,
-                [Arg(), Arg()],
-                1,
-                dtype=Ignored(),
-                layout=Ignored(),
-                device=KeywordArg("device"),
-                pin_memory=False,
-                _users=MULTIPLE,
-            ),
-            KeywordArg("dtype"),
+            torch.ops.aten.full.default,
+            [Arg(), Arg()],
+            1,
+            dtype=KeywordArg("dtype"),
+            layout=Ignored(),
+            device=KeywordArg("device"),
+            pin_memory=False,
             _users=MULTIPLE,
         ),
         1,
+        _users=MULTIPLE,
     ),
     pass_dict=pass_patterns[1],
 )
 def pointless_cumsum_replacement(match: Match, size0, size1, device, dtype):
     """Based on a pattern in OPTForCausalLM"""
 
-    def repl():
+    def repl(size0, size1):
         return torch.arange(1, size1 + 1, device=device, dtype=dtype).expand(
             size0, size1
         )
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
-    match.replace_by_example(repl, [])
+    with V.fake_mode:
+        match.replace_by_example(repl, [size0, size1])
 
 
 def shape_of_mm(a, b):
@@ -324,6 +352,70 @@ def addmm(match, mat1, mat2, inp):
         return L[aten.add](inp, L[aten.mm](mat1, mat2))
 
 
+def addmm_relu_pattern(input, mat1, mat2):
+    output = aten.addmm(input, mat1, mat2)
+    return aten.relu(output)
+
+
+def addmm_relu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, use_gelu=False)
+
+
+def addmm_gelu_pattern(input, mat1, mat2):
+    output = aten.addmm(input, mat1, mat2)
+    return aten.gelu(output)
+
+
+def addmm_gelu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, use_gelu=True)
+
+
+def should_replace_addmm_activation(match):
+    if config.max_autotune_gemm:
+        # keep addmm for tuning
+        return False
+
+    input = match.kwargs["input"].meta["val"]
+    # conditions of epilogue fusion in _addmm_activation
+    return input.is_cuda and input.dim() == 1 and input.is_contiguous()
+
+
+def register_addmm_activation_replacement():
+    if torch.cuda.is_available():
+        # workaround https://github.com/pytorch/pytorch/issues/97894
+        device = "cuda"
+    else:
+        device = "cpu"
+
+    # sizes/values dont actually matter for initial trace
+    # once we get a possible match we re-trace with the actual values and verify the match still holds
+
+    inp = functools.partial(torch.empty, (5,), device=device)
+    mat1 = functools.partial(torch.empty, (3, 4), device=device)
+    mat2 = functools.partial(torch.empty, (4, 5), device=device)
+
+    for pattern, replacement, args in [
+        (
+            addmm_relu_pattern,
+            addmm_relu_replacement,
+            [inp(), mat1(), mat2()],
+        ),
+        (
+            addmm_gelu_pattern,
+            addmm_gelu_replacement,
+            [inp(), mat1(), mat2()],
+        ),
+    ]:
+        register_replacement(
+            pattern,
+            replacement,
+            args,
+            inference_graph,
+            inference_patterns,
+            extra_check=should_replace_addmm_activation,
+        )
+
+
 def is_valid_splitwithsizes_cat(match):
     split_nodes = filter_nodes(match.nodes, aten.split_with_sizes)
     cat_nodes = filter_nodes(match.nodes, aten.cat)
@@ -377,3 +469,12 @@ def is_valid_splitwithsizes_cat(match):
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
+
+
+def view_to_reshape(gm):
+    """
+    Replace view ops in the GraphModule to reshape ops.
+    """
+    for nd in gm.graph.nodes:
+        if nd.target == torch.ops.aten.view.default:
+            nd.target = torch.ops.aten.reshape.default

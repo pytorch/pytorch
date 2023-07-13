@@ -176,9 +176,115 @@ struct CollectiveFingerPrint {
              << backend->getRank() << " is running collective: " << *this
              << ", but Rank " << rank
              << " is running collective: " << rank_fingerprint << ".";
+          auto diff_result = compute_collective_diff(rank_fingerprint);
+          if (std::get<0>(diff_result)) {
+            ss << std::get<1>(diff_result);
+          }
+
           TORCH_CHECK(false, ss.str());
         }
       }
+    }
+  }
+
+  static std::vector<std::string> get_size_strs(
+      const CollectiveFingerPrint& collective_fingerprint) {
+    std::vector<std::string> size_strs;
+    if (!collective_fingerprint.tensor_sizes_.empty()) {
+      for (const auto& single_tensor_shape_num :
+           collective_fingerprint.tensor_sizes_[0]) {
+        size_strs.emplace_back(std::to_string(single_tensor_shape_num));
+      }
+    }
+    return size_strs;
+  }
+
+  static std::vector<std::string> get_dtype_strs(
+      const CollectiveFingerPrint& collective_fingerprint) {
+    std::vector<std::string> dtype_strs;
+    dtype_strs.reserve(collective_fingerprint.tensor_dtypes_.size());
+    for (const auto& tensor_dtype : collective_fingerprint.tensor_dtypes_) {
+      dtype_strs.emplace_back(
+          c10::toString(static_cast<at::ScalarType>(tensor_dtype)));
+    }
+    return dtype_strs;
+  }
+
+  static std::vector<std::string> get_device_type_strs(
+      const CollectiveFingerPrint& collective_fingerprint) {
+    std::vector<std::string> device_type_strs;
+    device_type_strs.reserve(
+        collective_fingerprint.tensor_device_types_.size());
+    for (const auto& tensor_device_type :
+         collective_fingerprint.tensor_device_types_) {
+      device_type_strs.emplace_back(
+          c10::toString(static_cast<at::DeviceType>(tensor_device_type)));
+    }
+    return device_type_strs;
+  }
+
+  std::pair<bool, std::string> compute_collective_diff(
+      CollectiveFingerPrint& other) {
+    // Computes the difference between two collectives (seq num, tensor shapes,
+    // collective type, etc) for easier understanding of how mismatched
+    // collectives across ranks differ.
+    bool found_diff = false;
+    std::stringstream ss;
+    ss << "Collectives differ in the following aspects: ";
+    // Check seq_num
+    if (other.sequence_number_ != sequence_number_) {
+      found_diff = true;
+      ss << c10::str(
+          "\t Sequence number: ",
+          sequence_number_,
+          "vs ",
+          other.sequence_number_);
+    }
+    // Check op type
+    auto other_op = opTypeToString(other.op_type_);
+    auto this_op = opTypeToString(op_type_);
+    if (other_op.compare(this_op) != 0) {
+      found_diff = true;
+      ss << c10::str("  Op type: ", this_op, "vs ", other_op);
+    }
+
+    auto check = [&ss, &found_diff](
+                     const char* arg,
+                     std::vector<std::string> other,
+                     std::vector<std::string> curr) {
+      if (other.size() != curr.size()) {
+        found_diff = true;
+        ss << c10::str("  Tensor ", arg, ": ", curr, "vs ", other);
+        return;
+      }
+      for (size_t i = 0; i < other.size(); ++i) {
+        if (other[i].compare(curr[i]) != 0) {
+          found_diff = true;
+          ss << c10::str("  Tensor ", arg, ": ", curr, "vs ", other);
+          return;
+        }
+      }
+    };
+
+    // check tensor sizes
+    auto other_sizes = get_size_strs(other);
+    auto this_sizes = get_size_strs(*this);
+    check("Tensor shapes", other_sizes, this_sizes);
+
+    // check tensor dtypes
+    auto other_dtypes = get_dtype_strs(other);
+    auto this_dtypes = get_dtype_strs(*this);
+    check("Tensor dtypes", other_dtypes, this_dtypes);
+
+    // check tensor devices
+    auto other_devices = get_device_type_strs(other);
+    auto this_devices = get_device_type_strs(*this);
+
+    check("Tensor devices", other_devices, this_devices);
+    if (!found_diff) {
+      return std::make_pair(false, ss.str());
+    } else {
+      return std::make_pair(true, ss.str());
     }
   }
 
@@ -233,27 +339,12 @@ std::ostream& operator<<(
   auto op_type_str = opTypeToString(collective_fingerprint.op_type_);
   if (collective_fingerprint.num_tensors_ != 0) {
     // Convert dtype and device type info to string.
-    std::vector<std::string> dtype_strs;
-    std::vector<std::string> device_type_strs;
-    std::vector<std::string> size_strs;
-    dtype_strs.reserve(collective_fingerprint.tensor_dtypes_.size());
-    for (const auto& tensor_dtype : collective_fingerprint.tensor_dtypes_) {
-      dtype_strs.emplace_back(
-          c10::toString(static_cast<at::ScalarType>(tensor_dtype)));
-    }
-    device_type_strs.reserve(
-        collective_fingerprint.tensor_device_types_.size());
-    for (const auto& tensor_device_type :
-         collective_fingerprint.tensor_device_types_) {
-      device_type_strs.emplace_back(
-          c10::toString(static_cast<at::DeviceType>(tensor_device_type)));
-    }
-    if (!collective_fingerprint.tensor_sizes_.empty()) {
-      for (const auto& single_tensor_shape_num :
-           collective_fingerprint.tensor_sizes_[0]) {
-        size_strs.emplace_back(std::to_string(single_tensor_shape_num));
-      }
-    }
+    std::vector<std::string> dtype_strs =
+        CollectiveFingerPrint::get_dtype_strs(collective_fingerprint);
+    std::vector<std::string> device_type_strs =
+        CollectiveFingerPrint::get_device_type_strs(collective_fingerprint);
+    std::vector<std::string> size_strs =
+        CollectiveFingerPrint::get_size_strs(collective_fingerprint);
 
     collectiveInfo = c10::str(
         "CollectiveFingerPrint(",

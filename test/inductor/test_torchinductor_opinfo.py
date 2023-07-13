@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import torch
 
-import torch._dynamo
 from torch._dynamo.test_case import run_tests
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyNativeDeviceTypes,
@@ -29,6 +29,8 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -149,6 +151,13 @@ inductor_skips["cuda"] = {
     "_native_batch_norm_legit": {f16, f32, f64},
 }
 
+if not SM80OrLater:
+    inductor_skips["cuda"]["bfloat16"] = {b8, f16, f32, f64, i32, i64}
+
+if TEST_WITH_ROCM:
+    # Tensors are not alike
+    inductor_skips["cuda"]["logcumsumexp"] = {f32}
+
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
@@ -169,6 +178,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "index_add": {f16},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
+    # Unsupported: data dependent operator: aten._local_scalar_dense.default
+    "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
@@ -187,11 +198,11 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
-    "nn.functional.gaussian_nll_loss": {f32, f64},
+    "nn.functional.gaussian_nll_loss": {f16, f32, f64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.one_hot": {i64},
     "nn.functional.rrelu": {f32, f64},
-    "nn.functional.triplet_margin_with_distance_loss": {f32, f64, i32, i64},
+    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -211,10 +222,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "stft": {f32, f64},
     "svd": {f32, f64},
     "svd_lowrank": {f32, f64},
-    "linalg.cond": {f32, f64},
-    "linalg.svd": {f32, f64},
-    "linalg.svdvals": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
     "pca_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
@@ -275,6 +282,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "equal": {b8, f16, f32, f64, i32, i64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
+    # Unsupported: data dependent operator: aten._local_scalar_dense.default
+    "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
@@ -323,14 +332,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
-    # The following 3 tests fail on CUDA with AssertionError: expected size 5==5, stride 5==1 at dim=0
-    # linalg._svd's return value has different strides on CUDA vs CPU which causes this
-    # In test_meta.py there is a mechanism to skipping strides checks for some ops
-    # (including _linalg_svd), possibly we should have something similar here
-    "linalg.cond": {f32, f64},
-    "linalg.svdvals": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
-    "linalg.svd": {f32, f64},
     "pca_lowrank": {f32, f64},
     "svd_lowrank": {f32, f64},
     "svd": {f32, f64},
@@ -361,10 +362,12 @@ inductor_expected_failures_single_sample["cuda"] = {
     "complex": {f16, f32, f64},
 }
 
+
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
     "asin": {f16},
+    "atanh": {f16, f32},
     "cumprod": {f16},
     "linalg.vector_norm": {f64, f64},
     "kron": {f16},
@@ -379,8 +382,20 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "nn.functional.local_response_norm": {f16},
     "outer": {f16},
     "quantile": {f32, f64},
-    "tanh": {f16},
 }
+
+if not TEST_WITH_ROCM:
+    inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
+else:
+    # aten.miopen_batch_norm is unsupported for lowering
+    inductor_expected_failures_single_sample["cuda"]["nn.functional.batch_norm"] = {
+        f16,
+        f32,
+    }
+    inductor_expected_failures_single_sample["cuda"]["nn.functional.instance_norm"] = {
+        f16,
+        f32,
+    }
 
 inductor_should_fail_with_exception = defaultdict(dict)
 
@@ -441,6 +456,7 @@ inductor_override_kwargs = {
     "empty_permuted": {"assert_equal": False},
     "empty_like": {"assert_equal": False},
     "new_empty": {"assert_equal": False},
+    "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("masked.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
@@ -461,6 +477,9 @@ inductor_override_kwargs = {
 # Always test with all sample for following ops
 inductor_all_samples = {
     "arange",
+    "diagonal",
+    "diagonal_copy",
+    "diagonal_scatter",
     "softmax.with_dtype",
     "index_add",
     "index_copy",
@@ -496,6 +515,7 @@ class TestInductorOpInfo(TestCase):
     )  # inductor kernels failing this test intermittently
     @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
     @_ops(op_db[START:END])

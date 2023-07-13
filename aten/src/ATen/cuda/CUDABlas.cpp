@@ -115,6 +115,28 @@ uint32_t _getAlignment(uintptr_t address) {
   }
 }
 
+static size_t _parseChosenWorkspaceSize() {
+  const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
+  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+  if (val) {
+    try {
+      workspace_size = std::stoi(val);
+    } catch(std::invalid_argument const& e) {
+      TORCH_WARN("invalid CUBLAS_LT_WORKSPACE_SIZE,",
+                 " using default workspace size of ", workspace_size, " bytes.");
+    } catch(std::out_of_range const& e) {
+      TORCH_WARN("CUBLAS_LT_WORKSPACE_SIZE out of range,",
+                 " using default workspace size of ", workspace_size, " bytes.");
+    }
+  }
+  return workspace_size * 1024;
+}
+
+static size_t _getWorkspaceSize() {
+  static size_t workspace_size = _parseChosenWorkspaceSize();
+  return workspace_size;
+}
+
 } // anonymous namespace
 
 namespace at {
@@ -454,7 +476,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         CUDA_R_16F,
         ldc,
         CUDA_R_32F,
-        CUBLAS_GEMM_DFALT_TENSOR_OP));
+        CUBLAS_GEMM_DEFAULT_TENSOR_OP));
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
     TORCH_CUDABLAS_CHECK(cublasSgemmEx(
@@ -552,7 +574,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       CUDA_R_16BF,
       ldc,
       CUDA_R_32F,
-      CUBLAS_GEMM_DFALT_TENSOR_OP));
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 }
 #endif // !defined(USE_ROCM)
@@ -651,18 +673,18 @@ void gemm_and_bias(
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
-  if (std::is_same<Dtype, double>::value) {
+  if constexpr (std::is_same_v<Dtype, double>) {
     abcType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
-  } else if (std::is_same<Dtype, float>::value) {
+  } else if constexpr (std::is_same_v<Dtype, float>) {
     if (at::globalContext().allowTF32CuBLAS()) {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
     abcType = CUDA_R_32F;
-  } else if (std::is_same<Dtype, at::Half>::value) {
+  } else if constexpr (std::is_same_v<Dtype, at::Half>) {
     abcType = CUDA_R_16F;
-  } else if (std::is_same<Dtype, at::BFloat16>::value) {
+  } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abcType = CUDA_R_16BF;
   }
 
@@ -707,7 +729,7 @@ void gemm_and_bias(
   CuBlasLtMatmulPreference preference;
   // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
   // setting this to 1M.
-  size_t workspaceSize = 1024 * 1024;
+  size_t workspaceSize = _getWorkspaceSize();
   TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
       preference.descriptor(),
       CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,

@@ -513,26 +513,6 @@ int64_t _fused_sdp_choice_meta(
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 
-//  !!!!!! TODO: THIS NEEDS TO BE REMOVED BUT PEOPLE HAVE TRAINED THEIR MODELS
-//  WITH THIS OP BUILTIN !!!!!!
-std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
-    const Tensor& query_,
-    const Tensor& key,
-    const Tensor& value,
-    const c10::optional<Tensor>& attn_mask_,
-    double dropout_p,
-    bool need_attn_weights,
-    bool is_causal) {
-  if (!need_attn_weights) {
-    return std::make_tuple(
-        at::scaled_dot_product_attention(
-            query_, key, value, attn_mask_, dropout_p, is_causal, c10::nullopt),
-        Tensor());
-  }
-  return at::_scaled_dot_product_attention_math(
-      query_, key, value, attn_mask_, dropout_p, is_causal, c10::nullopt);
-}
-
 inline void validate_sdpa_input(
     const Tensor& query_,
     const Tensor& key,
@@ -615,7 +595,7 @@ Tensor scaled_dot_product_attention(
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
-          query_, key, value, compute_logsumexp, is_causal, scale);
+          query_, key, value, compute_logsumexp, dropout_p, is_causal, scale);
       return std::get<0>(out_and_lse);
     }
     case sdp::SDPBackend::math:
@@ -682,9 +662,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {
       if (dropout_mask.has_value()) {
-        auto attn_dropout_masked = attn.masked_fill(dropout_mask->logical_not(), 0.0);
+        // In order to validate the correctness of the fused kernels, we need to
+        // use the same dropout mask in order to compare the results.
+        TORCH_WARN_ONCE("Dropout mask should only be used for testing purposes.");
+        attn = attn.masked_fill(dropout_mask->logical_not(), 0.0);
         auto dropout_scaling = 1.0 / (1 - dropout_p);
-        return std::make_tuple(at::matmul(attn_dropout_masked, value * dropout_scaling), attn);
+        return std::make_tuple(at::matmul(attn, value * dropout_scaling), attn);
       } else {
         attn = at::dropout(attn, dropout_p, true);
       }

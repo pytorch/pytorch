@@ -8,6 +8,8 @@ on:
       - reopened
       - labeled
       - unlabeled
+    branches-ignore:
+      - nightly
   workflow_dispatch:
 
 jobs:

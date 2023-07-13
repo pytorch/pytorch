@@ -1,15 +1,21 @@
+from __future__ import annotations
+
+import dataclasses
+
 import functools
-from typing import Any
+
+from typing import Any, Optional
 
 import onnxscript  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
 
 import torch
+import torch.fx
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import decorator, formatter, utils
 
-_LENGTH_LIMIT: int = 80
+_LENGTH_LIMIT: int = 89
 
 # NOTE(bowbao): This is a shim over `torch.onnx._internal.diagnostics`, which is
 # used in `torch.onnx`, and loaded with `torch`. Hence anything related to `onnxscript`
@@ -39,7 +45,7 @@ def format_argument(obj: Any) -> str:
             )
         )
         diag.with_location(utils.function_location(formatter))
-        diagnostics.export_context().add_diagnostic(diag)
+        diagnostics.export_context().log(diag)
 
     return result_str
 
@@ -64,6 +70,11 @@ def _torch_fx_graph_module(obj: torch.fx.GraphModule) -> str:
 
 
 @_format_argument.register
+def _torch_fx_node(obj: torch.fx.Node) -> str:
+    return f"fx.Node({obj.name}[{obj.op}]'{obj.target}')"
+
+
+@_format_argument.register
 def _torch_tensor(obj: torch.Tensor) -> str:
     return f"Tensor(shape={obj.shape}, dtype={obj.dtype})"
 
@@ -80,7 +91,7 @@ def _onnxscript_torch_script_tensor(obj: graph_building.TorchScriptTensor) -> st
 
 
 @_format_argument.register
-def _onnxscript_onnx_function(obj: onnxscript.values.OnnxFunction) -> str:
+def _onnxscript_onnx_function(obj: onnxscript.OnnxFunction) -> str:
     return f"`OnnxFunction({obj.name})`"
 
 
@@ -93,3 +104,19 @@ diagnose_call = functools.partial(
 rules = diagnostics.rules
 levels = diagnostics.levels
 DiagnosticContext = infra.DiagnosticContext
+Diagnostic = infra.Diagnostic
+RuntimeErrorWithDiagnostic = infra.RuntimeErrorWithDiagnostic
+
+
+@dataclasses.dataclass
+class UnsupportedFxNodeDiagnostic(Diagnostic):
+    unsupported_fx_node: Optional[torch.fx.Node] = None
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # NOTE: This is a hack to make sure that the additional fields must be set and
+        # not None. Ideally they should not be set as optional. But this is a known
+        # limiation with `dataclasses`. Resolvable in Python 3.10 with `kw_only=True`.
+        # https://stackoverflow.com/questions/69711886/python-dataclasses-inheritance-and-default-values
+        if self.unsupported_fx_node is None:
+            raise ValueError("unsupported_fx_node must be specified.")

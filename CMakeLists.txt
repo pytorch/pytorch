@@ -340,6 +340,7 @@ option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
+option(DEBUG_CUDA "When compiling DEBUG, also attempt to compile CUDA with debug flags (may cause nvcc to OOM)" OFF)
 option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
 option(USE_PER_OPERATOR_HEADERS "Whether ATen should generate separate headers for each operator" ON)
 cmake_dependent_option(
@@ -348,6 +349,11 @@ cmake_dependent_option(
 cmake_dependent_option(
     BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 
+option(USE_MIMALLOC "Use mimalloc" OFF)
+# Enable third party mimalloc library to improve memory allocation performance on Windows.
+if(WIN32)
+  set(USE_MIMALLOC ON)
+endif()
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -408,6 +414,7 @@ option(USE_SYSTEM_FXDIV "Use system-provided fxdiv." OFF)
 option(USE_SYSTEM_BENCHMARK "Use system-provided google benchmark." OFF)
 option(USE_SYSTEM_ONNX "Use system-provided onnx." OFF)
 option(USE_SYSTEM_XNNPACK "Use system-provided xnnpack." OFF)
+option(USE_SYSTEM_ZSTD "Use system-provided zstd." OFF)
 option(USE_GOLD_LINKER "Use ld.gold to link" OFF)
 if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_CPUINFO ON)
@@ -423,8 +430,14 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_ONNX ON)
   set(USE_SYSTEM_XNNPACK ON)
   set(USE_SYSTEM_PYBIND11 ON)
+  if(USE_NCCL)
+    set(USE_SYSTEM_NCCL ON)
+  endif()
   if(USE_TBB)
     set(USE_SYSTEM_TBB ON)
+  endif()
+  if(USE_ZSTD)
+    set(USE_SYSTEM_ZSTD ON)
   endif()
 endif()
 
@@ -546,11 +559,6 @@ if(MSVC)
 endif(MSVC)
 
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
-
-if(NOT MSVC)
-  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -g -lineinfo --source-in-ptx")
-  string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -g -lineinfo --source-in-ptx")
-endif(NOT MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable.
@@ -715,6 +723,17 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
   "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 
+if(DEBUG_CUDA)
+  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
+  string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")
+  # CUDA-12.1 crashes when trying to compile with --source-in-ptx
+  # See https://github.com/pytorch/pytorch/issues/102372#issuecomment-1572526893
+  if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 12.1)
+    string(APPEND CMAKE_CUDA_FLAGS_DEBUG " --source-in-ptx")
+    string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " --source-in-ptx")
+  endif()
+endif(DEBUG_CUDA)
+
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
@@ -811,6 +830,8 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wvla-extension" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnewline-eof" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Winconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
@@ -855,6 +876,8 @@ if(NOT MSVC)
 
   append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-override" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
@@ -885,6 +908,7 @@ if(NOT MSVC)
   endif()
   append_cxx_flag_if_supported("-Wno-unused-but-set-variable" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-fstandalone-debug" CMAKE_CXX_FLAGS_DEBUG)
   string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
@@ -971,11 +995,11 @@ endif()
 
 if(APPLE)
     if(USE_MPS)
-      string(APPEND CMAKE_OBJCXX_FLAGS " -DUSE_MPS")
-      string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS -fno-objc-arc")
+      string(APPEND CMAKE_OBJCXX_FLAGS " -DUSE_MPS -fno-objc-arc")
+      string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS")
       string(APPEND CMAKE_SHARED_LINKER_FLAGS " -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
       # To suppress MPSGraph availability warnings
-      append_cxx_flag_if_supported("-Wno-unguarded-availability-new" CMAKE_CXX_FLAGS)
+      append_cxx_flag_if_supported("-Wno-unguarded-availability-new" CMAKE_OBJCXX_FLAGS)
     endif()
     append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
@@ -1014,6 +1038,16 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
+
+if(USE_MIMALLOC)
+  set(MI_OVERRIDE OFF)
+  set(MI_BUILD_SHARED OFF)
+  set(MI_BUILD_OBJECT OFF)
+  set(MI_BUILD_TESTS OFF)
+  add_definitions(-DUSE_MIMALLOC)
+  add_subdirectory(third_party/mimalloc)
+  include_directories(third_party/mimalloc/include)
+endif()
 
 # ---[ Main build
 add_subdirectory(c10)
