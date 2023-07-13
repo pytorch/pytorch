@@ -113,8 +113,7 @@ def validate_ir(node_or_nodes):
                     DynamicScalar,
                     TensorBox,
                     sympy.Symbol,
-                    sympy.core.relational.Relational,
-                    sympy.core.relational.Unequality,
+                    sympy.logic.boolalg.Boolean,
                     Expr,
                     torch._inductor.ir.ExpandView,
                 ),
@@ -486,6 +485,21 @@ def get_reduction_combine_fn(reduction_type, dtype):
                 ops.where(mask, a_index, b_index),
             )
 
+    elif reduction_type == "var_unnormalized":
+
+        def combine_fn(a, b):
+            a_mean, a_m2, a_weight = a
+            b_mean, b_m2, b_weight = b
+
+            delta = b_mean - a_mean
+            new_weight = a_weight + b_weight
+            w2_over_w = b_weight / new_weight
+            return (
+                a_mean + delta * w2_over_w,
+                a_m2 + b_m2 + delta * delta * a_weight * w2_over_w,
+                new_weight,
+            )
+
     else:
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
 
@@ -515,14 +529,13 @@ class Reduction(Loops):
         return self.reduction_type
 
     def store_reduction(self, output_name, indexer, vars, reduction_vars):
-        return ops.reduction(
-            output_name,
+        value = ops.reduction(
             self.dtype,
             self.src_dtype,
             self.reduction_type,
-            indexer(vars),
             self.inner_fn(vars, reduction_vars),
         )
+        return ops.store_reduction(output_name, indexer(vars), value)
 
     def index_length(self):
         return len(self.ranges) + len(self.reduction_ranges)
@@ -563,6 +576,25 @@ class Reduction(Loops):
         reduction_type,
         reduction_numel,
     ):
+        def _is_static(x):
+            return isinstance(x, (int, sympy.Integer))
+
+        should_split = (
+            is_triton(device)
+            and reduction_type
+            not in {
+                "argmax",
+                "argmin",
+                "var_unnormalized",
+            }
+            and config.split_reductions
+            and all(_is_static(r) for r in ranges)
+            and all(_is_static(r) for r in reduction_ranges)
+            and _is_static(reduction_numel)
+        )
+        if not should_split:
+            return ReductionHint.DEFAULT, 1
+
         num_sm = get_device_properties(device).multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
@@ -763,6 +795,19 @@ class Reduction(Loops):
                 )
 
             return lambda index: fn(index)[1]
+        elif reduction_type == "var_unnormalized":
+
+            def value_fn(index, rindex):
+                mean = inner_fn(index, rindex)
+                m2 = ops.constant(0, src_dtype)
+                weight = ops.constant(1, src_dtype)
+                return (mean, m2, weight)
+
+            def project_fn(index):
+                mean, m2, weight = fn(index)
+                return m2
+
+            return project_fn
         else:
             value_fn = inner_fn
             return fn
@@ -818,7 +863,7 @@ class Reduction(Loops):
 
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
-            if reduction_type in ("argmin", "argmax"):
+            if reduction_type in ("argmin", "argmax", "var_unnormalized"):
 
                 def fn(index):
                     return ops.constant(0, dst_dtype)
@@ -846,29 +891,25 @@ class Reduction(Loops):
                 ranges,
             )
 
-        split_reduction = (
-            is_triton(device)
-            and reduction_type
-            not in {
-                "argmax",
-                "argmin",
-            }
-            and config.split_reductions
+        # triton doesn't support reduce to single element well, so break it up
+        hint, split = cls.num_splits(
+            device,
+            dst_dtype,
+            src_dtype,
+            inner_fn,
+            ranges,
+            reduction_ranges,
+            reduction_type,
+            reduction_numel,
         )
-        if split_reduction:
-            # TODO(voz): dedup with sizevar util introduced in other PR
-            def _is_static(x):
-                return isinstance(x, (int, sympy.Integer))
-
-            split_reduction = (
-                all(_is_static(r) for r in ranges)
-                and all(_is_static(r) for r in reduction_ranges)
-                and _is_static(reduction_numel)
-            )
-
-        if split_reduction:
+        # intermediate reduction in split can contain complex indexing,
+        # and num_splits will fail to correctly set the hint
+        # reuse the passed hint if available
+        if reduction_hint == ReductionHint.DEFAULT:
+            reduction_hint = hint
+        if split > 1:
             # triton doesn't support reduce to single element well, so break it up
-            hint, split = cls.num_splits(
+            return cls.create_multilayer(
                 device,
                 dst_dtype,
                 src_dtype,
@@ -876,26 +917,9 @@ class Reduction(Loops):
                 ranges,
                 reduction_ranges,
                 reduction_type,
-                reduction_numel,
+                split,
+                reduction_hint,
             )
-            # intermediate reduction in split can contain complex indexing,
-            # and num_splits will fail to correctly set the hint
-            # reuse the passed hint if available
-            if reduction_hint == ReductionHint.DEFAULT:
-                reduction_hint = hint
-            if split > 1:
-                # triton doesn't support reduce to single element well, so break it up
-                return cls.create_multilayer(
-                    device,
-                    dst_dtype,
-                    src_dtype,
-                    inner_fn,
-                    ranges,
-                    reduction_ranges,
-                    reduction_type,
-                    split,
-                    reduction_hint,
-                )
 
         return TensorBox.create(
             Reduction(
@@ -932,6 +956,7 @@ class Reduction(Loops):
             "prod": 1,
             "xor_sum": 0,
             "any": 0,
+            "var_unnormalized": 0,
         }[reduction_type]
 
     @classmethod
@@ -2695,7 +2720,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, (sympy.Expr, sympy.Rel, int)):
+        if isinstance(x, (sympy.Expr, sympy.logic.boolalg.Boolean, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
@@ -3005,17 +3030,36 @@ class ScatterFallback(ExternKernel):
         else:
             (x, index) = [t.codegen_reference() for t in self.inputs]
             src = self.constant_args[1]
-        line = f"{self.kernel}({x}, {self.constant_args[0]}, {index}, {src}"
-        if self.kernel == "aten.scatter_":
-            if self.kwargs["reduce"]:
-                line += f", reduce={repr(self.kwargs['reduce'])}"
-        else:
-            line += ", ".join([""] + self.codegen_kwargs())
-        line += ")"
-        wrapper.writeline(line)
+        wrapper.generate_scatter_fallback(
+            x,
+            [x, self.constant_args[0], index, src],
+            self.kernel,
+            self.fn,
+            self.src_is_tensor,
+            self.kwargs["reduce"],
+            self.codegen_kwargs(),
+        )
 
     def should_allocate(self):
         return False
+
+    def get_cpp_kernel(self, fn, reduce):
+        if fn == "aten.scatter_":
+            if self.src_is_tensor:
+                kernel = (
+                    "at::scatter_out" if reduce is None else "at::scatter_reduce_out"
+                )
+            else:
+                assert (
+                    reduce is None
+                ), "Expect reduce to be None for aten.scatter_ with scalar src"
+                kernel = "at::scatter_out"
+        else:
+            assert (
+                reduce is not None
+            ), "Expect reduce to be not None for aten.scatter_reduce_"
+            kernel = "at::scatter_reduce_out"
+        return kernel
 
     def __init__(
         self,
@@ -3029,8 +3073,18 @@ class ScatterFallback(ExternKernel):
         include_self: bool = True,
     ):
         assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
-        self.kernel = fn
         self.src_is_tensor = isinstance(src, TensorBox)
+
+        if V.graph.cpp_wrapper:
+            # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
+            get_operator_enum = {"add": "sum", "multiply": "prod"}
+            if reduce in get_operator_enum:
+                reduce = get_operator_enum[reduce]
+            self.kernel = self.get_cpp_kernel(fn, reduce)
+        else:
+            self.kernel = fn
+        self.fn = fn
+
         constant_args: Tuple[Any, ...]
         if self.src_is_tensor:
             tensors = [self.realize_input(t) for t in [x, index, src]]
@@ -3045,6 +3099,7 @@ class ScatterFallback(ExternKernel):
             constant_args,
             {"reduce": reduce, "include_self": include_self},
         )
+        self.ordered_kwargs_for_cpp_kernel = ["reduce", "include_self"]
         self.name = V.graph.register_buffer(self)
 
 
@@ -3175,13 +3230,6 @@ class FallbackKernel(ExternKernelAlloc):
                 )
         else:
             if V.graph.cpp_wrapper:
-                from torch._inductor.codegen.wrapper import (
-                    SUPPORTED_FALLBACK_CPP_WRAPPER,
-                )
-
-                assert (
-                    kernel.__name__ in SUPPORTED_FALLBACK_CPP_WRAPPER
-                ), f"{kernel.__name__} is not supported with cpp wrapper"
                 self.use_cpp_op_schema = True
                 self.set_cpp_kernel(kernel)
             else:
@@ -3428,6 +3476,8 @@ def _prepare_convolution_fusion_create(
 
     x.realize()
     weight.realize()
+    if bias is not None:
+        bias.realize()
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
@@ -4467,17 +4517,28 @@ class LoopBodyBlock:
                 index = add_index(index, "writes", name)
                 return self._inner.store(name, index, value, mode)
 
-            def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+            def store_reduction(self, name, index, value):
                 index = add_index(index, "writes", name)
-                return self._inner.reduction(
-                    name, dtype, src_dtype, reduction_type, index, value
-                )
+                return self._inner.store_reduction(name, index, value)
 
             def index_expr(self, index, dtype):
                 if isinstance(index, (int, sympy.Integer)):
                     return self._inner.constant(int(index), dtype)
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
+
+            def bucketize(
+                self,
+                values,
+                offsets_name: str,
+                offsets_size: sympy.Expr,
+                indexing_dtype: torch.dtype,
+                right: bool,
+            ):
+                offsets_size = add_index(offsets_size, "other")
+                return self._inner.bucketize(
+                    values, offsets_name, offsets_size, indexing_dtype, right
+                )
 
             @staticmethod
             def masked(mask_proxy, masked_body: Callable[..., Any], other_proxy):
@@ -4572,7 +4633,7 @@ class Wait(ExternKernelAlloc):
 
     def codegen(self, wrapper):
         wrapper.add_import_once(
-            "from torch.distributed._functional_collectives import _wait_tensor"
+            "from torch.distributed._functional_collectives_impl import _wait_tensor"
         )
         (input_collective,) = [t.codegen_reference() for t in self.inputs]
         wrapper.writeline(f"{input_collective} = _wait_tensor({input_collective})")
@@ -4631,7 +4692,7 @@ class CollectiveKernel(ExternKernel):
         wrapper.add_import_once("import torch.distributed as dist")
         wrapper.add_import_once("import torch.distributed.distributed_c10d as c10d")
         wrapper.add_import_once(
-            "import torch.distributed._functional_collectives as fun_col"
+            "import torch.distributed._functional_collectives_impl as fun_col_impl"
         )
         # extract references to our args in string form for codegen output
         input_names = [t.codegen_reference() for t in self.inputs]
@@ -4646,7 +4707,7 @@ class CollectiveKernel(ExternKernel):
         self.codegen_output(wrapper, output_name, input_names)
         self.codegen_collective(wrapper, output_name, input_names)
         wrapper.writeline(
-            f"fun_col._register_tensor_work({output_name}, {output_name}_work)"
+            f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
         )
 
 
@@ -4816,7 +4877,7 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
         wrapper.writeline(
             f"{output_name}_work = dist.all_reduce_coalesced("
             f"{output_name}, "
-            f"op=fun_col._str_to_reduce_op('{str(self.reduce_op)}'), "
+            f"op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'), "
             f"group={output_name}_pg, "
             "async_op=True)"
         )
@@ -4845,7 +4906,7 @@ class AllReduce(InPlaceCollectiveKernel):
     def codegen_collective(self, wrapper, output_name, input_names):
         wrapper.writeline(
             f"{output_name}_work = dist.all_reduce("
-            f"{output_name}, async_op=True, group={output_name}_pg, op=fun_col._str_to_reduce_op('{str(self.reduce_op)}'))"
+            f"{output_name}, async_op=True, group={output_name}_pg, op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'))"
         )
 
 
@@ -4915,7 +4976,7 @@ class ReduceScatterTensor(OutOfPlaceCollectiveKernel):
         wrapper.writeline(
             f"{output_name}_work = dist.reduce_scatter_tensor("
             f"{output_name}[0], {output_name}_inputs[0], "
-            f"async_op=True, group={output_name}_pg, op=fun_col._str_to_reduce_op('{str(self.reduce_op)}'))"
+            f"async_op=True, group={output_name}_pg, op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'))"
         )
 
 
@@ -4952,7 +5013,7 @@ class AllGatherIntoTensorCoalesced(OutOfPlaceCollectiveKernel):
 
     def codegen_collective(self, wrapper, output_name, input_names):
         wrapper.writeline(
-            f"{output_name}_work = fun_col._all_gather_into_tensor_coalesced_fallback("
+            f"{output_name}_work = fun_col_impl._all_gather_into_tensor_coalesced_fallback("
             f"output_tensors={output_name}, "
             f"input_tensors={output_name}_inputs, "
             f"group={output_name}_pg, "
@@ -4995,10 +5056,10 @@ class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
 
     def codegen_collective(self, wrapper, output_name, input_names):
         wrapper.writeline(
-            f"{output_name}_work = fun_col._reduce_scatter_tensor_coalesced_fallback("
+            f"{output_name}_work = fun_col_impl._reduce_scatter_tensor_coalesced_fallback("
             f"output_tensors={output_name}, "
             f"input_tensors={output_name}_inputs, "
-            f"op=fun_col._str_to_reduce_op('{str(self.reduce_op)}'), "
+            f"op=fun_col_impl._str_to_reduce_op('{str(self.reduce_op)}'), "
             f"group={output_name}_pg, "
             "async_op=True)"
         )
