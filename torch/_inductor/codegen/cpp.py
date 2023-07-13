@@ -4,11 +4,9 @@ import functools
 import itertools
 import logging
 import math
-import os
 import re
 import sys
 from copy import copy, deepcopy
-from pathlib import Path
 from typing import Dict, List
 
 import numpy
@@ -20,11 +18,11 @@ from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 from torch.utils._sympy.functions import FloorDiv
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..optimize_indexing import get_expr_range, range_expressable_in_32_bits
+from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import SchedulerNode
 from ..utils import (
     cache_on_self,
@@ -285,28 +283,6 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)
     return sympy.simplify(new_index - index)
-
-
-@functools.lru_cache()
-def cpp_prefix_path():
-    path = Path(__file__).parent / "cpp_prefix.h"
-    with path.open() as f:
-        content = f.read()
-        _, filename = codecache.write(
-            content,
-            "h",
-        )
-    return filename
-
-
-def cpp_prefix():
-    filename = cpp_prefix_path()
-    if config.is_fbcode():
-        # We need relative paths, since we bundle up
-        # everything that we compile into a folder for remote compilation.
-        return f'#include "{os.path.basename(filename)}"'
-    else:
-        return f'#include "{filename}"'
 
 
 class CppPrinter(ExprPrinter):
@@ -1176,6 +1152,7 @@ class CppKernel(Kernel):
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
+        self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
@@ -1237,6 +1214,22 @@ class CppKernel(Kernel):
             )
         else:
             acc_type = reduction_acc_type(reduction_type, dtype)
+
+            if (reduction_type, acc_type) not in self.reduction_omp_dec:
+                if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
+                    # Scalar reduction for other reductions are declared by default
+                    self.reduction_prefix.splice(
+                        f"""\
+    #pragma omp declare reduction(\
+    {RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
+    omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
+    initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
+                """
+                    )
+                self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
+                    reduction_type
+                ]
+
             self.reduction_prefix.writeline(
                 f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
             )
@@ -1418,7 +1411,6 @@ class CppVecKernel(CppKernel):
             tiling_factor = codecache.pick_vec_isa().nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
-        self.reduction_omp_dec: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
     def load(self, name: str, index: sympy.Expr):
@@ -1529,7 +1521,7 @@ class CppVecKernel(CppKernel):
         acc_type = reduction_acc_type(reduction_type, dtype)
         acc_type_vec = reduction_acc_type_vec(reduction_type, dtype)
 
-        if reduction_type not in self.reduction_omp_dec:
+        if (reduction_type, acc_type) not in self.reduction_omp_dec:
             if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
                 # Scalar reduction for other reductions are declared by default
                 self.reduction_prefix.splice(
@@ -1540,6 +1532,11 @@ omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
 initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
             """
                 )
+            self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
+                reduction_type
+            ]
+
+        if (reduction_type, acc_type_vec) not in self.reduction_omp_dec:
             self.reduction_prefix.splice(
                 f"""\
 #pragma omp declare reduction(\
@@ -1548,7 +1545,9 @@ omp_out = {reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
 initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             """
             )
-            self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
+            self.reduction_omp_dec[reduction_type, acc_type_vec] = RTYPE_TO_CPP[
+                reduction_type
+            ]
 
         reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
@@ -2133,7 +2132,7 @@ class CppVecKernelChecker(CppVecKernel):
                             and expr <= i32_iinfo.max
                             and expr >= i32_iinfo.min
                         )
-                    expr_ranges = get_expr_range(expr, vars_ranges)
+                    expr_ranges = bound_sympy(expr, vars_ranges)
                     if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):
                         return False
                     return range_expressable_in_32_bits(
@@ -2750,7 +2749,7 @@ class KernelGroup:
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
-        code.writeline(cpp_prefix())
+        code.writeline(codecache.cpp_prefix())
 
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():
