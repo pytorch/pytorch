@@ -387,19 +387,19 @@ def compile_fx_inner(
                 compiled_graph.current_callable = compiled_artifact
 
             if len(set(compiled_graph.device_types)) > 1:
-                perf_hint_log.warning("skipping cudagraphs due to multiple devices")
+                perf_hint_log.info("skipping cudagraphs due to multiple devices")
             elif set(compiled_graph.device_types) == {"cuda"}:
                 if compiled_graph.mutated_inputs:
-                    perf_hint_log.warning("skipping cudagraphs due to input mutation")
+                    perf_hint_log.info("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
-                    perf_hint_log.warning(
+                    perf_hint_log.info(
                         "skipping cudagraphs due to complex input striding"
                     )
                 elif (
                     len(compiled_graph.device_idxs) > 1
                     and config.triton.cudagraph_trees
                 ):
-                    perf_hint_log.warning(
+                    perf_hint_log.info(
                         "skipping cudagraphs due to multiple device indexes"
                     )
 

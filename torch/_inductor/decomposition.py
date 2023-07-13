@@ -369,6 +369,16 @@ def _foreach_addcdiv_scalar(self, left_tensors, right_tensors, scalar=1):
     )
 
 
+@register_decomposition(aten._foreach_lerp.Scalar)
+def _foreach_lerp_scalar(start_tensors, end_tensors, weight):
+    return aten._foreach_add.List(
+        start_tensors,
+        aten._foreach_mul.Scalar(
+            aten._foreach_sub.List(end_tensors, start_tensors), weight
+        ),
+    )
+
+
 @functools.lru_cache(None)
 def fast_random_decomps():
     return {**decompositions, **extra_random_decomps}
