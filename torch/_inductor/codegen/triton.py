@@ -1207,7 +1207,9 @@ class TritonKernel(Kernel):
         if var.bounds.lower < 0:
             str_size = self.index_to_str(size)
             new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown():
+            if var.bounds != ValueRanges.unknown() and (
+                not isinstance(size, sympy.Expr) or size.is_constant()
+            ):
                 # Take the negative part of the bound and add size to it
                 # Then take union of that and the positive part
                 # This is a tighter bound than that of a generic ops.where, as we have info on the conde
