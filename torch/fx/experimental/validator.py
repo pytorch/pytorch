@@ -97,9 +97,10 @@ try:
         def min(self, a: z3.ArithRef, b: z3.ArithRef) -> z3.ArithRef:
             return z3.If(a < b, a, b)  # type: ignore[return-value]
 
+        # Python semantics for 'Mod' is defined as: p % q = p - floordiv(p, q) * q
+        # It should work with both integer and reals.
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
-            self.validator.add_assertion(q != 0)  # type: ignore[arg-type]
-            return Z3Ops.to_int(p) % Z3Ops.to_int(q)
+            return p - self.floordiv(p, q) * q
 
         def pow(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
             # Z3 can't handle complex numbers very well.

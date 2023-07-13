@@ -1,9 +1,13 @@
+#include <ATen/ATen.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
 
 #ifndef USE_ROCM
+#include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
+#include <cutlass/layout/layout.h>
+#include <cutlass/tensor_ref.h>
 #include <cutlass/epilogue/thread/linear_combination.h>
 #include <cutlass/epilogue/thread/linear_combination_relu.h>
 #include <cutlass/epilogue/thread/linear_combination_silu.h>
@@ -880,3 +884,172 @@ std::tuple<Tensor, Tensor> _structured_sparse_linear(
 
 } // namespace native
 } // namespace at
+
+// Following is just for testing purposes.
+namespace at {
+namespace native {
+
+#ifndef USE_ROCM
+// Copied from tools/util/include/host_reorder.h, from CUTLASS source
+// tree.  This is for simplicity - namely, this file is not under
+// include/cutlass in this tree, as other CUTLASS include files
+// needed, so it would require changing PyTorch CMake configuration;
+// furthermore, including this file produces build errors in PyTorch
+// at the moment.
+template <typename Element, typename LayoutDest, typename LayoutSrc>
+static void reorder_meta(cutlass::TensorRef<Element, LayoutDest> dest,
+                         cutlass::TensorRef<Element, LayoutSrc> src,
+                         const int problem_size_m, const int problem_size_k) {
+  for (int m = 0; m < problem_size_m; m++) {
+    for (int k = 0; k < problem_size_k; k++) {
+      // First reorder the rows.
+      int group = (sizeof(Element) == 2) ? 32 : 16;
+      int interweave = (sizeof(Element) == 2) ? 4 : 2;
+
+      int dest_row = m / group * group + (m % 8) * interweave + (m % group) / 8;
+      int dest_col = k;
+
+      // Next swizzle the 2x2 blocks from Z to N.
+      if (((dest_row % 2) == 0) && ((dest_col % 2) == 1)) {
+        ++dest_row;
+        --dest_col;
+      } else if (((dest_row % 2) == 1) && ((dest_col % 2) == 0)) {
+        --dest_row;
+        ++dest_col;
+      }
+
+      dest.at({dest_row, dest_col}) = src.at({m, k});
+    }
+  }
+}
+#endif
+
+std::tuple<Tensor, Tensor>
+_to_sparse_semi_structured(const Tensor& dense) {
+#ifndef USE_ROCM
+  // Check dimensions of the dense matrix.
+  TORCH_CHECK(dense.dim() == 2,
+              "torch._to_sparse_semi_structured: Expected dense argument to be "
+              "2D tensor, got ", dense.dim(), " dims");
+
+  // Determine PyTorch datatype for the metadata matrix.
+  auto meta_dtype = at::kChar;
+  auto dense_elems_per_meta_elem = 0;
+  if (dense.dtype() == at::kChar) {
+    meta_dtype = at::kInt;
+    dense_elems_per_meta_elem = 32;
+  } else if (dense.dtype() == at::kHalf || dense.dtype() == at::kBFloat16) {
+    meta_dtype = at::kShort;
+    dense_elems_per_meta_elem = 16;
+  } else {
+    AT_ERROR("torch._to_sparse_semi_structured: Invalid dense argument "
+             "datatype ", dense.dtype(), "encountered");
+  }
+
+  const auto dense_nrows = dense.size(0);
+  const auto dense_ncols = dense.size(1);
+
+  if (dense_nrows % 32 != 0) {
+    AT_ERROR("torch._to_sparse_semi_structured: Number of "
+             "row of dense matrix must be divisible by 32, but it is ",
+             dense_nrows);
+  }
+  if (dense_ncols % dense_elems_per_meta_elem != 0) {
+    AT_ERROR("torch._to_sparse_semi_structured: Number of columns of dense "
+             "matrix must be divisible by ", dense_elems_per_meta_elem,
+             ", but it is ", dense_ncols);
+  }
+
+  const auto dense_cpu = dense.to("cpu");
+
+  const auto mask_cpu = dense_cpu != at::zeros({1}, dense_cpu.options());
+
+  const auto sparse_cpu =
+    dense_cpu.masked_select(mask_cpu).view({dense_nrows, dense_ncols / 2});
+
+  const auto meta_nrows = dense_nrows;
+  const auto meta_ncols = dense_ncols / dense_elems_per_meta_elem;
+
+  auto meta_cpu = dense_cpu.new_empty({meta_nrows, meta_ncols},
+                                      at::TensorOptions().dtype(meta_dtype));
+  auto* mask_cpu_ptr = mask_cpu.data_ptr<bool>();
+  for (auto i = 0; i < meta_nrows; ++i) {
+    for (auto j = 0; j < meta_ncols; ++j) {
+      uint64_t meta_val = 0;
+      for (auto k = 0; k < dense_elems_per_meta_elem / 4; ++k, mask_cpu_ptr += 4) {
+        const auto mask_elems = std::make_tuple(
+          mask_cpu_ptr[0],
+          mask_cpu_ptr[1],
+          mask_cpu_ptr[2],
+          mask_cpu_ptr[3]
+        );
+        auto meta_quadruple = 0;
+        if (mask_elems == std::make_tuple(1, 1, 0, 0)) {
+          meta_quadruple = 4; // 0100
+        } else if (mask_elems == std::make_tuple(1, 0, 1, 0)) {
+          meta_quadruple = 8; // 1000
+        } else if (mask_elems == std::make_tuple(0, 1, 1, 0)) {
+          meta_quadruple = 9; // 1001
+        } else if (mask_elems == std::make_tuple(1, 0, 0, 1)) {
+          meta_quadruple = 12; // 1100
+        } else if (mask_elems == std::make_tuple(0, 1, 0, 1)) {
+          meta_quadruple = 13; // 1101
+        } else if (mask_elems == std::make_tuple(0, 0, 1, 1)) {
+          meta_quadruple = 14; // 1110
+        }
+        else {
+          AT_ERROR("torch._to_sparse_semi_structured: dense argument does not "
+                   "match 2:4 sparsity pattern");
+        }
+        meta_val = meta_val | (meta_quadruple << (4 * k));
+      }
+      const auto idx = i * meta_ncols + j;
+      if (meta_dtype == at::kShort) {
+        using MetaElement = int16_t;
+        const auto meta_cpu_ptr = meta_cpu.data_ptr<MetaElement>();
+        meta_cpu_ptr[idx] = (MetaElement)meta_val;
+      } else if (meta_dtype == at::kInt) {
+        using MetaElement = int32_t;
+        const auto meta_cpu_ptr = meta_cpu.data_ptr<MetaElement>();
+        meta_cpu_ptr[idx] = (MetaElement)meta_val;
+      }
+    }
+  }
+
+  auto meta_reordered_cpu = meta_cpu.new_empty({meta_nrows, meta_ncols});
+  using MetaLayout = cutlass::layout::RowMajor;
+  using MetaReorderedLayout = cutlass::layout::ColumnMajorInterleaved<2>;
+  if (meta_dtype == at::kShort) {
+    using MetaElement = int16_t;
+    auto meta_cpu_ref =
+      cutlass::TensorRef<MetaElement, MetaLayout>(
+          meta_cpu.data_ptr<MetaElement>(),
+          MetaLayout::packed({meta_nrows, meta_ncols}));
+    auto meta_reordered_cpu_ref =
+      cutlass::TensorRef<MetaElement, MetaReorderedLayout>(
+          meta_reordered_cpu.data_ptr<MetaElement>(),
+          MetaReorderedLayout::packed({meta_nrows, meta_ncols}));
+    reorder_meta(meta_reordered_cpu_ref, meta_cpu_ref, meta_nrows, meta_ncols);
+  } else if (meta_dtype == at::kInt) {
+    using MetaElement = int32_t;
+    auto meta_cpu_ref =
+      cutlass::TensorRef<MetaElement, MetaLayout>(
+          meta_cpu.data_ptr<MetaElement>(),
+          MetaLayout::packed({meta_nrows, meta_ncols}));
+    auto meta_reordered_cpu_ref =
+      cutlass::TensorRef<MetaElement, MetaReorderedLayout>(
+          meta_reordered_cpu.data_ptr<MetaElement>(),
+          MetaReorderedLayout::packed({meta_nrows, meta_ncols}));
+    reorder_meta(meta_reordered_cpu_ref, meta_cpu_ref, meta_nrows, meta_ncols);
+  }
+
+  return std::make_tuple(sparse_cpu.to(dense.device()),
+                         meta_reordered_cpu.to(dense.device()));
+#else
+  AT_ERROR("torch._to_sparse_semi_structured: ROCm doesn't support CUTLASS");
+  return std::make_tuple(Tensor{}, Tensor{});
+#endif
+}
+
+}  // namespace native
+}  // namespace at
