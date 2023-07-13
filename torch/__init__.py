@@ -700,6 +700,10 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
+        * :func:`torch.Tensor.resize_`, when called with a tensor that is not
+          quantized, sets new elements to a known value.  Floating point or
+          complex values are set to NaN. Integer values are set to the maximum
+          value.
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -741,6 +745,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
+        * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -1506,7 +1511,14 @@ class _TorchCompileInductorWrapper:
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
             from torch._inductor import list_mode_options
-            self.apply_options(list_mode_options(mode))
+            if mode == "reduce-overhead" and self.dynamic:
+                raise RuntimeError(
+                    "mode=reduce-overhead cannot be used together with dynamic=True! "
+                    "reduce-overhead enables cudagraph. dynamic=True forces recompiliation "
+                    "for each new shape, which defeats the purpose of cudagraph. "
+                    "Please only enable one of them."
+                )
+            self.apply_options(list_mode_options(mode, self.dynamic))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
@@ -1608,7 +1620,7 @@ def compile(model: Optional[Callable] = None, *,
         - "inductor" is the default backend, which is a good balance between performance and overhead
         - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
-        - To register an out-of-tree custom backend: https://pytorch.org/docs/master/dynamo/custom-backends.html
+        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/compile/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
         - "default" is the default mode, which is a good balance between performance and overhead
 
@@ -1705,10 +1717,6 @@ from torch import func as func
 from torch.func import vmap
 
 
-# ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
-from torch import onnx as onnx  # ONNX depends on a bunch of Dynamo stuff
-
-
 # The function _sparse_coo_tensor_unsafe is removed from PyTorch
 # Python API (v. 1.13), here we temporarily provide its replacement
 # with a deprecation warning.
@@ -1751,6 +1759,8 @@ _deprecated_attrs = {
 _lazy_modules = {
     "_dynamo",
     "_inductor",
+    # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+    "onnx",
 }
 
 def __getattr__(name):
