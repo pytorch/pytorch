@@ -207,6 +207,7 @@ def binary_folding_init():
                 )
             conv_args[2] = new_bias
         else:
+            assert binary_node.target in [aten.mul.Tensor, aten.div.Tensor]
             weight_broadcast_shape = [1 for _ in range(len(weight_meta_value.shape))]
             weight_broadcast_shape[0] = weight_meta_value.size(0)
             other_reshape1 = graph.create_node(
