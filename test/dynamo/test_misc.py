@@ -45,7 +45,6 @@ from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError, FloorDiv
-from torch.fx.experimental.validator import SympyToZ3, TranslationValidator
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -53,7 +52,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_MULTIGPU,
 )
-from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
+from torch.testing._internal.common_utils import TEST_Z3, freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
@@ -5906,6 +5905,7 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 9)
 
     def _prepare_for_translation_validator(self):
+        from torch.fx.experimental.validator import TranslationValidator
         validator = TranslationValidator()
 
         # SymPy symbols.
@@ -5917,8 +5917,9 @@ def ___make_guard_fn():
 
         return (s0, s1, s2), (z0, z1, z2), validator
 
-    @torch._dynamo.config.patch(translation_validation=True)
+    @unittest.skipIf(not TEST_Z3, "Z3 not installed")
     def test_sympy_to_z3_translation(self):
+        from torch.fx.experimental.validator import SympyToZ3
         import z3
 
         (
@@ -5988,7 +5989,7 @@ def ___make_guard_fn():
                 z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}"
             )
 
-    @torch._dynamo.config.patch(translation_validation=True)
+    @unittest.skipIf(not TEST_Z3, "Z3 not installed")
     def test_translation_validator_sat(self):
         (
             (s0, s1, s2),
@@ -6008,7 +6009,7 @@ def ___make_guard_fn():
         self.assertIsNone(r.model)
         self.assertIsNone(r.failed_source_expr)
 
-    @torch._dynamo.config.patch(translation_validation=True)
+    @unittest.skipIf(not TEST_Z3, "Z3 not installed")
     def test_translation_validator_unsat(self):
         (
             (s0, s1, s2),
