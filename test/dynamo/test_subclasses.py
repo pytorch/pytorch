@@ -11,7 +11,7 @@ import torch.utils.checkpoint
 from torch.utils._pytree import tree_map_only
 
 
-class PassthroughAddSubclass(torch.Tensor):
+class PassthroughLeftAddSubclass(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
@@ -19,6 +19,30 @@ class PassthroughAddSubclass(torch.Tensor):
 
         if func == torch.add:
             return args[0]
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
+class PassthroughRightAddSubclassLeft(PassthroughLeftAddSubclass):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        if func == torch.add:
+            return args[1]
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
+class PassthroughRightAddSubclass(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        if func == torch.add:
+            return args[1]
 
         return super().__torch_function__(func, types, args, kwargs)
 
@@ -58,7 +82,9 @@ class MockSubclass(torch.Tensor):
 
 
 GLOBAL_TEST_SUBCLASSES = {
-    PassthroughAddSubclass,
+    PassthroughLeftAddSubclass,
+    PassthroughRightAddSubclass,
+    PassthroughRightAddSubclassLeft,
     PassthroughMulSubclass,
     WrapperSubclass,
     MockSubclass,
@@ -143,51 +169,75 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(res, LocalSubclass)
 
     def test_multi_subclass_dispatch_notimpl(self):
-        import logging
-
-        torch._logging.set_logs(dynamo=logging.DEBUG)
-
-        def fn(x, y):
-            z = torch.add(x, y)
-            return torch.div(x, z)
-
-        fn_opt = compile_full_eager(fn)
+        @compile_full_eager
+        def fn(x, y, z):
+            return torch.sqrt(z), torch.div(x, y)
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported, "returned NotImplemented"
         ):
-            input0 = torch.ones(2, 2).as_subclass(PassthroughAddSubclass)
+            input0 = torch.ones(2, 2).as_subclass(PassthroughLeftAddSubclass)
             input1 = torch.ones(2, 2).as_subclass(PassthroughMulSubclass)
-            fn_opt(input0, input1)
+            fn(input0, input1, torch.ones(2, 2))
 
     def test_multi_subclass_dispatch_subclass_tiebreak(self):
-        pass
+        @compile_full_eager
+        def fn(x, y, z):
+            return torch.sqrt(z), torch.add(x, y)
+
+        input0 = torch.ones(2, 2).as_subclass(PassthroughLeftAddSubclass)
+        input1 = torch.zeros(2, 2).as_subclass(PassthroughRightAddSubclass)
+
+        _, res = fn(input0, input1, torch.ones(2, 2))
+
+        self.assertEqual(res, input0)
 
     def test_multi_subclass_dispatch_ordering_tiebreak(self):
-        pass
+        @compile_full_eager
+        def fn(x, y, z):
+            return torch.sqrt(z), torch.add(x, y)
+
+        input0 = torch.ones(2, 2).as_subclass(PassthroughLeftAddSubclass)
+        input1 = torch.zeros(2, 2).as_subclass(PassthroughRightAddSubclassLeft)
+
+        _, res = fn(input0, input1, torch.ones(2, 2))
+
+        self.assertEqual(res, input1)
+
+    def test_multi_subclass_dispatch_first_notimpl(self):
+        @compile_full_eager
+        def fn(x, y, z):
+            return torch.sqrt(z), torch.add(x, y)
+
+        input0 = torch.ones(2, 2).as_subclass(PassthroughMulSubclass)
+        input1 = torch.zeros(2, 2).as_subclass(PassthroughLeftAddSubclass)
+
+        _, res = fn(input0, input1, torch.ones(2, 2))
+
+        self.assertEqual(res, input0)
 
     def test_torch_function_trace(self):
-        def fn(x):
-            return torch.add(x, 10.0)
+        def fn(x, y):
+            return torch.sqrt(y), torch.add(x, 10.0)
 
         fn_opt = compile_full_eager(fn)
 
-        input = torch.ones(2, 2).as_subclass(PassthroughAddSubclass)
-        res_exp = fn(input)
-        res_act = fn_opt(input)
+        input = torch.ones(2, 2).as_subclass(PassthroughLeftAddSubclass)
+        _, res_exp = fn(input, torch.ones(2, 2))
+        _, res_act = fn_opt(input, torch.ones(2, 2))
 
         self.assertEqual(res_exp, res_act)
         self.assertEqual(res_act, torch.ones(2, 2))
 
     def test_torch_function_trace_other_arg_positions(self):
-        def fn(x):
-            return torch.add(torch.ones(3, 3), x)
+        def fn(x, y):
+            return torch.sqrt(y), torch.add(torch.ones(3, 3), x)
 
         fn_opt = compile_full_eager(fn)
 
-        input = torch.ones(2, 2).as_subclass(PassthroughAddSubclass)
-        res_exp = fn(input)
-        res_act = fn_opt(input)
+        input = torch.ones(2, 2).as_subclass(PassthroughLeftAddSubclass)
+        _, res_exp = fn(input, torch.ones(2, 2))
+        _, res_act = fn_opt(input, torch.ones(2, 2))
 
         self.assertEqual(res_exp, res_act)
         self.assertEqual(res_act, torch.ones(3, 3))
@@ -201,7 +251,24 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         pass
 
     def test_disable_torch_function_context(self):
-        pass
+        import logging
+
+        torch._logging.set_logs(dynamo=logging.DEBUG)
+
+        @compile_full_eager
+        def fn(x, y, z):
+            with torch._C.DisableTorchFunctionSubclass(), torch.no_grad():
+                return torch.sqrt(z), torch.add(x, y)
+
+        input0 = torch.ones(2, 2)
+        input1 = torch.ones(2, 2).as_subclass(PassthroughLeftAddSubclass)
+
+        _, res = fn(input0, input1, torch.ones(2, 2))
+
+        with torch._C.DisableTorchFunctionSubclass():
+            exp = torch.add(input0, input1)
+
+        self.assertEqual(exp, res)
 
 
 if __name__ == "__main__":

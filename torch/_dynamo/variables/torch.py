@@ -375,8 +375,10 @@ class TorchVariable(VariableTracker):
                 )
             else:
                 unimplemented(f"torch.from_numpy(<{type(t)}>)")
-        elif len(args) > 0 and any(
-            isinstance(arg, TensorWithTFOverrideVariable) for arg in args
+        elif (
+            len(args) > 0 or len(kwargs) > 0
+        ) and TensorWithTFOverrideVariable.can_dispatch_torch_function(
+            tx, args, kwargs
         ):
             # This code block implements inlining the __torch_function__
             # override of a tensor.

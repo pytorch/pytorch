@@ -768,6 +768,16 @@ class TensorWithTFOverrideVariable(VariableTracker):
         return f"__subclass_{self.subclass_type.__name__}"
 
     @staticmethod
+    def can_dispatch_torch_function(tx, args, kwargs):
+        if tx.output.torch_function_enabled:
+            all_args = args + tree_flatten(kwargs)[0]
+            return any(
+                isinstance(arg, TensorWithTFOverrideVariable) for arg in all_args
+            )
+        else:
+            return False
+
+    @staticmethod
     def dispatch_torch_function(tx, fn, args, kwargs):
         """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
 
@@ -788,7 +798,10 @@ class TensorWithTFOverrideVariable(VariableTracker):
                 kwargs,
             )
 
-            if res != ConstantVariable(NotImplemented):
+            if not (
+                isinstance(res, variables.ConstantVariable)
+                and res.value is NotImplemented
+            ):
                 return res
 
         unimplemented(
