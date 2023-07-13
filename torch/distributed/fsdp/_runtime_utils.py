@@ -276,17 +276,10 @@ def _share_state_and_init_handle_attrs(
             "set yet or should have been set to `False`",
         )
         fsdp_state._is_root = False
-        # Stream for unshard logic, including allocating the all-gather destination
-        # tensors and the all-gathers themselves.
-        fsdp_state._streams_unshard = root_state._streams_unshard
-        # Stream for overlapping gradient reduction with the backward pass gradient
-        # computation.
-        fsdp_state._streams_post_backward = root_state._streams_post_backward
-        # Stream for pre-unshard logic, namely allocations and writes for CPU
-        # offloading (H2D copy) and mixed precision (low precision cast).
-        fsdp_state._streams_pre_unshard = root_state._streams_pre_unshard
-        # Default stream for computation
-        fsdp_state._streams_default = root_state._streams_default
+        fsdp_state._unshard_stream = root_state._unshard_stream
+        fsdp_state._post_backward_stream = root_state._post_backward_stream
+        fsdp_state._pre_unshard_stream = root_state._pre_unshard_stream
+        fsdp_state._default_stream = root_state._default_stream
         fsdp_state._exec_order_data = root_state._exec_order_data
         fsdp_state._free_event_queue = root_state._free_event_queue
         fsdp_state._handles_prefetched = root_state._handles_prefetched
@@ -313,15 +306,15 @@ def _init_streams(
     assert state._device_handle.is_available()
     # Stream for unshard logic, including allocating the all-gather destination
     # tensors and the all-gathers themselves.
-    state._streams_unshard = state._device_handle.Stream()
+    state._unshard_stream = state._device_handle.Stream()
     # Stream for overlapping gradient reduction with the backward pass gradient
     # computation.
-    state._streams_post_backward = state._device_handle.Stream()
+    state._post_backward_stream = state._device_handle.Stream()
     # Stream for pre-unshard logic, namely allocations and writes for CPU
     # offloading (H2D copy) and mixed precision (low precision cast).
-    state._streams_pre_unshard = state._device_handle.Stream()
+    state._pre_unshard_stream = state._device_handle.Stream()
     # Default stream for computation
-    state._streams_default = state._device_handle.current_stream()
+    state._default_stream = state._device_handle.current_stream()
 
 
 @no_type_check
@@ -471,9 +464,9 @@ def _pre_forward_unshard(
     # If the handles have been prefetched, then there is no need to call
     # `_unshard()` again
     if not state._handles_prefetched.get(handles_key, False):
-        _unshard(state, handles, state._streams_unshard, state._streams_pre_unshard)
+        _unshard(state, handles, state._unshard_stream, state._pre_unshard_stream)
     state._needs_pre_forward_unshard[handles_key] = False
-    state._device_handle.current_stream().wait_stream(state._streams_unshard)
+    state._device_handle.current_stream().wait_stream(state._unshard_stream)
     _prefetch_handles(state, handles_key, _PrefetchMode.FORWARD)
 
 
@@ -619,8 +612,8 @@ def _root_pre_forward(
                 state._needs_pre_forward_unshard[handles_key] = True
         _wait_for_computation_stream(
             state._device_handle.current_stream(),
-            state._streams_unshard,
-            state._streams_pre_unshard,
+            state._unshard_stream,
+            state._pre_unshard_stream,
         )
         _reset_flat_param_grad_info_if_needed(state._all_handles)
 
@@ -701,10 +694,10 @@ def _pre_backward_hook(
                 _unshard(
                     state,
                     _handles,
-                    state._streams_unshard,
-                    state._streams_pre_unshard,
+                    state._unshard_stream,
+                    state._pre_unshard_stream,
                 )
-            state._device_handle.current_stream().wait_stream(state._streams_unshard)
+            state._device_handle.current_stream().wait_stream(state._unshard_stream)
 
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
@@ -777,9 +770,9 @@ def _post_backward_hook(
 
         # Wait for all ops in the current stream (e.g. gradient
         # computation) to finish before reduce-scattering the gradient
-        state._streams_post_backward.wait_stream(state._device_handle.current_stream())
+        state._post_backward_stream.wait_stream(state._device_handle.current_stream())
 
-        with state._device_handle.stream(state._streams_post_backward):
+        with state._device_handle.stream(state._post_backward_stream):
             autograd_computed_grad = flat_param.grad.data
             if state._exec_order_data.is_first_iter:  # only check once
                 _check_comm_hook(
@@ -862,14 +855,14 @@ def _post_backward_hook(
                 # post-backward stream, inform the caching allocator
                 _no_dispatch_record_stream(
                     grad_to_offload.data,
-                    state._streams_post_backward,
+                    state._post_backward_stream,
                 )
 
             # Since the unsharded gradient is produced in the computation
             # stream and consumed in the post-backward stream, inform the
             # caching allocator (before it goes out of scope)
             _no_dispatch_record_stream(
-                autograd_computed_grad, state._streams_post_backward
+                autograd_computed_grad, state._post_backward_stream
             )
 
             if handle._use_orig_params:
@@ -998,7 +991,7 @@ def _post_backward_final_callback(
 
     if root_state._sync_gradients:
         state._device_handle.current_stream().wait_stream(
-            root_state._streams_post_backward
+            root_state._post_backward_stream
         )
         if root_state.cpu_offload.offload_params:
             # Wait for non-blocking GPU -> CPU sharded gradient copies from the
@@ -1122,7 +1115,7 @@ def _prefetch_handles(
                 )
         # Prefetch the next set of handles without synchronizing to allow
         # the sync to happen as late as possible to maximize overlap
-        _unshard(state, handles_key, state._streams_unshard, state._streams_pre_unshard)
+        _unshard(state, handles_key, state._unshard_stream, state._pre_unshard_stream)
         for handle, prev_training_state in zip(handles_key, prev_training_states):
             handle._training_state = prev_training_state
         state._handles_prefetched[handles_key] = True
