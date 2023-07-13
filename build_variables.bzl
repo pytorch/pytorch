@@ -958,6 +958,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
 # List of non-globed source used to build ATen core internally
 aten_cpu_non_globed_sources = [
     "aten/src/ATen/detail/CUDAHooksInterface.cpp",
+    "aten/src/ATen/detail/DeviceHooksInterface.cpp",
     "aten/src/ATen/detail/HIPHooksInterface.cpp",
     "aten/src/ATen/detail/MPSHooksInterface.cpp",
     "aten/src/ATen/detail/ORTHooksInterface.cpp",
@@ -972,6 +973,7 @@ aten_cpu_non_globed_headers = [
     "aten/src/ATen/CPUGeneratorImpl.h",
     "aten/src/ATen/NumericUtils.h",
     "aten/src/ATen/detail/CUDAHooksInterface.h",
+    "aten/src/ATen/detail/DeviceHooksInterface.h",
     "aten/src/ATen/detail/MPSHooksInterface.h",
     "aten/src/ATen/detail/HIPHooksInterface.h",
     "aten/src/ATen/detail/ORTHooksInterface.h",
