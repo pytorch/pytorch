@@ -406,6 +406,14 @@ class SymPyValueRangeAnalysis:
 
         return ValueRanges.coordinatewise_increasing_map(a, b, fn_)
 
+    @classmethod
+    def floor(cls, x):
+        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.floor)
+
+    @classmethod
+    def ceil(cls, x):
+        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
+
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def __init__(self):
@@ -516,14 +524,6 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
             return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
         else:
             return ValueRanges(sympy.Min(b.lower, c.lower), sympy.Max(b.upper, c.upper))
-
-    @classmethod
-    def floor(cls, x):
-        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.floor)
-
-    @classmethod
-    def ceil(cls, x):
-        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
 
     def __getattr__(self, name):
         log.warning("unhandled ValueRange op %s", name)
