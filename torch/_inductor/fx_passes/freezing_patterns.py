@@ -47,12 +47,11 @@ def freezing_passes(gm: torch.fx.GraphModule):
 
 @init_once_fakemode
 def lazy_init():
-    """
     if torch._C._has_mkldnn and config.cpp.weight_prepack:
         from .mkldnn_fusion import _mkldnn_weight_pack_init
 
         _mkldnn_weight_pack_init()
-    """
+
     addmm_patterns_init()
     binary_folding_init()
 
@@ -133,24 +132,26 @@ def binary_folding_init():
     _binary_ops = [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
     _computation_calls = [CallFunction(aten.convolution.default, *_conv_args)]
 
+    def _is_constant_node(node):
+        return isinstance(node, torch.fx.Node) and node.op == "get_attr"
+
     def _check_conv_and_broadcast_op(conv_node, other):
-        if not (isinstance(other, torch.fx.Node) and other.op != "get_attr"):
-            return False
-        if conv_node.args[1].op != "get_attr" or (
-            conv_node.args[2] is not None and conv_node.args[2].op != "get_attr"
+        if not all(
+            _is_constant_node(other)
+            for n in [conv_node.args[1], conv_node.args[2], other]
         ):
             return False
 
         weight_meta_value = conv_node.args[1].meta.get("val")
-        other_mata_value = other.meta.get("val")
-        if weight_meta_value is None or other_mata_value is None:
+        other_meta_value = other.meta.get("val")
+        if weight_meta_value is None or other_meta_value is None:
             return False
 
-        # TODO: other_mata_value.dtype < other_mata_value.dtype?
-        if other_mata_value.dtype != other_mata_value.dtype:
+        # TODO: weight_meta_value.dtype < other_meta_value.dtype?
+        if weight_meta_value.dtype != other_meta_value.dtype:
             return False
         weight_shape = weight_meta_value.shape
-        other_shape = other_mata_value.shape
+        other_shape = other_meta_value.shape
         # make sure len(weight_shape) ==  len(other_shape)(or +1)
         if (
             len(weight_shape) != len(other_shape)
@@ -206,12 +207,12 @@ def binary_folding_init():
                 )
             conv_args[2] = new_bias
         else:
-            weight_broad_shape = [1 for _ in range(len(weight_meta_value.shape))]
-            weight_broad_shape[0] = weight_meta_value.size(0)
+            weight_broadcast_shape = [1 for _ in range(len(weight_meta_value.shape))]
+            weight_broadcast_shape[0] = weight_meta_value.size(0)
             other_reshape1 = graph.create_node(
                 "call_function",
                 aten.reshape.default,
-                (other, tuple(weight_broad_shape)),
+                (other, tuple(weight_broadcast_shape)),
             )
             conv_args[1] = graph.create_node(
                 "call_function", binary_node.target, (conv_args[1], other_reshape1)
