@@ -1119,6 +1119,39 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(len(streams), 1)
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
+        @torch._dynamo.config.patch("assume_static_by_default", False)
+        def test_dynamic_backward(self):
+            def foo(x):
+                x = torch.cat([x, x])
+                return torch.addmm(x, x, x).relu(), x.size(0)
+
+            opt_foo = torch.compile(mode="reduce-overhead")(foo)
+
+            def run_test(foo, inp):
+                r, s = foo(inp)
+                r.sum().backward()
+                g = inp.grad.clone()
+                inp.grad = None
+                r = r.clone()
+                return r, s, g
+
+            def run_big_test(inp):
+                r0, s0, g0 = run_test(foo, inp)
+                r1, s1, g1 = run_test(opt_foo, inp)
+                r2, s2, g2 = run_test(opt_foo, inp)
+                self.assertEqual(r0, r1)
+                self.assertEqual(r0, r2)
+                self.assertEqual(s0, s1)
+                self.assertEqual(s0, s2)
+                self.assertEqual(g0, g1)
+                self.assertEqual(g0, g2)
+
+            inp = torch.randn(2, 4, device="cuda", requires_grad=True)
+            run_big_test(inp)
+
+            inp = torch.randn(3, 6, device="cuda", requires_grad=True)
+            run_big_test(inp)
+
         def test_forward_generation(self):
             def foo(x):
                 return x * x * x
