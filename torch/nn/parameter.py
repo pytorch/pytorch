@@ -200,8 +200,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
 class _BufferMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Buffer)` return True for custom tensor instances that have the _is_buffer flag.
     def __instancecheck__(self, instance):
-        return super().__instancecheck__(instance) or (
-            isinstance(instance, torch.Tensor) and getattr(instance, '_is_buffer', False))
+        return isinstance(instance, torch.Tensor) and getattr(instance, '_is_buffer', False)
 
 
 class Buffer(torch.Tensor, metaclass=_BufferMeta):
@@ -234,8 +233,8 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
                                f"type {type(t).__name__} was found instead. To use the type as a "
                                "Buffer, please correct the detach() semantics defined by "
                                "its __torch_dispatch__() implementation.")
-        t._is_buffer = True
         t.persistent = persistent
+        t._is_buffer = True
         return t
 
     def __deepcopy__(self, memo):
@@ -265,7 +264,7 @@ class Buffer(torch.Tensor, metaclass=_BufferMeta):
 
     __torch_function__ = _disabled_torch_function_impl
 
-class UninitializedBuffer(UninitializedTensorMixin, Buffer):
+class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     r"""A buffer that is not initialized.
 
     Uninitialized Buffer is a a special case of :class:`torch.Tensor`
@@ -281,11 +280,12 @@ class UninitializedBuffer(UninitializedTensorMixin, Buffer):
     during construction using e.g. ``device='cuda'``.
     """
 
-    cls_to_become = Buffer
+    cls_to_become = torch.Tensor
 
     def __new__(cls, requires_grad=False, device=None, dtype=None, persistent=True) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         data = torch.empty(0, **factory_kwargs)
         ret = torch.Tensor._make_subclass(cls, data, requires_grad)
         ret.persistent = persistent
+        ret._is_buffer = True
         return ret
