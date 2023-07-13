@@ -162,15 +162,27 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def constant(value, dtype):
         # NB: value is NOT a sympy expression, it's a constant!
-        assert isinstance(value, (int, float, bool))
+        is_python = isinstance(value, (int, float, bool))
+        assert is_python or isinstance(value, (BooleanAtom, sympy.Integer, sympy.Number))
 
         # using nan makes subsequent computation throw, and for the purposes of optimization
         # returning -math.inf - math.inf is equivalent to giving up
         if math.isnan(value):
             return ValueRanges.unknown()
 
-        type_ = dtype_to_type(dtype)
-        value = type_(value)
+        if is_python:
+            type_ = dtype_to_type(dtype)
+            value = type_(value)
+        else:
+            # We do a type check on a best-effort basis
+            # We don't want to force a cast to sympy.Float if the value is Rational to avoid losing precision
+            if dtype == torch.bool:
+                assert isinstance(value, BooleanAtom)
+            elif dtype.is_floating_point:
+                assert not value.is_finite or value.is_real
+            else:
+                # dtype is intXX
+                assert value.is_integer
 
         return ValueRanges.wrap(value)
 
@@ -314,7 +326,9 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.wrap(r)
 
         if b == 0:
-            type_ = sympy.Float if a.lower.is_Float else sympy.Integer
+            if not a.lower.is_finite:
+                return ValueRanges.unknown()
+            type_ = sympy.Float if a.lower.is_real else sympy.Integer
             return ValueRanges.wrap(type_(1))
 
         if b < 0:
@@ -381,12 +395,13 @@ class SymPyValueRangeAnalysis:
         def fn_(x, y):
             # Poorman's version of upcasting in Sympy
             # Inf is not a float...
-            if x.is_Float or not x.is_finite or y.is_Float or not y.is_finite:
-                result_type = sympy.Float
-            else:
-                assert x.is_Integer
-                assert y.is_Integer
+            if x.is_Integer and y.is_Integer:
                 result_type = sympy.Integer
+            elif x.is_rational and y.is_rational:
+                result_type = sympy.Rational
+            else:
+                assert x.is_real or not x.is_finite or y.is_real or not y.is_finite
+                result_type = sympy.Float
             return fn(result_type(x), result_type(y))
 
         return ValueRanges.coordinatewise_increasing_map(a, b, fn_)
