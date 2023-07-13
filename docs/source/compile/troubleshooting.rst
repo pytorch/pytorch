@@ -28,11 +28,11 @@ tools and their typical usage. For additional help see
      - Usage
    * - Info logging
      - View summarized steps of compilation
-     - ``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``
+     - ``torch._logging.set_logs(dynamo = logging.INFO)``
    * - Debug logging
      - View detailed steps of compilation (print every instruction traced)
      - ``torch._logging.set_logs(dynamo = logging.DEBUG)`` and
-       ``torch._dynamo.config.verbose = True``, or ``TORCH_LOGS="+dynamo" TORCHDYNAMO_VERBOSE=1``
+       ``torch._dynamo.config.verbose = True``
    * - Minifier for any backend
      - Find smallest subgraph which reproduces errors for any backend
      - set environment variable ``TORCHDYNAMO_REPRO_AFTER="dynamo"``
@@ -71,9 +71,6 @@ tools and their typical usage. For additional help see
      - set the environment variable TORCH_COMPILE_DEBUG=1 or
        ``torch._inductor.config.trace.enabled = True``
 
-In addition to info and debug logging, you can use `torch._logging <https://pytorch.org/docs/main/logging.html>`__
-for more fine-grained logging.
-
 Diagnosing Runtime Errors
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -86,7 +83,7 @@ graph lowering (TorchInductor)*. Errors can occur in any component of
 the stack and will provide full stack traces.
 
 You may use info logging
-(``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``) and look for
+(``torch._logging.set_logs(dynamo = logging.INFO)``) and look for
 ``Step #: ...`` outputs in order to determine in which component the
 error has occurred. Logs are made at the beginning and end of each step,
 so the step that an error should correspond to is the most recent logged
@@ -738,5 +735,4 @@ OS, Python< PyTorch, CUDA, and Triton versions info by running:
 -  A log (set ``torch._dynamo.config.log_file`` to a valid file name to
    dump the logs to a file and
    ``torch._logging.set_logs(dynamo = logging.DEBUG)`` and
-   ``torch._dynamo.config.verbose = True``), or
-   ``TORCH_LOGS="+dynamo" TORCHDYNAMO_VERBOSE=1``
+   ``torch._dynamo.config.verbose = True``)

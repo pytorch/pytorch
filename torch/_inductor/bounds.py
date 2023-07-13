@@ -87,10 +87,9 @@ class BoundVars:
     def get_index(self, name):
         expr = self.loop_body.indexing_exprs[name]
         bound = self.replacement_vals.get(expr)
-        if bound is None:
-            bound = bound_sympy(expr, self.replacement_vals)
-        # The following assertion is true at the time of this writing
-        # We don't assert is as to not execute bound_sympy when bound is not None
-        # assert bound is None or bound == bound_sympy(expr, self.replacement_vals)
+        if bound is not None:
+            return bound
+
+        bound = bound_sympy(expr, self.replacement_vals)
         self.replacement_vals[name] = bound
         return bound
