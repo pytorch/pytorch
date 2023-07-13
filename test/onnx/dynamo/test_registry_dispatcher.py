@@ -328,7 +328,7 @@ class TestOpSchemaWrapper(common_utils.TestCase):
     )
     def test_perfect_match_inputs(self, inputs, attributes, assertion):
         # OnnxFunction with default attributes
-        op_schema_wrapper_add = onnxfunction_dispatcher._OpSchemaWrapper(
+        op_schema_wrapper_add = onnxfunction_dispatcher._OnnxSchemaChecker(
             ops.core.aten_add
         )
         self.assertEqual(
@@ -373,7 +373,7 @@ class TestOpSchemaWrapper(common_utils.TestCase):
         ],
     )
     def test_matching_score_system_on_overload_dtypes(self, inputs, kwargs, op, score):
-        op_schema_wrapper = onnxfunction_dispatcher._OpSchemaWrapper(op)
+        op_schema_wrapper = onnxfunction_dispatcher._OnnxSchemaChecker(op)
         op_schema_wrapper._record_matching_score(inputs, kwargs)
         self.assertEqual(op_schema_wrapper.match_score, score)
 
@@ -414,7 +414,7 @@ class TestOpSchemaWrapper(common_utils.TestCase):
         ],
     )
     def test_matching_score_system_on_optional_dtypes(self, inputs, kwargs, op, score):
-        op_schema_wrapper = onnxfunction_dispatcher._OpSchemaWrapper(op)
+        op_schema_wrapper = onnxfunction_dispatcher._OnnxSchemaChecker(op)
         op_schema_wrapper._record_matching_score(inputs, kwargs)
         self.assertEqual(op_schema_wrapper.match_score, score)
 

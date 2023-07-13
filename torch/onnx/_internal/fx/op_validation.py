@@ -93,9 +93,9 @@ def validate_op_between_ort_torch(
 
         try:
             (
-                function_inputs,
-                function_attributes,
-            ) = _split_tangled_arguments_with_param_schemas(
+                function_eager_inputs,
+                function_eager_attributes,
+            ) = _convert_torch_args_to_onnxfunction_args(
                 symbolic_fn.param_schemas(),
                 torch_args,
                 torch_kwargs,
@@ -103,9 +103,9 @@ def validate_op_between_ort_torch(
                 allow_extra_kwargs=True,
             )
             # NOTE: Apply kwargs preprocessing AFTER they are split
-            function_attributes = (
+            function_eager_attributes = (
                 fx_onnx_interpreter.filter_incompatible_and_dtype_convert_kwargs(
-                    function_attributes
+                    function_eager_attributes
                 )
             )
         # NOTE: Imcompatible kwargs or missing required args
@@ -119,7 +119,9 @@ def validate_op_between_ort_torch(
             diagnostic.level = diagnostics.levels.WARNING
             return
         try:
-            ort_outputs = symbolic_fn(*function_inputs, **function_attributes)
+            ort_outputs = symbolic_fn(
+                *function_eager_inputs, **function_eager_attributes
+            )
         # NOTE: Error in ONNX Runtime with random inputs generated from FakTensors
         except RuntimeError as runtime_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
@@ -256,16 +258,15 @@ def wrap_fx_args_as_torch_args(
 
 
 # NOTE: Referenced from onnxscript internal function: _tag_arguments_with_param_schemas.
-# Importing this function makes the code less robust, as it is not a public API on onnxscript.
 @_beartype.beartype
-def _split_tangled_arguments_with_param_schemas(
+def _convert_torch_args_to_onnxfunction_args(
     param_schemas: Sequence[onnxscript.values.ParamSchema],
     args: List[fx_type_utils.Argument],
     kwargs: Dict[str, fx_type_utils.Argument],
     fill_defaults: bool = False,
     allow_extra_kwargs: bool = False,
 ) -> Tuple[List[Any], Dict[str, Any],]:
-    """Split tangled Python args and kwargs with matching ONNX ParamSchema.
+    """Convert Python args and kwargs to OnnxFunction acceptable with matching ONNX ParamSchema.
 
     Args:
         param_schemas: The parameter schemas of an Op or a OnnxFunction.
