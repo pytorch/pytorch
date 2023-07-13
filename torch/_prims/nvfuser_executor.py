@@ -297,6 +297,7 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
                     ),
                 )
             )
+        warn("nvfuser integration in primTorch is deprecated")
         result = tree_unflatten(
             fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
             unflatten_spec,  # type: ignore[has-type]
