@@ -158,7 +158,7 @@ class FileTimerServer:
         file_path: str,
         max_interval: float = 10,
         daemon: bool = True,
-        log_event: Optional[Callable[[str, Optional[FileTimerRequest]], None]] = None
+        log_event: Callable[[str, Optional[FileTimerRequest]], None] = None
     ) -> None:
         self._file_path = file_path
         self._max_interval = max_interval
