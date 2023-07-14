@@ -407,7 +407,7 @@ def _reshard_grads(
 @no_type_check
 def _pre_forward(
     state: _FSDPState,
-    handle: FlatParamHandle,
+    handle: Optional[FlatParamHandle],
     unshard_fn: Callable,
     module: nn.Module,
     args: Tuple[Any, ...],
@@ -1033,6 +1033,7 @@ def _catch_all_reshard(
             already_resharded = (
                 state._handle.flat_param.data_ptr()
                 == state._handle.flat_param._local_shard.data_ptr()
+                and not state._handle._skipped_use_sharded_views
             )
             if already_resharded:
                 return

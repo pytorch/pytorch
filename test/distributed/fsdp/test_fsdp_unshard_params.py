@@ -236,7 +236,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         NOTE: This method depends on FSDP internals.
         """
         model = FSDP(nn.Linear(1, 1, bias=False, device=self.device))
-        flat_param = model._handle[0].flat_param
+        flat_param = model._handle.flat_param
         self.assertEqual(1, flat_param.numel())
         # Write a known value to the *sharded* `FlatParameter`
         with torch.no_grad():
