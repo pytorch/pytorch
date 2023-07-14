@@ -192,7 +192,8 @@ class CrossMapLRN2d(Function):
         ctx.k = k
         ctx.scale = None
 
-        assert input.dim() == 4
+        if input.dim() != 4:
+            raise ValueError("CrossMapLRN2d: Expected input to be 4D, got {}D instead.".format(input.dim()))
 
         ctx.scale = ctx.scale or input.new()
         output = input.new()
