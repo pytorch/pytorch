@@ -2,6 +2,7 @@
 
 import json
 import os
+import warnings
 
 from dataclasses import dataclass
 from typing import Any, Callable, cast, Dict, List, Optional, Tuple
@@ -159,8 +160,10 @@ def gh_fetch_merge_base(org: str, repo: str, base: str, head: str) -> str:
         if json_data:
             merge_base = json_data.get("merge_base_commit", {}).get("sha", "")
         else:
-            print(f"Failed to get merge base for {base}...{head}: Empty response")
+            warnings.warn(
+                f"Failed to get merge base for {base}...{head}: Empty response"
+            )
     except Exception as error:
-        print(f"Failed to get merge base for {base}...{head}: {error}")
+        warnings.warn(f"Failed to get merge base for {base}...{head}: {error}")
 
     return merge_base

@@ -645,7 +645,7 @@ class TestTryMerge(TestCase):
 
 @mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
-# @mock.patch("trymerge.gh_fetch_merge_base", return_value="")
+@mock.patch("trymerge.gh_fetch_merge_base", return_value="")
 class TestBypassFailures(TestCase):
     def test_get_classifications(self, *args: Any) -> None:
         flaky_rules = [
