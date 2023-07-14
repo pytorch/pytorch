@@ -980,7 +980,6 @@ def compile_fx(
                     original_output_start_index : original_output_start_index
                     + num_orig_model_outputs
                 ]
-                if isinstance(n, torch.fx.Node)
             }
 
         return inner_compile(

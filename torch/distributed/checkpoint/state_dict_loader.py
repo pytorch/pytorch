@@ -20,7 +20,7 @@ def load_state_dict(
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: Optional[LoadPlanner] = None,
+    planner: LoadPlanner = None,
 ) -> None:
     """
     Loads a distributed ``state_dict`` in SPMD style.
