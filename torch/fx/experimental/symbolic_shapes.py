@@ -3251,7 +3251,7 @@ Target Guards:
             self.log.debug("eval %s [trivial]", orig_expr)
             # NB: don't test float as there may be precision issues
             if isinstance(hint, (int, bool)):
-                assert expr == hint, f"{expr} != {hint}"
+                assert orig_expr == hint, f"{orig_expr} != {hint}"
             return orig_expr
 
         expr = orig_expr
