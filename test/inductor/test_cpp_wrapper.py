@@ -85,9 +85,6 @@ test_failures_cuda_wrapper = {
     "test_custom_op_cuda_dynamic_shapes": test_torchinductor.TestFailure(
         ("cuda_wrapper",), is_skip=True
     ),
-    "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",), is_skip=True
-    ),
 }
 
 
@@ -142,7 +139,7 @@ if RUN_CPU:
         BaseTest(
             "test_conv2d_binary_inplace_fusion_failed",
             "cpu",
-            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
                 ["op_convolution_pointwise_binary.call"],
@@ -152,7 +149,7 @@ if RUN_CPU:
         BaseTest(
             "test_conv2d_binary_inplace_fusion_pass",
             "cpu",
-            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
                 ["op_convolution_pointwise_binary_.call"],
@@ -162,7 +159,7 @@ if RUN_CPU:
         BaseTest(
             "test_conv2d_unary",
             "cpu",
-            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             slow=True,
         ),
@@ -177,7 +174,7 @@ if RUN_CPU:
         BaseTest(
             "test_linear_binary",
             "",
-            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
             torch.backends.mkldnn.is_available()
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
@@ -286,11 +283,6 @@ if RUN_CUDA:
         ),
         BaseTest(
             "test_convolution1",
-            device=None,
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
-        BaseTest(
-            "test_mm_plus_mm2",
             device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),

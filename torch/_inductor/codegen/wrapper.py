@@ -890,11 +890,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def write_header(self):
         if V.graph.aot_mode:
-            with open(
-                os.path.join(os.path.dirname(__file__), "aot_inductor_interface.cpp"),
-                "r",
-            ) as f:
-                self.header.splice(f.read())
+            self.header.splice(
+                """
+                /* AOTInductor generated code */
+
+                #include <ATen/ScalarOps.h>
+                #include <torch/csrc/inductor/aot_inductor_interface.h>
+                """
+            )
         else:
             self.header.splice(
                 """
@@ -905,12 +908,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 '''
                 """
             )
-
-        self.header.splice(
-            """
-            #include <torch/csrc/inductor/inductor_ops.h>
-            """
-        )
 
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
@@ -1279,6 +1276,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.header.splice(
             """
             #include <ATen/native/BinaryOps.h>
+            #include <ATen/core/dispatch/Dispatcher.h>
             #include <c10/util/Exception.h>
             #include <c10/cuda/CUDAGuard.h>
 
