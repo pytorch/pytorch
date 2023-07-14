@@ -44,7 +44,11 @@ from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError, FloorDiv
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    FloorDiv,
+    Mod,
+)
 from torch.fx.experimental.validator import SympyToZ3, TranslationValidator
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
@@ -5110,26 +5114,27 @@ def fn():
 
         from torch._dynamo.utils import get_instruction_source_311
 
-        offsets = (3, 11, 15, 19, 23, 29, 35, 46, 58, 64)
+        offsets = (3, 11, 15, 19, 23, 29, 35, 46, 58)
         insts = list(dis.get_instructions(f))
-        expected = (
+        all_sources = "\n".join(
+            get_instruction_source_311(f.__code__, insts[offset]) for offset in offsets
+        )
+        self.assertExpectedInline(
+            all_sources,
             """\
             a = ( b   )   +   c
                 ~~~~~~~~~~^~~~~
-""",
-            """\
+
             a = (a + b) // (c - d)
                 ~~~~~~~~^^~~~~~~~~
-""",
-            """\
+
             a = b    \\
                 ~~~~~~
          +\\
          ^~
                c  # test
                ~
-""",
-            """\
+
                 (b  # test +
                 ~~~~~~~~~~~~
                     )  \\
@@ -5146,12 +5151,10 @@ def fn():
                 ~
             )  # test
             ~
-""",
-            """\
+
             a = bbb   [  ccc    ]
                 ~~~~~~^^^^^^^^^^^
-""",
-            """\
+
             b = bbbbb \\
                 ~~~~~~~
                 [  ccc # test
@@ -5164,16 +5167,13 @@ def fn():
 
                 ] # test
                 ^
-""",
-            """\
+
             a = bbb[ccc][ddd][eee]
                 ~~~~~~~~^^^^^
-""",
-            """\
+
             a = g(g(g(b)))
                   ^^^^^^^
-""",
-            """\
+
             a = g(h(
                   ^^
                 g(b),
@@ -5183,15 +5183,15 @@ def fn():
             ))
             ^
 """,
+        )
+        # test unicode (since assertExpectedInline doesn't support unicode)
+        self.assertEqual(
+            get_instruction_source_311(f.__code__, insts[64]),
             """\
             a = "🔥😂👌" + b
                 ~~~~~~^~~
 """,
         )
-        for offset, answer in zip(offsets, expected):
-            self.assertEqual(
-                get_instruction_source_311(f.__code__, insts[offset]), answer
-            )
 
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -6065,7 +6065,6 @@ def ___make_guard_fn():
                 (op(s0, s1), op(z0, z1))
                 for op in (
                     operator.add,
-                    operator.mod,
                     operator.mul,
                     operator.pow,
                 )
@@ -6091,9 +6090,18 @@ def ___make_guard_fn():
                 s0 / s1,
                 z3.ToReal(z0) * (z1**-1),
             ),
-            (s2 % (s0 / s1), z2 % z3.ToInt(z3.ToReal(z0) * (z1**-1))),
-            (s2 % (s0**3), z2 % z3.ToInt(z0**3)),
             (FloorDiv(s0, s1), z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))),
+            (Mod(s0, s1), z0 - z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1)) * z1),
+            (
+                Mod(s2, (s0 / s1)),
+                z2
+                - z3.ToReal(z3.ToInt(z3.ToReal(z2) / (z3.ToReal(z0) * z1**-1)))
+                * (z3.ToReal(z0) * z1**-1),
+            ),
+            (
+                Mod(s2, s0**3),
+                z2 - z3.ToReal(z3.ToInt(z3.ToReal(z2) / z0**3)) * z0**3,
+            ),
         ]
 
         toZ3 = SympyToZ3(validator)

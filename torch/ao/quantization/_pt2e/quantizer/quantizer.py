@@ -16,6 +16,8 @@ __all__ = [
     "SharedQuantizationSpec",
     "DerivedQuantizationSpec",
     "QuantizationAnnotation",
+    "QuantizationConfig",
+    "OperatorPatternType",
 ]
 
 # TODO: maybe remove torch.float32

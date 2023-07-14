@@ -4068,10 +4068,6 @@ GRADCHECK_NONDET_TOL = 1e-12
 
 TestEnvironment.def_flag("TEST_WITH_SLOW_GRADCHECK", env_var="PYTORCH_TEST_WITH_SLOW_GRADCHECK")
 
-# TODO: Remove once run_test.py is updated to use the flag instead.
-def is_slow_gradcheck_env() -> bool:
-    return TEST_WITH_SLOW_GRADCHECK
-
 skipIfSlowGradcheckEnv = unittest.skipIf(
     TEST_WITH_SLOW_GRADCHECK,
     "Tests that don't use gradcheck don't need to run on slow_gradcheck CI"

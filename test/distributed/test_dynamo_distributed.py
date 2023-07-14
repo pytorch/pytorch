@@ -29,7 +29,6 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     requires_nccl,
     _dynamo_dist_per_rank_init,
-    skip_if_rocm,
 )
 import torch._dynamo.logging
 from torch._dynamo.comptime import comptime
@@ -272,7 +271,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     sparingly for integration tests.
     """
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_aot_eager_multiprocess(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
@@ -305,7 +303,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
     @skip_if_lt_x_gpu(1)
-    @skip_if_rocm
     def test_fsdp_aot_eager(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)

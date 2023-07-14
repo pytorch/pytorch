@@ -29,7 +29,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
-from torch.utils.weak import WeakIdKeyDictionary
+from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -47,9 +47,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
     ConstantSource,
-    DefaultDeviceSource,
-    DeterministicAlgorithmsSource,
-    GradModeSource,
+    GlobalStateSource,
     is_constant_source,
     LocalSource,
     ParamBufferSource,
@@ -235,6 +233,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export_constraints = export_constraints
         self.frame_state = frame_state
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
+
+        # Used to maintain an alias between real values variable tracker for tensors we have seen.
+        # This map ensures that the only tensors in graph inputs, and the only tensors in guards are unique.
+        self.real_value_tensor_positive_aliases = WeakTensorKeyDictionary()
+
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(
@@ -259,14 +262,16 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
 
         self.guards.add(
-            DeterministicAlgorithmsSource().make_guard(
-                GuardBuilder.DETERMINISTIC_ALGORITHMS
-            )
+            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
         )
 
-        self.guards.add(GradModeSource().make_guard(GuardBuilder.GRAD_MODE))
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
 
-        self.guards.add(DefaultDeviceSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
+        )
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -303,6 +308,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.should_exit = False
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
+        self.torch_function_enabled = torch._C._is_torch_function_enabled()
 
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
@@ -389,6 +395,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def save_global_state(self):
         global_state = self.tracing_context.global_context.global_state
+
+        global_state["torch_function_enabled"] = (
+            self.set_torch_function_state,
+            self.torch_function_enabled,
+        )
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
         global_state["autocast_enabled"] = (
             torch.set_autocast_enabled,
@@ -688,7 +699,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         """
         assert reason is not None
 
-        from .eval_frame import disable
+        from .decorators import disable
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
@@ -873,7 +884,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
         """
-        from .eval_frame import disable
+        from .decorators import disable
 
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
@@ -1050,6 +1061,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
+
+    def set_torch_function_state(self, enabled: bool) -> None:
+        self.torch_function_enabled = enabled
 
 
 class SubgraphTracer(fx.Tracer):

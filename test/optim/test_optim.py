@@ -810,9 +810,16 @@ class TestOptim(TestCase):
             st_max_mem, mt_max_mem = max_mems
             intermediate_size = nparams * param.nelement() * param.element_size()
             nintermediates = 1  # we expect a budget of 1 intermediate most of the time
-            if 'capturable' in kwargs_with_flags and kwargs_with_flags['capturable']:
-                # with capturable in Adam, we have 2 extra intermediates for the bias_corrections
+            if (('capturable' in kwargs_with_flags and kwargs_with_flags['capturable']) or
+                    optimizer_constructor.__name__ == "Adadelta"):
+                # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
+                # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 nintermediates = 3
+            elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
+                # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
+                # Adagrad uses std and grads at the same time
+                # RMSprop uses avg and grads
+                nintermediates = 2
 
             self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
 
@@ -854,12 +861,20 @@ class TestOptim(TestCase):
             (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
             (optim.ASGD, dict(weight_decay=0)),
             (optim.ASGD, dict(weight_decay=1)),
+            (optim.ASGD, dict(weight_decay=0, maximize=True)),
+            (optim.ASGD, dict(weight_decay=1, maximize=True)),
             (optim.Adamax, dict(weight_decay=0)),
             (optim.Adamax, dict(weight_decay=1)),
+            (optim.Adamax, dict(weight_decay=0, maximize=True)),
+            (optim.Adamax, dict(weight_decay=1, maximize=True)),
             (optim.Adadelta, dict(weight_decay=0)),
             (optim.Adadelta, dict(weight_decay=1)),
+            (optim.Adadelta, dict(weight_decay=0, maximize=True)),
+            (optim.Adadelta, dict(weight_decay=1, maximize=True)),
             (optim.Adagrad, dict(weight_decay=0)),
             (optim.Adagrad, dict(weight_decay=1)),
+            (optim.Adagrad, dict(weight_decay=0, maximize=True)),
+            (optim.Adagrad, dict(weight_decay=1, maximize=True)),
         ]
 
     def test_multi_tensor_optimizers(self):
@@ -882,7 +897,12 @@ class TestOptim(TestCase):
             optimizer.step()
 
     def test_peak_mem_multi_tensor_optimizers(self):
-        configs = [(o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ == "Adam"]
+        configs = [
+            (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
+                "Adadelta", "Adagrad", "Adamax", "Adam", "AdamW", "ASGD", "NAdam",
+                "RAdam", "RMSprop"
+            ]
+        ]
         self._test_foreach_memory(configs)
 
     @property
