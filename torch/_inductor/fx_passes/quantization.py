@@ -41,7 +41,6 @@ dequantize_per_channel_weight_pattern = CallFunction(
     KeywordArg("w_dtype"),
 )
 
-
 dequantize_per_channel_clone_weight_pattern = CallFunction(
     aten.clone.default,
     dequantize_per_channel_weight_pattern,
@@ -70,7 +69,7 @@ dequantize_qconv_pt2e_pattern = CallFunction(
 )
 
 
-def generate_pattern_with_output_quant_pattern(computation_call):
+def generate_pattern_with_output_quant(computation_call):
     """
     quantize output:
         output = round(output * o_inv_scale)
@@ -97,69 +96,64 @@ def generate_pattern_with_output_quant_pattern(computation_call):
                     ),
                     KeywordArg("o_zp"),
                 ),
-                KeywordArg("o_qmin"),  # 0
+                KeywordArg("o_qmin"),
             ),
-            KeywordArg("o_qmax"),  # 127
+            KeywordArg("o_qmax"),
         ),
-        KeywordArg("o_dtype"),  # dtype=torch.uint8
+        KeywordArg("o_dtype"),
     )
     return quantize_conv_output_pattern_pt2e
 
 
-pattern_match_count = 0
-
-
-def _register_quantized_conv_lowering(pattern, computation_op, unary_attr):
-    @register_lowering_pattern(pattern)
+def _register_quantized_conv_lowering(
+    pattern,
+    pass_number,
+    computation_op,
+    fp32_output,
+    unary_attr,
+    unary_scalars,
+    unary_algorithm,
+):
+    @register_lowering_pattern(pattern, pass_number=pass_number)
     def qconv(match: Match, *args, **kwargs):
-        x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
-        b, stride, padding, dilation = (
-            kwargs["b"],
-            kwargs["stride"],
-            kwargs["padding"],
-            kwargs["dilation"],
+        # Activation QParams
+        x, x_scale, x_zp = (
+            kwargs["x"],
+            kwargs["x_scale"],
+            kwargs["x_zp"],
         )
-        groups, o_inv_scale, o_zero_point, o_dtype = (
-            kwargs["groups"],
-            kwargs["o_inv_scale"],
-            kwargs["o_zp"],
-            kwargs["o_dtype"],
-        )
-
-        # packed_weight = kwargs["packed_weight"]
+        # Weight QParams
         packed_weight, w_scale, w_zp = (
             kwargs["packed_weight"],
             kwargs["w_scale"],
             kwargs["w_zp"],
         )
-        global pattern_match_count
-
-        pattern_match_count += 1
-        print(
-            "---- matched the pattern v2 post op: {0} ----: {1}".format(
-                unary_attr,
-                pattern_match_count,
-            ),
-            flush=True,
+        # Conv Params
+        b, stride, padding, dilation, groups = (
+            kwargs["b"],
+            kwargs["stride"],
+            kwargs["padding"],
+            kwargs["dilation"],
+            kwargs["groups"],
         )
-
+        # Output QParams
+        o_inv_scale, o_zero_point = (
+            kwargs["o_inv_scale"],
+            kwargs["o_zp"],
+        )
         assert (
             kwargs["fp32_output"] is True
         )  # Expected int8-in fp32-out qconv in weight prepack phase
         assert (
             kwargs["attr"] == "none"
         )  # Expected no post op fused in weight prepack phase
-        weight_shape = packed_weight.get_size()
-        dim = len(weight_shape) - 2
         computation_args = (
-            dim,
             x,
             x_scale,
             x_zp,
             packed_weight,
             w_scale,
             w_zp,
-            -1,  # w_axis delete it later
             b,
             stride,
             padding,
@@ -167,11 +161,10 @@ def _register_quantized_conv_lowering(pattern, computation_op, unary_attr):
             groups,
             o_inv_scale,
             o_zero_point,
-            o_dtype,
-            False,  # fp32_output
-            unary_attr,  # unary_attr
-            [],  # unary_scalars
-            "",  # unary_algorithm
+            fp32_output,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
         )
         return L[computation_op](*computation_args)
 
@@ -179,13 +172,17 @@ def _register_quantized_conv_lowering(pattern, computation_op, unary_attr):
 
 
 def register_quantization_lowerings():
-    quantize_conv_output_pattern_pt2e = generate_pattern_with_output_quant_pattern(
+    quantize_conv_output_pattern_pt2e = generate_pattern_with_output_quant(
         dequantize_qconv_pt2e_pattern
     )
     _register_quantized_conv_lowering(
         quantize_conv_output_pattern_pt2e,
-        torch.ops.onednn.qconv2d_pointwise,
-        "none",
+        2,  # pass_number
+        torch.ops.onednn.qconv2d_pointwise,  # computation_op
+        False,  # fp32_output
+        "none",  # unary_attr
+        [],  # unary_scalars
+        "",  # unary_algorithm
     )
 
 

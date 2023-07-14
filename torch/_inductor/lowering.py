@@ -1237,14 +1237,12 @@ def register_onednn_fusion_ops():
 
         @register_lowering(torch.ops.onednn.qconv2d_pointwise, type_promotion_kind=None)
         def qconvolution_unary(
-            dim,
             x: TensorBox,
             x_scale,
             x_zp,
             packed_weight: TensorBox,
             w_scale: TensorBox,
             w_zp: TensorBox,
-            w_axis,
             bias: TensorBox,
             stride,
             padding,
@@ -1252,7 +1250,6 @@ def register_onednn_fusion_ops():
             groups,
             o_inv_scale,
             o_zero_point,
-            o_dtype,
             fp32_output,
             attr,
             scalars,
@@ -1260,14 +1257,12 @@ def register_onednn_fusion_ops():
         ):
             return TensorBox.create(
                 ir.QConvPointWisePT2E.create(
-                    dim,
                     x,
                     x_scale,
                     x_zp,
                     packed_weight,
                     w_scale,
                     w_zp,
-                    -1,  # w_axis delete it later
                     bias,
                     stride,
                     padding,
@@ -1275,11 +1270,10 @@ def register_onednn_fusion_ops():
                     groups,
                     o_inv_scale,
                     o_zero_point,
-                    o_dtype,
-                    fp32_output,  # fp32_output
-                    attr,  # unary_attr
-                    scalars,  # unary_scalars
-                    algorithm,  # unary_algorithm
+                    fp32_output,
+                    attr,
+                    scalars,
+                    algorithm,
                 )
             )
 
