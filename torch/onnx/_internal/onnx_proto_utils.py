@@ -12,7 +12,7 @@ from typing import Any, List, Mapping, Set, Tuple, Union
 import torch
 import torch.jit._trace
 import torch.serialization
-from torch.onnx import _constants, _exporter_states, _type_utils, errors
+from torch.onnx import _constants, _exporter_states, errors
 from torch.onnx._internal import _beartype, jit_utils, registration
 
 
@@ -292,29 +292,3 @@ def _find_onnxscript_op(
                 else None,
             )
     return onnx_function_list, included_node_func
-
-
-def _convert_tensor_to_numpy(input: Any) -> Any:
-    try:
-        import numpy as np
-    except ImportError:
-        raise ImportError(f"{__name__} needs numpy, but it's not installed.")
-
-    if isinstance(input, torch.Tensor):
-        return input.detach().cpu().numpy()
-    if isinstance(input, torch.dtype):
-        return int(_type_utils.JitScalarType.from_dtype(input).onnx_type())
-    if isinstance(input, (tuple, list)):
-        if len(input) == 0:
-            return np.array((), dtype=np.int64)
-        if isinstance(input[0], torch.Tensor):
-            return [_convert_tensor_to_numpy(x) for x in input]
-        if isinstance(input[0], bool):
-            return np.array(input, dtype=np.bool_)
-
-        # Just a sequence of numbers
-        if isinstance(input[0], int):
-            return np.array(input, dtype=np.int64)
-        if isinstance(input[0], float):
-            return np.array(input)
-    return input

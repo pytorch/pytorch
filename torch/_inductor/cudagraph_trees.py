@@ -401,12 +401,6 @@ def cudagraphify(
     )
 
 
-def is_live(weak_ref):
-    if weak_ref is None:
-        return False
-    return weak_ref() is not None
-
-
 class StorageWeakRefWrapper:
     """
     Wrapper around a storage weak ref. Will deallocate it upon expiration if invoked.
@@ -473,6 +467,16 @@ class StorageWeakRefWrapper:
             return f"StorageWeakRefWrapper to {self.data_ptr()}; dead"
         else:
             return f"StorageWeakRefWrapper to {self.data_ptr()}; alive"
+
+
+def is_live(weak_ref: Optional[StorageWeakRefWrapper]) -> bool:
+    return maybe_deref(weak_ref) is not None
+
+
+def maybe_deref(weak_ref: Optional[StorageWeakRefWrapper]) -> UntypedStorage:
+    if weak_ref is None:
+        return None
+    return weak_ref()
 
 
 @contextlib.contextmanager
@@ -1255,10 +1259,9 @@ class CUDAGraphNode:
     ) -> Optional[PathOutputIndex]:
         for depth, output_refs in enumerate(self.path_weakrefs):
             for output_index, storage_ref in enumerate(output_refs):
-                if storage_ref is None or not is_live(storage_ref):
-                    continue
-                if storage_ref.data_ptr() == t.untyped_storage().data_ptr():
-                    return (depth, output_index)
+                if (storage := maybe_deref(storage_ref)) is not None:
+                    if storage.data_ptr() == t.untyped_storage().data_ptr():
+                        return (depth, output_index)
 
         return None
 
@@ -1323,14 +1326,10 @@ class CUDAGraphNode:
         for depth, outputs_liveness in enumerate(expected_liveness):
             for output_idx, output_liveness in enumerate(outputs_liveness):
                 # tensor can die early, but it can't be alive when it should be dead
-                assert output_liveness or not is_live(
-                    self.path_weakrefs[depth][output_idx]
-                )
-
                 w = self.path_weakrefs[depth][output_idx]
-                if w is not None and is_live(w):
-                    stor_data_ptr = w.data_ptr()
-                    stor_weak_ptr = w()
+                if (stor_weak_ptr := maybe_deref(w)) is not None:
+                    assert output_liveness
+                    stor_data_ptr = stor_weak_ptr.data_ptr()
 
                     assert (stor_data_ptr in live_storage_data_ptrs) == (
                         stor_weak_ptr in live_storage_weak_ptrs
@@ -1344,6 +1343,8 @@ class CUDAGraphNode:
 
                     if is_persistent_alias:
                         assert stor_data_ptr not in live_blocks
+                else:
+                    assert not output_liveness
 
         for depth, output_index in newly_dead:
             assert not is_live(self.path_weakrefs[depth][output_index])
@@ -1451,8 +1452,8 @@ class CUDAGraphNode:
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
-                    assert isinstance(inp, (int, torch.SymInt))
-                    recording_inputs.append(int(inp))
+                    assert isinstance(inp, int)
+                    recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
                     # static_input does an allocation!
                     recording_inputs.append(static_input(inp))
