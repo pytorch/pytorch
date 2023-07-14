@@ -31,7 +31,7 @@ from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int, fx_placeholder_vals
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
-from torch.utils._python_dispatch import supports_mode_tracing
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from . import config
 from .partitioners import default_partition
@@ -750,8 +750,8 @@ def _get_hints(exprs):
 
 def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     args_flattened, _ = pytree.tree_flatten(args)
-    any_subclass_args = any(supports_mode_tracing(x) for x in args_flattened if isinstance(x, Tensor))
-    any_subclass_outputs = any(supports_mode_tracing(x) for x in fw_metadata.traced_tangents if isinstance(x, Tensor))
+    any_subclass_args = any(is_traceable_wrapper_subclass(x) for x in args_flattened if isinstance(x, Tensor))
+    any_subclass_outputs = any(is_traceable_wrapper_subclass(x) for x in fw_metadata.traced_tangents if isinstance(x, Tensor))
     # This tells us whether or not we need to perform any unwrapping/wrapping of tensor subclasses at runtime.
     return any_subclass_args or any_subclass_outputs
 
@@ -762,7 +762,7 @@ def create_subclass_meta(curr_args: List[Any]) -> List[Union[int, SubclassCreati
     idx = 0
     infos = []
     for a in curr_args:
-        if isinstance(a, torch.Tensor) and supports_mode_tracing(a):
+        if isinstance(a, torch.Tensor) and is_traceable_wrapper_subclass(a):
             inner_tensors, meta = a.__tensor_flatten__()
             subclass_type = type(a)
             start_idx = idx
@@ -2765,14 +2765,14 @@ def unwrap_tensor_subclasses(wrapped_args, *, trace_joint: bool):
         assert isinstance(wrapped_args[0], (tuple, list)) and isinstance(wrapped_args[1], (tuple, list))
         unwrapped_args_fw = []
         for a in wrapped_args[0]:
-            if isinstance(a, torch.Tensor) and supports_mode_tracing(a):
+            if isinstance(a, torch.Tensor) and is_traceable_wrapper_subclass(a):
                 a_unwrapped, _ = a.__tensor_flatten__()
                 unwrapped_args_fw += a_unwrapped
             else:
                 unwrapped_args_fw += [a]
         unwrapped_args_tangents = []
         for a in wrapped_args[1]:
-            if isinstance(a, torch.Tensor) and supports_mode_tracing(a):
+            if isinstance(a, torch.Tensor) and is_traceable_wrapper_subclass(a):
                 a_unwrapped, _ = a.__tensor_flatten__()
                 unwrapped_args_tangents += a_unwrapped
             else:
@@ -2782,7 +2782,7 @@ def unwrap_tensor_subclasses(wrapped_args, *, trace_joint: bool):
         unwrapped_args_fw = []
         assert isinstance(wrapped_args, (list, tuple))
         for a in wrapped_args:
-            if isinstance(a, torch.Tensor) and supports_mode_tracing(a):
+            if isinstance(a, torch.Tensor) and is_traceable_wrapper_subclass(a):
                 a_unwrapped, _ = a.__tensor_flatten__()
                 unwrapped_args_fw += a_unwrapped
             else:
@@ -3638,7 +3638,7 @@ def create_aot_dispatcher_function(
                 if isinstance(x, FakeTensor):
                     assert x.fake_mode is fake_mode
                     return x
-                if supports_mode_tracing(x):
+                if is_traceable_wrapper_subclass(x):
                     flat_inner_tensors, _ = x.__tensor_flatten__()
                     if all(isinstance(inner, FakeTensor) for inner in flat_inner_tensors):
                         assert all(inner.fake_mode is fake_mode for inner in flat_inner_tensors)

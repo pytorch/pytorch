@@ -34,7 +34,7 @@ from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import supports_mode_tracing, TorchDispatchMode
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass, TorchDispatchMode
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
 from torch.utils._stats import count, count_label
@@ -148,7 +148,7 @@ _like_tensor_constructors = (
 def is_fake_tensor(val):
     if isinstance(val, FakeTensor):
         return True
-    if supports_mode_tracing(val):
+    if is_traceable_wrapper_subclass(val):
         inner_tensors, _ = val.__tensor_flatten__()
         return all(is_fake_tensor(x) for x in inner_tensors)
     return False

@@ -15,14 +15,13 @@ import torch
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, is_fake_tensor
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraint,
     DimDynamic,
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
-from torch.utils._python_dispatch import supports_mode_tracing
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from .. import config, mutation_guard, replay_record, skipfiles
@@ -161,7 +160,9 @@ class GraphArg:
     def __post_init__(self):
         if isinstance(self._example, torch.Tensor):
             self._example = TensorWeakRef(self._example)
-            assert is_fake_tensor(self.fake_tensor)
+            assert isinstance(
+                self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
+            )
 
     def load(self, tx):
         return self.source.reconstruct(tx)
@@ -291,12 +292,7 @@ class VariableBuilder:
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
             (
-                (
-                    torch.Tensor,
-                    torch.nn.Parameter,
-                    torch._subclasses.FakeTensor,
-                    torch.distributed._tensor.DTensor,
-                ),
+                (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
                 cls.wrap_tensor,
             ),
             ((tuple, list, odict_values), cls.wrap_listlike),
@@ -888,7 +884,7 @@ class VariableBuilder:
                 torch.Tensor,
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
-            ) or supports_mode_tracing(value), type(value)
+            ), type(value)
             ignore_subclass = False
 
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
@@ -923,7 +919,7 @@ class VariableBuilder:
         # ignore_subclass changes
         fake_tensor_value = None
         example_value = tensor_variable.proxy.node.meta["example_value"]
-        if is_fake_tensor(example_value):
+        if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
             fake_tensor_value = example_value
 
         grapharg = GraphArg(source, value, False, fake_tensor_value)
@@ -1467,11 +1463,9 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
-    if type(e) in (
-        torch.Tensor,
-        torch.nn.Parameter,
-        torch.distributed._tensor.DTensor,
-    ) or (ignore_subclass and isinstance(e, torch.Tensor)):
+    if type(e) in (torch.Tensor, torch.nn.Parameter) or (
+        ignore_subclass and isinstance(e, torch.Tensor)
+    ):
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(
             e, is_tensor, guard_source=source.guard_source()
