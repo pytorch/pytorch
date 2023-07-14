@@ -190,7 +190,8 @@ def redistribute_dtensor(
         placements,
         shape=input.size(),
         dtype=input.dtype,
-        requires_grad=local_tensor.requires_grad,
+        # NB: the requires_grad on our inner tensor won't be accurate, figure this out from the spec.
+        requires_grad=input._spec.tensor_meta.requires_grad,
         stride=input.stride(),
     )
 

@@ -180,6 +180,12 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 "use local_tensor.detach() and make requires_grad consistent."
             )
 
+        # temp HACK to get DTensor working with AOTAutograd.
+        # This will also effectively turn off functionalization, requires some design to fix properly.
+        # (Planning on working to fix this when I'm back from PTO).
+        if torch._is_functional_tensor(local_tensor):
+            local_tensor = torch._from_functional_tensor(local_tensor)
+
         # new method instruct wrapper tensor from local_tensor and add
         # placement spec, it does not do actual distribution
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
@@ -218,11 +224,13 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return self._local_tensor, self._spec
+        return [self._local_tensor], self._spec
 
     @staticmethod
-    def __tensor_unflatten__(local_tensor, spec):
+    def __tensor_unflatten__(inner_tensors, spec):
         assert spec is not None
+        assert isinstance(inner_tensors, (list, tuple)) and len(inner_tensors) == 1
+        local_tensor = inner_tensors[0]
         return DTensor(
             local_tensor,
             spec.mesh,
