@@ -1832,7 +1832,7 @@ def clamp(
 @out_wrapper()
 def clamp_min(
     self: TensorLikeType,
-    min: Optional[TensorOrNumberLikeType] = None,
+    min: TensorOrNumberLikeType = None,
 ) -> TensorLikeType:
     return torch.clamp(self, min=min)  # type: ignore[arg-type]
 
@@ -1841,7 +1841,7 @@ def clamp_min(
 @out_wrapper()
 def clamp_max(
     self: TensorLikeType,
-    max: Optional[TensorOrNumberLikeType] = None,
+    max: TensorOrNumberLikeType = None,
 ) -> TensorLikeType:
     return torch.clamp(self, max=max)  # type: ignore[arg-type]
 
@@ -4654,7 +4654,7 @@ def logspace(
     ret = torch.linspace(
         start,
         end,
-        steps,  # type: ignore[arg-type]
+        steps,
         dtype=torch.float64,
         layout=layout,
         device=device,

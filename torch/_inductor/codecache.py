@@ -807,7 +807,7 @@ class AotCodeCache:
                     ).split(" ")
                     log.debug("aot compilation command: %s", " ".join(cmd))
                     try:
-                        subprocess.check_call(cmd)
+                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError as e:
                         raise exc.CppCompileError(cmd, e.output) from e
 
