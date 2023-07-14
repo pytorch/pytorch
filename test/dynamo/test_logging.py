@@ -409,7 +409,7 @@ print("arf")
             env=env,
         )
         self.assertIn("[rank0]:", stderr.decode("utf-8"))
-        
+
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
     def test_trace_call(self, records):
