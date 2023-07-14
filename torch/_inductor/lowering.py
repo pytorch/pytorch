@@ -1301,6 +1301,10 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target is aten.view_as_complex.default:
         return False
 
+    # We should be able to remove this special case once `disable_cpp_codegen` is killed.
+    if node.target is aten.lift_fresh_copy.default:
+        return False
+
     def check_skip_condition(node, is_output):
         if not isinstance(node, torch.fx.Node):
             return False
@@ -1805,6 +1809,22 @@ make_fallback(aten.exponential.default, warn=False)
 
 # ROCm specific fallback, perf issues are observed when registered
 make_fallback(aten.miopen_batch_norm, warn=False)
+
+
+# Register with type_promotion_kind None.
+# For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
+@register_lowering(aten.copy, type_promotion_kind=None)
+def copy(self, src, non_blocking=False):
+    x = src
+    if self.get_device() != src.get_device():
+        x = to_device(x, self.get_device())
+    if self.get_dtype() != src.get_dtype():
+        x = to_dtype(x, self.get_dtype())
+
+    if self.get_size() != src.get_size():
+        out = expand(x, self.get_size())
+        return clone(out)
+    return clone(x)
 
 
 @register_lowering(aten.clone)
@@ -2766,7 +2786,7 @@ def upsample_bicubic2d_default(
             return 1 / scale if scale is not None and scale > 0 else in_size / out_size
 
     def compute_source_index(scale, dst_index, align_corners):
-        dst_index_ie = ops.to_dtype(ops.index_expr(dst_index, torch.int32), torch.float32)
+        dst_index_ie = ops.index_expr(dst_index, torch.float32)
         scale = ops.constant(scale, torch.float32)
         if align_corners:
             return ops.mul(scale, dst_index_ie)
@@ -3436,6 +3456,9 @@ def _adaptive_avg_pool2d(x, output_size):
     if h_in == h_out and w_in == w_out:
         return clone(x)
 
+    if h_out == 0 or w_out == 0:
+        o_size = [*batch, h_out, w_out]
+        return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
     if h_in % h_out == 0 and w_in % w_out == 0:
         kernel_size = [h_in // h_out, w_in // w_out]
         return avg_pool2d(x, kernel_size)

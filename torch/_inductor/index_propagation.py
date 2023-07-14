@@ -190,7 +190,8 @@ class IndexPropagation:
         is_valid_expr = new_expr is not NotImplemented and (
             # Inductor doesn't expect floating point in sympy expressions, but
             # allow floating point constants to be propagated
-            new_expr.expr.is_constant() or is_integer_dtype(new_expr.dtype)
+            new_expr.expr.is_constant()
+            or new_expr.expr.is_integer
         )
         if not is_valid_expr:
             return self.fallback(name, args, kwargs)

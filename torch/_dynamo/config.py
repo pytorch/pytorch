@@ -129,6 +129,7 @@ skipfiles_inline_module_allowlist = {
     torch._decomp,
     torch.utils._contextlib,
     torch.utils._pytree,
+    torch.sparse,
 }
 
 # If a string representing a PyTorch module is in this ignorelist,
