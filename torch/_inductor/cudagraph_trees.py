@@ -1350,8 +1350,8 @@ class CUDAGraphNode:
                 # tensor can die early, but it can't be alive when it should be dead
                 w = self.path_weakrefs[depth][output_idx]
                 if (stor_weak_ptr_and_data_ptr := maybe_deref(w)) is not None:
-                    stor_weak_ptr, stor_data_ptr = stor_weak_ptr_and_data_ptr
                     assert output_liveness
+                    stor_weak_ptr, stor_data_ptr = stor_weak_ptr_and_data_ptr
                     assert (stor_data_ptr in live_storage_data_ptrs) == (
                         stor_weak_ptr in live_storage_weak_ptrs
                     )
@@ -1364,8 +1364,6 @@ class CUDAGraphNode:
 
                     if is_persistent_alias:
                         assert stor_data_ptr not in live_blocks
-                else:
-                    assert not output_liveness
 
         for depth, output_index in newly_dead:
             assert not is_live(self.path_weakrefs[depth][output_index])
