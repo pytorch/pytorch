@@ -1429,7 +1429,7 @@ class FunctionSchema:
 
         if self.arguments.tensor_options is not None:
             assert self.kind() == SchemaKind.functional, (
-                "Found an operator that is not functional or out varuabt, but has tensor options arguments."
+                "Found an operator that is not functional or out variant, but has tensor options arguments."
                 "This is not allowed- tensor options arguments are only allowed for factory functions."
                 f"schema: {str(self)}"
             )
