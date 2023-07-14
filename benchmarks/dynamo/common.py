@@ -1083,30 +1083,6 @@ def try_script(model, example_inputs):
         return None
 
 
-def format_pt_outputs(pt_outputs):
-    if isinstance(pt_outputs, torch.Tensor):
-        pt_outputs = (pt_outputs,)
-
-    pt_outputs, _ = pytree.tree_flatten(pt_outputs)
-
-    # Hack for huggingface model outputs
-    try:
-        from transformers import modeling_outputs
-    except ImportError:
-        pass
-    else:
-
-        def _to_tuple(x):
-            if isinstance(x, modeling_outputs.ModelOutput):
-                return x.to_tuple()
-            return x
-
-        pt_outputs = pytree.tree_map(_to_tuple, pt_outputs)
-        pt_outputs, _ = pytree.tree_flatten(pt_outputs)
-
-    return pt_outputs
-
-
 class AOTInductorModelCache:
     cache = dict()
 
@@ -1119,7 +1095,9 @@ class AOTInductorModelCache:
             output_tensors = []
             # TODO: we should be able to do this by querying AOTInductorModel
             example_outputs = eager_forward(model, example_inputs)
-            example_outputs = format_pt_outputs(example_outputs)
+            if isinstance(example_outputs, dict):
+                # Workaround Huggingface output type issue ModelOutput
+                example_outputs = dict(example_outputs)
             example_outputs, output_spec = pytree.tree_flatten(example_outputs)
             for output in example_outputs:
                 output_tensors.append(torch.empty_like(output))
@@ -1329,7 +1307,27 @@ class OnnxModelFromTorchScript:
         return tuple(arg.contiguous() for arg in pt_inputs)
 
     def format_pt_outputs(self, pt_outputs):
-        return format_pt_outputs(pt_outputs)
+        if isinstance(pt_outputs, torch.Tensor):
+            pt_outputs = (pt_outputs,)
+
+        pt_outputs, _ = pytree.tree_flatten(pt_outputs)
+
+        # Hack for huggingface model outputs
+        try:
+            from transformers import modeling_outputs
+        except ImportError:
+            pass
+        else:
+
+            def _to_tuple(x):
+                if isinstance(x, modeling_outputs.ModelOutput):
+                    return x.to_tuple()
+                return x
+
+            pt_outputs = pytree.tree_map(_to_tuple, pt_outputs)
+            pt_outputs, _ = pytree.tree_flatten(pt_outputs)
+
+        return pt_outputs
 
     def create_outputs(self, *example_outputs):
         return tuple(torch.empty_like(x) for x in example_outputs)
