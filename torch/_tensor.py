@@ -878,8 +878,7 @@ class Tensor(torch._C._TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
-        dtype = torch.result_type(other, self)
-        return torch.tensor(other, dtype=dtype, device=self.device) ** self
+        return torch.pow(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
