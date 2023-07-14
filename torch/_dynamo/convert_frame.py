@@ -477,6 +477,10 @@ def _compile(
         )
 
         assert output is not None
+
+        if output.graph.is_empty_graph():
+            return None
+
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(
