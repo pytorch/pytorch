@@ -861,7 +861,7 @@ def load(
     pickle_module: Any = None,
     *,
     weights_only: bool = False,
-    mmap: Optional[bool] = None,
+    mmap: bool = None,
     **pickle_load_args: Any
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
