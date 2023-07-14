@@ -864,7 +864,7 @@ class TestTensorBoardNumpy(BaseTestCase):
         )
         compare_proto(graph, self)
 
-class TestTensorProtoSummary(TestCase):
+class TestTensorProtoSummary(BaseTestCase):
     def test_float_tensor_proto(self):
         float_values = [1.0, 2.0, 3.0]
         actual_proto = (
