@@ -132,7 +132,8 @@ void multi_margin_loss_shape_check(
     int64_t& dim,
     const int64_t& ndims,
     const Tensor& input,
-    const Tensor& target) {
+    const Tensor& target,
+    const c10::optional<Tensor>& weight) {
     TORCH_CHECK(
         (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0,
         "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
@@ -150,6 +151,12 @@ void multi_margin_loss_shape_check(
         target.dim() <= 1 && target.numel() == nframe,
         "inconsistent target size, expected ", nframe, " but got ",
         target.sizes());
+    if (weight && weight->defined()) {
+      TORCH_CHECK(
+          weight->dim() <= 1 && weight->numel() == dim,
+          "inconsistent weight size, expected ", dim, " but got ",
+          weight->sizes());
+    }
 }
 
 }  // namespace (anonymous)
@@ -163,7 +170,7 @@ Tensor& multi_margin_loss_cuda_out(
 
   TORCH_CHECK(p == 1 || p == 2, "multi_margin_loss: Invalid p, expected 1 or 2 but got ", p);
 
-  multi_margin_loss_shape_check(nframe, dim, ndims, input_, target_);
+  multi_margin_loss_shape_check(nframe, dim, ndims, input_, target_, weights_);
 
   // produce a scalar output for 1d input
   if (reduction == Reduction::None && target_.dim() > 0) {
@@ -318,7 +325,7 @@ Tensor& multi_margin_loss_cuda_backward_out(
   TORCH_CHECK(p == 1 || p == 2,
               "multi_margin_loss_backward: Invalid p, expected 1 or 2 but got ", p);
 
-  multi_margin_loss_shape_check(nframe, dim, ndims, input_, target_);
+  multi_margin_loss_shape_check(nframe, dim, ndims, input_, target_, weights_);
   resize_output(grad_input_, input_.sizes());
 
   if (input_.numel() == 0) {

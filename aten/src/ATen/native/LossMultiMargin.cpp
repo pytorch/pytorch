@@ -103,7 +103,7 @@ void multi_margin_loss_out_cpu_template(
     const Tensor& target,
     int p,
     const Scalar& margin,
-    const Tensor& weight,
+    const c10::optional<Tensor>& weight,
     int64_t reduction) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
@@ -111,7 +111,7 @@ void multi_margin_loss_out_cpu_template(
 
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
 
-  multi_margin_loss_shape_check(nframe, dim, ndims, input, target);
+  multi_margin_loss_shape_check(nframe, dim, ndims, input, target, weight);
 
   // produce a scalar output for 1d input
   if (reduction == Reduction::None && target.dim() > 0) {
@@ -125,13 +125,17 @@ void multi_margin_loss_out_cpu_template(
 
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
+  Tensor weight_contiguous;
+  if (weight && weight->defined()) {
+    weight_contiguous = weight->contiguous();
+  }
 
   AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "multi_margin_loss_cpu_kernel", [&] {
         auto input_data = input_contiguous.data_ptr<scalar_t>();
         auto target_data = target_contiguous.data_ptr<int64_t>();
         auto weight_data =
-            weight.defined() ? weight.data_ptr<scalar_t>() : nullptr;
+            weight_contiguous.defined() ? weight_contiguous.data_ptr<scalar_t>() : nullptr;
         multi_margin_loss_cpu_kernel<scalar_t>(
             output,
             input_data,
@@ -219,7 +223,7 @@ void multi_margin_loss_backward_out_cpu_template(
 
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
 
-  multi_margin_loss_shape_check(nframe, dim, ndims, input, target);
+  multi_margin_loss_shape_check(nframe, dim, ndims, input, target, weight);
   grad_input.resize_as_(input);
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
 
@@ -262,12 +266,9 @@ Tensor multi_margin_loss_cpu(
     const Tensor& input,
     const Tensor& target,
     const Scalar& p,
-    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
+    const Scalar& margin,
+    const c10::optional<Tensor>& weight,
     int64_t reduction) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
   auto output = at::empty({0}, input.options());
   multi_margin_loss_out_cpu_template(
       output, input, target, p.toInt(), margin, weight, reduction);
@@ -277,13 +278,10 @@ Tensor multi_margin_loss_cpu(
 Tensor& multi_margin_loss_cpu_out(const Tensor& input,
     const Tensor& target,
     const Scalar& p,
-    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
+    const Scalar& margin,
+    const c10::optional<Tensor>& weight,
     int64_t reduction,
     Tensor& output) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
   multi_margin_loss_out_cpu_template(
       output, input, target, p.toInt(), margin, weight, reduction);
   return output;

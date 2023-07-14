@@ -325,7 +325,7 @@ def meta_index_select_out(self, dim, index, out):
     return out.copy_(torch.index_select(self, dim, index))
 
 
-def _multi_margin_loss_shape_check(ndims, input, target):
+def _multi_margin_loss_shape_check(ndims, input, target, weight):
     torch._check(
         (ndims == 2 and input.size(1) != 0)
         or (ndims == 1 and input.size(0) != 0)
@@ -344,6 +344,11 @@ def _multi_margin_loss_shape_check(ndims, input, target):
         target.dim() <= 1 and target.numel() == nframe,
         lambda: f"inconsistent target size, expected {nframe} but got {target.shape}",
     )
+    if weight is not None:
+        torch._check(
+            weight.ndim <= 1 and weight.numel() == dim,
+            lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",
+        )
 
     return nframe, dim
 
@@ -360,7 +365,7 @@ def meta_multi_margin_loss(
 ) -> Tensor:
     ndims = input.ndim
     torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
-    nframe, _ = _multi_margin_loss_shape_check(ndims, input, target)
+    nframe, _ = _multi_margin_loss_shape_check(ndims, input, target, weight)
     if reduction == Reduction.NONE.value and target.ndim > 0:
         return input.new_empty(nframe)
     else:
@@ -380,7 +385,7 @@ def meta_multi_margin_loss_backward(
 ) -> Tensor:
     ndims = input.ndim
     torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
-    _multi_margin_loss_shape_check(ndims, input, target)
+    _multi_margin_loss_shape_check(ndims, input, target, weight)
     return input.new_empty(input.shape)
 
 
