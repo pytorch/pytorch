@@ -129,8 +129,8 @@ class _RemoteModule(nn.Module):
         self,
         remote_device: str,
         module_cls: Type[nn.Module],
-        args: Tuple = None,
-        kwargs: Dict[str, Any] = None,
+        args: Optional[Tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
         _module_interface_cls: Any = None,
     ):
         """
@@ -358,7 +358,7 @@ class _RemoteModule(nn.Module):
     def bfloat16(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.bfloat16.__name__)
 
-    def to(self, *args, **kwargs) -> T:  # type: ignore[return]
+    def to(self, *args, **kwargs) -> T:  # type: ignore[misc, return, type-var]
         _raise_not_supported(self.to.__name__)
 
     def register_backward_hook(  # type: ignore[return]
@@ -377,7 +377,7 @@ class _RemoteModule(nn.Module):
     ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_pre_hook.__name__)
 
-    def register_forward_hook(  # type: ignore[return]
+    def register_forward_hook(  # type: ignore[return, override]
         self,
         hook: Union[
             Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
@@ -685,8 +685,8 @@ class RemoteModule(_RemoteModule):
         self,
         remote_device: str,
         module_cls: Type[nn.Module],
-        args: Tuple = None,
-        kwargs: Dict[str, Any] = None,
+        args: Optional[Tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(remote_device, module_cls, args, kwargs)
 
