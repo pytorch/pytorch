@@ -283,6 +283,13 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
 
 @register_meta(aten.copy_.default)
 def meta_copy_(self, src, non_blocking=False):
+    # This code simulates the original decomp from inductor,
+    # which runs most of the meta checks that we care about.
+    # In theory, we should make this more robust by carefully
+    # auditing our C++ copy_() kernel and copying the checks here.
+    intermediate = src.to(self, non_blocking)
+    if self.size() != intermediate.size():
+        aten.expand_copy.default(intermediate, self.size())
     return self
 
 
