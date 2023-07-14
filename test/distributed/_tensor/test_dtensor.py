@@ -10,6 +10,7 @@ from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
+from torch.distributed._functional_collectives_impl import _tensor_needs_wait
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -257,15 +258,21 @@ class DTensorTest(DTensorTestBase):
             dt2 = DTensor.from_local(y.reshape(4, 2), mesh, [Shard(1)], run_check=False)
             dt_out = torch.matmul(dt, dt2)
             dt_out_redistribute = dt_out.redistribute(mesh, [Replicate()])
+            # Make sure we haven't synced yet
+            self.assertTrue(_tensor_needs_wait(dt_out_redistribute))
             dt_out_redistribute_view = dt_out_redistribute_view(dt_out_redistribute_view.shape)
-            return dt_out_redistribute.to_local()
+            self.assertTrue(_tensor_needs_wait(dt_out_redistribute_view))
+            return dt_out_redistribute_view.to_local()
 
         opt_fn = torch.compile(fn, backend=aot_eager_graph, fullgraph=True)
 
         x = torch.arange(8, requires_grad=True, dtype=torch.float32)
         y = torch.arange(8, requires_grad=True, dtype=torch.float32)
         out = fn(x, y)
+        # Make sure we haven't synced yet
+        self.assertTrue(_tensor_needs_wait(out))
         out_view = out.view(-1)
+        self.assertTrue(_tensor_needs_wait(out_view))
 
         # Assert that output is a `AsyncCollectiveTensor`
         self.assertEqual(type(out_view), AsyncCollectiveTensor)

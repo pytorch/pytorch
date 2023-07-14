@@ -87,6 +87,13 @@ def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
         wait_reg.wait()
     return tensor
 
+def _tensor_needs_wait(tensor: torch.Tensor) -> Optional[bool]:
+    data_ptr = tensor.data_ptr()
+    wait_reg = data_ptr_to_work.get(data_ptr)
+    if wait_reg is None:
+        return None
+    return wait_reg.work != None
+
 def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
     reduceOp = reduceOp.upper()
     op = dist.ReduceOp.RedOpType.__members__.get(reduceOp)
