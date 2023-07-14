@@ -305,8 +305,8 @@ def _multi_tensor_rprop(
 
         # update stepsizes with step size updates
         torch._foreach_mul_(grouped_step_sizes, signs)
-        for step_size in grouped_step_sizes:
-            step_size.clamp_(step_size_min, step_size_max)
+        torch._foreach_clamp_min_(grouped_step_sizes, step_size_min)
+        torch._foreach_clamp_max_(grouped_step_sizes, step_size_max)
 
         # for dir<0, dfdx=0
         # for dir>=0 dfdx=dfdx
