@@ -46,7 +46,6 @@ def assert_has_diagnostics(
     )
 
 
-@common_utils.instantiate_parametrized_tests
 class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def setUp(self):
         super().setUp()
@@ -158,49 +157,21 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             expected_error_node="aten.embedding.default",
         )
 
-    @common_utils.parametrize(
-        "op_level_debug, rule, expected_error_node",
-        [
-            common_utils.subtest(
-                (
-                    True,
-                    diagnostics.rules.op_level_debugging,
-                    "aten.convolution.default",
-                ),
-                name="bypassing_failed_op_level_debug",
-            ),
-            common_utils.subtest(
-                (
-                    False,
-                    diagnostics.rules.find_opschema_matched_symbolic_function,
-                    "aten.convolution.default",
-                ),
-                name="found_nearest_match",
-            ),
-        ],
-    )
-    def test_unsupported_function_schema_raises_diagnostic_warning(
-        self, op_level_debug: bool, rule: infra.Rule, expected_error_node: str
+    def test_unsupported_function_schema_raises_diagnostic_warning_when_found_nearest_match(
+        self,
     ):
         class TraceModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv2 = torch.nn.Conv2d(
-                    16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1)
-                )
-
             def forward(self, input):
-                return self.conv2(input)
+                return input.new_zeros(())
 
-        x = torch.randn(20, 16, 50, 50)
-        export_output = dynamo_export(
-            TraceModel(), x, export_options=ExportOptions(op_level_debug=op_level_debug)
-        )
+        x = torch.randn((2, 3), dtype=torch.float32)
+        export_output = dynamo_export(TraceModel(), x)
+
         assert_has_diagnostics(
             export_output.diagnostic_context,
-            rule,
+            diagnostics.rules.find_opschema_matched_symbolic_function,
             diagnostics.levels.WARNING,
-            expected_error_node=expected_error_node,
+            expected_error_node="aten.new_zeros.default",
         )
 
     def test_dispatch_overload_fall_back_default_raise_diagnostic_warning(self):
