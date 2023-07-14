@@ -63,8 +63,8 @@ class _NamedOptimizer(optim.Optimizer):
         self,
         named_parameters: Mapping[str, Union[torch.Tensor, ShardedTensor]],
         optimizer_class: optim.Optimizer,
-        param_groups: Optional[Collection[Mapping[str, Any]]] = None,
-        module: Optional[nn.Module] = None,
+        param_groups: Collection[Mapping[str, Any]] = None,
+        module: nn.Module = None,
         *args,
         **kwargs,
     ) -> None:
