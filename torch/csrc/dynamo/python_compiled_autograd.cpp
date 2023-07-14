@@ -244,7 +244,7 @@ static TraceState call_begin_capture(
     AutogradCompilerCall& compiler_call,
     size_t num_outputs) {
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
-  THPObjectPtr pyinput(TPHVariable_WrapList(compiler_call.inputs));
+  THPObjectPtr pyinput(THPVariable_WrapList(compiler_call.inputs));
   THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       self, method_name, pyinput.get(), pysizeinput.get(), NULL)));
@@ -252,7 +252,7 @@ static TraceState call_begin_capture(
   PyObject *fake_inputs, *fake_sizes;
   check(PyArg_ParseTuple(pyresult.get(), "OO", &fake_inputs, &fake_sizes));
   return TraceState(
-      TPHVariable_UnpackList(fake_inputs),
+      THPVariable_UnpackList(fake_inputs),
       cache.unwrap_dynamic_inputs(fake_sizes),
       compiler_call.accumulate_grad,
       num_outputs);
@@ -260,7 +260,7 @@ static TraceState call_begin_capture(
 
 static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
   static PyObject* method_name = PyUnicode_InternFromString("end_capture");
-  THPObjectPtr pyinput(TPHVariable_WrapList(inputs));
+  THPObjectPtr pyinput(THPVariable_WrapList(inputs));
   return check(PyObject_CallMethodOneArg(self, method_name, pyinput.get()));
 }
 
@@ -411,7 +411,7 @@ variable_list compiled_autograd(
       if (call.tensor_pre_hooks.size() + call.pre_hooks.size() > 0) {
         // TODO(jansel): we should lift hooks to be inputs to the graph since we
         // are not specializing on them
-        THPObjectPtr pyinputs(TPHVariable_WrapList(inputs));
+        THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         for (const auto& hook : call.tensor_pre_hooks) {
           pyinputs = check(PyObject_CallMethod(
               py_compiler,
@@ -425,15 +425,15 @@ variable_list compiled_autograd(
           pyinputs = check(PyObject_CallMethod(
               py_compiler.get(), "pre_hook", "Oi", pyinputs.get(), hook));
         }
-        inputs = TPHVariable_UnpackList(pyinputs);
+        inputs = THPVariable_UnpackList(pyinputs);
       }
 
       SwapSavedVariables saved(state, call.node);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
 
       if (call.post_hooks.size() > 0) {
-        THPObjectPtr pyinputs(TPHVariable_WrapList(inputs));
-        THPObjectPtr pyoutputs(TPHVariable_WrapList(outputs));
+        THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
+        THPObjectPtr pyoutputs(THPVariable_WrapList(outputs));
         for (const auto hook : call.post_hooks) {
           pyoutputs = check(PyObject_CallMethod(
               py_compiler.get(),
@@ -443,7 +443,7 @@ variable_list compiled_autograd(
               pyinputs.get(),
               hook));
         }
-        outputs = TPHVariable_UnpackList(pyoutputs);
+        outputs = THPVariable_UnpackList(pyoutputs);
       }
 
       node_outputs.emplace_back(std::move(outputs));
@@ -460,7 +460,7 @@ variable_list compiled_autograd(
   }
 
   {
-    THPObjectPtr inputs(TPHVariable_WrapList(compiler_call.inputs));
+    THPObjectPtr inputs(THPVariable_WrapList(compiler_call.inputs));
     THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
     THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
     THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
@@ -469,7 +469,7 @@ variable_list compiled_autograd(
         sizes.get(),
         hooks.get(),
         NULL)));
-    variable_list outputs = TPHVariable_UnpackList(pyresult);
+    variable_list outputs = THPVariable_UnpackList(pyresult);
     if (accumulate_grad) {
       TORCH_CHECK(outputs.size() == compiler_call.set_grad_targets.size());
       for (const auto i : c10::irange(outputs.size())) {
@@ -494,7 +494,7 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
 
   PyObject* prior = the_autograd_compiler;
   if (obj == Py_None) { // disable
-    the_autograd_compiler = nullptr;
+    the_autograd_compiler = nullptr; // decref not needed due to `prior`
     Engine::set_compiled_autograd(nullptr);
   } else { // enable
     Py_INCREF(obj);

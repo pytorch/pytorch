@@ -4,11 +4,13 @@ from .quantizer import (
     EdgeOrNode,
     FixedQParamsQuantizationSpec,
     OperatorConfig,
+    OperatorPatternType,
     QuantizationAnnotation,
     QuantizationSpec,
     QuantizationSpecBase,
     Quantizer,
     SharedQuantizationSpec,
+    QuantizationConfig,
 )
 from .x86_inductor_quantizer import X86InductorQuantizer
 
@@ -19,6 +21,8 @@ __all__ = [
     "ComposableQuantizer",
     "EdgeOrNode",
     "OperatorConfig",
+    "OperatorPatternType",
+    "QuantizationConfig",
     "EmbeddingQuantizer",
     "Quantizer",
     "QNNPackQuantizer",

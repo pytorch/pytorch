@@ -27,6 +27,7 @@ from warnings import warn
 import yaml
 from github_utils import (
     gh_fetch_json_list,
+    gh_fetch_merge_base,
     gh_fetch_url,
     gh_post_commit_comment,
     gh_post_pr_comment,
@@ -707,7 +708,26 @@ class GitHubPR:
         return self.info["commits"]["nodes"][-1]["commit"]
 
     def get_merge_base(self) -> str:
-        return cast(str, self.info["baseRefOid"])
+        if self.merge_base:
+            return self.merge_base
+
+        last_commit_oid = self.last_commit()["oid"]
+        # NB: We could use self.base_ref() here for regular PR, however, that doesn't
+        # work for ghstack where the base is the custom branch, i.e. gh/USER/ID/base,
+        # so let's just use main instead
+        self.merge_base = gh_fetch_merge_base(
+            self.org, self.project, last_commit_oid, "main"
+        )
+
+        # Fallback to baseRefOid if the API call fails, i.e. rate limit. Note that baseRefOid
+        # points to the base ref associated with the PR or, in other words, the head of main
+        # when the PR is created or rebased. This is not necessarily the merge base commit,
+        # but it could serve as a fallback in most cases and it's readily available as part
+        # of the PR info
+        if not self.merge_base:
+            self.merge_base = cast(str, self.info["baseRefOid"])
+
+        return self.merge_base
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:

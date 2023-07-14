@@ -143,6 +143,7 @@ class CompiledNodeArgs {
     }
   }
   void collect(const SavedVariable& t) {
+    TORCH_CHECK(!t.has_hooks(), "SavedVariable hooks not implemented")
     collect(t.unpack(_node_call.node));
   }
   void collect(const c10::SymInt& t) {
@@ -178,9 +179,6 @@ class CompiledNodeArgs {
     collect(t.first);
     collect(t.second);
   }
-  void collect(const c10::ScalarType& t) {
-    specialize_on_bytes(t);
-  }
   void collect(const c10::Scalar& t) {
     auto type = t.type();
     specialize_on_bytes(type);
@@ -199,20 +197,35 @@ class CompiledNodeArgs {
     }
   }
   void collect(const c10::TensorOptions& t) {
-    // TODO(jansel): are there any pointers in this type we shouldn't memcmp
-    // I think this one is wrong.... should fix it
-    specialize_on_bytes(t);
+    collect(t.device());
+    collect(t.dtype());
+    collect(t.layout());
+    collect(t.requires_grad());
+    collect(t.pinned_memory());
+    collect(t.memory_format_opt());
   }
   void collect(const at::TensorGeometry& t) {
     collect(t.sym_sizes());
     collect(t.sym_strides());
     collect(t.sym_storage_offset());
   }
-  void collect(torch::autograd::TypeAndSize& t) {
+  void collect(const torch::autograd::TypeAndSize& t) {
     collect(t.sym_sizes);
     collect(t.options);
   }
-
+  void collect(const c10::Device& t) {
+    collect(t.type());
+    collect(t.index());
+  }
+  void collect(const std::string& t) {
+    collect_size(t.size());
+    for (char c : t) {
+      collect(c);
+    }
+  }
+  void collect(const caffe2::TypeMeta& t) {
+    specialize_on_bytes(t.id());
+  }
   void collect(const OutputRef& t) {
     // +1 is for undefined encoded as -1
     collect_size(t.node_id + 1);
@@ -222,39 +235,27 @@ class CompiledNodeArgs {
     collect(t.input_refs);
     collect(t.graph_output);
   }
-  void collect(int8_t t) {
-    specialize_on_bytes(t);
+
+#define COLLECT_AS_BYTES(T) \
+  void collect(T t) {       \
+    specialize_on_bytes(t); \
   }
-  void collect(int16_t t) {
-    specialize_on_bytes(t);
-  }
-  void collect(int32_t t) {
-    specialize_on_bytes(t);
-  }
-  void collect(int64_t t) {
-    specialize_on_bytes(t);
-  }
-  void collect(uint8_t t) {
-    specialize_on_bytes(t);
-  }
-  void collect(uint16_t t) {
-    specialize_on_bytes(t);
-  }
-  void collect(uint32_t t) {
-    specialize_on_bytes(t);
-  }
-  void collect(uint64_t t) {
-    specialize_on_bytes(t);
-  }
-  void collect(bool t) {
-    specialize_on_bytes(t);
-  }
-  void collect(float t) {
-    specialize_on_bytes(t);
-  }
-  void collect(double t) {
-    specialize_on_bytes(t);
-  }
+  COLLECT_AS_BYTES(c10::ScalarType);
+  COLLECT_AS_BYTES(c10::DeviceType);
+  COLLECT_AS_BYTES(c10::Layout);
+  COLLECT_AS_BYTES(c10::MemoryFormat);
+  COLLECT_AS_BYTES(int8_t);
+  COLLECT_AS_BYTES(int16_t);
+  COLLECT_AS_BYTES(int32_t);
+  COLLECT_AS_BYTES(int64_t);
+  COLLECT_AS_BYTES(uint8_t);
+  COLLECT_AS_BYTES(uint16_t);
+  COLLECT_AS_BYTES(uint32_t);
+  COLLECT_AS_BYTES(uint64_t);
+  COLLECT_AS_BYTES(bool);
+  COLLECT_AS_BYTES(float);
+  COLLECT_AS_BYTES(double);
+#undef COLLECT_AS_BYTES
 
   void set_grad_target(const at::Tensor& tensor) {
     collect(_compiler.accumulate_grad);
@@ -515,18 +516,22 @@ class SwapSavedVariables {
     }
   }
 
-  void before(const c10::ScalarType& t) {}
-  void before(const c10::Scalar& t) {}
-  void before(const c10::TensorOptions& t) {}
-  void before(int64_t t) {}
-  void before(bool t) {}
-  void before(double t) {}
-  void after(const c10::ScalarType& t) {}
-  void after(const c10::Scalar& t) {}
-  void after(const c10::TensorOptions& t) {}
-  void after(int64_t t) {}
-  void after(bool t) {}
-  void after(double t) {}
+#define NO_OP_VISIT(T)     \
+  void before(const T&) {} \
+  void after(const T&) {}
+  NO_OP_VISIT(caffe2::TypeMeta);
+  NO_OP_VISIT(c10::Device);
+  NO_OP_VISIT(c10::DeviceType);
+  NO_OP_VISIT(c10::Layout);
+  NO_OP_VISIT(c10::MemoryFormat);
+  NO_OP_VISIT(c10::ScalarType);
+  NO_OP_VISIT(c10::Scalar);
+  NO_OP_VISIT(c10::TensorOptions);
+  NO_OP_VISIT(std::string);
+  NO_OP_VISIT(int64_t);
+  NO_OP_VISIT(bool);
+  NO_OP_VISIT(double);
+#undef NO_OP_VISIT
 
   void set_grad_value(const at::Tensor& tensor) {
     if (state.accumulate_grad)
