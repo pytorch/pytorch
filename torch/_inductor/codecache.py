@@ -9,6 +9,7 @@ import logging
 import multiprocessing
 import os
 import pathlib
+import platform
 import re
 import shutil
 import signal
@@ -619,7 +620,10 @@ def optimization_flags():
         # Also, `-march=native` is unrecognized option on M1
         base_flags += " -Xclang"
     else:
-        base_flags += " -march=native"
+        if platform.machine() == "ppc64le":
+            base_flags += " -mcpu=native"
+        else:
+            base_flags += " -march=native"
 
     # Internal cannot find libgomp.so
     if not config.is_fbcode():
@@ -728,9 +732,13 @@ def cpp_compile_command(
         include_pytorch, vec_isa, cuda, aot_mode
     )
     if config.is_fbcode():
-        # We need to copy any absolute-path torch includes
-        inp_name = os.path.basename(input)
-        out_name = os.path.basename(output)
+        if aot_mode:
+            inp_name = input
+            out_name = output
+        else:
+            # We need to copy any absolute-path torch includes
+            inp_name = os.path.basename(input)
+            out_name = os.path.basename(output)
         linker_path = f"-B{os.path.dirname(build_paths.ld())}"
     else:
         inp_name = input
@@ -786,7 +794,9 @@ class AotCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_so_dir = input_path[:-4]
+                # Place the generated .so into a sub-folder with the full hex-hash to avoid
+                # any name collision.
+                output_so_dir = os.path.splitext(input_path)[0]
                 if not os.path.exists(output_so_dir):
                     os.makedirs(output_so_dir, exist_ok=False)
                 so_name = f"{config.dll_name}.so"
@@ -801,7 +811,7 @@ class AotCodeCache:
                     ).split(" ")
                     log.debug("aot compilation command: %s", " ".join(cmd))
                     try:
-                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                        subprocess.check_call(cmd)
                     except subprocess.CalledProcessError as e:
                         raise exc.CppCompileError(cmd, e.output) from e
 
