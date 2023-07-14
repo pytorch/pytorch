@@ -991,8 +991,8 @@ def error_inputs_linspace(op, device, **kwargs):
 
 
 def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
-    ends = (-3, 0, 1, 4, 50)
-    starts = (-2., 0, 4.3, 50)
+    ends = (-3, 0, 1, 4, 50, 10 + 5j)
+    starts = (-2., 0, 4.3, 50, 1 + 2j)
     nsteps = (0, 1, 50)
     # Extra case to replicate off-by-one issue on CUDA
     cases = list(product(starts, ends, nsteps)) + [(0, 7, 50)]
@@ -1004,9 +1004,9 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput(1, args=(3, 1))
 
 
-def sample_inputs_logpace(op, device, dtype, requires_grad, **kwargs):
-    ends = (-3, 0, 1.2, 2, 4)
-    starts = (-2., 0, 1, 2, 4.3)
+def sample_inputs_logspace(op, device, dtype, requires_grad, **kwargs):
+    ends = (-3, 0, 1.2, 2, 4, 10 + 5j)
+    starts = (-2., 0, 1, 2, 4.3, 1 + 2j)
     nsteps = (0, 1, 2, 4)
     bases = (2., 1.1) if dtype in (torch.int8, torch.uint8) else (None, 2., 3., 1.1, 5.)
     for start, end, nstep, base in product(starts, ends, nsteps, bases):
