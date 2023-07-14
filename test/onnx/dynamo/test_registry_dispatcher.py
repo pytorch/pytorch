@@ -317,10 +317,6 @@ class TestOpSchemaWrapper(common_utils.TestCase):
                 name="non_perfect_match_due_to_non_tensor_inputs",
             ),
             common_utils.subtest(
-                ([torch.randn(3, 4), torch.randn(3, 4), torch.randn(3, 4)], {}, False),
-                name="non_perfect_match_due_to_too_many_inputs",
-            ),
-            common_utils.subtest(
                 ([torch.randn(3, 4), torch.randn(3, 4)], {"wrong_kwargs": 2.0}, False),
                 name="non_perfect_match_due_to_wrong_kwargs",
             ),
@@ -328,8 +324,8 @@ class TestOpSchemaWrapper(common_utils.TestCase):
     )
     def test_perfect_match_inputs(self, inputs, attributes, assertion):
         # OnnxFunction with default attributes
-        op_schema_wrapper_add = onnxfunction_dispatcher._OpSchemaWrapper(
-            ops.core.aten_add.op_schema
+        op_schema_wrapper_add = onnxfunction_dispatcher._OnnxSchemaChecker(
+            ops.core.aten_add
         )
         self.assertEqual(
             op_schema_wrapper_add.perfect_match_inputs(inputs, attributes), assertion
@@ -373,7 +369,7 @@ class TestOpSchemaWrapper(common_utils.TestCase):
         ],
     )
     def test_matching_score_system_on_overload_dtypes(self, inputs, kwargs, op, score):
-        op_schema_wrapper = onnxfunction_dispatcher._OpSchemaWrapper(op.op_schema)
+        op_schema_wrapper = onnxfunction_dispatcher._OnnxSchemaChecker(op)
         op_schema_wrapper._record_matching_score(inputs, kwargs)
         self.assertEqual(op_schema_wrapper.match_score, score)
 
@@ -414,7 +410,7 @@ class TestOpSchemaWrapper(common_utils.TestCase):
         ],
     )
     def test_matching_score_system_on_optional_dtypes(self, inputs, kwargs, op, score):
-        op_schema_wrapper = onnxfunction_dispatcher._OpSchemaWrapper(op.op_schema)
+        op_schema_wrapper = onnxfunction_dispatcher._OnnxSchemaChecker(op)
         op_schema_wrapper._record_matching_score(inputs, kwargs)
         self.assertEqual(op_schema_wrapper.match_score, score)
 

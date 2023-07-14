@@ -37,8 +37,8 @@ if HAS_TABULATE:
         model: Union[torch.nn.Module, Callable],
         sample_input: Union[torch.Tensor, Any],
         num_iters: int = 5,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        loss_fn: Optional[Callable] = None,
+        optimizer: torch.optim.Optimizer = None,
+        loss_fn: Callable = None,
     ):
         # Define the statement and setup for the benchmark
         if optimizer and loss_fn:
@@ -73,8 +73,8 @@ if HAS_TABULATE:
         num_iters: int = 5,
         backend: Optional[str] = None,
         mode: Optional[str] = "default",
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        loss_fn : Union[torch.nn.Module, Callable, None] = None,
+        optimizer: torch.optim.Optimizer = None,
+        loss_fn : Union[torch.nn.Module, Callable] = None,
     ):
         """
         Use this utility to benchmark torch.compile
@@ -117,7 +117,7 @@ if HAS_TABULATE:
         sample_input: Union[torch.Tensor, Any],
         num_iters : int = 5,
         optimizer: Optional[torch.optim.Optimizer] = None,
-        loss_fn : Union[torch.nn.Module, Callable, None] = None,
+        loss_fn : Union[torch.nn.Module, Callable] = None,
     ):
         """
         This is a simple utility that can be used to benchmark torch.compile
