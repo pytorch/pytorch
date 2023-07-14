@@ -16,7 +16,7 @@ from yaml import dump, load
 try:
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[assignment, misc]
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 
 class LintSeverity(str, Enum):

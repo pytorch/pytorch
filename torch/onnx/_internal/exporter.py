@@ -340,7 +340,7 @@ class ProtobufExportOutputSerializer:
     ) -> None:
         import onnx
 
-        if not isinstance(export_output.model_proto, onnx.ModelProto):  # type: ignore[attr-defined]
+        if not isinstance(export_output.model_proto, onnx.ModelProto):
             raise ValueError("export_output.ModelProto is not an onnx.ModelProto")
         destination.write(export_output.model_proto.SerializeToString())
 
@@ -348,7 +348,7 @@ class ProtobufExportOutputSerializer:
 class ExportOutput:
     """An in-memory representation of a PyTorch model that has been exported to ONNX."""
 
-    _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined]
+    _model_proto: Final[onnx.ModelProto]
     _input_adapter: Final[io_adapter.InputAdapter]
     _output_adapter: Final[io_adapter.OutputAdapter]
     _diagnostic_context: Final[infra.DiagnosticContext]
@@ -356,7 +356,7 @@ class ExportOutput:
     @_beartype.beartype
     def __init__(
         self,
-        model_proto: onnx.ModelProto,  # type: ignore[name-defined]
+        model_proto: onnx.ModelProto,
         input_adapter: io_adapter.InputAdapter,
         output_adapter: io_adapter.OutputAdapter,
         diagnostic_context: infra.DiagnosticContext,
@@ -367,7 +367,7 @@ class ExportOutput:
         self._diagnostic_context = diagnostic_context
 
     @property
-    def model_proto(self) -> onnx.ModelProto:  # type: ignore[name-defined]
+    def model_proto(self) -> onnx.ModelProto:
         """The exported ONNX model as an ``onnx.ModelProto``."""
 
         return self._model_proto
