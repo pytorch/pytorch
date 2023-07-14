@@ -1002,7 +1002,7 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
 
     yield SampleInput(1, args=(3, 1))
-    yield SampleInput(1 + 2j, args=(10 + 5j))  # inputs of complex type
+    yield SampleInput(1 + 2j, args=(10 + 5j,))  # inputs of complex type
 
 
 def sample_inputs_logspace(op, device, dtype, requires_grad, **kwargs):
@@ -1022,7 +1022,7 @@ def sample_inputs_logspace(op, device, dtype, requires_grad, **kwargs):
             yield SampleInput(start, args=(end, nstep, base), kwargs={"dtype": dtype, "device": device})
 
     yield SampleInput(1, args=(3, 1, 2.))
-    yield SampleInput(1 + 2j, args=(10 + 5j))  # inputs of complex type
+    yield SampleInput(1 + 2j, args=(10 + 5j,))  # inputs of complex type
 
 
 def sample_inputs_isclose(op, device, dtype, requires_grad, **kwargs):
