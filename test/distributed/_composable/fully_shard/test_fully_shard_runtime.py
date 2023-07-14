@@ -46,7 +46,7 @@ class TestRuntime(FSDPTest):
 
     @property
     def world_size(self) -> int:
-        return 2
+        return torch.cuda.device_count()
 
     def _init_models_and_optims(
         self,
@@ -100,6 +100,7 @@ class TestRuntime(FSDPTest):
                     ShardingStrategy.SHARD_GRAD_OP,
                     ShardingStrategy.SHARD_GRAD_OP,
                     ShardingStrategy.NO_SHARD,
+                    ShardingStrategy.HYBRID_SHARD,
                 ]
             },
             self._test_training,
