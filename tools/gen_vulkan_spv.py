@@ -20,7 +20,7 @@ from yaml.nodes import MappingNode
 try:
     from yaml import CLoader as Loader
 except ImportError:
-    from yaml import Loader  # type: ignore[assignment, misc]
+    from yaml import Loader  # type: ignore[misc]
 
 H_NAME = "spv.h"
 CPP_NAME = "spv.cpp"

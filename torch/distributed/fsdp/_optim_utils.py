@@ -476,7 +476,7 @@ def _flatten_optim_state_dict(
                     len(fqns) == 1
                 ), f"use_orig_params is True but there are multiple FQNs, {fqns}."
                 if optim is not None:  # NamedOptimizer or KeyedOptimizer case.
-                    state = optim.state.get(param, None)  # type: ignore[call-overload]
+                    state = optim.state.get(param, None)
                     if state is not None:
                         flat_osd_state[key] = copy.deepcopy(state)
                     else:

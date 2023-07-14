@@ -1,6 +1,6 @@
 import gc
 import sys
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import NamedTuple, Tuple, List, Optional
 import types
 import weakref
 import json
@@ -100,7 +100,7 @@ def annotated_references(obj):
     need for a list.  Descriptions are currently strings.
 
     """
-    references: Dict[int, List[str]] = {}
+    references = {}
 
     def add_reference(name, obj):
         references.setdefault(id(obj), []).append(name)
@@ -272,7 +272,7 @@ def create_graph(objects, *, context=None, filter=None):
         filter = is_cuda_tensor
 
     nodes = [Node(object_annotation(obj), context(obj), filter(obj), []) for obj in objects]
-    node_referrers: List[List[int]] = [[] for obj in objects]
+    node_referrers = [[] for obj in objects]
 
     id_to_node = {id(obj): i for i, obj in enumerate(objects)}
     for obj in objects:
@@ -299,8 +299,8 @@ def create_graph(objects, *, context=None, filter=None):
         to_keep.add(idx)
         referrers = node_referrers[idx]
         to_search.extend(referrers)
-    id_to_filtered_id: Dict[int, int] = {}
-    filtered: List[Any] = []
+    id_to_filtered_id = {}
+    filtered = []
     for i, n in enumerate(nodes):
         if i in to_keep:
             id_to_filtered_id[i] = len(id_to_filtered_id)

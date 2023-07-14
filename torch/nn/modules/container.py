@@ -103,7 +103,7 @@ class Sequential(Module):
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
 
-    def _get_item_by_idx(self, iterator, idx) -> T:  # type: ignore[misc, type-var]
+    def _get_item_by_idx(self, iterator, idx) -> T:
         """Get the idx-th item of the iterator"""
         size = len(self)
         idx = operator.index(idx)
