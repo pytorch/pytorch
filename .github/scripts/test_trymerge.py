@@ -699,14 +699,14 @@ class TestBypassFailures(TestCase):
     def test_get_classifications_broken_trunk(self, *args: Any) -> None:
         # The mock merge base is the actual value returned by gh_fetch_merge_base
         test_cases = [
-            # This PR had one broken trunk failure but it was run on a different shard
-            # than the one on the base commit. This should still count as broken trunk
             {
+                # This PR had one broken trunk failure but it was run on a different shard
+                # than the one on the base commit. This should still count as broken trunk
                 "pr_num": 104214,
                 "mock_merge_base": "436d035dc74db9c703297a62163b0cad0c546665",
             },
-            # This PR had one broken trunk failure and it used ghstack
             {
+                # This PR had one broken trunk failure and it used ghstack
                 "pr_num": 105145,
                 "mock_merge_base": "194fe1d12f9860734cc28ed21bdabda2fbb06336",
             },
