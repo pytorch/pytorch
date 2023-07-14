@@ -172,12 +172,18 @@ class BuiltinVariable(VariableTracker):
             operator.mod: (["__mod__", "__rmod__", "__imod__"], operator.imod),
             pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
             operator.pow: (["__pow__", "__rpow__", "__ipow__"], operator.ipow),
+            operator.lshift: (
+                ["__lshift__", "__rlshift__", "__ilshift__"],
+                operator.ilshift,
+            ),
+            operator.rshift: (
+                ["__rshift__", "__rrshift__", "__irshift__"],
+                operator.irshift,
+            ),
             # NB: The follow binary operators are not supported for now, since the
             # corresponding magic methods aren't defined on SymInt / SymFloat:
             # operator.matmul
             # divmod
-            # operator.lshift
-            # operator.rshift
             # operator.and_
             # operator.or_
             # operator.xor
@@ -838,6 +844,12 @@ class BuiltinVariable(VariableTracker):
         else:
             raise AssertionError("call_dict_helper with illegal arg")
 
+    def call_cast(self, _, *args, **kwargs):
+        if len(args) == 2:
+            return args[1]
+
+        unimplemented(f"unsupported args to builtin cast(): {args} {kwargs}")
+
     def call_dict(self, tx, *args, **kwargs):
         if not (args or kwargs):
             return self.call_dict_helper(tx, dict, None)
@@ -1090,7 +1102,8 @@ class BuiltinVariable(VariableTracker):
     def call_setattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
     ):
-        if isinstance(obj, variables.DataClassVariable):
+        from .distributed import PlacementVariable
+        if isinstance(obj, variables.DataClassVariable) or isinstance(obj, PlacementVariable):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)

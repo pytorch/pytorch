@@ -644,16 +644,12 @@ class TestDynamoDTensor(torch._dynamo.test_case.TestCase):
     def test_dynamo_dtensor_from_local(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
+        # create DTensor inside fn and run some compute
         def fn(x):
             dt = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
             return dt.to_local() + 2
 
-        # x = torch.ones(1)
-
-        # opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        # res = opt_fn(x)
-        # self.assertEqual(res, ref)
-        ### below is the op approach
+        ### below is the op approach for reference
         # from torch.distributed._tensor.api import _FromTorchTensor
         # def from_local_tensor(x):
         #     return _FromTorchTensor.apply(x, mesh, [Replicate()], False)
@@ -664,44 +660,33 @@ class TestDynamoDTensor(torch._dynamo.test_case.TestCase):
         # _dt_lib_impl = torch.library.Library("dtensor", "IMPL")
         # _dt_lib_impl.impl("from_local", from_local_tensor, "Autograd")
 
-        # def fn(x):
-        #     return torch.ops.dtensor.from_local(x)
-
-        def grab_graph_backend(gm, inps):
-            gm.print_readable()
-            return gm
-
-        # opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        opt_fn = torch._dynamo.optimize(grab_graph_backend, nopython=True)(fn)
         x = torch.ones(1)
         ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
     def test_dynamo_dtensor_from_local_redistribute(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
+        # pass in tensor as inputs/outputs, create DTensor and run collective
+        # inside the fn
         def fn(x):
             dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
             return dt.redistribute(mesh, [Replicate()]).to_local() + 2
 
-        def grab_graph_backend(gm, inps):
-            gm.print_readable()
-            return gm
-
-        # XXX: if apply https://github.com/pytorch/pytorch/pull/104482/files
-        # then remove the `eager` backend, fakification crashed in the aot_autograd
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.ones(1)
         ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
     def test_dynamo_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
+        # pass in DTensor as inputs/outputs to the function
         def fn(x):
-            return x.redistribute(mesh, [Replicate()]).to_local()
+            return x.redistribute(mesh, [Replicate()])
 
         x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False)
         ref = fn(x)

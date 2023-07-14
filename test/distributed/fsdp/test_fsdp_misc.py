@@ -606,6 +606,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         all_attr_name_and_values = [
             ("_use_orig_params", False, True),
             ("limit_all_gathers", False, True),
+            ("_use_full_prec_in_eval", False, True),
         ]
         self.assertEqual(
             [
@@ -628,10 +629,16 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             {},
         )
         attr_name = attr_name_and_values[0]
-        fsdp_kwargs_inner = {attr_name.lstrip("_"): attr_name_and_values[1]}
-        fsdp_kwargs_outer = {attr_name.lstrip("_"): attr_name_and_values[2]}
-        model.module[1] = FSDP(model.module[1], **fsdp_kwargs_inner)
-        fsdp_model = FSDP(model, **fsdp_kwargs_outer)
+
+        if "_use_full_prec_in_eval" == attr_name:
+            model.module[1] = FSDP(model.module[1])
+            os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = "1"
+            fsdp_model = FSDP(model)
+        else:
+            fsdp_kwargs_inner = {attr_name.lstrip("_"): attr_name_and_values[1]}
+            fsdp_kwargs_outer = {attr_name.lstrip("_"): attr_name_and_values[2]}
+            model.module[1] = FSDP(model.module[1], **fsdp_kwargs_inner)
+            fsdp_model = FSDP(model, **fsdp_kwargs_outer)
 
         # Run a forward to trigger lazy initialization and the error
         with self.assertRaisesRegex(

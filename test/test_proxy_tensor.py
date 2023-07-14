@@ -1434,8 +1434,14 @@ def forward(self, a_1):
         fx_g = _trace(f, 2, 4, 8, 16, 32)
         self.assertExpectedInline(show_guards(fx_g), """""")
 
+    @torch._dynamo.config.patch(translation_validation=True)
+    def test_constant_specialization(self):
+        def f(t):
+            assert t.shape[0] == 10
+            return t
 
-
+        tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(10))
+        self.assertExpectedInline(show_guards(tensor), """""")
 
 
 make_fx_failures = {

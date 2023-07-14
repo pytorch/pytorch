@@ -65,6 +65,7 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_is_full_backward_hook",
     "_forward_hooks",
     "_forward_hooks_with_kwargs",
+    "_forward_hooks_always_called",
     "_forward_pre_hooks",
     "_forward_pre_hooks_with_kwargs",
     "_state_dict_hooks",
@@ -128,8 +129,8 @@ class _RemoteModule(nn.Module):
         self,
         remote_device: str,
         module_cls: Type[nn.Module],
-        args: Tuple = None,
-        kwargs: Dict[str, Any] = None,
+        args: Optional[Tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
         _module_interface_cls: Any = None,
     ):
         """
@@ -684,8 +685,8 @@ class RemoteModule(_RemoteModule):
         self,
         remote_device: str,
         module_cls: Type[nn.Module],
-        args: Tuple = None,
-        kwargs: Dict[str, Any] = None,
+        args: Optional[Tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(remote_device, module_cls, args, kwargs)
 

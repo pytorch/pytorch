@@ -1189,6 +1189,26 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     return out + beta * self
 
 
+@register_decomposition(aten._addmm_activation)
+@out_wrapper()
+@pw_cast_for_opmath
+def _addmm_activation(
+    self: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    beta: int = 1,
+    alpha: int = 1,
+    use_gelu: bool = False,
+):
+    out = addmm(self, mat1, mat2, beta, alpha)
+    if use_gelu:
+        if self.is_cuda:
+            return aten.gelu(out, approximate="tanh")
+        else:
+            return aten.gelu(out)
+    return aten.relu(out)
+
+
 @register_decomposition(aten.addmv)
 @out_wrapper()
 @pw_cast_for_opmath
@@ -1434,19 +1454,16 @@ def native_batch_norm_helper(
         invstd = _unsqueeze_to_dim(invstd, input.dim() - 1)
         output = (input - mean) * invstd
 
-    if weight is None:
-        weight = input.new_ones(())
-    else:
+    if weight is not None:
         weight = weight.flatten()
+        weight = _unsqueeze_to_dim(weight, input.dim() - 1)
+        output = output * weight
 
-    if bias is None:
-        bias = input.new_zeros(())
-    else:
+    if bias is not None:
         bias = bias.flatten()
+        bias = _unsqueeze_to_dim(bias, input.dim() - 1)
+        output = output + bias
 
-    weight = _unsqueeze_to_dim(weight, input.dim() - 1)
-    bias = _unsqueeze_to_dim(bias, input.dim() - 1)
-    output = output * weight + bias
     if input.device.type == "cpu":
         save_mean = save_mean.to(dtype=input.dtype)
         save_rstd = save_rstd.to(dtype=input.dtype)
@@ -1844,6 +1861,10 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
             lambda: "adaptive_avg_pool2d(): Expected input to have non-zero size for "
             f"non-batch dimensions, but input has shape {tuple(shape)}.",
         )
+
+    # TODO: decompose integer path
+    if input.dtype in [torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64]:
+        return torch.nn.functional.adaptive_avg_pool2d(input, output_size)
 
     # Optimisation (we should also do this in the kernel implementation)
     if shape[-2] % output_size[-2] == 0 and shape[-1] % output_size[-1] == 0:
