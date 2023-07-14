@@ -70,14 +70,14 @@ class MemoryDep(typing.NamedTuple):
     def is_indirect(self) -> bool:
         return any(is_indirect(v.name) for v in self.index.free_symbols)
 
-    def generalize_for_scheduling(self):
+    def generalize_for_scheduling(self, is_mutation: bool):
         """
         Replace this exact memory dep, with a generic placeholder that
         only checks name, numel, and type.  Since we allow loop reordering
         (which changes memory deps) during scheduling, we want to be
         more permissive about dependency matches in the initial pass.
         """
-        if self.is_indirect():
+        if is_mutation or self.is_indirect():
             return StarDep(
                 self.name,
             )
@@ -137,7 +137,7 @@ class StarDep(typing.NamedTuple):
     def is_indirect(self) -> bool:
         return False
 
-    def generalize_for_scheduling(self):
+    def generalize_for_scheduling(self, is_mutation: bool):
         return self
 
     def can_read_from(self, other: Dep):
@@ -234,10 +234,10 @@ class ReadWrites:
     def reads_and_writes(self):
         return itertools.chain(self.reads, self.writes)
 
-    def generalize_for_scheduling(self):
+    def generalize_for_scheduling(self, is_mutation: bool):
         return ReadWrites(
-            {dep.generalize_for_scheduling() for dep in self.reads},
-            {dep.generalize_for_scheduling() for dep in self.writes},
+            {dep.generalize_for_scheduling(False) for dep in self.reads},
+            {dep.generalize_for_scheduling(is_mutation) for dep in self.writes},
             self.index_exprs,
             self.range_vars,
             self.var_ranges,

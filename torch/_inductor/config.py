@@ -313,7 +313,7 @@ class triton:
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = False
-    tiling_prevents_reduction_fusion = False
+    tiling_prevents_reduction_fusion = True
 
     # assert that indirect indexing does not read / write out of bounds
     assert_indirect_indexing = True

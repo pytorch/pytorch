@@ -538,15 +538,16 @@ class SchedulerNode(BaseSchedulerNode):
 
         if self.is_template():
             self.set_read_writes(
-                node.normalized_read_writes().generalize_for_scheduling()
+                node.normalized_read_writes().generalize_for_scheduling(
+                    self.has_mutation()
+                )
             )
         else:
             self.set_read_writes(
                 dependencies.extract_read_writes(
                     self._body,
                     *self._sizes,
-                    normalize=False,  # TODO: should we normalize now?
-                ).generalize_for_scheduling()
+                ).generalize_for_scheduling(self.has_mutation())
             )
 
         self.group = (node.get_device(), group_fn(self._sizes))
@@ -1585,8 +1586,7 @@ class Scheduler:
         if node1.get_names() & node2.recursive_predecessors:
             # node2 depends on node1 outputs
             return (
-                not node1.has_mutation()
-                and self.can_fuse_vertical(node1, node2)
+                self.can_fuse_vertical(node1, node2)
                 and self.can_fuse_loop_orders(node1, node2)
                 and self.get_backend(device).can_fuse_vertical(node1, node2)
             )
