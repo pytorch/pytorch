@@ -69,7 +69,7 @@ def rand_dense_2by4(r, c, dtype, device, choice=None):
     dense = make_tensor(r, c, dtype=dtype, device=device)
     dense[dense == 0] = 1  # To prevent zeros except where mask applied.
     dense = dense.masked_fill(~mask, 0)
-    return (dense, mask)
+    return dense
 
 def rand_dense_2by4_all_patterns(r, c, dtype, device):
     choices = [
@@ -222,7 +222,7 @@ class TestSparseSemiStructured(TestCase):
 
         dense_result = model(input)
 
-        model.weight = nn.Parameter(SparseSemiStructuredTensor(model.weight))
+        model.weight = nn.Parameter(to_sparse_semi_structured(model.weight))
 
         if inference_mode:
             with torch.inference_mode():
@@ -275,7 +275,7 @@ class TestSparseSemiStructured(TestCase):
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_linear_cutlass(self, device, dtype):
         def run_test(batch_shape, m, n, k, device, dtype, dtype_out, add_bias, activation, rtol, atol):
-            weight, mask = rand_dense_2by4(m, k, dtype, device)
+            weight = rand_dense_2by4(m, k, dtype, device)
             input = make_tensor((*batch_shape, n, k), dtype=dtype, device=device)
             bias = make_tensor((m,), dtype=dtype_out, device=device) if add_bias else None
 
@@ -293,10 +293,9 @@ class TestSparseSemiStructured(TestCase):
 
             weight_sparse = weight.masked_select(weight != 0).view(m, k // 2)
 
-            output1, meta = torch._structured_sparse_linear(input, weight_sparse, mask, bias=bias, activation=activation)
-            torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=rtol, atol=atol)
+            meta = to_sparse_semi_structured(weight).indices()
 
-            output1, _ = torch._structured_sparse_linear(input, weight_sparse, meta, bias=bias, activation=activation)
+            output1 = torch._sparse_semi_structured_linear(input, weight_sparse, meta, bias=bias, activation=activation)
             torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=rtol, atol=atol)
 
         batch_shapes = [[], [3], [3, 1]]
@@ -320,7 +319,7 @@ class TestSparseSemiStructured(TestCase):
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_conversions(self, device, dtype):
         def run_test(r, c, device, dtype):
-            dense_ref, _ = rand_dense_2by4(r, c, dtype, device)
+            dense_ref = rand_dense_2by4(r, c, dtype, device)
 
             compressed = to_sparse_semi_structured(dense_ref)
 
