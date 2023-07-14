@@ -57,6 +57,9 @@ class _ToTorchTensor(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input: "DTensor"):  # type: ignore[override]
         ctx.dtensor_spec = input._spec
+        # detach local tensor from its autograd graph as autograd works
+        # on top of DTensor and when calling to_local, it should be
+        # transformed to the local tensor before we return it.
         return input._local_tensor.detach()
 
     @staticmethod
@@ -111,8 +114,10 @@ class _FromTorchTensor(torch.autograd.Function):
                     input = input.contiguous()
                     device_mesh.broadcast(input, mesh_dim=idx)
 
+        # detach the local tensor passed to DTensor since after the construction
+        # of DTensor, autograd would work on top of DTensor instead of local tensor
         dist_tensor = DTensor(
-            input,
+            input.detach(),
             device_mesh,
             placements,
             shape=torch.Size(tensor_shape),
@@ -201,10 +206,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         r._spec = DTensorSpec(
             device_mesh, copy.deepcopy(placements), tensor_meta=tensor_meta
         )
-        # detach local tensor from autograd graph as we initialize the
-        # distributed tensor and autograd will be working on top of
-        # the wrapper tensor directly instead of local torch.Tensor
-        r._local_tensor = local_tensor.detach()
+        r._local_tensor = local_tensor
         return r
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
@@ -459,8 +461,10 @@ def distribute_tensor(
             )
 
     assert local_tensor is not None, "distributing a tensor should not be None"
+    # detach the local tensor passed to DTensor since after the construction
+    # of DTensor, autograd would work on top of DTensor instead of local tensor
     return DTensor(
-        local_tensor,
+        local_tensor.detach(),
         device_mesh,
         placements,
         shape=tensor.size(),
