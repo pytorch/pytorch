@@ -2392,6 +2392,19 @@ class TestSDPA(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=1e-3, rtol=1e-2)
 
+    def test_scaled_dot_product_attention_math_with_negative_scale(self, device):
+        # https://github.com/pytorch/pytorch/issues/105190.
+        def ref(x):
+            v1 = torch.matmul(x, x.transpose(-1, -2))
+            v2 = v1 / -0.0001
+            v3 = v2.softmax(dim=-1)
+            v4 = torch.matmul(v3, x)
+            return v4
+
+        x = torch.randn(1, 3, 64, 64, device=device)
+        ref_result = ref(x)
+        sdp_math = torch.ops.aten._scaled_dot_product_attention_math(x, x, x, scale=-1.0 / 0.0001)[0]
+        self.assertEqual(ref_result, sdp_math)
 
 device_types = ("cpu", "cuda")
 instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types)
