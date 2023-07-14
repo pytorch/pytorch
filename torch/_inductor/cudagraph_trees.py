@@ -1418,8 +1418,8 @@ class CUDAGraphNode:
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
-                    assert isinstance(inp, (int, torch.SymInt))
-                    recording_inputs.append(int(inp))
+                    assert isinstance(inp, int)
+                    recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
                     # static_input does an allocation!
                     recording_inputs.append(static_input(inp))
@@ -2001,8 +2001,6 @@ class CUDAGraphTreeManager:
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
         for node in self.current_node._path_from_root:
-            if not len(node.tensor_weakrefs) == len(node.stack_traces):
-                breakpoint()
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()

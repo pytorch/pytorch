@@ -2039,8 +2039,8 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
             example_inputs = (torch.randn(1, 3, 224, 224),)
             m = torchvision.models.mobilenet_v2()
             self._verify_symmetric_qnnpack_qat_numerics(
-                m, example_inputs, is_per_channel=False, verify_convert=False,
+                m, example_inputs, is_per_channel=False, verify_convert=True,
             )
             self._verify_symmetric_qnnpack_qat_numerics(
-                m, example_inputs, is_per_channel=True, verify_convert=False,
+                m, example_inputs, is_per_channel=True, verify_convert=True,
             )

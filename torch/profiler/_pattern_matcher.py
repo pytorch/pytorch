@@ -603,7 +603,7 @@ def input_dtypes(event: _ProfilerEvent):
 def report_all_anti_patterns(prof,
                              should_benchmark: bool = False,
                              print_enable: bool = True,
-                             json_report_dir: str = None):
+                             json_report_dir: Optional[str] = None):
     report_dict: Dict = {}
     anti_patterns = [
         ExtraCUDACopyPattern(prof, should_benchmark),

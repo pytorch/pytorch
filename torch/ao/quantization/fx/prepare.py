@@ -822,7 +822,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # we should remove this
         # removing this means we insert one observer for each use, even if they
         # have the same dtype, we can have an extra pass that removes the extra observers
-        for maybe_obs_node, _ in arg.users.items():
+        for maybe_obs_node in arg.users.keys():
             if maybe_obs_node.op == 'call_module':
                 maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
                 if (
@@ -1245,7 +1245,7 @@ def _maybe_make_input_output_share_observers(
             setattr(named_modules[parent_name], name, obs_mod_to_use)
 
     # set the output observer node to use that module
-    for output_obs_node, _ in node.users.items():
+    for output_obs_node in node.users.keys():
         assert _is_activation_post_process_node(output_obs_node, named_modules)
         parent_name, name = _parent_name(output_obs_node.target)
         setattr(named_modules[parent_name], name, obs_mod_to_use)
