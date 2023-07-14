@@ -6801,13 +6801,19 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             b = torch.arange(start=-a.numel() + 1, end=-1, device="cuda")
             test(flip, (a, b), has_assert=True)
 
+            # Constant propagate a constant that's negative
+            def flip_with_index_constant(A):
+                b = torch.arange(start=-a.numel() + 1, end=-1, device="cuda")
+                return A[b]
+
+            test(flip_with_index_constant, (a,), has_assert=False)
+
             # We currently don't do constant propagation with float constants
             def flip_with_index(A):
                 b = 1.0 * torch.arange(start=-a.numel() + 1, end=-1, device="cuda")
                 b = b.int()
                 return A[b]
 
-            a = torch.rand(1024, device="cuda")
             test(flip_with_index, (a,), has_assert=False)
 
         # See https://github.com/pytorch/pytorch/issues/100348
@@ -6825,6 +6831,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             out[0].sum().backward()
             self.assertEqual(inp.grad, inp_ref.grad)
 
+        @skipIfRocm  # asserts not implemented in Rocm yet
         def test_optimize_indexing_assert(self):
             def has_indirect(code, tl_fn: str):
                 self.assertTrue(
