@@ -591,6 +591,49 @@ class TensorVariable(VariableTracker):
             )
             result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
             return result.call_method(tx, "item", [], {})
+        elif name == "redistribute":
+            from .user_defined import UserDefinedObjectVariable
+
+            def as_value(v):
+                if isinstance(v, list):
+                    return [as_value(x) for x in v]
+                if isinstance(v, UserDefinedObjectVariable):
+                    from torch.distributed._tensor.placement_types import Shard
+
+                    placement_val = v.value
+                    # XXX: nasty hack in order to get the real object from UserDefinedObject with attributes
+                    if isinstance(
+                        placement_val, Shard
+                    ) and tx.output.side_effects.is_attribute_mutation(v):
+                        placement_val.dim = tx.output.side_effects.load_attr(
+                            v, "dim"
+                        ).value
+                    return placement_val
+                elif isinstance(v, variables.BaseListVariable):
+                    return v.python_type()([as_value(x) for x in v.items])
+                else:
+                    unimplemented("as_value only supports UDO and BaseListVariable")
+
+            args_as_value = as_value(args)
+
+            # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
+            # and rewrite args to have only proxyable args, then insert call_function
+            def redistribute_fn_with_prim_types(x):
+                return x.redistribute(*args_as_value)
+
+            # attach the same function name for better debugging
+            redistribute_fn_with_prim_types.__name__ = f"prim_{name}"
+
+            tensor_variable = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    redistribute_fn_with_prim_types,
+                    *proxy_args_kwargs([self], {}),
+                ),
+                **options,
+            )
+            return tensor_variable
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.

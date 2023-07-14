@@ -121,7 +121,7 @@ if torch.distributed.is_available():
     import torch.distributed.algorithms._checkpoint.checkpoint_wrapper
 
     FILENAME_ALLOWLIST |= {
-        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__
+        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__,
     }
 
 # Include optimizer code for tracing
@@ -194,6 +194,7 @@ def check(filename, allow_torch=False):
         return True
     if filename in FILENAME_ALLOWLIST:
         return False
+
     if allow_torch and is_torch(filename):
         return False
     if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
@@ -229,6 +230,13 @@ _recompile_re()
 
 
 def is_torch_inline_allowed(filename):
+    # XXX: figure out a better way to allow inlining the placement types
+    if torch.distributed.is_available():
+        import torch.distributed._tensor.placement_types as placement_types
+
+        if filename.startswith(_module_dir(placement_types)):
+            return True
+
     return any(
         filename.startswith(_module_dir(mod))
         for mod in config.skipfiles_inline_module_allowlist

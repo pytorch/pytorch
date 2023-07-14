@@ -15,6 +15,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class DummyMLP(torch.nn.Module):
@@ -618,6 +619,96 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                     for unpadded_tensor in unpadded_list
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
+
+
+class TestDynamoDTensor(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        fake_store = FakeStore()
+        dist.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=self.world_size
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    @property
+    def device_type(self) -> str:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def test_dynamo_dtensor_from_local(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            dt = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
+            return dt.to_local() + 2
+
+        # x = torch.ones(1)
+
+        # opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        # res = opt_fn(x)
+        # self.assertEqual(res, ref)
+        ### below is the op approach
+        # from torch.distributed._tensor.api import _FromTorchTensor
+        # def from_local_tensor(x):
+        #     return _FromTorchTensor.apply(x, mesh, [Replicate()], False)
+
+        # _dt_lib_def = torch.library.Library("dtensor", "DEF")
+        # _dt_lib_def.define("from_local(Tensor self) -> Tensor")
+
+        # _dt_lib_impl = torch.library.Library("dtensor", "IMPL")
+        # _dt_lib_impl.impl("from_local", from_local_tensor, "Autograd")
+
+        # def fn(x):
+        #     return torch.ops.dtensor.from_local(x)
+
+        def grab_graph_backend(gm, inps):
+            gm.print_readable()
+            return gm
+
+        # opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch._dynamo.optimize(grab_graph_backend, nopython=True)(fn)
+        x = torch.ones(1)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+    def test_dynamo_dtensor_from_local_redistribute(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+            return dt.redistribute(mesh, [Replicate()]).to_local() + 2
+
+        def grab_graph_backend(gm, inps):
+            gm.print_readable()
+            return gm
+
+        # XXX: if apply https://github.com/pytorch/pytorch/pull/104482/files
+        # then remove the `eager` backend, fakification crashed in the aot_autograd
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
+    def test_dynamo_dtensor(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            return x.redistribute(mesh, [Replicate()]).to_local()
+
+        x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
 
 
 if __name__ == "__main__":

@@ -34,7 +34,11 @@ from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass, TorchDispatchMode
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode_stack,
+    is_traceable_wrapper_subclass,
+    TorchDispatchMode,
+)
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
 from torch.utils._stats import count, count_label
@@ -173,6 +177,16 @@ def _is_tensor_constructor(func: OpOverload):
     return (
         len(schema.returns) == 1 and schema.returns[0].type is torch._C.TensorType.get()
     )
+
+
+def is_fake(x):
+    if isinstance(x, FakeTensor):
+        return True
+    if is_traceable_wrapper_subclass(x):
+        flattened_tensors, _ = type(x).__tensor_flatten__(x)
+        # need to recurse because we could have nested subclasses
+        return all(is_fake(x) for x in flattened_tensors)
+    return False
 
 
 @functools.lru_cache(None)
