@@ -1282,7 +1282,6 @@ class TestOperators(TestCase):
         xfail('masked_select'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         skip('nn.functional.fractional_max_pool3d'),  # generator works on cpu, fails on cuda
-        xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         skip('nn.functional.fractional_max_pool2d'),  # generator works on cpu, fails on cuda
         xfail('column_stack', ''),
         xfail('nn.functional.dropout2d', ''),
