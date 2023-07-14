@@ -82,7 +82,7 @@ void pushPyOutToStack(
     py::object out,
     const char* msg);
 
-inline PyObject* TPHVariable_WrapList(
+inline PyObject* THPVariable_WrapList(
     const torch::autograd::variable_list& inputs) {
   PyObject* pyinput = PyList_New(inputs.size());
   for (const auto i : c10::irange(inputs.size())) {
@@ -91,7 +91,7 @@ inline PyObject* TPHVariable_WrapList(
   return pyinput;
 }
 
-inline torch::autograd::variable_list TPHVariable_UnpackList(
+inline torch::autograd::variable_list THPVariable_UnpackList(
     PyObject* pyresult) {
   TORCH_CHECK(PyList_CheckExact(pyresult));
   auto result_len = PyList_GET_SIZE(pyresult);
