@@ -483,10 +483,16 @@ def is_live(weak_ref: Optional[StorageWeakRefWrapper]) -> bool:
     return maybe_deref(weak_ref) is not None
 
 
-def maybe_deref(weak_ref: Optional[StorageWeakRefWrapper]) -> UntypedStorage:
+def maybe_deref(
+    weak_ref: Optional[StorageWeakRefWrapper],
+) -> Optional[Tuple[UntypedStorage, int]]:
     if weak_ref is None:
         return None
-    return weak_ref()
+    r = weak_ref()
+    if r is None:
+        return None
+    # NB: r.data_ptr() does not necessarily equal weak_ref.data_ptr()
+    return r, weak_ref.data_ptr()
 
 
 @contextlib.contextmanager
@@ -1274,8 +1280,9 @@ class CUDAGraphNode:
     ) -> Optional[PathOutputIndex]:
         for depth, output_refs in enumerate(self.path_weakrefs):
             for output_index, storage_ref in enumerate(output_refs):
-                if (storage := maybe_deref(storage_ref)) is not None:
-                    if storage.data_ptr() == t.untyped_storage().data_ptr():
+                if (storage_and_ptr := maybe_deref(storage_ref)) is not None:
+                    storage, ptr = storage_and_ptr
+                    if ptr == t.untyped_storage().data_ptr():
                         return (depth, output_index)
 
         return None
@@ -1342,10 +1349,9 @@ class CUDAGraphNode:
             for output_idx, output_liveness in enumerate(outputs_liveness):
                 # tensor can die early, but it can't be alive when it should be dead
                 w = self.path_weakrefs[depth][output_idx]
-                if (stor_weak_ptr := maybe_deref(w)) is not None:
+                if (stor_weak_ptr_and_data_ptr := maybe_deref(w)) is not None:
+                    stor_weak_ptr, stor_data_ptr = stor_weak_ptr_and_data_ptr
                     assert output_liveness
-                    stor_data_ptr = stor_weak_ptr.data_ptr()
-
                     assert (stor_data_ptr in live_storage_data_ptrs) == (
                         stor_weak_ptr in live_storage_weak_ptrs
                     )
