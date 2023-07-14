@@ -770,7 +770,7 @@ def _im2col_col2im_indices_along_dim(
     # Apply dilation on kernel and find its indices along dim d
     kernel_grid = arange_kw(0, kernel_d * dilation_d, dilation_d).unsqueeze(-1)
 
-    # Broadcast and add kernel staring positions (indices) with
+    # Broadcast and add kernel starting positions (indices) with
     # kernel_grid along dim d, to get block indices along dim d
     return blocks_d_indices + kernel_grid
 
