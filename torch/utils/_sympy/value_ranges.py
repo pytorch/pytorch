@@ -83,6 +83,20 @@ class ValueRanges:
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
+    def tighten(self, other: "ValueRanges"):
+        """Given two ValueRanges, returns their intersection"""
+        # Some invariants
+        if other == ValueRanges.unknown():
+            return self
+        if self == ValueRanges.unknown():
+            return other
+        assert self.is_bool == other.is_bool, (self, other)
+        if self.is_bool:
+            range = ValueRanges(sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper))
+        else:
+            range = ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
+        return range
+
     # Intersection
     def __and__(self, other):
         return ValueRanges(lower=max(self.lower, other.lower), upper=min(self.upper, other.upper))
@@ -406,6 +420,14 @@ class SymPyValueRangeAnalysis:
 
         return ValueRanges.coordinatewise_increasing_map(a, b, fn_)
 
+    @classmethod
+    def floor(cls, x):
+        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.floor)
+
+    @classmethod
+    def ceil(cls, x):
+        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
+
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def __init__(self):
@@ -516,14 +538,6 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
             return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
         else:
             return ValueRanges(sympy.Min(b.lower, c.lower), sympy.Max(b.upper, c.upper))
-
-    @classmethod
-    def floor(cls, x):
-        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.floor)
-
-    @classmethod
-    def ceil(cls, x):
-        return ValueRanges.increasing_map(x, sympy.functions.elementary.integers.ceiling)
 
     def __getattr__(self, name):
         log.warning("unhandled ValueRange op %s", name)

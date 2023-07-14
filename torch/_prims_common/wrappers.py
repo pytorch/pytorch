@@ -10,7 +10,7 @@ from torch._prims_common import (
 import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-from typing import Callable, Sequence, Tuple, NamedTuple, Optional, overload
+from typing import Callable, Sequence, Tuple, NamedTuple, overload
 import inspect
 from functools import wraps
 import warnings
@@ -97,7 +97,7 @@ class elementwise_type_promotion_wrapper:
         self,
         *,
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
-        type_promoting_args: Optional[Sequence[str]] = None,
+        type_promoting_args: Sequence[str] = None,
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind

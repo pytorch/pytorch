@@ -11,7 +11,7 @@ from torchgen.selective_build.selector import SelectiveBuilder
 try:
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[assignment, misc]
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 
 if_condition_template_str = """if (kernel_tag_sv.compare("$kernel_tag_name") == 0) {
