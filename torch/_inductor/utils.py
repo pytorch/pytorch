@@ -1194,10 +1194,6 @@ def type_match(arg, arg_type, is_optional_arg):
     return False
 
 
-def is_optional(arg):
-    return "Optional" in str(arg.type)
-
-
 # torch/csrc/utils/python_arg_parser.cpp:FunctionSignature::parse
 def schema_match(schema, args, kwargs):
     min_args = 0
@@ -1217,6 +1213,9 @@ def schema_match(schema, args, kwargs):
             return f"takes from {min_args} to {max_pos_args} positional arguments but {nargs} were given"
         else:
             return f"takes {max_pos_args} positional arguments but {nargs} were given"
+
+    def is_optional(arg):
+        return "Optional" in str(arg.type)
 
     assert len(args) <= max_pos_args, args_error_message(
         len(args), max_pos_args, min_args
