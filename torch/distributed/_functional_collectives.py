@@ -291,6 +291,15 @@ def reduce_scatter_tensor_coalesced(
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
+# This is a bit unsafe: it checks if the first argument in the schema reports as a non-mutable alias.
+# Today, this maps 1:1 with "aten ops that are views".
+def _is_view_op(tgt):
+    assert isinstance(tgt, torch._ops.OpOverload)
+    schema = tgt._schema
+    if len(schema.arguments) > 0:
+        first_arg = schema.arguments[0]
+        # check if op is a view
+        return first_arg.alias_info is not None and not first_arg.alias_info.is_write
 
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
@@ -327,18 +336,43 @@ class AsyncCollectiveTensor(torch.Tensor):
         wait_tensor(self.elem)
         return self
 
+    def __tensor_flatten__(self):
+        """
+        protocol to inform how to flatten a DTensor to local tensor
+        for PT2 tracing
+        """
+        return [self.elem], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, spec):
+        assert spec is None
+        assert isinstance(inner_tensors, (list, tuple)) and len(inner_tensors) == 1
+        elem = inner_tensors[0]
+        return AsyncCollectiveTensor(elem)
+
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        is_view_op = _is_view_op(func)
         def unwrap(e: AsyncCollectiveTensor):
             # wait_tensor is idepotent and will do stream sync only once
-            wait_tensor(e.elem)
+            if not is_view_op:
+                wait_tensor(e.elem)
             return e.elem
+
+        def wrap(e: torch.Tensor):
+            # wait_tensor is idepotent and will do stream sync only once
+            assert not isinstance(e, AsyncCollectiveTensor)
+            return AsyncCollectiveTensor(e)
 
         unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
         unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
 
         # we don't wrap the result as it doesn't need to be waited on.
         out = func(*unwrapped_args, **unwrapped_kwargs)
+
+        # View ops dont require a sync, so we should re-wrap the outputs.
+        if is_view_op:
+            out = tree_map_only(torch.Tensor, wrap, out)
 
         return out
 

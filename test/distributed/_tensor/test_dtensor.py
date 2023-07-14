@@ -905,5 +905,29 @@ def forward(self, detach_13, clone, tangents_1):
         self.assertEqual(x_ref.grad, x.grad)
         self.assertEqual(y_ref.grad, y.grad)
 
+    # Test: the output of our graph is a collective that does not yet need to be synced,
+    # so the output is an AsyncCollectiveTensor.
+    def test_compile_dtensor_async_output(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x, y):
+            dt = DTensor.from_local(x.reshape(2, 4), mesh, [Shard(0)], run_check=False)
+            dt2 = DTensor.from_local(y.reshape(4, 2), mesh, [Shard(1)], run_check=False)
+            dt_out = torch.matmul(dt, dt2)
+            dt_out_redistribute = dt_out.redistribute(mesh, [Replicate()])
+            return dt_out_redistribute.to_local()
+
+        opt_fn = torch.compile(fn, backend=aot_eager_graph, fullgraph=True)
+
+        x = torch.arange(8, requires_grad=True, dtype=torch.float32)
+        y = torch.arange(8, requires_grad=True, dtype=torch.float32)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+
+        # Assert that they are both `AsyncCollectiveTensor`s
+        self.assertEqual(type(ref), type(res))
+        import pdb; pdb.set_trace()
+        self.assertEqual(ref, res)
+
 if __name__ == "__main__":
     run_tests()
