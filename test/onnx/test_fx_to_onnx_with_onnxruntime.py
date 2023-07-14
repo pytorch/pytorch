@@ -861,18 +861,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # Dump state_dict to a file to simulate how HuggingFace model is initialized.
             # The file will be loaded via .load_state_dict(...)
             state_dict = real_model.state_dict()
-            # TODO: Remove explicit named_bufefrs when # https://github.com/pytorch/pytorch/issues/105233 is fixed
-            state_dict.update({k: v for k, v in real_model.named_buffers()})
             torch.save(state_dict, tmp_checkpoint_file.name)
 
             with torch.onnx.enable_fake_mode() as fake_context:
                 fake_args = create_args()
                 fake_kwargs = create_kwargs()
                 fake_model = create_model()
-                # TODO: Remove strict=False when https://github.com/pytorch/pytorch/issues/105233 is fixed
-                fake_model.load_state_dict(
-                    torch.load(tmp_checkpoint_file.name), strict=False
-                )
+                fake_model.load_state_dict(torch.load(tmp_checkpoint_file.name))
 
             # Export the model with fake inputs and parameters
             export_options = torch.onnx.ExportOptions(
