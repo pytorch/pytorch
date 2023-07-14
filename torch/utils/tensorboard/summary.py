@@ -4,11 +4,14 @@ import os
 from typing import Optional
 
 import numpy as np
+
 from google.protobuf import struct_pb2
 
-from tensorboard.compat.proto.summary_pb2 import HistogramProto
-from tensorboard.compat.proto.summary_pb2 import Summary
-from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
+from tensorboard.compat.proto.summary_pb2 import (
+    HistogramProto,
+    Summary,
+    SummaryMetadata,
+)
 from tensorboard.compat.proto.tensor_pb2 import TensorProto
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 from tensorboard.plugins.custom_scalar import layout_pb2
@@ -18,9 +21,26 @@ from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
-__all__ = ['hparams', 'scalar', 'histogram_raw', 'histogram', 'make_histogram', 'image', 'image_boxes', 'draw_boxes',
-           'make_image', 'video', 'make_video', 'audio', 'custom_scalars', 'text', 'pr_curve_raw', 'pr_curve', 'compute_curve',
-           'mesh']
+__all__ = [
+    "hparams",
+    "scalar",
+    "histogram_raw",
+    "histogram",
+    "make_histogram",
+    "image",
+    "image_boxes",
+    "draw_boxes",
+    "make_image",
+    "video",
+    "make_video",
+    "audio",
+    "custom_scalars",
+    "text",
+    "pr_curve_raw",
+    "pr_curve",
+    "compute_curve",
+    "mesh",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -93,19 +113,19 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     """
     import torch
     from tensorboard.plugins.hparams.api_pb2 import (
+        DataType,
         Experiment,
         HParamInfo,
         MetricInfo,
         MetricName,
         Status,
-        DataType,
     )
     from tensorboard.plugins.hparams.metadata import (
-        PLUGIN_NAME,
-        PLUGIN_DATA_VERSION,
         EXPERIMENT_TAG,
-        SESSION_START_INFO_TAG,
+        PLUGIN_DATA_VERSION,
+        PLUGIN_NAME,
         SESSION_END_INFO_TAG,
+        SESSION_START_INFO_TAG,
     )
     from tensorboard.plugins.hparams.plugin_data_pb2 import (
         HParamsPluginData,
@@ -456,7 +476,10 @@ def image_boxes(
     tensor_boxes = make_np(tensor_boxes)
     tensor_image = tensor_image.astype(np.float32) * _calc_scale_factor(tensor_image)
     image = make_image(
-        tensor_image.clip(0, 255).astype(np.uint8), rescale=rescale, rois=tensor_boxes, labels=labels
+        tensor_image.clip(0, 255).astype(np.uint8),
+        rescale=rescale,
+        rois=tensor_boxes,
+        labels=labels,
     )
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
@@ -494,6 +517,7 @@ def make_image(tensor, rescale=1, rois=None, labels=None):
         ANTIALIAS = Image.ANTIALIAS
     image = image.resize((scaled_width, scaled_height), ANTIALIAS)
     import io
+
     output = io.BytesIO()
     image.save(output, format="PNG")
     image_string = output.getvalue()
@@ -818,8 +842,8 @@ def mesh(
     Returns:
       Merged summary for mesh/point cloud representation.
     """
-    from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
     from tensorboard.plugins.mesh import metadata
+    from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
 
     json_config = _get_json_config(config_dict)
 

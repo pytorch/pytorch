@@ -36,6 +36,7 @@ from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
+    IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -2365,6 +2366,12 @@ class CommonTemplate:
             res = opt_mod(x)
             expected = mod(x)
             self.assertTrue(torch.allclose(res, expected))
+
+    def test_adaptive_avg_pool_with_output_size_0(self):
+        m1 = nn.AdaptiveAvgPool1d(0)
+        self.common(m1, (torch.randn(1, 2),))
+        m2 = nn.AdaptiveAvgPool2d(0)
+        self.common(m2, (torch.randn(1, 2, 3),))
 
     def test_max_pool2d1(self):
         def fn(x):
@@ -6954,6 +6961,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     fn_opt(inps)
 
         @skipIfRocm
+        @unittest.skipIf(IS_FBCODE, "fbcode system python does not provide torch")
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")
