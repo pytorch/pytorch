@@ -4,6 +4,8 @@ aten::__irshift__.Scalar
 aten::__irshift__.Tensor
 aten::_adaptive_avg_pool2d
 aten::_adaptive_avg_pool2d.out
+aten::_addmm_activation
+aten::_addmm_activation.out
 aten::_euclidean_dist.out
 aten::_fused_dropout
 aten::_fused_dropout.out
