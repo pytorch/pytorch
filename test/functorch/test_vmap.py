@@ -3515,7 +3515,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('histogramdd'),  # expected Tensor as element 0 in argument 0, but got tuple
         xfail('nn.functional.gaussian_nll_loss'),  # data-dependent control flow error
         xfail('nn.functional.embedding_bag'),  # embedding renorm vmap inplace incompatible
-        xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
 
         # required rank 4 tensor to use channels_last format
