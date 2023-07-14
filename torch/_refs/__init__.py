@@ -4629,7 +4629,7 @@ def logspace(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return _maybe_convert_to_dtype(torch.pow(base, ret), dtype)
+    return _maybe_convert_to_dtype(torch.pow(base, ret), dtype)  # type: ignore[return-value]
 
 
 @overload
