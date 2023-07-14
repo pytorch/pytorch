@@ -628,7 +628,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     // Naive, composite implementation defined here.
 
     // Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for math
-    auto is_negative_scaling = false;
+    bool is_negative_scaling = false;
     c10::SymFloat scaling_factor;
     if (scale.has_value()) {
       is_negative_scaling  = scale.value() < 0;
