@@ -30,7 +30,11 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import VariableTracker
-from .ctx_manager import AutocastModeVariable, NullContextVariable
+from .ctx_manager import (
+    AutocastModeVariable,
+    NullContextVariable,
+    TorchFunctionDisableVariable,
+)
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
 from .tensor import TensorWithTFOverrideVariable
@@ -324,6 +328,14 @@ class TorchVariable(VariableTracker):
             return ConstantVariable(
                 torch.are_deterministic_algorithms_enabled(), **options
             ).add_guards(DeterministicAlgorithmsVariable._guards_singleton)
+        elif self.value is torch._C._is_torch_function_enabled:
+            assert not (args or kwargs)
+            return ConstantVariable(
+                tx.output.torch_function_enabled, **options
+            ).add_guards(TorchFunctionDisableVariable._guards_singleton)
+        elif self.value is torch._C.DisableTorchFunctionSubclass:
+            assert not (args or kwargs)
+            return TorchFunctionDisableVariable.create(tx, **options)
         elif self.value is torch.cuda.stream:
             log.warning(
                 "torch.cuda.stream() not fully supported, streams may be ignored"
@@ -555,6 +567,21 @@ class TorchVariable(VariableTracker):
                 unimplemented("Unsupported unflatten with len(args) != 2")
 
             return torch.utils._pytree.tree_unflatten(args[0], args[1].value)
+        elif self.value == torch.utils._pytree.tree_map_only:
+            if len(args) != 3:
+                unimplemented("Unsupported tree_map_only with len(args) != 3")
+
+            ty = args[0].value  # type
+            fn = args[1]  # map fn
+            tree = args[2]  # tree
+
+            def map_fn(v):
+                if ty == v.python_type():
+                    return fn.call_function(tx, [v], {})
+                else:
+                    return v
+
+            return torch.utils._pytree.tree_map(map_fn, tree)
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
