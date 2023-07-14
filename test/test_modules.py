@@ -565,6 +565,11 @@ class TestModule(TestCase):
                 gpu_p.data.copy_(cpu_p)
 
             # === Compare forward output between cpu and gpu ===
+            print(cpu_forward_args)
+            print(cpu_forward_kwargs)
+            print(gpu_forward_args)
+            print(gpu_forward_kwargs)
+
             cpu_outputs = cpu_module(*cpu_forward_args, **cpu_forward_kwargs)
             gpu_outputs = gpu_module(*gpu_forward_args, **gpu_forward_kwargs)
 
