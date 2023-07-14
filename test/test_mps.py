@@ -478,6 +478,8 @@ def mps_ops_modifier(ops):
         'nn.functional.interpolatebicubic': None,
         'nn.functional.interpolatelinear': None,
         'nn.functional.interpolatetrilinear': None,
+        # TODO: max_pool2d for integral types fails the numerical test
+        'nn.functional.max_pool2d': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'nn.functional.max_unpool1dgrad': None,
         'nn.functional.max_unpool2dgrad': None,
         'nn.functional.max_unpool3dgrad': None,
@@ -764,6 +766,7 @@ def mps_ops_error_inputs_modifier(ops):
         # Exceptions are not raised
         '__rmod__',
         '__rsub__',
+        '__rpow__',
         'bernoulli',
         'clamp_max',
         'clamp_min',
@@ -3448,6 +3451,9 @@ class TestMPS(TestCaseMPS):
         helper(torch.randint(3, (10, )), True, True)
         helper(torch.randint(3, (1, )), True, True)
         helper(torch.randint(3, (0, )), True, True)
+        # Regression test for https://github.com/pytorch/pytorch/issues/104879
+        x = torch.arange(2, device="mps")
+        self.assertEqual(x.reshape(1, 1, 2).unique(), x)
 
     def test_unique_consecutive(self):
         def helper(x, dim, return_inverse, return_counts):
@@ -3726,6 +3732,18 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(median_result, median_result_cpu)
 
         helper((2, 8, 4, 5), torch.int16)
+
+    def test_activation_checkpoint_does_not_error(self):
+        from torch.utils.checkpoint import checkpoint
+
+        for use_reentrant in (True, False):
+            a = torch.tensor(1., device="mps", requires_grad=True)
+
+            def fn(x):
+                return x.sin().cos().exp()
+
+            out = checkpoint(fn, a, use_reentrant=use_reentrant)
+            out.backward()
 
 class TestLogical(TestCaseMPS):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
@@ -5001,6 +5019,9 @@ class TestNLLLoss(TestCaseMPS):
         helper((1, 1, 3, 3))
         helper((7, 13))
         helper((2, 8, 4, 5))
+        x_cpu = torch.tensor([], dtype=torch.bool)
+        x_mps = x_cpu.to("mps")
+        assert x_cpu.all() == x_mps.all().cpu()
 
     # Test forward min
     def test_min_el(self):
@@ -6653,6 +6674,13 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(neg_result, neg_result_cpu)
 
         helper((2, 8, 4, 5))
+
+    def test_neg_strided_input(self):
+        # See https://github.com/pytorch/pytorch/issues/98074#issuecomment-1496088337
+        x = torch.arange(18.0, device='mps').reshape(2, 3, 3)
+        y = x.permute(1, 0, 2)[..., 1]
+        z = y + y.neg()
+        self.assertEqual(z.abs().max().item(), 0.0)
 
     # Test index add
     def test_index_add(self):

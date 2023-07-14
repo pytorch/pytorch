@@ -329,32 +329,32 @@ class TORCH_API Tensor: public TensorBase {
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, const Scalar& v);
 
   Tensor cpu() const {
-    return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
   }
 
   // TODO: The Python version also accepts arguments
   Tensor cuda() const {
-    return to(options().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor hip() const {
-    return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor ve() const {
-    return to(options().device(DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::VE), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor vulkan() const {
-    return to(options().device(DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::Vulkan), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor metal() const {
-    return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
   }
 
   Tensor meta() const {
-    return to(options().device(DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
+    return to(options().device(c10::DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
   }
 
   // ~~~~~ Autograd API ~~~~~

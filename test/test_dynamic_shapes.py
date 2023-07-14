@@ -20,7 +20,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
-    FloorDiv,
     guard_bool,
     guard_float,
     guard_int,
@@ -40,6 +39,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
+from torch.utils._sympy.functions import FloorDiv, Mod
 
 aten = torch.ops.aten
 
@@ -546,6 +546,15 @@ class TestSymNumberMagicMethods(TestCase):
                 # Complex result, which we do not support:
                 # TypeError: Cannot convert complex to float
                 return self.assertRaises((TypeError,))
+            elif fn in ("lshift", "rshift") and not (
+                isinstance(inp1, (SymInt, int)) and
+                isinstance(inp2, (SymInt, int))
+            ):
+                # TypeError: unsupported operand type(s)
+                return self.assertRaises((TypeError,))
+            elif fn in ("lshift", "rshift") and inp2 < 0:
+                # ValueError: math domain error
+                return self.assertRaises((ValueError,))
             else:
                 return contextlib.nullcontext()
 
@@ -875,7 +884,7 @@ class TestDimConstraints(TestCase):
         self.assertEqual(solution, {8})
 
     def test_dim_constraints_solve_full(self):
-        from sympy import Eq, Integer, Mod, Ne, Symbol
+        from sympy import Eq, Integer, Ne, Symbol
         from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
 
         src0 = TensorPropertySource(

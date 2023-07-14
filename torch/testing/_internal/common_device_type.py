@@ -2,6 +2,7 @@ import copy
 import gc
 import inspect
 import runpy
+import sys
 import threading
 from collections import namedtuple
 from enum import Enum
@@ -705,7 +706,10 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
         # because many of them will fail.
         # So instead, the only way to opt a specific device-agnostic test file into
         # lazy tensor testing is with include_lazy=True
-        desired_device_type_test_bases.append(LazyTestBase)
+        if IS_FBCODE:
+            print("TorchScript backend not yet supported in FBCODE/OVRSOURCE builds", file=sys.stderr)
+        else:
+            desired_device_type_test_bases.append(LazyTestBase)
 
     def split_if_not_empty(x: str):
         return x.split(",") if len(x) != 0 else []

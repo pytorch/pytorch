@@ -69,6 +69,7 @@ CLOSURE_VARS = collections.OrderedDict(
             "___are_deterministic_algorithms_enabled",
             torch.are_deterministic_algorithms_enabled,
         ),
+        ("___is_torch_function_enabled", torch._C._is_torch_function_enabled),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
@@ -491,6 +492,15 @@ class GuardBuilder(GuardBuilderBase):
             code = "___are_deterministic_algorithms_enabled()"
         else:
             code = "not ___are_deterministic_algorithms_enabled()"
+        self._produce_guard_code(guard, [code])
+
+    def TORCH_FUNCTION_STATE(self, guard: Guard):
+        assert guard.source is GuardSource.GLOBAL
+        code = None
+        if convert_frame.initial_torch_function_state:
+            code = "___is_torch_function_enabled()"
+        else:
+            code = "not ___is_torch_function_enabled()"
         self._produce_guard_code(guard, [code])
 
     def DEFAULT_DEVICE(self, guard: Guard):
@@ -917,34 +927,20 @@ class CheckFunctionManager:
                         converted.append(None)
                 return converted
 
-            def convert_offset(offset):
-                if is_concrete_int(offset):
-                    return int(offset)
-                return None
-
             dynamic_dims_sizes = [
                 convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides_offset[
-                        WeakIdRef(t)
-                    ]["size"]
+                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                        "size"
+                    ]
                 )
                 for t in tensor_check_examples
             ]
 
             dynamic_dims_strides = [
                 convert(
-                    self.output_graph.tensor_weakref_to_sizes_strides_offset[
-                        WeakIdRef(t)
-                    ]["stride"]
-                )
-                for t in tensor_check_examples
-            ]
-
-            dynamic_dims_offset = [
-                convert_offset(
-                    self.output_graph.tensor_weakref_to_sizes_strides_offset[
-                        WeakIdRef(t)
-                    ]["storage_offset"]
+                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                        "stride"
+                    ]
                 )
                 for t in tensor_check_examples
             ]
@@ -953,7 +949,6 @@ class CheckFunctionManager:
                 *tensor_check_examples,
                 dynamic_dims_sizes=dynamic_dims_sizes,
                 dynamic_dims_strides=dynamic_dims_strides,
-                dynamic_storage_offset=dynamic_dims_offset,
             )
             check_tensors_fn = tensor_guards.check
             check_tensors_verbose_fn = tensor_guards.check_verbose

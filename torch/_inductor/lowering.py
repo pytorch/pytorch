@@ -27,6 +27,7 @@ from torch._prims_common import (
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from torch.utils._pytree import tree_flatten
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -800,7 +801,7 @@ def repeat(x, repeats):
                 if old_size[i] == 1:
                     index[i] = sympy.Integer(0)
                 else:
-                    index[i] = ir.ModularIndexing(index[i], 1, old_size[i])
+                    index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
     old_size_product = V.graph.sizevars.size_hint(sympy_product(old_size))
@@ -850,7 +851,7 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
 @register_lowering(aten.roll, type_promotion_kind=None)
 def roll(a, shifts, dims=tuple()):
     """
-    This is based on torch._refs.roll(), but uses ir.ModularIndexing().
+    This is based on torch._refs.roll(), but uses ModularIndexing().
 
     We can't use the ref here because it is based on multiple calls to
     torch.cat() that this will result in terrible code.
@@ -893,7 +894,7 @@ def roll(a, shifts, dims=tuple()):
 
     def fn(index):
         index = list(index)
-        index[dim] = ir.ModularIndexing(
+        index[dim] = ModularIndexing(
             index[dim] + start, sympy.Integer(1), sympy.expand(size)
         )
         return a_loader(index)
@@ -1300,6 +1301,10 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target is aten.view_as_complex.default:
         return False
 
+    # We should be able to remove this special case once `disable_cpp_codegen` is killed.
+    if node.target is aten.lift_fresh_copy.default:
+        return False
+
     def check_skip_condition(node, is_output):
         if not isinstance(node, torch.fx.Node):
             return False
@@ -1525,6 +1530,7 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
         inner_fn=inner_fn,
         ranges=[*size],
     )
+    result.realize()
     return result
 
 
@@ -1584,7 +1590,7 @@ def _inductor_bucketize(
         indices = ops.bucketize(
             val,
             boundaries.get_name(),
-            ops.index_expr(boundaries_size, index_dtype),
+            boundaries_size,
             index_dtype,
             right,
         )
@@ -1668,6 +1674,7 @@ make_fallback(aten.adaptive_max_pool2d)
 make_fallback(aten.adaptive_max_pool3d)
 make_fallback(aten.addbmm)
 make_fallback(aten.addmv, warn=False)
+make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
@@ -1714,7 +1721,6 @@ make_fallback(aten.max_unpool3d)
 make_fallback(aten.median)
 make_fallback(aten.mode)
 make_fallback(aten.multilabel_margin_loss_forward)
-make_fallback(aten.multi_margin_loss)
 make_fallback(aten.nanmedian)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
@@ -1768,7 +1774,6 @@ make_fallback(aten.fractional_max_pool3d_backward)
 make_fallback(aten._linalg_check_errors)
 make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten.multilabel_margin_loss_backward)
-make_fallback(aten.multi_margin_loss_backward)
 make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
@@ -1802,6 +1807,22 @@ make_fallback(aten.exponential.default, warn=False)
 
 # ROCm specific fallback, perf issues are observed when registered
 make_fallback(aten.miopen_batch_norm, warn=False)
+
+
+# Register with type_promotion_kind None.
+# For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
+@register_lowering(aten.copy, type_promotion_kind=None)
+def copy(self, src, non_blocking=False):
+    x = src
+    if self.get_device() != src.get_device():
+        x = to_device(x, self.get_device())
+    if self.get_dtype() != src.get_dtype():
+        x = to_dtype(x, self.get_dtype())
+
+    if self.get_size() != src.get_size():
+        out = expand(x, self.get_size())
+        return clone(out)
+    return clone(x)
 
 
 @register_lowering(aten.clone)
@@ -1886,7 +1907,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         end = dim_size
 
     src_size = list(x.get_size())
-    src_size[dim] = ir.FloorDiv(sympy.expand(end - start), sympy.expand(step))
+    src_size[dim] = FloorDiv(sympy.expand(end - start), sympy.expand(step))
     src = expand(src, src_size)
     src_loader = src.make_loader()
 
@@ -1897,7 +1918,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
 
         idx_dim = ops.index_expr(idx[dim], torch.int64)
         src_idx = list(idx)
-        src_idx[dim] = ir.FloorDiv(idx[dim] - start, step)
+        src_idx[dim] = FloorDiv(idx[dim] - start, step)
 
         mask = []
         if start != 0:
@@ -1918,7 +1939,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             mask.append(
                 ops.eq(
                     ops.index_expr(
-                        ir.ModularIndexing(idx[dim] - start, 1, step), torch.int64
+                        ModularIndexing(idx[dim] - start, 1, step), torch.int64
                     ),
                     ops.constant(0, torch.torch.int64),
                 )
@@ -2904,11 +2925,13 @@ def reflection_pad2d_backward(grad_output, x, padding):
 
             # If the upper bound is less than the lower bound, we can get rid of one accumulation.
             # This happens when the padding size is zero.
-            if index_range1[2] < index_range1[1]:
+            upper_less_than_lower1 = index_range1[2] < index_range1[1]
+            if isinstance(upper_less_than_lower1, bool) and upper_less_than_lower1:
                 return
             cond = index_range_condition(index_range1)
             if index_range2 is not None:
-                if index_range2[2] < index_range2[1]:
+                upper_less_than_lower2 = index_range2[2] < index_range2[1]
+                if isinstance(upper_less_than_lower2, bool) and upper_less_than_lower2:
                     return
                 cond = ops.and_(cond, index_range_condition(index_range2))
             g = ops.masked(cond, lambda: load_from_output(out_x, out_y), 0.0)
@@ -3084,12 +3107,12 @@ def constant_boundary_condition_2d(x, fill_value, padding=None, pad_fill_value=1
 
 
 def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
-    x_out = ir.FloorDiv(
+    x_out = FloorDiv(
         x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1), stride[i]
     )
 
     if ceil_mode:
-        x_alt = ir.FloorDiv(
+        x_alt = FloorDiv(
             x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
         )
         if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
@@ -3291,13 +3314,13 @@ def max_pool2d_with_indices_backward(
         h = h + padding[0]
         w = w + padding[1]
         phstart = ops.index_expr(
-            ir.FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
+            FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
         )
         pwstart = ops.index_expr(
-            ir.FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
+            FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
         )
-        phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
-        pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
+        phend = ops.index_expr(FloorDiv(h, stride[0]) + 1, torch.int32)
+        pwend = ops.index_expr(FloorDiv(w, stride[1]) + 1, torch.int32)
 
         phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
         pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
@@ -3431,6 +3454,9 @@ def _adaptive_avg_pool2d(x, output_size):
     if h_in == h_out and w_in == w_out:
         return clone(x)
 
+    if h_out == 0 or w_out == 0:
+        o_size = [*batch, h_out, w_out]
+        return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
     if h_in % h_out == 0 and w_in % w_out == 0:
         kernel_size = [h_in // h_out, w_in // w_out]
         return avg_pool2d(x, kernel_size)
@@ -3442,10 +3468,10 @@ def _adaptive_avg_pool2d(x, output_size):
     dtype = x.get_dtype()
 
     def start_index(index, out_dim, inp_dim):
-        return ir.FloorDiv((index * inp_dim), out_dim)
+        return FloorDiv((index * inp_dim), out_dim)
 
     def end_index(index, out_dim, inp_dim):
-        return ir.FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
 
     h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
     h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
@@ -3498,7 +3524,7 @@ def upsample_nearest2d_backward(
     w_kernel_max = ceildiv(inp_w, out_w)
 
     def start_index(index, out_dim, inp_dim):
-        return ir.CeilDiv(index * inp_dim, out_dim)
+        return CeilDiv(index * inp_dim, out_dim)
 
     def end_index(index, out_dim, inp_dim):
         return start_index((index + 1), out_dim, inp_dim)
@@ -3727,13 +3753,13 @@ def avg_pool2d_backward(
         h = h + padding[0]
         w = w + padding[1]
         phstart = ops.index_expr(
-            ir.FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
+            FloorDiv(h - kernel_size[0] + stride[0], stride[0]), torch.int32
         )
         pwstart = ops.index_expr(
-            ir.FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
+            FloorDiv(w - kernel_size[1] + stride[1], stride[1]), torch.int32
         )
-        phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
-        pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
+        phend = ops.index_expr(FloorDiv(h, stride[0]) + 1, torch.int32)
+        pwend = ops.index_expr(FloorDiv(w, stride[1]) + 1, torch.int32)
 
         phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
         pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
@@ -3812,56 +3838,66 @@ def _validate_reduction_axis(x, axis):
     return axis
 
 
+def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
+    if dtype is not None:
+        x = to_dtype(x, dtype)
+    size = x.get_size()
+    axis = set(_validate_reduction_axis(x, axis))
+
+    kept_sizes = []
+    kept_idx = []
+    reduced_sizes = []
+    reduced_idx = []
+    for i in range(len(size)):
+        if i in axis:
+            reduced_idx.append(i)
+            reduced_sizes.append(size[i])
+        else:
+            kept_idx.append(i)
+            kept_sizes.append(size[i])
+
+    def loader(index, reduction_index):
+        assert len(reduction_index) == len(reduced_idx)
+        if keepdims:
+            assert len(index) == len(size)
+            assert all(index[i] == 0 for i in reduced_idx)
+            index = [index[i] for i in kept_idx]
+        assert len(index) == len(kept_idx)
+        new_index = [None] * (len(index) + len(reduction_index))
+        for idx, var in itertools.chain(
+            zip(kept_idx, index), zip(reduced_idx, reduction_index)
+        ):
+            new_index[idx] = var
+        return inner_loader(new_index)
+
+    if keepdims:
+        new_size = list(size)
+        for i in reduced_idx:
+            new_size[i] = sympy.Integer(1)
+    else:
+        new_size = kept_sizes
+
+    inner_loader = x.make_loader()
+    return dict(
+        device=x.get_device(),
+        dst_dtype=override_return_dtype or x.get_dtype(),
+        src_dtype=x.get_dtype(),
+        inner_fn=loader,
+        ranges=new_size,
+        reduction_ranges=reduced_sizes,
+    )
+
+
 def make_reduction(reduction_type: str, override_return_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
-        if dtype is not None:
-            x = to_dtype(x, dtype)
-        size = x.get_size()
-        axis = set(_validate_reduction_axis(x, axis))
-
-        kept_sizes = []
-        kept_idx = []
-        reduced_sizes = []
-        reduced_idx = []
-        for i in range(len(size)):
-            if i in axis:
-                reduced_idx.append(i)
-                reduced_sizes.append(size[i])
-            else:
-                kept_idx.append(i)
-                kept_sizes.append(size[i])
-
-        def loader(index, reduction_index):
-            assert len(reduction_index) == len(reduced_idx)
-            if keepdims:
-                assert len(index) == len(size)
-                assert all(index[i] == 0 for i in reduced_idx)
-                index = [index[i] for i in kept_idx]
-            assert len(index) == len(kept_idx)
-            new_index = [None] * (len(index) + len(reduction_index))
-            for idx, var in itertools.chain(
-                zip(kept_idx, index), zip(reduced_idx, reduction_index)
-            ):
-                new_index[idx] = var
-            return inner_loader(new_index)
-
-        if keepdims:
-            new_size = list(size)
-            for i in reduced_idx:
-                new_size[i] = sympy.Integer(1)
-        else:
-            new_size = kept_sizes
-
-        inner_loader = x.make_loader()
-        result = Reduction.create(
-            device=x.get_device(),
-            dst_dtype=override_return_dtype or x.get_dtype(),
-            src_dtype=x.get_dtype(),
-            inner_fn=loader,
-            ranges=new_size,
-            reduction_ranges=reduced_sizes,
-            reduction_type=reduction_type,
+        kwargs = _make_reduction_inner(
+            x,
+            axis=axis,
+            keepdims=keepdims,
+            dtype=dtype,
+            override_return_dtype=override_return_dtype,
         )
+        result = Reduction.create(reduction_type=reduction_type, **kwargs)
         if isinstance(
             result.data.data, Reduction
         ):  # Only realize if reduction isn't unrolled
@@ -3888,7 +3924,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
     return to_dtype(div(sum_result, denom), output_dtype)
 
 
-def var_mean_(x, axis, correction, keepdim, return_mean):
+def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     if correction is None:
         correction = 1
 
@@ -3914,17 +3950,73 @@ def var_mean_(x, axis, correction, keepdim, return_mean):
     return x_var, x_mean
 
 
+def use_two_step_variance(x, axis, keepdim):
+    # triton-rocm currently doesn't support tl.reduce
+    device = x.get_device()
+    if device.type == "cuda" and torch.version.hip is not None:
+        return True
+
+    # Single pass variance cannot be split, so use sum based var-mean if it
+    # would be split
+    kwargs = _make_reduction_inner(
+        x,
+        axis=axis,
+        keepdims=keepdim,
+        dtype=x.get_dtype(),
+        override_return_dtype=None,
+    )
+    _, split = ir.Reduction.num_splits(
+        reduction_numel=sympy_product(kwargs["reduction_ranges"]),
+        reduction_type="sum",
+        **kwargs,
+    )
+    return split > 1
+
+
+def var_welford_(x, axis, *, correction, keepdim):
+    if correction is None:
+        correction = 1
+
+    sum_dx2 = make_reduction("var_unnormalized")(x, axis=axis, keepdims=keepdim)
+
+    dtype = sum_dx2.get_dtype()
+    size = x.get_size()
+    axis = _validate_reduction_axis(x, axis)
+    rnumel = sympy_product(size[i] for i in axis)
+
+    def get_constant_or_index_expr(x, dtype):
+        if isinstance(x, sympy.Expr) and not x.is_constant():
+            return ops.to_dtype(ops.index_expr(x, torch.int64), dtype)
+        return ops.constant(x, dtype)
+
+    def scale_fn(data):
+        c = get_constant_or_index_expr(correction, dtype)
+        N = get_constant_or_index_expr(rnumel, dtype)
+        return data / (N - c)
+
+    return make_pointwise(scale_fn)(sum_dx2)
+
+
 @register_lowering([aten.var, prims.var])
 def var_(x, axis=None, *, correction=None, keepdim=False):
-    return var_mean_(
-        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
-    )
+    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
+        return var_mean_sum_(
+            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
+        )
+
+    return var_welford_(x, axis=axis, correction=correction, keepdim=keepdim)
 
 
 @register_lowering(aten.var_mean)
 def var_mean(x, axis=None, *, correction=None, keepdim=False):
-    return var_mean_(
-        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
+    if use_two_step_variance(x, axis=axis, keepdim=keepdim):
+        return var_mean_sum_(
+            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
+        )
+
+    return (
+        var_welford_(x, axis=axis, correction=correction, keepdim=keepdim),
+        mean(x, axis=axis, keepdim=keepdim),
     )
 
 

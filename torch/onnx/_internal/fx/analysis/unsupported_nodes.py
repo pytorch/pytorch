@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Dict, List, Set
 
+import torch
 from torch.onnx._internal.fx import _pass, diagnostics
 
 
@@ -51,33 +52,23 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
             RuntimeErrorWithDiagnostic: If diagnostics are emitted and the diagnostic
                 level is `ERROR`.
         """
-        errors: List[diagnostics.RuntimeErrorWithDiagnostic] = []
+        unsupported_nodes: List[torch.fx.Node] = []
         for node in self.module.graph.nodes:
             if node.op == "call_function":
                 try:
                     # NOTE: OPSchema matcher is not in this analysis scope.
-                    aten_name = self.onnxfunction_dispatcher.get_aten_name(
+                    self.onnxfunction_dispatcher.get_function_overloads(
                         node, self.diagnostic_context
                     )
-                    self.onnxfunction_dispatcher.get_function_overloads(
-                        node, aten_name, self.diagnostic_context
-                    )
                 except diagnostics.RuntimeErrorWithDiagnostic as e:
-                    errors.append(e)
+                    unsupported_nodes.append(node)
 
         op_to_target_mapping: Dict[str, Set[str]] = {}
 
-        if errors:
-            for error in errors:
-                node_diagnostic = error.diagnostic
-                assert isinstance(
-                    node_diagnostic, diagnostics.UnsupportedFxNodeDiagnostic
-                )
-                node = node_diagnostic.unsupported_fx_node
-                assert node is not None
-                op = node.op
-                target = node.target
-                op_to_target_mapping.setdefault(op, set()).add(str(target))
+        for node in unsupported_nodes:
+            op = node.op
+            target = node.target
+            op_to_target_mapping.setdefault(op, set()).add(str(target))
 
         analysis_result = UnsupportedFxNodesAnalysisResult(op_to_target_mapping)
         self._lint(analysis_result, diagnostic_level)
