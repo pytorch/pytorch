@@ -329,16 +329,27 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        is_view_op = _is_view_op(func)
         def unwrap(e: AsyncCollectiveTensor):
             # wait_tensor is idepotent and will do stream sync only once
-            wait_tensor(e.elem)
+            if not is_view_op:
+                wait_tensor(e.elem)
             return e.elem
+
+        def wrap(e: torch.Tensor):
+            # wait_tensor is idepotent and will do stream sync only once
+            assert not isinstance(e, AsyncCollectiveTensor)
+            return AsyncCollectiveTensor(e)
 
         unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
         unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
 
         # we don't wrap the result as it doesn't need to be waited on.
         out = func(*unwrapped_args, **unwrapped_kwargs)
+
+        # View ops dont require a sync, so we should re-wrap the outputs.
+        if is_view_op:
+            out = tree_map_only(torch.Tensor, wrap, out)
 
         return out
 
