@@ -191,10 +191,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         export_output = dynamo_export(
             TraceModel(), x, export_options=ExportOptions(op_level_debug=False)
         )
-        export_output.diagnostic_context.dump(
-            "test_bool.sarif",
-            compress=False,
-        )
         assert_has_diagnostics(
             export_output.diagnostic_context,
             diagnostics.rules.find_opschema_matched_symbolic_function,
