@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/detail/DeviceHooksInterface.h>
 #include <c10/core/Allocator.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
@@ -64,7 +63,7 @@ constexpr const char* CUDA_HELP =
 // TODO: Consider putting the stub definitions in another class, so that one
 // never forgets to implement each virtual function in the real implementation
 // in CUDAHooks.  This probably doesn't buy us much though.
-struct TORCH_API CUDAHooksInterface : public at::DeviceHooksInterface {
+struct TORCH_API CUDAHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   virtual ~CUDAHooksInterface() = default;
@@ -79,7 +78,7 @@ struct TORCH_API CUDAHooksInterface : public at::DeviceHooksInterface {
     TORCH_CHECK(false, "Cannot get default CUDA generator without ATen_cuda library. ", CUDA_HELP);
   }
 
-  virtual Device getDeviceFromPtr(void* /*data*/) const override {
+  virtual Device getDeviceFromPtr(void* /*data*/) const {
     TORCH_CHECK(false, "Cannot get device of pointer on CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 

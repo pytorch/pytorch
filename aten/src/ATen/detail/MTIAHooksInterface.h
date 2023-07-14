@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/detail/DeviceHooksInterface.h>
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
 
@@ -26,7 +25,7 @@ constexpr const char* MTIA_HELP =
     "this error has occurred because you are trying "
     "to use some MTIA's functionality without MTIA extension included.";
 
-struct TORCH_API MTIAHooksInterface : public at::DeviceHooksInterface {
+struct TORCH_API MTIAHooksInterface {
   virtual ~MTIAHooksInterface() = default;
 
   virtual void initMTIA() const {

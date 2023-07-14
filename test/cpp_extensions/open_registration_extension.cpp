@@ -17,7 +17,7 @@
 #include <ATen/ops/abs_native.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
-#include <ATen/detail/DeviceHooksInterface.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
@@ -339,36 +339,36 @@ void set_custom_device_index(c10::DeviceIndex device_index) {
 }
 
 
-struct TORCH_API PrivateUse1HooksInterface : public at::DeviceHooksInterface {
-    virtual ~PrivateUse1HooksInterface() = default;
+struct TORCH_API FooHooksInterface : public at::PrivateUse1HooksInterface {
+    virtual ~FooHooksInterface() = default;
     const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) {
       static auto device_gen = make_generator_privateuse1(device_index);
       return device_gen;
     }
 };
 
-struct TORCH_API PrivateUse1HooksArgs : public at::DeviceHooksArgs {};
+struct TORCH_API FooHooksArgs : public at::PrivateUse1HooksArgs {};
 
-TORCH_DECLARE_REGISTRY(PrivateUse1HooksRegistry, PrivateUse1HooksInterface, PrivateUse1HooksArgs);
+TORCH_DECLARE_REGISTRY(PrivateUse1HooksRegistry, FooHooksInterface, FooHooksArgs);
 #define REGISTER_PRIVATEUSE1_HOOKS(clsname) \
   C10_REGISTER_CLASS(PrivateUse1HooksRegistry, clsname, clsname)
 
-C10_DEFINE_REGISTRY(PrivateUse1HooksRegistry, PrivateUse1HooksInterface, PrivateUse1HooksArgs)
+C10_DEFINE_REGISTRY(PrivateUse1HooksRegistry, FooHooksInterface, FooHooksArgs)
 
-static at::DeviceHooksInterface* get_private_hooks() {
-  static at::DeviceHooksInterface* privateuse1_hooks;
+static at::PrivateUse1HooksInterface* get_private_hooks() {
+  static at::PrivateUse1HooksInterface* privateuse1_hooks;
   static c10::once_flag once;
   c10::call_once(once, [] {
     privateuse1_hooks = PrivateUse1HooksRegistry()->Create("PrivateUse1Hooks", {}).release();
     if (!privateuse1_hooks) {
-      privateuse1_hooks = new PrivateUse1HooksInterface();
+      privateuse1_hooks = new FooHooksInterface();
     }
   });
   return privateuse1_hooks;
 }
 
 void register_hook() {
-  at::SetDeviceHooksInterface(c10::DeviceType::PrivateUse1, get_private_hooks());
+  at::SetPrivateUse1HooksInterface(c10::DeviceType::PrivateUse1, get_private_hooks());
 }
 
 const at::Generator& default_generator(c10::DeviceIndex device_index) {

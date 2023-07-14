@@ -5,8 +5,8 @@
 #include <c10/util/Exception.h>
 namespace at {
 
-struct TORCH_API DeviceHooksInterface {
-  virtual ~DeviceHooksInterface() = default;
+struct TORCH_API PrivateUse1HooksInterface {
+  virtual ~PrivateUse1HooksInterface() = default;
   virtual const at::Generator& getDefaultGenerator(c10::DeviceIndex device_index) {
     C10_THROW_ERROR(NotImplementedError, "must be inherited to implement.");
   }
@@ -16,10 +16,10 @@ struct TORCH_API DeviceHooksInterface {
   }
 };
 
-struct TORCH_API DeviceHooksArgs {};
+struct TORCH_API PrivateUse1HooksArgs {};
 
-TORCH_API void SetDeviceHooksInterface(at::DeviceType t, at::DeviceHooksInterface* hook_);
+TORCH_API void SetPrivateUse1HooksInterface(at::DeviceType t, at::PrivateUse1HooksInterface* hook_);
 
-TORCH_API at::DeviceHooksInterface* GetDeviceHooksInterface(const at::DeviceType& t);
+TORCH_API at::PrivateUse1HooksInterface* GetPrivateUse1HooksInterface(const at::DeviceType& t);
 
 }

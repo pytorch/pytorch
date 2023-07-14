@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/detail/DeviceHooksInterface.h>
 #include <c10/core/Allocator.h>
 #include <ATen/core/Generator.h>
 #include <c10/util/Exception.h>
@@ -22,7 +21,7 @@ namespace at {
 // which we may want to call into from CPU code (and thus must be dynamically
 // dispatched, to allow for separate compilation of HIP code).  See
 // CUDAHooksInterface for more detailed motivation.
-struct TORCH_API HIPHooksInterface : public at::DeviceHooksInterface {
+struct TORCH_API HIPHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   virtual ~HIPHooksInterface() = default;
