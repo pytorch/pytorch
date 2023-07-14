@@ -20,7 +20,6 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
     make_contiguous_strides_for,
-    NumberType,
     TensorLike,
 )
 
@@ -323,70 +322,6 @@ def meta_index_select(self, dim, index):
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
-
-
-def _multi_margin_loss_shape_check(ndims, input, target, weight):
-    torch._check(
-        (ndims == 2 and input.size(1) != 0)
-        or (ndims == 1 and input.size(0) != 0)
-        or ndims == 0,
-        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
-    )
-
-    if ndims <= 1:
-        nframe = 1
-        dim = 1 if ndims == 0 else input.size(0)
-    else:
-        nframe = input.size(0)
-        dim = input.size(1)
-
-    torch._check(
-        target.dim() <= 1 and target.numel() == nframe,
-        lambda: f"inconsistent target size, expected {nframe} but got {target.shape}",
-    )
-    if weight is not None:
-        torch._check(
-            weight.ndim <= 1 and weight.numel() == dim,
-            lambda: f"inconsistent weight size, expected {dim} but got {weight.shape}",
-        )
-
-    return nframe, dim
-
-
-@register_meta(aten.multi_margin_loss)
-@out_wrapper()
-def meta_multi_margin_loss(
-    input: Tensor,
-    target: Tensor,
-    p: NumberType = 1,
-    margin: NumberType = 1,
-    weight: Optional[Tensor] = None,
-    reduction: int = Reduction.MEAN.value,
-) -> Tensor:
-    ndims = input.ndim
-    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
-    nframe, _ = _multi_margin_loss_shape_check(ndims, input, target, weight)
-    if reduction == Reduction.NONE.value and target.ndim > 0:
-        return input.new_empty(nframe)
-    else:
-        return input.new_empty(())
-
-
-@register_meta(aten.multi_margin_loss_backward)
-@out_wrapper()
-def meta_multi_margin_loss_backward(
-    grad_output: Tensor,
-    input: Tensor,
-    target: Tensor,
-    p: NumberType,
-    margin: NumberType,
-    weight: Optional[Tensor] = None,
-    reduction: int = Reduction.MEAN.value,
-) -> Tensor:
-    ndims = input.ndim
-    torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
-    _multi_margin_loss_shape_check(ndims, input, target, weight)
-    return input.new_empty(input.shape)
 
 
 def _multilabel_margin_loss_shape_check(ndims, target_arg, input, target):
