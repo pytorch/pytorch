@@ -244,7 +244,7 @@ def convert_frame_assert(
         ):
             if config.report_guard_failures:
                 message = (
-                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
                     f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
                 )
             else:

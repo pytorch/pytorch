@@ -7,7 +7,7 @@ import torch
 from torch._guards import Source
 from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._python_dispatch import supports_mode_tracing, transform_subclass
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass, transform_subclass
 from torch.utils.weak import WeakIdRef
 
 DimList = List
@@ -395,7 +395,7 @@ class MetaConverter:
 
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
-                    if supports_mode_tracing(t):
+                    if is_traceable_wrapper_subclass(t):
 
                         def empty_create(inner_t):
                             is_leaf = safe_is_leaf(inner_t)
@@ -480,7 +480,7 @@ class MetaConverter:
                         def maybe_get_fake_mode(t):
                             if isinstance(t, FakeTensor):
                                 return t.fake_mode
-                            if supports_mode_tracing(t):
+                            if is_traceable_wrapper_subclass(t):
                                 inner_tensors, _ = t.__tensor_flatten__()
                                 modes = [maybe_get_fake_mode(x) for x in inner_tensors]
                                 m = modes[0]
@@ -532,7 +532,7 @@ class MetaConverter:
             type(t) is torch.Tensor
             or type(t) is torch.nn.Parameter
             or (ignore_subclass and isinstance(t, torch.Tensor))
-            or supports_mode_tracing(t)
+            or is_traceable_wrapper_subclass(t)
             or isinstance(t, FakeTensor)
         ):
             if t.device.type != "xla" and any(
