@@ -926,7 +926,6 @@ def forward(self, detach_13, clone, tangents_1):
 
         # Assert that they are both `AsyncCollectiveTensor`s
         self.assertEqual(type(ref), type(res))
-        import pdb; pdb.set_trace()
         self.assertEqual(ref, res)
 
 if __name__ == "__main__":
