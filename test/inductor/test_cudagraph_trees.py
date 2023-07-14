@@ -1152,6 +1152,32 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             inp = torch.randn(3, 6, device="cuda", requires_grad=True)
             run_big_test(inp)
 
+        def test_dynamic_warmup(self):
+            COUNTER = 0
+
+            def f(inps):
+                i, x = inps
+                inps.clear()
+                nonlocal COUNTER
+                COUNTER += 1
+                return x * 2
+
+            x = torch.randn(2, device="cuda")
+            inp_list = [2, x]
+            foo_cg = self.cudagraphify_impl(f, inp_list, ())
+            foo_cg(inp_list)  # warmup
+            foo_cg([2, x])  # record
+            foo_cg([2, x])  # replay
+            self.assertEqual(COUNTER, 2)
+
+            # Switching the size will require a warmup again
+            x = torch.randn(3, device="cuda")
+            inp_list = [3, x]
+            foo_cg(inp_list)  # warmup
+            foo_cg([3, x])  # record
+            foo_cg([3, x])  # replay
+            self.assertEqual(COUNTER, 4)
+
         def test_forward_generation(self):
             def foo(x):
                 return x * x * x
