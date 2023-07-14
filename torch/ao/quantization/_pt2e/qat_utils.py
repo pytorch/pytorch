@@ -458,10 +458,8 @@ def _update_special_qspecs_after_replacement(
         if isinstance(edge_or_node, Node):
             _node = edge_or_node
             return original_to_replacement_node.get(_node, _node)
-        # TODO: It's really should be
-        # isinstance(edge_or_node, tuple) and len(edge_or_node) == 2 and all(isinstance(x, Node) for x in edge_or_node)
-        elif isinstance(edge_or_node, Tuple[Node, Node]):  # type: ignore[arg-type]
-            src, dest = edge_or_node  # type: ignore[misc]
+        elif isinstance(edge_or_node, Tuple[Node, Node]):
+            src, dest = edge_or_node
             return (
                 original_to_replacement_node.get(src, src),
                 original_to_replacement_node.get(dest, dest),

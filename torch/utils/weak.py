@@ -50,7 +50,7 @@ class WeakIdRef(weakref.ref):
         # cache the id of the key as we know this is definitely the hash
         # method
         self._id = id(key)
-        super().__init__(key, callback)  # type: ignore[call-arg]
+        super().__init__(key, callback)
 
     def __call__(self):
         r = super().__call__()
