@@ -27,6 +27,7 @@ from . import config, skipfiles
 from .eval_frame import check_if_dynamo_supported, innermost_fn, optimize_assert
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .hooks import Hooks
+from .utils import checkpoint_params
 
 log = logging.getLogger(__name__)
 if TYPE_CHECKING:
@@ -335,10 +336,13 @@ def export(
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
             nonlocal graph_captured_input
-
+            # running the graph can change the state of the module. Therefore,
+            # do a save-restore of params/buffers
+            restore = checkpoint_params(graph)
             graph_captured_input = graph_inputs
             assert graph is not None
             graph_captured_result = graph(*graph_inputs)
+            restore()
             return graph_captured_result
 
         return result_capturing_wrapper
@@ -432,6 +436,8 @@ def export(
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
+        # Running the graph can mutate the state of the module, so save-restore
+        restore = checkpoint_params(graph)
         with enable_python_dispatcher(), fake_mode:
             try:
                 graph = make_fx(
@@ -445,6 +451,7 @@ def export(
             except CondOpArgsMismatchError as e:
                 # Wrap the internal error to the user-facing error
                 raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
+        restore()
 
     new_graph = FlattenInputOutputSignature(
         graph,
