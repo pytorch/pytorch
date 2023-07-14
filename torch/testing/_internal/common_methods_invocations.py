@@ -13242,17 +13242,26 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         check_batched_forward_grad=False,
         decorators=[DecorateInfo(toleranceOverride(
-            {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon', device_type='cuda',), ],
+            {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon',), ],
         skips=(
             # This is only failing on Linux Bionic 3.10 Cuda 11.6
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
                          device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
-                         device_type='cuda', dtypes=(torch.float32,)),
+                         dtypes=(torch.float32,)),
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # Forward works for dtype=float64 which is the math path
             DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
+            # Not implemented for Forward AD
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_fn_fwgrad_bwgrad',
+                         device_type='cpu'),
+            # Not implemented for backward derivative
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad',
+                         device_type='cpu'),
+            # Dimensionality of sizes (0) must match dimensionality of strides (1)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive',
+                         device_type='cpu'),
             # OpInfo was implemented with a lambda
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # See [Note] SDPA returns Philox Offset and Seed as tensors that will live on CPU when not in cuda graph capture

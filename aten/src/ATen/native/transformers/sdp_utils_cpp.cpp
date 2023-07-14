@@ -17,15 +17,22 @@
 #include <functional>
 
 namespace sdp {
+namespace {
+// This helper function creates a constexpr std::array
+// From a compile time list of values
+template <typename V, typename... T>
+constexpr auto array_of(T&&... t) -> std::array<V, sizeof...(T)> {
+  return {{std::forward<T>(t)...}};
+}
 
-bool input_requires_grad(sdp_params params) {
+bool input_requires_grad_cpp(sdp_params params) {
   const bool any_inputs_require_grad = params.query.requires_grad() ||
       params.key.requires_grad() || params.value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
   return any_inputs_require_grad && gradmode_enabled;
 }
 
-bool has_for_nested_inputs(sdp_params params) {
+bool has_for_nested_inputs_cpp(sdp_params params) {
   return (
       params.query.is_nested() || params.key.is_nested() ||
       params.value.is_nested());
@@ -41,7 +48,7 @@ std::array<SDPBackend, num_backends> priority_order_cpp(sdp_params params) {
 }
 
 template <typename dtype_vector>
-bool check_tensor_dtype(
+bool check_tensor_dtype_cpp(
     sdp_params params,
     dtype_vector allowed_dtypes,
     bool debug) {
@@ -69,7 +76,7 @@ bool check_tensor_dtype(
 }
 
 
-bool try_broadcast_param_size(
+bool try_broadcast_param_size_cpp(
     const c10::SymInt q_size,
     const c10::SymInt k_size,
     const c10::SymInt v_size,
@@ -99,7 +106,7 @@ bool try_broadcast_param_size(
   return true;
 }
 
-bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
+bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper_cpp(
     at::Tensor param,
     c10::string_view param_name,
     bool debug) {
@@ -136,14 +143,14 @@ bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
   return true;
 }
 
-bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
+bool check_for_seq_len_0_nested_tensor_cpp(sdp_params params, bool debug) {
   // When this function is called we are assured that the nt is dim==4
-  if (!has_for_nested_inputs(params)) {
+  if (!has_for_nested_inputs_cpp(params)) {
     return true;
   }
 
   bool q_is_safe = params.query.is_nested()
-      ? check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
+      ? check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper_cpp(
             params.query, "query ", debug)
       : true;
   // short circuit if any is unsafe
@@ -152,7 +159,7 @@ bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   }
 
   bool k_is_safe = params.key.is_nested()
-      ? check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
+      ? check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper_cpp(
             params.key, "key ", debug)
       : true;
   if (!k_is_safe) {
@@ -160,7 +167,7 @@ bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   }
 
   bool v_is_safe = params.value.is_nested()
-      ? check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
+      ? check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper_cpp(
             params.value, "value ", debug)
       : true;
   if (!v_is_safe) {
@@ -176,16 +183,16 @@ bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
       q_num_heads == k_num_heads && q_num_heads == v_num_heads;
 
   if (!same_num_heads) {
-    return try_broadcast_param_size(
+    return try_broadcast_param_size_cpp(
         q_num_heads, k_num_heads, v_num_heads, "num heads ", debug);
   }
 
   return true;
 }
 
-bool check_nested_tensor(sdp_params params, bool debug) {
+bool check_nested_tensor_cpp(sdp_params params, bool debug) {
   // Return false if have nested tensor
-  if (has_for_nested_inputs(params)) {
+  if (has_for_nested_inputs_cpp(params)) {
     if (debug) {
       TORCH_WARN(
           "Both fused kernels of cpp version currently do support Nested Tensor inputs.");
@@ -195,7 +202,7 @@ bool check_nested_tensor(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_for_dropout(sdp_params params, bool debug) {
+bool check_for_dropout_cpp(sdp_params params, bool debug) {
   if (params.dropout > 0.00001) {
     if (debug) {
       TORCH_WARN("Both fused kernels do not support non-zero dropout.");
@@ -205,9 +212,9 @@ bool check_for_dropout(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_requires_grad_and_nested(sdp_params params, bool debug) {
+bool check_requires_grad_and_nested_cpp(sdp_params params, bool debug) {
   // If we fail both checks then we return false
-  if (has_for_nested_inputs(params) && input_requires_grad(params)) {
+  if (has_for_nested_inputs_cpp(params) && input_requires_grad_cpp(params)) {
     if (debug) {
       TORCH_WARN(
           "Memory efficient attention currently doesn't support training with NT inputs.");
@@ -217,7 +224,7 @@ bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_for_attn_mask(sdp_params params, bool debug) {
+bool check_for_attn_mask_cpp(sdp_params params, bool debug) {
   if (params.has_attn_mask) {
     if (debug) {
       TORCH_WARN("Both fused kernels do not support non-null attn_mask.");
@@ -227,18 +234,7 @@ bool check_for_attn_mask(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_for_noncontiguous(sdp_params params, bool debug) {
-  if (!(params.query.stride(3) == 1 && params.key.stride(3) == 1 &&
-        params.value.stride(3) == 1)) {
-    if (debug) {
-      TORCH_WARN("Both fused kernels do not support non-contiguous embedding.");
-    }
-    return false;
-  }
-  return true;
-}
-
-bool check_tensor_shapes(sdp_params params, bool debug) {
+bool check_tensor_shapes_cpp(sdp_params params, bool debug) {
   auto query_dim = params.query.dim();
   if (!(query_dim == params.key.dim() && query_dim == params.value.dim() &&
         (query_dim == 4))) {
@@ -257,7 +253,7 @@ bool check_tensor_shapes(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_safe_kv_broadcast(at::Tensor param, bool debug) {
+bool check_safe_kv_broadcast_cpp(at::Tensor param, bool debug) {
   const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
   auto seq_len = nt_tensor_impl->opt_size(2);
   if (!seq_len.has_value()) {
@@ -352,7 +348,7 @@ bool check_head_dim_size_mem_efficient_cpp(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_runtime_disabled_flash(sdp_params params, bool debug) {
+bool check_runtime_disabled_flash_cpp(sdp_params params, bool debug) {
   // We check the global context to see if user has explicitly turned of flash
   // sdp kernels
   if (!at::globalContext().userEnabledFlashSDP()) {
@@ -364,7 +360,7 @@ bool check_runtime_disabled_flash(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_runtime_disabled_mem_efficient(sdp_params params, bool debug) {
+bool check_runtime_disabled_mem_efficient_cpp(sdp_params params, bool debug) {
   // We check the global context to see if user has explicitly turned of
   // mem_efficient sdp kernels
   if (!at::globalContext().userEnabledMemEfficientSDP()) {
@@ -382,13 +378,12 @@ bool use_flash_attention_cpp(sdp_params params, bool debug) {
 
   // Define gate functions that determine if a flash kernel can be run
   constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
-      check_runtime_disabled_flash,
-      check_nested_tensor,
-      check_for_dropout,
-      check_tensor_shapes,
-      check_for_noncontiguous,
+      check_runtime_disabled_flash_cpp,
+      check_nested_tensor_cpp,
+      check_for_dropout_cpp,
+      check_tensor_shapes_cpp,
       check_batch_size_and_num_heads_cpp,
-      check_for_attn_mask,
+      check_for_attn_mask_cpp,
       check_head_dim_size_cpp);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
@@ -396,7 +391,7 @@ bool use_flash_attention_cpp(sdp_params params, bool debug) {
     }
   }
 
-  return check_tensor_dtype(params, cpp_supported_flash_dtypes, debug);
+  return check_tensor_dtype_cpp(params, cpp_supported_flash_dtypes, debug);
 }
 
 bool use_mem_efficient_attention_cpp(sdp_params params, bool debug) {
@@ -405,13 +400,12 @@ bool use_mem_efficient_attention_cpp(sdp_params params, bool debug) {
 
   //  Define gate functions that determine if a mem efficient kernel can be run
   constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
-      check_runtime_disabled_mem_efficient,
-      check_nested_tensor,
-      check_for_dropout,
-      check_tensor_shapes,
-      check_for_noncontiguous,
+      check_runtime_disabled_mem_efficient_cpp,
+      check_nested_tensor_cpp,
+      check_for_dropout_cpp,
+      check_tensor_shapes_cpp,
       check_batch_size_and_num_heads_cpp,
-      check_for_attn_mask,
+      check_for_attn_mask_cpp,
       check_head_dim_size_mem_efficient_cpp);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
@@ -419,8 +413,9 @@ bool use_mem_efficient_attention_cpp(sdp_params params, bool debug) {
     }
   }
 
-  return check_tensor_dtype(params, cpp_supported_mem_efficient_dtypes, debug);
+  return check_tensor_dtype_cpp(params, cpp_supported_mem_efficient_dtypes, debug);
 }
+} // namespace
 
 SDPBackend select_sdp_backend_cpp(sdp_params kernel_params) {
   // This function defines the priority order of the different sdp backends
