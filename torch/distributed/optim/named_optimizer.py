@@ -162,7 +162,7 @@ class _NamedOptimizer(optim.Optimizer):
         return self._optimizer.step(closure=closure)
 
     @property
-    def state(self) -> Mapping[torch.Tensor, Any]:
+    def state(self) -> Mapping[torch.Tensor, Any]:  # type: ignore[override]
         return self._optimizer.state
 
     def load_state_dict(self, state_dict: Mapping[str, Any]) -> None:

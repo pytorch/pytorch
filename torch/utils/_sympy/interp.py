@@ -66,15 +66,16 @@ def sympy_interp(
     analysis, env: Dict[sympy.Symbol, Any], expr: Union[sympy.Expr, SympyBoolean]
 ):
     # Handle base cases
-    # TODO: not really sure if I'm passing the right dtype here
-    # TODO: wouldn't it be better to pass the sympy expression through
-    # sometimes?
-    if isinstance(expr, sympy.Integer):
-        return analysis.constant(int(expr), torch.int64)
+    dtype = None
+    if isinstance(expr, BooleanAtom):
+        dtype = torch.bool
+    elif isinstance(expr, sympy.Integer):
+        dtype = torch.int64
     elif isinstance(expr, sympy.Number):
-        return analysis.constant(float(expr), torch.double)
-    elif isinstance(expr, BooleanAtom):
-        return analysis.constant(bool(expr), torch.bool)
+        dtype = torch.double
+
+    if dtype is not None:
+        return analysis.constant(expr, dtype)
     elif isinstance(expr, sympy.Symbol):
         return env[expr]
 
