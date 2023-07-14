@@ -487,13 +487,34 @@ class _OnnxSchemaChecker:
             return False
         # Check attribute dtypes
         for attribute_name, attribute in function_attributes.items():
-            attribute_onnx_type = fx_type_utils.from_python_type_to_onnx_attribute_type(
-                type(attribute)
-            )
-            if attribute_onnx_type != self.attributes[attribute_name].type:
+            if not self._match_onnx_attribute_type(attribute_name, attribute):
                 # If the attribute type of the OpSchema and the attribute type don't match,
                 # we know the function and the input are not compatible
                 return False
+        return True
+
+    @_beartype.beartype
+    def _match_onnx_attribute_type(
+        self,
+        attribute_name: str,
+        attribute: fx_type_utils.Argument,
+        is_sequence: bool = False,
+    ) -> bool:
+        if isinstance(attribute, (int, float, bool, str)):
+            attribute_onnx_type = fx_type_utils.from_python_type_to_onnx_attribute_type(
+                type(attribute), is_sequence=is_sequence
+            )
+            if attribute_onnx_type != self.attributes[attribute_name].type:
+                return False
+        # If the attribute is an empty list, we don't know the type of the list
+        # so it's a mismatch
+        elif isinstance(attribute, (list, tuple)) and attribute:
+            return self._match_onnx_attribute_type(
+                attribute_name, attribute[0], is_sequence=True
+            )
+        else:
+            # NOTE: Unrecognized attribute type
+            return False
         return True
 
     @_beartype.beartype
