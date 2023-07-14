@@ -326,25 +326,25 @@ def meta_index_select_out(self, dim, index, out):
 
 
 def _multi_margin_loss_shape_check(ndims, input, target):
-    valid_inputs = (
+    torch._check(
         (ndims == 2 and input.size(1) != 0)
         or (ndims == 1 and input.size(0) != 0)
-        or ndims == 0
+        or ndims == 0,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
     )
+
     if ndims <= 1:
         nframe = 1
         dim = 1 if ndims == 0 else input.size(0)
     else:
         nframe = input.size(0)
         dim = input.size(1)
+
     torch._check(
-        valid_inputs,
-        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+        target.dim() <= 1 and target.numel() == nframe,
+        lambda: f"inconsistent target size, expected {nframe} but got {target.shape}",
     )
-    torch._check(
-        valid_inputs and target.ndim <= 1 and target.numel() == nframe,
-        lambda: f"inconsistent target size, got: {target.shape}",
-    )
+
     return nframe, dim
 
 
