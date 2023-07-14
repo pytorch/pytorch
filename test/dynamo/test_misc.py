@@ -6072,6 +6072,151 @@ def ___make_guard_fn():
         self.assertIsNotNone(r.model)
         self.assertIsNotNone(r.failed_source_expr)
 
+    def test_simple_set_usage(self):
+        def foo(x, y):
+            setty = {x, y}
+            return setty.pop() * setty.pop()
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter, nopython=True)(foo)
+        x = torch.randn(10, 10)
+        y = torch.randn(10, 10)
+        foo(x, y)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_add_to_set(self):
+        def foo(x, y):
+            setty = set()
+            setty.add(x[0])
+            setty.add(x[1])
+            setty.add(x[2])
+            setty.add(y)
+            return y * len(setty)
+
+        x = torch.randn(10, 10)
+        y = torch.randn(2, 2)
+        eager_result = foo([x, x, x, x, y], y)
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter, nopython=True)(foo)
+        result = foo([x, x, x, x, y], y)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(result, eager_result)
+
+    def test_iter_set(self):
+        def foo(x, y):
+            setty = set()
+            for t in x:
+                setty.add(t)
+            return y * len(setty)
+
+        x = torch.randn(10, 10)
+        y = torch.randn(2, 2)
+        eager_result = foo([x, x, x, x, y], y)
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter, nopython=True)(foo)
+        result = foo([x, x, x, x, y], y)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(result, eager_result)
+
+    def test_input_set_graph_break(self):
+        def foo(x):
+            return x.pop() * x.pop()
+
+        x = torch.randn(10, 10)
+        y = torch.randn(10, 10)
+
+        counter = CompileCounter()
+
+        inp = {x, x, x, x, y, y}
+        foo = torch._dynamo.optimize(counter, nopython=True)(foo)
+
+        # There's a lot of stuff about sets that cannot work without a good deal of exertion on our part.
+        # Specifically, getting a set as input won't ever work with how GetItemSource works (Can't arbitrary access set contents)
+        # and so the guard story for the objects passed into input just isn't there atm.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "^call_method UserDefinedObjectVariable\\(set\\).*",
+        ):
+            foo(inp)
+
+        foo = torch._dynamo.optimize(counter, nopython=False)(foo)
+        foo(inp)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_reconstruct_set_across_graph_break(self):
+        def foo(x, y):
+            setty = set()
+            for t in x:
+                setty.add(t)
+            print("Break!")
+            return y * len(setty)
+
+        x = torch.randn(10, 10)
+        y = torch.randn(2, 2)
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter)(foo)
+        result = foo([x, x, x, x, y], y)
+
+    def test_set_aliasing_recompiles(self):
+        g1 = torch.randn(10)
+        g2 = torch.randn(10)
+        g3 = torch.randn(10)
+        g4 = torch.randn(10)
+
+        def foo(a, b, c):
+            myset = {g1, a, b, c}
+            return a + len(myset)
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter)(foo)
+        # first call with no aliasing
+        foo(g2, g3, g4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # no aliasing again
+        foo(g3, g2, g4)
+        # assert no recompile
+        self.assertEqual(counter.frame_count, 1)
+
+        # aliasing changes, we should recompile
+        foo(g2, g2, g2)
+        self.assertEqual(counter.frame_count, 2)
+
+        # same aliasing, different tensor
+        foo(g3, g3, g3)
+        self.assertEqual(counter.frame_count, 2)
+
+        # aliasing between global and arg, should recompile again
+        foo(g1, g1, g1)
+        self.assertEqual(counter.frame_count, 3)
+
+        # Reset
+        torch._dynamo.reset()
+
+        # aliasing between global and arg, first call
+        foo(g1, g1, g1)
+        self.assertEqual(counter.frame_count, 4)
+
+        # same aliasing, different tensor, all local, recompile
+        foo(g3, g3, g3)
+        self.assertEqual(counter.frame_count, 5)
+
+        # aliasing same tensor, we shouldn't recompile
+        foo(g2, g2, g2)
+        self.assertEqual(counter.frame_count, 5)
+
+        # No aliasing
+        foo(g2, g3, g4)
+        self.assertEqual(counter.frame_count, 6)
+
+        # No aliasing again
+        foo(g3, g2, g4)
+        # assert no recompile
+        self.assertEqual(counter.frame_count, 6)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
