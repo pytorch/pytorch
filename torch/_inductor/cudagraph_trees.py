@@ -1418,8 +1418,8 @@ class CUDAGraphNode:
         ):
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
-                    assert isinstance(inp, (int, torch.SymInt))
-                    recording_inputs.append(int(inp))
+                    assert isinstance(inp, int)
+                    recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
                     # static_input does an allocation!
                     recording_inputs.append(static_input(inp))
