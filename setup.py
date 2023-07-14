@@ -569,7 +569,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         setuptools.command.build_ext.build_ext.run(self)
 
         if IS_DARWIN and package_type != 'conda':
-            report('-- Building libiomp')
+            report('-- Packaging libiomp')
             self._embed_libiomp()
 
         # Copy the essential export library to compile C++ extensions.
@@ -888,11 +888,10 @@ def configure_extension_build():
 
     # Cross-compile for M1
     if IS_DARWIN:
-        report('-- detected IS_DARWIN')
         macos_target_arch = os.getenv('CMAKE_OSX_ARCHITECTURES', '')
 
         if macos_target_arch in ['arm64', 'x86_64']:
-            report('-- detected macos target architecture ' + macos_target_arch)
+            report(f"-- Building for Darwin target architecture {macos_target_arch}")
             macos_sysroot_path = os.getenv('CMAKE_OSX_SYSROOT')
             if macos_sysroot_path is None:
                 macos_sysroot_path = subprocess.check_output([
@@ -901,11 +900,9 @@ def configure_extension_build():
             extra_compile_args += ['-arch', macos_target_arch, '-isysroot', macos_sysroot_path]
             extra_link_args += ['-arch', macos_target_arch]
         elif macos_target_arch == '':
-            # We are adding no extra compile and link args. Can this ever be valid?
-            report('-- no target architecture found.')
+            report('-- No target architecture found.')
         else:
-            # This could be a watch architecture like armv7k-arm64-32. We are adding no extra compile and link args. is this valid?
-            report('-- macos target architecture is ' + macos_target_arch + '.')
+            report(f"-- Found Darwin target architecture {macos_target_arch}")
 
     def make_relative_rpath_args(path):
         if IS_DARWIN:
