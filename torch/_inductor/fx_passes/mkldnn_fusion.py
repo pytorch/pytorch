@@ -696,8 +696,7 @@ if torch._C._has_mkldnn:
         if input_meta_value is None or weight_meta_value is None:
             return False
         input_size = input_meta_value.shape
-        # TODO: support dynamic input size.
-        if free_symbols(input_size) or conv_node.args[1].op != "get_attr":
+        if conv_node.args[1].op != "get_attr":
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
@@ -714,6 +713,9 @@ if torch._C._has_mkldnn:
                 return False
         is_transposed = conv_node.args[-3]
         if is_transposed:
+            # TODO: Support dynamic shape case for MKLDNN conv transpose.
+            if free_symbols(input_size):
+                return False
             groups = conv_node.args[-1]
             in_channels = weight_meta_value.size(0)
             # doesn't support group_depthwise_conv_transpose.
@@ -770,9 +772,6 @@ if torch._C._has_mkldnn:
         ):
             if not mkldnn._is_mkldnn_bf16_supported():
                 return False
-            if free_symbols(batch_size):
-                # TODO: support symbolic input size for bfloat16 path
-                return False
         return True
 
     _aten_conv_args = (
@@ -806,11 +805,17 @@ if torch._C._has_mkldnn:
                     constant_args.insert(1, args[-2])  # output_padding
                     packed_weight_op = mkldnn._reorder_convolution_transpose_weight
                     packed_conv_op = mkldnn._convolution_transpose_pointwise.default
-
-                packed_weight_inputs = (args[1],) + tuple(constant_args) + (input_size,)
-                packed_weight_node = graph.create_node(
-                    "call_function", packed_weight_op, args=packed_weight_inputs
-                )
+                if not free_symbols(input_size):
+                    packed_weight_inputs = (
+                        (args[1],) + tuple(constant_args) + (input_size,)
+                    )
+                    packed_weight_node = graph.create_node(
+                        "call_function", packed_weight_op, args=packed_weight_inputs
+                    )
+                else:
+                    assert not is_transposed
+                    # For dynamic shape case, we need to pack weight in runtime.
+                    packed_weight_node = args[1]
                 packed_conv_inputs = (
                     (args[0], packed_weight_node, args[2])
                     + tuple(constant_args)
@@ -843,15 +848,20 @@ if torch._C._has_mkldnn:
                 )
                 is_bf16_weight = weight.meta.get("val").dtype == torch.bfloat16
                 batch_size = input.meta.get("val").shape[0]
-                packed_weight_inputs = (transpose_weight_node, batch_size)
-                packed_weight_op = (
-                    mkldnn._reorder_linear_weight
-                    if is_bf16_weight
-                    else torch.ops.mkl._mkl_reorder_linear_weight
-                )
-                packed_weight_node = graph.create_node(
-                    "call_function", packed_weight_op, args=packed_weight_inputs
-                )
+                if not free_symbols(batch_size):
+                    packed_weight_inputs = (transpose_weight_node, batch_size)
+                    packed_weight_op = (
+                        mkldnn._reorder_linear_weight
+                        if is_bf16_weight
+                        else torch.ops.mkl._mkl_reorder_linear_weight
+                    )
+                    packed_weight_node = graph.create_node(
+                        "call_function", packed_weight_op, args=packed_weight_inputs
+                    )
+                else:
+                    assert is_bf16_weight
+                    # For dynamic shape case, we need to pack weight in runtime.
+                    packed_weight_node = transpose_weight_node
                 packed_linear_inputs = (input, packed_weight_node)
                 if is_bf16_weight:
                     packed_linear_inputs += (bias, "none", [], "")
@@ -882,12 +892,6 @@ if torch._C._has_mkldnn:
         """
         if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
             return gm
-        for node in gm.graph.nodes:
-            if node.target == "to_mkldnn" and len(node.args[0].users) > 1:
-                for user_node in list(node.args[0].users.keys()):
-                    if user_node.target == "to_mkldnn" and user_node != node:
-                        user_node.replace_all_uses_with(node)
-                        gm.graph.erase_node(user_node)
         packed_weight_ops = [
             torch._C._nn.mkldnn_reorder_conv2d_weight,
             mkldnn._reorder_convolution_transpose_weight,
