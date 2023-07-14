@@ -291,6 +291,15 @@ def reduce_scatter_tensor_coalesced(
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
+# This is a bit unsafe: it checks if the first argument in the schema reports as a non-mutable alias.
+# Today, this maps 1:1 with "aten ops that are views".
+def _is_view_op(tgt):
+    assert isinstance(tgt, torch._ops.OpOverload)
+    schema = tgt._schema
+    if len(schema.arguments) > 0:
+        first_arg = schema.arguments[0]
+        # check if op is a view
+        return first_arg.alias_info is not None and not first_arg.alias_info.is_write
 
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
