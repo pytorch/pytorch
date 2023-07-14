@@ -2861,13 +2861,13 @@ def parse_args(args=None):
     run_mode_group.add_argument(
         "--inference", action="store_true", help="Performs inference"
     )
-    return parser.parse_args(args)
+    return parser.parse_known_args(args)
 
 
 def main(runner, original_dir=None):
     if original_dir:
         os.chdir(original_dir)
-    args = parse_args()
+    args, unknown_args = parse_args()
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)
 
