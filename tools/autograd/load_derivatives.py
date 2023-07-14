@@ -46,7 +46,8 @@ from torchgen.model import (
     Type,
     Variant,
 )
-from torchgen.utils import concatMap, IDENT_REGEX, split_name_params, YamlLoader
+from torchgen.utils import concatMap, IDENT_REGEX, split_name_params
+from torchgen.yaml_utils import YamlLoader
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
@@ -68,7 +69,7 @@ def add_view_copy_derivatives(
 
     view_infos = {}
 
-    for _, info_dispatch_dict in infos.items():
+    for info_dispatch_dict in infos.values():
         # maybe_view_group only needs to be calculated once per info_dispatch_dict
         maybe_view_group = None
         view_copy_differentiability_infos = {}
@@ -619,7 +620,7 @@ def create_differentiability_info(
     output_differentiability = defn_dict.pop("output_differentiability", None)
     output_differentiability_conditions = None
     if output_differentiability and any(
-        [isinstance(diff, str) for diff in output_differentiability]
+        isinstance(diff, str) for diff in output_differentiability
     ):
         if len(output_differentiability) != 1:
             raise RuntimeError(

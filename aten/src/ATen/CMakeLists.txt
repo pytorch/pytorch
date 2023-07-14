@@ -444,10 +444,17 @@ if(USE_CUDA AND NOT USE_ROCM)
       CUDA::cufft_static_nocallback
     )
    if(NOT BUILD_LAZY_CUDA_LINALG)
-     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-       CUDA::cusolver_static
-       ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
-     )
+     if(CUDA_VERSION_MAJOR LESS_EQUAL 11)
+       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+         CUDA::cusolver_static
+         ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
+       )
+     elseif(CUDA_VERSION_MAJOR GREATER_EQUAL 12)
+       list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+         CUDA::cusolver_static
+         ${CUDAToolkit_LIBRARY_DIR}/libcusolver_lapack_static.a     # needed for libcusolver_static
+       )
+     endif()
    endif()
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
@@ -537,7 +544,7 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS})
 if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${miopen_h})
+  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${mps_h} ${native_mps_h} ${miopen_h})
   # Metal
   if(USE_PYTORCH_METAL_EXPORT)
     # Add files needed from exporting metal models(optimized_for_mobile)

@@ -6,7 +6,9 @@ import traceback
 import warnings
 from enum import auto, Enum
 from typing import (
+    Any,
     Callable,
+    cast,
     Dict,
     Generator,
     Iterable,
@@ -14,6 +16,7 @@ from typing import (
     no_type_check,
     Optional,
     Set,
+    Tuple,
 )
 
 import torch
@@ -21,6 +24,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp.flat_param as flat_param_file
 import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
@@ -37,6 +41,54 @@ from .api import (
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
+
+
+class _FSDPDeviceHandle:
+    """
+    This is a simple abstraction for FSDP computing devices,
+    which enables custom backends that implement CUDA-like
+    semantics to be integrated with FSDP.
+    """
+
+    def __init__(self, device: torch.device, backend: Any = None):
+        if backend is None:
+            try:
+                self.__backend = getattr(torch, device.type)
+                self.__device = device
+            except AttributeError:
+                raise AttributeError(
+                    f"Device '{device}' does not have a corresponding backend registered as 'torch.{device.type}'."
+                )
+        else:
+            self.__backend = backend
+
+    @classmethod
+    def from_device(cls, device: torch.device) -> "_FSDPDeviceHandle":
+        """
+        Return an device handle corresponding to the device, and through this handle,
+        operations with the same semantics as CUDA can be performed on the device.
+        Just return torch.cuda if the device is cuda to make attribute-access faster.
+        Custom backend must first register a module with the same name with {device.type} on torch.
+        """
+        if device.type == "cuda":
+            return cast(_FSDPDeviceHandle, torch.cuda)
+        return cls(device)
+
+    def __getattr__(self, __name: str) -> Any:
+        try:
+            return getattr(self.__backend, __name)
+        except AttributeError:
+            raise AttributeError(
+                f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{__name}'"
+            )
+
+
+class _UninitializedDeviceHandle(_FSDPDeviceHandle):
+    def __init__(self):
+        pass
+
+    def __getattribute__(self, __name: str) -> Any:
+        raise RuntimeError("Trying to use an uninitialized device handle.")
 
 
 class _FSDPState(_State):
@@ -58,13 +110,17 @@ class _FSDPState(_State):
         self._is_root: Optional[bool] = None
         self._handles: List[flat_param_file.FlatParamHandle] = []
         self._fully_sharded_module_to_handles: Dict[
-            nn.Module, flat_param_file.FlatParamHandle
+            nn.Module, List[flat_param_file.FlatParamHandle]
         ] = {}
-        self.compute_device = torch.device("cuda", torch.cuda.current_device())
+        self.compute_device: Optional[torch.device] = None
+        # Abstract device handle for fsdp compute device. For now,
+        # the compute device must implement cuda semantics used by fsdp
+        self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
+        self._device_mesh: Optional[DeviceMesh] = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
@@ -121,9 +177,13 @@ def _module_handles(state: _FSDPState, module: nn.Module) -> List:
     the handles that contain some parameter in ``module``.
     """
     if _is_composable(state):
+        # A valid FSDP state may have no managed parameters and hence no
+        # handles, meaning no entry in `_fully_sharded_module_to_handles`
+        if len(state._handles) == 0:
+            return []
         assert (
             module in state._fully_sharded_module_to_handles
-        ), f"Expects a `comm_module` but got {module} on rank {state.rank}"
+        ), f"Expects a fully sharded module but got {module} on rank {state.rank}"
         return state._fully_sharded_module_to_handles[module][:]
     else:
         # NOTE: This assumes `module` is a `FullyShardedDataParallel` instance.
@@ -184,6 +244,25 @@ def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
     return getattr(tensor, FSDP_FLATTENED, False)
 
 
+def _named_parameters_with_duplicates(
+    module: nn.Module, **kwargs: Any
+) -> List[Tuple[str, nn.Parameter]]:
+    """
+    This API is required as some modules overwrite `named_parameters()` but do not support
+    `remove_duplicate`.
+    """
+    assert (
+        "remove_duplicate" not in kwargs
+    ), "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
+    kwargs["remove_duplicate"] = False
+    try:
+        ret = list(module.named_parameters(**kwargs))
+    except AssertionError as e:
+        kwargs.pop("remove_duplicate")
+        ret = list(module.named_parameters(**kwargs))
+    return ret
+
+
 def _get_param_to_fqns(
     model: torch.nn.Module,
     dedup_shared_params: bool = True,
@@ -204,11 +283,13 @@ def _get_param_to_fqns(
             includes the FQNs across all encounters. (Default: ``True``)
     """
 
-    def module_fn(module, prefix, param_to_fqns):
-        for param_name, param in module.named_parameters(recurse=False):
+    def module_fn(module, prefix, tree_level, param_to_fqns):
+        for param_name, param in _named_parameters_with_duplicates(
+            module, recurse=False
+        ):
             local_fqns = (
                 param._fqns
-                if type(param) is flat_param_file.FlatParameter
+                if isinstance(param, flat_param_file.FlatParameter)
                 else [param_name]
             )  # prefixed from `module`
             global_fqns = [
@@ -218,15 +299,15 @@ def _get_param_to_fqns(
             if not is_shared_param:
                 param_to_fqns[param] = global_fqns
             else:
-                if type(param) is flat_param_file.FlatParameter:
+                if isinstance(param, flat_param_file.FlatParameter):
                     # DMP overwrites `named_parameters` and skip (advance to
                     # the next child module) the wrapped_module (e.g.,
                     # _dmp_wrapped_module and _fsdp_wrapped_module). When a user
                     # calls `named_child` to traverse the module recursively and
                     # calls `named_parameters` with `recurse=False`, parameters
                     # will be traversed more than once.
-                    # This hack is specificed designed for DMP + FSDP. We
-                    # overwite the flat_parameters traversal result to only obtain
+                    # This hack is specified designed for DMP + FSDP. We
+                    # overwrite the flat_parameters traversal result to only obtain
                     # the last one, which happens to be the correct one.
                     #
                     # TODO: Remove this hack once DMP + FSDP is not supported.
@@ -247,7 +328,7 @@ def _get_param_to_fqns(
         model,
         module_fn,
         return_fn,
-        [key for key, _ in model.named_parameters()],
+        [key for key, _ in _named_parameters_with_duplicates(model)],
         param_to_unflat_param_names,
     )
 
@@ -272,13 +353,14 @@ def _apply_to_modules(
     to remove the prefix.
     """
 
-    def f(module: torch.nn.Module, prefix: str, *args, **kwargs):
+    def f(module: torch.nn.Module, prefix: str, tree_level: int, *args, **kwargs):
         # Call the module function before recursing over children (pre-order)
-        module_fn(module, prefix, *args, **kwargs)
+        module_fn(module, prefix, tree_level, *args, **kwargs)
         for submodule_name, submodule in module.named_children():
             if submodule is None:
                 continue
             new_prefix = prefix + submodule_name + "."
+            new_tree_level = tree_level + 1
             if filter_fqns is not None:
                 for fqn in filter_fqns:
                     if fqn.startswith(new_prefix):
@@ -286,7 +368,7 @@ def _apply_to_modules(
                 else:
                     # DMP's named_parameter() will mess up the traversal with
                     # ``named_children`` + `named_parameter(recurse=False)``.
-                    # This hack is a must to make the travsersal work.
+                    # This hack is a must to make the traversal work.
                     # TODO: Remove this hack once DMP + FSDP is not supported.
                     if (
                         submodule_name == "_fsdp_wrapped_module"
@@ -308,9 +390,9 @@ def _apply_to_modules(
                             f"submodule_name = {submodule_name}"
                         )
                         new_prefix = prefix
-            f(submodule, new_prefix, *args, **kwargs)
+            f(submodule, new_prefix, new_tree_level, *args, **kwargs)
 
-    f(root_module, "", *args, **kwargs)
+    f(root_module, "", 0, *args, **kwargs)
     return return_fn(*args, **kwargs)
 
 

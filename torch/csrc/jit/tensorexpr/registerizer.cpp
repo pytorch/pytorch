@@ -485,7 +485,7 @@ void RegisterizerAnalysis::visit(LoadPtr v) {
 }
 
 // Loop and Conditional scopes are different in that it may or may not be
-// possible to hoist the intializer of a scalar variable outside the block
+// possible to hoist the initializer of a scalar variable outside the block
 // depending on if we can tell that the Buffer access is valid outside. This is
 // tricky because the access that demonstrates this may be later in the tree and
 // we haven't encountered it yet.
@@ -523,7 +523,7 @@ void RegisterizerAnalysis::mergeHiddenScope(bool allowClosed) {
 void RegisterizerAnalysis::mergeCurrentScopeIntoParent() {
   auto parent = currentScope_->parent();
 
-  // copy across current closed accceses, merging / closing as necessary
+  // copy across current closed accesses, merging / closing as necessary
   for (auto& candidate : currentScope_->closedAccesses()) {
     auto& parentAccesses = parent->getAccessMapByBuf(candidate->buf());
 
@@ -662,7 +662,7 @@ ExprPtr RegisterizerReplacer::mutate(LoadPtr v) {
 
 StmtPtr RegisterizerReplacer::mutate(StorePtr v) {
   if (eliminatedIntializers_.count(v) != 0) {
-    // This store is the intializer for a scalar var that is already inserted.
+    // This store is the initializer for a scalar var that is already inserted.
     return nullptr;
   }
 

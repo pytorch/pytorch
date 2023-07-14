@@ -11,7 +11,7 @@
 // NB: most activation functions fit pointwise unary or binary rules.
 // These are only the ones that have special batch rules to help with organization
 namespace at { namespace functorch {
-std::tuple<Tensor,optional<int64_t>>
+static std::tuple<Tensor,optional<int64_t>>
 glu_batch_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t dim) {
   // repeated error message from glu because 0D -> 1D when batched
   // this can't pass anyway because a 0-dimensional tensor has "size" 1, which
@@ -27,7 +27,7 @@ glu_batch_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t dim) {
   return std::make_tuple(res, 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> glu_backward_batch_rule(
+static std::tuple<Tensor,optional<int64_t>> glu_backward_batch_rule(
     const Tensor& grad_output, optional<int64_t> grad_output_bdim,
     const Tensor& self, optional<int64_t> self_bdim, int64_t dim) {
   if (self_bdim) {

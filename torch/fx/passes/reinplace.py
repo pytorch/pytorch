@@ -81,9 +81,9 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
             # For multi-output views, we want to map each output view to the base,
             # but this mapping involves two separate nodes in FX IR.
             # e.g. "a, b = x_1.split(...)" becomes:
-            #    %split_tensor : [#users=2] = call_function[target=torch.ops.aten.split.Tensor](args = (%x_1, 2), kwargs = {})
-            #    %getitem : [#users=1] = call_function[target=operator.getitem](args = (%split_tensor, 0), kwargs = {})
-            #    %getitem_1 : [#users=1] = call_function[target=operator.getitem](args = (%split_tensor, 1), kwargs = {})
+            #    %split_tensor : [num_users=2] = call_function[target=torch.ops.aten.split.Tensor](args = (%x_1, 2), kwargs = {})
+            #    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%split_tensor, 0), kwargs = {})
+            #    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%split_tensor, 1), kwargs = {})
             # And we'd like to set:
             #    getitem1.meta['view_of'] = x_1
             elif node.target is _operator.getitem:
@@ -153,7 +153,7 @@ def _maybe_get_inplace_op(op):
         for f in inplace_overloads
         if _schemas_match(op._schema, f._schema)
     ]
-    # Just becuase foo() and foo_() are both existing operators,
+    # Just because foo() and foo_() are both existing operators,
     # They aren't guaranteed to have compatible schemas.
     # For example, pow.Scalar(Scalar self, Tensor exponent) has no valid inplace variant,
     # Even though several overloads of pow_ exist.
@@ -280,7 +280,7 @@ def reinplace(gm, *sample_args):
            Because that would require resizing "a".
 
            Similarly, we can't convert torch.ge(a, b) into a.ge_(b),
-           beause that would require changing a's dtype (from e.g. float32 to bool).
+           because that would require changing a's dtype (from e.g. float32 to bool).
            Note that in this specific example, we could technically do better..
 
            If we see the pattern:

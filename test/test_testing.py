@@ -18,7 +18,7 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
+    (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
      parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -418,7 +418,6 @@ instantiate_device_type_tests(TestTesting, globals())
 
 class TestFrameworkUtils(TestCase):
 
-    @skipIfRocm
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     def test_filtering_env_var(self):
@@ -2140,6 +2139,15 @@ instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
 
 
 class TestImports(TestCase):
+    @classmethod
+    def _check_python_output(cls, program) -> str:
+        return subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", program],
+            stderr=subprocess.STDOUT,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+
     def test_circular_dependencies(self) -> None:
         """ Checks that all modules inside torch can be imported
         Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
@@ -2150,6 +2158,7 @@ class TestImports(TestCase):
                            "torch.testing._internal.distributed.",  # just fails
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal.fx",  # depends on onnx-script
+                           "torch._inductor.triton_helpers",  # depends on triton
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
@@ -2187,14 +2196,14 @@ class TestImports(TestCase):
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
 
+    @unittest.skipIf(IS_WINDOWS, "TODO enable on Windows")
+    def test_lazy_imports_are_lazy(self) -> None:
+        out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")
+        self.assertEqual(out.strip(), "True")
+
     @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     def test_no_warning_on_import(self) -> None:
-        out = subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", "import torch"],
-            stderr=subprocess.STDOUT,
-            # On Windows, opening the subprocess with the default CWD makes `import torch`
-            # fail, so just set CWD to this script's directory
-            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        out = self._check_python_output("import torch")
         self.assertEqual(out, "")
 
     @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
@@ -2212,10 +2221,7 @@ class TestImports(TestCase):
             'logging.root.setLevel(logging.INFO)',
             f'_logger.info("{expected}")'
         ]
-        out = subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", "; ".join(commands)],
-            stderr=subprocess.STDOUT,
-        ).decode("utf-8")
+        out = self._check_python_output("; ".join(commands))
         self.assertEqual(out.strip(), expected)
 
 class TestOpInfos(TestCase):

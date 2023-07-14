@@ -10,7 +10,7 @@ try:
     # use faster C loader if available
     from yaml import CSafeLoader as YamlLoader
 except ImportError:
-    from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
+    from yaml import SafeLoader as YamlLoader  # type: ignore[assignment, misc]
 
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
 TAGS_PATH = "aten/src/ATen/native/tags.yaml"
@@ -85,7 +85,7 @@ def get_selector_from_legacy_operator_selection_list(
     # Internal build doesn't use this flag any more. Only used by OSS
     # build now. Every operator should be considered a root operator
     # (hence generating unboxing code for it, which is consistent with
-    # the current behaviour), and also be considered as used for
+    # the current behavior), and also be considered as used for
     # training, since OSS doesn't support training on mobile for now.
     #
     is_root_operator = True

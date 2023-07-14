@@ -113,7 +113,7 @@ namespace {
 // - when we resize to a larger size, it acts as a mutation
 // - when we resize to a smaller size, it acts as a view
 // See Note [resize_ in Functionalization] for more dtails
-const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet, const at::Tensor & self, at::IntArrayRef size, c10::optional<at::MemoryFormat> memory_format) {
+static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet, const at::Tensor & self, at::IntArrayRef size, c10::optional<at::MemoryFormat> memory_format) {
   // First unwrap the tensor arguments
   at::Tensor self_;
   if (at::functionalization::impl::isFunctionalTensor(self)) {
@@ -173,28 +173,28 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
 }
 
 
-at::Tensor lift_functionalize(const at::Tensor & self) {
+static at::Tensor lift_functionalize(const at::Tensor & self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift(self);
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-at::Tensor lift_fresh_functionalize(const at::Tensor & self) {
+static at::Tensor lift_fresh_functionalize(const at::Tensor & self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift_fresh(self);
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
+static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift_fresh_copy(self);
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
+static bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
     // If the target device is empty, then the output tensor should be on the same device as the input
     auto real_tgt_device = tgt_device.has_value() ? tgt_device.value() : self_device;
     return real_tgt_device.type() == c10::DeviceType::XLA || real_tgt_device.type() == c10::DeviceType::Lazy;
@@ -202,7 +202,7 @@ bool device_opted_into_functionalization(c10::Device self_device, c10::optional<
 
 // note I only need this because the to.dtype/to.dtype_layout overload calls this, so we skip the op above.
 // We should probably get rid of this though.
-at::Tensor _to_copy_functionalize(
+static at::Tensor _to_copy_functionalize(
         const at::Tensor & self,
         c10::optional<at::ScalarType> dtype,
         c10::optional<at::Layout> layout,
@@ -255,7 +255,7 @@ at::Tensor _to_copy_functionalize(
 // The idea with _unsafe_view is that you're guaranteed that the input
 // is a temporary, and don't actually have to worry about propagating
 // mutations between the input and output.
-at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymIntArrayRef size) {
+static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymIntArrayRef size) {
   if (!at::functionalization::impl::isFunctionalTensor(self)) {
     at::AutoDispatchSkipFunctionalize guard;
     return at::_unsafe_view_symint(self, size);

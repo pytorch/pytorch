@@ -70,6 +70,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
 
   virtual void setTimeout(const std::chrono::milliseconds& timeout);
 
+
   // watchKey() takes two arguments: key and callback function. The callback
   // should be run whenever the key is changed (create, update, or delete). The
   // callback function takes two parameters: currentValue and newValue, which
@@ -85,6 +86,19 @@ class TORCH_API Store : public torch::CustomClassHolder {
         false,
         "watchKey only implemented for TCPStore and PrefixStore that wraps TCPStore.");
   }
+
+  virtual void append(
+      const std::string& key,
+      const std::vector<uint8_t>& value);
+
+  virtual std::vector<std::vector<uint8_t>> multiGet(const std::vector<std::string>& keys);
+
+  virtual void multiSet(
+    const std::vector<std::string>& keys,
+    const std::vector<std::vector<uint8_t>>& values);
+
+  // Returns true if this store support watchKey, append, multiGet and multiSet
+  virtual bool hasExtendedApi() const;
 
  protected:
   std::chrono::milliseconds timeout_;

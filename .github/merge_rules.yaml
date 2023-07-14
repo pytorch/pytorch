@@ -17,8 +17,10 @@
   - torch/csrc/jit/serialization/onnx.*
   - torch/csrc/onnx/**
   - torch/onnx/**
+  - torch/testing/_internal/common_methods_invocations.py
   - third_party/onnx
   - caffe2/python/onnx/**
+  - benchmarks/dynamo/_onnx/**
   approved_by:
   - BowenBao
   - abock
@@ -69,8 +71,10 @@
   patterns:
   - .github/ci_commit_pins/vision.txt
   - .github/ci_commit_pins/torchdynamo.txt
+  - .ci/docker/ci_commit_pins/triton.txt
   approved_by:
   - pytorchbot
+  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -81,11 +85,12 @@
   - .github/ci_commit_pins/xla.txt
   approved_by:
   - pytorchbot
+  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
   - pull / linux-bionic-py3_8-clang8-xla / build
-  - pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.2xlarge)
+  - pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.12xlarge)
 
 - name: Documentation
   patterns:
@@ -197,6 +202,7 @@
   - EasyCLA
   - Lint
   - pull
+
 - name: Distributions
   patterns:
   - torch/distributions/**
@@ -287,11 +293,12 @@
   - aten/src/ATen/native/quantized/cpu/**
   - aten/src/ATen/native/Convolution*.cpp
   - aten/src/ATen/native/mkldnn/**
-  - test/test_mkldnn.py
+  - test/test_mkl*.py
   approved_by:
   - mingfeima
   - XiaobingSuper
   - jgong5
+  - vfdev-5
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -370,7 +377,7 @@
   - '**functorch**'
   - '**pytree**'
   approved_by:
-  - kshiteej12345
+  - kshitij12345
   - srossross
   - chillee
   - zou3519
@@ -407,6 +414,7 @@
   - mruberry
   - lezcano
   - Skylion007
+  - ngimel
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -420,6 +428,7 @@
   - gchanan
   - ezyang
   - dzhulgakov
+  - malfet
   mandatory_checks_name:
   - EasyCLA
   - Lint

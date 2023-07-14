@@ -2,6 +2,7 @@
 from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
+import importlib
 
 import torch
 from torch import _VF
@@ -429,7 +430,10 @@ def fractional_max_pool2d_with_indices(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
+    r"""
+    fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
+
+    Applies 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
@@ -473,6 +477,8 @@ def fractional_max_pool2d_with_indices(
         raise ValueError("fractional_max_pool2d requires specifying either " "an output_size or an output_ratio")
     if output_size is None:
         assert output_ratio is not None
+        if len(output_ratio) > 2:
+            raise ValueError("fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints.")
         _output_ratio = _pair(output_ratio)
         output_size = [int(input.size(-2) * _output_ratio[0]), int(input.size(-1) * _output_ratio[1])]
 
@@ -523,7 +529,10 @@ def fractional_max_pool3d_with_indices(
     return_indices: bool = False,
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies 3D fractional max pooling over an input signal composed of several input planes.
+    r"""
+    fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
+
+    Applies 3D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
@@ -1064,7 +1073,10 @@ def lp_pool1d(
 def adaptive_max_pool1d_with_indices(
     input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 1D adaptive max pooling over an input signal composed of
+    r"""
+    adaptive_max_pool1d(input, output_size, return_indices=False)
+
+    Applies a 1D adaptive max pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.AdaptiveMaxPool1d` for details and output shape.
@@ -1103,7 +1115,10 @@ def adaptive_max_pool2d_with_indices(
     input: Tensor, output_size: BroadcastingList2[int],
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 2D adaptive max pooling over an input signal composed of
+    r"""
+    adaptive_max_pool2d(input, output_size, return_indices=False)
+
+    Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.AdaptiveMaxPool2d` for details and output shape.
@@ -1144,7 +1159,10 @@ def adaptive_max_pool3d_with_indices(
     input: Tensor, output_size: BroadcastingList3[int],
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""Applies a 3D adaptive max pooling over an input signal composed of
+    r"""
+    adaptive_max_pool3d(input, output_size, return_indices=False)
+
+    Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.AdaptiveMaxPool3d` for details and output shape.
@@ -1716,7 +1734,7 @@ where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distr
 When the approximate argument is 'tanh', Gelu is estimated with
 
 .. math::
-    \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+    \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt{2 / \pi} * (x + 0.044715 * x^3)))
 
 See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
 """)
@@ -2122,6 +2140,16 @@ def embedding(
     and the output is the corresponding word embeddings.
 
     See :class:`torch.nn.Embedding` for more details.
+
+    .. note::
+        Note that the analytical gradients of this function with respect to
+        entries in :attr:`weight` at the row specified by :attr:`padding_idx`
+        are expected to differ from the numerical ones.
+
+    .. note::
+        Note that `:class:`torch.nn.Embedding` differs from this function in
+        that it initializes the row of :attr:`weight` specified by
+        :attr:`padding_idx` to all zeros on construction.
 
     Args:
         input (LongTensor): Tensor containing indices into the embedding matrix
@@ -2901,10 +2929,9 @@ def kl_div(
         :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
         and in the meantime, specifying either of those two args will override :attr:`reduction`.
 
-    .. note::
+    .. warning::
         :attr:`reduction` = ``'mean'`` doesn't return the true kl divergence value, please use
         :attr:`reduction` = ``'batchmean'`` which aligns with KL math definition.
-        In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -3137,8 +3164,14 @@ def binary_cross_entropy_with_logits(
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
-        pos_weight (Tensor, optional): a weight of positive examples.
-                Must be a vector with length equal to the number of classes.
+        pos_weight (Tensor, optional): a weight of positive examples to be broadcasted with target.
+            Must be a tensor with equal size along the class dimension to the number of classes.
+            Pay close attention to PyTorch's broadcasting semantics in order to achieve the desired
+            operations. For a target of size [B, C, H, W] (where B is batch size) pos_weight of
+            size [B, C, H, W] will apply different pos_weights to each element of the batch or
+            [C, H, W] the same pos_weights across the batch. To apply the same positive weight
+            along all spacial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
+            Default: ``None``
 
     Examples::
 
@@ -3677,12 +3710,12 @@ Examples::
 )
 
 @_overload  # noqa: F811
-def upsample(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811
+def upsample(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811,B950
     pass
 
 
 @_overload  # noqa: F811
-def upsample(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811
+def upsample(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811,B950
     pass
 
 
@@ -3751,18 +3784,27 @@ if upsample.__doc__:
     upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
 
+def _is_integer(x) -> bool:
+    r"""Type check the input number is an integer.
+    Will return True for int, SymInt and Tensors with integer elements.
+    """
+    if isinstance(x, (int, torch.SymInt)):
+        return True
+    return isinstance(x, Tensor) and not x.is_floating_point()
+
+
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
     pass
 
 
@@ -3778,7 +3820,7 @@ def interpolate(  # noqa: F811
 ) -> Tensor:  # noqa: F811
     pass
 
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
     r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -3836,6 +3878,12 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         backward compatibility.
         Mode ``mode='nearest'`` matches buggy OpenCV's ``INTER_NEAREST`` interpolation algorithm.
 
+    .. note::
+        The gradients for the dtype ``float16`` on CUDA may be inaccurate in the upsample operation
+        when using modes ``['linear', 'bilinear', 'bicubic', 'trilinear', 'area']``.
+        For more details, please refer to the discussion in
+        `issue#104157 <https://github.com/pytorch/pytorch/issues/104157>`_.
+
     Note:
         {backward_reproducibility_note}
     """
@@ -3880,8 +3928,13 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
                     f"input with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
                     "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
                     "output size in (o1, o2, ...,oK) format."
-
                 )
+            if not torch.jit.is_scripting():
+                if not all(_is_integer(x) for x in size):
+                    raise TypeError(
+                        "expected size to be one of int or Tuple[int] or Tuple[int, int] or "
+                        f"Tuple[int, int, int], but got size with types {[type(x) for x in size]}"
+                    )
             output_size = size
         else:
             output_size = [size for _ in range(dim)]
@@ -3965,6 +4018,15 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         assert align_corners is not None
         if antialias:
             return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
+        # Two levels are necessary to prevent TorchScript from touching
+        # are_deterministic_algorithms_enabled.
+        if not torch.jit.is_scripting():
+            if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
+                # Use slow decomp whose backward will be in terms of index_put
+                # importlib is required because the import cannot be top level
+                # (cycle) and cannot be nested (TS doesn't support)
+                return importlib.import_module('torch._decomp.decompositions').upsample_bilinear2d_vec(
+                    input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None
@@ -4206,7 +4268,7 @@ def grid_sample(
         For example, `PIL`_ and `OpenCV`_ use -0.5 and -0.75 respectively.
         This algorithm may "overshoot" the range of values it's interpolating.
         For example, it may produce negative values or values greater than 255 when interpolating input in [0, 255].
-        Clamp the results with :func: `torch.clamp` to ensure they are within the valid range.
+        Clamp the results with :func:`torch.clamp` to ensure they are within the valid range.
     .. _`cubic convolution algorithm`: https://en.wikipedia.org/wiki/Bicubic_interpolation
     .. _`PIL`: https://github.com/python-pillow/Pillow/blob/4634eafe3c695a014267eefdce830b4a825beed7/src/libImaging/Resample.c#L51
     .. _`OpenCV`: https://github.com/opencv/opencv/blob/f345ed564a06178670750bad59526cfa4033be55/modules/imgproc/src/resize.cpp#L908
@@ -4658,7 +4720,7 @@ def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, o
     Args:
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
-        dim (int): the dimension to reduce. Default: 1
+        dim (int or tuple of ints): the dimension to reduce. Default: 1
         eps (float): small value to avoid division by zero. Default: 1e-12
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
@@ -4859,12 +4921,27 @@ greater than 0.0 is specified.
 .. code-block:: python
 
     # Efficient implementation equivalent to the following:
-    scale_factor = 1 / math.sqrt(Q.size(-1)) if scale is None else scale
-    attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0) if is_causal else attn_mask
-    attn_mask = attn_mask.masked_fill(not attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
-    attn_weight = torch.softmax((Q @ K.transpose(-2, -1) * scale_factor) + attn_mask, dim=-1)
-    attn_weight = torch.dropout(attn_weight, dropout_p)
-    return attn_weight @ V
+    def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> torch.Tensor:
+        # Efficient implementation equivalent to the following:
+        L, S = query.size(-2), key.size(-2)
+        scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+        attn_bias = torch.zeros(L, S, dtype=query.dtype)
+        if is_causal:
+            assert attn_mask is None
+            temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+            attn_bias.to(query.dtype)
+
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                attn_mask.masked_fill_(attn_mask.logical_not(), float("-inf"))
+            else:
+                attn_bias += attn_mask
+        attn_weight = query @ key.transpose(-2, -1) * scale_factor
+        attn_weight += attn_bias
+        attn_weight = torch.softmax(attn_weight, dim=-1)
+        attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
+        return attn_weight @ value
 
 .. warning:: This function is beta and subject to change.
 
@@ -4930,7 +5007,7 @@ Shape legend:
 
 Examples::
 
-    >>> # Optionally use the context manager to ensure one of the fused kerenels is run
+    >>> # Optionally use the context manager to ensure one of the fused kernels is run
     >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
     >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
@@ -5072,7 +5149,7 @@ def multi_head_attention_forward(
         need_weights: output attn_output_weights.
             Default: `True`
             Note: `needs_weight` defaults to `True`, but should be set to `False`
-            For best performance when attention weights are not nedeeded.
+            For best performance when attention weights are not needed.
             *Setting needs_weights to `True`
             leads to a significant performance degradation.*
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all

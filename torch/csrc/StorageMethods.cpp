@@ -47,7 +47,9 @@ static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyLong_FromVoidPtr(THPStorage_Unpack(self).data<uint8_t>());
+  // PyLong_FromVoidPtr should not need to mutate the pointer in order
+  // to extract a new long object from it.
+  return PyLong_FromVoidPtr(const_cast<void*>(THPStorage_Unpack(self).data()));
   END_HANDLE_TH_ERRORS
 }
 
@@ -75,17 +77,6 @@ static PyObject* THPStorage_copy_(
   Py_INCREF(self);
   return self;
 
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPStorage_isPinned(PyObject* self, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-#if defined(USE_CUDA)
-  return PyBool_FromLong(
-      at::globalContext().isPinnedPtr(THPStorage_Unpack(self).data<uint8_t>()));
-#else
-  Py_RETURN_FALSE;
-#endif
   END_HANDLE_TH_ERRORS
 }
 
@@ -132,6 +123,36 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
     const auto size_bytes = static_cast<size_t>(size_bytes_i);
     at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), size_bytes);
 #endif
+  } else if (device_type == at::kMeta) {
+    at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
+  } else if (device_type == at::kPrivateUse1) {
+    ptrdiff_t size_bytes_i = newsize;
+    TORCH_CHECK(
+        !c10::overflows<int64_t>(size_bytes_i),
+        "Requested storage size (",
+        size_bytes_i,
+        ") cannot be represented as a int64_t");
+    const auto size_bytes = static_cast<int64_t>(size_bytes_i);
+    void* original_data_ptr = storage.data_ptr().get();
+
+    auto src_option =
+        c10::TensorOptions().device(storage.device()).dtype(at::kByte);
+    auto src_tensor = at::empty({0}, {}, src_option).set_(storage);
+    src_tensor.resize_({size_bytes});
+
+    // When using resize_ to replace resize_bytes_xxx, in some cases
+    // the original data_ptr is still returned, which is an inconsistent
+    // behavior when compared to resize_bytes_xxx. For these cases,
+    // an additional memory copy and update for storage are required.
+    if (original_data_ptr == src_tensor.storage().data_ptr().get()) {
+      auto new_tensor = at::empty(src_tensor.sizes(), src_tensor.options());
+      new_tensor.copy_(src_tensor);
+      storage.set_data_ptr_noswap(
+          std::move(const_cast<at::DataPtr&>(new_tensor.storage().data_ptr())));
+      storage.unsafeGetStorageImpl()->set_allocator(
+          new_tensor.storage().unsafeGetStorageImpl()->allocator());
+      storage.set_nbytes(new_tensor.storage().nbytes());
+    }
   } else {
     TORCH_CHECK(
         false,
@@ -272,43 +293,67 @@ static PyObject* THPStorage_fromBuffer(
       /*resizable=*/true);
 
   if (scalar_type == at::kByte || scalar_type == at::kChar) {
-    memcpy(storage->data(), src + offset, count);
+    memcpy(storage->mutable_data(), src + offset, count);
   } else if (scalar_type == at::kBool) {
     // Because of ASAN checks, that are failing whenever
     // we are trying to get a value which is not 0 or 1, we have to manually
     // convert original values to boolean ones.
     torch::utils::THP_decodeBoolBuffer(
-        storage->data<bool>(), src + offset, do_byte_swap, count);
+        static_cast<bool*>(storage->mutable_data()),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kShort) {
     torch::utils::THP_decodeInt16Buffer(
-        storage->data<int16_t>(), src + offset, do_byte_swap, count);
+        static_cast<int16_t*>(storage->mutable_data()),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kInt) {
     torch::utils::THP_decodeInt32Buffer(
-        storage->data<int32_t>(), src + offset, do_byte_swap, count);
+        static_cast<int32_t*>(storage->mutable_data()),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kLong) {
     torch::utils::THP_decodeInt64Buffer(
-        storage->data<int64_t>(), src + offset, do_byte_swap, count);
+        static_cast<int64_t*>(storage->mutable_data()),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kHalf) {
     torch::utils::THP_decodeHalfBuffer(
-        storage->data<c10::Half>(), src + offset, do_byte_swap, count);
+        static_cast<c10::Half*>(storage->mutable_data()),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kBFloat16) {
     torch::utils::THP_decodeBFloat16Buffer(
-        storage->data<c10::BFloat16>(), src + offset, do_byte_swap, count);
+        static_cast<c10::BFloat16*>(storage->mutable_data()),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kFloat) {
     torch::utils::THP_decodeFloatBuffer(
-        storage->data<float>(), src + offset, do_byte_swap, count);
+        static_cast<float*>(storage->mutable_data()),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kDouble) {
     torch::utils::THP_decodeDoubleBuffer(
-        storage->data<double>(), src + offset, do_byte_swap, count);
+        static_cast<double*>(storage->mutable_data()),
+        src + offset,
+        do_byte_swap,
+        count);
   } else if (scalar_type == at::kComplexFloat) {
     torch::utils::THP_decodeComplexFloatBuffer(
-        storage->data<c10::complex<float>>(),
+        static_cast<c10::complex<float>*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
         count);
   } else if (scalar_type == at::kComplexDouble) {
     torch::utils::THP_decodeComplexDoubleBuffer(
-        storage->data<c10::complex<double>>(),
+        static_cast<c10::complex<double>*>(storage->mutable_data()),
         src + offset,
         do_byte_swap,
         count);
@@ -495,6 +540,50 @@ PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 1, "tuple of 1 item expected");
+  PyObject* _elem_size = PyTuple_GET_ITEM(args, 0);
+  THPUtils_assert(
+      THPUtils_checkLong(_elem_size), "_byteswap(): arg must be an 'int'");
+  auto elem_size = THPUtils_unpackLong(_elem_size);
+  THPUtils_assert(
+      elem_size == 1 || elem_size == 2 || elem_size == 4 || elem_size == 8,
+      "elem_size must be 1, 2, 4, or 8");
+
+  const auto& storage = THPStorage_Unpack(self);
+  const auto nbytes = static_cast<uint64_t>(storage.nbytes());
+  const uint64_t count = nbytes / elem_size;
+
+  if (elem_size == 1) {
+    Py_RETURN_NONE;
+  }
+  THPUtils_assert(
+      nbytes % elem_size == 0,
+      "the length of data is not a multiple of %ld",
+      elem_size);
+
+  if (elem_size == 2) {
+    auto buffer = static_cast<uint16_t*>(storage.mutable_data());
+    for (uint64_t i = 0; i < count; i++, buffer++) {
+      *buffer = thp_bswap16(*buffer);
+    }
+  } else if (elem_size == 4) {
+    auto buffer = static_cast<uint32_t*>(storage.mutable_data());
+    for (uint64_t i = 0; i < count; i++, buffer++) {
+      *buffer = thp_bswap32(*buffer);
+    }
+  } else if (elem_size == 8) {
+    auto buffer = static_cast<uint64_t*>(storage.mutable_data());
+    for (uint64_t i = 0; i < count; i++, buffer++) {
+      *buffer = thp_bswap64(*buffer);
+    }
+  }
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_methods[] = {
     {"copy_",
@@ -507,7 +596,6 @@ static PyMethodDef THPStorage_methods[] = {
     {"resize_", THPStorage_resize_, METH_O, nullptr},
     {"nbytes", THPStorage_nbytes, METH_NOARGS, nullptr},
     {"data_ptr", THPStorage_dataPtr, METH_NOARGS, nullptr},
-    {"is_pinned", THPStorage_isPinned, METH_NOARGS, nullptr},
     {"_write_file", THPStorage_writeFile, METH_VARARGS, nullptr},
     {"_new_with_file",
      THPStorage_newWithFile,
@@ -523,6 +611,7 @@ static PyMethodDef THPStorage_methods[] = {
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},
+    {"_byteswap", THPStorage_byteswap, METH_VARARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THPStorage_getMethods() {

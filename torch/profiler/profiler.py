@@ -10,11 +10,11 @@ from warnings import warn
 import torch
 import torch.autograd.profiler as prof
 from torch._C._profiler import (
-    _add_execution_graph_observer,
-    _disable_execution_graph_observer,
-    _enable_execution_graph_observer,
+    _add_execution_trace_observer,
+    _disable_execution_trace_observer,
+    _enable_execution_trace_observer,
     _ExperimentalConfig,
-    _remove_execution_graph_observer,
+    _remove_execution_trace_observer,
 )
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
@@ -26,7 +26,7 @@ __all__ = [
     "schedule",
     "tensorboard_trace_handler",
     "profile",
-    "ExecutionGraphObserver",
+    "ExecutionTraceObserver",
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
 
@@ -105,6 +105,7 @@ class _KinetoProfile:
         self.profiler = prof.profile(
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
+            use_mtia=(ProfilerActivity.MTIA in self.activities),
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
@@ -134,6 +135,20 @@ class _KinetoProfile:
             dist_info = self._get_distributed_info()
             if dist_info:
                 self.add_metadata_json("distributedInfo", json.dumps(dist_info))
+
+            # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
+            is_cuda11_or_lower = (
+                (torch.version.cuda is not None)
+                and ([int(x) for x in torch.version.cuda.split(".")] < [12, 0])
+            )
+            if (
+                is_cuda11_or_lower
+                and hasattr(torch, '_inductor')
+            ):
+                import torch._inductor.config as inductor_config
+                if inductor_config.triton.cudagraphs:
+                    os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+                    self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
 
     def stop_trace(self):
         assert self.profiler is not None
@@ -227,7 +242,7 @@ class _KinetoProfile:
         assert self.profiler is not None and self.profiler.kineto_results is not None
         return MemoryProfile(self.profiler.kineto_results)
 
-    def export_memory_timeline(self, path: str, device: str = None) -> None:
+    def export_memory_timeline(self, path: str, device: Optional[str] = None) -> None:
         """Extract the memory information from the memory profile collected
         tree for a given device, and export a timeline plot consisting of
         [times, [sizes by category]], where times are timestamps and sizes
@@ -245,7 +260,10 @@ class _KinetoProfile:
         self.mem_tl = MemoryProfileTimeline(self._memory_profile())
 
         # Depending on the file suffix, save the data as json.gz or json.
-        if path.endswith('.gz'):
+        # For html, we can embed the image into an HTML file.
+        if path.endswith('.html'):
+            self.mem_tl.export_memory_timeline_html(path, device)
+        elif path.endswith('.gz'):
             fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
             fp.close()
             self.mem_tl.export_memory_timeline(fp.name, device)
@@ -584,14 +602,14 @@ class profile(_KinetoProfile):
 
 
 
-class ExecutionGraphObserver:
-    """Execution Graph Observer
+class ExecutionTraceObserver:
+    """Execution Trace Observer
 
-    Each process can have a single ExecutionGraphObserver instance. The observer
+    Each process can have a single ExecutionTraceObserver instance. The observer
     can be added to record function callbacks via calling register_callback()
     explicitly. Without calling unregister_callback(), repeated calls to
     register_callback() will not add additional observers to record function
-    callbacks. Once an ExecutionGraphObserver is created, the start() and stop()
+    callbacks. Once an ExecutionTraceObserver is created, the start() and stop()
     methods control when the event data is recorded.
 
     Deleting or calling unregister_callback() will remove the observer from the
@@ -603,7 +621,7 @@ class ExecutionGraphObserver:
         Initializes the default states.
         """
         self._registered = False
-        self._execution_graph_running = False
+        self._execution_trace_running = False
 
     def __del__(self):
         """
@@ -613,44 +631,50 @@ class ExecutionGraphObserver:
 
     def register_callback(self, output_file_path: str):
         """
-        Adds EG observer to record function callbacks. The the data will be
+        Adds ET observer to record function callbacks. The the data will be
         written to output_file_path.
         """
         if not self._registered:
             self._output_file_path = output_file_path
-            self._registered = _add_execution_graph_observer(output_file_path)
+            self._registered = _add_execution_trace_observer(output_file_path)
 
     def unregister_callback(self):
         """
-        Removes EG observer from record function callbacks.
+        Removes ET observer from record function callbacks.
         """
         if self._registered:
             self.stop()
-            _remove_execution_graph_observer()
+            _remove_execution_trace_observer()
             self._registered = False
 
     @property
     def is_registered(self):
         """
-        Return if the execution graph observer is registered.
+        Returns True if the execution trace observer is registered, otherwise False.
         """
         return self._registered
+
+    def is_running(self):
+        """
+        Returns True if the observer is running, otherwise False.
+        """
+        return self._execution_trace_running
 
     def start(self):
         """
         Starts to capture.
         """
-        if self._registered and not self._execution_graph_running:
-            _enable_execution_graph_observer()
-            self._execution_graph_running = True
+        if self._registered and not self._execution_trace_running:
+            _enable_execution_trace_observer()
+            self._execution_trace_running = True
 
     def stop(self):
         """
         Stops to capture.
         """
-        if self._execution_graph_running:
-            _disable_execution_graph_observer()
-            self._execution_graph_running = False
+        if self._execution_trace_running:
+            _disable_execution_trace_observer()
+            self._execution_trace_running = False
 
     def get_output_file_path(self) -> str:
         """
@@ -660,6 +684,6 @@ class ExecutionGraphObserver:
             return self._output_file_path
         else:
             raise RuntimeError(
-                "A callback to the EG profiler needs to be registered "
+                "A callback to the ET profiler needs to be registered "
                 "first before getting the output file path"
             )

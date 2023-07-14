@@ -1,10 +1,10 @@
 import os.path as _osp
-import sys
+import torch
 
 from .throughput_benchmark import ThroughputBenchmark
 from ._crash_handler import enable_minidumps, disable_minidumps, enable_minidumps_on_exceptions
 from .cpp_backtrace import get_cpp_backtrace
-from .backend_registration import rename_privateuse1_backend
+from .backend_registration import rename_privateuse1_backend, generate_methods_for_privateuse1_backend
 
 # Set the module for a given object for nicer printing
 def set_module(obj, mod):
@@ -12,7 +12,7 @@ def set_module(obj, mod):
         raise TypeError("The mod argument should be a string")
     obj.__module__ = mod
 
-if sys.executable == "torch_deploy":
+if torch._running_with_deploy():
     # not valid inside torch_deploy interpreter, no paths exists for frozen modules
     cmake_prefix_path = None
 else:

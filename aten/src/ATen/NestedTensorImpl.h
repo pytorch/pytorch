@@ -14,6 +14,7 @@ namespace at {
 namespace native {
 struct NestedTensorImpl;
 inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt);
+int64_t get_numel_from_nested_size_tensor(const at::Tensor& tensor);
 
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(
@@ -57,13 +58,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // Returns nullopt if the ith dimension is irregular. The ith dimension
   // of a NestedTensor is regular if the unbound tensors match in
   // size at the (i-1)th dimension.
-  c10::optional<int64_t> opt_size(int64_t d) const {
-    d = at::maybe_wrap_dim(d, dim(), false);
-    if (opt_sizes_[d] == -1) {
-      return c10::nullopt;
-    }
-    return opt_sizes_[d];
-  }
+  c10::optional<int64_t> opt_size(int64_t d) const;
 
   int64_t size(int64_t d) const {
     c10::optional<int64_t> optional_size = this->opt_size(d);
@@ -167,9 +162,10 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   //    && nesting in ascending order
   const at::Tensor storage_offsets_;
   // NOTE: -1 here means the size is missing
+  // Optional to allow it to be computed lazily from nested.
   // TODO: maybe we can remove this metadata since
   //       we can compute it from `nested_sizes_`
-  std::vector<int64_t> opt_sizes_;
+  mutable c10::optional<std::vector<int64_t>> opt_sizes_;
 
   template <typename VariableVersion>
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(

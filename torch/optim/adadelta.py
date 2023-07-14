@@ -3,7 +3,6 @@ from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
                         _differentiable_doc, _foreach_doc, _maximize_doc)
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
 
 __all__ = ["Adadelta", "adadelta"]
@@ -276,13 +275,17 @@ def _multi_tensor_adadelta(
     if len(params) == 0:
         return
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, square_avgs, acc_deltas])
-    for device_params, device_grads, device_square_avgs, device_acc_deltas in grouped_tensors.values():
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, acc_deltas])
+    for ((device_params, device_grads, device_square_avgs, device_acc_deltas), _) in grouped_tensors.values():
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
 
         if weight_decay != 0:
-            device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
+            # Re-use the intermediate memory (device_grads) already allocated for maximize
+            if maximize:
+                torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+            else:
+                device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
         torch._foreach_mul_(device_square_avgs, rho)
         torch._foreach_addcmul_(device_square_avgs, device_grads, device_grads, value=1 - rho)

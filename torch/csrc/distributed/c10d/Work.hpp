@@ -28,6 +28,8 @@ enum class OpType : std::uint8_t {
   RECVANYSOURCE = 14,
   BARRIER = 15,
   _REDUCE_SCATTER_BASE = 16,
+  COALESCED = 17,
+  _ALLREDUCE_SPARSE = 18,
   UNKNOWN = 100,
 };
 

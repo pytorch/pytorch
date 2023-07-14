@@ -51,8 +51,6 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 #define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type)
 #endif
 
-// Avoid if_constexpr if possble, as it's more expensive to compile
-#if defined __cpp_if_constexpr
 #define AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type)   \
   do {                                                \
     if constexpr (!at::should_include_kernel_dtype(   \
@@ -64,17 +62,6 @@ TORCH_API void record_kernel_function_dtype(std::string name);
           at_dispatch_name);                          \
     }                                                 \
   } while (0)
-#else // defined __cpp_if_constexpr
-#define AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type)        \
-  at::guts::if_constexpr<!at::should_include_kernel_dtype( \
-      at_dispatch_name, enum_type)>([&] {                  \
-    AT_ERROR(                                              \
-        "dtype '",                                         \
-        toString(enum_type),                               \
-        "' not selected for kernel tag ",                  \
-        at_dispatch_name);                                 \
-  })
-#endif
 
 #define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...)           \
   case enum_type: {                                                     \
@@ -257,6 +244,14 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 #define AT_DISPATCH_FLOATING_TYPES_AND_HALF(TYPE, NAME, ...) \
   AT_DISPATCH_SWITCH(                                        \
       TYPE, NAME, AT_DISPATCH_CASE_FLOATING_TYPES_AND_HALF(__VA_ARGS__))
+
+#define AT_DISPATCH_CASE_REDUCED_FLOATING_TYPES(...)  \
+  AT_DISPATCH_CASE(at::ScalarType::Half, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::BFloat16, __VA_ARGS__)
+
+#define AT_DISPATCH_REDUCED_FLOATING_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                       \
+      TYPE, NAME, AT_DISPATCH_CASE_REDUCED_FLOATING_TYPES(__VA_ARGS__))
 
 #define AT_DISPATCH_CASE_FLOATING_TYPES_AND(SCALARTYPE, ...) \
   AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)               \

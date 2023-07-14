@@ -19,6 +19,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPInitMode,
     FSDPTest,
     NestedWrappedModule,
+    NonUniformReqGradNWM,
     subtest_name,
 )
 from torch.testing._internal.common_utils import (
@@ -42,19 +43,23 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-params = "cpu_offload,sharding_strategy,mixed_precision"
+params = "cpu_offload,sharding_strategy,mixed_precision,use_orig_params"
 cpu_offload_config = [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
 sharding_strategy_config = [ShardingStrategy.SHARD_GRAD_OP, None]
 mixed_precision = ["enable_mixed_precision", None]
+use_orig_params = ["enable_use_orig_params", None]
 
 configs = list(
-    itertools.product(cpu_offload_config, sharding_strategy_config, mixed_precision)
+    itertools.product(
+        cpu_offload_config, sharding_strategy_config, mixed_precision, use_orig_params
+    )
 )
 test_name_mapping = {
     str(CPUOffload(offload_params=True)): "offload_true",
     str(CPUOffload(offload_params=False)): "offload_false",
     str(ShardingStrategy.SHARD_GRAD_OP): "shard_grad_op",
     "enable_mixed_precision": "mixed_precision",
+    "enable_use_orig_params": "use_orig_params",
 }
 
 subtest_name = functools.partial(subtest_name, test_name_mapping)
@@ -156,6 +161,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         cpu_offload: CPUOffload,
         sharding_strategy: Optional[ShardingStrategy],
         mixed_precision: Optional[str],
+        use_orig_params: Optional[str],
     ):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         mp = (
@@ -167,15 +173,27 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
             if mixed_precision is not None
             else None
         )
+        # the ``NonUniformReqGradNWM`` model requires we set `init_scale`
+        # more conservatively than default to avoid infs with the initial steps
+        if use_orig_params == "enable_use_orig_params":
+            use_orig = True
+            model_cls = NonUniformReqGradNWM
+            sharded_grad_scaler_kwargs = {"init_scale": 2.0**11}
+        else:
+            use_orig = False
+            model_cls = NestedWrappedModule  # type: ignore[assignment]
+            sharded_grad_scaler_kwargs = None
         for cuda_init_mode in init_modes:
             self._test_fsdp_parity(
-                NestedWrappedModule,
+                model_cls,
                 FSDPInitMode.RECURSIVE,
                 cuda_init_mode=cuda_init_mode,
                 cpu_offload=cpu_offload,
                 sharding_strategy=sharding_strategy,
                 mixed_precision=mp,
                 enable_sharded_grad_scaler=True,
+                use_orig_params=use_orig,
+                sharded_grad_scaler_kwargs=sharded_grad_scaler_kwargs,
             )
 
 

@@ -59,8 +59,8 @@ template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(MULTILABELMARGIN_THREADS)
 __global__ void multilabel_margin_loss_forward_kernel(
     scalar_t* output,
-    scalar_t* input,
-    int64_t* target,
+    const scalar_t* input,
+    const int64_t* target,
     scalar_t* is_target,
     int nframe,
     int dim,
@@ -68,8 +68,8 @@ __global__ void multilabel_margin_loss_forward_kernel(
 
   // vectors:
   int k = blockIdx.x;
-  scalar_t* input_k = input + k * dim;
-  int64_t* target_k = target + k * dim;
+  const scalar_t* input_k = input + k * dim;
+  const int64_t* target_k = target + k * dim;
   scalar_t* output_k = output + k;
   scalar_t* is_target_k = is_target + k * dim;
 
@@ -131,22 +131,22 @@ template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(MULTILABELMARGIN_THREADS)
 __global__ void multilabel_margin_loss_backward_kernel(
     scalar_t* grad_input,
-    scalar_t* grad_output,
-    scalar_t* input,
-    int64_t* target,
-    scalar_t* is_target,
+    const scalar_t* grad_output,
+    const scalar_t* input,
+    const int64_t* target,
+    const scalar_t* is_target,
     int nframe,
     int dim,
     bool size_average,
     bool reduce) {
 
   int k = blockIdx.x;
-  scalar_t* input_k = input + k * dim;
+  const scalar_t* input_k = input + k * dim;
   scalar_t* grad_input_k = grad_input + k * dim;
-  int64_t* target_k = target + k * dim;
-  scalar_t* is_target_k = is_target + k * dim;
+  const int64_t* target_k = target + k * dim;
+  const scalar_t* is_target_k = is_target + k * dim;
 
-  scalar_t* grad_output_k = grad_output;
+  const scalar_t* grad_output_k = grad_output;
   if (!reduce) {
     grad_output_k += k;
   }
@@ -232,10 +232,10 @@ void multilabel_margin_loss_forward_out_cuda_template(
           using accscalar_t = at::acc_type<scalar_t, true>;
           multilabel_margin_loss_forward_kernel<scalar_t, accscalar_t>
               <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-                  output.data_ptr<scalar_t>(),
-                  input_.data_ptr<scalar_t>(),
-                  target_.data_ptr<int64_t>(),
-                  is_target_.data_ptr<scalar_t>(),
+                  output.mutable_data_ptr<scalar_t>(),
+                  input_.const_data_ptr<scalar_t>(),
+                  target_.const_data_ptr<int64_t>(),
+                  is_target_.mutable_data_ptr<scalar_t>(),
                   1,
                   dim,
                   reduction == at::Reduction::Mean);
@@ -259,10 +259,10 @@ void multilabel_margin_loss_forward_out_cuda_template(
             using accscalar_t = at::acc_type<scalar_t, true>;
             multilabel_margin_loss_forward_kernel<scalar_t, accscalar_t>
                 <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-                    output_tmp.data_ptr<scalar_t>(),
-                    input_.data_ptr<scalar_t>(),
-                    target_.data_ptr<int64_t>(),
-                    is_target_.data_ptr<scalar_t>(),
+                    output_tmp.mutable_data_ptr<scalar_t>(),
+                    input_.const_data_ptr<scalar_t>(),
+                    target_.const_data_ptr<int64_t>(),
+                    is_target_.mutable_data_ptr<scalar_t>(),
                     nframe,
                     dim,
                     reduction == at::Reduction::Mean);
@@ -285,10 +285,10 @@ void multilabel_margin_loss_forward_out_cuda_template(
             using accscalar_t = at::acc_type<scalar_t, true>;
             multilabel_margin_loss_forward_kernel<scalar_t, accscalar_t>
                 <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-                    output.data_ptr<scalar_t>(),
-                    input_.data_ptr<scalar_t>(),
-                    target_.data_ptr<int64_t>(),
-                    is_target_.data_ptr<scalar_t>(),
+                    output.mutable_data_ptr<scalar_t>(),
+                    input_.const_data_ptr<scalar_t>(),
+                    target_.const_data_ptr<int64_t>(),
+                    is_target_.mutable_data_ptr<scalar_t>(),
                     nframe,
                     dim,
                     false);
@@ -342,11 +342,11 @@ void multilabel_margin_loss_backward_cuda_out_template(
           using accscalar_t = at::acc_type<scalar_t, true>;
           multilabel_margin_loss_backward_kernel<scalar_t, accscalar_t>
               <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
-                  grad_input.data_ptr<scalar_t>(),
-                  grad_output_.data_ptr<scalar_t>(),
-                  input_.data_ptr<scalar_t>(),
-                  target_.data_ptr<int64_t>(),
-                  is_target_.data_ptr<scalar_t>(),
+                  grad_input.mutable_data_ptr<scalar_t>(),
+                  grad_output_.const_data_ptr<scalar_t>(),
+                  input_.const_data_ptr<scalar_t>(),
+                  target_.const_data_ptr<int64_t>(),
+                  is_target_.const_data_ptr<scalar_t>(),
                   1,
                   dim,
                   reduction == at::Reduction::Mean,
@@ -373,11 +373,11 @@ void multilabel_margin_loss_backward_cuda_out_template(
           using accscalar_t = at::acc_type<scalar_t, true>;
           multilabel_margin_loss_backward_kernel<scalar_t, accscalar_t>
               <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
-                  grad_input.data_ptr<scalar_t>(),
-                  grad_output_.data_ptr<scalar_t>(),
-                  input_.data_ptr<scalar_t>(),
-                  target_.data_ptr<int64_t>(),
-                  is_target_.data_ptr<scalar_t>(),
+                  grad_input.mutable_data_ptr<scalar_t>(),
+                  grad_output_.const_data_ptr<scalar_t>(),
+                  input_.const_data_ptr<scalar_t>(),
+                  target_.const_data_ptr<int64_t>(),
+                  is_target_.const_data_ptr<scalar_t>(),
                   grad_input.size(0),
                   grad_input.size(1),
                   reduction == at::Reduction::Mean,

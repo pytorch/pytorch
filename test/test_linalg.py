@@ -12,15 +12,16 @@ from math import inf, nan, isnan
 import random
 from random import randrange
 from itertools import product
-from functools import reduce, partial, wraps
+from functools import reduce, partial
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
-     TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
+     TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize)
+     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
+     setLinalgBackendsToDefaultFinally)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, has_cusolver,
+    (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, dtypesIfMPS, largeTensorTest)
@@ -42,16 +43,6 @@ assert torch.get_default_dtype() is torch.float32
 if TEST_SCIPY:
     import scipy
 
-def setLinalgBackendsToDefaultFinally(fn):
-    @wraps(fn)
-    def _fn(*args, **kwargs):
-        try:
-            fn(*args, **kwargs)
-        finally:
-            # Set linalg backend back to default to make sure potential failures in one test
-            #   doesn't affect other linalg tests
-            torch.backends.cuda.preferred_linalg_library('default')
-    return _fn
 
 @unittest.skipIf(IS_ARM64, "Issue with numpy version on arm")
 class TestLinalg(TestCase):
@@ -274,14 +265,11 @@ class TestLinalg(TestCase):
                     return np.linalg.lstsq(a, b, rcond=rcond)
                 check_correctness_ref(a, b, res, numpy_ref)
 
-        version = torch.testing._internal.common_cuda._get_torch_cuda_version()
-        cusolver_available = (version >= (10, 2))
-
         ms = [2 ** i for i in range(5)]
         m_ge_n_sizes = [(m, m // 2) for m in ms] + [(m, m) for m in ms]
         # cases m < n are only supported on CPU and for cuSOLVER path on CUDA
         m_l_n_sizes = [(m // 2, m) for m in ms]
-        include_m_l_n_case = (cusolver_available or device == 'cpu')
+        include_m_l_n_case = (has_cusolver() or device == 'cpu')
         matrix_sizes = m_ge_n_sizes + (m_l_n_sizes if include_m_l_n_case else [])
         batches = [(), (2,), (2, 2), (2, 2, 2)]
         # we generate matrices with singular values sampled from a normal distribution,
@@ -1697,7 +1685,6 @@ class TestLinalg(TestCase):
     # Test degenerate shape results match numpy for linalg.norm vector norms
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped on ASAN since it checks for undefined behavior.")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_vector_degenerate_shapes(self, device, dtype):
         def run_test_case(input, ord, dim, keepdim):
@@ -2111,6 +2098,30 @@ class TestLinalg(TestCase):
             return "norm failed for input size %s, p=%s, keepdim=%s, dim=%s" % (
                 input_size, p, keepdim, dim)
 
+        # 'nuc' norm uses SVD, and thus its precsion is much lower than other norms.
+        # test_svd takes @precisionOverride({torch.float: 1e-4, torch.cfloat: 2e-4}),
+        # and here we are doing the same thing for nuc norm.
+        class PrecisionContext(object):
+            def __init__(self, test, norm):
+                self.norm = norm
+                self.saved_overrides = getattr(test, 'precision_overrides', None)
+                self.target_test = test
+
+            def __enter__(self):
+                if 'nuc' != self.norm:
+                    return None
+                self.target_test.precision_overrides = {torch.float: 1e-4, torch.cfloat: 2e-4}
+                return self.target_test.precision_overrides
+
+            def __exit__(self, type, value, tb) -> bool:
+                if 'nuc' != self.norm:
+                    return True
+                if self.saved_overrides is None:
+                    delattr(self.target_test, 'precision_overrides')
+                else:
+                    self.target_test.precision_overrides = self.saved_overrides
+                return True
+
         for keepdim in [False, True]:
             # full reduction
             x = torch.randn(25, device=device)
@@ -2136,8 +2147,9 @@ class TestLinalg(TestCase):
                 res = x.norm(p, keepdim=keepdim).cpu()
                 expected = np.linalg.norm(xn, p, keepdims=keepdim)
                 msg = gen_error_message(x.size(), p, keepdim)
-                self.assertEqual(res.shape, expected.shape, msg=msg)
-                self.assertEqual(res, expected, msg=msg)
+                with PrecisionContext(self, p):
+                    self.assertEqual(res.shape, expected.shape, msg=msg)
+                    self.assertEqual(res, expected, msg=msg)
 
             # zero dimensions
             x = torch.randn((), device=device)
@@ -2163,8 +2175,9 @@ class TestLinalg(TestCase):
                     res = x.norm(p=p, dim=dim, keepdim=keepdim).cpu()
                     expected = np.linalg.norm(xn, ord=p, axis=dim, keepdims=keepdim)
                     msg = gen_error_message(x.size(), p, keepdim, dim)
-                    self.assertEqual(res.shape, expected.shape, msg=msg)
-                    self.assertEqual(res, expected, msg=msg)
+                    with PrecisionContext(self, p):
+                        self.assertEqual(res.shape, expected.shape, msg=msg)
+                        self.assertEqual(res, expected, msg=msg)
 
     # Test that torch.norm with p=+/-inf propagates NaN
     def test_norm_old_nan_propagation(self, device):
@@ -2250,6 +2263,7 @@ class TestLinalg(TestCase):
                     a_norm_fro = torch.norm(a, p='fro', dim=dim, keepdim=keepdim)
                     self.assertEqual(a_norm_fro, a_norm_2)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_nuclear_norm_axes_small_brute_force_old(self, device):
@@ -2340,6 +2354,7 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
     @skipCUDAIfNoCusolver
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_svd_lowrank(self, device, dtype):
@@ -2422,7 +2437,7 @@ class TestLinalg(TestCase):
         if torch.device(device).type == 'cuda':
             if torch.cuda.has_magma:
                 backends.append("magma")
-            if has_cusolver():
+            if has_cusolver() or has_hipsolver():
                 backends.append("cusolver")
 
         ns = (12, 4, 2, 0)
@@ -2484,7 +2499,6 @@ class TestLinalg(TestCase):
             Q.sum().abs().backward()
 
     @skipCUDAIfNoCusolver  # MAGMA backend doesn't work in this case
-    @skipCUDAIfRocm
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -4048,7 +4062,6 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @skipCUDAIfNoMagma  # Magma needed for the PLU decomposition
     @skipCUDAIfRocm  # There is a memory access bug in rocBLAS in the (non-batched) solve_triangular
-    @skipCUDAVersionIn([(11, 3), (11, 6), (11, 7)])  # Tracked in https://github.com/pytorch/pytorch/issues/70111
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -5389,16 +5402,27 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         else:
             alpha = 1.2 if alpha is None else alpha
             beta = 0.8 if beta is None else beta
-        res1 = f(t, m, v, alpha=alpha, beta=beta)
+        if activation == "gelu":
+            res1 = f(t, m, v, alpha=alpha, beta=beta, use_gelu=True)
+        else:
+            res1 = f(t, m, v, alpha=alpha, beta=beta)
         res2 = torch.full_like(res1, math.nan)
         if transpose_out:
             res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
-        f(t, m, v, alpha=alpha, beta=beta, out=res2)
+        if activation == "gelu":
+            f(t, m, v, alpha=alpha, beta=beta, out=res2, use_gelu=True)
+        else:
+            f(t, m, v, alpha=alpha, beta=beta, out=res2)
         res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
         if beta != 0:
             res3 += (beta * t).to(numpy_dtype).cpu().numpy()
         if activation == "relu":
             res3 = res3 * (res3 > 0)
+        elif activation == "gelu":
+            res3_t = torch.from_numpy(res3).to(dtype)
+            approximate = "tanh" if t.is_cuda else "none"
+            res3_t = torch.nn.functional.gelu(res3_t, approximate=approximate)
+            res3 = res3_t.to(numpy_dtype).cpu().numpy()
         else:
             assert activation is None, f"unsupported activation {activation}"
         res3 = torch.from_numpy(res3).to(dtype)
@@ -5480,6 +5504,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         m2 = torch.randn(50, 25, device=device).to(dtype)
         self._test_addmm_addmv(func, M, m1, m2, activation=activation)
 
+        # vector-shaped bias and beta=1 result in epilogue fusion in CUDA
+        V = torch.randn(25, device=device).to(dtype)
+        self._test_addmm_addmv(func, V, m1, m2, beta=1, activation=activation)
+
         # Test 0-strided
         M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
         m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
@@ -5504,6 +5532,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
             self._test_addmm_addmv(func, M, m1, m2, transpose_out=t4, activation=activation)
 
+            if t1:
+                # use vector V instead of matrix M for epilogue fusion in CUDA (doesn't depend on t1)
+                self._test_addmm_addmv(func, V, m1, m2, beta=1, transpose_out=t4, activation=activation,)
+
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfMPS(torch.float32)
@@ -5514,14 +5546,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
 
-    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
-                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
+                        torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(
-                  *[torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
+                  *[torch.bfloat16, torch.half] if TEST_WITH_ROCM or SM53OrLater else []))
     @dtypes(*floating_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
-    def test_addmm_activation(self, device, dtype):
+    def test_addmm_relu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
+
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
+                        torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypesIfCUDA(*floating_types_and(
+                  *[torch.bfloat16, torch.half] if TEST_WITH_ROCM or SM53OrLater else []))
+    @dtypes(*floating_types_and(torch.bfloat16))
+    @tf32_on_and_off(0.05)
+    def test_addmm_gelu(self, device, dtype):
+        self._test_addmm_impl(torch._addmm_activation, "gelu", device, dtype)
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*floating_and_complex_types())
@@ -5577,6 +5618,20 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 y_ref = torch.bmm(mat1, mat2)
                 y = torch.baddbmm(input, mat1, mat2, beta=0.0, out=out)
                 self.assertEqual(y_ref, y)
+
+    @dtypes(torch.int16, torch.int32, torch.int64, torch.float16, torch.float32, torch.float64)
+    def test_baddbmm_input_dtypes_compatibility(self, device, dtype):
+        batch1 = torch.rand((1, 2, 2), dtype=torch.float32, device=device)
+        batch2 = torch.rand((1, 2, 2), dtype=torch.float32, device=device)
+        input_tensor = torch.rand((1, 2, 2), device=device).to(dtype)
+        if dtype != torch.float32:
+            with self.assertRaisesRegex(RuntimeError, "Input dtypes must be the same"):
+                y = torch.baddbmm(input_tensor, batch1, batch2, beta=0.0)
+        else:
+            out = torch.randn((1, 2, 2), dtype=dtype, device=device).fill_(torch.nan)
+            y_ref = torch.bmm(batch1, batch2)
+            y = torch.baddbmm(input_tensor, batch1, batch2, beta=0.0, out=out)
+            self.assertEqual(out, y_ref)
 
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
@@ -5834,6 +5889,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # test broadcasting
         self.assertEqual(torch.bmm(Ab_conj, Bb_, out=out_b), torch.bmm(Ab_conj_physical, Bb_, out=out_b))
         self.assertEqual(torch.bmm(t_b(Ab_conj), Bb_, out=out_b), torch.bmm(t_b(Ab_conj_physical), Bb_, out=out_b))
+
+    @onlyNativeDeviceTypes
+    def test_mm_empty_inputs_mixed_dtype_errors(self, device):
+        a = torch.randint(0, 10, [1, 10], dtype=torch.int16, device=device)
+        b = torch.randn(10, 20, dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected .* and .* to have the same dtype, but got:"):
+            torch.mm(a, b)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
@@ -6793,7 +6855,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for fn in [torch.det, torch.logdet, torch.slogdet, torch.linalg.slogdet]:
                 expected_value = []
                 actual_value = fn(full_tensor)
-                for full_idx in itertools.product(*map(lambda x: list(range(x)), batchdims)):
+                for full_idx in itertools.product(*(list(range(x)) for x in batchdims)):
                     expected_value.append(fn(full_tensor[full_idx]))
 
                 if fn == torch.slogdet or fn == torch.linalg.slogdet:
@@ -7153,6 +7215,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         run_test((1, 1), (1, 1, 1025))
 
     @skipCUDAIfNoCusolver
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     def test_pca_lowrank(self, device):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
@@ -7340,7 +7403,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoCusolver
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDAIfRocm
     @dtypes(*floating_and_complex_types())
     def test_ldl_factor(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix

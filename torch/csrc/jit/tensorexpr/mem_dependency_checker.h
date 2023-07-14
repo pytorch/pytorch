@@ -33,7 +33,7 @@ using DependencySet = std::unordered_set<std::shared_ptr<AccessInfo>>;
 /* AccessInfo
  *
  * Represents a single bounded memory access to a buffer, for instance a Load or
- * a Store. Holds infomation relating to the specific access and links to
+ * a Store. Holds information relating to the specific access and links to
  * connected accesses in the dependency graph.
  */
 class TORCH_API AccessInfo {
@@ -65,7 +65,8 @@ class TORCH_API AccessInfo {
         var_(std::move(var)),
         bounds_(std::move(bounds)) {}
 
-  // Id is a unique int representing the order this access occured in the graph.
+  // Id is a unique int representing the order this access occurred in the
+  // graph.
   size_t id() const {
     return id_;
   }
@@ -166,7 +167,7 @@ class TORCH_API AccessInfo {
 
 using VarBoundMap = std::unordered_map<VarPtr, Bound>;
 
-/* MemDepedencyChecker analyses a IR fragment and builds a dependency graph of
+/* MemDependencyChecker analyses a IR fragment and builds a dependency graph of
  * accesses contained within.
  *
  * It's possible to retrieve the entire graph in node-object form, or can be

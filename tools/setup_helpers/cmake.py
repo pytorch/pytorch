@@ -29,6 +29,8 @@ def _mkdir_p(d: str) -> None:
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
 USE_NINJA = not check_negative_env_flag("USE_NINJA") and which("ninja") is not None
+if "CMAKE_GENERATOR" in os.environ:
+    USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
 
 
 class CMake:
@@ -143,7 +145,7 @@ class CMake:
             os.environ["CMAKE_GENERATOR"] = "Ninja"
             args.append("-GNinja")
         elif IS_WINDOWS:
-            generator = os.getenv("CMAKE_GENERATOR", "Visual Studio 15 2017")
+            generator = os.getenv("CMAKE_GENERATOR", "Visual Studio 16 2019")
             supported = ["Visual Studio 16 2019", "Visual Studio 17 2022"]
             if generator not in supported:
                 print("Unsupported `CMAKE_GENERATOR`: " + generator)
@@ -207,7 +209,7 @@ class CMake:
                     "BLAS",
                     "WITH_BLAS",
                     "BUILDING_WITH_TORCH_LIBS",
-                    "CUDA_HOST_COMILER",
+                    "CUDA_HOST_COMPILER",
                     "CUDA_NVCC_EXECUTABLE",
                     "CUDA_SEPARABLE_COMPILATION",
                     "CUDNN_LIBRARY",
@@ -231,6 +233,7 @@ class CMake:
                     "OPENSSL_ROOT_DIR",
                     "STATIC_DISPATCH_BACKEND",
                     "SELECTED_OP_LIST",
+                    "TORCH_CUDA_ARCH_LIST",
                     "TRACING_BASED",
                 )
             }

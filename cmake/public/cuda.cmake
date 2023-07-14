@@ -45,7 +45,9 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
   set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}")
 endif()
 enable_language(CUDA)
-set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+if("X${CMAKE_CUDA_STANDARD}" STREQUAL "X" )
+  set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # CMP0074 - find_package will respect <PackageName>_ROOT variables
@@ -329,14 +331,11 @@ list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA}")
 
 # disable some nvcc diagnostic that appears in boost, glog, glags, opencv, etc.
-foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration
+foreach(diag cc_clobber_ignored
              set_but_not_used field_without_dll_interface
              base_class_has_different_dll_interface
              dll_interface_conflict_none_assumed
              dll_interface_conflict_dllexport_assumed
-             implicit_return_from_non_void_function
-             unsigned_compare_with_zero
-             declared_but_not_referenced
              bad_friend_decl)
   list(APPEND SUPPRESS_WARNING_FLAGS --diag_suppress=${diag})
 endforeach()

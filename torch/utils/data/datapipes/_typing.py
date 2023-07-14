@@ -366,7 +366,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
             namespace['reset'] = conditional_reset
 
         if '__iter__' in namespace:
-            hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
+            hook_iterator(namespace)
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
 

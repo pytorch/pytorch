@@ -13,9 +13,9 @@ from torch.distributed.fsdp._common_utils import (
     TrainingState,
 )
 from torch.distributed.fsdp._runtime_utils import (
-    _clear_grads_if_needed,
     _get_fsdp_root_states_with_modules,
     _lazy_init,
+    _reset_flat_param_grad_info_if_needed,
     _reshard,
     _reshard_grads,
     _unshard,
@@ -171,7 +171,7 @@ def _unshard_fsdp_state_params(
     _validate_unshard_params_args(
         state, writeback, rank0_only, offload_to_cpu, with_grads
     )
-    torch.cuda.synchronize()
+    state._device_handle.synchronize()
     # If handles are shared by other module(s), the handle may be already unsharded.
     handles = [
         handle
@@ -190,11 +190,11 @@ def _unshard_fsdp_state_params(
     for handle in handles:
         handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
 
-    _clear_grads_if_needed(handles)
+    _reset_flat_param_grad_info_if_needed(handles)
     free_unsharded_flat_params = [handle.needs_unshard() for handle in handles]
     # No need to call `wait_stream()` since we unshard in the computation
     # stream directly
-    computation_stream = torch.cuda.current_stream()
+    computation_stream = state._device_handle.current_stream()
     _unshard(state, handles, computation_stream, computation_stream)
     if with_grads:
         _unshard_grads(handles)

@@ -192,7 +192,7 @@ class TensorParallelMultiheadAttention(torch.nn.Module):
         # ===================================
 
         factor = self.tp_size if isinstance(query_layer, DT) else 1
-        # preallocting result tensor: [b * nh, sq, sk]
+        # preallocating result tensor: [b * nh, sq, sk]
         matmul_result = torch.empty(
             b * nh // factor,
             sq,

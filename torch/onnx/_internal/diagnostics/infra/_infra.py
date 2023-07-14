@@ -10,7 +10,7 @@ from typing import FrozenSet, List, Mapping, Optional, Sequence, Tuple
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
 
 
-class Level(enum.Enum):
+class Level(enum.IntEnum):
     """The level of a diagnostic.
 
     This class is used to represent the level of a diagnostic. The levels are defined
@@ -22,12 +22,21 @@ class Level(enum.Enum):
     - NOTE: An opportunity for improvement was found.
     - WARNING: A potential problem was found.
     - ERROR: A serious problem was found.
+
+    This level is a subclass of enum.IntEnum, and can be used as an integer. Its integer
+    value maps to the logging levels in Python's logging module. The mapping is as
+    follows:
+
+        Level.NONE = logging.DEBUG = 10
+        Level.NOTE = logging.INFO = 20
+        Level.WARNING = logging.WARNING = 30
+        Level.ERROR = logging.ERROR = 40
     """
 
-    NONE = enum.auto()
-    NOTE = enum.auto()
-    WARNING = enum.auto()
-    ERROR = enum.auto()
+    NONE = 10
+    NOTE = 20
+    WARNING = 30
+    ERROR = 40
 
 
 levels = Level

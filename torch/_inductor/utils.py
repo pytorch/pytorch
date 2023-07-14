@@ -1,6 +1,8 @@
 import collections
 import contextlib
+import dataclasses
 import functools
+import inspect
 import itertools
 import logging
 import math
@@ -11,29 +13,55 @@ import sys
 import tempfile
 import textwrap
 import time
+from collections import defaultdict
 from io import StringIO
-from typing import Any, Dict, List, NamedTuple, Optional, Union
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Union
 from unittest import mock
 
 import sympy
 
 import torch
+from torch.autograd import DeviceType
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
-from .cuda_properties import get_device_capability
+from .cuda_properties import current_device, get_device_capability
 
 log = logging.getLogger(__name__)
 
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
-try:
-    from triton.testing import do_bench
-except ImportError:
+def do_bench(*args, **kwargs):
+    @functools.lru_cache(None)
+    def load_triton():
+        try:
+            # NB: Lazily load triton, as importing triton is slow
+            # see https://github.com/openai/triton/issues/1599
+            from triton.testing import do_bench as triton_do_bench
+        except ImportError:
+            raise NotImplementedError("requires Triton")
 
-    def do_bench(*args, **kwargs):
-        raise NotImplementedError("requires Triton")
+        # triton PR https://github.com/openai/triton/pull/1513 change the
+        # quantile fields name from 'percentiles' to 'quantiles'
+        # and change the default value from (0.5, 0.2, 0.8) to None.
+        # This may break inductor since a caller expects a tuple may get a item.
+        #
+        # Add a wrapper to maintain the same behavior for inductor.
+        # Maybe we should have own implementation of this function?
+        return triton_do_bench, (
+            "quantiles"
+            if inspect.signature(triton_do_bench).parameters.get("quantiles")
+            is not None
+            else "percentiles"
+        )
+
+    triton_do_bench, quantile_field_name = load_triton()
+
+    if quantile_field_name not in kwargs:
+        kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
+    return triton_do_bench(*args, **kwargs)[0]
 
 
 @functools.lru_cache(None)
@@ -62,6 +90,16 @@ def has_torchvision_roi_align():
 
 def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
+
+
+def decode_device(device):
+    if device is None:
+        return torch.tensor(0.0).device  # default device
+    if isinstance(device, str):
+        device = torch.device(device)
+    if device.type == "cuda" and device.index is None:
+        return torch.device("cuda", index=current_device())
+    return device
 
 
 def sympy_product(it):
@@ -221,9 +259,9 @@ def cmp(a, b):
     return int(a > b) - int(a < b)
 
 
-def pad_list(x):
+def pad_listlike(x, size):
     if len(x) == 1:
-        return [x[0], x[0]]
+        return type(x)([x[0]]) * size
     else:
         return x
 
@@ -240,12 +278,21 @@ def cache_on_self(fn):
     return wrapper
 
 
-def get_fused_kernel_name(node_schedule):
-    all_origins = functools.reduce(
+def aggregate_origins(node_schedule):
+    return functools.reduce(
         operator.or_,
-        [node.node.origins for node in node_schedule if hasattr(node, "node")],
+        [
+            node.node.origins
+            for node in node_schedule
+            if hasattr(node, "node") and node.node
+        ],
+        set(),
     )
-    if config.triton.descriptive_names == "original_aten":
+
+
+def get_fused_kernel_name(node_schedule, descriptive_names):
+    all_origins = aggregate_origins(node_schedule)
+    if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
             origin.meta["original_aten"]._overloadpacket.__name__
@@ -253,17 +300,17 @@ def get_fused_kernel_name(node_schedule):
             if origin.op == "call_function" and "original_aten" in origin.meta
         ]
         sources = sorted(set(sources))
-    elif config.triton.descriptive_names == "torch":
+    elif descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
         for origin in all_origins:
             if origin.op == "call_function" and "source_fn" in origin.meta:
-                if isinstance(origin.meta["source_fn"], str):
-                    sources.append(origin.meta["source_fn"])
+                if isinstance(origin.meta["source_fn"][1], str):
+                    sources.append(origin.meta["source_fn"][1])
                 else:
-                    sources.append(origin.meta["source_fn"].__name__)
+                    sources.append(origin.meta["source_fn"][1].__name__)
         sources = sorted(set(sources))
-    elif config.triton.descriptive_names == "inductor_node":
+    elif descriptive_names == "inductor_node":
         sources = [
             origin.name for origin in all_origins if origin.op == "call_function"
         ]
@@ -274,10 +321,7 @@ def get_fused_kernel_name(node_schedule):
 
 
 def get_kernel_metadata(node_schedule):
-    all_origins = functools.reduce(
-        operator.or_,
-        [node.node.origins for node in node_schedule if hasattr(node, "node")],
-    )
+    all_origins = aggregate_origins(node_schedule)
     inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
     original_aten_dict = collections.defaultdict(list)
     for node in inductor_nodes:
@@ -291,6 +335,23 @@ def get_kernel_metadata(node_schedule):
     for original_aten, nodes in sorted(original_aten_dict.items()):
         metadata.append(f"# {original_aten} => {', '.join(sorted(nodes))}")
     return "\n".join(metadata)
+
+
+def dominated_nodes(initial_queue: Iterable[torch.fx.Node], skip_filter=None):
+    """Returns the set of nodes whose values depend on those within initial_queue"""
+    initial_queue = list(initial_queue)
+    dominated_set = set(initial_queue)
+
+    while initial_queue:
+        node = initial_queue.pop()
+        for user in node.users:
+            if skip_filter and skip_filter(user):
+                continue
+            if user not in dominated_set:
+                dominated_set.add(user)
+                initial_queue.append(user)
+
+    return dominated_set
 
 
 def gather_origins(args, kwargs):
@@ -323,21 +384,21 @@ def sympy_str(expr: sympy.Expr):
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    from .ir import CleanDiv, FloorDiv, ModularIndexing
-
     if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
 
 
-def sympy_symbol(name):
+def sympy_symbol(name) -> sympy.Symbol:
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
-    return sympy.Symbol(name, integer=True, positive=True)
+    # NOTE: shape symbols are positive (> 0), but index variables are only
+    # non-negative (>= 0).
+    return sympy.Symbol(name, integer=True, nonnegative=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
+def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
     """
     xreplace is faster than subs, but is way more picky
     """
@@ -361,14 +422,32 @@ def free_symbol_has(index: sympy.Expr, pattern: str):
 
 
 def has_incompatible_cudagraph_ops(gm):
-    forbidden_list = {
+    forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
         "fbgemm.dense_to_jagged.default",
         "fbgemm.jagged_to_padded_dense.default",
+        "run_with_rng_state",
+        "run_and_save_rng_state",
     }
+    if torch.are_deterministic_algorithms_enabled():
+        forbidden_set.update(
+            {
+                "aten._unsafe_index_put.default",
+                "aten.index_put.default",
+                "aten.index_put_.default",
+                "aten.scatter.src",
+                "aten.scatter.reduce",
+                "aten.scatter.value_reduce",
+                "aten.scatter_add_",
+                "aten.scatter_add.default",
+                "aten.scatter_reduce.two",
+                "aten.scatter_reduce_.two",
+                "aten.scatter_reduce.two_out",
+            }
+        )
     for node in gm.graph.nodes:
-        if str(node.target) in forbidden_list:
+        if str(node.target) in forbidden_set:
             return True
     return False
 
@@ -406,7 +485,7 @@ def fresh_inductor_cache(cache_entries=None):
                         )
 
 
-def argsort(seq):
+def argsort(seq) -> List[int]:
     # preserve original order for equal strides
     getter = seq.__getitem__
     a_r = range(len(seq))
@@ -617,16 +696,32 @@ def run_and_get_code(fn, *args, **kwargs):
         GraphLowering, "compile_to_module", patched_compile_to_module
     ):
         torch._dynamo.reset()
-        fn(*args, **kwargs)
-    return source_codes
+        result = fn(*args, **kwargs)
+    return result, source_codes
 
 
 def run_and_get_triton_code(fn, *args, **kwargs):
-    source_codes = run_and_get_code(fn, *args, **kwargs)
+    _, source_codes = run_and_get_code(fn, *args, **kwargs)
     assert (
         len(source_codes) == 1
     ), f"expected exactly one code output got {len(source_codes)}"
     return source_codes[0]
+
+
+@contextlib.contextmanager
+def override_lowering(aten_op, override_fn):
+    """
+    Override the lowering of aten_op with overide_fn.
+    The first argument of override_fn is the original lowering fn.
+    """
+    from torch._inductor import lowering
+
+    orig_fn = lowering.lowerings[aten_op]
+    try:
+        lowering.lowerings[aten_op] = functools.partial(override_fn, orig_fn)
+        yield
+    finally:
+        lowering.lowerings[aten_op] = orig_fn
 
 
 def developer_warning(msg):
@@ -701,6 +796,13 @@ def get_benchmark_name():
             return arg[len("--only=") :]
 
 
+_kernel_category_choices = [
+    "pointwise",
+    "reduction",
+    "persistent_reduction",
+]
+
+
 def get_kernel_category(kernel_mod):
     """
     Given the module defining a triton kernel, return the category of the kernel.
@@ -709,15 +811,22 @@ def get_kernel_category(kernel_mod):
     - reduction
     - persistent_reduction
 
-    Currently we simply decide the cateory depending on what decorator is imported
+    Currently we simply decide the category depending on what decorator is imported
     by the kernel.
     """
-    choices = [
-        "pointwise",
-        "reduction",
-        "persistent_reduction",
-    ]
-    choices = [ch for ch in choices if ch in kernel_mod.__dict__]
+    choices = [ch for ch in _kernel_category_choices if ch in kernel_mod.__dict__]
+    if len(choices) == 1:
+        return choices[0]
+    else:
+        return "unknown"
+
+
+def get_kernel_category_by_source_code(src_code):
+    """
+    Similar to get_kernel_category but use the source code. Call this API
+    if we have not compile the src_code to module yet.
+    """
+    choices = [ch for ch in _kernel_category_choices if f"@{ch}" in src_code]
     if len(choices) == 1:
         return choices[0]
     else:
@@ -736,17 +845,29 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     """
     from torch._inductor.codecache import PyCodeCache
 
+    def get_triton_kernel(mod):
+        from torch._inductor.triton_heuristics import CachingAutotuner
+
+        cand_list = [
+            v
+            for k, v in mod.__dict__.items()
+            if k.startswith("triton_") and isinstance(v, CachingAutotuner)
+        ]
+        assert len(cand_list) == 1
+        return cand_list[0]
+
     nfound = 0
     for kernel_key, kernel_mod in PyCodeCache.cache.items():
         if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
             continue
 
+        triton_kernel = get_triton_kernel(kernel_mod)
         kernel_category = get_kernel_category(kernel_mod)
         args = kernel_mod.get_args()
         num_in_out_ptrs = len(
             [
                 arg_name
-                for arg_name in kernel_mod.triton_.fn.arg_names
+                for arg_name in triton_kernel.fn.arg_names
                 if arg_name.startswith("in_out_ptr")
             ]
         )
@@ -778,11 +899,11 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
                 )
         else:
-            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
+            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)
             assert (
-                len(kernel_mod.triton_.launchers) == 1
+                len(triton_kernel.launchers) == 1
             ), "Autotuner should have selected the best config"
-            launcher = kernel_mod.triton_.launchers[0]
+            launcher = triton_kernel.launchers[0]
             print(
                 get_info_str(
                     ms,
@@ -814,3 +935,226 @@ def is_cpu_device(inputs):
         for item in inputs
         if isinstance(item, torch.Tensor)
     )
+
+
+def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
+    assert isinstance(
+        val, sympy.Expr
+    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    if val.is_integer:
+        return torch.int64
+    else:
+        return torch.float64
+
+
+@contextlib.contextmanager
+def maybe_profile(should_profile, *args, **kwargs):
+    if should_profile:
+        with torch.profiler.profile(*args, **kwargs) as p:
+            yield p
+    else:
+        yield
+
+
+@dataclasses.dataclass
+class ProfileEvent:
+    category: str
+    key: str
+    self_cuda_time_ms: float
+    # the benchmark is run multiple times and we average the count across all the
+    # runs. It should be an integer but define a float just in case.
+    count: float
+
+
+def parse_profile_event_list(benchmark_name, event_list, wall_time_ms, nruns):
+    def get_self_cuda_time(ev):
+        """
+        ev.self_cuda_time_total is in microsecond. Convert to millisecond.
+        """
+        return ev.self_cuda_time_total / 1000 / nruns
+
+    all_events = defaultdict(list)
+
+    def add_event(ev, category):
+        profile_ev = ProfileEvent(
+            category=category,
+            key=ev.key,
+            self_cuda_time_ms=get_self_cuda_time(ev),
+            count=ev.count / nruns,  # average across all runs
+        )
+        all_events[category].append(profile_ev)
+
+    for ev in event_list:
+        assert not ev.is_legacy, "Don't support the legacy profiler"
+        if ev.device_type == DeviceType.CPU:
+            # ignore the event on CPU side
+            continue
+
+        category = "unknown"
+        if ev.key.startswith("triton_"):
+            if ev.key.startswith("triton_poi"):
+                category = "triton_pointwise"
+            elif ev.key.startswith("triton_red"):
+                category = "triton_reduction"
+            elif ev.key.startswith("triton_per"):
+                category = "triton_persistent_reduction"
+            else:
+                category = "triton_unknown"
+
+        add_event(ev, category)
+
+    def report_category(category, profile_events):
+        from tabulate import tabulate
+
+        profile_events.sort(key=lambda ev: ev.self_cuda_time_ms, reverse=True)
+
+        rows = []
+        total_time = 0.0
+        print(f"\n  == {category} category kernels == ")
+        for ev in profile_events:
+            total_time += ev.self_cuda_time_ms
+            percent = f"{ev.self_cuda_time_ms / wall_time_ms * 100:.2f}%"
+            rows.append([ev.key[:120], ev.self_cuda_time_ms, ev.count, percent])
+        rows.append(
+            ["Total", total_time, "", f"{total_time / wall_time_ms * 100:.2f}%"]
+        )
+        print(
+            tabulate(
+                rows, headers=["Kernel", "Self CUDA TIME (ms)", "Count", "Percent"]
+            )
+        )
+        return total_time
+
+    def report():
+        category_list = [
+            "triton_pointwise",
+            "triton_reduction",
+            "triton_persistent_reduction",
+            "triton_unknown",
+            "unknown",
+        ]
+        assert set(all_events.keys()).issubset(
+            set(category_list)
+        ), f"{list(all_events.keys())}"
+
+        per_category_wall_time = {}
+        total_cuda_ms = 0.0
+        for category in category_list:
+            if category in all_events:
+                _time = report_category(category, all_events[category])
+                per_category_wall_time[category] = _time
+                total_cuda_ms += _time
+
+        gpu_busy_percent = f"{total_cuda_ms / wall_time_ms * 100:.2f}%"
+        print(f"\nPercent of time when GPU is busy: {gpu_busy_percent}")
+        print(f"Total wall time {wall_time_ms:.3f} ms")
+
+        # output such a line so we can gather such line from all compiled modules from all
+        # benchmarks and tabulate it!
+        # Columns: benchmark_name, pointwise_percent, reduction_percent, persistent_reduction_percent,
+        #   unknown_category_percent, GPU_busy_percent, wall_time_ms
+        tabulate_line = f"Output for tabulate: {benchmark_name}"
+        for category in category_list:
+            percent = (
+                f"{per_category_wall_time.get(category, 0.0) / wall_time_ms * 100:.2f}%"
+            )
+            tabulate_line += f", {percent}"
+        tabulate_line += f", {gpu_busy_percent}, {wall_time_ms:.3f}ms"
+
+        print(tabulate_line)
+
+    report()
+
+
+def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
+    """
+    This is the function called in __main__ block of a compiled module.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--benchmark-kernels",
+        "-k",
+        action="store_true",
+        help="Whether to benchmark each individual kernels",
+    )
+    parser.add_argument(
+        "--benchmark-all-configs",
+        "-c",
+        action="store_true",
+        help="Whether to benchmark each individual config for a kernel",
+    )
+    parser.add_argument(
+        "--profile",
+        "-p",
+        action="store_true",
+        help="Whether to profile the compiled module",
+    )
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels(benchmark_name, args.benchmark_all_configs)
+    else:
+        times = 10
+        repeat = 10
+        wall_time_ms = (
+            benchmark_compiled_module_fn(times=times, repeat=repeat) / times * 1000
+        )
+
+        if not args.profile:
+            return
+
+        with torch.profiler.profile(record_shapes=True) as p:
+            benchmark_compiled_module_fn(times=times, repeat=repeat)
+
+        path = f"{tempfile.gettempdir()}/compiled_module_profile.json"
+        p.export_chrome_trace(path)
+        print(f"Profiling result for a compiled module of benchmark {benchmark_name}:")
+        print(f"Chrome trace for the profile is written to {path}")
+        event_list = p.key_averages(group_by_input_shape=True)
+        print(event_list.table(sort_by="self_cuda_time_total", row_limit=10))
+        parse_profile_event_list(
+            benchmark_name, event_list, wall_time_ms, times * repeat
+        )
+
+
+def triton_config_to_hashable(cfg):
+    """
+    Convert triton config to a tuple that can uniquely identify it. We can use
+    the return value as a dictionary key.
+    """
+    items = sorted(cfg.kwargs.items())
+    items.append(("num_warps", cfg.num_warps))
+    items.append(("num_stages", cfg.num_stages))
+    return tuple(items)
+
+
+HAS_COLORAMA = True
+try:
+    import colorama
+except ImportError:
+    HAS_COLORAMA = False
+
+
+def _color_text(msg, color):
+    if not HAS_COLORAMA:
+        return msg
+
+    return getattr(colorama.Fore, color.upper()) + msg + colorama.Fore.RESET
+
+
+def green_text(msg):
+    return _color_text(msg, "green")
+
+
+def yellow_text(msg):
+    return _color_text(msg, "yellow")
+
+
+def red_text(msg):
+    return _color_text(msg, "red")
+
+
+def blue_text(msg):
+    return _color_text(msg, "blue")

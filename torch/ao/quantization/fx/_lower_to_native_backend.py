@@ -75,6 +75,7 @@ def is_default_node(node, modules):
     module_type_list = [
         nnqr.ConvTranspose1d,
         nnqr.ConvTranspose2d,
+        nnqr.ConvTranspose3d,
         torch.nn.ELU,
         torch.nn.LeakyReLU,
         torch.nn.Hardswish,
@@ -169,6 +170,8 @@ def is_general_tensor_shape_node(node, modules):
     ]
     module_type_list = [
         torch.nn.Identity,
+        torch.nn.PixelShuffle,
+        torch.nn.PixelUnshuffle,
     ]
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 
@@ -242,6 +245,7 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
     nn.BatchNorm3d: nnq.BatchNorm3d,
     nnqr.ConvTranspose1d: nnq.ConvTranspose1d,
     nnqr.ConvTranspose2d: nnq.ConvTranspose2d,
+    nnqr.ConvTranspose3d: nnq.ConvTranspose3d,
     nn.ELU: nnq.ELU,
     nn.LeakyReLU: nnq.LeakyReLU,
     nn.Hardswish: nnq.Hardswish,
@@ -291,11 +295,14 @@ DYNAMIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Typ
 # Mapping from a functional to lower to a 2-tuple of
 #   1) The quantized version of the op
 #   2) The quantized version of the op fused with relu, if it exists, else None
-STATIC_LOWER_FUNCTIONAL_MAP: Dict[Callable, Tuple[Callable, Callable]] = {
+STATIC_LOWER_FUNCTIONAL_MAP: Dict[Callable, Tuple[Callable, Optional[Callable]]] = {
     F.linear: (torch.ops.quantized.linear, torch.ops.quantized.linear_relu),
     F.conv1d: (torch.ops.quantized.conv1d, torch.ops.quantized.conv1d_relu),
     F.conv2d: (torch.ops.quantized.conv2d, torch.ops.quantized.conv2d_relu),
     F.conv3d: (torch.ops.quantized.conv3d, torch.ops.quantized.conv3d_relu),
+    F.conv_transpose1d: (torch.ops.quantized.conv_transpose1d, None),
+    F.conv_transpose2d: (torch.ops.quantized.conv_transpose2d, None),
+    F.conv_transpose3d: (torch.ops.quantized.conv_transpose3d, None),
 }
 
 WEIGHT_PREPACK_OPS: Set[Callable] = {
@@ -304,6 +311,9 @@ WEIGHT_PREPACK_OPS: Set[Callable] = {
     torch._ops.ops.quantized.conv1d_prepack,
     torch._ops.ops.quantized.conv2d_prepack,
     torch._ops.ops.quantized.conv3d_prepack,
+    torch.ops.quantized.conv_transpose1d_prepack,
+    torch.ops.quantized.conv_transpose2d_prepack,
+    torch.ops.quantized.conv_transpose3d_prepack,
 }
 
 # Mapping from a functional to a dictionary, where the key is a 2-tuple of
@@ -333,6 +343,12 @@ CONV_FUNCTIONAL_OPS: Set[Callable] = {
     F.conv1d,
     F.conv2d,
     F.conv3d,
+}
+
+CONV_TRANSPOSE_FUNCTIONAL_OPS: Set[Callable] = {
+    F.conv_transpose1d,
+    F.conv_transpose2d,
+    F.conv_transpose3d,
 }
 
 QBIN_OP_MAPPING: Dict[Union[Callable, str], Callable] = {
@@ -741,7 +757,7 @@ def _lower_weight_only_weighted_ref_module(model: GraphModule):
         # TODO: maybe define a WeightedWeightOnlyQuantizedModule
         q_module = q_class.from_reference(ref_module)  # type: ignore[union-attr]
 
-        # replace reference moduel with dynamically quantized module
+        # replace reference module with dynamically quantized module
         parent_name, module_name = _parent_name(ref_node.target)
         setattr(named_modules[parent_name], module_name, q_module)
 
@@ -788,6 +804,20 @@ def _lower_static_weighted_ref_functional(
                 for i in [2, 3, 4]:
                     if len(prepack_args) > i and isinstance(prepack_args[i], int):
                         prepack_args[i] = (prepack_args[i],)
+        elif func_node.target in CONV_TRANSPOSE_FUNCTIONAL_OPS:
+            prepack_op = get_qconv_prepack_op(func_node.target)  # type: ignore[arg-type]
+            # For conv_transpose1d, the stride, padding, and dilation args may be ints,
+            # in which case we need to convert them to tuples
+            if func_node.target == F.conv_transpose1d:
+                # Note prepack_args[5] is groups.
+                for i in [2, 3, 4, 6]:
+                    if len(prepack_args) > i and isinstance(prepack_args[i], int):
+                        prepack_args[i] = (prepack_args[i],)
+            # swap dilation and groups
+            # prepack op has arguments: {w, b, stride, padding, output_padding, dilation, groups}
+            # transposed conv op has arguments: {x, w, b, stride, padding, output_padding, groups, dilation}
+            if (len(prepack_args) > 6):
+                prepack_args[5], prepack_args[6] = prepack_args[6], prepack_args[5]
         else:
             raise ValueError("Lowering is not supported for op '%s'" % func_node.target)
         with model.graph.inserting_before(output_scale_node):
@@ -803,8 +833,13 @@ def _lower_static_weighted_ref_functional(
 
         # Step 2: Replace reference pattern with the corresponding quantized op
         (q_func, q_relu_func) = STATIC_LOWER_FUNCTIONAL_MAP[func_node.target]  # type: ignore[index]
-        func_node.target = q_relu_func if relu_node is not None else q_func
+        # conv_transpose does not support fusion with relu yet. q_relu_func is None in such cases
+        if q_relu_func is not None:
+            func_node.target = q_relu_func if relu_node is not None else q_func
+        else:
+            func_node.target = q_func
         func_node.args = (input_dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
+        # kwargs for func_node has been moved to kwargs for prepack op
         func_node.kwargs = {}
         q_node.replace_all_uses_with(func_node)
         # Move func_node after output_zp_node in the graph
@@ -812,7 +847,7 @@ def _lower_static_weighted_ref_functional(
 
         # Clean up: Remove quantize node, and the relu node if it exists
         model.graph.erase_node(q_node)
-        if relu_node is not None:
+        if relu_node is not None and q_relu_func is not None:
             model.graph.erase_node(relu_node)
 
 def _lower_dynamic_weighted_ref_functional(
@@ -948,7 +983,7 @@ def _lower_quantized_binary_op(
         assert bop_node.target in QBIN_OP_MAPPING
         binop_to_qbinop = QBIN_OP_MAPPING if relu_node is None else QBIN_RELU_OP_MAPPING
         qbin_op = binop_to_qbinop[bop_node.target]
-        # prepare the args for quantized bianry op
+        # prepare the args for quantized binary op
         # (x, y)
         qop_node_args = list(bop_node.args)
         # (x, y, scale, zero_point)

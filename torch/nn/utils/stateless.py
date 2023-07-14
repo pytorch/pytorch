@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 from collections import defaultdict
-from typing import Any, Dict, Iterator, Set, Tuple, Union
+from typing import Any, Dict, Iterator, Optional, Set, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -148,7 +148,7 @@ def functional_call(
     module: "torch.nn.Module",
     parameters_and_buffers: Dict[str, Tensor],
     args: Union[Any, Tuple],
-    kwargs: Dict[str, Any] = None,
+    kwargs: Optional[Dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,
@@ -204,7 +204,7 @@ def functional_call(
         kwargs (dict): keyword arguments to be passed to the module call
         tie_weights (bool, optional): If True, then parameters and buffers tied in the original model will be treated as
             tied in the reparamaterized version. Therefore, if True and different values are passed for the tied
-            paramaters and buffers, it will error. If False, it will not respect the originally tied parameters and
+            parameters and buffers, it will error. If False, it will not respect the originally tied parameters and
             buffers unless the values passed for both weights are the same. Default: True.
         strict (bool, optional): If True, then the parameters and buffers passed in must match the parameters and
             buffers in the original module. Therefore, if True and there are any missing or unexpected keys, it will
@@ -233,7 +233,7 @@ def _functional_call(
     module: "torch.nn.Module",
     parameters_and_buffers: Dict[str, Tensor],
     args: Union[Any, Tuple],
-    kwargs: Dict[str, Any] = None,
+    kwargs: Optional[Dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,
