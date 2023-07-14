@@ -210,7 +210,7 @@ def full(
 def zeros(
     *size,
     requires_grad: bool = False,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype = None,
     layout: torch.layout = torch.strided,
     device_mesh: Optional[DeviceMesh] = None,
     placements: Optional[Sequence[Placement]] = None,
