@@ -1394,7 +1394,6 @@ def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
     for shape in cases:
         yield SampleInput(make_arg(shape))
 
-# TODO: add reduction kwargs
 def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(_make_tensor, dtype=torch.long, requires_grad=False)
@@ -1404,11 +1403,65 @@ def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwa
         ((S,), make_target([], low=0, high=S), {"p": 1}),
         ((S,), make_target([1], low=0, high=S), {"p": 2}),
         ((S, M), make_target([S], low=0, high=M), {"margin": 1.0}),
+        ((S, M), make_target([S], low=0, high=M), {"margin": -3.14}),
         ((M, S), make_target([M], low=0, high=S), {"weight": None}),
+        ((M, S), make_target([M], low=0, high=S), {"reduction": "none"}),
+        ((M, S), make_target([M], low=0, high=S), {"reduction": "mean"}),
+        ((M, S), make_target([M], low=0, high=S), {"reduction": "sum"}),
     )
 
     for input_shape, target, kwargs in inputs:
         yield SampleInput(_make_tensor(input_shape), args=(target,), kwargs=kwargs)
+
+
+def reference_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs)
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(_make_tensor, dtype=torch.long, requires_grad=False)
+
+    inputs = (
+        ((), make_target([], low=0, high=1)),
+        ((S,), make_target([], low=0, high=S)),
+        ((S,), make_target([1], low=0, high=S)),
+        ((M, S), make_target([M], low=0, high=S)),
+    )
+    ps = (1, 2)
+    margins = (0, 7, -3.14)
+    reductions = (None, "none", "mean", "sum")
+
+    for (input_shape, target), p, margin, reduction in product(inputs, ps, margins, reductions):
+        kwargs = {"p": p, "margin": margin}
+        if reduction is not None:
+            kwargs["reduction"] = reduction
+        yield SampleInput(_make_tensor(input_shape), args=(target,), kwargs=kwargs)
+
+
+def error_inputs_multi_margin_loss(op, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+    # invalid reduction
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={'reduction': 'abc'}),
+                     error_type=ValueError, error_regex='abc is not a valid value for reduction')
+    # invalid input
+    yield ErrorInput(SampleInput(make_input(5, 0), args=(make_input(5,),), kwargs={}),
+                     error_type=RuntimeError,
+                     error_regex=r'Expected non-empty vector or matrix with optional 0-dim batch size, but got: \[5, 0\]')
+    yield ErrorInput(SampleInput(make_input(0,), args=(make_input(5,),), kwargs={}),
+                     error_type=RuntimeError,
+                     error_regex=r'Expected non-empty vector or matrix with optional 0-dim batch size, but got: \[0\]')
+    # invalid target
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={}),
+                     error_type=RuntimeError,
+                     error_regex=(
+                         r'inconsistent target size, expected 5 but got \[5, 4\]'
+                         if torch.device(device).type == 'cuda' else
+                         r'inconsistent target size, got: \[5, 4\]'))
+    # invalid target dtype
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={}),
+                     error_type=RuntimeError, error_regex='expected scalar type Long but found Float')
+    # invalid p
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={'p': 3}),
+                     error_type=ValueError, error_regex='only p == 1 and p == 2 supported')
+
 
 def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
     inputs = (
@@ -12744,6 +12797,8 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_multi_margin_loss,
+        reference_inputs_func=reference_inputs_multi_margin_loss,
+        error_inputs_func=error_inputs_multi_margin_loss,
     ),
     OpInfo(
         "nn.functional.multilabel_margin_loss",
