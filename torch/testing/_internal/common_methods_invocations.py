@@ -991,8 +991,8 @@ def error_inputs_linspace(op, device, **kwargs):
 
 
 def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
-    ends = (-3, 0, 1, 4, 50, 10 + 5j)
-    starts = (-2., 0, 4.3, 50, 1 + 2j)
+    ends = (-3, 0, 1, 4, 50)
+    starts = (-2., 0, 4.3, 50)
     nsteps = (0, 1, 50)
     # Extra case to replicate off-by-one issue on CUDA
     cases = list(product(starts, ends, nsteps)) + [(0, 7, 50)]
@@ -1002,11 +1002,12 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
 
     yield SampleInput(1, args=(3, 1))
+    yield SampleInput(1 + 2j, args=(10 + 5j))  # inputs of complex type
 
 
 def sample_inputs_logspace(op, device, dtype, requires_grad, **kwargs):
-    ends = (-3, 0, 1.2, 2, 4, 10 + 5j)
-    starts = (-2., 0, 1, 2, 4.3, 1 + 2j)
+    ends = (-3, 0, 1.2, 2, 4)
+    starts = (-2., 0, 1, 2, 4.3)
     nsteps = (0, 1, 2, 4)
     bases = (2., 1.1) if dtype in (torch.int8, torch.uint8) else (None, 2., 3., 1.1, 5.)
     for start, end, nstep, base in product(starts, ends, nsteps, bases):
@@ -1021,6 +1022,7 @@ def sample_inputs_logspace(op, device, dtype, requires_grad, **kwargs):
             yield SampleInput(start, args=(end, nstep, base), kwargs={"dtype": dtype, "device": device})
 
     yield SampleInput(1, args=(3, 1, 2.))
+    yield SampleInput(1 + 2j, args=(10 + 5j))  # inputs of complex type
 
 
 def sample_inputs_isclose(op, device, dtype, requires_grad, **kwargs):
