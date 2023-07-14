@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <exception>
+#include <stdexcept>
 
 namespace torch {
 namespace lazy {

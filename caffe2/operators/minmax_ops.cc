@@ -17,7 +17,7 @@ must have the same shape and data type, and the output will have the same shape
 as the inputs.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/minmax_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/minmax_ops.cc
 
 <details>
 
@@ -92,7 +92,7 @@ OPERATOR_SCHEMA(Min)
 Element-wise min of an arbitrary number of input tensors. This operation can be performed in-place, by using the first input blob as the output blob. All inputs must have the same shape and data type, and the output will have the same shape as the inputs.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/minmax_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/minmax_ops.cc
 
 <details>
 

@@ -53,6 +53,11 @@ inline bool THPVariable_Check(PyObject* obj) {
   if (!THPVariableClass)
     return false;
 
+  // Fast path
+  if (THPVariable_CheckExact(obj)) {
+    return true;
+  }
+
   const auto result = PyObject_IsInstance(obj, THPVariableClass);
   if (result == -1)
     throw python_error();

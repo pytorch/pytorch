@@ -19,7 +19,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import largeTensorTest, onlyNativeDeviceTypes, dtypes, \
     instantiate_device_type_tests, skipCUDAIfRocm, expectedFailureMeta, dtypesIfCUDA, onlyCPU, onlyCUDA, \
-    TEST_WITH_ROCM
+    TEST_WITH_ROCM, expectedFailureCUDA
 from torch.testing._internal.common_dtype import floating_types_and
 import torch.nn.functional as F
 import torch.nn as nn
@@ -272,6 +272,23 @@ class TestPoolingNN(NNTestCase):
         self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
         self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_adaptive_avg_pooling_overflow(self):
+        input = torch.randint(-256, 256, (20, 32, 256, 256), dtype=torch.half, device='cuda')
+        avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
+        out = avg_pool(input)
+        self.assertFalse(torch.isinf(out).any())
+        self.assertFalse(torch.isnan(out).any())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_adaptive_avg_pooling_nhwc_overflow(self):
+        input = torch.randint(-256, 256, (20, 32, 256, 256), dtype=torch.half, device='cuda')
+        input = input.contiguous(memory_format=torch.channels_last)
+        avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
+        out = avg_pool(input)
+        self.assertFalse(torch.isinf(out).any())
+        self.assertFalse(torch.isnan(out).any())
 
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
@@ -530,17 +547,52 @@ class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @skipCUDAIfRocm
     @parametrize_test("module_name,module_size,output_size,test_index,should_error", [
-        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), -1, True), name='case1'),
-        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), 2 * 2 * 4 * 5, True), name='case2'),
-        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), (2 * 2 * 4 * 5) - 1, False), name='case3'),
-        subtest(('MaxUnpool2d', (2, 3), (2, 1, 4, 2), 2 * 3 * 4 * 2, True), name='case4'),
-        subtest(('MaxUnpool2d', (2, 3), (2, 1, 4, 2), (2 * 3 * 4 * 2) - 1, False), name='case5'),
-
-        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), -1, True), name='case6'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), 2 * 2 * 2 * 3 * 4 * 5, True), name='case7'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), (2 * 2 * 2 * 3 * 4 * 5) - 1, False), name='case8'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), 2 * 2 * 2 * 3 * 4 * 1, True), name='case9'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), (2 * 2 * 2 * 3 * 4 * 1) - 1, False), name='case10'),
+        # Some tests are failing in trunk https://github.com/pytorch/pytorch/issues/103854
+        subtest(
+            ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), -1, True),
+            name='case1',
+            decorators=[expectedFailureCUDA]
+        ),
+        subtest(
+            ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), 2 * 2 * 4 * 5, True),
+            name='case2',
+            decorators=[expectedFailureCUDA]
+        ),
+        subtest(
+            ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), (2 * 2 * 4 * 5) - 1, False),
+            name='case3'
+        ),
+        subtest(
+            ('MaxUnpool2d', (2, 3), (2, 1, 4, 2), 2 * 3 * 4 * 2, True),
+            name='case4',
+            decorators=[expectedFailureCUDA]
+        ),
+        subtest(
+            ('MaxUnpool2d', (2, 3), (2, 1, 4, 2), (2 * 3 * 4 * 2) - 1, False),
+            name='case5'
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), -1, True),
+            name='case6',
+            decorators=[expectedFailureCUDA]),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), 2 * 2 * 2 * 3 * 4 * 5, True),
+            name='case7',
+            decorators=[expectedFailureCUDA]
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), (2 * 2 * 2 * 3 * 4 * 5) - 1, False),
+            name='case8'
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), 2 * 2 * 2 * 3 * 4 * 1, True),
+            name='case9',
+            decorators=[expectedFailureCUDA]
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), (2 * 2 * 2 * 3 * 4 * 1) - 1, False),
+            name='case10'
+        ),
     ])
     def test_MaxUnpool_index_errors(self, device, module_name, module_size, output_size, test_index, should_error):
         # NOTE: CUDA tests need to be run in a subprocess because they cause device asserts
@@ -702,6 +754,9 @@ torch.cuda.synchronize()
     def test_adaptive_pooling_no_suppot_input(self, device, dtype):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
+                # adapative_avg_pool2d for int is implemented
+                if numel == 2 and pool_type == 'Avg':
+                    continue
                 cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
                 module_cls = getattr(nn, cls_name)
                 output_size = (2,) * numel

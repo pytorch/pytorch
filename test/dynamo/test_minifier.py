@@ -1,7 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import functools
-import re
-import textwrap
 import unittest
 
 import torch._dynamo
@@ -11,367 +9,207 @@ requires_cuda = functools.partial(
     unittest.skipIf, not torch.cuda.is_available(), "requires cuda"
 )
 
-RELU_COMPILE_ERROR_BACKEND = """\
-from torch._dynamo import register_backend
-
-class DynamoCompileError(Exception):
-    pass
-
-@register_backend
-def test_relu_compile_error(gm: torch.fx.GraphModule, example_inputs):
-    for node in gm.graph.nodes:
-        if node.target == torch.relu:
-            raise DynamoCompileError("relu found")
-    return gm
-"""
-
-RELU_RUNTIME_ERROR_BACKEND = """\
-from torch._dynamo import register_backend
-
-@register_backend
-def test_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs):
-    for node in gm.graph.nodes:
-        if node.target == torch.relu:
-            node.target = torch._assert
-            node.args = (False, "DynamoRuntimeError")
-    gm.recompile()
-    return gm
-"""
-
-RELU_ACCURACY_ERROR_BACKEND = """\
-from torch._dynamo import register_backend
-
-@register_backend
-def test_relu_accuracy_error(gm: torch.fx.GraphModule, example_inputs):
-    for node in gm.graph.nodes:
-        if node.target == torch.relu:
-            node.target = torch.add
-            node.args = (node.args[0], 1)
-    gm.recompile()
-
-    return gm
-"""
-
-RELU_CUSTOM_ERROR_BACKEND = """\
-class CustomError(Exception):
-    pass
-
-def test_relu_custom_error(gm: torch.fx.GraphModule, example_inputs):
-    for node in gm.graph.nodes:
-        if node.target == torch.relu:
-            raise CustomError("relu found")
-    return gm
-"""
-
 
 class MinifierTests(MinifierTestBase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-
-    @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
-
     # Test that compile, runtime, and accuracy errors after dynamo can be repro'd (both CPU and CUDA)
-    def _test_after_dynamo(self, device, repro_level, backend_code, error_name):
-        run_code = textwrap.dedent(
-            f"""\
-            @torch._dynamo.optimize("{self._get_fn_name(backend_code)}")
-            def inner(x):
-                for _ in range(10):
-                    x = torch.sin(x)
-                x = torch.relu(x)
-                for _ in range(10):
-                    x = torch.cos(x)
-                return x
+    def _test_after_dynamo(self, device, backend, expected_error):
+        run_code = f"""\
+@torch._dynamo.optimize({backend!r})
+def inner(x):
+    for _ in range(10):
+        x = torch.sin(x)
+    x = torch.relu(x)
+    for _ in range(10):
+        x = torch.cos(x)
+    return x
 
-            inner(torch.randn(20, 20).to("{device}"))
-        """
-        )
-
-        (test_proc, _, repro_proc), _ = self._run_full_test(
-            run_code, "dynamo", repro_level, backend_code
-        )
-
-        self.assertIn(error_name, test_proc.stderr.decode("utf-8"))
-        self.assertIn(error_name, repro_proc.stderr.decode("utf-8"))
+inner(torch.randn(20, 20).to("{device}"))
+"""
+        self._run_full_test(run_code, "dynamo", expected_error, isolate=False)
 
     def test_after_dynamo_cpu_compile_error(self):
         self._test_after_dynamo(
-            "cpu", 2, RELU_COMPILE_ERROR_BACKEND, "DynamoCompileError"
+            "cpu", "relu_compile_error_TESTING_ONLY", "ReluCompileError"
         )
 
     def test_after_dynamo_cpu_runtime_error(self):
         self._test_after_dynamo(
-            "cpu", 2, RELU_RUNTIME_ERROR_BACKEND, "DynamoRuntimeError"
+            "cpu", "relu_runtime_error_TESTING_ONLY", "ReluRuntimeError"
         )
 
     def test_after_dynamo_cpu_accuracy_error(self):
-        self._test_after_dynamo("cpu", 4, RELU_ACCURACY_ERROR_BACKEND, "AccuracyError")
+        self._test_after_dynamo(
+            "cpu", "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
+        )
 
     @requires_cuda()
     def test_after_dynamo_cuda_compile_error(self):
         self._test_after_dynamo(
-            "cuda", 2, RELU_COMPILE_ERROR_BACKEND, "DynamoCompileError"
+            "cuda", "relu_compile_error_TESTING_ONLY", "ReluCompileError"
         )
 
     @requires_cuda()
     def test_after_dynamo_cuda_runtime_error(self):
         self._test_after_dynamo(
-            "cuda", 2, RELU_RUNTIME_ERROR_BACKEND, "DynamoRuntimeError"
+            "cuda", "relu_runtime_error_TESTING_ONLY", "ReluRuntimeError"
         )
 
     @requires_cuda()
     def test_after_dynamo_cuda_accuracy_error(self):
-        self._test_after_dynamo("cuda", 4, RELU_ACCURACY_ERROR_BACKEND, "AccuracyError")
-
-    # Ensure that the testing backends pass when relu is not present.
-    def _test_after_dynamo_backend_passes(self, device, repro_level, backend_code):
-        run_code = textwrap.dedent(
-            f"""\
-            @torch._dynamo.optimize("{self._get_fn_name(backend_code)}")
-            def inner(x):
-                for _ in range(10):
-                    x = torch.sin(x)
-                for _ in range(10):
-                    x = torch.cos(x)
-                return x
-
-            inner(torch.randn(20, 20).to("{device}"))
-        """
+        self._test_after_dynamo(
+            "cuda", "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
         )
 
-        test_code = self._gen_test_code(run_code, "dynamo", repro_level, backend_code)
-        proc, repro_dir = self._run_test_code(test_code)
-        self.assertEqual(proc.returncode, 0)
-        self.assertIsNone(repro_dir)
+    def test_after_dynamo_non_leaf_compile_error(self):
+        run_code = """\
+@torch._dynamo.optimize("non_leaf_compile_error_TESTING_ONLY")
+def inner(x):
+    return x + 1
+
+inner(torch.randn(20, 20, requires_grad=True) + 1)
+"""
+        self._run_full_test(
+            run_code, "dynamo", "TestingOnlyCompileError", isolate=False
+        )
+
+    # Ensure that the testing backends pass when relu is not present.
+    def _test_after_dynamo_backend_passes(self, device, backend):
+        @torch._dynamo.optimize(backend)
+        def inner(x):
+            for _ in range(10):
+                x = torch.sin(x)
+            for _ in range(10):
+                x = torch.cos(x)
+            return x
+
+        inner(torch.randn(20, 20).to(device))
 
     def test_after_dynamo_cpu_compile_backend_passes(self):
-        self._test_after_dynamo_backend_passes("cpu", 2, RELU_COMPILE_ERROR_BACKEND)
+        self._test_after_dynamo_backend_passes("cpu", "relu_compile_error_TESTING_ONLY")
 
     def test_after_dynamo_cpu_runtime_backend_passes(self):
-        self._test_after_dynamo_backend_passes("cpu", 2, RELU_RUNTIME_ERROR_BACKEND)
+        self._test_after_dynamo_backend_passes("cpu", "relu_runtime_error_TESTING_ONLY")
 
     def test_after_dynamo_cpu_accuracy_backend_passes(self):
-        self._test_after_dynamo_backend_passes("cpu", 4, RELU_ACCURACY_ERROR_BACKEND)
+        self._test_after_dynamo_backend_passes(
+            "cpu", "relu_accuracy_error_TESTING_ONLY"
+        )
 
     @requires_cuda()
     def test_after_dynamo_cuda_compile_backend_passes(self):
-        self._test_after_dynamo_backend_passes("cuda", 2, RELU_COMPILE_ERROR_BACKEND)
+        self._test_after_dynamo_backend_passes(
+            "cuda", "relu_compile_error_TESTING_ONLY"
+        )
 
     @requires_cuda()
     def test_after_dynamo_cuda_runtime_backend_passes(self):
-        self._test_after_dynamo_backend_passes("cuda", 2, RELU_RUNTIME_ERROR_BACKEND)
+        self._test_after_dynamo_backend_passes(
+            "cuda", "relu_runtime_error_TESTING_ONLY"
+        )
 
     @requires_cuda()
     def test_after_dynamo_cuda_accuracy_backend_passes(self):
-        self._test_after_dynamo_backend_passes("cuda", 4, RELU_ACCURACY_ERROR_BACKEND)
-
-    # Ensure that generated code with a custom backends generates a runnable minifier
-    # launcher script that results in a RuntimeError
-    def test_after_dynamo_custom_backend(self):
-        run_code = textwrap.dedent(
-            f"""\
-            @torch._dynamo.optimize({self._get_fn_name(RELU_CUSTOM_ERROR_BACKEND)})
-            def inner(x):
-                for _ in range(10):
-                    x = torch.sin(x)
-                x = torch.relu(x)
-                for _ in range(10):
-                    x = torch.cos(x)
-                return x
-
-            inner(torch.randn(20, 20))
-        """
+        self._test_after_dynamo_backend_passes(
+            "cuda", "relu_accuracy_error_TESTING_ONLY"
         )
-
-        repro_after = "dynamo"
-        repro_level = 2
-        test_code = self._gen_test_code(
-            run_code, repro_after, repro_level, RELU_CUSTOM_ERROR_BACKEND
-        )
-        _, repro_dir = self._run_test_code(test_code)
-        launch_proc, _ = self._run_minifier_launcher("", repro_dir)
-        self.assertIn("RuntimeError", launch_proc.stderr.decode("utf-8"))
 
     # Test that a module with mixed cpu/cuda parts with an error after dynamo can be repro'd
     @requires_cuda()
     def test_cpu_cuda_module_after_dynamo(self):
-        backend_name = self._get_fn_name(RELU_COMPILE_ERROR_BACKEND)
+        backend_name = "relu_compile_error_TESTING_ONLY"
+        run_code = f"""\
+class CpuCudaModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.m_x = torch.nn.Linear(20, 20).cuda()
+        self.m_y = torch.nn.Linear(20, 20)
+        self.p_x = torch.nn.Parameter(torch.randn(20, 20).cuda())
+        self.p_y = torch.nn.Parameter(torch.randn(20, 20))
+        self.register_buffer("b_x", torch.ones(20, 20).cuda())
+        self.register_buffer("b_y", torch.ones(20, 20))
 
-        run_code = textwrap.dedent(
-            f"""\
-            class CpuCudaModule(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.m_x = torch.nn.Linear(20, 20).cuda()
-                    self.m_y = torch.nn.Linear(20, 20)
-                    self.p_x = torch.nn.Parameter(torch.randn(20, 20).cuda())
-                    self.p_y = torch.nn.Parameter(torch.randn(20, 20))
-                    self.register_buffer("b_x", torch.ones(20, 20).cuda())
-                    self.register_buffer("b_y", torch.ones(20, 20))
+    def forward(self, x, y):
+        return self.m_x(x) + self.p_x + self.b_x, self.m_y(y) + self.p_y + self.b_y
 
-                def forward(self, x, y):
-                    return self.m_x(x) + self.p_x + self.b_x, self.m_y(y) + self.p_y + self.b_y
+mod = CpuCudaModule()
 
-            mod = CpuCudaModule()
+@torch._dynamo.optimize({backend_name!r})
+def inner(x1, y1):
+    x2 = torch.randn(20, 20).cuda()
+    y2 = torch.randn(20, 20)
+    x3, y3 = mod(x1 + x2, y1 + y2)
+    return torch.relu(x3.cpu() + y3)
 
-            @torch._dynamo.optimize("{backend_name}")
-            def inner(x1, y1):
-                x2 = torch.randn(20, 20).cuda()
-                y2 = torch.randn(20, 20)
-                x3, y3 = mod(x1 + x2, y1 + y2)
-                return torch.relu(x3.cpu() + y3)
+inner(torch.randn(20, 20).cuda(), torch.randn(20, 20))
+"""
 
-            inner(torch.randn(20, 20).cuda(), torch.randn(20, 20))
-        """
+        res = self._run_full_test(run_code, "dynamo", "ReluCompileError", isolate=False)
+
+        self.assertExpectedInline(
+            res.minifier_module(),
+            """\
+class Repro(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.G__mod___m_x = Linear(in_features=20, out_features=20, bias=True).cuda()
+        self.G__mod___m_y = Linear(in_features=20, out_features=20, bias=True)
+        self.register_buffer('G__mod___b_x', torch.randn([20, 20], dtype=torch.float32).cuda())
+        self.register_buffer('G__mod___b_y', torch.randn([20, 20], dtype=torch.float32))
+        self.G__mod___p_x = torch.nn.Parameter(torch.randn([20, 20], dtype=torch.float32, device="cuda"))
+        self.G__mod___p_y = torch.nn.Parameter(torch.randn([20, 20], dtype=torch.float32))
+
+    def forward(self, L_x1_ : torch.Tensor, L_y1_ : torch.Tensor):
+        l_x1_ = L_x1_
+        l_y1_ = L_y1_
+        randn = torch.randn(20, 20)
+        cuda = randn.cuda();  randn = None
+        randn_1 = torch.randn(20, 20)
+        add = l_x1_ + cuda;  l_x1_ = cuda = None
+        add_1 = l_y1_ + randn_1;  l_y1_ = randn_1 = None
+        g__mod___m_x = self.G__mod___m_x(add);  add = None
+        g__mod___p_x = self.G__mod___p_x
+        add_2 = g__mod___m_x + g__mod___p_x;  g__mod___m_x = g__mod___p_x = None
+        g__mod___b_x = self.G__mod___b_x
+        add_3 = add_2 + g__mod___b_x;  add_2 = g__mod___b_x = None
+        g__mod___m_y = self.G__mod___m_y(add_1);  add_1 = None
+        g__mod___p_y = self.G__mod___p_y
+        add_4 = g__mod___m_y + g__mod___p_y;  g__mod___m_y = g__mod___p_y = None
+        g__mod___b_y = self.G__mod___b_y
+        add_5 = add_4 + g__mod___b_y;  add_4 = g__mod___b_y = None
+        cpu = add_3.cpu();  add_3 = None
+        add_6 = cpu + add_5;  cpu = add_5 = None
+        relu = torch.relu(add_6);  add_6 = None
+        return (relu,)""",
         )
-
-        (test_proc, _, repro_proc), (launch_code, _) = self._run_full_test(
-            run_code, "dynamo", 2, RELU_COMPILE_ERROR_BACKEND
-        )
-
-        tb1 = test_proc.stderr.decode("utf-8")
-        tb2 = repro_proc.stderr.decode("utf-8")
-
-        # Check if generated minifier code covers all cpu/cuda cases
-        self.assertIsNotNone(re.search(r"args.*cuda", launch_code))
-        self.assertIsNotNone(re.search(r"args.*cpu", launch_code))
-        # search for Linear(...).cuda()
-        self.assertIsNotNone(re.search(r"Linear.*cuda", launch_code))
-        # search for Linear(...)
-        self.assertIsNotNone(
-            re.search(r"Linear(?!.*cuda.*$)", launch_code, re.MULTILINE)
-        )
-        self.assertIsNotNone(re.search(r"register_buffer.*cuda", launch_code))
-        self.assertIsNotNone(
-            re.search(r"register_buffer(?!.*cuda.*$)", launch_code, re.MULTILINE)
-        )
-        self.assertIsNotNone(re.search(r"Parameter.*cuda", launch_code))
-        self.assertIsNotNone(
-            re.search(r"Parameter(?!.*cuda.*$)", launch_code, re.MULTILINE)
-        )
-        # search for
-        # <name> = torch.randn(...)
-        # ... = <name>.cuda()
-        self.assertIsNotNone(
-            re.search(r"(\w+) = torch.randn.*\1\.cuda", launch_code, re.DOTALL)
-        )
-        # search for
-        # <name> = torch.randn(...)
-        # no followup call to <name>.cuda()
-        self.assertIsNotNone(
-            re.search(
-                r"(\w+) = torch.randn(?!.*\1\.cuda\(\).*$)", launch_code, re.DOTALL
-            )
-        )
-
-        self.assertIn(backend_name, tb1)
-        self.assertIn(backend_name, tb2)
 
     # Test if we can actually get a minified graph
     def test_if_graph_minified(self):
-        backend_name = self._get_fn_name(RELU_COMPILE_ERROR_BACKEND)
+        backend_name = "relu_compile_error_TESTING_ONLY"
+        run_code = f"""\
+@torch._dynamo.optimize({backend_name!r})
+def inner(x):
+    for _ in range(20):
+        x = torch.sin(x)
+    x = torch.relu(x)
+    for _ in range(20):
+        x = torch.cos(x)
+    return x
 
-        run_code = textwrap.dedent(
-            f"""\
-            @torch._dynamo.optimize("{backend_name}")
-            def inner(x):
-                for _ in range(20):
-                    x = torch.sin(x)
-                x = torch.relu(x)
-                for _ in range(20):
-                    x = torch.cos(x)
-                return x
+inner(torch.randn(20, 20))
+"""
 
-            inner(torch.randn(20, 20))
-        """
-        )
+        res = self._run_full_test(run_code, "dynamo", "ReluCompileError", isolate=False)
 
-        (test_proc, _, repro_proc), (launch_code, repro_code) = self._run_full_test(
-            run_code, "dynamo", 2, RELU_COMPILE_ERROR_BACKEND
-        )
-
-        tb1 = test_proc.stderr.decode("utf-8")
-        tb2 = repro_proc.stderr.decode("utf-8")
-
-        self.assertIn(backend_name, tb1)
-        self.assertIn(backend_name, tb2)
-
-        # compare the length of the forward functions
-        match = re.search(r"def forward.*return", launch_code, re.DOTALL)
-        self.assertIsNotNone(match)
-        self.assertGreater(match.group(0).count("\n"), 40)
-
-        match = re.search(r"def forward.*return", repro_code, re.DOTALL)
-        self.assertIsNotNone(match)
-        self.assertLess(match.group(0).count("\n"), 5)
-
-    # Test that dynamo config can be saved and restored, especially
-    # log_level (changing it should affect logger levels).
-    def test_dynamo_config_serialization(self):
-        run_code = textwrap.dedent(
+        self.assertExpectedInline(
+            res.repro_module(),
             """\
-            import torch._dynamo.config
-            torch._dynamo.config.cache_size_limit = 55
-            data = torch._dynamo.config.save_config()
-            torch._dynamo.config.cache_size_limit = 3
-            torch._dynamo.config.repro_after = "dynamo"
-            torch._dynamo.config.load_config(data)
-            assert torch._dynamo.config.cache_size_limit == 55
-            assert torch._dynamo.config.repro_after == "dynamo"
-        """
-        )
-        proc, _ = self._run_test_code(run_code)
-        self.assertEqual(proc.returncode, 0)
+class Repro(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
 
-    # Test that launched minifier processes have the same config as
-    # the original process.
-    def _test_after_dynamo_with_modified_config(
-        self, repro_level, backend_code, error_name
-    ):
-        lines = backend_code.split("\n")
-        for def_idx, line in enumerate(lines):
-            if line.startswith("def"):
-                break
-        else:
-            self.assertTrue(False)
-        lines.insert(
-            def_idx + 1, "    assert torch._dynamo.config.cache_size_limit == 5"
-        )
-        backend_code = "\n".join(lines)
-        run_code = textwrap.dedent(
-            f"""\
-            torch._dynamo.config.cache_size_limit = 5
-            @torch._dynamo.optimize("{self._get_fn_name(backend_code)}")
-            def inner(x):
-                for _ in range(10):
-                    x = torch.sin(x)
-                x = torch.relu(x)
-                for _ in range(10):
-                    x = torch.cos(x)
-                return x
-
-            inner(torch.randn(20, 20).to("cpu"))
-        """
-        )
-
-        (test_proc, _, repro_proc), _ = self._run_full_test(
-            run_code, "dynamo", repro_level, backend_code
-        )
-
-        self.assertIn(error_name, test_proc.stderr.decode("utf-8"))
-        self.assertIn(error_name, repro_proc.stderr.decode("utf-8"))
-
-    def test_after_dynamo_with_modified_config_cpu_compile_error(self):
-        self._test_after_dynamo_with_modified_config(
-            2, RELU_COMPILE_ERROR_BACKEND, "DynamoCompileError"
-        )
-
-    def test_after_dynamo_with_modified_config_cpu_accuracy_error(self):
-        self._test_after_dynamo_with_modified_config(
-            4, RELU_ACCURACY_ERROR_BACKEND, "AccuracyError"
+    def forward(self, sin_19):
+        relu = torch.relu(sin_19);  sin_19 = None
+        return (relu,)""",
         )
 
 

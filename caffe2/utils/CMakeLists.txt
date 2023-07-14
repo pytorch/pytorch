@@ -30,7 +30,6 @@ list(APPEND Caffe2_CPU_SRCS
   utils/math/utils.cc
   utils/math_cpu.cc
   utils/murmur_hash3.cc
-  utils/proto_convert.cc
   utils/proto_utils.cc
   utils/proto_wrap.cc
   utils/threadpool/ThreadPool.cc
@@ -71,10 +70,15 @@ set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS}
         utils/fatal_signal_asan_no_sig_test.cc
         utils/simple_queue_test.cc
         utils/proto_utils_test.cc
-        utils/cpuid_test.cc
         utils/smart_tensor_printer_test.cc
         utils/cast_test.cc
         )
+
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x")
+  set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS}
+          utils/cpuid_test.cc
+          )
+endif()
 
 set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS}
         utils/math_gpu_test.cc

@@ -75,8 +75,8 @@ bool almostEqualTensor(const at::Tensor& a, const at::Tensor& b, float t) {
     return false;
   }
   for (int i = 0; i < a.numel(); ++i) {
-    float x1 = a.data_ptr<float>()[i];
-    float x2 = b.data_ptr<float>()[i];
+    float x1 = a.const_data_ptr<float>()[i];
+    float x2 = b.const_data_ptr<float>()[i];
     if (std::abs(x1 - x2) > t) {
       return false;
     }

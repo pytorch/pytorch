@@ -423,7 +423,9 @@ Tensor conv_depthwise3d_cuda(
   Tensor weight_ = weight.contiguous();
   Tensor bias_ = bias.defined() ? bias.contiguous() : bias;
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
       input.scalar_type(),
       "conv_depthwise3d",
       [&]{
@@ -433,7 +435,7 @@ Tensor conv_depthwise3d_cuda(
         int64_t smem = 0;
 
         const scalar_t* bias_ptr =
-            bias_.defined() ? bias_.data_ptr<scalar_t>() : NULL;
+            bias_.defined() ? bias_.const_data_ptr<scalar_t>() : NULL;
 
         // Range check to avoid overflow in CUDA kernels.
         TORCH_CHECK(input_.numel() <= std::numeric_limits<int32_t>::max(),
@@ -551,7 +553,9 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
 
   if (output_mask[0]) {
     const Tensor weight_ = weight.contiguous();
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kHalf,
+        kBFloat16,
         grad_output.scalar_type(),
         "conv_depthwise3d",
         [&] {
@@ -586,7 +590,9 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
 
   if (output_mask[1]) {
     const Tensor input_ = input.contiguous();
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kHalf,
+        kBFloat16,
         grad_output.scalar_type(),
         "conv_depthwise3d",
         [&] {

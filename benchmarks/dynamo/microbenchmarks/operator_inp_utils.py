@@ -296,7 +296,7 @@ class OperatorInputsLoader:
             try:
                 op = eval(key)
             except AttributeError as ae:
-                log.warning(f"Evaluating an op name into an OpOverload: {ae}")
+                log.warning("Evaluating an op name into an OpOverload: %s", ae)
                 continue
             yield op
 
@@ -306,7 +306,7 @@ class OperatorInputsLoader:
         ), f"Could not find {op}, must provide overload"
 
         count = 0
-        for _, counter in self.operator_db[str(op)].items():
+        for counter in self.operator_db[str(op)].values():
             count += counter
         return count
 

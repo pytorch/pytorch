@@ -11,7 +11,7 @@ on real world models for both training and inference with a single line of code.
 .. note::
     The :func:`~torch.compile` API is experimental and subject to change.
 
-The simplest possible interesting program is the below which we go over in a lot more detail in `getting started <https://pytorch.org/docs/master/compile/get-started.html>`__
+The simplest possible interesting program is the below which we go over in a lot more detail in `getting started <https://pytorch.org/docs/main/compile/get-started.html>`__
 showing how to use :func:`~torch.compile` to speed up inference on a variety of real world models from both TIMM and HuggingFace which we
 co-announced `here <https://pytorch.org/blog/Accelerating-Hugging-Face-and-TIMM-models/>`__
 
@@ -41,23 +41,18 @@ Optimizations can be passed in :func:`~torch.compile` with either a backend mode
 The default backend is `inductor` which will likely be the most reliable and performant option for most users and library maintainers,
 other backends are there for power users who don't mind more experimental community support.
 
+There is some nuance involved in benchmarking ``torch.compile`` so we've provided a utility to make this simpler with :func:`~torch.utils.benchmark.utils.compile.bench_all`
+
 You can get the full list of community backends by running :func:`~torch._dynamo.list_backends`
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
+Troubleshooting
+---------------
 
-    compile
-
-Troubleshooting and Gotchas
----------------------------
-
-IF you experience issues with models failing to compile, running of out of memory, recompiling too often, not giving accurate results,
-odds are you will find the right tool to solve your problem in our guides.
+If you experience issues with models failing to compile, running out of memory, recompiling too often, not giving accurate results, you might find the right tool to solve your problem in one of our guides.
 
 .. WARNING::
-    A few features are still very much in development and not likely to work for most users. Please do not use these features
-    in production code and if you're a library maintainer please do not expose these options to your users
+    A few features are still in development and not likely to work for most users. Please do not use these features
+    in production code and if you're a library maintainer please do not expose these options to your users.
     Dynamic shapes ``dynamic=true`` and max autotune ``mode="max-autotune"`` which can be passed in to :func:`~torch.compile`.
     Distributed training has some quirks which you can follow in the troubleshooting guide below. Model export is not ready yet.
 
@@ -70,11 +65,13 @@ odds are you will find the right tool to solve your problem in our guides.
 Learn more
 ----------
 
-If you can't wait to get started and want to learn more about the internals of the PyTorch 2.0 stack then
-please check out the references below.
+To learn more about the internals of the PyTorch 2.0 stack, check out the
+following references:
 
 .. toctree::
    :maxdepth: 1
 
    get-started
    technical-overview
+   nn-module
+   transformations

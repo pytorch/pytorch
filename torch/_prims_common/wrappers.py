@@ -10,7 +10,7 @@ from torch._prims_common import (
 import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-from typing import Callable, Sequence, Tuple, NamedTuple, overload
+from typing import Callable, Sequence, Tuple, NamedTuple, Optional, overload
 import inspect
 from functools import wraps
 import warnings
@@ -97,7 +97,7 @@ class elementwise_type_promotion_wrapper:
         self,
         *,
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
-        type_promoting_args: Sequence[str] = None,
+        type_promoting_args: Optional[Sequence[str]] = None,
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind
@@ -139,22 +139,29 @@ class elementwise_type_promotion_wrapper:
         return _fn
 
 
-# TODO: handle tuples of tensors
-def _maybe_resize_out(out: TensorLikeType, shape: ShapeType):
+# Returns True if resize is necessary
+def _resize_output_check(out: TensorLikeType, shape: ShapeType):
     # If the shapes are correct there's nothing to do
     if utils.same_shape(out.shape, shape):
-        return out
-    else:
-        if out.numel() != 0:
-            msg = (
-                f"An output with one or more elements was resized since it had shape {str(out.shape)} "
-                "which does not match the required output shape {str(shape)}. "
-                "This behavior is deprecated, and in a future PyTorch release outputs will not "
-                "be resized unless they have zero elements. "
-                "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0)."
-            )
-            warnings.warn(msg)
+        return False
+    if out.numel() != 0:
+        msg = (
+            f"An output with one or more elements was resized since it had shape {str(out.shape)} "
+            "which does not match the required output shape {str(shape)}. "
+            "This behavior is deprecated, and in a future PyTorch release outputs will not "
+            "be resized unless they have zero elements. "
+            "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0)."
+        )
+        warnings.warn(msg)
+    return True
+
+
+# TODO: handle tuples of tensors
+def _maybe_resize_out(out: TensorLikeType, shape: ShapeType):
+    if _resize_output_check(out, shape):
         return out.resize_(shape)
+    else:
+        return out
 
 
 def _safe_copy_out(
@@ -169,13 +176,13 @@ def _safe_copy_out(
 
     # Checks safe cast
     if exact_dtype:
-        utils.check(
+        torch._check(
             copy_from.dtype == copy_to.dtype,
             lambda: f"Expected out tensor to have dtype {copy_from.dtype} "
             f"but got {copy_to.dtype} instead",
         )
     else:
-        utils.check(
+        torch._check(
             utils.can_safe_cast_to(cast_from=copy_from.dtype, cast_to=copy_to.dtype),
             lambda: f"Attempting to cast from {copy_from.dtype} to out tensor with dtype {copy_to.dtype}, "
             "but this can't be cast because it is not safe!",
@@ -248,10 +255,9 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
-                    utils.check(
+                    torch._check_type(
                         len(out) == len(result),
                         lambda: f"expected tuple of {len(result)} elements but got {len(out)}",
-                        TypeError,
                     )
                     for r, o in zip(result, out):
                         # These two operations are done in-place
@@ -284,12 +290,9 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
 
 def backwards_not_supported(prim):
     def redispatch_prim(args, kwargs):
-        g = torch._C._AutoDispatchBelowAutograd()
-        try:
+        with torch._C._AutoDispatchBelowAutograd():
             old = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
             return prim(*args, **kwargs)
-        finally:
-            del g
 
     class BackwardsNotSupported(torch.autograd.Function):
         @staticmethod

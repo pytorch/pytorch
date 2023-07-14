@@ -351,8 +351,11 @@ class BatchNorm2d(_BatchNorm):
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
-    to 1 and the elements of :math:`\beta` are set to 0. The standard-deviation is calculated
-    via the biased estimator, equivalent to `torch.var(input, unbiased=False)`.
+    to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
+    standard-deviation is calculated via the biased estimator, equivalent to
+    `torch.var(input, unbiased=False)`. However, the value stored in the moving average of the
+    standard-deviation is calculated via the unbiased  estimator, equivalent to
+    `torch.var(input, unbiased=True)`.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -726,9 +729,10 @@ class SyncBatchNorm(_BatchNorm):
         need_sync = (bn_training and self.training and
                      torch.distributed.is_available() and torch.distributed.is_initialized())
         if need_sync:
-            # currently only GPU input is supported
-            if not input.is_cuda:
-                raise ValueError("SyncBatchNorm expected input tensor to be on GPU")
+            # currently only GPU/PrivateUse1 input is supported
+            if input.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
+                raise ValueError("SyncBatchNorm expected input tensor to be on GPU or "
+                                 f"{torch._C._get_privateuse1_backend_name()}")
 
             process_group = torch.distributed.group.WORLD
             if self.process_group:

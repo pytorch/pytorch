@@ -28,7 +28,8 @@ from torchgen.gen import get_grouped_native_functions, parse_native_yaml
 
 from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import concatMap, FileManager, NamespaceHelper, YamlLoader
+from torchgen.utils import concatMap, FileManager, NamespaceHelper
+from torchgen.yaml_utils import YamlLoader
 from .gen_backend_stubs import (
     error_on_missing_kernels,
     gen_dispatcher_registrations,
@@ -403,8 +404,7 @@ def run_gen_lazy_tensor(
             fs = list(x.functions()) if isinstance(x, NativeFunctionsGroup) else [x]
             for f in fs:
                 if f.func.name in ops_list:
-                    for r in func(f):
-                        yield r
+                    yield from func(f)
 
     selector = SelectiveBuilder.get_nop_selector()
 

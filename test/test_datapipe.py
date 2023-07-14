@@ -5,6 +5,7 @@ import itertools
 import os
 import os.path
 import pickle
+import pydoc
 import random
 import sys
 import tempfile
@@ -17,14 +18,20 @@ from typing import (
     Generic,
     Iterator,
     List,
-    NamedTuple,
     Optional,
     Set,
     Tuple,
     Type,
     TypeVar,
     Union,
+    TYPE_CHECKING
 )
+if not TYPE_CHECKING:
+    # pyre isn't treating this the same as a typing.NamedTuple
+    from typing_extensions import NamedTuple
+else:
+    from typing import NamedTuple
+
 from unittest import skipIf
 
 import numpy as np
@@ -830,6 +837,43 @@ class TestFunctionalIterDataPipe(TestCase):
                         datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                     with self.assertRaises((pickle.PicklingError, AttributeError)):
                         pickle.dumps(datapipe)
+
+    def test_docstring(self):
+        """
+        Ensure functional form of IterDataPipe has the correct docstring from
+        the class form.
+
+        Regression test for https://github.com/pytorch/data/issues/792.
+        """
+        input_dp = dp.iter.IterableWrapper(range(10))
+
+        for dp_funcname in [
+            "batch",
+            "collate",
+            "concat",
+            "demux",
+            "filter",
+            "fork",
+            "map",
+            "mux",
+            "read_from_stream",
+            # "sampler",
+            "shuffle",
+            "unbatch",
+            "zip",
+        ]:
+            if sys.version_info >= (3, 9):
+                docstring = pydoc.render_doc(
+                    thing=getattr(input_dp, dp_funcname), forceload=True
+                )
+            elif sys.version_info < (3, 9):
+                # pydoc works differently on Python 3.8, see
+                # https://docs.python.org/3/whatsnew/3.9.html#pydoc
+                docstring = getattr(input_dp, dp_funcname).__doc__
+
+            assert f"(functional name: ``{dp_funcname}``)" in docstring
+            assert "Args:" in docstring
+            assert "Example:" in docstring or "Examples:" in docstring
 
     def test_iterable_wrapper_datapipe(self):
 
@@ -1894,6 +1938,34 @@ class TestFunctionalMapDataPipe(TestCase):
                     with self.assertRaises((pickle.PicklingError, AttributeError)):
                         pickle.dumps(datapipe)
 
+    def test_docstring(self):
+        """
+        Ensure functional form of MapDataPipe has the correct docstring from
+        the class form.
+
+        Regression test for https://github.com/pytorch/data/issues/792.
+        """
+        input_dp = dp.map.SequenceWrapper(range(10))
+
+        for dp_funcname in [
+            "batch",
+            "concat",
+            "map",
+            "shuffle",
+            "zip",
+        ]:
+            if sys.version_info >= (3, 9):
+                docstring = pydoc.render_doc(
+                    thing=getattr(input_dp, dp_funcname), forceload=True
+                )
+            elif sys.version_info < (3, 9):
+                # pydoc works differently on Python 3.8, see
+                # https://docs.python.org/3/whatsnew/3.9.html#pydoc
+                docstring = getattr(input_dp, dp_funcname).__doc__
+            assert f"(functional name: ``{dp_funcname}``)" in docstring
+            assert "Args:" in docstring
+            assert "Example:" in docstring or "Examples:" in docstring
+
     def test_sequence_wrapper_datapipe(self):
         seq = list(range(10))
         input_dp = dp.map.SequenceWrapper(seq)
@@ -2185,7 +2257,7 @@ class TestTyping(TestCase):
             self.assertFalse(issubinstance(d, t[int]))  # type: ignore[index]
 
         # dict
-        d = dict({'1': 1, '2': 2.})
+        d = {'1': 1, '2': 2.}
         self.assertTrue(issubinstance(d, Dict))
         self.assertTrue(issubinstance(d, Dict[str, T_co]))
         self.assertFalse(issubinstance(d, Dict[str, int]))
@@ -2696,6 +2768,23 @@ class TestCircularSerialization(TestCase):
         })}
         self.assertEqual(res2, exp_res_2)
 
+
+class CustomShardingIterDataPipe(IterDataPipe):
+    def __init__(self, dp):
+        self.dp = dp
+        self.num_of_instances = 1
+        self.instance_id = 0
+
+    def apply_sharding(self, num_of_instances, instance_id):
+        self.num_of_instances = num_of_instances
+        self.instance_id = instance_id
+
+    def __iter__(self):
+        for i, d in enumerate(self.dp):
+            if i % self.num_of_instances == self.instance_id:
+                yield d
+
+
 class TestSharding(TestCase):
 
     def _get_pipeline(self):
@@ -2802,6 +2891,12 @@ class TestSharding(TestCase):
         with self.assertRaises(Exception):
             dp.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DEFAULT)
 
+    def test_legacy_custom_sharding(self):
+        dp = self._get_pipeline()
+        sharded_dp = CustomShardingIterDataPipe(dp)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, 1)
+        items = list(sharded_dp)
+        self.assertEqual([1, 20], items)
 
     def test_sharding_length(self):
         numbers_dp = dp.iter.IterableWrapper(range(13))
@@ -2829,6 +2924,19 @@ class TestSharding(TestCase):
         expected = list(dp0)
 
         dp0 = self._get_pipeline().sharding_filter()
+        dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
+        items = []
+        for i in dl:
+            items.append(i)
+
+        self.assertEqual(sorted(expected), sorted(items))
+
+    def test_legacy_custom_sharding_with_old_dataloader(self):
+        dp0 = self._get_pipeline()
+        expected = list(dp0)
+
+        dp0 = self._get_pipeline()
+        dp0 = CustomShardingIterDataPipe(dp0)
         dl = DataLoader(dp0, batch_size=1, shuffle=False, num_workers=2)
         items = []
         for i in dl:

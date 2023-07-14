@@ -30,6 +30,9 @@ from torch._C._profiler import (
 from torch._utils import _element_size
 from torch.profiler import _utils
 
+from typing_extensions import Literal
+
+KeyAndID = Tuple["Key", int]
 TensorAndID = Tuple["TensorKey", int]
 
 log = logging.getLogger(__name__)
@@ -63,6 +66,11 @@ class Action(enum.Enum):
     DESTROY = enum.auto()
 
 
+@dataclasses.dataclass(eq=True, unsafe_hash=False, frozen=True)
+class Key:
+    device: torch.device
+
+
 @dataclasses.dataclass
 class _Storage:
     """Bundle storage pointer and id.
@@ -85,7 +93,7 @@ class _Storage:
 
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, frozen=True)
-class TensorKey:
+class TensorKey(Key):
     """Hashable identifier for a storage which has been asigned an ID.
 
     A detailed description of Tensor IDs and why they are needed is given in
@@ -97,7 +105,6 @@ class TensorKey:
 
     id: int
     storage: _Storage
-    device: torch.device
 
     def __repr__(self) -> str:
         return f"id={self.id}: {repr(self.storage):<24} ({self.device})"
@@ -117,7 +124,7 @@ class TensorKey:
             and storage_ptr is not None
             and allocation_id is not None
         ):
-            return TensorKey(tensor_id, _Storage(storage_ptr, allocation_id), device)
+            return TensorKey(device, tensor_id, _Storage(storage_ptr, allocation_id))
         return None
 
     @classmethod
@@ -361,7 +368,7 @@ class SizeMap:
                     # the core PyTorch codebase.
                     if prior_size != new_size:
                         delta = f"{prior_size} vs. {new_size}"
-                        log.warning(f"Mismatch between allocation and free: {delta}")
+                        log.warning("Mismatch between allocation and free: %s", delta)
 
         self._values.update(allocations)
 
@@ -381,8 +388,7 @@ class SizeMap:
             if isinstance(i, _TensorMetadata):
                 yield i
             elif isinstance(i, list):
-                for t in i:
-                    yield t
+                yield from i
 
     def __getitem__(self, key: TensorKey):
         return self._values[key]
@@ -634,7 +640,9 @@ class CategoryDict:
     ) -> None:
         self._values[key.id].by_version.setdefault((key, version), category)
 
-    def get(self, key: TensorKey, version: int) -> Optional[Category]:
+    def get(self, key: Key, version: int) -> Optional[Category]:
+        if isinstance(key, Key) and not isinstance(key, TensorKey):
+            return None
         element = self._values[key.id]
         return (
             element.by_id
@@ -659,15 +667,34 @@ class MemoryProfile:
         self._set_autograd_detail()
 
     @property
-    def timeline(self) -> Tuple[Tuple[int, Action, TensorAndID, int], ...]:
+    def timeline(self) -> Tuple[Tuple[int, Action, KeyAndID, int], ...]:
+        output: List[Tuple[int, Action, KeyAndID, int]] = []
         allocation_times: Dict[Tuple[TensorKey, bool], int] = {}
+        live_unknown: Dict[Tuple[int, torch.device], Literal[True]] = {}
         for event in self._op_tree.dfs():
             if event.typed[0] == _EventType.Allocation:
                 alloc_fields = event.typed[1]
-                key = TensorKey.from_allocation(alloc_fields)
-                if key is not None:
-                    is_allocation = alloc_fields.alloc_size > 0
-                    allocation_times[(key, is_allocation)] = event.start_time_ns
+                alloc_size = alloc_fields.alloc_size
+                is_allocation = alloc_size > 0
+                t = event.start_time_ns
+
+                tkey = TensorKey.from_allocation(alloc_fields)
+                if tkey is not None:
+                    allocation_times[(tkey, is_allocation)] = t
+
+                else:
+                    key = Key(alloc_fields.device)
+                    ptr_and_device = (alloc_fields.ptr, key.device)
+                    if is_allocation:
+                        if ptr_and_device in live_unknown:
+                            output.append((t, Action.INCREMENT_VERSION, (key, 0), alloc_size))
+                        else:
+                            live_unknown[ptr_and_device] = True
+                            output.append((t, Action.CREATE, (key, 0), alloc_size))
+                    else:
+                        output.append((t, Action.DESTROY, (key, 0), -alloc_size))
+                        if not live_unknown.pop(ptr_and_device, False):
+                            output.append((-1, Action.PREEXISTING, (key, 0), -alloc_size))
 
         snapshot = self._category_snapshot()
         last_version = dict(sorted(snapshot.keys()))
@@ -694,11 +721,13 @@ class MemoryProfile:
                     t = allocation_times[(key, False)]
                     events.append((t, Action.DESTROY, (key, last_version[key])))
 
-        events.sort(key=lambda x: (x[0], x[1].value))
-        return tuple(
+        output.extend(
             (time, action, (key, version), self._size_map[key])
             for time, action, (key, version) in events
         )
+
+        output.sort(key=lambda x: (x[0], x[1].value))
+        return tuple(output)
 
     def _is_gradient(self, *args, **kwargs) -> bool:
         return self._categories.get(*args, **kwargs) == Category.GRADIENT
@@ -1016,3 +1045,57 @@ class MemoryProfileTimeline:
         import json
         with open(path, 'w') as f:
             json.dump([times, sizes], f)
+
+    def export_memory_timeline_html(self, path, device, figsize=(20, 12), title=None) -> None:
+        """Exports the memory timeline as an HTML file which contains
+        the memory timeline plot embedded as a PNG file."""
+        # Check if user has matplotlib installed, return gracefully if not.
+        import importlib.util
+        matplotlib_spec = importlib.util.find_spec("matplotlib")
+        if matplotlib_spec is None:
+            print("export_memory_timeline_html failed because matplotlib was not found.")
+            return
+
+        import matplotlib.pyplot as plt
+        import numpy as np
+        from base64 import b64encode
+        from tempfile import NamedTemporaryFile
+        from os import remove
+
+        mt = self._coalesce_timeline(device)
+        times, sizes = np.array(mt[0]), np.array(mt[1])
+        stacked = np.cumsum(sizes, axis=1) / 1024**3
+
+        # Plot memory timeline as stacked data
+        fig = plt.figure(figsize=figsize, dpi=80)
+        axes = fig.gca()
+        for category, color in _CATEGORY_TO_COLORS.items():
+            i = _CATEGORY_TO_INDEX[category]
+            axes.fill_between(
+                times / 1e3, stacked[:, i], stacked[:, i + 1], color=color, alpha=0.7
+            )
+        fig.legend(["Unknown" if i is None else i.name for i in _CATEGORY_TO_COLORS])
+        axes.set_xlabel("Time (us)")
+        axes.set_ylabel("Memory (GB)")
+        title = "\n\n".join(
+            ([title] if title else []) + [f"Max: {stacked[:, -1].max():.2f} GB"]
+        )
+        axes.set_title(title)
+
+        # Embed the memory timeline image into the HTML file
+        tmpfile = NamedTemporaryFile('wb', suffix='.png', delete=False)
+        tmpfile.close()
+        fig.savefig(tmpfile.name, format='png')
+
+        with open(tmpfile.name, 'rb') as tmp:
+            encoded = b64encode(tmp.read()).decode('utf-8')
+            html = """<html>
+<head><meta charset="utf-8" /><title>GPU Memory Timeline HTML</title></head>
+<body>
+  <img src=\'data:image/png;base64,{}\'>
+</body>
+</html>""".format(encoded)
+
+            with open(path, 'w') as f:
+                f.write(html)
+        remove(tmpfile.name)

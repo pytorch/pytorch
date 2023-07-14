@@ -5,7 +5,7 @@ namespace caffe2 {
 
 const char* githubLinks = R"DOC(
   Github Links:
-  - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/counter_ops.cc
+  - https://github.com/pytorch/pytorch/blob/main/caffe2/operators/counter_ops.cc
 
 )DOC";
 

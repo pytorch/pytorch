@@ -1083,7 +1083,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           descs.hy_desc.desc(), hy.data_ptr(),
           descs.cy_desc.desc(), cy.defined() ? cy.data_ptr() : nullptr,
           workspace.data_ptr(), workspace.size(0),
-          reserve.data_ptr(), reserve.size(0)
+          reserve.mutable_data_ptr(), reserve.size(0)
           ));
   } else { // inference
     reserve = at::empty({0}, input.options().dtype(kByte));

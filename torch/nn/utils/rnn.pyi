@@ -59,7 +59,7 @@ class PackedSequence(PackedSequence_):
     ) -> T: ...
     @overload
     def to(
-        self,
+        self: T,
         other: Tensor,
         non_blocking: bool = False,
         copy: bool = False,

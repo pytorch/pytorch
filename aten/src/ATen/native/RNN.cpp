@@ -9,6 +9,8 @@
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <c10/core/GradMode.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -23,7 +25,9 @@
 #include <ATen/ops/_thnn_differentiable_lstm_cell_backward_native.h>
 #include <ATen/ops/_thnn_fused_gru_cell.h>
 #include <ATen/ops/_thnn_fused_lstm_cell.h>
+#include <ATen/ops/_thnn_fused_lstm_cell_backward.h>
 #include <ATen/ops/_thnn_fused_lstm_cell_backward_impl.h>
+#include <ATen/ops/_thnn_fused_lstm_cell_backward_native.h>
 #include <ATen/ops/_use_cudnn_rnn_flatten_weight_native.h>
 #include <ATen/ops/cat.h>
 #include <ATen/ops/cudnn_is_acceptable.h>
@@ -70,12 +74,23 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
     return is_miopen_acceptable;
 }
 
-bool use_mkldnn(const Tensor& input) {
+bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
+  auto is_cpu_backend = [&](const TensorList tensors) {
+    bool backend_cpu = true;
+    for (const auto& t : tensors) {
+      if (!(t.options().backend() == at::Backend::CPU)) {
+        backend_cpu = false;
+        break;
+      }
+    }
+    return backend_cpu;
+  };
   return input.options().backend() == at::Backend::CPU &&
+      is_cpu_backend(params) && is_cpu_backend(hx) &&
       (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16);
 #endif
   return false;
@@ -1311,7 +1326,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
         std::move(packed_output.data), std::move(std::get<1>(result)));     \
   }
 #define ONE_HIDDEN_QRNN(NAME, CELL)                                         \
-  std::tuple<Tensor, Tensor> NAME##_input(                                  \
+  static std::tuple<Tensor, Tensor> NAME##_input(                           \
       const Tensor& _input,                                                 \
       const Tensor& hx,                                                     \
       c10::List<c10::intrusive_ptr<CellParamsBase>> _params,                \
@@ -1341,7 +1356,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
     return results;                                                         \
   }                                                                         \
                                                                             \
-  std::tuple<Tensor, Tensor> NAME##_data(                                   \
+  static std::tuple<Tensor, Tensor> NAME##_data(                            \
       const Tensor& data,                                                   \
       const Tensor& batch_sizes,                                            \
       const Tensor& hx,                                                     \
@@ -1375,7 +1390,7 @@ ONE_HIDDEN_QRNN(quantized_gru, GRUCell<QRNNCellParamsWrapper>)
 
 // BC wrappers for quantized_gru
 
-std::tuple<Tensor, Tensor> quantized_gru_input_legacy(
+static std::tuple<Tensor, Tensor> quantized_gru_input_legacy(
     const Tensor& _input,
     const Tensor& hx,
     c10::List<at::Tensor> _params,
@@ -1392,7 +1407,7 @@ std::tuple<Tensor, Tensor> quantized_gru_input_legacy(
       "using the newer definitions in torch.jit.quantized");
 }
 
-std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
+static std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
     const Tensor& data,
     const Tensor& batch_sizes,
     const Tensor& hx,
@@ -1461,7 +1476,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     }
   }
 
-  if (use_mkldnn(_input)) {
+  if (use_mkldnn(_input, _params, hx)) {
     if (!has_projections) {
       if (hx[0].unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
         TORCH_WARN_ONCE(
@@ -1686,7 +1701,7 @@ Tensor rnn_relu_cell(
 // an int8 or float16 quantized weight. This is advantageous in small-batch-size
 // scenarios where runtime is dominated by memory fetches of the weight matrix.
 
-std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
+static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
     const Tensor& _input,
     c10::List<at::Tensor> hx_,
     c10::List<c10::intrusive_ptr<CellParamsBase>> _params_,
@@ -1740,7 +1755,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
 
 // BC wrappers for quantized_lstm
 
-std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
+static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
     const Tensor& _input,
     c10::List<at::Tensor> hx_,
     c10::List<at::Tensor> _params_,
@@ -1759,7 +1774,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input_legacy(
       "using the newer definitions in torch.jit.quantized");
 }
 
-std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
+static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
     const Tensor& data,
     const Tensor& batch_sizes,
     c10::List<at::Tensor> hx_,
@@ -1806,7 +1821,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
                          std::move(std::get<2>(results)));
 }
 
-std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
+static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
     const Tensor& data,
     const Tensor& batch_sizes,
     c10::List<at::Tensor> hx_,
@@ -1881,7 +1896,7 @@ return_type name( \
 // Quantized LSTM cell
 using quantized_lstm_cell_type = LSTMCell<QuantizedCellParams>;
 using quantized_lstm_return_type = std::tuple<Tensor, Tensor>;
-std::tuple<Tensor, Tensor> prepare_quantized_lstm_hx(TensorList hx) {
+static std::tuple<Tensor, Tensor> prepare_quantized_lstm_hx(TensorList hx) {
   return std::make_tuple(hx[0], hx[1]);
 }
 
@@ -1890,11 +1905,11 @@ using quantized_lstm_cell_dynamic_type = LSTMCell<QuantizedCellParamsDynamic>;
 
 DEFINE_QUANTIZED_RNN_CELL(quantized_lstm_cell, TensorList, quantized_lstm_cell_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
 
-DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_lstm_cell_dynamic, TensorList, quantized_lstm_cell_dynamic_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
+static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_lstm_cell_dynamic, TensorList, quantized_lstm_cell_dynamic_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
 
 // Helpers for simpler cells
 using simple_hx_type = const Tensor&;
-simple_hx_type prepare_quantized_hx(simple_hx_type hx) {
+static simple_hx_type prepare_quantized_hx(simple_hx_type hx) {
   return hx;
 }
 
@@ -1904,19 +1919,19 @@ using quantized_gru_cell_dynamic_type = GRUCell<QuantizedCellParamsDynamic>;
 
 DEFINE_QUANTIZED_RNN_CELL(quantized_gru_cell, simple_hx_type, quantized_gru_cell_type, Tensor, prepare_quantized_hx);
 
-DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_gru_cell_dynamic, simple_hx_type, quantized_gru_cell_dynamic_type, Tensor, prepare_quantized_hx);
+static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_gru_cell_dynamic, simple_hx_type, quantized_gru_cell_dynamic_type, Tensor, prepare_quantized_hx);
 
 // Quantized RNN w/ ReLU cell
 using quantized_rnn_relu_cell_type = SimpleCell<relu_f, QuantizedCellParams>;
 DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_relu_cell, simple_hx_type, quantized_rnn_relu_cell_type, Tensor, prepare_quantized_hx);
 using quantized_rnn_relu_cell_dynamic_type = SimpleCell<relu_f, QuantizedCellParamsDynamic>;
-DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_relu_cell_dynamic, simple_hx_type, quantized_rnn_relu_cell_dynamic_type, Tensor, prepare_quantized_hx);
+static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_relu_cell_dynamic, simple_hx_type, quantized_rnn_relu_cell_dynamic_type, Tensor, prepare_quantized_hx);
 
 // Quantized RNN w/ tanh cell
 using quantized_rnn_tanh_cell_type = SimpleCell<tanh_f, QuantizedCellParams>;
 DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_tanh_cell, simple_hx_type, quantized_rnn_tanh_cell_type, Tensor, prepare_quantized_hx);
 using quantized_rnn_tanh_cell_dynamic_type = SimpleCell<tanh_f, QuantizedCellParamsDynamic>;
-DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_type, quantized_rnn_tanh_cell_dynamic_type, Tensor, prepare_quantized_hx);
+static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_type, quantized_rnn_tanh_cell_dynamic_type, Tensor, prepare_quantized_hx);
 
 namespace {
 

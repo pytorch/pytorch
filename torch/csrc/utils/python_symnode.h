@@ -11,6 +11,7 @@ namespace torch {
 
 TORCH_PYTHON_API py::handle get_symint_class();
 TORCH_PYTHON_API py::handle get_symfloat_class();
+TORCH_PYTHON_API py::handle get_symbool_class();
 
 // NB: These functions must not be called too early, otherwise torch not setup.
 // Alternate design is to have torch "register" the object to us
@@ -19,6 +20,9 @@ inline bool is_symint(py::handle obj) {
 }
 inline bool is_symfloat(py::handle obj) {
   return py::isinstance(obj, get_symfloat_class());
+}
+inline bool is_symbool(py::handle obj) {
+  return py::isinstance(obj, get_symbool_class());
 }
 
 namespace impl {
@@ -114,6 +118,16 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   int64_t int_() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("int_")().cast<int64_t>();
+  }
+
+  c10::optional<int64_t> maybe_as_int() override {
+    py::gil_scoped_acquire acquire;
+    const auto& r = getPyObj().attr("maybe_as_int")();
+    if (r.is_none()) {
+      return c10::nullopt;
+    } else {
+      return r.cast<int64_t>();
+    }
   }
 
   std::string str() override {

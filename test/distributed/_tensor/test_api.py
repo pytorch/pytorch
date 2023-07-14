@@ -46,7 +46,6 @@ class DTensorAPITest(DTensorTestBase):
         shard_spec = [Shard(0)]
 
         for requires_grad in [True, False]:
-
             tensor_to_shard = torch.randn(
                 3 * self.world_size, 3, requires_grad=requires_grad
             )
@@ -95,8 +94,8 @@ class DTensorAPITest(DTensorTestBase):
         for input_size, shard_dim in input_sizes_and_shard_dims:
             shard_spec = [Shard(shard_dim)]
             tensor_to_shard = torch.randn(input_size)
-            splitted_tensor_list = tensor_to_shard.tensor_split(
-                self.world_size, dim=shard_dim
+            splitted_tensor_list = list(
+                torch.chunk(tensor_to_shard, self.world_size, dim=shard_dim)
             )
             dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
             self.assertEqual(dist_tensor.size(), torch.Size(input_size))
@@ -210,6 +209,31 @@ class DTensorAPITest(DTensorTestBase):
         param_grad = list(replica_model.parameters())[0].grad
         self.assertTrue(isinstance(param_grad, DTensor))
         self.assertTrue(isinstance(param_grad.placements[0], Replicate))
+
+    @with_comms
+    def test_distribute_module_meta(self):
+        # If  the model is too big, the user may first the create entire model on the meta device and then initialize
+        # it on the device in the partition function.
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        # fully shard all parameters on dim 0
+        module_to_shard = MyModel(5 * self.world_size, 20, device="meta")
+
+        shard_spec = [Shard(0)]
+
+        def shard_fn(name, module, device_mesh):
+            for param_name, param in module._parameters.items():
+                dist_param = distribute_tensor(param, device_mesh, shard_spec)
+                dist_param = torch.empty_like(
+                    dist_param, device=device_mesh.device_type
+                )
+                module.register_parameter(param_name, torch.nn.Parameter(dist_param))
+
+        sharded_module = distribute_module(module_to_shard, device_mesh, shard_fn)
+        for param in sharded_module.parameters():
+            self.assertIsInstance(param, DTensor)
+            self.assertFalse(param.is_meta)
+            self.assertTrue(param.device.type == device_mesh.device_type)
 
 
 if __name__ == "__main__":

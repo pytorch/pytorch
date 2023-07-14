@@ -107,3 +107,6 @@ chgrp -R jenkins /var/lib/jenkins/.gradle
 popd
 
 rm -rf /var/lib/jenkins/.gradle/daemon
+
+# Cache vision models used by the test
+source "$(dirname "${BASH_SOURCE[0]}")/cache_vision_models.sh"

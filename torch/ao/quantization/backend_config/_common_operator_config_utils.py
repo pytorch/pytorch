@@ -25,28 +25,28 @@ from ..fuser_method_mappings import (
 
 __all__: List[str] = []
 
-# TODO: rename to be more explict, e.g. qat_conv_relu
+# TODO: rename to be more explicit, e.g. qat_conv_relu
 _ConvMetadata = namedtuple(
     "_ConvMetadata",
     ["root", "transpose", "bn", "reference", "transpose_reference",
      "fused_conv_relu", "fused_conv_bn", "fused_conv_bn_relu",
      "qat", "relu_qat", "bn_qat", "bn_relu_qat",
-     "func"])
+     "func", "func_transpose"])
 _Conv1dMetadata = _ConvMetadata(
     nn.Conv1d, nn.ConvTranspose1d, nn.BatchNorm1d, nnqr.Conv1d, nnqr.ConvTranspose1d,
     nni.ConvReLU1d, nni.ConvBn1d, nni.ConvBnReLU1d,
     nnqat.Conv1d, nniqat.ConvReLU1d, nniqat.ConvBn1d, nniqat.ConvBnReLU1d,
-    F.conv1d)
+    F.conv1d, F.conv_transpose1d)
 _Conv2dMetadata = _ConvMetadata(
     nn.Conv2d, nn.ConvTranspose2d, nn.BatchNorm2d, nnqr.Conv2d, nnqr.ConvTranspose2d,
     nni.ConvReLU2d, nni.ConvBn2d, nni.ConvBnReLU2d,
     nnqat.Conv2d, nniqat.ConvReLU2d, nniqat.ConvBn2d, nniqat.ConvBnReLU2d,
-    F.conv2d)
+    F.conv2d, F.conv_transpose2d)
 _Conv3dMetadata = _ConvMetadata(
     nn.Conv3d, nn.ConvTranspose3d, nn.BatchNorm3d, nnqr.Conv3d, nnqr.ConvTranspose3d,
     nni.ConvReLU3d, nni.ConvBn3d, nni.ConvBnReLU3d,
     nnqat.Conv3d, nniqat.ConvReLU3d, nniqat.ConvBn3d, nniqat.ConvBnReLU3d,
-    F.conv3d)
+    F.conv3d, F.conv_transpose3d)
 
 # Add constraints for fixed qparams ops like sigmoid and tanh to ensure values
 # fall within the proper ranges, e.g. [0, 1] for sigmoid, [-1, 1] for tanh
@@ -366,6 +366,12 @@ def _get_conv_configs(dtype_configs):
                 .set_root_module(convs.transpose)
                 .set_reference_quantized_module(convs.transpose_reference))
 
+        # 4.3 functional conv transpose
+        conv_configs.append(
+            BackendPatternConfig(convs.func_transpose)
+                .set_dtype_configs(dtype_configs)  # noqa: E131
+                ._set_input_type_to_index({"weight": 1, "bias": 2}))
+
     return conv_configs
 
 def _get_cat_config(dtype_configs: List[DTypeConfig]) -> BackendPatternConfig:
@@ -492,6 +498,8 @@ def _get_share_qparams_op_configs(dtype_configs):
         torch.nn.MaxPool1d,
         torch.nn.MaxPool2d,
         torch.nn.MaxPool3d,
+        torch.nn.PixelShuffle,
+        torch.nn.PixelUnshuffle,
         torch.nn.ReLU,
         torch.nn.ReLU6,
         torch.adaptive_avg_pool1d,

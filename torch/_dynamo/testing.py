@@ -3,14 +3,17 @@ import dis
 import functools
 import logging
 import os.path
+import re
+import sys
 import types
 import unittest
 from unittest.mock import patch
 
 import torch
 from torch import fx
+from torch._dynamo.output_graph import OutputGraph
 
-from . import config, eval_frame, optimize_assert, reset
+from . import config, eval_frame, optimize_assert, reset, utils
 from .bytecode_transformation import (
     create_instruction,
     debug_checks,
@@ -53,10 +56,7 @@ def named_buffers_for_optimized_module(mod):
 
 
 def remove_optimized_module_prefix(name):
-    prefix = "_orig_mod."
-    assert name.startswith(prefix)
-    name = name[len(prefix) :]
-    return name
+    return re.sub(r"^_orig_mod[.]", "", name)
 
 
 def collect_results(model, prediction, loss, example_inputs):
@@ -103,8 +103,10 @@ def requires_bwd_pass(out):
     if isinstance(out, torch.Tensor):
         return out.requires_grad
     elif isinstance(out, (list, tuple)):
-        return any([requires_bwd_pass(x) for x in out])
+        return any(requires_bwd_pass(x) for x in out)
     elif out is None:
+        return False
+    elif isinstance(out, int):
         return False
     raise NotImplementedError("Don't know how to reduce", type(out))
 
@@ -145,7 +147,7 @@ def debug_dump(name, code: types.CodeType, extra=""):
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks):
+def debug_insert_nops(frame, cache_size, hooks, _):
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
@@ -157,8 +159,20 @@ def debug_insert_nops(frame, cache_size, hooks):
 
     debug_checks(frame.f_code)
     code = transform_code_object(frame.f_code, insert_nops)
+    graph = OutputGraph(
+        code_options={},
+        compiler_fn=None,
+        root_tx=None,
+        export=False,
+        export_constraints=None,
+        frame_state={"_id": 0},
+        # TODO: shouldn't this be f_locals/f_globals from frame?
+        local_scope=locals(),
+        global_scope=globals(),
+        f_code=frame.f_code,
+    )
 
-    return GuardedCode(code, CheckFunctionManager().check_fn)
+    return GuardedCode(code, CheckFunctionManager(graph).check_fn)
 
 
 class CompileCounter:
@@ -183,6 +197,7 @@ class CompileCounterWithBackend:
         self.frame_count = 0
         self.op_count = 0
         self.backend = backend
+        self.graphs = []
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         from .backends.registry import lookup_backend
@@ -191,11 +206,12 @@ class CompileCounterWithBackend:
         for node in gm.graph.nodes:
             if "call" in node.op:
                 self.op_count += 1
+        self.graphs.append(gm)
         return lookup_backend(self.backend)(gm, example_inputs)
 
 
 def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
-    if config.dynamic_shapes and expected_ops_dynamic is not None:
+    if not config.assume_static_by_default and expected_ops_dynamic is not None:
         expected_ops = expected_ops_dynamic
 
     actual = CompileCounter()
@@ -242,12 +258,33 @@ def format_speedup(speedup, pvalue, is_correct=True, pvalue_threshold=0.1):
     return f"{speedup:.3f}x p={pvalue:.2f}"
 
 
-def requires_static_shapes(fn):
+@contextlib.contextmanager
+def trace_numpy() -> None:
+    config.numpy_ndarray_as_tensor, prev = True, config.numpy_ndarray_as_tensor
+    try:
+        yield
+    finally:
+        config.numpy_ndarray_as_tensor = prev
+
+
+def requires_numpy_pytorch_interop(fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
-        if config.dynamic_shapes:
-            raise unittest.SkipTest("requires static shapes")
-        return fn(*args, **kwargs)
+        if utils.HAS_NUMPY_TORCH_INTEROP and utils.HAS_NUMPY:
+            with trace_numpy():
+                return fn(*args, **kwargs)
+        raise unittest.SkipTest("requires both numpy and numpy_pytorch_interop")
+
+    return _fn
+
+
+def requires_numpy(fn):
+    @functools.wraps(fn)
+    def _fn(*args, **kwargs):
+        if utils.HAS_NUMPY:
+            with trace_numpy():
+                return fn(*args, **kwargs)
+        raise unittest.SkipTest("requires numpy")
 
     return _fn
 
@@ -277,7 +314,7 @@ def _make_fn_with_patches(fn, *patches):
     return _fn
 
 
-def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
+def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=None):
     class DummyTestClass(cls):
         pass
 
@@ -290,8 +327,36 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
             if not callable(fn):
                 continue
             new_name = f"{name}{fn_suffix}"
-            fn = _make_fn_with_patches(fn, *patches)
-            fn.__name__ = new_name
-            setattr(DummyTestClass, new_name, fn)
+            new_fn = _make_fn_with_patches(fn, *patches)
+            new_fn.__name__ = new_name
+            if xfail_prop is not None and hasattr(fn, xfail_prop):
+                new_fn = unittest.expectedFailure(new_fn)
+            setattr(DummyTestClass, new_name, new_fn)
 
     return DummyTestClass
+
+
+# test Python 3.11+ specific features
+def skipIfNotPy311(fn):
+    if sys.version_info >= (3, 11):
+        return fn
+    return unittest.skip(fn)
+
+
+# Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
+# and test/dynamo/test_dynamic_shapes.py
+def expectedFailureDynamic(fn):
+    fn._expected_failure_dynamic = True
+    return fn
+
+
+# Controls tests generated in test/inductor/test_torchinductor_codegen_dynamic_shapes.py
+def expectedFailureCodegenDynamic(fn):
+    fn._expected_failure_codegen_dynamic = True
+    return fn
+
+
+# Controls test generated in test/inductor/test_cpp_wrapper.py
+def expectedFailureDynamicWrapper(fn):
+    fn._expected_failure_dynamic_wrapper = True
+    return fn

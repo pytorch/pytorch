@@ -57,12 +57,12 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
     conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
-    conda_install numpy=1.19.2 ${CONDA_COMMON_DEPS}
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
-    conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS}
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   else
     # Install `typing-extensions` for 3.7
-    conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} typing-extensions
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS} typing-extensions
   fi
 
   # This is only supported in 3.8 upward
@@ -95,6 +95,14 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   else
     # Pinned scikit-learn due to https://github.com/scikit-learn/scikit-learn/issues/14485 (affects gcc 5.5 only)
     pip_install scikit-learn==0.20.3
+  fi
+
+  if [ -n "$DOCS" ]; then
+    apt-get update
+    apt-get -y install expect-dev
+
+    # We are currently building docs with python 3.8 (min support version)
+    pip_install -r /opt/conda/requirements-docs.txt
   fi
 
   popd

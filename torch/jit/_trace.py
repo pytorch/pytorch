@@ -110,9 +110,10 @@ class ONNXTracedModule(torch.nn.Module):
 
             trace_inputs = _unflatten(in_args, in_desc)
 
-            ret_inputs.append(
-                tuple(x.clone(memory_format=torch.preserve_format) for x in args)
-            )
+            if self._return_inputs:
+                ret_inputs.append(
+                    tuple(x.clone(memory_format=torch.preserve_format) for x in args)
+                )
             if self._return_inputs_states:
                 inputs_states.append(_unflatten(in_args, in_desc))
             outs.append(self.inner(*trace_inputs))
@@ -329,7 +330,7 @@ def _check_trace(
             for name, data in inputs.items():
                 copied_dict[name] = _clone_inputs(data)
             check_mod = torch.jit.trace_module(
-                func.__self__ if hasattr(func, "__self__") else func,
+                getattr(func, "__self__", func),
                 copied_dict,
                 check_trace=False,
                 strict=strict,

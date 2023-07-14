@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Optional, Any, Union
+from typing import Optional, Any, Union, Type
 
 import torch
 import torch.nn as nn
@@ -22,6 +22,7 @@ from torch.ao.quantization.fake_quantize import (
 
 from .observer import (
     _PartialWrapper,
+    MinMaxObserver,
     HistogramObserver,
     MovingAverageMinMaxObserver,
     NoopObserver,
@@ -56,6 +57,7 @@ __all__ = [
     "per_channel_dynamic_qconfig",
     "float_qparams_weight_only_qconfig",
     "float_qparams_weight_only_qconfig_4bit",
+    "default_quint8_weight_qconfig",
     "default_qat_qconfig",
     "default_dynamic_qat_qconfig",
     "default_weight_only_qconfig",
@@ -74,6 +76,7 @@ __all__ = [
     "get_default_qat_qconfig_dict",
     "QConfigAny",
     "qconfig_equals",
+
 ]
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
@@ -245,6 +248,10 @@ def get_default_qconfig(backend='x86', version=0):
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_weight_observer)
         elif backend == 'onednn':
+            if not torch.cpu._is_cpu_support_vnni():
+                warnings.warn(
+                    "Default qconfig of oneDNN backend with reduce_range of false may have accuracy issues "
+                    "on CPU without Vector Neural Network Instruction support.")
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_per_channel_weight_observer)
         elif backend == 'x86':
@@ -300,6 +307,8 @@ default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=
 
 default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
+
+default_quint8_weight_qconfig = QConfig(activation=HistogramObserver, weight=MinMaxObserver)
 
 def get_default_qat_qconfig(backend='x86', version=1):
     """
@@ -491,7 +500,7 @@ def _add_module_to_qconfig_obs_ctr(
 
     return QConfig(activation, weight)
 
-_ObserverOrFakeQuantizeConstructor = Union[_PartialWrapper, ObserverBase, FakeQuantizeBase]
+_ObserverOrFakeQuantizeConstructor = Union[_PartialWrapper, Type[ObserverBase], Type[FakeQuantizeBase]]
 
 def _obs_or_fq_ctr_equals(obs_or_fq1: _ObserverOrFakeQuantizeConstructor, obs_or_fq2: _ObserverOrFakeQuantizeConstructor):
     if isinstance(obs_or_fq1, _PartialWrapper) and isinstance(obs_or_fq2, _PartialWrapper):

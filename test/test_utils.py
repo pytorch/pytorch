@@ -26,7 +26,7 @@ from torch.utils._pytree import tree_any, tree_all_only
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch import set_default_device
 from torch.utils._device import set_device
-from torch.utils._traceback import report_compile_source_on_error
+from torch.utils._traceback import report_compile_source_on_error, format_traceback_short
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
@@ -785,19 +785,19 @@ class DummyXPUModule:
         return True
 
     @staticmethod
-    def is_autocast_foo_enabled():
+    def is_autocast_enabled():
         return True
 
     @staticmethod
-    def get_autocast_foo_dtype():
+    def get_autocast_dtype():
         return torch.float16
 
     @staticmethod
-    def set_autocast_foo_enabled(enable):
+    def set_autocast_enabled(enable):
         pass
 
     @staticmethod
-    def set_autocast_foo_dtype(dtype):
+    def set_autocast_dtype(dtype):
         pass
 
     @staticmethod
@@ -846,6 +846,19 @@ class TestExtensionUtils(TestCase):
         with torch.autocast(device_type=custom_backend_name):
             pass
 
+        self.assertEqual(torch._utils._get_device_index('foo:1'), 1)
+        self.assertEqual(torch._utils._get_device_index(torch.device("foo:2")), 2)
+
+class TestRenderUtils(TestCase):
+    def test_basic(self):
+        self.assertExpectedInline(
+            torch._utils.render_call(torch.sum, [torch.randn(100)], {'dim': 0}),
+            '''torch.sum(tensor([...], size=(100,)), dim=0)'''
+        )
+        self.assertExpectedInline(
+            torch._utils.render_call(torch.sum, [torch.randn(100, 100)], {'dim': 0}),
+            '''torch.sum(tensor([...], size=(100, 100)), dim=0)'''
+        )
 
 class TestDeviceUtils(TestCase):
     def test_basic(self):
@@ -925,15 +938,13 @@ class TestCppExtensionUtils(TestCase):
 
 class TestTraceback(TestCase):
     def test_basic(self):
-        # We can't xfail this test as it leaves the traceback in such a bad
-        # state that xfail itself fails.
-        if sys.version_info >= (3, 11):
-            self.skipTest("Fails on 3.11")
-
         source = '''\
 def f(x):
+    def g(x):
+        raise RuntimeError()  # HEYA
+
     x = x * 3
-    raise RuntimeError()  # HEYA
+    return g(x) + 1
 '''
 
         out: Dict[str, Any] = {}
@@ -945,6 +956,12 @@ def f(x):
                 out["f"](1)
         except RuntimeError as e:
             self.assertIn("HEYA", ''.join(traceback.format_tb(e.__traceback__)))
+
+    def test_format_traceback_short(self):
+        try:
+            raise RuntimeError()
+        except RuntimeError as e:
+            self.assertRegex(format_traceback_short(e.__traceback__), r'.*test_utils.py:\d+ in test_format_traceback_short')
 
 
 if __name__ == '__main__':

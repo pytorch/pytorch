@@ -1,16 +1,16 @@
-from typing import Any, Dict, List, Tuple, Callable, Union, Set, OrderedDict
 import dataclasses
 import traceback
+from typing import Any, Callable, Container, Dict, List, Optional, OrderedDict, Tuple, TypeVar, overload
 
 import torch
 import torch.distributed as dist
+from torch import nn
 from torch.nn.parallel._functions import _get_stream
-from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
-    _is_namedtuple,
-)
+from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.nn.utils.rnn import PackedSequence
 
 __all__ = []  # type: ignore[var-annotated]
+
 
 def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str, ...]]:
     """
@@ -39,37 +39,76 @@ def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str,
 
     return tuple(flat_args), tuple(kwarg_keys)
 
+def _cast_forward_inputs(
+    dtype: Optional[torch.dtype],
+    *args: Any,
+    **kwargs: Any,
+) -> Tuple[Any, Any]:
+    """
+    Casts floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
+    This respects the existing ``requires_grad`` on the tensors.
+    """
+    if dtype is None:
+        return args, kwargs
+
+    def cast_fn(x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_floating_point(x) or x.dtype == dtype:
+            return x
+        return x.to(dtype)
+
+    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
 
 def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
     """See _pack_kwargs."""
-    assert len(kwarg_keys) <= len(flat_args), f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
+    assert len(kwarg_keys) <= len(
+        flat_args
+    ), f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
     if len(kwarg_keys) == 0:
         return flat_args, {}
     args = flat_args[: -len(kwarg_keys)]
     kwargs = dict(zip(kwarg_keys, flat_args[-len(kwarg_keys) :]))
     return args, kwargs
 
-def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
+
+S = TypeVar("S", dict, list, tuple)
+T = TypeVar("T", torch.Tensor, PackedSequence)
+
+
+@overload
+def _recursive_to(inputs: S, target_device: torch.device, use_side_stream_for_tensor_copies: bool) -> List[S]:
+    ...
+
+
+@overload
+def _recursive_to(inputs: T, target_device: torch.device, use_side_stream_for_tensor_copies: bool) -> Tuple[T]:
+    ...
+
+
+def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
     r"""
-    Recursively moves input to the target_gpu.
+    Recursively moves input to the target_device.
     """
 
     def to_map(obj):
         if isinstance(obj, (torch.Tensor, PackedSequence)):
             device = obj.data.device if isinstance(obj, PackedSequence) else obj.device
-            if device == torch.device("cuda", target_gpu):
+            if device == target_device:
                 return (obj,)
             if not use_side_stream_for_tensor_copies:
-                return (obj.to(target_gpu),)
+                return (obj.to(target_device),)
             else:
-                # Perform CPU -> GPU copies in a background stream. This code is
+                # If the custom module is not registered to torch, stream is not used for acceleration
+                device_mod = getattr(torch, device.type, None)
+                if device.type == "cpu" or device_mod is None:
+                    return (obj.to(target_device),)
+                # Perform CPU -> target_device copies in a background stream. This code is
                 # motivated from similar logic in torch/nn/parallel/_functions.py
-                stream = _get_stream(target_gpu)
-                with torch.cuda.stream(stream):
-                    output = obj.to(target_gpu)
+                stream = _get_stream(target_device)
+                with device_mod.stream(stream):
+                    output = obj.to(target_device)
                 # synchronize with the copy stream
-                with torch.cuda.device(target_gpu):
-                    current_stream = torch.cuda.current_stream()
+                with torch.cuda.device(target_device.index):
+                    current_stream = device_mod.current_stream()
                     # Sync the current stream with the copy stream
                     current_stream.wait_stream(stream)
                     # Ensure tensor memory is not reused until work on
@@ -77,6 +116,7 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
                     if isinstance(obj, PackedSequence):
                         output.data.record_stream(current_stream)  # type: ignore[arg-type]
                     else:
+                        assert isinstance(output, torch.Tensor)
                         output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
         if _is_namedtuple(obj):
@@ -96,6 +136,7 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
         to_map = None  # type: ignore[assignment]
     return res
 
+
 def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
     """This is used as an alternate to ``assert`` when in the backward context
     to print the error message ``s`` since otherwise, it is swallowed."""
@@ -104,6 +145,7 @@ def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
         traceback.print_stack()
         if raise_assertion_error:
             raise AssertionError(s)
+
 
 def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
     """
@@ -146,16 +188,26 @@ def _free_storage(tensor: torch.Tensor) -> bool:
             tensor._typed_storage()._resize_(0)
         return not already_freed
 
-def _apply_to_tensors(
-    fn: Callable,
-    container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence],
-) -> Any:
+
+Q = TypeVar("Q")
+R = TypeVar("R", dict, list, tuple, set, OrderedDict, PackedSequence, Any)
+
+
+@overload
+def _apply_to_tensors(fn: Callable[[torch.Tensor], Q], container: torch.Tensor) -> Q:
+    ...
+
+
+@overload
+def _apply_to_tensors(fn: Callable[[torch.Tensor], Any], container: R) -> R:
+    ...
+
+
+def _apply_to_tensors(fn, container):
     """Recursively apply to all tensor in different kinds of container types."""
 
-    def apply(
-        x: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]
-    ) -> Any:
-        if torch.is_tensor(x):
+    def apply(x):
+        if isinstance(x, torch.Tensor):
             return fn(x)
         elif hasattr(x, "__dataclass_fields__"):
             dc = dataclasses.replace(x)
@@ -183,63 +235,69 @@ def _apply_to_tensors(
 
     return apply(container)
 
-def _to_kwargs(inputs, kwargs, device_id, use_side_stream_for_tensor_copies):
-    inputs = (
-        _recursive_to(inputs, device_id, use_side_stream_for_tensor_copies)
+
+def _to_kwargs(
+    inputs: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]],
+    target_device: torch.device,
+    use_side_stream_for_tensor_copies: bool,
+) -> Tuple[Tuple[Any, ...], Tuple[Dict[str, Any], ...]]:
+    moved_inputs = (
+        _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies)
         if inputs
         else []
     )
-    kwargs = (
-        _recursive_to(kwargs, device_id, use_side_stream_for_tensor_copies)
+    moved_kwargs = (
+        _recursive_to(kwargs, target_device, use_side_stream_for_tensor_copies)
         if kwargs
         else []
     )
-    if len(inputs) < len(kwargs):
-        inputs.extend([() for _ in range(len(kwargs) - len(inputs))])
-    elif len(kwargs) < len(inputs):
-        kwargs.extend([{} for _ in range(len(inputs) - len(kwargs))])
-    inputs = tuple(inputs)
-    kwargs = tuple(kwargs)
-    return inputs, kwargs
+    if len(moved_inputs) < len(moved_kwargs):
+        moved_inputs.extend([() for _ in range(len(moved_kwargs) - len(inputs))])
+    elif len(moved_kwargs) < len(moved_inputs):
+        moved_kwargs.extend([{} for _ in range(len(moved_inputs) - len(moved_kwargs))])
+    return tuple(moved_inputs), tuple(moved_kwargs)
 
-def _verify_param_shape_across_processes(process_group, tensors, logger=None):
+
+def _verify_param_shape_across_processes(
+    process_group: dist.ProcessGroup, tensors: List[torch.Tensor], logger: Optional[dist.Logger] = None
+):
     return dist._verify_params_across_processes(process_group, tensors, logger)
 
+
 def _sync_module_states(
-    module,
-    process_group,
-    broadcast_bucket_size,
-    src,
-    params_and_buffers_to_ignore,
-):
+    module: nn.Module,
+    process_group: dist.ProcessGroup,
+    broadcast_bucket_size: int,
+    src: int,
+    params_and_buffers_to_ignore: Container[str],
+    broadcast_buffers: bool = True,
+) -> None:
     """
     Syncs ``module``'s parameters and buffers state so that all ranks contain
     the same module state across all ranks. Note that this API assumes that all
     parameter shapes are consistent before running the synchronization. This can
     be checked with ``_verify_param_shape_across_processes``.
     """
-    module_states = []
+    module_states: List[torch.Tensor] = []
     for name, param in module.named_parameters():
         if name not in params_and_buffers_to_ignore:
             module_states.append(param.detach())
 
-    for name, buffer in module.named_buffers():
-        if name not in params_and_buffers_to_ignore:
-            module_states.append(buffer.detach())
+    if broadcast_buffers:
+        for name, buffer in module.named_buffers():
+            if name not in params_and_buffers_to_ignore:
+                module_states.append(buffer.detach())
 
-    _sync_params_and_buffers(
-        process_group,
-        module_states,
-        broadcast_bucket_size,
-        src
-    )
+    _sync_params_and_buffers(process_group, module_states, broadcast_bucket_size, src)
+
 
 def _sync_params_and_buffers(
     process_group: dist.ProcessGroup,
     module_states: List[torch.Tensor],
     broadcast_bucket_size: int,
     src: int,
-):
+) -> None:
     """
     Synchronizes ``module_states`` (list of tensors) across all processes by
     broadcasting them from rank 0.
@@ -248,6 +306,7 @@ def _sync_params_and_buffers(
         dist._broadcast_coalesced(
             process_group, module_states, broadcast_bucket_size, src
         )
+
 
 def _replace_by_prefix(
     state_dict: Dict[str, Any],

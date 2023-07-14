@@ -4,7 +4,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
@@ -17,7 +17,6 @@ namespace c10 {
 struct IValue;
 class OperatorHandle;
 struct TensorImpl;
-struct SafePyObject;
 } // namespace c10
 
 namespace torch {
@@ -139,6 +138,9 @@ struct C10_API PyInterpreterVTable {
 
   // Invoke the Python boxed fallback dispatch to go back into Python
   virtual void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
+      const = 0;
+
+  virtual void reportErrorCallback(PyObject* callback, DispatchKey key)
       const = 0;
 
   // This is only invoked in the multipy/torchdeploy situation from

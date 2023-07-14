@@ -55,7 +55,7 @@ static NSString *gVersionExtension = @"version";
   return [PTMCoreMLCompiler _compileModel:modelName atPath:modelPath];
 }
 
-+ (nullable MLModel*)loadModel:(const std::string&)modelID backend:(const std::string&)backend allowLowPrecision:(BOOL)allowLowPrecision {
++ (nullable MLModel*)loadModel:(const std::string)modelID backend:(const std::string)backend allowLowPrecision:(BOOL)allowLowPrecision {
   NSString *modelName = [NSString stringWithCString:modelID.c_str() encoding:NSUTF8StringEncoding];
   NSURL *modelURL = [PTMCoreMLCompiler _cacheURLForModel:modelName extension:gCompiledModelExtension];
 

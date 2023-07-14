@@ -248,7 +248,7 @@ def pack_padded_sequence(
                           'values, and it will treat them as constants, likely rendering '
                           'the trace incorrect for any other combination of lengths.',
                           stacklevel=2)
-        lengths = torch.as_tensor(lengths, dtype=torch.int64)
+        lengths = torch.as_tensor(lengths, dtype=torch.int64, device='cpu')
     else:
         lengths = lengths.to(dtype=torch.int64)
 
@@ -440,7 +440,7 @@ def unpad_sequence(
         padded_sequences.transpose_(0, 1)
 
     max_length = padded_sequences.shape[1]
-    idx = torch.arange(max_length)
+    idx = torch.arange(max_length, device=lengths.device)
 
     for seq, length in zip(padded_sequences, lengths):
         mask = idx < length

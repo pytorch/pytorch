@@ -177,7 +177,7 @@ void AddApplyLinkOps(
     // to add control_input to that op
     for (auto& op : *netdef->mutable_op()) {
       if (HasInput(op, link.internal)) {
-        // First appears as an input, no need to do antyhing
+        // First appears as an input, no need to do anything
         continue;
       }
       if (HasOutput(op, link.internal)) {

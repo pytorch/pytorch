@@ -1,21 +1,25 @@
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, register_backend
 from .convert_frame import replay
+from .decorators import assume_constant_result, disable, run
 from .eval_frame import (
-    assume_constant_result,
-    disable,
     explain,
-    export,
     is_dynamo_supported,
     optimize,
     optimize_assert,
     OptimizedModule,
     reset_code,
-    run,
-    skip,
 )
+from .exc import IncorrectUsage
+from .export import export
 from .external_utils import is_compiling
-from .utils import compilation_metrics, guard_failures, orig_code_map, reset_frame_count
+from .utils import (
+    compilation_metrics,
+    graph_break_reasons,
+    guard_failures,
+    orig_code_map,
+    reset_frame_count,
+)
 
 __all__ = [
     "allow_in_graph",
@@ -24,6 +28,8 @@ __all__ = [
     "forbid_in_graph",
     "graph_break",
     "mark_dynamic",
+    "maybe_mark_dynamic",
+    "mark_static",
     "optimize",
     "optimize_assert",
     "export",
@@ -32,7 +38,6 @@ __all__ = [
     "replay",
     "disable",
     "reset",
-    "skip",
     "OptimizedModule",
     "is_compiling",
     "register_backend",
@@ -40,7 +45,7 @@ __all__ = [
 ]
 
 
-def reset():
+def reset() -> None:
     """Clear all compile caches and restore initial state"""
     for weak_code in convert_frame.input_codes.seen + convert_frame.output_codes.seen:
         code = weak_code()
@@ -50,7 +55,10 @@ def reset():
     convert_frame.output_codes.clear()
     orig_code_map.clear()
     guard_failures.clear()
+    graph_break_reasons.clear()
     resume_execution.ContinueExecutionCache.cache.clear()
+    if hasattr(eval_frame.most_recent_backend, "reset"):
+        eval_frame.most_recent_backend.reset()
     eval_frame.most_recent_backend = None
     compilation_metrics.clear()
     reset_frame_count()
@@ -83,6 +91,23 @@ def allow_in_graph(fn):
     return fn
 
 
+def _disallow_in_graph_helper(throw_if_not_allowed):
+    def inner(fn):
+        if isinstance(fn, (list, tuple)):
+            return [disallow_in_graph(x) for x in fn]
+        assert callable(fn), "disallow_in_graph expects a callable"
+        if throw_if_not_allowed and not allowed_functions.is_allowed(fn):
+            raise IncorrectUsage(
+                "disallow_in_graph is expected to be used on an already allowed callable (like torch.* ops). "
+                "Allowed callables means callables that TorchDynamo puts as-is in the extracted graph."
+            )
+        allowed_functions._allowed_function_ids.remove(id(fn))
+        allowed_functions._disallowed_function_ids.add(id(fn))
+        return fn
+
+    return inner
+
+
 def disallow_in_graph(fn):
     """
     Customize which functions TorchDynamo will exclude in the generated
@@ -103,15 +128,10 @@ def disallow_in_graph(fn):
     Will break the graph on `torch.sub`, and give two graphs each with a
     single `torch.add()` op.
     """
-    if isinstance(fn, (list, tuple)):
-        return [disallow_in_graph(x) for x in fn]
-    assert callable(fn), "disallow_in_graph expects a callable"
-    allowed_functions._allowed_function_ids.remove(id(fn))
-    allowed_functions._disallowed_function_ids.add(id(fn))
-    return fn
+    return _disallow_in_graph_helper(throw_if_not_allowed=True)(fn)
 
 
-@disallow_in_graph
+@_disallow_in_graph_helper(throw_if_not_allowed=False)
 def graph_break():
     """Force a graph break"""
     pass
@@ -167,3 +187,79 @@ def mark_dynamic(t, index):
     assert isinstance(index, (list, tuple))
     for i in index:
         mark_dynamic(t, i)
+
+
+@forbid_in_graph
+def maybe_mark_dynamic(t, index):
+    """
+    Mark a tensor as having a dynamic dim, but don't enforce it (i.e., if this
+    dimension ends up getting specialized, don't error).
+    """
+    if isinstance(index, int):
+        if not hasattr(t, "_dynamo_weak_dynamic_indices"):
+            t._dynamo_weak_dynamic_indices = set()
+        # TODO(voz): Should we bounds check?
+        t._dynamo_weak_dynamic_indices.add(index)
+        return
+
+    assert isinstance(index, (list, tuple))
+    for i in index:
+        maybe_mark_dynamic(t, i)
+
+
+@forbid_in_graph
+def mark_static(t, index=None):
+    """
+    Mark a tensor as having a static dim.
+
+    This will prevent us from attempting to compile it dynamically
+    when dynamic=True; this can improve trace-time performance.
+
+    This has lower precedence than mark_dynamic.
+    """
+    if isinstance(index, int):
+        if not hasattr(t, "_dynamo_static_indices"):
+            t._dynamo_static_indices = set()
+        # TODO(voz): Should we bounds check?
+        t._dynamo_static_indices.add(index)
+    elif index is None:
+        for i in range(t.dim()):
+            mark_static(t, i)
+    else:
+        assert isinstance(index, (list, tuple))
+        for i in index:
+            mark_static(t, i)
+
+
+# Note: it's preferable to not make `import torch` eagerly import other libs.
+# However, we want to provide a grace period to make borderline versions of einops
+# compatible with torch.compile.
+# TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
+def _allow_in_graph_einops():
+    try:
+        import einops
+
+        try:
+            from einops._torch_specific import (  # requires einops > 0.6.1, torch >= 2.0
+                _ops_were_registered_in_torchdynamo,
+            )
+
+            # einops > 0.6.1 will call the op registration logic as it is imported.
+            pass
+        except ImportError:
+            # einops <= 0.6.1
+            allow_in_graph(einops.rearrange)
+            allow_in_graph(einops.reduce)
+            if hasattr(einops, "repeat"):
+                allow_in_graph(einops.repeat)  # available since einops 0.2.0
+            if hasattr(einops, "einsum"):
+                allow_in_graph(einops.einsum)  # available since einops 0.5.0
+            if hasattr(einops, "pack"):
+                allow_in_graph(einops.pack)  # available since einops 0.6.0
+            if hasattr(einops, "unpack"):
+                allow_in_graph(einops.unpack)  # available since einops 0.6.0
+    except ImportError:
+        pass
+
+
+_allow_in_graph_einops()

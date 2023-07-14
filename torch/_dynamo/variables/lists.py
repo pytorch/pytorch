@@ -1,17 +1,21 @@
+import collections
 import functools
+import inspect
 import operator
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
+from torch.utils import _pytree as pytree
 
-from .. import config, variables
+from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
-from ..utils import check_constant_args, namedtuple_fields, proxy_args_kwargs
+from ..utils import check_constant_args, guard_if_dyn, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
+from .functions import UserFunctionVariable, UserMethodVariable
 
 
 class BaseListVariable(VariableTracker):
@@ -53,7 +57,13 @@ class BaseListVariable(VariableTracker):
         return self.python_type()(self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
-        index = arg.as_python_constant()
+        from .tensor import SymNodeVariable
+
+        if isinstance(arg, SymNodeVariable):
+            index = arg.sym_num
+        else:
+            index = arg.as_python_constant()
+
         if isinstance(index, slice):
             if self.source is not None:
                 return self.clone(
@@ -67,7 +77,7 @@ class BaseListVariable(VariableTracker):
                     mutable_local=MutableLocal() if self.mutable_local else None,
                 ).add_options(arg, self)
         else:
-            assert isinstance(index, int)
+            assert isinstance(index, (int, torch.SymInt))
             return self.items[index].add_options(arg, self)
 
     def unpack_var_sequence(self, tx):
@@ -77,8 +87,8 @@ class BaseListVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
@@ -154,6 +164,25 @@ class BaseListVariable(VariableTracker):
             comps,
         ).add_options(options)
 
+    # List-like implementations for pytree
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            index = SliceVariable(
+                [
+                    ConstantVariable(index.start),
+                    ConstantVariable(index.stop),
+                    ConstantVariable(index.step),
+                ]
+            )
+        elif isinstance(index, int):
+            index = ConstantVariable(index)
+        else:
+            raise TypeError("Invalid index type. Must be int or slice.")
+        return self.getitem_const(index)
+
 
 class RangeVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
@@ -202,20 +231,17 @@ class RangeVariable(BaseListVariable):
         return self.items[fields.index(name)].add_options(self)
 
 
-class ListVariable(BaseListVariable):
-    def python_type(self):
-        return list
-
-    def reconstruct(self, codegen):
-        codegen.foreach(self.items)
-        return [create_instruction("BUILD_LIST", len(self.items))]
+class CommonListMethodsVariable(BaseListVariable):
+    """
+    Implement methods common to List and other List-like things
+    """
 
     def call_method(
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "append" and self.mutable_local:
@@ -226,7 +252,7 @@ class ListVariable(BaseListVariable):
                 new_rec_contains.add(arg.mutable_local)
             tx.replace_all(
                 self,
-                ListVariable(
+                type(self)(
                     self.items + [arg],
                     recursively_contains=new_rec_contains,
                     regen_guards=False,
@@ -244,7 +270,7 @@ class ListVariable(BaseListVariable):
             (arg,) = args
             return tx.replace_all(
                 self,
-                ListVariable(
+                type(self)(
                     list(self.items) + list(arg.unpack_var_sequence(tx)),
                     regen_guards=False,
                     **options,
@@ -257,7 +283,7 @@ class ListVariable(BaseListVariable):
             items.insert(idx.as_python_constant(), value)
             return tx.replace_all(
                 self,
-                ListVariable(items, regen_guards=False, **options),
+                type(self)(items, regen_guards=False, **options),
             )
         elif name == "pop" and self.mutable_local:
             assert not kwargs
@@ -265,14 +291,14 @@ class ListVariable(BaseListVariable):
             result = items.pop(*[a.as_python_constant() for a in args])
             tx.replace_all(
                 self,
-                ListVariable(items, regen_guards=False, **options),
+                type(self)(items, regen_guards=False, **options),
             )
             return result
         elif name == "clear" and self.mutable_local:
             assert not kwargs and not args
             return tx.replace_all(
                 self,
-                ListVariable([], regen_guards=False, **options),
+                type(self)([], regen_guards=False, **options),
             )
         elif (
             name == "__setitem__"
@@ -289,6 +315,113 @@ class ListVariable(BaseListVariable):
                 items[key.as_python_constant()] = value
             result = ListVariable(items, regen_guards=False, **options)
             return tx.replace_all(self, result)
+        elif name == "copy":
+            # List copy() doesn't have args and kwargs
+            assert not kwargs
+            assert not args
+            items = list(self.items)
+            return type(self)(
+                items, regen_guards=False, mutable_local=MutableLocal(), **options
+            )
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
+
+class ListVariable(CommonListMethodsVariable):
+    def python_type(self):
+        return list
+
+    def reconstruct(self, codegen):
+        codegen.foreach(self.items)
+        return [create_instruction("BUILD_LIST", arg=len(self.items))]
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if (
+            name == "__setitem__"
+            and self.mutable_local
+            and args
+            and args[0].is_python_constant()
+        ):
+            assert not kwargs
+            key, value = args
+            items = list(self.items)
+            if isinstance(key, SliceVariable):
+                if not value.has_unpack_var_sequence(tx):
+                    unimplemented(
+                        f"Missing dynamo support for expanding {value} into a list for slice assignment."
+                    )
+                items[key.as_python_constant()] = value.unpack_var_sequence(tx)
+            else:
+                items[key.as_python_constant()] = value
+            result = ListVariable(items, regen_guards=False, **options)
+            return tx.replace_all(self, result)
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
+
+class DequeVariable(CommonListMethodsVariable):
+    def python_type(self):
+        return collections.deque
+
+    def reconstruct(self, codegen):
+        assert "deque" not in codegen.tx.f_globals
+        codegen.append_output(
+            codegen.create_load_python_module(collections.deque, True)
+        )
+        codegen.foreach(self.items)
+        return create_call_function(len(self.items), False)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if (
+            name == "__setitem__"
+            and self.mutable_local
+            and args
+            and args[0].is_python_constant()
+        ):
+            assert not kwargs
+            key, value = args
+            assert key.is_python_constant() and isinstance(
+                key.as_python_constant(), int
+            )
+            items = list(self.items)
+            items[key.as_python_constant()] = value
+            result = DequeVariable(items, regen_guards=False, **options)
+            return tx.replace_all(self, result)
+        elif name == "extendleft" and self.mutable_local:
+            assert not kwargs
+            (arg,) = args
+            return tx.replace_all(
+                self,
+                DequeVariable(
+                    list(arg.unpack_var_sequence(tx)) + list(self.items),
+                    regen_guards=False,
+                    **options,
+                ),
+            )
+        elif name == "popleft" and self.mutable_local:
+            assert not args
+            assert not kwargs
+            items = collections.deque(self.items)
+            result = items.popleft()
+            tx.replace_all(
+                self,
+                DequeVariable(list(items), regen_guards=False, **options),
+            )
+            return result
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -299,14 +432,14 @@ class TupleVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_TUPLE", len(self.items))]
+        return [create_instruction("BUILD_TUPLE", arg=len(self.items))]
 
     def call_method(
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
 
@@ -374,7 +507,7 @@ class SizeVariable(TupleVariable):
         codegen.load_import_from("torch", "Size")
         codegen.foreach(self.items)
         build_torch_size = [
-            create_instruction("BUILD_TUPLE", len(self.items)),
+            create_instruction("BUILD_TUPLE", arg=len(self.items)),
         ] + create_call_function(1, True)
         return build_torch_size
 
@@ -385,46 +518,20 @@ class SizeVariable(TupleVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
-            if config.dynamic_shapes:
-                out = self.get_item_dyn(tx, args[0])
-            else:
-                out = self.getitem_const(args[0])
+            out = self.get_item_dyn(tx, args[0])
             return out
         return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
-        from .tensor import SymNodeVariable
-
         index = arg.as_python_constant()
         if isinstance(index, slice):
-
-            def _dynamo_get_item_lambda(target, index):
-                return torch.Size.__getitem__(target, index)
-
-            parent_proxy = self.as_proxy()
-            proxy = tx.output.create_proxy(
-                "call_function",
-                _dynamo_get_item_lambda,
-                *proxy_args_kwargs([self, arg], {}),
-            )
-            items = self.items[index]
-
-            def _unpack_into_example(item):
-                if isinstance(item, SymNodeVariable):
-                    return item.sym_num
-                return item.as_python_constant()
-
-            # Mirror the indexing into example_value for downstream correctness
-            proxy.node.meta["example_value"] = parent_proxy.node.meta["example_value"][
-                index
-            ]
-            return SizeVariable(items, proxy=proxy).add_options(arg, self)
+            return SizeVariable(self.items[index]).add_options(arg, self)
         else:
             assert isinstance(index, int)
             return self.items[index].add_options(arg, self)
@@ -455,13 +562,32 @@ class NamedTupleVariable(TupleVariable):
         codegen.append_output(codegen._create_load_const(create_fn))
         codegen.foreach(self.items)
         return [
-            create_instruction("BUILD_TUPLE", len(self.items)),
+            create_instruction("BUILD_TUPLE", arg=len(self.items)),
         ] + create_call_function(1, True)
 
     def var_getattr(self, tx, name):
+        def check_and_create_method():
+            options = VariableTracker.propagate(self)
+            method = inspect.getattr_static(self.tuple_cls, name, None)
+            if isinstance(method, classmethod):
+                # We need the unbounded cls method to avoid the inline __self__
+                return UserMethodVariable(
+                    method.__func__,
+                    variables.UserDefinedClassVariable(self.tuple_cls, **options),
+                )
+            elif isinstance(method, staticmethod):
+                return UserFunctionVariable(method.__func__, **options)
+            elif inspect.isfunction(method):
+                return UserMethodVariable(method, self, **options)
+            else:
+                return None
+
         fields = namedtuple_fields(self.tuple_cls)
         if name not in fields:
-            unimplemented(f"NamedTupleVariable.{name}")
+            method = check_and_create_method()
+            if not method:
+                unimplemented(f"NamedTupleVariable.{name}")
+            return method
         return self.items[fields.index(name)].add_options(self)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
@@ -498,11 +624,11 @@ class SliceVariable(BaseListVariable):
         return slice
 
     def as_python_constant(self):
-        return slice(*[x.as_python_constant() for x in self.items])
+        return slice(*[guard_if_dyn(x) for x in self.items])
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_SLICE", len(self.items))]
+        return [create_instruction("BUILD_SLICE", arg=len(self.items))]
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -546,6 +672,54 @@ class ListIteratorVariable(VariableTracker):
         remaining_items = self.items[self.index :]
         codegen.foreach(remaining_items)
         return [
-            create_instruction("BUILD_TUPLE", len(remaining_items)),
+            create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
             create_instruction("GET_ITER"),
         ]
+
+
+class TupleIteratorVariable(ListIteratorVariable):
+    pass
+
+
+def _listvariable_flatten(d: ListVariable) -> Tuple[List[Any], pytree.Context]:
+    return d.items, None
+
+
+def _listvariable_unflatten(values: List[Any], context: pytree.Context) -> ListVariable:
+    assert all(isinstance(x, VariableTracker) for x in values)
+
+    # Guard propagation happens in the BaseListVariable constructor
+    return ListVariable(values, mutable_local=MutableLocal())
+
+
+def _register_dynamo_list_to_tree_spec():
+    pytree._register_pytree_node(
+        ListVariable,
+        _listvariable_flatten,
+        _listvariable_unflatten,
+        pytree._list_to_str,
+        pytree._maybe_str_to_list,
+    )
+
+
+def _tuplevariable_flatten(d: TupleVariable) -> Tuple[List[Any], pytree.Context]:
+    return d.items, None
+
+
+def _tuplevariable_unflatten(
+    values: List[Any], context: pytree.Context
+) -> TupleVariable:
+    assert all(isinstance(x, VariableTracker) for x in values)
+
+    # Guard propagation happens in the BaseListVariable constructor
+    return TupleVariable(values)
+
+
+def _register_dynamo_tuple_to_tree_spec():
+    pytree._register_pytree_node(
+        TupleVariable,
+        _tuplevariable_flatten,
+        _tuplevariable_unflatten,
+        pytree._tuple_to_str,
+        pytree._maybe_str_to_tuple,
+    )

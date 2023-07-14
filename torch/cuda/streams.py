@@ -20,12 +20,10 @@ class Stream(torch._C._CudaStreamBase):
         device(torch.device or int, optional): a device on which to allocate
             the stream. If :attr:`device` is ``None`` (default) or a negative
             integer, this will use the current device.
-        priority(int, optional): priority of the stream. Can be either
-            -1 (high priority) or 0 (low priority). By default, streams have
-            priority 0.
+        priority(int, optional): priority of the stream, should be 0 or
+            negative, where negative numbers indicate higher priority. By default,
+            streams have priority 0.
 
-    .. note:: Although CUDA versions >= 11 support more than two levels of
-        priorities, in PyTorch, we only support two levels of priorities.
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
