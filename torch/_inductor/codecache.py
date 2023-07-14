@@ -9,6 +9,7 @@ import logging
 import multiprocessing
 import os
 import pathlib
+import platform
 import re
 import shutil
 import signal
@@ -619,7 +620,10 @@ def optimization_flags():
         # Also, `-march=native` is unrecognized option on M1
         base_flags += " -Xclang"
     else:
-        base_flags += " -march=native"
+        if platform.machine() == "ppc64le":
+            base_flags += " -mcpu=native"
+        else:
+            base_flags += " -march=native"
 
     # Internal cannot find libgomp.so
     if not config.is_fbcode():
