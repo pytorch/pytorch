@@ -54,20 +54,43 @@ class TestEmbeddingOp(DTensorTestBase):
         inp = torch.randint(
             0, num_embeddings, tuple(input_size), device=self.device_type
         )
+        target = torch.empty(
+            *inp.size(), embedding_dim, dtype=torch.float, device=self.device_type
+        ).random_(0, 1)
         placements = [Replicate()]
         replicate_inp = DTensor.from_local(inp, device_mesh, placements)
         sharded_output = sharded_embedding(replicate_inp)
+        output = sharded_output.redistribute(
+            sharded_output.device_mesh, [Replicate()]
+        ).to_local()
 
         # Run local computation
         local_output = local_embedding(inp)
 
         # Verify
-        self.assertEqual(
-            local_output,
-            sharded_output.redistribute(
-                sharded_output.device_mesh, [Replicate()]
-            ).to_local(),
+        self.assertEqual(local_output, output)
+
+        # Use a sample cross entry loss to verify backward and grad computation.
+        loss = torch.nn.CrossEntropyLoss()
+        attn_loss = loss(
+            output,
+            target,
         )
+        attn_dup_loss = loss(
+            local_output,
+            target,
+        )
+        attn_loss.backward()
+        attn_dup_loss.backward()
+
+        gradient = sharded_embedding.weight.grad.redistribute(
+            sharded_output.device_mesh, [Replicate()]
+        ).to_local()
+
+        local_grad = local_embedding.weight.grad
+
+        # Verify gradient.
+        self.assertEqual(gradient, local_grad)
 
         # Validate for torch.nn.functional.embedding version.
         local_output = torch.nn.functional.embedding(
