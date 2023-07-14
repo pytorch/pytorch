@@ -1475,7 +1475,7 @@ class TripletMarginLoss(_Loss):
 
     Examples::
 
-    >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2, eps=1e-6)
+    >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2, eps=1e-7)
     >>> anchor = torch.randn(100, 128, requires_grad=True)
     >>> positive = torch.randn(100, 128, requires_grad=True)
     >>> negative = torch.randn(100, 128, requires_grad=True)
