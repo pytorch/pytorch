@@ -6,6 +6,7 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/native/ReductionType.h>
 #include <c10/util/irange.h>
+#include <ATen/OpMathType.h>
 
 namespace at::native {
 inline namespace CPU_CAPABILITY {
@@ -93,6 +94,15 @@ inline void init(scalar_t* out, int64_t size, bool include_self = false) {
   }
 }
 
+template <typename scalar_t, ReductionType reduce>
+inline void _init(scalar_t* self_ptr, at::opmath_type<scalar_t>* buffer_ptr, int64_t size, bool include_self) {
+  if (!include_self) {
+    init<at::opmath_type<scalar_t>, reduce>(buffer_ptr, size, include_self);
+  } else {
+    vec::convert(self_ptr, buffer_ptr, size);
+  }
+}
+
 template <typename scalar_t>
 inline scalar_t _max(const scalar_t& x, const scalar_t& y) {
   return at::_isnan(y) ? y : std::max(x, y);
@@ -115,6 +125,45 @@ inline Vectorized<scalar_t> _min(const Vectorized<scalar_t>& x, const Vectorized
   return vec::minimum(x, y);
 }
 
+template <typename scalar_t, typename accumut, typename Op,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+inline void map_acc(
+    const Op& vec_fun,
+    accumut* output_data,
+    const accumut* input_data,
+    const scalar_t* input_data2,
+    int64_t size) {
+  using Vec = vec::Vectorized<scalar_t>;
+  using aVec = vec::Vectorized<accumut>;
+  int64_t d = 0;
+  constexpr int64_t kVecSize = Vec::size();
+  constexpr int64_t kaVecSize = aVec::size();
+  for (d = 0; d < size - (size % kVecSize); d += kVecSize) {
+    Vec data2_vec = Vec::loadu(input_data2 + d);
+    aVec data2_avec0, data2_avec1;
+    std::tie(data2_avec0, data2_avec1) = convert_to_float<scalar_t>(data2_vec);
+    aVec input_vec0 = aVec::loadu(input_data + d);
+    aVec input_vec1 = aVec::loadu(input_data + d + kaVecSize);
+    vec_fun(input_vec0, data2_avec0).store(output_data + d);
+    vec_fun(input_vec1, data2_avec1).store(output_data + d + kaVecSize);
+  }
+  if (size - d > 0) {
+    int64_t tail_size = size - d;
+    Vec data2_vec = Vec::loadu(input_data2 + d, tail_size);
+    aVec data2_avec0, data2_avec1;
+    std::tie(data2_avec0, data2_avec1) = convert_to_float<scalar_t>(data2_vec);
+    if (tail_size > kaVecSize) {
+      aVec input_vec0 = aVec::loadu(input_data + d);
+      aVec input_vec1 = aVec::loadu(input_data + d + kaVecSize, tail_size - kaVecSize);
+      vec_fun(input_vec0, data2_avec0).store(output_data + d);
+      vec_fun(input_vec1, data2_avec1).store(output_data + d + kaVecSize, tail_size - kaVecSize);
+    } else {
+      aVec input_vec0 = aVec::loadu(input_data + d, tail_size);
+      vec_fun(input_vec0, data2_avec0).store(output_data + d, tail_size);
+    }
+  }
+}
+
 // for Max and Min, propagate NaN:
 template <typename T, ReductionType reduce>
 inline T update(const T& x, const T& y) {
@@ -135,6 +184,19 @@ template <typename scalar_t, ReductionType reduce>
 inline void update(scalar_t* out, scalar_t* data, int64_t K) {
   using Vec = vec::Vectorized<vec_scalar_t<scalar_t>>;
   map2<scalar_t>(
+      [](Vec x, Vec y) { return update<Vec, reduce>(x, y); },
+      out,
+      out,
+      data,
+      K);
+}
+
+template <typename scalar_t, ReductionType reduce,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+inline void update(at::opmath_type<scalar_t>* out, scalar_t* data, int64_t K) {
+  using opmath_t = at::opmath_type<scalar_t>;
+  using Vec = vec::Vectorized<opmath_t>;
+  map_acc<scalar_t, opmath_t>(
       [](Vec x, Vec y) { return update<Vec, reduce>(x, y); },
       out,
       out,
