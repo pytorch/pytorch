@@ -13,9 +13,10 @@ from ..exc import unimplemented
 from ..source import AttrSource, ODictGetItemSource
 from ..utils import (
     check_constant_args,
+    get_custom_getattr,
     HAS_NUMPY_TORCH_INTEROP,
     identity,
-    proxy_args_kwargs, get_custom_getattr,
+    proxy_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
@@ -825,7 +826,9 @@ class NumpyVariable(VariableTracker):
             #  wrapped by NumpyNdarrayVariable which is wrong!
             getattr_fn = get_custom_getattr(torch_np)
             if getattr_fn:
-                unimplemented("torch_np has custom getattr implementation and dynamo doesn't support it")
+                unimplemented(
+                    "torch_np has custom getattr implementation and dynamo doesn't support it"
+                )
             func = getattr(torch_np, self.value.__name__)
             return wrap_fx_proxy_cls(
                 target_cls=NumpyNdarrayVariable,
