@@ -724,6 +724,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from . import ConstantVariable
         from .builder import wrap_fx_proxy
+        from .builder import VariableBuilder
         
         if not torch._dynamo.config.capture_func_transforms:
             unimplemented("torch.func.vmap capture is disabled")
@@ -745,6 +746,34 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "NYI - torch.func.vmap is not implemented when chunk_size is passed"
             )
 
+        # TODO: Pass unbatched input to speculate_subgraph.
+        from . import ConstantVariable, TensorVariable
+        flat_args, arg_spec = torch.utils._pytree.tree_flatten(batch_input_args)
+        print(flat_args, "FLAT ARGS")
+        in_dims_v = in_dims.as_python_constant()
+        in_dims_v = (
+            [
+                in_dims_v,
+            ]
+            if isinstance(in_dims_v, int)
+            else in_dims_v
+        )
+        broadcasted_in_dims = torch._functorch.vmap._broadcast_to_and_flatten(
+            list(in_dims_v), arg_spec
+        )
+
+        unbatched_input_args = []
+        for arg, in_dim in zip(flat_args, broadcasted_in_dims):
+            if in_dim is not None:
+                assert isinstance(arg, TensorVariable)
+                fake_value = get_fake_value(arg.as_proxy().node, tx)
+                unbatched_fake = fake_value.select(in_dim, 0)
+                props = TensorVariable.specialize(unbatched_fake)
+                unbatched_input_args.append(TensorVariable(arg.as_proxy(), **props))
+            else:
+                print(arg.size, arg.stride, "UNSLICED")
+                unbatched_input_args.append(arg)
+
         body_r, body_graph, body_lifted_freevars = speculate_subgraph(
             tx,
             fn,
@@ -763,19 +792,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # body_lifted_variable should not be treated as batched.
         # So here we update `in_dims` to reflect that.
-        _, arg_spec = torch.utils._pytree.tree_flatten(batch_input_args)
 
-        in_dims_v = in_dims.as_python_constant()
-        in_dims_v = (
-            [
-                in_dims_v,
-            ]
-            if isinstance(in_dims_v, int)
-            else in_dims_v
-        )
-        broadcasted_in_dims = torch._functorch.vmap._broadcast_to_and_flatten(
-            list(in_dims_v), arg_spec
-        )
         # NOTE: updated_in_dims is flat list, it is ok for now
         #       as speculate_subgraph does not supports functions with non-Tenosr args.
         #       (so we graph-break above)
@@ -794,8 +811,9 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         batched_fn_args = tuple(arg.as_proxy().node.meta["example_value"] for arg in batch_input_args) + tuple(
                 arg.node.meta["example_value"] for arg in body_lifted_freevars
             )
-        gm = torch.fx.GraphModule({}, body_graph)
-        example_value = torch._functorch.vmap.vmap_impl(gm, in_dims.value, out_dims.value, randomness.value, chunk_size.value, *batched_fn_args)
+        gm = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+        example_value = torch._functorch.vmap.vmap_impl(
+            gm, in_dims.value, out_dims.value, randomness.value, chunk_size.value, *batched_fn_args)
 
         # vmap_proxy corresponds to `vmap_proxy = vmap(fn, *vmap_args, **vmap_kwargs)`
         vmap_proxy = tx.output.create_proxy(
