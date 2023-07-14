@@ -701,7 +701,20 @@ def _pre_backward_hook(
                     state._unshard_stream,
                     state._pre_unshard_stream,
                 )
-            state._device_handle.current_stream().wait_stream(state._unshard_stream)
+            current_stream = state._device_handle.current_stream()
+            if current_stream != state._default_stream:
+                if current_stream == state._unshard_stream:
+                    stream_str = "unshard stream"
+                elif current_stream == state._post_backward_stream:
+                    stream_str = "post-backward stream"
+                elif current_stream == state._pre_unshard_stream:
+                    stream_str = "pre-unshard stream"
+                else:
+                    stream_str = "unknown stream"
+                raise RuntimeError(
+                    f"Pre-backward current stream is not default stream and instead {stream_str}"
+                )
+            current_stream.wait_stream(state._unshard_stream)
 
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
