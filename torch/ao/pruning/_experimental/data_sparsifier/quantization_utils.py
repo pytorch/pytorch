@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.ao.pruning.sparsifier.utils import module_to_fqn, fqn_to_module
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 SUPPORTED_MODULES = {
     nn.Embedding,
@@ -28,7 +28,7 @@ def _fetch_all_embeddings(model):
 def post_training_sparse_quantize(model,
                                   data_sparsifier_class,
                                   sparsify_first=True,
-                                  select_embeddings: Optional[List[nn.Module]] = None,
+                                  select_embeddings: List[nn.Module] = None,
                                   **sparse_config):
     """Takes in a model and applies sparsification and quantization to only embeddings & embeddingbags.
     The quantization step can happen before or after sparsification depending on the `sparsify_first` argument.
