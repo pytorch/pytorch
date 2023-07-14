@@ -11,9 +11,6 @@
 
 namespace torch {
 namespace autograd {
-namespace generated {
-struct TypeAndSize;
-}
 
 struct SizeInput {
   // Note: int value is still needed when dynamic to pass as an arg
@@ -211,7 +208,11 @@ class CompiledNodeArgs {
     collect(t.sym_strides());
     collect(t.sym_storage_offset());
   }
-  void collect(torch::autograd::generated::TypeAndSize& t);
+  void collect(torch::autograd::TypeAndSize& t) {
+    collect(t.sym_sizes);
+    collect(t.options);
+  }
+
   void collect(const OutputRef& t) {
     // +1 is for undefined encoded as -1
     collect_size(t.node_id + 1);
@@ -457,8 +458,14 @@ class SwapSavedVariables {
     after(t.mutable_storage_offset());
     t.recompute();
   }
-  void before(torch::autograd::generated::TypeAndSize& t);
-  void after(torch::autograd::generated::TypeAndSize& t);
+  void before(torch::autograd::TypeAndSize& t) {
+    before(t.sym_sizes);
+    before(t.options);
+  }
+  void after(torch::autograd::TypeAndSize& t) {
+    after(t.sym_sizes);
+    after(t.options);
+  }
 
   template <typename T>
   void before(std::vector<T>& t) {
