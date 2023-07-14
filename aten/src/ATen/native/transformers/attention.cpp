@@ -686,7 +686,7 @@ Tensor triton_multi_head_attention(
     const c10::optional<Tensor>& mask) {
   // query shape: [B, T, D]
   // qkv_weight shape: [3 * D, D]
-  TORCH_CHECK(!mask, "Only casual mask is supported for Triton.");
+  TORCH_CHECK(!mask, "Only causal mask is supported for Triton.");
 
   const auto D = embed_dim;
   TORCH_CHECK(

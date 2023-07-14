@@ -184,7 +184,7 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
 
 
 def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
-                                                      unsupported_dtype: Optional[List[torch.dtype]] = None) -> None:
+                                                      unsupported_dtype: List[torch.dtype] = None) -> None:
     # Attribute is registered in the _StorageBase class
     # and UntypedStorage obtains through inheritance.
     @property  # type: ignore[misc]
@@ -255,7 +255,7 @@ def _generate_storage_methods_for_privateuse1_backend(custom_backend_name: str,
 
 def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module: bool = True,
                                              for_storage: bool = False,
-                                             unsupported_dtype: Optional[List[torch.dtype]] = None) -> None:
+                                             unsupported_dtype: List[torch.dtype] = None) -> None:
     r"""
     generate_methods_for_privateuse1_backend(for_tensor, for_module, for_storage, unsupported_dtype) -> None
 
