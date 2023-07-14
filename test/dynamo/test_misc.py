@@ -1330,7 +1330,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ref = fn(x, y)
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
-        # we expect fn to have 2 frames
+        # Graph break: call_function args: NumpyVariable() ConstantVariable(dtype) from user code at ...
+        #     tensor = torch.tensor(ndarray, dtype=torch.long)
         self.assertEqual(cnts.frame_count, 2)
 
     def test_inplace_view_on_graph_input(self):

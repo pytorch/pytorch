@@ -15,7 +15,7 @@ from ..utils import (
     check_constant_args,
     HAS_NUMPY_TORCH_INTEROP,
     identity,
-    proxy_args_kwargs,
+    proxy_args_kwargs, get_custom_getattr,
 )
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
@@ -795,7 +795,7 @@ class TypingVariable(VariableTracker):
 
 class NumpyVariable(VariableTracker):
     """
-    Wrapper around `numpy.*` for better error messages.
+    Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
     """
 
     def __init__(self, value, **kwargs):
@@ -818,9 +818,14 @@ class NumpyVariable(VariableTracker):
         # lookup method name in torch_np. Things like np.dtype(float) are not supported yet.
         if self.value.__name__ == "dtype":
             unimplemented(
-                f"numpy dtype function is not supported yet. Got {self.value}."
+                f"numpy dtype function is not supported yet. Got type {type(self.value)}."
             )
         elif hasattr(torch_np, self.value.__name__):
+            # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
+            #  wrapped by NumpyNdarrayVariable which is wrong!
+            getattr_fn = get_custom_getattr(torch_np)
+            if getattr_fn:
+                unimplemented("torch_np has custom getattr implementation and dynamo doesn't support it")
             func = getattr(torch_np, self.value.__name__)
             return wrap_fx_proxy_cls(
                 target_cls=NumpyNdarrayVariable,
@@ -852,7 +857,8 @@ class NumpyVariable(VariableTracker):
         return self.value
 
     def as_proxy(self):
-        # this handles numpy dtype attribute such as np.float32.
+        # this handles numpy dtype attribute such as np.float32. TODO(larryliu0820): we should split NumpyVariable
+        #  into NumpyVariable for instances/objects and NumpyVariable for types.
         if isinstance(self.value, type) and config.numpy_ndarray_as_tensor:
             # retrieve attribute str. E.g., "float32" if given np.float32
             import torch_np
