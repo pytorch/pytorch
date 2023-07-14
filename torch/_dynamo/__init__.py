@@ -4,7 +4,6 @@ from .convert_frame import replay
 from .decorators import assume_constant_result, disable, run
 from .eval_frame import (
     explain,
-    export,
     is_dynamo_supported,
     optimize,
     optimize_assert,
@@ -12,6 +11,7 @@ from .eval_frame import (
     reset_code,
 )
 from .exc import IncorrectUsage
+from .export import export
 from .external_utils import is_compiling
 from .utils import (
     compilation_metrics,
