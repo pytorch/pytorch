@@ -14,8 +14,10 @@ from .quantizer import (
     SharedQuantizationSpec,
     QuantizationSpecBase,
 )
-from .utils import _fold_bn_weights_into_conv_node
-from .utils import _get_aten_graph_module
+from .utils import (
+    _fold_bn_weights_into_conv_node,
+    _get_aten_graph_module,
+)
 
 # Example inputs for `_conv2d_bn_pattern`, `_qat_conv2d_bn_pattern`, and `_qat_conv2d_bn_pattern_no_bias`
 _conv2d_bn_pattern_example_inputs = (
@@ -308,7 +310,7 @@ def _has_conv_bias_filter(
     Match filter for the subgraph rewriter that returns True if the conv node in
     the original graph has bias.
     """
-    for _, n in match.nodes_map.items():
+    for n in match.nodes_map.values():
         if n.target == torch.ops.aten.convolution.default:
             return n.args[2] is not None
     raise ValueError("Could not find conv node in matched conv + bn pattern")
@@ -456,8 +458,10 @@ def _update_special_qspecs_after_replacement(
         if isinstance(edge_or_node, Node):
             _node = edge_or_node
             return original_to_replacement_node.get(_node, _node)
-        elif isinstance(edge_or_node, Tuple[Node, Node]):
-            src, dest = edge_or_node
+        # TODO: It's really should be
+        # isinstance(edge_or_node, tuple) and len(edge_or_node) == 2 and all(isinstance(x, Node) for x in edge_or_node)
+        elif isinstance(edge_or_node, Tuple[Node, Node]):  # type: ignore[arg-type]
+            src, dest = edge_or_node  # type: ignore[misc]
             return (
                 original_to_replacement_node.get(src, src),
                 original_to_replacement_node.get(dest, dest),
@@ -721,7 +725,7 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
         _fold_bn_weights_into_conv_node(conv_node, conv_weight, conv_bias, bn_node, m)
 
         # Copy over literal args for conv
-        for _, original_node in _filter_nodes_map(r.nodes_map).items():
+        for original_node in _filter_nodes_map(r.nodes_map).values():
             if original_node.target == torch.ops.aten.convolution.default:
                 _copy_over_literal_conv_args(original_node, conv_node)
 
