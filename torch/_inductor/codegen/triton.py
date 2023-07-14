@@ -62,6 +62,26 @@ class TritonPrinter(PythonPrinter):
     def _helper_sqrt(self, expr):
         return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
 
+    def _print_Min(self, expr):
+        nargs = len(expr.args)
+        if len(expr.args) == 1:
+            return self._print(expr.args[0])
+
+        mid = len(expr.args) // 2
+        a = self._print(sympy.Min(*expr.args[:mid]))
+        b = self._print(sympy.Min(*expr.args[mid:]))
+        return f"tl.math.min({a}, {b})"
+
+    def _print_Max(self, expr):
+        nargs = len(expr.args)
+        if len(expr.args) == 1:
+            return self._print(expr.args[0])
+
+        mid = len(expr.args) // 2
+        a = self._print(sympy.Max(*expr.args[:mid]))
+        b = self._print(sympy.Max(*expr.args[mid:]))
+        return f"tl.math.max({a}, {b})"
+
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
@@ -1034,6 +1054,7 @@ class TritonKernel(Kernel):
                     index = sympy_subs(index, replacements)
 
         index_vars = index.free_symbols
+        index = self.simplify_indexing(index)
         index_str = self.index_to_str(index)
 
         mask_vars: Set[str] = set()
@@ -1370,8 +1391,6 @@ class TritonKernel(Kernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert self.inside_reduction
-        default = ir.Reduction.default_value(reduction_type, src_dtype)
-        default = self._map_tuple_or_scalar(triton_constant, default)
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
         masks = sorted(masks)
@@ -1419,6 +1438,8 @@ class TritonKernel(Kernel):
         cond = " & ".join(masks)
 
         if self.persistent_reduction:
+            default = ir.Reduction.default_value(reduction_type, src_dtype)
+            default = self._map_tuple_or_scalar(triton_constant, default)
 
             def _mask_value(value, default):
                 return self.cse.generate(
@@ -1439,14 +1460,25 @@ class TritonKernel(Kernel):
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
-            elif reduction_type == "welford":
+            elif reduction_type == "welford_reduce":
+                sum_ = self.cse.generate(
+                    self.compute,
+                    self.reduction_resize(f"tl.sum({masked_value}, {dim})"),
+                )
+                self.inside_reduction = False
+                rnumel = ops.index_expr(self.numels[-1], dtype)
+                self.inside_reduction = True
+                mean = ops.div(sum_, rnumel)
+
+                dx = ops.sub(value, mean)
+                dx2 = ops.mul(dx, dx)
+                m2 = ops.reduction(dtype, dtype, "sum", dx2)
+                result_var = (mean, m2, rnumel)
+            elif reduction_type == "welford_combine":
                 mean, m2, weight = masked_value
                 welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
-                if welford in self.cse.cache:
-                    mean, m2, weight = self.cse.cache[welford]
-                else:
-                    mean, m2, weight = [self.cse.newvar() for _ in range(3)]
-                    self.compute.writeline(f"{mean}, {m2}, {weight} = {welford}")
+                mean, m2, weight = [self.cse.newvar() for _ in range(3)]
+                self.compute.writeline(f"{mean}, {m2}, {weight} = {welford}")
 
                 result_var = tuple(
                     self.cse.generate(self.compute, self.reduction_resize(var_name))
@@ -1458,6 +1490,8 @@ class TritonKernel(Kernel):
                 )
         else:
             accumulator = f"_{result_var}"
+            default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
+            default = self._map_tuple_or_scalar(triton_constant, default)
             if not isinstance(default, tuple):
                 self.body.writeline(
                     f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
@@ -1481,7 +1515,7 @@ class TritonKernel(Kernel):
                 """
                 )
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
-            elif reduction_type == "welford":
+            elif "welford" in reduction_type:
                 accumulator = f"{result_var}_mean"
                 accumulator_m2 = f"{result_var}_m2"
                 accumulator_weight = f"{result_var}_weight"
@@ -1495,19 +1529,34 @@ class TritonKernel(Kernel):
                     f"{accumulator_weight} = tl.zeros({self.dense_size_str()}, {acc_type})"
                 )
 
-                mean, m2, weight = value
-                self.compute.splice(
-                    f"""\
-                {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers._welford_combine(
-                    {accumulator}, {accumulator_m2}, {accumulator_weight},
-                    {mean}, {m2}, {weight}
-                )
+                if reduction_type == "welford_combine":
+                    mean, m2, weight = value
+                    self.compute.splice(
+                        f"""\
+                    {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_combine(
+                        {accumulator}, {accumulator_m2}, {accumulator_weight},
+                        {mean}, {m2}, {weight}
+                    )
 
-                {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
-                {accumulator_m2} = tl.where({cond}, {accumulator_m2}_next, {accumulator_m2})
-                {accumulator_weight} = tl.where({cond}, {accumulator_weight}_next, {accumulator_weight})
-                """
-                )
+                    {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
+                    {accumulator_m2} = tl.where({cond}, {accumulator_m2}_next, {accumulator_m2})
+                    {accumulator_weight} = tl.where({cond}, {accumulator_weight}_next, {accumulator_weight})
+                    """
+                    )
+                else:
+                    assert reduction_type == "welford_reduce"
+                    self.compute.splice(
+                        f"""\
+                    {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_reduce(
+                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight},
+                    )
+
+                    {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
+                    {accumulator_m2} = tl.where({cond}, {accumulator_m2}_next, {accumulator_m2})
+                    {accumulator_weight} = tl.where({cond}, {accumulator_weight}_next, {accumulator_weight})
+                    """
+                    )
+
                 result_mean = result_var
                 result_m2 = self.cse.newvar()
                 result_weight = self.cse.newvar()
@@ -2485,7 +2534,7 @@ class TritonScheduling:
             if perf_hint_log.level <= logging.WARNING:
                 for node in EnableReduction.filter(node_schedule):
                     if len(cls.candidate_tilings(node)) > 0:
-                        perf_hint_log.warning("reduction over non-contiguous dims")
+                        perf_hint_log.info("reduction over non-contiguous dims")
                         break
             return (numel, reduction_numel)
 
@@ -2524,7 +2573,7 @@ class TritonScheduling:
                     break  # only 1 choice for now
 
         if len(ranked_tilings) > 1:
-            perf_hint_log.warning("possibly bad tiling: %s", ranked_tilings)
+            perf_hint_log.info("possibly bad tiling: %s", ranked_tilings)
 
         for tiled_groups in ranked_tilings:
             new_groups = (*tiled_groups, reduction_numel)

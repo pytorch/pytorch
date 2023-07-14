@@ -140,11 +140,11 @@ class KernelFormatterHandler:
         return inner
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        num_values = len(value) if isinstance(value, tuple) else 1
-        varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
+        num_values = 3 if "welford" in reduction_type else 1
+        varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
         self.output.writeline(f"{','.join(varnames)} = {line}")
-        return tuple(varnames)
+        return tuple(varnames) if num_values > 1 else varnames[0]
 
     def getvalue(self, result):
         self.output.writeline(f"return {result}")

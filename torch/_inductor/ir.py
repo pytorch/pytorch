@@ -113,8 +113,7 @@ def validate_ir(node_or_nodes):
                     DynamicScalar,
                     TensorBox,
                     sympy.Symbol,
-                    sympy.core.relational.Relational,
-                    sympy.core.relational.Unequality,
+                    sympy.logic.boolalg.Boolean,
                     Expr,
                     torch._inductor.ir.ExpandView,
                 ),
@@ -936,7 +935,7 @@ class Reduction(Loops):
         )
 
     @staticmethod
-    def default_value(reduction_type, dtype):
+    def default_accumulator(reduction_type, dtype):
         if reduction_type in {"max", "argmax"}:
             if is_float_dtype(dtype):
                 return float("-inf")
@@ -957,8 +956,15 @@ class Reduction(Loops):
             "prod": 1,
             "xor_sum": 0,
             "any": 0,
-            "welford": (0, 0, 0),
+            "welford_reduce": (0, 0, 0),
+            "welford_combine": (0, 0, 0),
         }[reduction_type]
+
+    @staticmethod
+    def default_value(reduction_type, dtype):
+        if reduction_type == "welford_reduce":
+            return 0
+        return Reduction.default_accumulator(reduction_type, dtype)
 
     @classmethod
     def create_multilayer(
@@ -1065,6 +1071,10 @@ class Reduction(Loops):
         )
 
 
+def num_reduction_outputs(reduction_type):
+    return 3 if "welford" in reduction_type else 1
+
+
 class WelfordReduction(Reduction):
     output_index: int
 
@@ -1072,26 +1082,24 @@ class WelfordReduction(Reduction):
         self,
         device,
         dtype,
-        mean_fn,
-        m2_fn,
-        weight_fn,
+        inner_fns,
         ranges,
         reduction_ranges,
         reduction_type,
         reduction_hint,
         output_index,
     ):
-        def inner_fn(idx, reduction_idx):
-            return (
-                mean_fn(idx, reduction_idx),
-                m2_fn(idx, reduction_idx),
-                weight_fn(idx, reduction_idx),
-            )
+        if len(inner_fns) == 1:
+            loader = inner_fns[0]
+        else:
+
+            def loader(idx, reduction_idx):
+                return tuple(fn(idx, reduction_idx) for fn in inner_fns)
 
         super().__init__(
             device,
             dtype,
-            inner_fn,
+            loader,
             ranges,
             reduction_ranges,
             reduction_type,
@@ -1107,6 +1115,7 @@ class WelfordReduction(Reduction):
             self.reduction_type,
             self.inner_fn(vars, reduction_vars),
         )
+        print(values)
         value = values[self.output_index]
         return ops.store_reduction(output_name, indexer(vars), value)
 
@@ -1115,31 +1124,28 @@ class WelfordReduction(Reduction):
         cls,
         device: torch.device,
         dtype: torch.dtype,
-        mean_fn: Callable[..., Any],
-        m2_fn: Callable[..., Any],
-        weight_fn: Callable[..., Any],
+        inner_fns: Sequence[Callable[..., Any]],
         ranges: List[Expr],
         reduction_ranges: List[Expr],
         reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
-        assert reduction_type == "welford"
+        assert reduction_type in {"welford_reduce", "welford_combine"}
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
+        def const(idx, val):
+            def inner_fn(idx):
+                return ops.constant(val, dst_dtype)
+
+            return Pointwise.create(
+                device=device,
+                dtype=dtype,
+                inner_fn=inner_fn,
+                ranges=list(ranges),
+            )
+
         if reduction_numel == 0:
-
-            def const(idx, val):
-                def inner_fn(idx):
-                    return ops.constant(val, dst_dtype)
-
-                return Pointwise.create(
-                    device=device,
-                    dtype=dtype,
-                    inner_fn=inner_fn,
-                    ranges=list(ranges),
-                )
-
             mean = const(0)
             m2 = const(0)
             weight = const(0)
@@ -1159,7 +1165,10 @@ class WelfordReduction(Reduction):
                     ranges=list(ranges),
                 )
 
-            return copy(mean_fn), copy(m2_fn), copy(weight_fn)
+            if reduction_type == "welford_reduce":
+                return copy(inner_fns[0]), const(0), const(1)
+            else:
+                return tuple(copy(fn) for fn in inner_fns)
 
         # TODO: Unrolled reduction
         # if (
@@ -1182,7 +1191,7 @@ class WelfordReduction(Reduction):
             device,
             dtype,
             dtype,
-            mean_fn,
+            inner_fns[0],
             ranges,
             reduction_ranges,
             reduction_type=reduction_type,
@@ -1198,9 +1207,7 @@ class WelfordReduction(Reduction):
             return cls.create_multilayer(
                 device,
                 dtype,
-                mean_fn,
-                m2_fn,
-                weight_fn,
+                inner_fns,
                 ranges,
                 reduction_ranges,
                 reduction_type,
@@ -1213,9 +1220,7 @@ class WelfordReduction(Reduction):
                 WelfordReduction(
                     device,
                     dtype,
-                    mean_fn,
-                    m2_fn,
-                    weight_fn,
+                    inner_fns,
                     ranges,
                     reduction_ranges,
                     reduction_type,
@@ -1238,9 +1243,7 @@ class WelfordReduction(Reduction):
         cls,
         device: torch.device,
         dtype: torch.dtype,
-        mean_fn: Callable[..., Any],
-        m2_fn: Callable[..., Any],
-        weight_fn: Callable[..., Any],
+        inner_fns: Sequence[Callable[..., Any]],
         ranges: List[Expr],
         reduction_ranges: List[Expr],
         reduction_type: str,
@@ -1274,6 +1277,27 @@ class WelfordReduction(Reduction):
 
         reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
 
+        if need_mask and reduction_type != "welford_combine":
+
+            def constant(idx, reduction_idx, value):
+                return ops.constant(value, dtype)
+
+            return cls.create_multilayer(
+                device=device,
+                dst_dtype=dst_dtype,
+                src_dtype=src_dtype,
+                inner_fns=(
+                    inner_fn[0],
+                    partial(constant, value=0),
+                    partial(constant, value=1),
+                ),
+                ranges=ranges,
+                reduction_ranges=reduction_ranges,
+                reduction_type="welford_combine",
+                split=split,
+                reduction_hint=reduction_hint,
+            )
+
         def wrapper_fn(index, reduction_index, loader):
             (reduction_index,) = reduction_index
             *new_index, reduction_block = index
@@ -1294,9 +1318,7 @@ class WelfordReduction(Reduction):
         intermediates = WelfordReduction.create(
             device,
             dtype,
-            partial(wrapper_fn, loader=mean_fn),
-            partial(wrapper_fn, loader=m2_fn),
-            partial(wrapper_fn, loader=weight_fn),
+            tuple(partial(wrapper_fn, loader=loader) for loader in inner_fns),
             [*ranges, split],
             [block_size],
             reduction_type,
@@ -1305,13 +1327,10 @@ class WelfordReduction(Reduction):
         for i in intermediates:
             i.realize()
 
-        def intermediate_wrapper_fn(index, reduction_index, loader):
-            return loader([*index, *reduction_index])
+        i_loaders = [i.make_loader() for i in intermediates]
 
-        new_mean_fn, new_m2_fn, new_weight_fn = [
-            partial(intermediate_wrapper_fn, loader=i.make_loader())
-            for i in intermediates
-        ]
+        def intermediate_loader_fn(index, reduction_index, loader):
+            return loader([*index, *reduction_index])
 
         numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
         if split <= 512 and numel_hint <= 512 and reduction_hint == ReductionHint.OUTER:
@@ -1325,12 +1344,11 @@ class WelfordReduction(Reduction):
         return WelfordReduction.create(
             device,
             dtype,
-            new_mean_fn,
-            new_m2_fn,
-            new_weight_fn,
+            tuple(partial(intermediate_loader_fn, loader=i.make_loader()) for i in intermediates),
             ranges,
             [split],
-            reduction_type,
+            # welford_reduce turns one input into three outputs, which are combined with welford_combine
+            "welford_combine",
             reduction_hint,
         )
 
@@ -2991,7 +3009,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, (sympy.Expr, sympy.Rel, int)):
+        if isinstance(x, (sympy.Expr, sympy.logic.boolalg.Boolean, int)):
             return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
@@ -3301,17 +3319,36 @@ class ScatterFallback(ExternKernel):
         else:
             (x, index) = [t.codegen_reference() for t in self.inputs]
             src = self.constant_args[1]
-        line = f"{self.kernel}({x}, {self.constant_args[0]}, {index}, {src}"
-        if self.kernel == "aten.scatter_":
-            if self.kwargs["reduce"]:
-                line += f", reduce={repr(self.kwargs['reduce'])}"
-        else:
-            line += ", ".join([""] + self.codegen_kwargs())
-        line += ")"
-        wrapper.writeline(line)
+        wrapper.generate_scatter_fallback(
+            x,
+            [x, self.constant_args[0], index, src],
+            self.kernel,
+            self.fn,
+            self.src_is_tensor,
+            self.kwargs["reduce"],
+            self.codegen_kwargs(),
+        )
 
     def should_allocate(self):
         return False
+
+    def get_cpp_kernel(self, fn, reduce):
+        if fn == "aten.scatter_":
+            if self.src_is_tensor:
+                kernel = (
+                    "at::scatter_out" if reduce is None else "at::scatter_reduce_out"
+                )
+            else:
+                assert (
+                    reduce is None
+                ), "Expect reduce to be None for aten.scatter_ with scalar src"
+                kernel = "at::scatter_out"
+        else:
+            assert (
+                reduce is not None
+            ), "Expect reduce to be not None for aten.scatter_reduce_"
+            kernel = "at::scatter_reduce_out"
+        return kernel
 
     def __init__(
         self,
@@ -3325,8 +3362,18 @@ class ScatterFallback(ExternKernel):
         include_self: bool = True,
     ):
         assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
-        self.kernel = fn
         self.src_is_tensor = isinstance(src, TensorBox)
+
+        if V.graph.cpp_wrapper:
+            # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
+            get_operator_enum = {"add": "sum", "multiply": "prod"}
+            if reduce in get_operator_enum:
+                reduce = get_operator_enum[reduce]
+            self.kernel = self.get_cpp_kernel(fn, reduce)
+        else:
+            self.kernel = fn
+        self.fn = fn
+
         constant_args: Tuple[Any, ...]
         if self.src_is_tensor:
             tensors = [self.realize_input(t) for t in [x, index, src]]
@@ -3341,6 +3388,7 @@ class ScatterFallback(ExternKernel):
             constant_args,
             {"reduce": reduce, "include_self": include_self},
         )
+        self.ordered_kwargs_for_cpp_kernel = ["reduce", "include_self"]
         self.name = V.graph.register_buffer(self)
 
 
@@ -3471,13 +3519,6 @@ class FallbackKernel(ExternKernelAlloc):
                 )
         else:
             if V.graph.cpp_wrapper:
-                from torch._inductor.codegen.wrapper import (
-                    SUPPORTED_FALLBACK_CPP_WRAPPER,
-                )
-
-                assert (
-                    kernel.__name__ in SUPPORTED_FALLBACK_CPP_WRAPPER
-                ), f"{kernel.__name__} is not supported with cpp wrapper"
                 self.use_cpp_op_schema = True
                 self.set_cpp_kernel(kernel)
             else:
@@ -4771,8 +4812,8 @@ class LoopBodyBlock:
 
             def reduction(self, dtype, src_dtype, reduction_type, value):
                 result = self._inner.reduction(dtype, src_dtype, reduction_type, value)
-                if isinstance(value, tuple):
-                    return [result[i] for i in range(len(value))]
+                if "welford" in reduction_type:
+                    return tuple(result[i] for i in range(3))
                 return result
 
             def index_expr(self, index, dtype):
