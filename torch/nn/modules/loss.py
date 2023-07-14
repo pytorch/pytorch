@@ -1439,7 +1439,7 @@ class TripletMarginLoss(_Loss):
     .. math::
         d(x_i, y_i) = \left\lVert {\bf x}_i - {\bf y}_i \right\rVert_p
 
-    The norm is calculated using the specified p value and a small constant :math:`\varepsilon` is 
+    The norm is calculated using the specified p value and a small constant :math:`\varepsilon` is
     added for numerical stability.
 
     See also :class:`~torch.nn.TripletMarginWithDistanceLoss`, which computes the
