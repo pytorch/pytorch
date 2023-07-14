@@ -15,6 +15,7 @@ import torch
 import torch._logging
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.value_ranges import ValueRanges
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path
@@ -115,8 +116,8 @@ def triton_constant(value):
 
 
 class TritonCSEVariable(CSEVariable):
-    def __init__(self, name):
-        super().__init__(name)
+    def __init__(self, name, bounds: ValueRanges):
+        super().__init__(name, bounds)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: Set[str] = set()
 
@@ -259,6 +260,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def index_expr(expr, dtype):
         index_str, mask_vars, mask, expand_str = V.kernel.indexing(expr)
+        # This is called from CSEProxy.__getattr__,  so we'll set the bounds there
         var = V.kernel.cse.generate(V.kernel.compute, index_str)
         var.mask_vars = mask_vars
         return var
@@ -760,8 +762,8 @@ class TritonKernel(Kernel):
         self.outside_loop_vars = set()
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
-        self.indirect_max_sizes_expr = {}  # Upper bounds for indirect_indexing
-        self.indirect_max_sizes_printed = {}  # Upper bounds, printed as a string
+        # Upper bounds for indirect_indexing and their str representation
+        self.indirect_max_sizes: Dict[Tuple[str, str], [sympy.Expr, str]] = {}
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
@@ -1181,11 +1183,28 @@ class TritonKernel(Kernel):
                 self.size_map = size_map
 
             def __call__(self):
-                # The conditions need to be in parens because of Python's operator precedence.
-                # It'd be less # error-prone to use and/or/not, which is suported by triton
-                size = self.size_map[(self.var, self.mask)]
-                cond = f"(0 <= {self.var}) & ({self.var} < {size})"
-                cond_print = f"0 <= {self.var} < {size}"
+                size, size_str = self.size_map[(self.var, self.mask)]
+
+                # We assert if we've not been able to prove the bound
+                assert_min = (self.var.bounds.lower >= 0) != sympy.true
+                assert_max = (self.var.bounds.upper < size) != sympy.true
+
+                # FooBar interview question
+                if not (assert_min or assert_max):
+                    return None
+                elif assert_min and assert_max:
+                    # The conditions need to be in parens because of Python's operator precedence.
+                    # It'd be less error-prone to use and/or/not, which is suported by triton
+                    cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
+                    cond_print = f"0 <= {self.var} < {size_str}"
+                elif assert_min:
+                    cond = f"0 <= {self.var}"
+                    cond_print = cond
+                else:
+                    assert assert_max
+                    cond = f"{self.var} < {size_str}"
+                    cond_print = cond
+
                 if self.mask:
                     cond = f"({cond}) | ~{self.mask}"
                 return self.line.format(cond=cond, cond_print=cond_print)
@@ -1213,20 +1232,17 @@ class TritonKernel(Kernel):
 
             # An assertion line may have been written already, if so just
             # update the max size.
-            map_key = (str(var), mask)
-            existing_size = self.indirect_max_sizes_expr.get(map_key)
+            map_key = (var, mask)
+            existing_size, _ = self.indirect_max_sizes.get(map_key, (None, None))
             if existing_size is not None:
                 size = sympy.Min(size, existing_size)
             else:
                 line = 'tl.device_assert({cond}, "index out of bounds: {cond_print}")'
                 self.compute.writeline(
-                    IndirectAssertLine(
-                        line, str(var), mask, self.indirect_max_sizes_printed
-                    )
+                    IndirectAssertLine(line, var, mask, self.indirect_max_sizes)
                 )
 
-            self.indirect_max_sizes_expr[map_key] = size
-            self.indirect_max_sizes_printed[map_key] = self.index_to_str(size)
+            self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
 
         return sympy_symbol(str(var))
 
