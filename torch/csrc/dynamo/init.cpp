@@ -1,9 +1,9 @@
 #include <torch/csrc/dynamo/init.h>
 
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/dynamo/compiled_autograd_py.h>
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/guards.h>
+#include <torch/csrc/dynamo/python_compiled_autograd.h>
 
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, NULL};
@@ -29,7 +29,7 @@ void initDynamoBindings(PyObject* torch) {
   }
 
   PyObject* compiled_autograd = torch_c_dynamo_compiled_autograd_init();
-  if (compiled_autograd == NULL ||
+  if (compiled_autograd == nullptr ||
       PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) != 0) {
     throw python_error();
   }

@@ -31,7 +31,7 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 
 #ifndef _WIN32
 // Windows build fails due to 65536 symbol limit
-#define COMPILED_AUTOGRAD
+#define TORCH_COMPILED_AUTOGRAD
 #endif
 
 namespace torch {
@@ -559,7 +559,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return false;
   }
 
-#ifdef COMPILED_AUTOGRAD
+#ifdef TORCH_COMPILED_AUTOGRAD
   // see [Note: Compiled Autograd]
   // Used by compiled autograd to
   //   1) Extract tensors/symint args

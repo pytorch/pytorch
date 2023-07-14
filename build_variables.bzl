@@ -823,7 +823,7 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_torch_functions_manual.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
-    "torch/csrc/dynamo/compiled_autograd_py.cpp",
+    "torch/csrc/dynamo/python_compiled_autograd.cpp",
     "torch/csrc/dynamo/cpython_defs.c",
     "torch/csrc/dynamo/eval_frame.c",
     "torch/csrc/dynamo/guards.cpp",

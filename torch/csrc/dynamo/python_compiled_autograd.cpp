@@ -1,4 +1,4 @@
-#include <torch/csrc/dynamo/compiled_autograd_py.h>
+#include <torch/csrc/dynamo/python_compiled_autograd.h>
 
 #include <torch/csrc/autograd/compiled_autograd.h>
 #include <torch/csrc/autograd/engine.h>
@@ -39,20 +39,16 @@ method, and after() restores things to how we found them.
 When we see tensor hooks, we record them directly in the output graph
 without tracing into them.  We do this to avoid executing unsafe code
 at trace time.
+
+Notes:
+  - We require hooks to not change shapes of tensors.
+  - We require non-hook autograd nodes to be tracable.
 */
 
 namespace torch {
 namespace dynamo {
 using namespace torch::autograd;
 using c10::SymInt;
-
-static PyObject* wrap_variable_list(const variable_list& inputs) {
-  PyObject* pyinput = PyList_New(inputs.size());
-  for (const auto i : c10::irange(inputs.size())) {
-    PyList_SET_ITEM(pyinput, i, THPVariable_Wrap(inputs[i]));
-  }
-  return pyinput;
-}
 
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyTuple_New(inputs.size());
@@ -71,16 +67,6 @@ static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
   return pyinput;
 }
 
-static variable_list unwrap_variable_list(PyObject* pyresult) {
-  TORCH_CHECK(PyList_CheckExact(pyresult));
-  auto result_len = PyList_GET_SIZE(pyresult);
-  variable_list result;
-  result.reserve(result_len);
-  for (const auto i : c10::irange(result_len)) {
-    result.emplace_back(THPVariable_Unpack(PyList_GET_ITEM(pyresult, i)));
-  }
-  return result;
-}
 static PyObject* check(PyObject* pyresult) {
   if (C10_UNLIKELY(pyresult == nullptr)) {
     // see https://github.com/pytorch/pytorch/pull/34845
@@ -97,6 +83,8 @@ static void check(bool result) {
 }
 
 struct CacheNode {
+  // A node in the shadow graph, we follow next edges until we reach the end of
+  // the graph
   static CacheNode* root() {
     static CacheNode _root;
     return &_root;
@@ -107,7 +95,7 @@ struct CacheNode {
     if (it == next.end()) {
       // caller's key is in temporary memory, must copy it
       CacheKeyBuffer buffer(key.key, key.key_size);
-      CacheKey key_with_storage(key.node_type, buffer.data, key.key_size);
+      CacheKey key_with_storage(key.node_type, buffer.get(), key.key_size);
       it = next.emplace(key_with_storage, std::make_unique<CacheNode>()).first;
       key_storage.emplace_back(std::move(buffer));
     }
@@ -171,6 +159,8 @@ struct CacheNode {
     }
 
     if (!cache_hit) {
+      // we missed cache because static size inputs didn't match; force
+      // recompilation with the varying size input as dynamic
       compiled_fn = nullptr;
     }
     return cache_hit;
@@ -254,7 +244,7 @@ static TraceState call_begin_capture(
     AutogradCompilerCall& compiler_call,
     size_t num_outputs) {
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
-  THPObjectPtr pyinput(wrap_variable_list(compiler_call.inputs));
+  THPObjectPtr pyinput(TPHVariable_WrapList(compiler_call.inputs));
   THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       self, method_name, pyinput.get(), pysizeinput.get(), NULL)));
@@ -262,7 +252,7 @@ static TraceState call_begin_capture(
   PyObject *fake_inputs, *fake_sizes;
   check(PyArg_ParseTuple(pyresult.get(), "OO", &fake_inputs, &fake_sizes));
   return TraceState(
-      unwrap_variable_list(fake_inputs),
+      TPHVariable_UnpackList(fake_inputs),
       cache.unwrap_dynamic_inputs(fake_sizes),
       compiler_call.accumulate_grad,
       num_outputs);
@@ -270,7 +260,7 @@ static TraceState call_begin_capture(
 
 static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
   static PyObject* method_name = PyUnicode_InternFromString("end_capture");
-  THPObjectPtr pyinput(wrap_variable_list(inputs));
+  THPObjectPtr pyinput(TPHVariable_WrapList(inputs));
   return check(PyObject_CallMethodOneArg(self, method_name, pyinput.get()));
 }
 
@@ -421,7 +411,7 @@ variable_list compiled_autograd(
       if (call.tensor_pre_hooks.size() + call.pre_hooks.size() > 0) {
         // TODO(jansel): we should lift hooks to be inputs to the graph since we
         // are not specializing on them
-        THPObjectPtr pyinputs(wrap_variable_list(inputs));
+        THPObjectPtr pyinputs(TPHVariable_WrapList(inputs));
         for (const auto& hook : call.tensor_pre_hooks) {
           pyinputs = check(PyObject_CallMethod(
               py_compiler,
@@ -435,15 +425,15 @@ variable_list compiled_autograd(
           pyinputs = check(PyObject_CallMethod(
               py_compiler.get(), "pre_hook", "Oi", pyinputs.get(), hook));
         }
-        inputs = unwrap_variable_list(pyinputs);
+        inputs = TPHVariable_UnpackList(pyinputs);
       }
 
       SwapSavedVariables saved(state, call.node);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
 
       if (call.post_hooks.size() > 0) {
-        THPObjectPtr pyinputs(wrap_variable_list(inputs));
-        THPObjectPtr pyoutputs(wrap_variable_list(outputs));
+        THPObjectPtr pyinputs(TPHVariable_WrapList(inputs));
+        THPObjectPtr pyoutputs(TPHVariable_WrapList(outputs));
         for (const auto hook : call.post_hooks) {
           pyoutputs = check(PyObject_CallMethod(
               py_compiler.get(),
@@ -453,13 +443,14 @@ variable_list compiled_autograd(
               pyinputs.get(),
               hook));
         }
-        outputs = unwrap_variable_list(pyoutputs);
+        outputs = TPHVariable_UnpackList(pyoutputs);
       }
 
       node_outputs.emplace_back(std::move(outputs));
     }
 
     cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
+    state.debug_asserts();
   }
 
   // TODO(jansel): we should release all the variables and then use a
@@ -469,7 +460,7 @@ variable_list compiled_autograd(
   }
 
   {
-    THPObjectPtr inputs(wrap_variable_list(compiler_call.inputs));
+    THPObjectPtr inputs(TPHVariable_WrapList(compiler_call.inputs));
     THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
     THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
     THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
@@ -478,7 +469,7 @@ variable_list compiled_autograd(
         sizes.get(),
         hooks.get(),
         NULL)));
-    variable_list outputs = unwrap_variable_list(pyresult);
+    variable_list outputs = TPHVariable_UnpackList(pyresult);
     if (accumulate_grad) {
       TORCH_CHECK(outputs.size() == compiler_call.set_grad_targets.size());
       for (const auto i : c10::irange(outputs.size())) {

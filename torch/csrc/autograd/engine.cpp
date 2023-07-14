@@ -81,18 +81,20 @@ static std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd =
     nullptr;
 static std::atomic<int32_t> num_threads_in_backwards;
 struct CompiledAutogradThreadingDebugCheck {
-  CompiledAutogradThreadingDebugCheck() : active(true) {
+  CompiledAutogradThreadingDebugCheck() : incremented(true) {
     num_threads_in_backwards++;
   }
   ~CompiledAutogradThreadingDebugCheck() {
     release();
   }
   void release() {
-    if (std::exchange(active, false)) {
+    if (std::exchange(incremented, false)) {
       num_threads_in_backwards--;
     }
   }
-  bool active;
+
+ private:
+  bool incremented;
 };
 
 } // namespace
@@ -1361,9 +1363,12 @@ Engine& Engine::get_default_engine() {
 }
 
 void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
-  the_compiled_autograd.store(fn);
+  bool ok = num_threads_in_backwards.load() == 0;
+  if (ok) {
+    the_compiled_autograd.store(fn);
+  }
   TORCH_CHECK(
-      num_threads_in_backwards.load() == 0,
+      ok && num_threads_in_backwards.load() == 0, // double check for race
       "compiled_autograd.enable() requires no threads in backwards()")
 }
 

@@ -53,7 +53,7 @@ struct TORCH_API ${op} : public ${superclass} {
     ${release_variables}
   }
   ${will_release_variables}
-#ifdef COMPILED_AUTOGRAD
+#ifdef TORCH_COMPILED_AUTOGRAD
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
 #endif
@@ -83,7 +83,7 @@ variable_list ${op}::apply(variable_list&& grads) {
   ${body}
   return grad_inputs;
 }
-#ifdef COMPILED_AUTOGRAD
+#ifdef TORCH_COMPILED_AUTOGRAD
 void ${op}::compiled_args(CompiledNodeArgs& args) {
     ${compiled_args}
 }

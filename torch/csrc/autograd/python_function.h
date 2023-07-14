@@ -35,7 +35,7 @@ struct PyNode : public Node {
   std::string name() const override;
   bool is_traceable() override;
 
-#ifdef COMPILED_AUTOGRAD
+#ifdef TORCH_COMPILED_AUTOGRAD
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
       const variable_list& inputs,
@@ -99,6 +99,13 @@ struct THPFunction {
   // into tensors full of zeros. Set by Python with 'set_materialize_grads'.
   // Default is true.
   bool materialize_grads;
+
+  // boolean indicating whether to materialize output grad tensors
+  // corresponding to non-differentiable outputs. Normally, someone would
+  // already get this behavior by switching off materialize_grads,
+  // but there are certain use cases where that is not feasible:
+  // https://github.com/pytorch/pytorch/pull/98659#pullrequestreview-1376822560
+  bool materialize_non_diff_grads;
 
   // Cause AotAutograd to call the original FX graph rather than compiling.
   bool compiled_autograd_tracing;

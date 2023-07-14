@@ -64,7 +64,7 @@ auto ImplicitAdd::apply(variable_list&& grads) -> variable_list {
   return tensor_list{result};
 }
 
-#ifdef COMPILED_AUTOGRAD
+#ifdef TORCH_COMPILED_AUTOGRAD
 variable_list ImplicitAdd::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {

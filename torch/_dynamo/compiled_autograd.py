@@ -61,7 +61,7 @@ class AutogradCompilerInstance:
 
         # size inputs to symints
         sizes = [
-            self.shape_env.create_symint_and_symbol(
+            self.shape_env.create_unspecified_symint_and_symbol(
                 val,
                 self.source("sizes", idx),
                 DimDynamic.DYNAMIC,

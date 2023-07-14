@@ -6,6 +6,8 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import HAS_CPU
 
+# note: these tests are not run on windows due to inductor_utils.HAS_CPU
+
 
 def compiler_fn(gm):
     """Same as torch.compile() but counts number of compiles"""
@@ -18,8 +20,6 @@ def compiler_fn(gm):
 
 
 # TODO(jansel): hooks as lambdas creates recompiles in dynamo, we should fix that
-
-
 def hook1(grad):
     return grad * 2
 

@@ -16,6 +16,7 @@ struct TypeAndSize;
 }
 
 struct SizeInput {
+  // Note: int value is still needed when dynamic to pass as an arg
   enum DynType : uint8_t { STATIC = 0, DYNAMIC = 1 };
   SizeInput(DynType dt, int64_t v) : dyn_type(dt), value(v) {}
   DynType dyn_type;
@@ -23,21 +24,15 @@ struct SizeInput {
 };
 
 struct CacheKeyBuffer {
-  CacheKeyBuffer() : data(nullptr) {}
   CacheKeyBuffer(const uint8_t* key, uint16_t len) : data(new uint8_t[len]) {
-    std::memcpy(data, key, len);
+    std::memcpy(data.get(), key, len);
   }
-  CacheKeyBuffer(CacheKeyBuffer&& other)
-      : data(std::exchange(other.data, nullptr)) {}
-  ~CacheKeyBuffer() {
-    if (data != nullptr) {
-      delete[] data;
-    }
+  const uint8_t* get() const {
+    return data.get();
   }
-  CacheKeyBuffer(const CacheKeyBuffer& other) = delete;
-  CacheKeyBuffer& operator=(const CacheKeyBuffer&) = delete;
 
-  uint8_t* data;
+ private:
+  std::unique_ptr<uint8_t[]> data;
 };
 
 struct CacheKey {
@@ -74,7 +69,6 @@ struct CacheKey {
 struct OutputRef {
   OutputRef() : node_id(-1), index(-1) {}
   OutputRef(int node_, int index_) : node_id(node_), index(index_) {}
-
   bool is_set() const {
     return this->node_id >= 0;
   }
@@ -84,29 +78,22 @@ struct OutputRef {
 };
 
 struct NodeCall {
-  NodeCall(const std::shared_ptr<Node>& node_)
-      : node(node_), input_refs(node_->num_inputs()) {}
-
-  NodeCall(const std::shared_ptr<Node>& node_, int num_inputs_)
-      : node(node_), input_refs(num_inputs_) {}
-
+  NodeCall(std::shared_ptr<Node> node_)
+      : node(std::move(node_)), input_refs(node->num_inputs()) {}
+  NodeCall(std::shared_ptr<Node> node_, int num_inputs_)
+      : node(std::move(node_)), input_refs(num_inputs_) {}
   OutputRef& operator[](size_t pos) {
     return input_refs[pos];
   }
-
   size_t size() const {
     return input_refs.size();
   }
-
   void mark_output(int input_nr, int output_idx) {
     graph_output.emplace_back(std::make_pair(input_nr, output_idx));
   }
 
   std::shared_ptr<Node> node;
-  // at::SmallVector??
-  std::vector<OutputRef> input_refs;
-
-  // borrowed references
+  std::vector<OutputRef> input_refs; // at::SmallVector??
   std::vector<std::pair<int, int>> tensor_pre_hooks;
   std::vector<int> pre_hooks;
   std::vector<int> post_hooks;
@@ -211,7 +198,7 @@ class CompiledNodeArgs {
       collect(c.real());
       collect(c.imag());
     } else {
-      TORCH_CHECK(false);
+      TORCH_INTERNAL_ASSERT(false);
     }
   }
   void collect(const c10::TensorOptions& t) {
@@ -398,21 +385,14 @@ struct TraceState {
         sym_sizes(ss),
         outputs(num_outputs),
         accumulate_grad(accumulate_grad_) {}
-
-  ~TraceState() {
-    if (C10_UNLIKELY(proxy_inputs_index != proxy_inputs.size())) {
-      TORCH_WARN("not all proxy_inputs consumed")
-    }
-    if (C10_UNLIKELY(sym_sizes_index != sym_sizes.size())) {
-      TORCH_WARN("not all sym_sizes consumed")
-    }
+  void debug_asserts() {
+    TORCH_INTERNAL_ASSERT(proxy_inputs_index == proxy_inputs.size());
+    TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
   }
-
   const at::Tensor& next_proxy_input() {
     TORCH_CHECK(proxy_inputs_index < proxy_inputs.size());
     return proxy_inputs[proxy_inputs_index++];
   }
-
   c10::optional<c10::SymInt> next_sym_size() {
     TORCH_CHECK(sym_sizes_index < sym_sizes.size());
     return sym_sizes[sym_sizes_index++];
