@@ -269,6 +269,11 @@ class DTensorTest(DTensorTestBase):
 
         # Assert that output is a `AsyncCollectiveTensor`
         self.assertEqual(type(out_view), AsyncCollectiveTensor)
+        ref = torch.ones(8) + 1
+        # Use the data, requiring a sync
+        out_data = out_view + 1
+        self.assertEqual(type(out_data), torch.Tensor)
+        self.assertEqual(out_data, ref)
 
     @with_comms
     def test_from_local_then_to_local(self):
