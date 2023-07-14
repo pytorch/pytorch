@@ -612,32 +612,84 @@ void replication_pad1d_backward_kernel_impl(
 
 void replication_pad2d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
   PaddingParams param{input, output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad2d", [&] {
-    cpu_padding<scalar_t, ReplicationPad>(output, input, param);
-  });
+  switch (input.suggest_memory_format()) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad2d", [&] {
+        cpu_padding<scalar_t, ReplicationPad>(output, input, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad2d_channels_last", [&]{
+        cpu_padding_channels_last<scalar_t, ReplicationPad>(output, input, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+  }
 }
 
 void replication_pad2d_backward_kernel_impl(
     const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
   PaddingParams param{grad_input, grad_output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad2d_backward", [&] {
-    cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);
-  });
+  switch (grad_output.suggest_memory_format()) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad2d_backward", [&] {
+        cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad2d_backward_channels_last", [&]{
+        cpu_padding_backward_channels_last<scalar_t, ReplicationPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+  }
 }
 
 void replication_pad3d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
   PaddingParams param{input, output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d", [&] {
-    cpu_padding<scalar_t, ReplicationPad>(output, input, param);
-  });
+  switch (padding_memory_format_3d(input)) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d", [&] {
+        cpu_padding<scalar_t, ReplicationPad>(output, input, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast3d: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_channels_last", [&]{
+        cpu_padding_channels_last<scalar_t, ReplicationPad>(output, input, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+  }
 }
 
 void replication_pad3d_backward_kernel_impl(
     const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
   PaddingParams param{grad_input, grad_output, padding};
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad3d_backward", [&] {
-    cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);
-  });
+  switch (padding_memory_format_3d(grad_output)) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad3d_backward", [&] {
+        cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast3d: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad3d_backward_channels_last", [&]{
+        cpu_padding_backward_channels_last<scalar_t, ReplicationPad>(grad_input, grad_output, param);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+  }
 }
 
 } // anonymous namespace
