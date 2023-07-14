@@ -42,6 +42,7 @@ import functools
 import gc
 import itertools
 import logging
+import operator
 import sys
 import threading
 import traceback
@@ -352,13 +353,21 @@ def get_manager(
 
 
 def cudagraphify_impl(model, inputs, static_input_idxs, *args, **kwargs):
-    fn = None
+    fn_cache: Dict[Tuple[int, ...], Callable[..., Any]] = {}
+
+    # Detect int inputs: we need to index on these
+    int_key = [i for i, v in enumerate(inputs) if isinstance(v, int)]
+    get_ints: Any = operator.itemgetter(*int_key) if int_key else lambda _: None
+
     del inputs
 
     def deferred_cudagraphify(inputs):
-        nonlocal fn
+        int_key = get_ints(inputs)
+        fn = fn_cache.get(int_key)
         if fn is not None:
             return fn(inputs)
+
+        log.info("recording cudagraph tree for %s", int_key)
 
         # first get indices we need to check to align, then update our static inputs,
         # and finally copy
@@ -368,6 +377,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs, *args, **kwargs):
 
         fn, out = cudagraphify(model, inputs, new_static_input_idxs, *args, **kwargs)
         fn = align_inputs_from_check_idxs(fn, inputs_to_check=check_input_idxs)
+        fn_cache[int_key] = fn
 
         return out
 
@@ -878,9 +888,9 @@ class CUDAGraphNode:
 
         # Cleared after recording
         self.recording_outputs: Optional[
-            OutputList[Optional[torch.Tensor]]
+            OutputList[Union[torch.Tensor, int]]
         ] = self._record(wrapped_function.model, recording_inputs)
-        self.outputs_metadata: OutputList[Optional[Dict[str, Any]]] = []
+        self.outputs_metadata: OutputList[Union[Dict[str, Any], int, None]] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
         # their memory being reclaimed in subsequent cuda graph recordings. We record the tensor metadata
@@ -892,7 +902,8 @@ class CUDAGraphNode:
                     self._tensor_metadata(out, ignore_storage_offset=False)
                 )
             else:
-                self.outputs_metadata.append(None)
+                assert isinstance(out, (int, type(None))), type(out)
+                self.outputs_metadata.append(out)
 
         self.graph.replay()
 
@@ -956,8 +967,9 @@ class CUDAGraphNode:
         for i, (storage_info, metadata) in enumerate(
             zip(self.output_storage_alias, self.outputs_metadata)
         ):
-            if metadata is None:
-                outputs.append(None)
+            if not isinstance(metadata, dict):  # tensor metadata
+                assert isinstance(metadata, (int, type(None)))
+                outputs.append(metadata)
                 continue
 
             cached_t = self.cached_tensor_outputs[i]
@@ -994,9 +1006,12 @@ class CUDAGraphNode:
     def prepare_alias_info_for_tensor_construction(
         self,
         out_alias_info: Optional[OutputAliasInfo],
-        metadata: Optional[Dict[str, Any]],
+        metadata: Union[Dict[str, Any], int, None],
     ) -> Union[UntypedStorage, None, int]:
-        if metadata is None or out_alias_info is UnaliasedStorage:
+        if (
+            isinstance(metadata, (int, type(None)))
+            or out_alias_info is UnaliasedStorage
+        ):
             return None
 
         if isinstance(out_alias_info, AliasesPriorGraphOutput):
@@ -1196,7 +1211,7 @@ class CUDAGraphNode:
                 continue
 
             assert storage_info is UnaliasedStorage
-            assert metadata is not None
+            assert isinstance(metadata, dict)
             s = self.create_storage(metadata)
             out = self._reconstruct_from_tensor_metadata(metadata, storage=s)
 
