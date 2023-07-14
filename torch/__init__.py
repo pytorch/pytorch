@@ -743,7 +743,8 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
-        * :func:`torch.bincount` when called on a CUDA tensor
+        * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
+          tensor is given
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
