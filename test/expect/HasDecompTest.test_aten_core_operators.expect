@@ -340,8 +340,6 @@ aten::mul.Tensor
 aten::mul.out
 aten::mul_.Scalar
 aten::mul_.Tensor
-aten::multi_margin_loss
-aten::multi_margin_loss.out
 aten::narrow_copy
 aten::narrow_copy.out
 aten::native_dropout
