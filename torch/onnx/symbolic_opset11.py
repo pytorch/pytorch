@@ -469,7 +469,6 @@ def masked_scatter(g: jit_utils.GraphContext, self, mask, source):
         axes=torch.LongTensor([0]),
         starts=torch.LongTensor([0]),
         ends=opset9.size(g, index, torch.LongTensor([0])),
-        dynamic_slice=True,
     )
     return g.op("ScatterND", self, index, source)
 
@@ -1298,9 +1297,7 @@ def im2col(g: jit_utils.GraphContext, input, kernel_size, dilation, padding, str
 @_beartype.beartype
 def narrow(g: jit_utils.GraphContext, input, dim, start, length):
     end = g.op("Add", start, length)
-    return symbolic_helper._slice_helper(
-        g, input, axes=dim, starts=start, ends=end, dynamic_slice=True
-    )
+    return symbolic_helper._slice_helper(g, input, axes=dim, starts=start, ends=end)
 
 
 @_onnx_symbolic("aten::flatten")

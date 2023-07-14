@@ -459,6 +459,8 @@ class ViewAndMutationMeta:
     # pass once, and re-use the output throughout AOTAutograd
     traced_tangents: List[Any]
 
+    num_symints_saved_for_bw: Optional[int] = None
+
     def __post_init__(self):
         mutated_inp_indices = [
             i for i, m in enumerate(self.input_info) if m.mutates_metadata or m.mutates_data
@@ -548,6 +550,32 @@ class ViewAndMutationMeta:
         # independent and simpler to handle. Therefore, we track them
         # separately.
         self.num_outputs_rng_offset = 1 if self.is_rng_op_functionalized else 0
+
+        # Our forward() returns both (mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
+        self.num_forward_returns = self.num_mutated_inputs + self.num_outputs + self.num_intermediate_bases
+        # In case of functionalization of rng ops, the fw_module returns one
+        # additinal output for rng offset. This rng offset is used right
+        # away to advance the rng state, and is not passed on to the raw
+        # outputs. However, we need to know the exact boundary to identify
+        # which tensors to be saved for the bwd graph.  num_forward captures
+        # this information.
+        self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
+
+    @property
+    def tensors_saved_for_backwards_slice(self):
+        assert self.num_symints_saved_for_bw is not None
+        if self.num_symints_saved_for_bw > 0:
+            return slice(self.num_forward, -self.num_symints_saved_for_bw)
+        else:
+            return slice(self.num_forward, None)
+
+    @property
+    def symints_saved_for_backwards_slice(self):
+        assert self.num_symints_saved_for_bw is not None
+        if self.num_symints_saved_for_bw > 0:
+            return slice(-self.num_symints_saved_for_bw, None)
+        else:
+            return slice(0, 0)  # empty slice
 
     def __eq__(self, other):
         if not isinstance(other, ViewAndMutationMeta):
@@ -1884,7 +1912,7 @@ def create_synthetic_base_metadata(
     # generate the requires_grad info on those same mutated inputs, but after constructing synthetic bases.
     input_infos = []
     mutated_inp_require_grad_info = []
-    for _, outer_indices in synthetic_base_to_indices.items():
+    for outer_indices in synthetic_base_to_indices.values():
         # leaf-ness should be all-or-nothing for aliased tensor.
         # (aka if "a" and "b" are views, then a.is_leaf == b.is_leaf)
         any_leaf = any(m.input_info[x].is_leaf for x in outer_indices)
@@ -2686,6 +2714,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             symint_outs_saved_for_bw = [
                 n for n in fw_outs_saved_for_bw if is_sym_node(n)
             ]
+            fw_metadata.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
         # Note [Detaching inputs that never need gradients]
@@ -2767,9 +2796,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 torch._guards.TracingContext.get().fw_metadata = fw_metadata
 
 
-            compiled_fw_func = aot_config.fw_compiler(
-                fw_module, adjusted_flat_args
-            )
+            with TracingContext.report_output_strides() as fwd_output_strides:
+                compiled_fw_func = aot_config.fw_compiler(
+                    fw_module, adjusted_flat_args
+                )
 
 
     saved_context = TracingContext.get()
@@ -2799,12 +2829,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             )
 
             num_outputs = CompiledFunction.metadata.num_outputs
-            num_outputs_aliased_to_inputs = (
-                CompiledFunction.metadata.num_outputs_aliased_to_inputs
-            )
-            num_outputs_aliased_to_intermediates = (
-                CompiledFunction.metadata.num_outputs_aliased_to_intermediates
-            )
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
@@ -2812,42 +2836,28 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             num_mutated_metadata_only_inputs = (
                 CompiledFunction.metadata.num_mutated_metadata_only_inputs
             )
-            num_outputs_rng_offset = CompiledFunction.metadata.num_outputs_rng_offset
-            # Our forward() returns both (mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
-            num_forward_returns = num_mutated_inputs + num_outputs + num_intermediate_bases
-            # In case of functionalization of rng ops, the fw_module returns one
-            # additinal output for rng offset. This rng offset is used right
-            # away to advance the rng state, and is not passed on to the raw
-            # outputs. However, we need to know the exact boundary to identify
-            # which tensors to be saved for the bwd graph.  num_forward captures
-            # this information.
-            num_forward = num_forward_returns + num_outputs_rng_offset
+            num_forward_returns = CompiledFunction.metadata.num_forward_returns
+            num_forward = CompiledFunction.metadata.num_forward
 
             assert num_forward_returns == len(
                 CompiledFunction.metadata.requires_grad_info
             ) + num_intermediate_bases
 
             # Partitioners must put symint arguments at the end separate from tensor arguments
-            if num_symints_saved_for_bw > 0:
-                tensors_saved_for_backwards = fw_outs[
-                    num_forward:-num_symints_saved_for_bw
-                ]
-                assert all(
-                    isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
-                )
-                # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
-                symint_outs = fw_outs[-num_symints_saved_for_bw:]
-                assert all(
-                    isinstance(x, (int, float, torch.SymInt, torch.SymFloat))
-                    for x in symint_outs
-                )
-                ctx.symints = symint_outs
-            else:
-                tensors_saved_for_backwards = fw_outs[num_forward:]
-                # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
-                ctx.symints = []
+            tensors_saved_for_backwards = fw_outs[
+                CompiledFunction.metadata.tensors_saved_for_backwards_slice
+            ]
+            assert all(
+                isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
+            )
+            # See Note [Detaching saved tensors in AOTAutograd]
+            ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
+            symint_outs = fw_outs[CompiledFunction.metadata.symints_saved_for_backwards_slice]
+            assert all(
+                isinstance(x, (int, float, torch.SymInt, torch.SymFloat))
+                for x in symint_outs
+            )
+            ctx.symints = symint_outs
 
             raw_returns = fw_outs[0:num_forward_returns]
 
@@ -2979,10 +2989,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # Add the seed and offset to args
                 rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
-            all_args = (
-                list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args) + list(rng_args)
-            )
-
+            all_args = [
+                *ctx.symints,
+                *ctx.saved_tensors,
+                *contiguous_args,
+                *rng_args
+            ]
             del contiguous_args
 
             def call_compiled_backward():
@@ -2992,20 +3004,35 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
                     placeholder_list = fx_placeholder_vals(bw_module)
 
+                    forward_saved_for_backwards_strides = None
+                    if fwd_output_strides is not None:
+                        forward_saved_for_backwards_strides = fwd_output_strides[
+                            CompiledFunction.metadata.tensors_saved_for_backwards_slice
+                        ]
+
                     # saved activations can have different stride to eager if
                     # the compiler does layout optimization. We should restride the
                     # tensor passed in for compiling the backward graph using the
                     # saved tensor's stride.
                     for i in range(len(placeholder_list)):
                         ph_arg = placeholder_list[i]
-                        real_arg = all_args[i]
                         if not isinstance(ph_arg, torch.Tensor):
                             continue
 
-                        # Comparing ph_arg.stride() with real_arg.stride() directly may
+                        if forward_saved_for_backwards_strides is None:
+                            continue
+
+                        real_stride = None
+                        # Per all_args calling convention
+                        if len(ctx.symints) <= i < len(ctx.symints) + len(forward_saved_for_backwards_strides):
+                            real_stride = forward_saved_for_backwards_strides[i - len(ctx.symints)]
+                        if real_stride is None:
+                            continue
+
+                        # Comparing ph_arg.stride() with real_stride directly may
                         # cause dynamic dimensions in ph_arg being specialized to static
                         # value. Using the hints to avoid that.
-                        if _get_hints(ph_arg.stride()) != real_arg.stride():
+                        if _get_hints(ph_arg.stride()) != real_stride:
                             # Note that here we use the stride of the real tensor to
                             # restride a FakeTensor. This does not cause trouble
                             # for dynamic shape since this code path only get
@@ -3021,7 +3048,15 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                             # (2408448, 1, 21504, 192). The solution mentioned will
                             # decide a stride of (802816, 1, 7168, 64) for this
                             # tensor which is wrong.
-                            placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_arg.stride())
+                            #
+                            # NB: Occasionally, we will do a restride even
+                            # though it is not necessarily.  This concretely
+                            # happens in XLNetLMHeadModel where inductor
+                            # thinks that the tensor will have (1024, 1024, 1)
+                            # stride but it actually gets (1024, 524288, 1).
+                            # The stride difference here is non-substantive
+                            # as dim 1's size is 1.
+                            placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
                     with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(

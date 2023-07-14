@@ -10,6 +10,7 @@ from ._pt2e.utils import (
     _get_node_name_to_scope,
     _fuse_conv_bn_,
     _rearrange_weight_observer_for_decomposed_linear,
+    _replace_dropout_for_eval,
 )
 from ._pt2e.representation import reference_representation_rewrite
 from .fx.prepare import prepare as fx_prepare
@@ -86,6 +87,9 @@ def convert_pt2e(
     model: GraphModule,
     use_reference_representation: bool = False,
 ) -> GraphModule:
+    # TODO: Handle this in export itself, outside of quantization
+    # See https://github.com/pytorch/pytorch/issues/103681.
+    _replace_dropout_for_eval(model)
     model = _convert_to_reference_decomposed_fx(model)
     model = _fold_conv_bn_qat(model)
     if use_reference_representation:
