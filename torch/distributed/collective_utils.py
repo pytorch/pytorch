@@ -160,7 +160,7 @@ def all_gather(
             ret_list.append(sp.payload)
 
         if len(exception_list) > 0:
-            raise RuntimeError(  # type: ignore[misc]
+            raise RuntimeError(
                 error_msg, exception_list) from exception_list[0]
         return ret_list
     else:
@@ -168,7 +168,7 @@ def all_gather(
             raise RuntimeError(
                 f"all_gather failed with exception {sync_obj.exception}",
             ) from sync_obj.exception
-        return [sync_obj.payload]  # type: ignore[list-item]
+        return [sync_obj.payload]
 
 
 # Note: use Any for typing for now so users can pass in

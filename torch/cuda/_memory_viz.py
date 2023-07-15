@@ -455,7 +455,7 @@ def _profile_to_snapshot(profile):
         device = to_device(tensor_key.device)
         addr = tensor_key.storage.ptr
 
-        seg = snapshot['segments'][device]  # type: ignore[index]
+        seg = snapshot['segments'][device]
         if seg['address'] is None or seg['address'] > addr:
             seg['address'] = addr
         seg['total_size'] = max(seg['total_size'], addr + size)  # record max addr for now, we will make it the size later
@@ -465,12 +465,12 @@ def _profile_to_snapshot(profile):
         stack = [{'filename': 'none', 'line': 0, 'name': p.name} for p in stack]
         r = {'action': 'alloc', 'addr': addr, 'size': size, 'stream': 0, 'frames': stack, 'category': category}
         if during_trace:
-            snapshot['device_traces'][device].append(r)  # type: ignore[index]
+            snapshot['device_traces'][device].append(r)
         return r
 
     def free(alloc, device):
         for e in ('free_requested', 'free_completed'):
-            snapshot['device_traces'][device].append({'action': e,  # type: ignore[index]
+            snapshot['device_traces'][device].append({'action': e,
                                                       'addr': alloc['addr'],
                                                       'size': alloc['size'],
                                                       'stream': 0,
@@ -499,7 +499,7 @@ def _profile_to_snapshot(profile):
     blocks_at_end = [(to_device(tensor_key.device), event['addr'], event['size'], event['frames'])
                      for (tensor_key, version), event in kv_to_elem.items()]
     for device, blocks in groupby(sorted(blocks_at_end), key=lambda x: x[0]):
-        seg = snapshot['segments'][device]  # type: ignore[index]
+        seg = snapshot['segments'][device]
         last_addr = seg['address']
         for _, addr, size, frames in blocks:
             if last_addr < addr:
@@ -510,8 +510,8 @@ def _profile_to_snapshot(profile):
         if last_addr < seg['total_size']:
             seg['blocks'].append({'size': seg['total_size'] - last_addr, 'state': 'inactive'})
 
-    snapshot['segments'] = [seg for seg in snapshot['segments'] if seg['blocks']]  # type: ignore[attr-defined]
-    for seg in snapshot['segments']:  # type: ignore[attr-defined, name-defined, no-redef]
+    snapshot['segments'] = [seg for seg in snapshot['segments'] if seg['blocks']]
+    for seg in snapshot['segments']:
         seg['total_size'] -= seg['address']
         if not seg['blocks']:
             seg['blocks'].append({'size': seg['total_size'], 'state': 'inactive'})

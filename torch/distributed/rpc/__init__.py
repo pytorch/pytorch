@@ -17,7 +17,7 @@ _init_counter_lock = threading.Lock()
 
 __all__ = ["is_available"]
 
-def is_available():
+def is_available() -> bool:
     return hasattr(torch._C, "_rpc_init")
 
 
