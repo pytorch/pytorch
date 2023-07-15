@@ -902,6 +902,10 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
     VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
+    // test if runtime API call works...
+    int count;
+    cudaGetDeviceCount(&count);
+    LOG(INFO) << "[Rank " << rank_ << "] Count: " << count;
     workCleanupLoop();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
