@@ -1,7 +1,7 @@
 import torch
 from torch.fx import GraphModule
-from ..utils import _get_aten_graph_module
-from ..utils import _remove_tensor_overload_for_qdq_ops
+from ..utils import get_aten_graph_module
+from ..utils import remove_tensor_overload_for_qdq_ops
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
 from torch.fx.subgraph_rewriter import replace_pattern
 
@@ -117,11 +117,11 @@ _EXAMPLE_INPUTS_PATTERN_AND_REPLACEMENTS = [
 ]
 
 def reference_representation_rewrite(model: GraphModule) -> GraphModule:
-    _remove_tensor_overload_for_qdq_ops(model)
+    remove_tensor_overload_for_qdq_ops(model)
     for example_inputs, pattern, replacement in _EXAMPLE_INPUTS_PATTERN_AND_REPLACEMENTS:
-        pattern = _get_aten_graph_module(pattern, example_inputs)
-        _remove_tensor_overload_for_qdq_ops(pattern)
-        replacement = _get_aten_graph_module(replacement, example_inputs)
-        _remove_tensor_overload_for_qdq_ops(replacement)
+        pattern = get_aten_graph_module(pattern, example_inputs)
+        remove_tensor_overload_for_qdq_ops(pattern)
+        replacement = get_aten_graph_module(replacement, example_inputs)
+        remove_tensor_overload_for_qdq_ops(replacement)
         matches = replace_pattern(model, pattern, replacement)
     return model
