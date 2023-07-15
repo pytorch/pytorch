@@ -691,6 +691,12 @@ class SymNode:
         else:
             return self._hint
 
+    def maybe_as_int(self):
+        if self.expr.free_symbols:
+            return None
+        else:
+            return int(self.expr)
+
     def _update_expr(self):
         self._expr = self.shape_env.replace(self._expr)
 
