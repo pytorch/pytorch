@@ -199,7 +199,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         self.compressed_tensor = compressed_tensor
         self.transposed = transposed
 
-    def __repr__(self) -> str:
+    def __repr__(self) -> str:  # type: ignore[override]
         """Return string representation of SparseSemiStructuredTensor
 
         Returns:
