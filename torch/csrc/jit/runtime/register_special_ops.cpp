@@ -327,7 +327,7 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor"),
+            "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type, Optional[torch.Generator] generator=None) -> Tensor"),
         [](Stack& stack) {
           at::Tensor weight;
           at::Tensor input;
@@ -393,7 +393,7 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)"),
+            "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b, Optional[torch.Generator] generator=None) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
@@ -409,7 +409,7 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std) -> Tensor(a!)"),
+            "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std, Optional[torch.Generator] generator=None) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;
@@ -425,7 +425,7 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::_no_grad_fill_(Tensor(a!) tensor, float val) -> Tensor(a!)"),
+            "aten::_no_grad_fill_(Tensor(a!) tensor, float val, Optional[torch.Generator] generator=None) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
           torch::NoGradGuard no_grad;

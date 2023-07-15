@@ -107,6 +107,7 @@ class TestPublicBindings(TestCase):
             "Future",
             "FutureType",
             "Generator",
+            "GeneratorType",
             "get_autocast_cpu_dtype",
             "get_autocast_ipu_dtype",
             "get_default_dtype",
