@@ -1158,3 +1158,105 @@ def red_text(msg):
 
 def blue_text(msg):
     return _color_text(msg, "blue")
+
+
+PYTHON_TYPE_TO_SCHEMA_TYPE = {
+    torch.dtype: "int",
+    torch.device: "Device",
+    bool: "bool",
+}
+
+
+def may_get_optional_schema_type(schema_type, is_optional_arg):
+    return f"Optional[{schema_type}]" if is_optional_arg else schema_type
+
+
+def type_match(arg, arg_type, is_optional_arg):
+    if isinstance(arg, immutable_list):
+        if all(
+            isinstance(x, int) or (isinstance(x, sympy.Symbol) and x.is_integer)
+            for x in arg
+        ):
+            may_optional_schema_type = may_get_optional_schema_type(
+                "List[int]", is_optional_arg
+            )
+            return may_optional_schema_type == str(arg_type)
+        else:
+            # TODO: add support here
+            return False
+
+    if arg.__class__ in PYTHON_TYPE_TO_SCHEMA_TYPE:
+        schema_type = PYTHON_TYPE_TO_SCHEMA_TYPE[arg.__class__]
+        may_optional_schema_type = may_get_optional_schema_type(
+            schema_type, is_optional_arg
+        )
+        return may_optional_schema_type == str(arg_type)
+
+    # TODO: add support here
+    return False
+
+
+# torch/csrc/utils/python_arg_parser.cpp:FunctionSignature::parse
+def schema_match(schema, args, kwargs):
+    min_args = 0
+    max_pos_args = 0
+    for argument in schema.arguments:
+        if not argument.has_default_value():
+            min_args += 1
+        if not argument.kwarg_only:
+            max_pos_args += 1
+
+    nargs = len(args)
+    remaining_kwargs = len(kwargs)
+    arg_pos = 0
+
+    def args_error_message(nargs, max_pos_args, min_args):
+        if min_args != max_pos_args:
+            return f"takes from {min_args} to {max_pos_args} positional arguments but {nargs} were given"
+        else:
+            return f"takes {max_pos_args} positional arguments but {nargs} were given"
+
+    def is_optional(arg):
+        return "Optional" in str(arg.type)
+
+    assert len(args) <= max_pos_args, args_error_message(
+        len(args), max_pos_args, min_args
+    )
+
+    for argument in schema.arguments:
+        obj = None
+        is_kwd = False
+        if arg_pos < nargs:
+            if argument.kwarg_only:
+                return False
+            obj = args[arg_pos]
+        elif kwargs:
+            if argument.name in kwargs:
+                obj = kwargs[argument.name]
+                is_kwd = True
+
+        if obj is None and not is_optional(argument):
+            return False
+
+        if obj is not None:
+            expected_type = argument.type
+            if not type_match(obj, expected_type, is_optional(argument)):
+                return False
+
+        if not is_kwd:
+            arg_pos += 1
+        elif (obj is None and is_optional(argument)) or obj is not None:
+            remaining_kwargs -= 1
+
+    if remaining_kwargs > 0:
+        return False
+
+    return True
+
+
+def try_find_schema(schemas, args, kwargs):
+    for schema in schemas:
+        if schema_match(schema, args, kwargs):
+            return schema
+
+    return None
