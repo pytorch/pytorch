@@ -10,7 +10,7 @@ try:
     # use faster C loader if available
     from yaml import CSafeLoader as YamlLoader
 except ImportError:
-    from yaml import SafeLoader as YamlLoader  # type: ignore[assignment, misc]
+    from yaml import SafeLoader as YamlLoader  # type: ignore[misc]
 
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
 TAGS_PATH = "aten/src/ATen/native/tags.yaml"
