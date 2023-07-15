@@ -33,7 +33,7 @@ def get_upgraders() -> Dict[str, Tuple[str, str]]:
     """Getting upgraders entry map and operator version map and merge them into one dict."""
     upgraders = torch._C._get_upgraders_entry_map()
     op_version_map = torch._C._get_operator_version_map()
-    output: Dict[str, Tuple[str, str]] = defaultdict(tuple)  # type: ignore[arg-type]
+    output = defaultdict(tuple)
     for opname, entry_list in op_version_map.items():
         if not entry_list:
             raise RuntimeError(f"Op version map has an empty entry for opname {opname}")
