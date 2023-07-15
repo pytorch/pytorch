@@ -260,9 +260,7 @@ class DTensorTest(DTensorTestBase):
             dt_out_redistribute = dt_out.redistribute(mesh, [Replicate()])
             # Make sure we haven't synced yet
             self.assertTrue(_tensor_needs_wait(dt_out_redistribute))
-            dt_out_redistribute_view = dt_out_redistribute_view(
-                dt_out_redistribute_view.shape
-            )
+            dt_out_redistribute_view = dt_out_redistribute(dt_out_redistribute.shape)
             self.assertTrue(_tensor_needs_wait(dt_out_redistribute_view))
             return dt_out_redistribute_view.to_local()
 
