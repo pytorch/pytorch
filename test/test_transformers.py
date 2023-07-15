@@ -2419,11 +2419,14 @@ class TestSDPA(NNTestCase):
         causal,
         train,
     ):
-        atol = 1e-5; rtol = 5e-6
+        atol = 1e-5
+        rtol = 5e-6
         if dtype is torch.bfloat16:
-            atol = 1e-2; rtol = 1e-2
+            atol = 1e-2
+            rtol = 1e-2
         if dtype is torch.bfloat16 and causal and train:
-            atol = 2e-2; rtol = 2e-2
+            atol = 2e-2
+            rtol = 2e-2
 
         n_embd = n_head * head_dim
         x = torch.randn(batch_size, seq_len, 3 * n_embd, device=device, dtype=dtype)
@@ -2441,7 +2444,7 @@ class TestSDPA(NNTestCase):
             k2 = k2.float()
             v2 = v2.float()
 
-         # (B, nh, T, hs)
+        # (B, nh, T, hs)
         k = k.view(batch_size, seq_len, n_head, n_embd // n_head).transpose(1, 2)
         q = q.view(batch_size, seq_len, n_head, n_embd // n_head).transpose(1, 2)
         v = v.view(batch_size, seq_len, n_head, n_embd // n_head).transpose(1, 2)

@@ -580,6 +580,9 @@ EXCLUDE_SCRIPT_MODULES = {
 
     # Doesn't use future division, so this is not supported
     'test_nn_CrossMapLRN2d',
+    # Derivative for aten::_scaled_dot_product_flash_attention_backward is not implemented
+    'test_nn_TransformerDecoderLayer_gelu_activation',
+    'test_nn_TransformerDecoderLayer_relu_activation',
 }
 
 script_method_template = '''

@@ -2967,8 +2967,6 @@ aot_autograd_module_failures = set({
 symbolic_aot_autograd_module_failures = {
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
-    torch.nn.TransformerEncoderLayer, # RuntimeError: dimensionality of sizes (0)
-                                      # must match dimensionality of strides (1)
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.AdaptiveAvgPool3d,  # could not find kernel for aten._adaptive_avg_pool3d_backward.default at dispatch key
                                  # DispatchKey.Meta

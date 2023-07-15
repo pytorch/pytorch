@@ -13259,8 +13259,8 @@ op_db: List[OpInfo] = [
             # Not implemented for backward derivative
             DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad',
                          device_type='cpu'),
-            # Dimensionality of sizes (0) must match dimensionality of strides (1)
-            DecorateInfo(unittest.skip("Skipped!"), 'TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive',
+            # CPU and CUDA have inconsistencies for intermediate outputs
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace',
                          device_type='cpu'),
             # OpInfo was implemented with a lambda
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
