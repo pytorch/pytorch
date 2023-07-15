@@ -433,10 +433,10 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
     for (const auto i : c10::irange(devices_.size())) {
       // Checking the work's corresponding CUDA events' status
       if (!(*ncclEndEvents_)[i].query()) {
-        //C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+        // C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
         return false;
       }
-      //C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+      // C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
     }
   } catch (const std::exception& e) {
     C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
