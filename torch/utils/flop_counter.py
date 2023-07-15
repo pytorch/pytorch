@@ -236,7 +236,7 @@ class FlopCounterMode(TorchDispatchMode):
             mods: Optional[Union[torch.nn.Module, List[torch.nn.Module]]] = None,
             depth: int = 2,
             display: bool = True,
-            custom_mapping: Optional[Dict[Any, Any]] = None):
+            custom_mapping: Dict[Any, Any] = None):
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.parents = ["Global"]
