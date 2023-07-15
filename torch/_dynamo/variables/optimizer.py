@@ -45,6 +45,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             try:
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
                 self.value._init_group(*py_args, **py_kwargs)
+                self.map_grads_to_sources()
                 self.install_guards(tx)
                 self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
                 return ConstantVariable(None)
@@ -110,12 +111,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
             )
             guards.add(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
             for k, v in value.items():
-                if isinstance(v, torch.Tensor):
-                    guards.add(
-                        GetItemSource(p_state_source, k).make_guard(
-                            GuardBuilder.TENSOR_MATCH
-                        )
-                    )
+                if isinstance(v, torch.Tensor) and v not in self.grad_to_source:
+                    continue  # we process tensors guards used in step when we call it
                 elif v is None or isinstance(v, (bool, int, float, str)):
                     guards.add(
                         GetItemSource(p_state_source, k).make_guard(
@@ -148,7 +145,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
     def update_list_args(self, tx, args, kwargs, py_args, py_kwargs):
         """Update the args and kwargs to the traced optimizer call"""
-        self.map_grads_to_sources()
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable) and all(
                 isinstance(t, torch.Tensor) for t in py_arg

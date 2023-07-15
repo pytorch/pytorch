@@ -92,6 +92,8 @@ def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
     @requires_cuda()
     def test_fn(self):
+        import os
+
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         input = torch.ones([10, 10], device="cuda:0")
@@ -100,12 +102,15 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
         )
         model(input).sum().backward()
 
+        os.environ["TORCHDYNAMO_REPORT_GUARD_FAILURES"] = "1"
         opt_compiled = optim_cls(model.parameters(), **kwargs)
         compiled_step = compile_opt(opt_compiled)
 
         # check no recompile here
         with torch.set_grad_enabled(False):
             compiled_step()
+
+            torch._logging.set_logs(recompiles=True)
             compiled_step()
 
             # perturb state to force recompile
