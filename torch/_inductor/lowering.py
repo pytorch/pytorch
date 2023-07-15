@@ -1301,6 +1301,10 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target is aten.view_as_complex.default:
         return False
 
+    # We should be able to remove this special case once `disable_cpp_codegen` is killed.
+    if node.target is aten.lift_fresh_copy.default:
+        return False
+
     def check_skip_condition(node, is_output):
         if not isinstance(node, torch.fx.Node):
             return False
@@ -1717,7 +1721,6 @@ make_fallback(aten.max_unpool3d)
 make_fallback(aten.median)
 make_fallback(aten.mode)
 make_fallback(aten.multilabel_margin_loss_forward)
-make_fallback(aten.multi_margin_loss)
 make_fallback(aten.nanmedian)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
@@ -1771,7 +1774,6 @@ make_fallback(aten.fractional_max_pool3d_backward)
 make_fallback(aten._linalg_check_errors)
 make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten.multilabel_margin_loss_backward)
-make_fallback(aten.multi_margin_loss_backward)
 make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
@@ -1805,6 +1807,22 @@ make_fallback(aten.exponential.default, warn=False)
 
 # ROCm specific fallback, perf issues are observed when registered
 make_fallback(aten.miopen_batch_norm, warn=False)
+
+
+# Register with type_promotion_kind None.
+# For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
+@register_lowering(aten.copy, type_promotion_kind=None)
+def copy(self, src, non_blocking=False):
+    x = src
+    if self.get_device() != src.get_device():
+        x = to_device(x, self.get_device())
+    if self.get_dtype() != src.get_dtype():
+        x = to_dtype(x, self.get_dtype())
+
+    if self.get_size() != src.get_size():
+        out = expand(x, self.get_size())
+        return clone(out)
+    return clone(x)
 
 
 @register_lowering(aten.clone)
