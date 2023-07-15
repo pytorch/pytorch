@@ -29,12 +29,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-bionic-cuda12_1-py3_10-gcc9-build:
-    name: linux-bionic-cuda12.1-py3.10-gcc9
+  linux-focal-cuda12_1-py3_10-gcc9-build:
+    name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc9
-      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
       test-matrix: |
         { include: [
           { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -42,21 +42,21 @@ jobs:
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda12_1-py3_10-gcc9-test:
-    name: linux-bionic-cuda12.1-py3.10-gcc9
+  linux-focal-cuda12_1-py3_10-gcc9-test:
+    name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda12_1-py3_10-gcc9-build
+    needs: linux-focal-cuda12_1-py3_10-gcc9-build
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc9
-      docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
 
-  libtorch-linux-bionic-cuda12_1-py3_7-gcc9-debug-build:
-    name: libtorch-linux-bionic-cuda12.1-py3.7-gcc9-debug
+  libtorch-linux-focal-cuda12_1-py3_7-gcc9-debug-build:
+    name: libtorch-linux-focal-cuda12.1-py3.7-gcc9-debug
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: libtorch-linux-bionic-cuda12.1-py3.7-gcc9
-      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
+      build-environment: libtorch-linux-focal-cuda12.1-py3.7-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
       build-generates-artifacts: false
       runner: linux.4xlarge
       test-matrix: |
@@ -65,12 +65,12 @@ jobs:
         ]}
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  linux-bionic-cuda12_1-py3_10-gcc9-no-ops-build:
-    name: linux-bionic-cuda12.1-py3.10-gcc9-no-ops
+  linux-focal-cuda12_1-py3_10-gcc9-no-ops-build:
+    name: linux-focal-cuda12.1-py3.10-gcc9-no-ops
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc9-no-ops
-      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-no-ops
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
