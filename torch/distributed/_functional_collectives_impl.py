@@ -92,7 +92,7 @@ def _tensor_needs_wait(tensor: torch.Tensor) -> Optional[bool]:
     wait_reg = data_ptr_to_work.get(data_ptr)
     if wait_reg is None:
         return None
-    return wait_reg.work != None
+    return wait_reg.work is not None
 
 def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
     reduceOp = reduceOp.upper()
