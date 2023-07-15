@@ -413,6 +413,15 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             torch.utils.rename_privateuse1_backend('foo')
             a = torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])
 
+        def test_open_device_qtensor():
+            torch.utils.rename_privateuse1_backend('foo')
+            device = self.module.custom_device()
+            x = torch.empty(4, 4, device=device)
+            self.module.enable_qtensor()
+            q_tensor = torch.quantize_per_tensor(x, 0.1, 10, torch.quint8)
+            self.assertEqual(q_tensor.device.type, torch._C._get_privateuse1_backend_name())
+
+
         test_base_device_registration()
         test_before_common_registration()
         test_common_registration()
@@ -428,6 +437,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_type()
         test_open_device_faketensor()
         test_open_device_named_tensor()
+        test_open_device_qtensor()
 
 
 if __name__ == "__main__":

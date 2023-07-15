@@ -19,6 +19,12 @@
 
 namespace at {
 
+using NewQTensorFuncType = std::function<at::Tensor(at::IntArrayRef,
+    const TensorOptions&, at::QuantizerPtr)>;
+
+TORCH_API void SetNewQTensorImpl(at::DeviceType t, at::NewQTensorFuncType impl);
+TORCH_API const at::NewQTensorFuncType& GetNewQTensorImpl(at::DeviceType t);
+
 /**
  * UnknownQuantizer is a placeholder quantizer for functions that implement
  * quantization in a two step process.  First a tensor is allocated but with

@@ -32,6 +32,21 @@ namespace {
 
 } // anonymous namespace
 
+c10::optional<at::NewQTensorFuncType> new_qtensor_impls[at::COMPILE_TIME_MAX_DEVICE_TYPES];
+static std::mutex _qtensor_mutex_lock;
+void SetNewQTensorImpl(at::DeviceType t, at::NewQTensorFuncType impl) {
+  std::lock_guard<std::mutex> lock(_qtensor_mutex_lock);
+  TORCH_CHECK(t == at::DeviceType::PrivateUse1, "SetNewQTensorImpl only support `PrivateUse1` now.");
+  new_qtensor_impls[static_cast<int>(t)] = impl;
+}
+
+const at::NewQTensorFuncType& GetNewQTensorImpl(at::DeviceType t) {
+  TORCH_CHECK(t == at::DeviceType::PrivateUse1, "GetNewQTensorImpl only support `PrivateUse1` now.");
+  auto& impl = new_qtensor_impls[static_cast<int>(t)];
+  TORCH_CHECK(impl.has_value(), "Please SetNewQTensorImpl first.")
+  return impl.value();
+}
+
 // Note: this is not a native function as Quantizer is not exposed to python yet
 QuantizerPtr TensorBase::quantizer() const {
   // This is a terrible hack to emulate what VariableType is doing
@@ -113,6 +128,9 @@ inline Tensor new_qtensor(
     QuantizerPtr quantizer) {
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   auto device = options.device();
+  if (device.is_privateuseone()) {
+    return GetNewQTensorImpl(device.type())(sizes, options, quantizer);
+  }
   at::Allocator* allocator = nullptr;
   // TODO: why isn't this just using GetAllocator
   if (device.is_cuda()) {
