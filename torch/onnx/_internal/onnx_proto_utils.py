@@ -62,7 +62,7 @@ def export_as_test_case(
         shutil.rmtree(data_set_dir)
     os.makedirs(data_set_dir)
 
-    proto = onnx.load_model_from_string(model_bytes)  # type: ignore[attr-defined]
+    proto = onnx.load_model_from_string(model_bytes)
 
     for i, (input_proto, input) in enumerate(zip(proto.graph.input, inputs_data)):
         export_data(input, input_proto, os.path.join(data_set_dir, f"input_{i}.pb"))
@@ -112,12 +112,12 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     inputs = {}
     input_files = glob.glob(os.path.join(test_data_dir, "input_*.pb"))
     for input_file in input_files:
-        tensor = onnx.load_tensor(input_file)  # type: ignore[attr-defined]
+        tensor = onnx.load_tensor(input_file)
         inputs[tensor.name] = numpy_helper.to_array(tensor)
     outputs = {}
     output_files = glob.glob(os.path.join(test_data_dir, "output_*.pb"))
     for output_file in output_files:
-        tensor = onnx.load_tensor(output_file)  # type: ignore[attr-defined]
+        tensor = onnx.load_tensor(output_file)
         outputs[tensor.name] = numpy_helper.to_array(tensor)
 
     return model_bytes, inputs, outputs
@@ -227,7 +227,7 @@ def _add_onnxscript_fn(
     # size > 2GB, and if it for some reason did not, the model would fail on
     # serialization anyway in terms of the protobuf limitation. So we don't
     # need to worry about > 2GB model getting here.
-    model_proto = onnx.load_model_from_string(model_bytes)  # type: ignore[attr-defined]
+    model_proto = onnx.load_model_from_string(model_bytes)
 
     # Iterate graph nodes to insert only the included custom
     # function_proto into model_proto

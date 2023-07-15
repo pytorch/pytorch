@@ -89,9 +89,7 @@ def get_raw_profiles_folder() -> str:
 
 def detect_compiler_type(platform: TestPlatform) -> CompilerType:
     if platform == TestPlatform.OSS:
-        from package.oss.utils import (  # type: ignore[assignment, import, misc]
-            detect_compiler_type,
-        )
+        from package.oss.utils import detect_compiler_type  # type: ignore[misc]
 
         cov_type = detect_compiler_type()  # type: ignore[call-arg]
     else:
@@ -102,7 +100,7 @@ def detect_compiler_type(platform: TestPlatform) -> CompilerType:
         cov_type = detect_compiler_type()
 
     check_compiler_type(cov_type)
-    return cov_type  # type: ignore[no-any-return]
+    return cov_type
 
 
 def get_test_name_from_whole_path(path: str) -> str:

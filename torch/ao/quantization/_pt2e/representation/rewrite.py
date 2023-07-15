@@ -119,9 +119,9 @@ _EXAMPLE_INPUTS_PATTERN_AND_REPLACEMENTS = [
 def reference_representation_rewrite(model: GraphModule) -> GraphModule:
     _remove_tensor_overload_for_qdq_ops(model)
     for example_inputs, pattern, replacement in _EXAMPLE_INPUTS_PATTERN_AND_REPLACEMENTS:
-        pattern = _get_aten_graph_module(pattern, example_inputs)  # type: ignore[arg-type, assignment]
-        _remove_tensor_overload_for_qdq_ops(pattern)  # type: ignore[arg-type]
-        replacement = _get_aten_graph_module(replacement, example_inputs)  # type: ignore[arg-type, assignment]
-        _remove_tensor_overload_for_qdq_ops(replacement)  # type: ignore[arg-type]
+        pattern = _get_aten_graph_module(pattern, example_inputs)
+        _remove_tensor_overload_for_qdq_ops(pattern)
+        replacement = _get_aten_graph_module(replacement, example_inputs)
+        _remove_tensor_overload_for_qdq_ops(replacement)
         matches = replace_pattern(model, pattern, replacement)
     return model
