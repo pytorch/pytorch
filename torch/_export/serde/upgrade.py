@@ -189,6 +189,7 @@ class GraphModuleOpUpgrader:
         args = [n.meta.get("val", None) for n in exported_program.graph.nodes if n.op == "placeholder"]
         args_real_tensors = [torch.ones(tuple(arg.size()), dtype=arg.dtype) if isinstance(arg, FakeTensor) else arg for
                              arg in args]
+        assert exported_program.call_spec.in_spec is not None
         inputs = tree_unflatten(args_real_tensors, exported_program.call_spec.in_spec)
 
         for _pass in self.upgrader_passes:

@@ -1,9 +1,8 @@
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, register_backend
 from .convert_frame import replay
+from .decorators import assume_constant_result, disable, run
 from .eval_frame import (
-    assume_constant_result,
-    disable,
     explain,
     export,
     is_dynamo_supported,
@@ -11,7 +10,6 @@ from .eval_frame import (
     optimize_assert,
     OptimizedModule,
     reset_code,
-    run,
 )
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
@@ -30,6 +28,7 @@ __all__ = [
     "forbid_in_graph",
     "graph_break",
     "mark_dynamic",
+    "maybe_mark_dynamic",
     "mark_static",
     "optimize",
     "optimize_assert",
@@ -188,6 +187,24 @@ def mark_dynamic(t, index):
     assert isinstance(index, (list, tuple))
     for i in index:
         mark_dynamic(t, i)
+
+
+@forbid_in_graph
+def maybe_mark_dynamic(t, index):
+    """
+    Mark a tensor as having a dynamic dim, but don't enforce it (i.e., if this
+    dimension ends up getting specialized, don't error).
+    """
+    if isinstance(index, int):
+        if not hasattr(t, "_dynamo_weak_dynamic_indices"):
+            t._dynamo_weak_dynamic_indices = set()
+        # TODO(voz): Should we bounds check?
+        t._dynamo_weak_dynamic_indices.add(index)
+        return
+
+    assert isinstance(index, (list, tuple))
+    for i in index:
+        maybe_mark_dynamic(t, i)
 
 
 @forbid_in_graph
