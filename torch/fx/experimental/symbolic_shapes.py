@@ -3249,6 +3249,9 @@ Target Guards:
 
         if len(orig_expr.free_symbols) == 0:
             self.log.debug("eval %s [trivial]", orig_expr)
+            # NB: don't test float as there may be precision issues
+            if isinstance(hint, (int, bool)):
+                assert orig_expr == hint, f"{orig_expr} != {hint}"
             return orig_expr
 
         expr = orig_expr
@@ -3256,6 +3259,9 @@ Target Guards:
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
             self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
+            # NB: don't test float as there may be precision issues
+            if isinstance(hint, (int, bool)):
+                assert static_expr == hint, f"{static_expr} != {hint}"
             return static_expr
 
         if not (expr.free_symbols <= self.var_to_val.keys()):
