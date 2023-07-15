@@ -28,7 +28,7 @@ size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 pick_loop_orders = True
 
 # maximum number of candidate loop orderings to explore
-loop_ordering_search_limit = 120
+loop_ordering_search_limit = 1
 
 # break up loops ranges to allow more fusion
 split_var_ranges = True
