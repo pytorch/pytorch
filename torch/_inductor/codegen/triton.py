@@ -2419,13 +2419,13 @@ class TritonScheduling:
         # that need to access the entire tensor; they don't contribute read indexing
         # information (and practically, they don't have dep.index so they can't be used
         # for stride_hints below
-        all_deps = itertools.chain(rw.reads, rw.writes)
-        assert all(isinstance(dep, (MemoryDep, StarDep)) for dep in all_deps)
-        deps = [
-            dep
-            for dep in all_deps
-            if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
-        ]
+        deps = []
+        for dep in itertools.chain(rw.reads, rw.writes):
+            assert isinstance(
+                dep, (MemoryDep, StarDep)
+            ), "Dependency is not of type MemoryDep or StarDep"
+            if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep):
+                deps.append(dep)
         write_names = {dep.name for dep in rw.writes}
 
         tilings = []
