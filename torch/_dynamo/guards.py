@@ -3,6 +3,7 @@ import builtins
 import collections
 import dataclasses
 import enum
+import functools
 import importlib
 import itertools
 import logging
@@ -18,7 +19,11 @@ from weakref import ReferenceType
 
 import torch
 import torch.utils._device
-from torch._dynamo.source import TensorProperty, TensorPropertySource
+from torch._dynamo.source import (
+    is_from_local_source,
+    TensorProperty,
+    TensorPropertySource,
+)
 
 from torch._guards import (
     DuplicateInputs,
@@ -69,6 +74,7 @@ CLOSURE_VARS = collections.OrderedDict(
             "___are_deterministic_algorithms_enabled",
             torch.are_deterministic_algorithms_enabled,
         ),
+        ("___is_torch_function_enabled", torch._C._is_torch_function_enabled),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
@@ -491,6 +497,15 @@ class GuardBuilder(GuardBuilderBase):
             code = "___are_deterministic_algorithms_enabled()"
         else:
             code = "not ___are_deterministic_algorithms_enabled()"
+        self._produce_guard_code(guard, [code])
+
+    def TORCH_FUNCTION_STATE(self, guard: Guard):
+        assert guard.source is GuardSource.GLOBAL
+        code = None
+        if convert_frame.initial_torch_function_state:
+            code = "___is_torch_function_enabled()"
+        else:
+            code = "not ___is_torch_function_enabled()"
         self._produce_guard_code(guard, [code])
 
     def DEFAULT_DEVICE(self, guard: Guard):
@@ -1149,3 +1164,29 @@ def unique(seq):
         if x not in seen:
             yield x
             seen.add(x)
+
+
+def make_dupe_guard(obj_source, dupe_source):
+    # Note - we may end up in a situation where we invoke something like
+    # def fn(x, y)
+    # with fn(x, x)
+    # Prior to the addition of tracking to all relevant objects, we would handle this just fine by
+    # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
+    # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
+    # In the the fn(x, x) example call above look like a graph with a single input.
+    # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
+
+    # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
+    # leave unsourced - like a local list created and discharged entirely within a local scope.
+    if dupe_source and dupe_source != obj_source:
+        ser_source_is_local = is_from_local_source(dupe_source)
+        source_is_local = is_from_local_source(obj_source)
+        # Note - both must be local, or global, or we will run afoul of a lack of merging in how we currently
+        # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
+        # so maybe we should do this refactor before we land this...
+        # TODO(voz): Combine local and global guard builders.
+        if ser_source_is_local == source_is_local:
+            # Note - this is a little agressive - these being duplicate input does not always matter.
+            # However, this should always be a sound guard to add here.
+            return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)
+    return None
