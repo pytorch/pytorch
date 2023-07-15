@@ -1,6 +1,6 @@
 import functools
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, Optional, Sequence
+from typing import Any, Callable, Dict, Sequence
 from warnings import warn
 
 import torch
@@ -111,7 +111,7 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
         orig_func: Callable,
         types: Sequence,
         args: Sequence[Any] = (),
-        kwargs: Optional[Dict] = None,
+        kwargs: Dict = None,
     ):
         if kwargs is None:
             kwargs = {}
@@ -161,7 +161,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         orig_func: Callable,
         types: Sequence,
         args: Sequence[Any] = (),
-        kwargs: Optional[Dict] = None,
+        kwargs: Dict = None,
     ):
         if kwargs is None:
             kwargs = {}
@@ -374,7 +374,7 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         orig_func: Callable,
         types: Sequence,
         args: Sequence[Any] = (),
-        kwargs: Optional[Dict] = None,
+        kwargs: Dict = None,
     ):
         if kwargs is None:
             kwargs = {}
