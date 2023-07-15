@@ -1284,10 +1284,9 @@ class WelfordReduction(Reduction):
 
             return cls.create_multilayer(
                 device=device,
-                dst_dtype=dst_dtype,
-                src_dtype=src_dtype,
+                dtype=dtype,
                 inner_fns=(
-                    inner_fn[0],
+                    inner_fns[0],
                     partial(constant, value=0),
                     partial(constant, value=1),
                 ),

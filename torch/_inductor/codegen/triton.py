@@ -1461,15 +1461,15 @@ class TritonKernel(Kernel):
                     self.compute, result_var, masked_value, accumulator_index
                 )
             elif reduction_type == "welford_reduce":
-                sum_ = self.cse.generate(
-                    self.compute,
-                    self.reduction_resize(f"tl.sum({masked_value}, {dim})"),
-                )
+                # For persistent reductions, don't bother with
+                # welford's algorithm since it uses more registers, and
+                # taking two reductions doesn't increase memory usage.
+                sum_ = ops.reduction(dtype, dtype, "sum", value)
                 self.inside_reduction = False
                 rnumel = ops.index_expr(self.numels[-1], dtype)
-                self.inside_reduction = True
                 mean = ops.div(sum_, rnumel)
 
+                self.inside_reduction = True
                 dx = ops.sub(value, mean)
                 dx2 = ops.mul(dx, dx)
                 m2 = ops.reduction(dtype, dtype, "sum", dx2)
@@ -1537,10 +1537,6 @@ class TritonKernel(Kernel):
                         {accumulator}, {accumulator_m2}, {accumulator_weight},
                         {mean}, {m2}, {weight}
                     )
-
-                    {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
-                    {accumulator_m2} = tl.where({cond}, {accumulator_m2}_next, {accumulator_m2})
-                    {accumulator_weight} = tl.where({cond}, {accumulator_weight}_next, {accumulator_weight})
                     """
                     )
                 else:
@@ -1550,12 +1546,14 @@ class TritonKernel(Kernel):
                     {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_reduce(
                         {value}, {accumulator}, {accumulator_m2}, {accumulator_weight},
                     )
+                    """)
 
-                    {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
-                    {accumulator_m2} = tl.where({cond}, {accumulator_m2}_next, {accumulator_m2})
-                    {accumulator_weight} = tl.where({cond}, {accumulator_weight}_next, {accumulator_weight})
-                    """
-                    )
+                self.compute.splice(
+                    f"""\
+                {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
+                {accumulator_m2} = tl.where({cond}, {accumulator_m2}_next, {accumulator_m2})
+                {accumulator_weight} = tl.where({cond}, {accumulator_weight}_next, {accumulator_weight})
+                """)
 
                 result_mean = result_var
                 result_m2 = self.cse.newvar()

@@ -895,6 +895,7 @@ class CommonTemplate:
             return torch.var(a)
 
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
+        self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
 
     def test_expanded_reduction(self):
         if self.device == "cpu":
