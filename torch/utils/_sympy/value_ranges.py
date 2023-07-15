@@ -553,15 +553,14 @@ def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> Va
         #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
         ranges = deepcopy(ranges)
         for s in unbounded_vars:
-            if s.is_integer:
-                if s.is_positive:
-                    lower = 1
-                elif s.is_nonnegative:
-                    lower = 0
-                else:
-                    lower = -math.inf
+            assert s.is_integer  # type: ignore[attr-defined]
+            if s.is_positive:  # type: ignore[attr-defined]
+                lower = 1
+            elif s.is_nonnegative:  # type: ignore[attr-defined]
+                lower = 0
             else:
-                lower = 0.0 if s.is_nonnegative else -math.inf
+                lower = -math.inf  # type: ignore[assignment]
+
             ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
 
     return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)
