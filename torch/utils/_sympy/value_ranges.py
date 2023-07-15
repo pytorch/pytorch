@@ -545,11 +545,21 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
 
 
 def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> ValueRanges:
-    # Add dynamic shapes within the expression as potentially unbounded
-    dynamic_shapes = expr.free_symbols - ranges.keys()
-    if dynamic_shapes:
+    unbounded_vars = expr.free_symbols - ranges.keys()
+    if unbounded_vars:
+        # Give some bounds to the free variables via their SymPy assumptions
+        # TODO A better way of doing this would be to assign them a range upon creation, as
+        #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
         ranges = deepcopy(ranges)
-        for s in dynamic_shapes:
-            ranges[s] = ValueRanges(0, math.inf)  # type: ignore[index]
+        for s in unbounded_vars:
+            assert s.is_integer  # type: ignore[attr-defined]
+            if s.is_positive:  # type: ignore[attr-defined]
+                lower = 1
+            elif s.is_nonnegative:  # type: ignore[attr-defined]
+                lower = 0
+            else:
+                lower = -math.inf  # type: ignore[assignment]
+
+            ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
 
     return sympy_interp(SymPyValueRangeAnalysis(), ranges, expr)
