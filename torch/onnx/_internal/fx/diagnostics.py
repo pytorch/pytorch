@@ -71,12 +71,35 @@ def _torch_fx_graph_module(obj: torch.fx.GraphModule) -> str:
 
 @_format_argument.register
 def _torch_fx_node(obj: torch.fx.Node) -> str:
-    return f"fx.Node({obj.name}[{obj.op}]'{obj.target}')"
+    shape = obj.meta["val"].shape if "val" in obj.meta else None
+    dtype = obj.meta["val"].dtype if "val" in obj.meta else None
+    return f"fx.Node({obj.name}[{obj.op}]'{obj.target}', shape={shape}, dtype={dtype})"
 
 
 @_format_argument.register
 def _torch_tensor(obj: torch.Tensor) -> str:
     return f"Tensor(shape={obj.shape}, dtype={obj.dtype})"
+
+
+@_format_argument.register
+def _list(obj: list) -> str:
+    if obj:
+        return f"List(length={len(obj)}, element_type={type(obj[0])})"
+    return f"List(length={len(obj)}, element_type=None)"
+
+
+@_format_argument.register
+def _tuple(obj: tuple) -> str:
+    if obj:
+        return f"Tuple(length={len(obj)}, element_type={type(obj[0])})"
+    return f"Tuple(length={len(obj)}, element_type=None)"
+
+
+@_format_argument.register
+def _dict(obj: dict) -> str:
+    if obj:
+        return f"Dict(length={len(obj)}, key_type={type(list(obj.keys())[0])}, value_type={type(list(obj.values())[0])})"
+    return f"Dict(length={len(obj)}, key_type=None, value_type=None)"
 
 
 @_format_argument.register
