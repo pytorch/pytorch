@@ -83,6 +83,20 @@ class ValueRanges:
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
+    def tighten(self, other: "ValueRanges"):
+        """Given two ValueRanges, returns their intersection"""
+        # Some invariants
+        if other == ValueRanges.unknown():
+            return self
+        if self == ValueRanges.unknown():
+            return other
+        assert self.is_bool == other.is_bool, (self, other)
+        if self.is_bool:
+            range = ValueRanges(sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper))
+        else:
+            range = ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
+        return range
+
     # Intersection
     def __and__(self, other):
         return ValueRanges(lower=max(self.lower, other.lower), upper=min(self.upper, other.upper))
@@ -534,12 +548,20 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
 def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> ValueRanges:
     unbounded_vars = expr.free_symbols - ranges.keys()
     if unbounded_vars:
-        dynamic_shapes = {s for s in unbounded_vars if s.name[0] == "s"}  # type: ignore[attr-defined]
-        if dynamic_shapes != unbounded_vars:
-            return ValueRanges.unknown()
-        else:
-            ranges = deepcopy(ranges)
-            for s in dynamic_shapes:
-                ranges[s] = ValueRanges(2, math.inf)  # type: ignore[index]
+        # Give some bounds to the free variables via their SymPy assumptions
+        # TODO A better way of doing this would be to assign them a range upon creation, as
+        #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
+        ranges = deepcopy(ranges)
+        for s in unbounded_vars:
+            if s.is_integer:
+                if s.is_positive:
+                    lower = 1
+                elif s.is_nonnegative:
+                    lower = 0
+                else:
+                    lower = -math.inf
+            else:
+                lower = 0.0 if s.is_nonnegative else -math.inf
+            ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
 
     return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)
