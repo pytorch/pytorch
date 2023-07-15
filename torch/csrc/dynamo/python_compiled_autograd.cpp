@@ -210,6 +210,16 @@ struct CacheNode {
   THPObjectPtr compiled_fn;
 };
 
+struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
+  InputBuffer& lookup(Node* function) {
+    auto it = find(function);
+    if (it == end()) {
+      it = emplace(function, InputBuffer(function->num_inputs())).first;
+    }
+    return it->second;
+  }
+};
+
 static PyObject* the_autograd_compiler = nullptr;
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 
@@ -281,78 +291,36 @@ variable_list compiled_autograd(
       std::move(graph_task.dependencies_);
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   worklist.reserve(dependencies.size());
-  std::unordered_map<Node*, NodeCall> node_inputs;
-  node_inputs.emplace(graph_root.get(), NodeCall(graph_root));
-  std::vector<NodeCall> calls;
-  calls.reserve(dependencies.size() + 8);
   AutogradCompilerCall compiler_call(accumulate_grad);
-  CacheNode* cache = CacheNode::root();
-
+  auto& node_calls = compiler_call.node_calls;
   for (const auto i : c10::irange(output_edges.size())) {
-    auto inp = node_inputs.find(output_edges[i].function.get());
-    if (inp == node_inputs.end()) {
-      inp = node_inputs
-                .emplace(
-                    output_edges[i].function.get(),
-                    NodeCall(output_edges[i].function))
-                .first;
-    }
-    inp->second.mark_output(output_edges[i].input_nr, i);
+    node_calls.lookup(output_edges[i].function)
+        .mark_output(output_edges[i].input_nr, i);
   }
+  CacheNode* cache = CacheNode::root();
+  std::vector<NodeCall*> calls;
+  calls.reserve(dependencies.size() + 1);
 
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
-
-    auto node_input_iter = node_inputs.find(fn.get());
-    TORCH_CHECK(node_input_iter != node_inputs.end());
-    NodeCall& node_call = node_input_iter->second;
+    NodeCall& call = node_calls.lookup(fn);
+    calls.emplace_back(&call);
 
     { // update cache and gather args into `compiler_call`
-      CompiledNodeArgs node_args(compiler_call, node_call);
-      node_args.collect(node_call);
+      CompiledNodeArgs node_args(compiler_call, call);
       fn->compiled_args(node_args);
-      node_args.collect_hooks_from(fn.get());
+      node_args.collect(call);
       cache = cache->lookup(node_args.key());
     }
 
-    // finalize node construction
-    calls.emplace_back(std::move(node_call));
-    node_inputs.erase(node_input_iter);
-    size_t node_id = calls.size();
-
     const auto& edges = fn->next_edges();
-    for (int output_id = edges.size() - 1; output_id >= 0; --output_id) {
+    for (auto output_id : c10::irange(edges.size())) {
       if (!edges[output_id].is_valid()) {
         continue;
       }
       const std::shared_ptr<Node>& edge_node = edges[output_id].function;
       uint32_t input_nr = edges[output_id].input_nr;
-
-      auto inp = node_inputs.find(edge_node.get());
-      if (inp == node_inputs.end()) {
-        inp = node_inputs.emplace(edge_node.get(), NodeCall(edge_node)).first;
-      }
-      NodeCall& input_buffer = inp->second;
-      if (!input_buffer[input_nr].is_set()) {
-        // normal case
-        input_buffer[input_nr] = OutputRef(node_id, output_id);
-      } else {
-        // create a fake node to add the existing gradient to the new one
-        NodeCall implicit_add(std::make_shared<ImplicitAdd>(), 2);
-        implicit_add[0] = input_buffer[input_nr];
-        implicit_add[1] = OutputRef(node_id, output_id);
-
-        { // update cache
-          CompiledNodeArgs node_args(compiler_call, implicit_add);
-          node_args.collect(implicit_add.input_refs);
-          cache = cache->lookup(node_args.key());
-        }
-
-        calls.emplace_back(std::move(implicit_add));
-        input_buffer[input_nr] = OutputRef(calls.size(), 0);
-      }
-
       auto it = dependencies.find(edge_node.get());
       TORCH_CHECK(it != dependencies.end());
       if (--it->second == 0) {
@@ -362,43 +330,26 @@ variable_list compiled_autograd(
     }
   }
 
-  // TODO(jansel): many of the dynamic sizes seem to be stored as ints rather
-  // than symints
+  // TODO(jansel): some dynamic sizes seem to be ints not symints
   if (!cache->check_dynamic_sizes(compiler_call)) {
     // cache miss, need to capture FX graph
     THPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
-
     TraceState state = call_begin_capture(
         py_compiler, *cache, compiler_call, output_edges.size());
+    InputBuffers input_buffers;
 
-    std::vector<variable_list> node_outputs;
-    node_outputs.reserve(calls.size() + 1);
-    node_outputs.emplace_back(state.proxy_inputs);
-    for (auto& call : calls) {
+    for (NodeCall* call_ptr : calls) {
+      NodeCall& call = *call_ptr;
       // TODO(jansel): consider adding some of this stuff:
-      // at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
-      // c10::WarningUtils::WarningHandlerGuard
-      // warnings_guard(&local_graph_task->warning_handler_); GraphTaskGuard
       // guard(local_graph_task); NodeGuard ndguard(task.fn_); const auto
       // opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
       // c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
       // CheckpointValidGuard cpvguard(graph_task);
-      // at::NoNamesGuard no_names_guard;
-      // auto step_callbacks =
-      //    at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
+      // at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
       // if (C10_UNLIKELY(step_callbacks.has_value())) { ... }
 
-      variable_list inputs;
-      inputs.reserve(call.input_refs.size());
-      for (auto ref : call.input_refs) {
-        if (ref.is_set()) {
-          inputs.emplace_back(node_outputs[ref.node_id][ref.index]);
-        } else {
-          // TODO(jansel): do we need to construct zeros here?
-          inputs.emplace_back();
-        }
-      }
+      variable_list inputs = input_buffers.lookup(call.node.get()).buffer;
 
       for (const auto& graph_output : call.graph_output) {
         int input_nr = graph_output.first;
@@ -409,8 +360,6 @@ variable_list compiled_autograd(
       }
 
       if (call.tensor_pre_hooks.size() + call.pre_hooks.size() > 0) {
-        // TODO(jansel): we should lift hooks to be inputs to the graph since we
-        // are not specializing on them
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         for (const auto& hook : call.tensor_pre_hooks) {
           pyinputs = check(PyObject_CallMethod(
@@ -430,6 +379,15 @@ variable_list compiled_autograd(
 
       SwapSavedVariables saved(state, call.node);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
+      saved.before(call);
+      validate_outputs(
+          call.node->next_edges(), outputs, [&](const std::string& msg) {
+            std::ostringstream ss;
+            ss << "[Compiled Autograd Tracing: " << call.node->name() << "] "
+               << msg;
+            return ss.str();
+          });
+      saved.after(call);
 
       if (call.post_hooks.size() > 0) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
@@ -446,7 +404,15 @@ variable_list compiled_autograd(
         outputs = THPVariable_UnpackList(pyoutputs);
       }
 
-      node_outputs.emplace_back(std::move(outputs));
+      for (const auto i : c10::irange(outputs.size())) {
+        auto& output = outputs[i];
+        const auto& next = call.node->next_edge(i);
+        if (next.is_valid() && output.defined()) {
+          input_buffers.lookup(next.function.get())
+              .add(
+                  next.input_nr, std::move(output), c10::nullopt, c10::nullopt);
+        }
+      }
     }
 
     cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
@@ -456,8 +422,10 @@ variable_list compiled_autograd(
   // TODO(jansel): we should release all the variables and then use a
   //               boxed calling convention so activation memory can be freed
   for (auto& call : calls) {
-    call.node->release_variables();
+    call->node->release_variables();
   }
+
+  // TODO(jansel): clear grads we will overwrite below
 
   {
     THPObjectPtr inputs(THPVariable_WrapList(compiler_call.inputs));

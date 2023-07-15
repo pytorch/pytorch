@@ -236,6 +236,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   const InputMetadata& input_metadata(size_t index) const {
     return input_metadata_[index];
   }
+  InputMetadata& input_metadata(size_t index) {
+    return input_metadata_[index];
+  }
 
   /**
    * Note: Function Streams

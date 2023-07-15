@@ -74,11 +74,7 @@ variable_list AccumulateGrad::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
   at::Tensor& grad = variable.mutable_grad();
-
-  // TODO(jansel): This is the wrong place for this, as I don't see this in the
-  // above apply. Where does this implicit sum happen in eager mode?
-  at::Tensor result = inputs[0].sum_to_size_symint(variable.sym_sizes());
-
+  at::Tensor result = inputs[0];
   if (grad.defined()) {
     saved.before(grad);
     result = result + grad;

@@ -56,21 +56,7 @@ auto Identity::apply(variable_list&& grads) -> variable_list {
   return std::move(grads);
 }
 
-auto ImplicitAdd::apply(variable_list&& grads) -> variable_list {
-  auto result = grads[0];
-  for (const auto i : c10::irange(1, grads.size())) {
-    result = result + grads[i];
-  }
-  return tensor_list{result};
-}
-
 #ifdef TORCH_COMPILED_AUTOGRAD
-variable_list ImplicitAdd::apply_with_saved(
-    const variable_list& inputs,
-    SwapSavedVariables& saved) {
-  return apply(variable_list(inputs));
-}
-
 variable_list GraphRoot::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {

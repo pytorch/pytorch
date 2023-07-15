@@ -140,7 +140,6 @@ struct InputMetadata {
     return was_default_constructed_;
   }
 
- private:
   bool is_nested_tensor() const {
     return (c10::holds_alternative<at::Tensor>(shape_));
   }
@@ -161,6 +160,7 @@ struct InputMetadata {
     return c10::get<at::Tensor>(shape_);
   }
 
+ private:
   const at::TensorOptions options_;
   MetadataShape shape_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());

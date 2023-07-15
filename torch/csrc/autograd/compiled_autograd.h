@@ -63,38 +63,33 @@ struct CacheKey {
   const uint8_t* key;
 };
 
-struct OutputRef {
-  OutputRef() : node_id(-1), index(-1) {}
-  OutputRef(int node_, int index_) : node_id(node_), index(index_) {}
-  bool is_set() const {
-    return this->node_id >= 0;
-  }
-
-  int node_id;
-  int index;
-};
-
 struct NodeCall {
-  NodeCall(std::shared_ptr<Node> node_)
-      : node(std::move(node_)), input_refs(node->num_inputs()) {}
-  NodeCall(std::shared_ptr<Node> node_, int num_inputs_)
-      : node(std::move(node_)), input_refs(num_inputs_) {}
-  OutputRef& operator[](size_t pos) {
-    return input_refs[pos];
-  }
-  size_t size() const {
-    return input_refs.size();
-  }
+  NodeCall(uint32_t id_, std::shared_ptr<Node> node_)
+      : id(id_), node(std::move(node_)) {}
+
   void mark_output(int input_nr, int output_idx) {
     graph_output.emplace_back(std::make_pair(input_nr, output_idx));
   }
 
+  uint32_t id;
   std::shared_ptr<Node> node;
-  std::vector<OutputRef> input_refs; // at::SmallVector??
   std::vector<std::pair<int, int>> tensor_pre_hooks;
   std::vector<int> pre_hooks;
   std::vector<int> post_hooks;
   std::vector<std::pair<int, int>> graph_output;
+};
+
+struct NodeCalls : public std::unordered_map<Node*, NodeCall> {
+  NodeCall& lookup(const std::shared_ptr<Node>& function) {
+    auto it = find(function.get());
+    if (it == end()) {
+      it = emplace(function.get(), NodeCall(_next_id++, function)).first;
+    }
+    return it->second;
+  }
+
+ private:
+  uint32_t _next_id = 0;
 };
 
 struct AutogradCompilerCall {
@@ -124,6 +119,7 @@ struct AutogradCompilerCall {
   std::vector<at::Tensor> inputs;
   std::vector<at::Tensor> set_grad_targets;
   std::vector<c10::SafePyObject> hooks;
+  NodeCalls node_calls;
   bool accumulate_grad;
   SizeInput::DynType default_dyn_type;
 };
@@ -226,14 +222,25 @@ class CompiledNodeArgs {
   void collect(const caffe2::TypeMeta& t) {
     specialize_on_bytes(t.id());
   }
-  void collect(const OutputRef& t) {
-    // +1 is for undefined encoded as -1
-    collect_size(t.node_id + 1);
-    collect_size(t.index + 1);
-  }
   void collect(const NodeCall& t) {
-    collect(t.input_refs);
+    collect_size(t.id);
     collect(t.graph_output);
+    collect_hooks_from(t.node.get());
+    collect(t.node->next_edges());
+  }
+  void collect(const Edge& t) {
+    if (t.is_valid()) {
+      collect_size(_compiler.node_calls.lookup(t.function).id);
+      collect_size(t.input_nr);
+      collect(t.function->input_metadata(t.input_nr)); // for validate_outputs
+    }
+  }
+  void collect(const InputMetadata& t) {
+    TORCH_CHECK(!t.is_nested_tensor(), "NestedTensor not implemented");
+    collect(t.options());
+    collect(t.is_tensor_subclass());
+    // TODO(jansel): re-add this
+    // collect(t.shape_as_dim_vector());
   }
 
 #define COLLECT_AS_BYTES(T) \
@@ -447,6 +454,29 @@ class SwapSavedVariables {
     t = std::move(stashed_symints[stashed_symints_index++]);
   }
 
+  void before(NodeCall& t) {
+    before(t.node->next_edges());
+  }
+  void after(NodeCall& t) {
+    after(t.node->next_edges());
+  }
+  void before(Edge& t) {
+    if (t.is_valid()) {
+      before(t.function->input_metadata(t.input_nr)); // for validate_outputs
+    }
+  }
+  void after(Edge& t) {
+    if (t.is_valid()) {
+      after(t.function->input_metadata(t.input_nr)); // for validate_outputs
+    }
+  }
+  void before(InputMetadata& t) {
+    // before(t.shape_as_dim_vector());
+  }
+  void after(InputMetadata& t) {
+    // after(t.shape_as_dim_vector());
+  }
+
   void before(at::TensorGeometry& t) {
     before(t.mutable_sizes());
     before(t.mutable_strides());
@@ -482,13 +512,13 @@ class SwapSavedVariables {
   }
 
   template <typename T>
-  void before(c10::ArrayRef<T>& t) {
+  void before(const c10::ArrayRef<T>& t) {
     for (size_t i = 0; i < t.size(); ++i) {
       before(t[i]);
     }
   }
   template <typename T>
-  void after(c10::ArrayRef<T>& t) {
+  void after(const c10::ArrayRef<T>& t) {
     for (size_t i = 0; i < t.size(); ++i) {
       after(t[i]);
     }
