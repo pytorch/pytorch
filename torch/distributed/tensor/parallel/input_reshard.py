@@ -49,7 +49,7 @@ def input_reshard(
 
     def input_reshard_backward_hook(_: torch.nn.Module, _i: Tuple[Any, ...], _o: Any) -> Any:
         nonlocal cx
-        cx.__exit__()  # type: ignore[name-defined, union-attr]
+        cx.__exit__()  # type: ignore[name-defined]
 
     if input_reshard_dim is None:
         return module
