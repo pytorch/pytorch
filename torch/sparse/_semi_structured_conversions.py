@@ -1,6 +1,6 @@
 import torch
 
-
+@torch.compile
 def sparse_semi_structured_from_dense(dense):
     if dense.dim() != 2:
         raise RuntimeError(
@@ -204,7 +204,7 @@ def sparse_semi_structured_from_dense(dense):
     )
     return (sparse, meta_reordered)
 
-
+@torch.compile
 def sparse_semi_structured_to_dense(sparse, meta_reordered):
     if sparse.dim() != 2:
         raise RuntimeError(
