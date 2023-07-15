@@ -427,8 +427,8 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
-  auto mode = cudaStreamCaptureModeGlobal; // should not change existing mode, testing to see if any API call is a problem here
-  C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+  auto mode = cudaStreamCaptureModeGlobal;
+  cudaThreadExchangeStreamCaptureMode(&mode);
   try {
     for (const auto i : c10::irange(devices_.size())) {
       // Checking the work's corresponding CUDA events' status
