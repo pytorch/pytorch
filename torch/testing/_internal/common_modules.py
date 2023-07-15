@@ -2850,7 +2850,7 @@ module_db: List[ModuleInfo] = [
                                 device_type='cpu', active_if=IS_WINDOWS),
                    # Not implemented for backward derivative
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad',
-                         device_type='cpu'),
+                                device_type='cpu'),
                ],
                skips=(
                    # No channels_last support for TransformerEncoderLayer currently.

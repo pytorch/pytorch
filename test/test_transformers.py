@@ -2436,8 +2436,8 @@ class TestSDPA(NNTestCase):
             x.requires_grad_(True)
             x2.requires_grad_(True)
 
-        q, k, v  = x.split(n_embd, dim=2)
-        q2, k2, v2  = x2.split(n_embd, dim=2)
+        q, k, v = x.split(n_embd, dim=2)
+        q2, k2, v2 = x2.split(n_embd, dim=2)
 
         if dtype is torch.bfloat16:
             q2 = q2.float()
