@@ -31,6 +31,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .ctx_manager import AutocastModeVariable, NullContextVariable
+from .distributed import is_from_local
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
 from .tensor import TensorWithTFOverrideVariable
@@ -538,11 +539,7 @@ class TorchVariable(VariableTracker):
             assert len(args) == 1, "Expected one arg (pg)"
             assert isinstance(args[0], ProcessGroupVariable)
             return ConstantVariable(self.value(args[0].as_python_constant()))
-        elif (
-            inspect.isfunction(self.value)
-            and torch.distributed.is_available()
-            and self.value is torch.distributed._tensor.api.DTensor.from_local
-        ):
+        elif is_from_local(self.value):
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
             args_as_value = [x.as_python_constant() for x in args[1:]]

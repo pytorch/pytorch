@@ -1,11 +1,19 @@
-from typing import Dict, List
 import inspect
+from typing import Dict, List
 
 import torch
-from ..utils import (
-    istype,
-)
+from ..utils import istype
 from .base import VariableTracker
+
+
+def is_from_local(value):
+    if torch.distributed.is_available():
+        from torch.distributed._tensor import DTensor
+
+        if inspect.isfunction(value) and value is DTensor.from_local:
+            return True
+
+    return False
 
 
 class PlacementClassVariable(VariableTracker):
@@ -19,7 +27,8 @@ class PlacementClassVariable(VariableTracker):
         if torch.distributed.is_available():
             from torch.distributed._tensor.placement_types import Placement
 
-            return issubclass(value, Placement)
+            if type(value) is type and issubclass(value, Placement):
+                return True
         return False
 
     def call_function(
@@ -65,6 +74,7 @@ class PlacementVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable
+
         options = VariableTracker.propagate(self, args, kwargs.values())
         allowed_methods = ["__init__", "__setattr__"]
         # placement types dynamo tracking allows only __init__
@@ -83,6 +93,7 @@ class PlacementVariable(VariableTracker):
             return self
 
         return super().call_method(tx, name, args, kwargs)
+
 
 class DeviceMeshVariable(VariableTracker):
     def __init__(self, value, **kwargs):

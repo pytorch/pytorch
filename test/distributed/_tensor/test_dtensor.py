@@ -649,7 +649,7 @@ class TestDynamoDTensor(torch._dynamo.test_case.TestCase):
             dt = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
             return dt.to_local() + 2
 
-        ### below is the op approach for reference
+        # below is the op approach for reference
         # from torch.distributed._tensor.api import _FromTorchTensor
         # def from_local_tensor(x):
         #     return _FromTorchTensor.apply(x, mesh, [Replicate()], False)

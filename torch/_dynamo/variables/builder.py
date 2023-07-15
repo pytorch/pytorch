@@ -73,6 +73,7 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
 )
+from .distributed import DeviceMeshVariable, PlacementClassVariable
 from .functions import (
     CollectiveFunctionRewriteVariable,
     UserFunctionVariable,
@@ -116,11 +117,6 @@ from .user_defined import (
     ProcessGroupVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
-)
-from .distributed import(
-    DeviceMeshVariable,
-    PlacementClassVariable,
-    PlacementVariable
 )
 
 
@@ -386,7 +382,9 @@ class VariableBuilder:
         value = inspect.getattr_static(value, "_torchdynamo_inline", value)
 
         # Everything else (NB: order matters!)
-        if is_traceable_wrapper_subclass(value) or istype(value, config.traceable_tensor_subclasses):
+        if is_traceable_wrapper_subclass(value) or istype(
+            value, config.traceable_tensor_subclasses
+        ):
             return self.wrap_tensor(value)
         elif is_namedtuple(value):
             return self.wrap_listlike(value)
