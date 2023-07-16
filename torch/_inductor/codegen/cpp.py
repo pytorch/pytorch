@@ -2138,11 +2138,16 @@ class CppVecKernelChecker(CppVecKernel):
 
                 def can_use_int32():
                     free_symbols = list(expr.free_symbols)
-                    vars_ranges = {
-                        k: ValueRanges(0, v)
+                    sizes = {
+                        k: v
                         for k, v in zip(self.itervars, self.ranges)
                         if k in free_symbols
                     }
+                    # Trivial case: Range empty
+                    if any(v == 0 for v in sizes.values()):
+                        return True
+
+                    vars_ranges = {k: ValueRanges(0, v - 1) for k, v in sizes.items()}
                     if not vars_ranges or len(vars_ranges) != len(free_symbols):
                         i32_iinfo = numpy.iinfo(numpy.int32)
                         return (
@@ -2153,8 +2158,11 @@ class CppVecKernelChecker(CppVecKernel):
                     expr_ranges = bound_sympy(expr, vars_ranges)
                     if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):
                         return False
+                    # If something takes the values 0..7, we will compare in the loop
+                    # x < 8. As such, for the loop not to overflow in the last iteration, we want
+                    # to check that expr_ranges.upper + 1 is representable as well
                     return range_expressable_in_32_bits(
-                        ValueRanges(int(expr_ranges.lower), int(expr_ranges.upper))
+                        ValueRanges(int(expr_ranges.lower), int(expr_ranges.upper) + 1)
                     )
 
                 with RecordOptimizationContext(__name__) as node_ctx:

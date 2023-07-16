@@ -148,6 +148,17 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
+    def init_backend_registration(self):
+        if get_scheduling_for_device("cpu") is None:
+            from .codegen.cpp import CppScheduling
+
+            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+
+        if get_scheduling_for_device("cuda") is None:
+            from .codegen.triton import TritonScheduling
+
+            register_backend_for_device("cuda", TritonScheduling, WrapperCodeGen)
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -213,6 +224,7 @@ class GraphLowering(torch.fx.Interpreter):
         ] = (
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
+        self.init_backend_registration()
 
     @staticmethod
     def decide_layout_opt(gm) -> bool:
@@ -663,6 +675,13 @@ class GraphLowering(torch.fx.Interpreter):
             elif n.op == "call_function" and n.target in layout_constraints:
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
+            elif n.target == torch.ops.aten.sym_stride:
+                # inductor graphs can occasionally return sizes/strides,
+                # e.g. if we need to save symints for the backward graph.
+                if isinstance(n.meta["val"], torch.SymInt):
+                    result = n.meta["val"].node.expr
+                else:
+                    result = super().run_node(n)
             elif is_magic_method(n.target):
                 if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
@@ -848,16 +867,6 @@ class GraphLowering(torch.fx.Interpreter):
 
     def codegen(self):
         from .scheduler import Scheduler
-
-        if get_scheduling_for_device("cpu") is None:
-            from .codegen.cpp import CppScheduling
-
-            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
-
-        if get_scheduling_for_device("cuda") is None:
-            from .codegen.triton import TritonScheduling
-
-            register_backend_for_device("cuda", TritonScheduling, WrapperCodeGen)
 
         self.init_wrapper_code()
 
