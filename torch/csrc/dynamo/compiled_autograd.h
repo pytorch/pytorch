@@ -133,8 +133,7 @@ class CompiledNodeArgs {
   // key.
  public:
   void collect(const at::Tensor& t) {
-    collect(t.defined());
-    if (t.defined()) {
+    if (cond(t.defined())) {
       _compiler.add_tensor_input(t);
     }
   }
@@ -165,8 +164,7 @@ class CompiledNodeArgs {
   }
   template <typename T>
   void collect(const c10::optional<T>& t) {
-    specialize_on_bytes(t.has_value());
-    if (t.has_value()) {
+    if (cond(t.has_value())) {
       collect(*t);
     }
   }
@@ -229,8 +227,7 @@ class CompiledNodeArgs {
     collect(t.node->next_edges());
   }
   void collect(const Edge& t) {
-    collect(t.is_valid());
-    if (t.is_valid()) {
+    if (cond(t.is_valid())) {
       collect_size(_compiler.node_calls.lookup(t.function).id);
       collect_size(t.input_nr);
       collect(t.function->input_metadata(t.input_nr)); // for validate_outputs
@@ -241,6 +238,10 @@ class CompiledNodeArgs {
     collect(t.options());
     collect(t.is_tensor_subclass());
     collect(t.shape_as_dim_vector());
+  }
+  bool cond(bool cond) {
+    collect(cond);
+    return cond;
   }
 
 #define COLLECT_AS_BYTES(T) \

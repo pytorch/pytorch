@@ -78,8 +78,8 @@ inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
 }
 
 std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd = nullptr;
-const auto compiled_autograd_poison =
-    reinterpret_cast<Engine::compiled_autograd_fn>(0x1);
+#define COMPILED_AUTOGRAD_POISON \
+  reinterpret_cast<Engine::compiled_autograd_fn>(1)
 std::atomic<int32_t> num_threads_in_backwards;
 struct CompiledAutogradThreadingDebugCheck {
   CompiledAutogradThreadingDebugCheck() : incremented(true) {
@@ -1176,7 +1176,7 @@ auto Engine::execute(
   // Allows us to assert no other threads are in backwards
   CompiledAutogradThreadingDebugCheck _thread_check;
   auto compiled_autograd = the_compiled_autograd.load();
-  TORCH_CHECK(compiled_autograd != compiled_autograd_poison);
+  TORCH_CHECK(compiled_autograd != COMPILED_AUTOGRAD_POISON);
 
   // accumulate_grad is true if and only if the frontend call was to
   // grad(), not backward(). grad() returns the sum of the gradients
@@ -1188,9 +1188,7 @@ auto Engine::execute(
   // initialize a new thread local ready queue on CPU or reuse the existing one
   // (if there is one allocated already, i.e. consecutive backward calls,
   // re-entrant backward calls), then memoize the local_ready_queue in GraphTask
-  if (compiled_autograd == nullptr) {
-    init_local_ready_queue();
-  }
+  init_local_ready_queue();
   bool not_reentrant_backward_call = worker_device == NO_DEVICE;
 
   // Store root nodes so we can traverse through the graph later
@@ -1217,6 +1215,11 @@ auto Engine::execute(
   // Now compute the dependencies for all executable functions
   compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
 
+  if (!outputs.empty()) {
+    graph_task->init_to_execute(
+        *graph_root, outputs, accumulate_grad, min_topo_nr);
+  }
+
   if (compiled_autograd != nullptr) {
     // see [Note: Compiled Autograd]
     TORCH_CHECK(!keep_graph, "compiled_autograd does not support keep_graph");
@@ -1225,11 +1228,6 @@ auto Engine::execute(
     _thread_check.release();
     return (*compiled_autograd)(
         graph_root, *graph_task, accumulate_grad, outputs);
-  }
-
-  if (!outputs.empty()) {
-    graph_task->init_to_execute(
-        *graph_root, outputs, accumulate_grad, min_topo_nr);
   }
 
   // Queue the root
@@ -1365,9 +1363,9 @@ Engine& Engine::get_default_engine() {
 }
 
 void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
-  auto prior = the_compiled_autograd.exchange(compiled_autograd_poison);
+  auto prior = the_compiled_autograd.exchange(COMPILED_AUTOGRAD_POISON);
   TORCH_CHECK(
-      num_threads_in_backwards.load() == 0 && prior != compiled_autograd_poison,
+      num_threads_in_backwards.load() == 0 && prior != COMPILED_AUTOGRAD_POISON,
       "compiled_autograd.enable() requires no threads in backwards()");
   the_compiled_autograd.store(fn);
 }

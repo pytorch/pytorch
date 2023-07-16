@@ -285,18 +285,16 @@ variable_list compiled_autograd(
   static std::mutex lock;
   std::lock_guard<std::mutex> lock_guard(lock);
   pybind11::gil_scoped_acquire gil;
-  NoGradGuard no_grad; // TODO(jansel): double backward
-
   std::unordered_map<Node*, int> dependencies =
       std::move(graph_task.dependencies_);
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   worklist.reserve(dependencies.size());
   AutogradCompilerCall compiler_call(accumulate_grad);
-  auto& node_calls = compiler_call.node_calls;
   for (const auto i : c10::irange(output_edges.size())) {
-    node_calls.lookup(output_edges[i].function)
+    compiler_call.node_calls.lookup(output_edges[i].function)
         .mark_output(output_edges[i].input_nr, i);
   }
+  const bool check_exec_info = !graph_task.exec_info_.empty();
   CacheNode* cache = CacheNode::root();
   std::vector<NodeCall*> calls;
   calls.reserve(dependencies.size() + 1);
@@ -304,7 +302,7 @@ variable_list compiled_autograd(
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
-    NodeCall& call = node_calls.lookup(fn);
+    NodeCall& call = compiler_call.node_calls.lookup(fn);
     calls.emplace_back(&call);
 
     { // update cache and gather args into `compiler_call`
@@ -314,18 +312,21 @@ variable_list compiled_autograd(
       cache = cache->lookup(node_args.key());
     }
 
-    const auto& edges = fn->next_edges();
-    for (auto output_id : c10::irange(edges.size())) {
-      if (!edges[output_id].is_valid()) {
+    for (const auto& edge : fn->next_edges()) {
+      if (!edge.is_valid()) {
         continue;
       }
-      const std::shared_ptr<Node>& edge_node = edges[output_id].function;
-      uint32_t input_nr = edges[output_id].input_nr;
-      auto it = dependencies.find(edge_node.get());
+      if (check_exec_info) {
+        auto it = graph_task.exec_info_.find(edge.function.get());
+        if (it == graph_task.exec_info_.end() || !it->second.should_execute()) {
+          continue;
+        }
+      }
+      auto it = dependencies.find(edge.function.get());
       TORCH_CHECK(it != dependencies.end());
       if (--it->second == 0) {
         dependencies.erase(it);
-        worklist.emplace_back(edge_node);
+        worklist.emplace_back(edge.function);
       }
     }
   }

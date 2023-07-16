@@ -62,24 +62,40 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 
 #ifdef TORCH_COMPILED_AUTOGRAD
 void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
-  at::Tensor& grad = variable.mutable_grad();
-  args.collect(grad.defined());
-  if (grad.defined()) {
-    args.collect(grad);
+  if (args.cond(
+          variable.defined() && variable.requires_grad() &&
+          GradMode::is_enabled())) {
+    args.collect(variable);
+    args.collect(variable.grad());
+    args.set_grad_target(variable);
   }
-  args.set_grad_target(variable);
 }
 variable_list AccumulateGrad::apply_with_saved(
-    const variable_list& inputs,
+    const variable_list& grads,
     SwapSavedVariables& saved) {
-  at::Tensor& grad = variable.mutable_grad();
-  at::Tensor result = inputs[0];
-  if (grad.defined()) {
-    saved.before(grad);
-    result = result + grad;
-    saved.after(grad);
+  if (!(variable.defined() && variable.requires_grad() &&
+        GradMode::is_enabled())) {
+    return variable_list();
   }
-  saved.set_grad_value(result);
+  TORCH_CHECK(!variable.grad_fn() && grads.size() == 1);
+  TORCH_CHECK(grads[0].defined(), "not implemented")
+  at::Tensor variable_copy = variable;
+  at::Tensor grad_copy = variable.grad();
+  saved.before(variable_copy);
+  saved.before(grad_copy);
+  int callback_count = 0;
+  accumulateGrad(
+      variable_copy,
+      grad_copy,
+      grads[0],
+      0 /* num_expected_refs, 0 disables in-place update */,
+      [&callback_count, &saved](const at::Tensor& grad_update) {
+        callback_count++;
+        saved.set_grad_value(grad_update);
+      });
+  TORCH_INTERNAL_ASSERT(callback_count == 1);
+  saved.after(variable_copy);
+  saved.after(grad_copy);
   return variable_list();
 }
 #endif
