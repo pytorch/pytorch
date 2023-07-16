@@ -439,7 +439,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
       // C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
     }
   } catch (const std::exception& e) {
-    C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+    // C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
     if (std::string(e.what()).find("driver shutting down") ==
         std::string::npos) {
       throw;
