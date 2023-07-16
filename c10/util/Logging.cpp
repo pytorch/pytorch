@@ -260,6 +260,8 @@ bool InitCaffeLogging(int* argc, char** argv) {
 
   initGoogleLogging(argv[0]);
 
+  detail::setLogLevelFlagFromEnv();
+
   UpdateLoggingLevelsFromFlags();
 
   return true;
