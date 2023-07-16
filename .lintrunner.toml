@@ -181,6 +181,7 @@ include_patterns = [
     'torch/_dynamo/repro/**/*.py',
     'torch/_inductor/graph.py',
     'torch/_inductor/codegen/wrapper.py',
+    'torch/_inductor/cudagraph_trees.py',
     'torch/_C/_dynamo/**/*.py',
     'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
 ]
