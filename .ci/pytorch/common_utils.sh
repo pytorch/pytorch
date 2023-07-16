@@ -171,7 +171,7 @@ function checkout_install_torchdeploy() {
   local commit
   commit=$(get_pinned_commit multipy)
   pushd ..
-  git clone --recurse-submodules https://github.com/Lalaland/multipy.git
+  git clone --recurse-submodules https://github.com/EthanSteinberg/multipy.git
   pushd multipy
   git checkout "${commit}"
   python multipy/runtime/example/generate_examples.py
