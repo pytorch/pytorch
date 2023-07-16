@@ -155,6 +155,9 @@ struct InputMetadata {
     const auto& dim_shape = c10::get<SymIntSmallVec>(shape_);
     return c10::SymIntArrayRef(dim_shape.data(), dim_shape.size());
   }
+  SymIntSmallVec& mutable_shape_as_dim_vector() {
+    return c10::get<SymIntSmallVec>(shape_);
+  }
 
   at::Tensor shape_as_tensor() const {
     return c10::get<at::Tensor>(shape_);

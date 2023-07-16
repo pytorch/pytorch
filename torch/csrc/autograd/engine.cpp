@@ -77,9 +77,10 @@ inline bool should_run_in_cpu_ready_queue(c10::DeviceType device) {
   }
 }
 
-static std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd =
-    nullptr;
-static std::atomic<int32_t> num_threads_in_backwards;
+std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd = nullptr;
+const auto compiled_autograd_poison =
+    reinterpret_cast<Engine::compiled_autograd_fn>(0x1);
+std::atomic<int32_t> num_threads_in_backwards;
 struct CompiledAutogradThreadingDebugCheck {
   CompiledAutogradThreadingDebugCheck() : incremented(true) {
     num_threads_in_backwards++;
@@ -1175,6 +1176,7 @@ auto Engine::execute(
   // Allows us to assert no other threads are in backwards
   CompiledAutogradThreadingDebugCheck _thread_check;
   auto compiled_autograd = the_compiled_autograd.load();
+  TORCH_CHECK(compiled_autograd != compiled_autograd_poison);
 
   // accumulate_grad is true if and only if the frontend call was to
   // grad(), not backward(). grad() returns the sum of the gradients
@@ -1363,13 +1365,11 @@ Engine& Engine::get_default_engine() {
 }
 
 void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
-  bool ok = num_threads_in_backwards.load() == 0;
-  if (ok) {
-    the_compiled_autograd.store(fn);
-  }
+  auto prior = the_compiled_autograd.exchange(compiled_autograd_poison);
   TORCH_CHECK(
-      ok && num_threads_in_backwards.load() == 0, // double check for race
-      "compiled_autograd.enable() requires no threads in backwards()")
+      num_threads_in_backwards.load() == 0 && prior != compiled_autograd_poison,
+      "compiled_autograd.enable() requires no threads in backwards()");
+  the_compiled_autograd.store(fn);
 }
 
 void Engine::queue_callback(std::function<void()> callback) {

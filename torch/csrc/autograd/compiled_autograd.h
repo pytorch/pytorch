@@ -148,15 +148,15 @@ class CompiledNodeArgs {
   template <typename T>
   void collect(const std::vector<T>& t) {
     collect_size(t.size());
-    for (size_t i = 0; i < t.size(); ++i) {
-      collect(t[i]);
+    for (const T& i : t) {
+      collect(i);
     }
   }
   template <typename T>
   void collect(const c10::ArrayRef<T>& t) {
     collect_size(t.size());
-    for (size_t i = 0; i < t.size(); ++i) {
-      collect(t[i]);
+    for (const T& i : t) {
+      collect(i);
     }
   }
   template <typename T>
@@ -229,6 +229,7 @@ class CompiledNodeArgs {
     collect(t.node->next_edges());
   }
   void collect(const Edge& t) {
+    collect(t.is_valid());
     if (t.is_valid()) {
       collect_size(_compiler.node_calls.lookup(t.function).id);
       collect_size(t.input_nr);
@@ -239,8 +240,7 @@ class CompiledNodeArgs {
     TORCH_CHECK(!t.is_nested_tensor(), "NestedTensor not implemented");
     collect(t.options());
     collect(t.is_tensor_subclass());
-    // TODO(jansel): re-add this
-    // collect(t.shape_as_dim_vector());
+    collect(t.shape_as_dim_vector());
   }
 
 #define COLLECT_AS_BYTES(T) \
@@ -283,16 +283,12 @@ class CompiledNodeArgs {
     for (auto& i : fn->post_hooks()) {
       i->compiled_args(*this);
     }
-    specialize_on_hook_counts();
-  }
-
-  void specialize_on_hook_counts() {
     collect_size(_node_call.tensor_pre_hooks.size());
-    for (const auto& h : _node_call.tensor_pre_hooks) {
-      collect_size(h.second);
-    }
     collect_size(_node_call.pre_hooks.size());
     collect_size(_node_call.post_hooks.size());
+    for (const auto& h : _node_call.tensor_pre_hooks) {
+      collect_size(h.second); // index
+    }
   }
 
   CacheKey key() const {
@@ -454,12 +450,6 @@ class SwapSavedVariables {
     t = std::move(stashed_symints[stashed_symints_index++]);
   }
 
-  void before(NodeCall& t) {
-    before(t.node->next_edges());
-  }
-  void after(NodeCall& t) {
-    after(t.node->next_edges());
-  }
   void before(Edge& t) {
     if (t.is_valid()) {
       before(t.function->input_metadata(t.input_nr)); // for validate_outputs
@@ -471,10 +461,10 @@ class SwapSavedVariables {
     }
   }
   void before(InputMetadata& t) {
-    // before(t.shape_as_dim_vector());
+    before(t.mutable_shape_as_dim_vector());
   }
   void after(InputMetadata& t) {
-    // after(t.shape_as_dim_vector());
+    after(t.mutable_shape_as_dim_vector());
   }
 
   void before(at::TensorGeometry& t) {
@@ -500,27 +490,26 @@ class SwapSavedVariables {
 
   template <typename T>
   void before(std::vector<T>& t) {
-    for (size_t i = 0; i < t.size(); ++i) {
-      before(t[i]);
+    for (T& i : t) {
+      before(i);
     }
   }
   template <typename T>
   void after(std::vector<T>& t) {
-    for (size_t i = 0; i < t.size(); ++i) {
-      after(t[i]);
+    for (T& i : t) {
+      after(i);
     }
   }
-
-  template <typename T>
-  void before(const c10::ArrayRef<T>& t) {
-    for (size_t i = 0; i < t.size(); ++i) {
-      before(t[i]);
+  template <typename T, unsigned N>
+  void before(c10::SmallVector<T, N>& t) {
+    for (T& i : t) {
+      before(i);
     }
   }
-  template <typename T>
-  void after(const c10::ArrayRef<T>& t) {
-    for (size_t i = 0; i < t.size(); ++i) {
-      after(t[i]);
+  template <typename T, unsigned N>
+  void after(c10::SmallVector<T, N>& t) {
+    for (T& i : t) {
+      after(i);
     }
   }
 

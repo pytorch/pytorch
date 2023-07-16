@@ -379,7 +379,7 @@ variable_list compiled_autograd(
 
       SwapSavedVariables saved(state, call.node);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
-      saved.before(call);
+      saved.before(call.node->next_edges());
       validate_outputs(
           call.node->next_edges(), outputs, [&](const std::string& msg) {
             std::ostringstream ss;
@@ -387,7 +387,7 @@ variable_list compiled_autograd(
                << msg;
             return ss.str();
           });
-      saved.after(call);
+      saved.after(call.node->next_edges());
 
       if (call.post_hooks.size() > 0) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
