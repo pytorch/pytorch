@@ -131,7 +131,7 @@ overhead: we first rewrote the `autograd` engine in C++, then the majority
 of operator definitions, then developed TorchScript and the C++
 frontend.
 
-Still, working in Python provides easily the best experience for our
+Still, working in Python has easily provided the best experience for our
 users: it is flexible, familiar, and perhaps most importantly, has a
 huge ecosystem of scientific computing libraries and extensions
 available for use. This fact motivates a few of our most recent
