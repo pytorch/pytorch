@@ -1139,6 +1139,7 @@ target_link_libraries(pybind::pybind11 INTERFACE python::python)
 if(APPLE)
   target_link_options(pybind::pybind11 INTERFACE -undefined dynamic_lookup)
 endif()
+add_definitions(-DPYBIND11_NO_GIL_CHECKS)
 
 # ---[ MPI
 if(USE_MPI)
