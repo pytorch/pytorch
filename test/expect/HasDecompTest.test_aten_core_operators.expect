@@ -185,8 +185,6 @@ aten::div_.Tensor
 aten::div_.Tensor_mode
 aten::embedding
 aten::embedding.out
-aten::empty_like
-aten::empty_like.out
 aten::empty_strided
 aten::empty_strided.out
 aten::eq.Scalar

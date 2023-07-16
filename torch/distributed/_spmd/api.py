@@ -143,7 +143,7 @@ def _rematerialize_optimizer(
     assert opt is not None
 
     # update opt.state with proxy tensors
-    orig_states = copy(opt.state)
+    orig_states: Dict[str, Any] = copy(opt.state)
     for n in named_states:
         # opt.state's key type is string, but optimizer uses Parameter as keys
         opt.state[params[n]] = named_states[n]  # type: ignore[index]
