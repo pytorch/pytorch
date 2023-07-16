@@ -1036,7 +1036,7 @@ static PyMethodDef methods[] = { // NOLINT
      castPyCFunctionWithKeywords(set_multithreading_enabled),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
+    {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
     {"_exit_dual_level",
      castPyCFunctionWithKeywords(python_exit_dual_level),
      METH_VARARGS | METH_KEYWORDS,
