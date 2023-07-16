@@ -1186,6 +1186,7 @@ class TorchPatcher:
         from ..optim import (
             adadelta,
             adagrad,
+            adam,
             adamax,
             adamw,
             asgd,
@@ -1195,7 +1196,20 @@ class TorchPatcher:
             sgd,
         )
 
-        for opt_mod in (
+        all_opts = {
+            adadelta,
+            adagrad,
+            adam,
+            adamax,
+            adamw,
+            asgd,
+            nadam,
+            rmsprop,
+            rprop,
+            sgd,
+        }
+
+        disabled_multi_tensor_opts = {
             adadelta,
             adagrad,
             adamax,
@@ -1205,11 +1219,16 @@ class TorchPatcher:
             rmsprop,
             rprop,
             sgd,
-        ):
+        }
+
+        for opt_mod in all_opts:
             opt_name = opt_mod.__name__.split(".")[-1]
             multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
             fused_fn_name = f"_fused_{opt_name}"
-            if hasattr(opt_mod, multi_tensor_fn_name):
+            if (
+                hasattr(opt_mod, multi_tensor_fn_name)
+                and opt_mod in disabled_multi_tensor_opts
+            ):
                 setattr(
                     opt_mod,
                     multi_tensor_fn_name,

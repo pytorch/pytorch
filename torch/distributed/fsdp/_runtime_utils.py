@@ -1433,7 +1433,7 @@ def _register_post_backward_reshard_only_hooks(
         hook_handle = register_multi_grad_hook(
             inp_tensors, functools.partial(_post_backward_reshard, state, handle)
         )
-        handle.flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
+        handle.flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined]
 
 
 @no_type_check
@@ -1468,11 +1468,11 @@ def _wait_for_computation_stream(
     For example, this should be called in the FSDP root's pre-forward to
     respect optimizer step computation.
     """
-    unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
+    unshard_stream.wait_stream(computation_stream)
     # Having the pre-all-gather stream wait for the current stream even if we
     # do not leverage the pre-all-gather stream is tolerable since this only
     # runs once per iteration
-    pre_unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
+    pre_unshard_stream.wait_stream(computation_stream)
 
 
 def _reset_flat_param_grad_info_if_needed(
