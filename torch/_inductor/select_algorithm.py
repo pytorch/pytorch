@@ -26,7 +26,7 @@ from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 
 from .codegen.triton_utils import config_of, signature_of
 
-from .utils import do_bench, sympy_dot, sympy_product, unique
+from .utils import do_bench, sympy_dot, sympy_product, sympy_subs, unique
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -202,6 +202,11 @@ class TritonTemplateKernel(TritonKernel):
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
             ]
             assert len(indices) == len(lengths)
+            replacements = {
+                x: self.args.size(x)
+                for x in index_symbols + lengths
+                if x.name.startswith("s") or x.name.startswith("ps")
+            }
 
             # glue to make generated code use same indexing from template
             for name, range_tree_entry in zip(
@@ -211,6 +216,7 @@ class TritonTemplateKernel(TritonKernel):
             contiguous_index = sympy_dot(
                 ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
             )
+            contiguous_index = sympy_subs(contiguous_index, replacements)
             self.body.writeline("xindex = " + texpr(contiguous_index))
             self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
@@ -218,6 +224,7 @@ class TritonTemplateKernel(TritonKernel):
             self.template_mask = mask
             self.template_indices = indices
             output_index = self.output_node.get_layout().make_indexer()(index_symbols)
+            output_index = sympy_subs(output_index, replacements)
             if output_index == contiguous_index:
                 output_index = sympy.Symbol("xindex")
 
@@ -301,6 +308,8 @@ class TritonTemplateKernel(TritonKernel):
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
+            if isinstance(call_args[i], sympy.Symbol):
+                call_args[i] = texpr(call_args[i])
 
         if V.graph.cpp_wrapper:
             wrapper.generate_kernel_call(
@@ -465,13 +474,17 @@ class TritonTemplate:
             mod = PyCodeCache.load(code, extra)
             _, call_args, _ = kernel.args.python_argdefs()
 
+<<<<<<< HEAD
         expected_args = list(unique(x.get_name() for x in input_nodes))
         expected_args.extend([fake_out.get_name()])
         assert list(call_args) == expected_args, (call_args, expected_args)
+=======
+        expected_args = [x.get_name() for x in input_nodes] + [fake_out.get_name()]
+        assert list(call_args)[:len(expected_args)] == expected_args, (call_args, expected_args)
+>>>>>>> ef095fb7011 (Support dynamic shapes in TritonTemplates.)
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
-        assert not extra_args, "TODO: dynamic shapes"
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
 
