@@ -44,7 +44,12 @@ from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
 FUNCTION_DECLARATION = CodeTemplate(
     """\
+#ifdef _WIN32
 struct ${op} : public ${superclass} {
+#else
+struct TORCH_API ${op} : public ${superclass} {
+#endif
+  TORCH_API ${op}() = default;
   using ${superclass}::${superclass};
   variable_list apply(variable_list&& grads) override;
   std::string name() const override { return "${op}"; }
