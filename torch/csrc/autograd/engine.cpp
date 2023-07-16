@@ -2,11 +2,11 @@
 
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/autograd.h>
-#include <torch/csrc/autograd/compiled_autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <ATen/DeviceGuard.h>

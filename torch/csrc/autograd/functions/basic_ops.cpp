@@ -1,9 +1,9 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 
-#include <torch/csrc/autograd/compiled_autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 
 #include <ATen/ATen.h>
 

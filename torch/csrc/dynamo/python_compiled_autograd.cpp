@@ -1,7 +1,7 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
-#include <torch/csrc/autograd/compiled_autograd.h>
 #include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>

@@ -5,8 +5,8 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/autograd/compiled_autograd.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
