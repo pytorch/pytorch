@@ -486,6 +486,7 @@ inductor_all_samples = {
     "scatter_reduce.sum",
     "select_scatter",
     "squeeze",
+    "unfold",
     "unsqueeze",
     "sum",
     "amax",
