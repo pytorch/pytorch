@@ -12,8 +12,8 @@ from .quantizer import (
     Quantizer,
     QuantizationAnnotation,
 )
-from torch.ao.quantization._pt2e.graph_utils import find_sequential_partitions
-from torch.ao.quantization._pt2e.quantizer.utils import (
+from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
+from torch.ao.quantization.pt2e.quantizer.utils import (
     get_input_act_qspec,
     get_output_act_qspec,
     get_weight_qspec,
@@ -40,7 +40,7 @@ __all__ = [
     "get_default_x86_inductor_quantization_config",
 ]
 
-def supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
+def _supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
     # TODO: Add more supported operators here.
     supported_operators: Dict[str, List[OperatorPatternType]] = {
         "conv2d": [
@@ -69,10 +69,10 @@ def supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
     return copy.deepcopy(supported_operators)
 
 
-def get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
+def _get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
     supported_config_and_operators: List[OperatorConfig] = []
     for quantization_config in [get_default_x86_inductor_quantization_config(), ]:
-        ops = supported_quantized_operators()
+        ops = _supported_quantized_operators()
         for op_string, pattern_list in ops.items():
             supported_config_and_operators.append(
                 OperatorConfig(quantization_config, pattern_list)
@@ -120,12 +120,12 @@ def get_default_x86_inductor_quantization_config():
     return quantization_config
 
 
-def get_supported_config_and_operators() -> List[OperatorConfig]:
-    return get_supported_x86_inductor_config_and_operators()
+def _get_supported_config_and_operators() -> List[OperatorConfig]:
+    return _get_supported_x86_inductor_config_and_operators()
 
 
 class X86InductorQuantizer(Quantizer):
-    supported_config_and_operators = get_supported_config_and_operators()
+    supported_config_and_operators = _get_supported_config_and_operators()
 
     def __init__(self):
         super().__init__()
