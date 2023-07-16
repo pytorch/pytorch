@@ -317,7 +317,6 @@ class CompiledNodeArgs {
 
   void collect_size(size_t s) {
     // we expect sizes to be small, so try to cram them into a single byte
-    // shorter keys, means faster caches
     constexpr uint8_t encode_as_u64 = std::numeric_limits<uint8_t>::max();
     constexpr uint8_t encode_as_u32 = encode_as_u64 - 1;
     constexpr uint8_t encode_as_u16 = encode_as_u64 - 2;
@@ -380,13 +379,13 @@ class CompiledNodeArgs {
 
 struct TraceState {
   TraceState(
-      const variable_list& pi,
+      const variable_list& proxy_inputs_,
       const std::vector<c10::optional<c10::SymInt>>& ss,
       bool accumulate_grad_,
       size_t num_outputs)
       : proxy_inputs_index(0),
         sym_sizes_index(0),
-        proxy_inputs(pi),
+        proxy_inputs(proxy_inputs_),
         sym_sizes(ss),
         outputs(num_outputs),
         accumulate_grad(accumulate_grad_) {}
@@ -452,12 +451,13 @@ class SwapSavedVariables {
 
   void before(Edge& t) {
     if (t.is_valid()) {
-      before(t.function->input_metadata(t.input_nr)); // for validate_outputs
+      // need for symints used by validate_outputs
+      before(t.function->mutable_input_metadata(t.input_nr));
     }
   }
   void after(Edge& t) {
     if (t.is_valid()) {
-      after(t.function->input_metadata(t.input_nr)); // for validate_outputs
+      after(t.function->mutable_input_metadata(t.input_nr));
     }
   }
   void before(InputMetadata& t) {

@@ -57,6 +57,9 @@ auto Identity::apply(variable_list&& grads) -> variable_list {
 }
 
 #ifdef TORCH_COMPILED_AUTOGRAD
+void GraphRoot::compiled_args(CompiledNodeArgs& args) {
+  args.collect(outputs);
+}
 variable_list GraphRoot::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
@@ -64,10 +67,6 @@ variable_list GraphRoot::apply_with_saved(
   variable_list result(outputs);
   saved.after(outputs);
   return result;
-}
-
-void GraphRoot::compiled_args(CompiledNodeArgs& args) {
-  args.collect(outputs);
 }
 #endif
 

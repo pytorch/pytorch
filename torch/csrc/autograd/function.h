@@ -236,7 +236,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   const InputMetadata& input_metadata(size_t index) const {
     return input_metadata_[index];
   }
-  InputMetadata& input_metadata(size_t index) {
+  InputMetadata& mutable_input_metadata(size_t index) {
     return input_metadata_[index];
   }
 
@@ -580,16 +580,13 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
         std::string("apply_with_saved not implemented: ") + name());
   }
 #else
-  // Used by compiled autograd to
-  //   1) Extract tenstor/symint args
-  //   2) Collect node information for specialization and caching
-  void compiled_args(CompiledNodeArgs& args){
-      TORCH_CHECK(false, "Windows is not supported")}
-
-  // Used by compiled autograd to call apply() with different saved tensors
-  variable_list
-      apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) {
-    TORCH_CHECK(false, "Windows is not supported")
+  void compiled_args(CompiledNodeArgs& args) {
+    TORCH_CHECK(false, "Windows is not supported");
+  }
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) {
+    TORCH_CHECK(false, "Windows is not supported");
   }
 #endif
 

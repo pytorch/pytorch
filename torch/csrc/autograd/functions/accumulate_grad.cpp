@@ -69,7 +69,6 @@ void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
   }
   args.set_grad_target(variable);
 }
-
 variable_list AccumulateGrad::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {

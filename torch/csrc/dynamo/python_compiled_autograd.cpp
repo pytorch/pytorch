@@ -421,36 +421,29 @@ variable_list compiled_autograd(
 
   // TODO(jansel): we should release all the variables and then use a
   //               boxed calling convention so activation memory can be freed
+  // TODO(jansel): clear grads we will overwrite below
   for (auto& call : calls) {
     call->node->release_variables();
   }
 
-  // TODO(jansel): clear grads we will overwrite below
-
-  {
-    THPObjectPtr inputs(THPVariable_WrapList(compiler_call.inputs));
-    THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
-    THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
-    THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
-        cache->compiled_fn.get(),
-        inputs.get(),
-        sizes.get(),
-        hooks.get(),
-        NULL)));
-    variable_list outputs = THPVariable_UnpackList(pyresult);
-    if (accumulate_grad) {
-      TORCH_CHECK(outputs.size() == compiler_call.set_grad_targets.size());
-      for (const auto i : c10::irange(outputs.size())) {
-        // TODO(jansel): does this one need to be an inplace copy?  if so it
-        // should go in the graph
-        at::Tensor& grad = compiler_call.set_grad_targets[i].mutable_grad();
-        grad = outputs[i];
-      }
-      return variable_list();
-    } else {
-      TORCH_CHECK(outputs.size() == output_edges.size());
-      return outputs;
+  THPObjectPtr inputs(THPVariable_WrapList(compiler_call.inputs));
+  THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
+  THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
+  THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
+      cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
+  variable_list outputs = THPVariable_UnpackList(pyresult);
+  if (accumulate_grad) {
+    TORCH_CHECK(outputs.size() == compiler_call.set_grad_targets.size());
+    for (const auto i : c10::irange(outputs.size())) {
+      // TODO(jansel): does this one need to be an inplace copy?  if so it
+      // should go in the graph
+      at::Tensor& grad = compiler_call.set_grad_targets[i].mutable_grad();
+      grad = outputs[i];
     }
+    return variable_list();
+  } else {
+    TORCH_CHECK(outputs.size() == output_edges.size());
+    return outputs;
   }
 }
 
