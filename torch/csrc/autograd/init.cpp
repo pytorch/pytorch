@@ -754,7 +754,10 @@ static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_multithreading_enabled(PyObject* self, PyObject* args, PyObject* kwargs) {
+static PyObject* set_multithreading_enabled(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
       "set_multithreading_enabled(bool enabled)",
@@ -765,22 +768,28 @@ static PyObject* set_multithreading_enabled(PyObject* self, PyObject* args, PyOb
   if (at::impl::torch_function_mode_enabled()) {
     auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
     return handle_torch_function(
-        r, args, kwargs, torch_C_module, "torch._C", "_set_multithreading_enabled");
+        r,
+        args,
+        kwargs,
+        torch_C_module,
+        "torch._C",
+        "_set_multithreading_enabled");
   }
   auto multithreading_enabled = r.toBool(0);
-  c10::AutogradState::get_tls_state().set_multithreading_enabled(multithreading_enabled);
+  c10::AutogradState::get_tls_state().set_multithreading_enabled(
+      multithreading_enabled);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* is_multithreading_enabled(PyObject* self, PyObject* args) {
-    HANDLE_TH_ERRORS
-    if (c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
-        Py_RETURN_TRUE;
-    } else {
-        Py_RETURN_FALSE;
-    }
-    END_HANDLE_TH_ERRORS
+  HANDLE_TH_ERRORS
+  if (c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* is_inference_mode_enabled(PyObject* _unused, PyObject* arg) {
@@ -1033,7 +1042,10 @@ static PyMethodDef methods[] = { // NOLINT
      is_anomaly_check_nan_enabled,
      METH_NOARGS,
      nullptr},
-    {"_is_multithreading_enabled", is_multithreading_enabled, METH_NOARGS, nullptr},
+    {"_is_multithreading_enabled",
+     is_multithreading_enabled,
+     METH_NOARGS,
+     nullptr},
     {"_set_multithreading_enabled",
      castPyCFunctionWithKeywords(set_multithreading_enabled),
      METH_VARARGS | METH_KEYWORDS,
