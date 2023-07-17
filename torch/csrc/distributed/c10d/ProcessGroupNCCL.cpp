@@ -286,6 +286,7 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
+thread_local int64_t _timeout_skew = 0;
 
 std::ostream& operator<<(
     std::ostream& output,
@@ -452,7 +453,7 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
       currentTimepoint - workStartTime_);
   auto workTimeout = timeout ? *timeout : opTimeout_;
 
-  if (timeElapsed < workTimeout)
+  if (timeElapsed < workTimeout + _timeout_skew)
     return false;
 
   // Timed out
@@ -469,7 +470,9 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
       *this,
       " ran for ",
       timeElapsed.count(),
-      " milliseconds before timing out.");
+      " milliseconds before timing out."
+      "Timeout skew: ",
+      _timeout_skew);
 
   LOG(ERROR) << exceptionMsg;
   std::exception_ptr exception_ptr =
@@ -903,9 +906,13 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
     VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
     // test if runtime API call works...
+    auto skew_start = std::chrono::steady_clock::now();
     auto mode = cudaStreamCaptureModeGlobal;
     cudaThreadExchangeStreamCaptureMode(&mode);
     cudaThreadExchangeStreamCaptureMode(&mode);
+    auto skew_end = std::chrono::steady_clock::now();
+    auto skew = std::chrono::duration_cast<std::chrono::milliseconds>(skew_end - skew_start);
+    _timeout_skew += skew;
     workCleanupLoop();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
