@@ -501,6 +501,7 @@ lazy_tensor_core_python_sources = [
 ]
 
 inductor_core_resources = [
+    "torch/csrc/inductor/aot_inductor_tensor.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
 ]
 

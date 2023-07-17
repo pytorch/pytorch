@@ -1586,15 +1586,9 @@ class ReinterpretView(BaseView):
         pass
 
     def codegen_reference(self):
-        size = V.graph.wrapper_code.codegen_shape_tuple(self.layout.size)
-        stride = V.graph.wrapper_code.codegen_shape_tuple(self.layout.stride)
-        offset = V.graph.wrapper_code.codegen_sizevar(self.layout.offset)
-        namespace = V.graph.wrapper_code.namespace
-        if offset != "0":
-            return (
-                f"{namespace}as_strided({self.get_name()}, {size}, {stride}, {offset})"
-            )
-        return f"{namespace}as_strided({self.get_name()}, {size}, {stride})"
+        return V.graph.wrapper_code.codegen_as_strided(
+            self.get_name(), self.layout.size, self.layout.stride, self.layout.offset
+        )
 
 
 class SliceView(View):

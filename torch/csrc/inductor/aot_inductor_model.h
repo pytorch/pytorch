@@ -4,9 +4,12 @@
 #include <string>
 #include <vector>
 
+// TODO: remove dependency on aten and c10
 #include <ATen/ATen.h>
 
 #include <c10/cuda/CUDAGuard.h>
+
+#include <torch/csrc/inductor/aot_inductor_tensor.h>
 
 #define AOT_VECTOR_SIZE_CHECK(vec, expected_size) \
   {                                               \
@@ -49,8 +52,8 @@ class AOTInductorModelBase {
   // Passes such as constant-folding may affect how we handle constants.
   // We will revisit it once all the relevant pieces are ready.
   void run(
-      const std::vector<at::Tensor>& inputs,
-      std::vector<at::Tensor>& outputs,
+      std::vector<AotInductorTensor>& inputs,
+      std::vector<AotInductorTensor>& outputs,
       cudaStream_t stream) {
     AOT_VECTOR_SIZE_CHECK(inputs, num_inputs());
     AOT_VECTOR_SIZE_CHECK(outputs, num_outputs());
@@ -167,8 +170,8 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
   AOTInductorModel();
 
   void run_impl(
-      const std::vector<at::Tensor>& inputs,
-      std::vector<at::Tensor>& outputs,
+      std::vector<AotInductorTensor>& args,
+      std::vector<AotInductorTensor>& outputs,
       cudaStream_t stream);
 
   static std::unique_ptr<AOTInductorModel> Create() {

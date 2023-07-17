@@ -54,22 +54,26 @@ AOTInductorError AOTInductorModelContainerRun(
           container_handle);
 
   const auto* inputs = reinterpret_cast<const at::Tensor*>(inputs_handle);
-  std::vector<at::Tensor> input_tensors;
+  std::vector<AotInductorTensor> input_tensors;
   input_tensors.reserve(num_inputs);
   for (size_t i = 0; i < num_inputs; i++) {
-    input_tensors.push_back(inputs[i]);
+    input_tensors.emplace_back(convert_to_aot_inductor_tensor((void*)&inputs[i]));
   }
 
   auto* outputs = reinterpret_cast<at::Tensor*>(outputs_handle);
-  std::vector<at::Tensor> output_tensors;
+  std::vector<AotInductorTensor> output_tensors;
   output_tensors.reserve(num_outputs);
   for (size_t i = 0; i < num_outputs; i++) {
-    output_tensors.push_back(outputs[i]);
+    output_tensors.emplace_back(convert_to_aot_inductor_tensor((void*)&outputs[i]));
   }
 
   auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { container->run(input_tensors, output_tensors, stream); })
+      { container->run(input_tensors, output_tensors, stream);
+        for (size_t i = 0; i < num_outputs; i++) {
+          convert_to_aten_tensor(output_tensors[i], (void*)&outputs[i]);
+        }
+      })
 }
 
 AOTInductorError AOTInductorModelContainerGetNumInputs(

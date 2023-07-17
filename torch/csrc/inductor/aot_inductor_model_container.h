@@ -50,8 +50,8 @@ class AOTInductorModelContainer {
   }
 
   void run(
-      const std::vector<at::Tensor>& inputs,
-      std::vector<at::Tensor>& outputs,
+      std::vector<AotInductorTensor>& inputs,
+      std::vector<AotInductorTensor>& outputs,
       cudaStream_t stream) {
     auto* model = get_available_model();
     try {

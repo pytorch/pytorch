@@ -15,6 +15,8 @@ verbose_progress = False
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
+aot_inductor_abi_compatible = True
+
 # dead code elimination
 dce = False
 
