@@ -93,6 +93,9 @@ class SSGraph:
         critical_path: [SSNode]. It records the critical path of the graph. All nodes in the critical path will be assigned to the default stream.
         stream_pool_size: how many extra CUDA streams used to allocate. TODO: it's better to use the max number of nodes in the same level in reverse_level
         stream_pool: [stream_index, ]. It records the CUDA streams used to allocate.
+        final_order: [SSNode]. It records the final order of the nodes after reorder. The order matters.
+        max_stream_id: the max stream id used in the graph.
+        arg_to_stream: the argument to stream mapping. {arg_name: stream_id}
     """
 
     def __init__(self, nodes) -> None:
@@ -102,9 +105,11 @@ class SSGraph:
         self.reverse_level = {}
         self.reverse_level_predecessors = {}
         self.critical_path = []
-        self.stream_pool_size = int(environ.get("STREAM_POOL_SIZE", 20))
-        self.stream_pool = []
+        self.stream_pool_size = int(environ.get("STREAM_POOL_SIZE", 1))
+        self.stream_pool = [0] * (self.stream_pool_size + 1)
+        self.arg_to_stream = {}
         self.final_order = []
+        self.max_stream_id = 0
         self.build_graph(nodes)
         self.stream_scheduling()
 
@@ -197,7 +202,6 @@ class SSGraph:
             self.stream_pool[predecessor.stream_id] += 1
             return predecessor.stream_id
         else:
-            # get the min value and its corresponding key in self.stream_pool
             min_value = min(self.stream_pool)
             min_stream = self.stream_pool.index(min_value)
             self.stream_pool[min_stream] += 1
@@ -235,8 +239,6 @@ class SSGraph:
                     ssnode.cuda_event = True
 
     def stream_scheduling(self):
-        for i in range(self.stream_pool_size + 1):
-            self.stream_pool.append(0)
         # Yueming TODO: do we need keep this fake 0?
         self.stream_pool[0] = len(self.ssnodes) + 2
         self.dig_node(self.ssnodes[0])

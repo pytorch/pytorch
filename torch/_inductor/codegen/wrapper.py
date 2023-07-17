@@ -211,16 +211,25 @@ class AllocateLine(MemoryPlanningLine):
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
         line = self.wrapper.make_buffer_allocation(self.node)
-        # if self has attribute user_streams, then it is used by multiple streams
+        # if self has attribution named user_streams, it is used by multiple streams
         if hasattr(self, "user_streams"):
             need_cuda_event = False
             if len(self.user_streams) > 1:
                 print(f"findhao-> buffer {self.node.get_name()} is used by multiple streams")
             elif len(self.user_streams) == 1:
                 if self.user_streams[0] != 0:
-                    code.writeline(f"with torch.cuda.stream(stream{self.user_streams[0]}_raw):")
-                    with code.indent():
-                        code.writeline(line)
+                    if V.graph.cpp_wrapper:
+                        code.writeline(f"at::Tensor {self.node.get_name()};")
+                        code.writeline(f"{{")
+                        line = self.wrapper.make_buffer_allocation(self.node, need_declare=False)
+                        with code.indent():
+                            code.writeline(f"at::cuda::CUDAStreamGuard streamGuard(stream{self.user_streams[0]});")
+                            code.writeline(line)
+                        code.writeline(f"}}")
+                    else:
+                        code.writeline(f"with torch.cuda.stream(stream{self.user_streams[0]}_raw):")
+                        with code.indent():
+                            code.writeline(line)
                     return
             for user_stream in self.user_streams:
                 if user_stream != 0:
@@ -486,7 +495,7 @@ class WrapperCodeGen(CodeGen):
     def cuda_event_record(self, node_name, kernel_IndentedBuffer):
         ssnode = V.graph.stream_graph.name_mapping[node_name]
         if V.graph.cpp_wrapper:
-            kernel_IndentedBuffer.writeline(f"cudaEventRecord(event_{ssnode.get_name()}, stream{ssnode.stream_id}_raw);")
+            kernel_IndentedBuffer.writeline(f"cudaEventRecord(event_{ssnode.get_name()}, stream{ssnode.stream_id});")
         else:
             kernel_IndentedBuffer.writeline(f"event_{ssnode.get_name()}.record(stream{ssnode.stream_id}_raw)")  
 
@@ -500,14 +509,21 @@ class WrapperCodeGen(CodeGen):
         stream_id = ssnode.stream_id
         kernel_IndentedBuffer = kernel_IndentedBuffer
         if stream_id != 0:
-
-            kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
+            if V.graph.cpp_wrapper:
+                kernel_IndentedBuffer.writeline(f"at::Tensor {node_name};")
+                kernel_IndentedBuffer.writeline(f"{{")
+            else:
+                kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
             with kernel_IndentedBuffer.indent():
+                if V.graph.cpp_wrapper:
+                    kernel_IndentedBuffer.writeline(f"at::cuda::CUDAStreamGuard streamGuard(stream{stream_id});")
                 if isinstance(call_strs, list):
                     for call_str in call_strs:
                         kernel_IndentedBuffer.writeline(call_str)
                 else:
                     kernel_IndentedBuffer.writeline(call_strs)
+            if V.graph.cpp_wrapper:
+                kernel_IndentedBuffer.writeline(f"}}")
         else:
             if isinstance(call_strs, list):
                 for call_str in call_strs:
@@ -520,7 +536,10 @@ class WrapperCodeGen(CodeGen):
             self.writeline(line)
 
     def generate_extern_kernel_alloc(self, output_name, kernel, args, origin_node):
-        call_strs = [f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}",]
+        if config.multiple_streams and V.graph.cpp_wrapper and V.graph.stream_graph.name_mapping[output_name].stream_id !=0:
+            call_strs = [f"{output_name} = {kernel}({', '.join(args)}){self.ending}",]
+        else:
+            call_strs = [f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}",]
         if (
             self.supports_intermediate_hooks
             and config.generate_intermediate_hooks
@@ -563,20 +582,45 @@ class WrapperCodeGen(CodeGen):
         # ignore cpp_wrapper
         if V.graph.cpp_wrapper:
             if config.multiple_streams:
-                for i in range(1, V.graph.stream_graph.stream_pool_size + 1):
-                    self.header.writeline(f"cudaStream_t stream{i} = nullptr;")
-                self.header.writeline(f"cudaStream_t stream0 = 0;")
+                for index, num_used in enumerate(V.graph.stream_graph.stream_pool):
+                    # must use this check
+                    if index == 0:
+                        continue
+                    if num_used > 0:
+                        self.header.writeline(f"static cudaStream_t cuda_stream{index} = nullptr;")
         else:
             self.write_triton_header_once()
             self.header.writeline(f"")
             if config.multiple_streams:
-                for i in range(1, V.graph.stream_graph.stream_pool_size + 1):
-                    self.header.writeline(f"stream{i}_raw = torch.cuda.Stream()")
-                    self.header.writeline(f"stream{i} = stream{i}_raw.cuda_stream")
+                for index, num_used in enumerate(V.graph.stream_graph.stream_pool):
+                    # must use this check
+                    if index == 0:
+                        continue
+                    if num_used > 0:
+                        self.header.writeline(f"stream{index}_raw = torch.cuda.Stream()")
+                        self.header.writeline(f"stream{index} = stream{index}_raw.cuda_stream")
                 self.header.writeline(f"stream0_raw = torch.cuda.default_stream()")
             # TODO(Yueming): what about mutliple GPUs? is it always 0? is it better to change it to stream0_raw.cuda_stream?
             self.header.writeline(f"stream0 = get_cuda_stream(0)")
+    def generate_stream_creation_in_body(self):
+        if V.graph.cpp_wrapper and config.multiple_streams:
+            for index, _ in enumerate(V.graph.stream_graph.stream_pool):
+                # must use this check
+                if index == 0:
+                    continue
+                self.wrapper_call.splice(
+                    f"""
+                    if (cuda_stream{index} == nullptr){{
+                        cudaStreamCreate(&cuda_stream{index});
+                    }}
+                    at::cuda::CUDAStream stream{index} = at::cuda::getStreamFromExternal(cuda_stream{index}, 0);
+                    """
+                )
+            self.wrapper_call.splice(f"at::cuda::CUDAStream stream0 = at::cuda::getDefaultCUDAStream();")
 
+
+
+            
     @dynamo_timed
     def generate(self):
         result = IndentedBuffer()
@@ -954,7 +998,20 @@ class WrapperCodeGen(CodeGen):
 
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
-            self.writeline(self.make_buffer_free(buffer))
+            done = False
+            if V.graph.cpp_wrapper and config.multiple_streams:
+                line = self.make_buffer_free(buffer)
+                stream_id = V.graph.stream_graph.arg_to_stream.get(name, 0)
+                if stream_id != 0:
+                    lines = V.graph.wrapper_code.lines
+                    for i in range(len(lines) - 1, -1, -1):
+                        if isinstance(lines[i], str) and lines[i].strip() == '}':
+                            line = f"\t{line}"
+                            lines.insert(i, line)
+                            done = True
+                            break
+            if not done:
+                self.writeline(self.make_buffer_free(buffer))
             return
 
         if not self.can_reuse(buffer):
@@ -1109,7 +1166,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
-
+            self.generate_stream_creation_in_body()
             self.wrapper_call.splice(
                 """
                 c10::optional<at::Scalar> optional_scalar;
@@ -1301,7 +1358,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else f"at::device({DEVICE_TO_ATEN[device.type]})"
         )
 
-    def make_buffer_allocation(self, buffer):
+    def make_buffer_allocation(self, buffer, need_declare=True):
         from .cpp import DTYPE_TO_ATEN
 
         output_idx = None
@@ -1322,8 +1379,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             dtype = buffer.get_dtype()
             shape = tuple(buffer.get_size())
             stride = tuple(buffer.get_stride())
+            if need_declare:
+                tmp_declare = self.declare
+            else:
+                tmp_declare = ""
             return (
-                f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
+                f"{tmp_declare}{buffer.get_name()} = {self.namespace}empty_strided("
                 f"{self.codegen_shape_tuple(shape)}, "
                 f"{self.codegen_shape_tuple(stride)}, "
                 f"{self.codegen_device(device)}"
@@ -1431,6 +1492,24 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             }
             """
         )
+        if config.multiple_streams:
+            self.header.splice(
+                """
+                static inline void launchKernel_stream(
+                        CUfunction func,
+                        int gridX,
+                        int gridY,
+                        int gridZ,
+                        int numWraps,
+                        int sharedMemBytes,
+                        void* args[],
+                        CUstream stream) {
+                    AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
+                        func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
+                        stream, args, nullptr));
+                }
+                """
+            )
 
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
@@ -1459,7 +1538,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         )
         self.writeline("}")
 
-    def generate_args_decl(self, call_args):
+    def generate_args_decl(self, call_args, stream_id=0):
         # TODO: only works for constant now, need type info
         new_args = []
         for arg in call_args:
@@ -1478,9 +1557,32 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             elif is_float(arg):
                 self.writeline(f"float {var_name} = {arg};")
             else:
-                self.writeline(
-                    f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
-                )
+                written = False
+                if config.multiple_streams:
+                    sg = V.graph.stream_graph
+                    sg.arg_to_stream[arg] = stream_id
+                    if arg.startswith("buf"):
+                        # TODO: what if bufX is allocated in default stream because of the multiple stream access?
+                        # TODO: special case resnet18 buf22
+                        tmp_stream_id = stream_id
+                        tmp_stream_id2 = sg.name_mapping[arg].stream_id
+                        if tmp_stream_id2 != tmp_stream_id:
+                            print(f"findhao-> different stream id for {arg}: {tmp_stream_id2} {tmp_stream_id}")
+                        if tmp_stream_id != 0:
+                            arg_IndentedBuffer = IndentedBuffer()
+                            arg_IndentedBuffer.writeline(f"CUdeviceptr {var_name};")
+                            arg_IndentedBuffer.writeline(f"{{")
+                            with arg_IndentedBuffer.indent():
+                                arg_IndentedBuffer.writeline(f"at::cuda::CUDAStreamGuard streamGuard(stream{tmp_stream_id});")
+                                arg_IndentedBuffer.writeline(f"{var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());")
+                            arg_IndentedBuffer.writeline(f"}}")
+                            for line in [ _ for _ in arg_IndentedBuffer.getrawvalue().split("\n") if _]:
+                                self.writeline(line)
+                            written = True
+                if not written: 
+                    self.writeline(
+                        f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
+                    )
             new_args.append(f"&{var_name}")
 
         return ", ".join(new_args)
@@ -1500,18 +1602,36 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
         self.generate_load_kernel(name, params)
 
-        call_args = self.generate_args_decl(call_args)
+        call_args = self.generate_args_decl(call_args, stream_id=stream_id)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
-        self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
-        self.writeline(
-            "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
-                name,
-                params["grid_x"],
-                params["grid_y"],
-                params["grid_z"],
-                params["num_warps"],
-                params["shared_mem"],
-                kernel_args_var,
-                device_index,
+        if kernel_IndentedBuffer:
+            writer = kernel_IndentedBuffer
+        else:
+            writer = self
+        writer.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
+        if stream_id != 0:
+            writer.writeline(
+                "launchKernel_stream({}, {}, {}, {}, {}, {}, {}, {});".format(
+                    name,
+                    params["grid_x"],
+                    params["grid_y"],
+                    params["grid_z"],
+                    params["num_warps"],
+                    params["shared_mem"],
+                    kernel_args_var,
+                    f"stream{stream_id}",
+                )
             )
-        )
+        else:
+            writer.writeline(
+                "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
+                    name,
+                    params["grid_x"],
+                    params["grid_y"],
+                    params["grid_z"],
+                    params["num_warps"],
+                    params["shared_mem"],
+                    kernel_args_var,
+                    device_index,
+                )
+            )
