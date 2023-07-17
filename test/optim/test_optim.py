@@ -773,17 +773,71 @@ class TestOptim(TestCase):
                 for k in st_p_state:
                     self.assertEqual(st_p_state[k], mt_p_state[k])
 
+    def _test_foreach_memory(self, optimizer_pairs_with_flags):
+        if not torch.cuda.is_available():
+            return
+
+        device = "cuda"
+        nparams = 10
+        for optimizer_constructor, kwargs in optimizer_pairs_with_flags:
+            max_mems = []
+            for flag_value in (False, True):
+                kwargs_with_flags = deepcopy(kwargs)
+                kwargs_with_flags['foreach'] = flag_value
+
+                # The 128 is critical here! Our CUDACachingAllocator allocates in blocks of 512,
+                # meaning any tensor that occupies <512 bytes of memory will allocate a whole
+                # 512 bytes anyway. We use 128 (since datasize would be 4 bytes) so that param
+                # is size 512 exactly, making our later calculations for intermediate_size easy.
+                param = torch.rand(128, device=device)
+                params = [torch.rand_like(param) for _ in range(nparams)]
+
+                optimizer = optimizer_constructor(
+                    params, **kwargs_with_flags
+                )
+
+                for p in params:
+                    p.grad = torch.rand_like(p)
+
+                optimizer.step()
+                import gc
+                gc.collect()
+                torch.cuda.reset_peak_memory_stats()
+                optimizer.step()
+                gc.collect()
+                max_mems.append(torch.cuda.max_memory_allocated())
+
+            st_max_mem, mt_max_mem = max_mems
+            intermediate_size = nparams * param.nelement() * param.element_size()
+            nintermediates = 1  # we expect a budget of 1 intermediate most of the time
+            if (('capturable' in kwargs_with_flags and kwargs_with_flags['capturable']) or
+                    optimizer_constructor.__name__ == "Adadelta"):
+                # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
+                # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
+                nintermediates = 3
+            elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
+                # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
+                # Adagrad uses std and grads at the same time
+                # RMSprop uses avg and grads
+                nintermediates = 2
+
+            self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
+
     @property
     def _multi_tensor_optimizer_configs(self):
         return [
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=True, fused=False)),
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=False, fused=False)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=True, fused=False)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=False, fused=False)),
-            (optim.AdamW, dict(weight_decay=1.0, amsgrad=True)),
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=False, maximize=True)),
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=True, maximize=True)),
+            (optim.Adam, dict(weight_decay=0.0, amsgrad=False, capturable=True, maximize=True)),
+            (optim.Adam, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
             (optim.AdamW, dict(weight_decay=1.0, amsgrad=False)),
             (optim.AdamW, dict(weight_decay=0.0, amsgrad=True)),
-            (optim.AdamW, dict(weight_decay=0.0, amsgrad=False)),
+            (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, maximize=True)),
+            (optim.AdamW, dict(weight_decay=0.0, amsgrad=False, maximize=True)),
+            (optim.AdamW, dict(weight_decay=1.0, amsgrad=True, capturable=True, maximize=True)),
+            (optim.AdamW, dict(weight_decay=0.0, amsgrad=False, capturable=True, maximize=True)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
             (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3)),
@@ -807,12 +861,20 @@ class TestOptim(TestCase):
             (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
             (optim.ASGD, dict(weight_decay=0)),
             (optim.ASGD, dict(weight_decay=1)),
+            (optim.ASGD, dict(weight_decay=0, maximize=True)),
+            (optim.ASGD, dict(weight_decay=1, maximize=True)),
             (optim.Adamax, dict(weight_decay=0)),
             (optim.Adamax, dict(weight_decay=1)),
+            (optim.Adamax, dict(weight_decay=0, maximize=True)),
+            (optim.Adamax, dict(weight_decay=1, maximize=True)),
             (optim.Adadelta, dict(weight_decay=0)),
             (optim.Adadelta, dict(weight_decay=1)),
+            (optim.Adadelta, dict(weight_decay=0, maximize=True)),
+            (optim.Adadelta, dict(weight_decay=1, maximize=True)),
             (optim.Adagrad, dict(weight_decay=0)),
             (optim.Adagrad, dict(weight_decay=1)),
+            (optim.Adagrad, dict(weight_decay=0, maximize=True)),
+            (optim.Adagrad, dict(weight_decay=1, maximize=True)),
         ]
 
     def test_multi_tensor_optimizers(self):
@@ -834,15 +896,26 @@ class TestOptim(TestCase):
             optimizer = optimizer_ctor(params, foreach=True, **optimizer_params)
             optimizer.step()
 
+    def test_peak_mem_multi_tensor_optimizers(self):
+        configs = [
+            (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
+                "Adadelta", "Adagrad", "Adamax", "Adam", "AdamW", "ASGD", "NAdam",
+                "RAdam", "RMSprop"
+            ]
+        ]
+        self._test_foreach_memory(configs)
+
     @property
     def _fused_optimizer_configs(self):
         return tuple(itertools.product(
             (optim.Adam, optim.AdamW),
             (
-                dict(weight_decay=1., amsgrad=False),
+                dict(weight_decay=1., amsgrad=False, capturable=True, maximize=True),
+                dict(weight_decay=1., amsgrad=False, maximize=True),
                 dict(weight_decay=1., amsgrad=True),
                 dict(weight_decay=0., amsgrad=False),
-                dict(weight_decay=0., amsgrad=True),
+                dict(weight_decay=0., amsgrad=True, capturable=True, maximize=True),
+                dict(weight_decay=0., amsgrad=True, maximize=True),
             ),
         ))
 
