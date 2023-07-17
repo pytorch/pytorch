@@ -309,7 +309,7 @@ variable_list compiled_autograd(
     { // update cache and gather args into `compiler_call`
       CompiledNodeArgs node_args(compiler_call, call);
       node_args.collect(call);
-      if (node_args.cond(node_args.needed)) {
+      if (node_args.cond(call.needed)) {
         fn->compiled_args(node_args);
         node_args.collect(call.node->next_edges());
       }
