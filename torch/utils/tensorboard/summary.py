@@ -3,9 +3,8 @@ import logging
 import os
 from typing import Optional
 
-import numpy as np
-
 import torch
+import numpy as np
 
 from google.protobuf import struct_pb2
 
@@ -46,6 +45,8 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
 
 # type maps: torch.Tensor type -> (protobuf type, protobuf val field)
 _TENSOR_TYPE_MAP = {
