@@ -360,7 +360,7 @@ variable_list compiled_autograd(
 
       variable_list inputs = input_buffers.lookup(call.node.get()).buffer;
 
-      if (call.tensor_pre_hooks.size() + call.pre_hooks.size() > 0) {
+      if (call.tensor_pre_hooks.size() > 0) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         for (const auto& hook : call.tensor_pre_hooks) {
           pyinputs = check(PyObject_CallMethod(
@@ -370,10 +370,6 @@ variable_list compiled_autograd(
               pyinputs.get(),
               hook.first,
               hook.second));
-        }
-        for (const auto hook : call.pre_hooks) {
-          pyinputs = check(PyObject_CallMethod(
-              py_compiler.get(), "pre_hook", "Oi", pyinputs.get(), hook));
         }
         inputs = THPVariable_UnpackList(pyinputs);
       }
@@ -385,9 +381,16 @@ variable_list compiled_autograd(
         TORCH_INTERNAL_ASSERT(!state.outputs[output_index].defined());
         state.outputs[output_index] = inputs[input_nr];
       }
-
       if (!call.needed) {
         continue;
+      }
+      if (call.pre_hooks.size() > 0) {
+        THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
+        for (const auto hook : call.pre_hooks) {
+          pyinputs = check(PyObject_CallMethod(
+              py_compiler.get(), "pre_hook", "Oi", pyinputs.get(), hook));
+        }
+        inputs = THPVariable_UnpackList(pyinputs);
       }
 
       SwapSavedVariables saved(state, call.node);
