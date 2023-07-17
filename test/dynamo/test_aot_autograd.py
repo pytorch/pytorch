@@ -7,8 +7,9 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch.fx.traceback as fx_traceback
+import torch.utils._pytree as pytree
 from torch._dynamo.testing import CompileCounter, expectedFailureDynamic, rand_strided
-from torch._functorch.aot_autograd import aot_export_module
+from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
 
@@ -747,6 +748,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
                 return (output,)
 
+
         mod = Model()
         mod.train()
         x = torch.rand(100, 16, 32, 32, requires_grad=True)
@@ -755,15 +757,36 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # Use dynamo export to get the fx graph module
         g_mod, _ = torch._dynamo.export(mod, x, target)
 
+        def _prepare_model_args():
+            arg_list = []
+            named_parameters = dict(
+                g_mod.named_parameters(remove_duplicate=False))
+            named_buffers = dict(
+                g_mod.named_buffers(remove_duplicate=False))
+            params_and_buffers = {
+                **dict(named_parameters),
+                **dict(named_buffers),
+            }
+            params_and_buffers_flat, params_spec = pytree.tree_flatten(
+                params_and_buffers)
+            params_len = len(params_and_buffers_flat)
+            functional_call = create_functional_call(
+                    g_mod, params_spec, params_len)
+            return params_and_buffers_flat, functional_call
+
+        full_args, fn_to_trace = _prepare_model_args()
+        param_and_buf_len = len(full_args)
+        full_args.extend([x, target])
+
         # aot_export requires a graph mod input of fwd graph
         # returns the full fwd/bwd graph in graph mod format
         with torch.enable_grad(), fx_traceback.preserve_node_meta():
-            fx_g, signature = aot_export_module(
-                g_mod,
-                [x, target],
-                trace_joint=True,
-                output_loss_index=0,
-                skip_flatten_joint=True,
+            fx_g, _, _, _ = _aot_export_function(
+                fn_to_trace,
+                full_args,
+                decompositions=None,
+                num_params_buffers=param_and_buf_len,
+                no_tangents=True,
             )
 
         # Walk all the nodes in fx graph.

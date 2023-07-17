@@ -3788,10 +3788,6 @@ def aot_export_module(
     # If trace_joint is True, we expect your module to return a scalar loss.
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
-    # For debug purposes the user may want to inspect the joint graph.
-    # Skipping the flatten_joint stage perserves the node.meta information
-    # available in the joint fwd/bwd graph fx_g.
-    skip_flatten_joint: int = False,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
     This function takes in a module, and returns:
@@ -3901,13 +3897,6 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             num_params_buffers=len(params_and_buffers_flat),
             no_tangents=True,
         )
-
-    # When skip_flatten_join is set we want to preserve
-    # fx_g above by skipping the call to make_fx(flattened_joint).
-    # trace_joint needs to be updated because it is passed to
-    # create_graph_signature() and needs to be False when
-    # flatten_joint is skipped.
-    trace_joint = trace_joint and not skip_flatten_joint
 
     if trace_joint:
         def flattened_joint(*args):
