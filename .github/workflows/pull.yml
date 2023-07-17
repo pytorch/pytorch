@@ -305,12 +305,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
         ]}
 
-  linux-bionic-cuda12_1-py3_10-gcc9-bazel-test:
-    name: linux-bionic-cuda12.1-py3.10-gcc9-bazel-test
+  linux-focal-cuda12_1-py3_10-gcc9-bazel-test:
+    name: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc9-bazel-test
-      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
       cuda-version: "12.1"
       test-matrix: |
         { include: [

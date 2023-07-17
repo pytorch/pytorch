@@ -1,7 +1,22 @@
 import torch
 
-@torch.compile
-def sparse_semi_structured_from_dense(dense):
+
+def _is_compile_supported(device_type):
+    import torch._dynamo
+
+    compile_supported = torch._dynamo.is_dynamo_supported()
+    if device_type == "cpu":
+        pass
+    elif device_type == "cuda" and compile_supported:
+        from torch._inductor.utils import has_triton
+
+        compile_supported = has_triton()
+    else:
+        compile_supported = False
+    return compile_supported
+
+
+def _sparse_semi_structured_from_dense(dense):
     if dense.dim() != 2:
         raise RuntimeError(
             f"Expected 2-dimensional dense tensor, got {dense.dim()}-dimensional tensor"
@@ -204,8 +219,8 @@ def sparse_semi_structured_from_dense(dense):
     )
     return (sparse, meta_reordered)
 
-@torch.compile
-def sparse_semi_structured_to_dense(sparse, meta_reordered):
+
+def _sparse_semi_structured_to_dense(sparse, meta_reordered):
     if sparse.dim() != 2:
         raise RuntimeError(
             f"Expected 2-dimensional sparse tensor, got {sparse.dim()}-dimensional tensor"
@@ -317,3 +332,19 @@ def sparse_semi_structured_to_dense(sparse, meta_reordered):
     dense.scatter_(0, dense_offsets, sparse.view(-1))
 
     return dense.view(m, 2 * k)
+
+
+def sparse_semi_structured_from_dense(dense):
+    if _is_compile_supported(dense.device.type):
+        kernel = torch.compile(_sparse_semi_structured_from_dense)
+        return kernel(dense)
+
+    return _sparse_semi_structured_from_dense(dense)
+
+
+def sparse_semi_structured_to_dense(sparse, meta_reordered):
+    if _is_compile_supported(sparse.device.type):
+        kernel = torch.compile(_sparse_semi_structured_to_dense)
+        return kernel(sparse, meta_reordered)
+
+    return _sparse_semi_structured_to_dense(sparse, meta_reordered)
