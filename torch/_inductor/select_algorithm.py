@@ -129,6 +129,11 @@ class TritonTemplateKernel(TritonKernel):
             arg_name = f"arg_{name}"
             self.named_input_nodes[name] = input_node
             self.args.input_buffers[input_node.get_name()] = arg_name
+
+        # The args may be duplicated, so renaming must be after args are de-duplicated.
+        for name in argnames:
+            input_node = self.named_input_nodes[name]
+            arg_name = self.args.input_buffers[input_node.get_name()]
             if input_node.get_layout().offset == 0:
                 renames.writeline(f"{name} = {arg_name}")
             else:
@@ -460,11 +465,8 @@ class TritonTemplate:
             mod = PyCodeCache.load(code, extra)
             _, call_args, _ = kernel.args.python_argdefs()
 
-        expected_args = [x.get_name() for x in input_nodes] + [fake_out.get_name()]
-        # TODO(nmacchioni) fix bug here in CI tests
-        # assert list(call_args) == expected_args, (call_args, expected_args)
-        if list(call_args) != expected_args:
-            return None
+        expected_args = list(set(x.get_name() for x in input_nodes)) + [fake_out.get_name()]
+        assert list(call_args) == expected_args, (call_args, expected_args)
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
@@ -762,15 +764,17 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes,
         layout,
     ):
-        example_inputs = [cls.benchmark_example_value(x) for x in input_nodes]
-        example_inputs_extern = list(example_inputs)
-        for i in range(len(example_inputs)):
+        example_inputs_extern = [cls.benchmark_example_value(x) for x in input_nodes]
+        for i in range(len(example_inputs_extern)):
             if input_nodes[i].get_layout().offset != 0:
                 offset = V.graph.sizevars.size_hint(input_nodes[i].get_layout().offset)
                 data = example_inputs_extern[i]
                 example_inputs_extern[i] = torch.as_strided(
                     data, data.size(), data.stride(), offset
                 )
+        # de-duplicate args
+        unique_input_nodes = {x.get_name(): x for x in input_nodes}
+        example_inputs = [cls.benchmark_example_value(x) for x in unique_input_nodes.values()]
 
         out = cls.benchmark_example_value(layout)
         out_extern = torch.as_strided(
