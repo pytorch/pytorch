@@ -1051,6 +1051,31 @@ def unbind(x, dim=0):
     return result
 
 
+@register_lowering(aten.unfold, type_promotion_kind=None)
+def unfold(x, dimension, size, step):
+    sizes = x.get_size()
+    ndim = len(sizes)
+    dim = canonicalize_dim(ndim, dimension)
+
+    if ndim == 0:
+        return slice_(unsqueeze(x, 0), end=size)
+
+    sizevars = V.graph.sizevars
+    sizevars.guard_leq(size, sizes[dim])
+    sizevars.guard_lt(0, step)
+
+    new_dim_size = FloorDiv(sizes[dim] - size, step) + 1
+    x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, sizes[dim])))
+
+    out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
+
+    def reindexer(idx):
+        dim_idx = idx[-1] + idx[dim] * step
+        return (*idx[:dim], dim_idx, *idx[dim + 1 : -1])
+
+    return TensorBox(ir.GenericView.create(x, out_size, reindexer))
+
+
 @register_lowering(aten.unsqueeze, type_promotion_kind=None)
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
@@ -1342,6 +1367,10 @@ def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
     # Custom fallback lowering
     if node.target is aten.view_as_complex.default:
+        return False
+
+    # We should be able to remove this special case once `disable_cpp_codegen` is killed.
+    if node.target is aten.lift_fresh_copy.default:
         return False
 
     def check_skip_condition(node, is_output):
@@ -1713,6 +1742,7 @@ make_fallback(aten.adaptive_max_pool2d)
 make_fallback(aten.adaptive_max_pool3d)
 make_fallback(aten.addbmm)
 make_fallback(aten.addmv, warn=False)
+make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
@@ -1759,7 +1789,6 @@ make_fallback(aten.max_unpool3d)
 make_fallback(aten.median)
 make_fallback(aten.mode)
 make_fallback(aten.multilabel_margin_loss_forward)
-make_fallback(aten.multi_margin_loss)
 make_fallback(aten.nanmedian)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
@@ -1813,7 +1842,6 @@ make_fallback(aten.fractional_max_pool3d_backward)
 make_fallback(aten._linalg_check_errors)
 make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten.multilabel_margin_loss_backward)
-make_fallback(aten.multi_margin_loss_backward)
 make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
@@ -1847,6 +1875,22 @@ make_fallback(aten.exponential.default, warn=False)
 
 # ROCm specific fallback, perf issues are observed when registered
 make_fallback(aten.miopen_batch_norm, warn=False)
+
+
+# Register with type_promotion_kind None.
+# For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
+@register_lowering(aten.copy, type_promotion_kind=None)
+def copy(self, src, non_blocking=False):
+    x = src
+    if self.get_device() != src.get_device():
+        x = to_device(x, self.get_device())
+    if self.get_dtype() != src.get_dtype():
+        x = to_dtype(x, self.get_dtype())
+
+    if self.get_size() != src.get_size():
+        out = expand(x, self.get_size())
+        return clone(out)
+    return clone(x)
 
 
 @register_lowering(aten.clone)
@@ -2949,11 +2993,13 @@ def reflection_pad2d_backward(grad_output, x, padding):
 
             # If the upper bound is less than the lower bound, we can get rid of one accumulation.
             # This happens when the padding size is zero.
-            if index_range1[2] < index_range1[1]:
+            upper_less_than_lower1 = index_range1[2] < index_range1[1]
+            if isinstance(upper_less_than_lower1, bool) and upper_less_than_lower1:
                 return
             cond = index_range_condition(index_range1)
             if index_range2 is not None:
-                if index_range2[2] < index_range2[1]:
+                upper_less_than_lower2 = index_range2[2] < index_range2[1]
+                if isinstance(upper_less_than_lower2, bool) and upper_less_than_lower2:
                     return
                 cond = ops.and_(cond, index_range_condition(index_range2))
             g = ops.masked(cond, lambda: load_from_output(out_x, out_y), 0.0)
@@ -3476,6 +3522,9 @@ def _adaptive_avg_pool2d(x, output_size):
     if h_in == h_out and w_in == w_out:
         return clone(x)
 
+    if h_out == 0 or w_out == 0:
+        o_size = [*batch, h_out, w_out]
+        return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
     if h_in % h_out == 0 and w_in % w_out == 0:
         kernel_size = [h_in // h_out, w_in // w_out]
         return avg_pool2d(x, kernel_size)

@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import retry, IS_SANDCASTLE, TestCase
 
 def sum_of_state_dict(state_dict):
     s = 0
-    for _, v in state_dict.items():
+    for v in state_dict.values():
         s += v.sum()
     return s
 
