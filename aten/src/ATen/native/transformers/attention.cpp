@@ -628,17 +628,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     // Naive, composite implementation defined here.
 
     // Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for math
-    bool is_negative_scaling = false;
-    c10::SymFloat scaling_factor;
-    if (scale.has_value()) {
-      is_negative_scaling  = scale.value() < 0;
-      scaling_factor = c10::SymFloat(std::abs(scale.value()));
-    } else {
-      scaling_factor = c10::SymFloat(1.0) / (c10::SymFloat(query_.sym_size(-1)).sqrt());
-    }
-    scaling_factor = scaling_factor.sqrt();
+    bool is_negative_scaling = scale.has_value() && scale.value() < 0;
+    auto scaling_factor = sdp::calculate_scale(query_, is_negative_scaling ? std::abs(scale.value()) : scale).sqrt();
 
-    const auto query = query_ * scaling_factor;
+    const auto query = query_ * (is_negative_scaling ? c10::SymFloat(0.0) - scaling_factor: scaling_factor);
     if (is_causal) {
         TORCH_CHECK(!attn_mask.has_value(),
                 "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
@@ -662,9 +655,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         // Otherwise, attn_mask represents an additive attention tensor
     }
     auto attn = at::matmul(query, key.transpose(-2, -1)*scaling_factor);
-    if (is_negative_scaling) {
-      attn = -attn;
-    }
     if (attn_mask.has_value()) {
         attn.add_(*attn_mask);
     }
