@@ -951,8 +951,6 @@ aten::multi_margin_loss_backward
 aten::multi_margin_loss_backward.grad_input
 aten::multilabel_margin_loss_backward
 aten::multilabel_margin_loss_backward.grad_input
-aten::multilabel_margin_loss_forward
-aten::multilabel_margin_loss_forward.output
 aten::multinomial
 aten::multinomial.out
 aten::nanmedian
