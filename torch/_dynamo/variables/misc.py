@@ -13,6 +13,7 @@ from ..exc import unimplemented
 from ..source import AttrSource, ODictGetItemSource
 from ..utils import (
     check_constant_args,
+    get_custom_getattr,
     HAS_NUMPY_TORCH_INTEROP,
     identity,
     proxy_args_kwargs,
@@ -795,7 +796,7 @@ class TypingVariable(VariableTracker):
 
 class NumpyVariable(VariableTracker):
     """
-    Wrapper around `numpy.*` for better error messages.
+    Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
     """
 
     def __init__(self, value, **kwargs):
@@ -815,8 +816,19 @@ class NumpyVariable(VariableTracker):
         from .tensor import NumpyNdarrayVariable
 
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
-        # lookup method name in torch_np
-        if hasattr(torch_np, self.value.__name__):
+        # lookup method name in torch_np. Things like np.dtype(float) are not supported yet.
+        if self.value.__name__ == "dtype":
+            unimplemented(
+                f"numpy dtype function is not supported yet. Got type {type(self.value)}."
+            )
+        elif hasattr(torch_np, self.value.__name__):
+            # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
+            #  wrapped by NumpyNdarrayVariable which is wrong!
+            getattr_fn = get_custom_getattr(torch_np)
+            if getattr_fn:
+                unimplemented(
+                    "torch_np has custom getattr implementation and dynamo doesn't support it"
+                )
             func = getattr(torch_np, self.value.__name__)
             return wrap_fx_proxy_cls(
                 target_cls=NumpyNdarrayVariable,
@@ -846,6 +858,23 @@ class NumpyVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+    def as_proxy(self):
+        # this handles numpy dtype attribute such as np.float32. TODO(larryliu0820): we should split NumpyVariable
+        #  into NumpyVariable for instances/objects and NumpyVariable for types.
+        if isinstance(self.value, type) and config.numpy_ndarray_as_tensor:
+            # retrieve attribute str. E.g., "float32" if given np.float32
+            import torch_np
+
+            attr = self.value.__name__
+            # get torch_np equivalent
+            tnp_dtype = torch_np.dtype(attr)
+            # returning a string here because we are assuming all `dtype` kwargs for numpy
+            # functions can take an equivalent string and the behavior of the function would
+            # be the same as taking a numpy dtype.
+            return tnp_dtype.name
+
+        return super().as_proxy()
 
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
