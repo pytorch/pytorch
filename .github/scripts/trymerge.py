@@ -1080,7 +1080,7 @@ class GitHubPR:
         skip_mandatory_checks: bool = False,
         dry_run: bool = False,
         comment_id: Optional[int] = None,
-        ignore_current_checks: Optional[List[str]] = None,
+        skip_current_checks = False,
     ) -> None:
         # Raises exception if matching rule is not found
         merge_rule, pending_checks, failed_checks = find_matching_merge_rule(
@@ -1088,7 +1088,7 @@ class GitHubPR:
             repo,
             skip_mandatory_checks=skip_mandatory_checks,
             skip_internal_checks=can_skip_internal_checks(self, comment_id),
-            ignore_current_checks=ignore_current_checks,
+            skip_current_checks = skip_current_checks,
         )
         additional_merged_prs = self.merge_changes(
             repo, skip_mandatory_checks, comment_id
@@ -1122,7 +1122,7 @@ class GitHubPR:
                 is_failed=False,
                 dry_run=dry_run,
                 skip_mandatory_checks=skip_mandatory_checks,
-                ignore_current=bool(ignore_current_checks),
+                ignore_current=skip_current_checks,
                 workspace=ROCKSET_MERGES_WORKSPACE,
             )
         else:
@@ -1226,7 +1226,7 @@ def find_matching_merge_rule(
     repo: Optional[GitRepo] = None,
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
-    ignore_current_checks: Optional[List[str]] = None,
+    skip_current_checks: bool = False,
 ) -> Tuple[
     MergeRule,
     List[Tuple[str, Optional[str], Optional[int]]],
@@ -1256,6 +1256,10 @@ def find_matching_merge_rule(
         raise RuntimeError(reject_reason)
     checks = pr.get_checkrun_conclusions()
     base_rev = None
+    ignore_current_checks = None
+    if skip_current_checks:
+        _, failing = categorize_checks(checks, list(checks.keys()))
+        ignore_current_checks = [x[0] for x in failing]
     try:
         # is allowed to fail if git is not available
         base_rev = pr.get_merge_base()
@@ -1868,9 +1872,6 @@ def merge(
     last_exception = ""
     elapsed_time = 0.0
     flaky_rules = read_flaky_rules()
-    ignore_current_checks = [
-        x[0] for x in ignore_current_checks_info
-    ]  # convert to List[str] for convenience
     while elapsed_time < timeout_minutes * 60:
         check_for_sev(pr.org, pr.project, skip_mandatory_checks)
         current_time = time.time()
@@ -1889,7 +1890,7 @@ def merge(
             ignore_flaky_failures = True
             try:
                 find_matching_merge_rule(
-                    pr, repo, ignore_current_checks=ignore_current_checks
+                    pr, repo, skip_current_checks = ignore_current
                 )
             except MandatoryChecksMissingError as ex:
                 if ex.rule is not None:
@@ -1904,7 +1905,7 @@ def merge(
                 pr.last_commit()["oid"],
                 pr.get_merge_base(),
                 flaky_rules,
-                ignore_current_checks=ignore_current_checks,
+                skip_current_checks = ignore_current
             )
             pending, failing = categorize_checks(
                 checks,
@@ -1942,7 +1943,7 @@ def merge(
                 dry_run=dry_run,
                 skip_mandatory_checks=skip_mandatory_checks,
                 comment_id=comment_id,
-                ignore_current_checks=ignore_current_checks,
+                skip_current_checks = ignore_current
             )
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
