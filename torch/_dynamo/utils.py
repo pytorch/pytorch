@@ -1722,28 +1722,42 @@ def build_checkpoint_variable(**options):
 # https://github.com/python/cpython/blob/v3.11.4/Lib/traceback.py
 # in order to output source code corresponding to bytecode in 3.11+.
 # We need our own versions since we want to support multiline expressions.
-def _fix_offset(str, offset):
+def _fix_offset(str: str, offset: int):
+    """
+    Convert byte offset `offset` of `str` into character offset.
+    Byte offset is used for 3.11+ instruction column data.
+    Takes things like unicode characters into consideration.
+    """
     as_utf8 = str.encode("utf-8")
     return len(as_utf8[:offset].decode("utf-8", errors="replace"))
 
 
 @dataclasses.dataclass
 class _Anchors:
+    # inclusive
     left_end_lineno: int
     left_end_offset: int
+    # exclusive
     right_start_lineno: int
     right_start_offset: int
 
 
-# supports anchors on multiple lines
-def _extract_anchors_from_expr(segment):
+def _extract_anchors_from_expr(segment: str):
+    """
+    Given source code `segment` corresponding to a bytecode
+    instruction, determine:
+        - for binary ops, the location of the binary op
+        - for indexing, the location of the brackets.
+    `segment` is expected to be a valid Python expression
+    """
     assert sys.version_info >= (3, 11)
 
     import ast
 
     try:
-        # expect an expression, so wrap the segment in
-        # brackets to handle multi-line expressions
+        # Without brackets, `segment` is parsed as a statement.
+        # We expect an expression, so wrap `segment` in
+        # brackets to handle multi-line expressions.
         tree = ast.parse("(\n" + segment + "\n)")
     except SyntaxError:
         return None
@@ -1753,9 +1767,12 @@ def _extract_anchors_from_expr(segment):
 
     lines = segment.split("\n")
 
+    # get character index given byte offset
     def normalize(lineno, offset):
         return _fix_offset(lines[lineno - 1], offset)
 
+    # Gets the next valid character index in `lines`, if
+    # the current location is not valid. Handles empty lines.
     def next_valid_char(lineno, col):
         while lineno < len(lines) and col >= len(lines[lineno]):
             col = 0
@@ -1763,12 +1780,14 @@ def _extract_anchors_from_expr(segment):
         assert lineno < len(lines) and col < len(lines[lineno])
         return lineno, col
 
+    # Get the next valid character index in `lines`.
     def increment(lineno, col):
         col += 1
         lineno, col = next_valid_char(lineno, col)
         assert lineno < len(lines) and col < len(lines[lineno])
         return lineno, col
 
+    # Get the next valid character at least on the next line
     def nextline(lineno, col):
         col = 0
         lineno += 1
@@ -1780,6 +1799,10 @@ def _extract_anchors_from_expr(segment):
     if isinstance(statement, ast.Expr):
         expr = statement.value
         if isinstance(expr, ast.BinOp):
+            # ast gives locations for BinOp subexpressions, e.g.
+            # ( left_expr ) + ( right_expr )
+            #   left^^^^^       right^^^^^
+            # -2 since end_lineno is 1-indexed and exclusive
             cur_lineno = expr.left.end_lineno - 2
             cur_col = normalize(cur_lineno, expr.left.end_col_offset)
             cur_lineno, cur_col = next_valid_char(cur_lineno, cur_col)
@@ -1791,22 +1814,28 @@ def _extract_anchors_from_expr(segment):
                 else:
                     cur_lineno, cur_col = increment(cur_lineno, cur_col)
 
+            # binary op is 1 or 2 characters long, on the same line
             right_anchor = cur_col + 1
-            # handle operators that have multiple characters
             if (
                 right_anchor < len(lines[cur_lineno])
                 and not (ch := lines[cur_lineno][right_anchor]).isspace()
                 and ch not in "\\#"
             ):
                 right_anchor += 1
+            # right_anchor can be invalid since it is exclusive
 
             return _Anchors(cur_lineno, cur_col, cur_lineno, right_anchor)
         elif isinstance(expr, ast.Subscript):
+            # ast gives locations for value and slice subexpressions, e.g.
+            # ( value_expr ) [ slice_expr ]
+            #   value^^^^^     slice^^^^^
+            # find left bracket
             left_lineno = expr.value.end_lineno - 2
             left_col = normalize(left_lineno, expr.value.end_col_offset)
             left_lineno, left_col = next_valid_char(left_lineno, left_col)
             while lines[left_lineno][left_col] != "[":
                 left_lineno, left_col = increment(left_lineno, left_col)
+            # find right bracket
             right_lineno = expr.slice.end_lineno - 2
             right_col = normalize(right_lineno, expr.slice.end_col_offset)
             right_lineno, right_col = next_valid_char(right_lineno, right_col)
@@ -1818,8 +1847,21 @@ def _extract_anchors_from_expr(segment):
     return None
 
 
-# get lines of code with markers corresponding to inst
-def get_instruction_source_311(code, inst):
+def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction):
+    """
+    Python 3.11+ only. Returns lines of source code (from code object `code`)
+    corresponding to `inst`'s location data, and underlines relevant code to `inst`.
+
+    Example: CALL on `g`:
+    f(g(
+      ^^
+        h(x)))
+        ^^^^^
+
+    We need our own implementation since `format_frame_summary` in
+    Python's `traceback` module doesn't handle multi-line expressions
+    (and their anchor extraction code is not completely correct).
+    """
     result = ""
     if inst.positions.lineno is None:
         return result
@@ -1829,15 +1871,21 @@ def get_instruction_source_311(code, inst):
     if inst.positions.col_offset is None or inst.positions.end_col_offset is None:
         return first_line
 
+    # character index of the start of the instruction
     start_offset = _fix_offset(first_line, inst.positions.col_offset)
-    lines = []
+    # character index of the end of the instruction
+    end_offset = None
+    # expression relevant to the instruction
+    segment = ""
+    # underline markers - start with `~` marker and replace with `^` later
     markers = []
+
     if inst.positions.end_lineno == inst.positions.lineno:
         end_offset = _fix_offset(first_line, inst.positions.end_col_offset)
-        lines.append(first_line[start_offset:end_offset])
+        segment = first_line[start_offset:end_offset]
         markers.append(" " * start_offset + "~" * (end_offset - start_offset))
     else:
-        lines.append(first_line[start_offset:])
+        segment = first_line[start_offset:] + "\n"
         markers.append(" " * start_offset + "~" * (len(first_line) - start_offset))
         last_line = linecache.getline(
             code.co_filename, inst.positions.end_lineno
@@ -1845,27 +1893,33 @@ def get_instruction_source_311(code, inst):
         end_offset = _fix_offset(last_line, inst.positions.end_col_offset)
         for lineno in range(inst.positions.lineno + 1, inst.positions.end_lineno):
             line = linecache.getline(code.co_filename, lineno).rstrip()
-            lines.append(line)
+            segment += line + "\n"
+            # don't underline leading spaces
             num_spaces = len(line) - len(line.lstrip())
             markers.append(" " * num_spaces + "~" * (len(line) - num_spaces))
-        lines.append(last_line[:end_offset])
+        segment += last_line[:end_offset]
         num_spaces = len(last_line) - len(last_line.lstrip())
         markers.append(" " * num_spaces + "~" * (end_offset - num_spaces))
 
     anchors = None
     try:
-        anchors = _extract_anchors_from_expr("\n".join(lines))
+        anchors = _extract_anchors_from_expr(segment)
     except AssertionError:
         pass
 
+    # replace `~` markers with `^` where necessary
     if anchors is None:
         markers = [marker.replace("~", "^") for marker in markers]
     else:
+        # make markers mutable
         markers = [list(marker) for marker in markers]
+
+        # anchor positions do not take start_offset into account
         if anchors.left_end_lineno == 0:
             anchors.left_end_offset += start_offset
         if anchors.right_start_lineno == 0:
             anchors.right_start_offset += start_offset
+
         if anchors.left_end_lineno == anchors.right_start_lineno:
             for i in range(anchors.left_end_offset, anchors.right_start_offset):
                 markers[anchors.left_end_lineno][i] = "^"
@@ -1880,6 +1934,8 @@ def get_instruction_source_311(code, inst):
             for i in range(0, anchors.right_start_offset):
                 if last_marker[i] == "~":
                     last_marker[i] = "^"
+
+        # make markers into strings again
         markers = ["".join(marker) for marker in markers]
 
     for i in range(len(markers)):

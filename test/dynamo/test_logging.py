@@ -420,19 +420,28 @@ print("arf")
         fn_opt(torch.randn(10, 20), torch.randn(20, 30))
 
         self.assertEqual(len(records), 3)
-        expected = (
+        # only get last 2 lines
+        messages = [
+            "\n".join(record.getMessage().split("\n")[-2:]) for record in records
+        ]
+        self.assertExpectedInline(
+            messages[0],
             """\
             return (x * 2) @ (y * 3)
                     ~~^~~""",
+        )
+        self.assertExpectedInline(
+            messages[1],
             """\
             return (x * 2) @ (y * 3)
                               ~~^~~""",
+        )
+        self.assertExpectedInline(
+            messages[2],
             """\
             return (x * 2) @ (y * 3)
                    ~~~~~~~~^~~~~~~~~""",
         )
-        for record, answer in zip(records, expected):
-            self.assertIn(answer, record.getMessage())
 
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
@@ -447,22 +456,33 @@ print("arf")
         fn_opt(torch.randn(3, 3))
 
         self.assertEqual(len(records), 4)
-        expected = (
+        messages = [
+            "\n".join(record.getMessage().split("\n")[-2:]) for record in records
+        ]
+        self.assertExpectedInline(
+            messages[0],
             """\
             return g(g(x))
                      ^^^^""",
-            """\
-            return x * 2
-                   ~~^~~""",
-            """\
-            return g(g(x))
-                   ^^^^^^^""",
+        )
+        self.assertExpectedInline(
+            messages[1],
             """\
             return x * 2
                    ~~^~~""",
         )
-        for record, answer in zip(records, expected):
-            self.assertIn(answer, record.getMessage())
+        self.assertExpectedInline(
+            messages[2],
+            """\
+            return g(g(x))
+                   ^^^^^^^""",
+        )
+        self.assertExpectedInline(
+            messages[3],
+            """\
+            return x * 2
+                   ~~^~~""",
+        )
 
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
@@ -476,16 +496,21 @@ print("arf")
         fn_opt(torch.randn(3, 3))
 
         self.assertEqual(len(records), 2)
-        expected = (
+        messages = [
+            "\n".join(record.getMessage().split("\n")[-2:]) for record in records
+        ]
+        self.assertExpectedInline(
+            messages[0],
             """\
             x = x * 2
                 ~~^~~""",
+        )
+        self.assertExpectedInline(
+            messages[1],
             """\
             return x * 3
                    ~~^~~""",
         )
-        for record, answer in zip(records, expected):
-            self.assertIn(answer, record.getMessage())
 
 
 # single record tests
