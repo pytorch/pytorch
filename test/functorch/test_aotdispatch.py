@@ -1565,7 +1565,7 @@ def forward(self, tangents_1):
         f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
-        self.assertEqual(count, [(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)])
+        self.assertExpectedInline(str(count), """[(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)]""")
 
     def test_dupe_arg(self):
         def f(x, y):
