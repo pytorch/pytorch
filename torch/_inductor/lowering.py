@@ -255,12 +255,12 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args = list(args)
+        args: Union[List, Tuple] = list(args)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             unpacked = True
-            args = list(args[0])
+            args = args[0]
 
         # explicitly assert for "out=" ops for better error messages
         assert not any(
