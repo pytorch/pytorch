@@ -96,7 +96,7 @@ def _auto_wrap(
         )
         recursive_wrap_kwargs["auto_wrap_policy"] = policy
         _warn_on_overridden_mixed_precision(overridden_module_classes)
-    _recursive_wrap(**recursive_wrap_kwargs, **fsdp_kwargs)
+    _recursive_wrap(**recursive_wrap_kwargs, **fsdp_kwargs)  # type: ignore[arg-type]
 
 
 def _check_nested_wrapping(root_module: nn.Module):

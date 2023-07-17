@@ -268,6 +268,7 @@ test_dynamo_shard() {
       test_package \
       test_legacy_vmap \
       test_custom_op_testing \
+      test_content_store \
       export/test_db \
       functorch/test_dims \
       functorch/test_aotdispatch \
@@ -369,7 +370,7 @@ test_perf_for_dashboard() {
       if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
         python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-            --dynamic-batch-only --disable-cudagraphs "$@" \
+            --dynamic-batch-only "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
