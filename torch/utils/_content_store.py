@@ -47,6 +47,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 # SHA-1 if stable_hash=True, otherwise it will consistent for a single
 # process run but not necessarily across processes.
 def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) -> str:
+    import torch._dynamo
     from torch._dynamo.utils import is_compile_supported
 
     device_type = storage.device.type
