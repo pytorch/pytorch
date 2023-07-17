@@ -1,21 +1,6 @@
 import torch
 
 
-def _is_compile_supported(device_type):
-    import torch._dynamo
-
-    compile_supported = torch._dynamo.is_dynamo_supported()
-    if device_type == "cpu":
-        pass
-    elif device_type == "cuda" and compile_supported:
-        from torch._inductor.utils import has_triton
-
-        compile_supported = has_triton()
-    else:
-        compile_supported = False
-    return compile_supported
-
-
 def _sparse_semi_structured_from_dense(dense):
     if dense.dim() != 2:
         raise RuntimeError(
@@ -335,7 +320,8 @@ def _sparse_semi_structured_to_dense(sparse, meta_reordered):
 
 
 def sparse_semi_structured_from_dense(dense):
-    if _is_compile_supported(dense.device.type):
+    from torch._dynamo.utils import is_compile_supported
+    if is_compile_supported(dense.device.type):
         kernel = torch.compile(_sparse_semi_structured_from_dense)
         return kernel(dense)
 
@@ -343,7 +329,8 @@ def sparse_semi_structured_from_dense(dense):
 
 
 def sparse_semi_structured_to_dense(sparse, meta_reordered):
-    if _is_compile_supported(sparse.device.type):
+    from torch._dynamo.utils import is_compile_supported
+    if is_compile_supported(sparse.device.type):
         kernel = torch.compile(_sparse_semi_structured_to_dense)
         return kernel(sparse, meta_reordered)
 
