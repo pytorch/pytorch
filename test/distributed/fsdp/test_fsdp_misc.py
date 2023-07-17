@@ -349,8 +349,8 @@ class TestFSDPMiscMultiProcess(FSDPTest):
 
                 # Overlapped optimizer FSDP module should have sharded_grad as None.
                 for fsdp_unit in FSDP.fsdp_modules(fsdp_overlap):
-                    handles = fsdp_unit._handles
-                    for handle in handles:
+                    handle = fsdp_unit._handle
+                    if handle:
                         handle_grad = handle.sharded_grad
                         self.assertEqual(
                             None,
