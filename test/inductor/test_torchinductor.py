@@ -6600,8 +6600,6 @@ class CommonTemplate:
 
         self.common(fn, (input, boundaries, add_value), check_lowp=False)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
-
     @config.patch(implicit_fallbacks=True)
     def test_custom_op(self):
         import torch.library

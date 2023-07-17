@@ -487,6 +487,7 @@ aten::trunc
 aten::trunc.out
 aten::trunc_
 aten::unbind.int
+aten::unfold
 aten::uniform
 aten::uniform.out
 aten::uniform_
