@@ -358,7 +358,7 @@ class TestPaternMatcher(TestCase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_weight_prepack(self):
+    def test_qconv2d_unary(self):
         class M(torch.nn.Module):
             def __init__(
                 self,
