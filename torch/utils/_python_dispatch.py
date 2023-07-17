@@ -127,8 +127,7 @@ def is_traceable_wrapper_subclass(t):
     # It must implement two magic methods: __tensor_flatten__ and __tensor_unflatten__.
 
     is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
-    is_tracable = hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
-    return is_subclass and is_tracable
+    return is_subclass and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
 
 def transform_subclass(t, callback):
     assert is_traceable_wrapper_subclass(t)

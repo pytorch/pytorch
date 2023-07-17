@@ -550,12 +550,9 @@ class MetaConverter:
                     r._is_param = True
                 return r
         elif torch.overrides.is_tensor_like(t):
-            # Blindly converting tensor subclasses to meta can cause
-            # unpredictable problems; e.g., FX tests will trace meta
-            # tensors into their trace / some subclasses don't correctly
-            # support meta.  Trying to YOLO this is more trouble than it's
-            # worth.
             if is_traceable_wrapper_subclass(t):
+                # convert traceable wrapper subclasses to meta by converting
+                # the underlying tensor to meta
                 out = transform_subclass(
                     t,
                     lambda t: self.meta_tensor(
@@ -563,9 +560,14 @@ class MetaConverter:
                     ),
                 )
                 return out
-
-            self.miss += 1
-            return NotImplemented
+            else:
+                # Blindly converting tensor subclasses to meta can cause
+                # unpredictable problems; e.g., FX tests will trace meta
+                # tensors into their trace / some subclasses don't correctly
+                # support meta.  Trying to YOLO this is more trouble than it's
+                # worth.
+                self.miss += 1
+                return NotImplemented
         else:
             # non-Tensor types don't count as hit or miss
             return t

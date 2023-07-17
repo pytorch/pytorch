@@ -3,7 +3,7 @@ import copy
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
-from torch.ao.quantization._pt2e.quantizer import (
+from torch.ao.quantization.pt2e.quantizer import (
     X86InductorQuantizer,
 )
 from torch.ao.quantization._quantize_pt2e import (
@@ -19,7 +19,7 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_quantized import override_quantized_engine
 from enum import Enum
 import itertools
-import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+import torch.ao.quantization.pt2e.quantizer.x86_inductor_quantizer as xiq
 from torch.testing._internal.common_utils import skip_but_pass_in_sandcastle
 
 
