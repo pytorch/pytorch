@@ -3,19 +3,8 @@ PyTorch 2.0 Troubleshooting
 
 **Author**: `Michael Lazos <https://github.com/mlazos>`_
 
-`torch.compile` is still in active development, and many of the reasons for
-graph breaks and excessive recompilation will be fixed with upcoming
-support for `tracing dynamic tensor
-shapes <https://docs.google.com/document/d/1QJB-GOnbv-9PygGlOMXwiO9K6vVNm8sNg_olixJ9koc/edit?usp=sharing>`__,
-more careful choices for guards and better tuned heuristics.
-
-In the meantime, you may need to diagnose a particular issue and
-determine if it is easy to work around with a change to your model, or
-file an issue for support.
-
-Also, we are actively developing debug tools, profilers, and improving our
-errors/warnings. Please give us feedback if you have an issue with this
-infra, or an idea for an improvement. Below is a table of the available
+We are actively developing debug tools, profilers, and improving our
+error and warning messages. Below is a table of the available
 tools and their typical usage. For additional help see
 `Diagnosing Runtime Errors <#diagnosing-runtime-errors>`__.
 
@@ -71,27 +60,26 @@ tools and their typical usage. For additional help see
      - set the environment variable TORCH_COMPILE_DEBUG=1 or
        ``torch._inductor.config.trace.enabled = True``
 
-In addition to info and debug logging, you can use `torch._logging <https://pytorch.org/docs/main/logging.html>`__
+In addition to info and debug logging,
+you can use `torch._logging <https://pytorch.org/docs/main/logging.html>`__
 for more fine-grained logging.
 
 Diagnosing Runtime Errors
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Below is the TorchDynamo compiler stack.
-
 At a high level, the TorchDynamo stack consists of a graph capture from
-Python code (TorchDynamo) and a backend compiler. In this example, the
-backend compiler consists of backward graph tracing (AOTAutograd) and
+Python code (TorchDynamo) and a backend compiler. For example, a
+backend compiler may consist of backward graph tracing (AOTAutograd) and
 graph lowering (TorchInductor)*. Errors can occur in any component of
 the stack and will provide full stack traces.
 
-You may use info logging
-(``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``) and look for
-``Step #: ...`` outputs in order to determine in which component the
-error has occurred. Logs are made at the beginning and end of each step,
-so the step that an error should correspond to is the most recent logged
-step whose end has not yet been logged. The steps correspond to the
-following parts of the stack (according to the image above):
+To determine in which component an error occurred,
+you may use info-level logging
+``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``
+and look for``Step #: ...`` outputs. Logs are made at the beginning and end of
+each step, so the step that an error should correspond to is the most recently
+logged step whose end has not yet been logged. The steps correspond to the
+following parts of the stack:
 
 ==== ================
 Step Component
@@ -101,19 +89,14 @@ Step Component
 3    TorchInductor
 ==== ================
 
-The beginning and end of AOTAutograd is currently not logged, but we
-plan to add it soon.
+If info logging is insufficient, you can use available backend
+options. These options include:
 
-If info logging is insufficient, then there are also some backend
-options which can enable you to determine which component is causing the
-error if you’re unable to understand the error message that is
-generated. These are the following:
-
--  ``"eager"``: only runs torchdynamo forward graph capture and then
+-  ``"eager"``: only runs TorchDynamo forward graph capture and then
    runs the captured graph with PyTorch. This provides an indication as
    to whether TorchDynamo is raising the error.
 
--  ``"aot_eager"``: runs torchdynamo to capture a forward graph, and
+-  ``"aot_eager"``: runs TorchDynamo to capture a forward graph, and
    then AOTAutograd to trace the backward graph without any additional
    backend compiler steps. PyTorch eager will then be used to run the
    forward and backward graphs. This is useful to narrow down the issue
@@ -147,7 +130,7 @@ Torchdynamo Errors
 ------------------
 
 If the error that is generated occurs with the ``"eager"`` backend, then
-TorchDynamo is the most likely source of the error. Here is a sample code
+TorchDynamo is most likely the source of the error. Here is a sample code
 which will generate an error.
 
 .. code-block:: py
@@ -166,7 +149,7 @@ which will generate an error.
 
    compiled_test_assertion_error()
 
-Which will generate the following error:
+The code above generates the following error:
 
 ::
 
@@ -187,29 +170,30 @@ Which will generate the following error:
 As the message suggests you can set
 ``torch._dynamo.config.verbose=True`` to get a full stack trace to both
 the error in TorchDynamo and the user code. In addition to this flag,
-you can also set the ``log_level`` of torchdynamo through
-``torch._dynamo.config.log_level``. The available levels are the
-following:
+you can also set the ``log_level`` of TorchDynamo through
+``torch._dynamo.config.log_level``. These levels include:
 
 - ``logging.DEBUG``: Print every instruction that is
-  encountered in addition to all below log levels.
+  encountered in addition to all the log levels listed below.
 - ``logging.INFO``:
   Print each function that is compiled (original and modified bytecode)
-  and the graph that is captured in addition to all below log levels.
+  and the graph that is captured in addition to all the log levels listed below.
 - ``logging.WARNING`` (default): Print graph breaks in addition to all
-  below log levels.
+  the log levels listed below.
 - ``logging.ERROR``: Print errors only.
 
-If a model is sufficiently large, the logs can become overwhelming. If
+If a model is very large, the logs can become overwhelming. If
 an error occurs deep within a model's Python code, it can be useful to
 execute only the frame in which the error occurs to enable easier
 debugging. There are two tools available to enable this:
 
-- Setting the environment variable ``TORCHDYNAMO_DEBUG_FUNCTION`` to the desired function name will only run torchdynamo on functions with that name.
+- Setting the environment variable ``TORCHDYNAMO_DEBUG_FUNCTION``
+to the desired function name will only run torchdynamo on functions with that
+name.
 - Enabling the record/replay tool (set ``torch._dynamo.config.replay_record_enabled = True``) which dumps an execution record when an error is encountered. This record can then be replayed to run only the frame where an error occurred.
 
-TorchInductor Errors
---------------------
+Diagnosing TorchInductor Errors
+-------------------------------
 
 If the error does not occur with the ``"eager"`` backend, then the
 backend compiler is the source of the error (`example
@@ -218,7 +202,7 @@ There are `different
 choices <https://github.com/pytorch/torchdynamo/blob/0b8aaf340dad4777a080ef24bf09623f1aa6f3dd/README.md#existing-backends>`__
 for backend compilers for TorchDynamo, with TorchInductor or nvfuser
 fitting the needs of most users. This section focuses on TorchInductor
-as the motivating example, but some tools will be usable with other
+as the motivating example, but some tools can also be used with other
 backend compilers.
 
 Below is the portion of the stack which we are focusing on:
@@ -292,7 +276,7 @@ environment variable ``TORCHDYNAMO_REPRO_AFTER=“aot”`` (or setting
 ``torch._dynamo.config.repro_after="aot"`` directly) will generate a
 Python program which reduces the graph produced by AOTAutograd to the
 smallest subgraph which reproduces the error. (See below for an example
-where we minify the graph produced by torchdynamo) Running the program
+where we minify the graph produced by TorchDynamo) Running the program
 with this environment variable should show nearly `identical
 output <https://gist.github.com/mlazos/0458ab828aa403c779fe73c012aa5982>`__,
 with an additional line indicating where ``minifier_launcher.py`` has
@@ -395,7 +379,7 @@ this program with ``TORCHDYNAMO_REPRO_AFTER=“dynamo”`` (or
 output <https://gist.github.com/mlazos/244e3d5b53667e44078e194762c0c92b>`__\ and
 the following code in ``{torch._dynamo.config.base_dir}/repro.py``.
 
-.. note:: The other option for TORCHDYNAMO_REPRO_AFTER are ``"aot"``, which
+.. note:: The other option for TORCHDYNAMO_REPRO_AFTER is ``"aot"``, which
    will run the minifier after the backward graph has been generated.
 
 .. code-block:: python
@@ -444,7 +428,7 @@ Performance Profiling
 Accessing TorchDynamo Profiler
 ------------------------------
 
-TorchDynamo has a builtin stats function for collecting and displaying
+TorchDynamo has a built-in stats function for collecting and displaying
 the time spent in each compilation phase. These stats can be accessed by
 calling ``torch._dynamo.utils.compile_times()`` after executing
 Torch._Dynamo. By default, this returns a string representation of the
@@ -458,7 +442,7 @@ spent in each compilation phase, output code, output graph visualization
 and IR dump. This is a debugging tool designed to make it easier to
 understand and troubleshoot the internals of TorchInductor.
 
-Let's run an example with the following test program (repro.py):
+Let's run an example with the following test program (``repro.py``):
 
 ::
 
@@ -477,9 +461,12 @@ Let's run an example with the following test program (repro.py):
   y = test_model(torch.ones(10, 10))
 
 Setting the environment variable ``TORCH_COMPILE_DEBUG=1`` will cause a
-debug trace directory to be created, by default this directory will be in the current directory and named torch_compile_debug
-(this can be overridden in the torchdynamo configuration field ``debug_dir_root`` and also the env var TORCH_COMPILE_DEBUG_DIR).
-Inside this directory, each run will have a separate folder named with the timestamp and process id of the run:
+debug trace directory to be created, by default this directory will be in the
+current directory and named torch_compile_debug (this can be overridden in
+the torchdynamo configuration field ``debug_dir_root`` and also the
+``env var TORCH_COMPILE_DEBUG_DIR``). Inside this directory, each run will
+have a separate folder named with the timestamp and process id of the run:
+
 ::
 
    $ env TORCH_COMPILE_DEBUG=1 python repro.py
@@ -487,8 +474,9 @@ Inside this directory, each run will have a separate folder named with the times
    $ ls
    run_2023_03_01_08_20_52_143510-pid_180167
 
-In the run folder there will be a torchdynamo directory which contains debug logs, and an torchinductor
-folder which contains a subfolder for each compiled kernel with inductor debug artifacts.
+In the run folder there will be a ``torchdynamo`` directory which contains
+debug logs, and an ``torchinductor`` folder which contains a subfolder for each
+compiled kernel with inductor debug artifacts.
 
 ::
 
@@ -497,7 +485,9 @@ folder which contains a subfolder for each compiled kernel with inductor debug a
    $ ls
    torchinductor  torchdynamo
 
-Moving further into the torchinductor directory, the \*.log files are logs from the aot autograd phase of compilation, model__0_forward_1.0 contains the inductor debug artifacts.
+Moving further into the ``torchinductor`` directory, the ``\*.log`` files are
+logs from the AOT Autograd phase of compilation, ``model__0_forward_1.0`` contains
+the inductor debug artifacts.
 
 ::
 
@@ -509,10 +499,11 @@ Moving further into the torchinductor directory, the \*.log files are logs from 
    debug.log  fx_graph_readable.py  fx_graph_runnable.py  fx_graph_transformed.py  ir_post_fusion.txt  ir_pre_fusion.txt  output_code.py
 
 Here is a summary of the contents:
- - fx_graph_readable.py and fx_graph_runnable.py are the readable and runnable versions of the fx_graph received by inductor.
- - fx_graph_transformed.py is the fx graph after inductor has run all fx passes.
- - ir\*.txt is the inductor ir pre and post fusion.
- - output_code.py is the compiled triton kernel for the subgraph.
+ - ``fx_graph_readable.py`` and ``fx_graph_runnable.py`` are the readable and
+ runnable versions of the ``fx_graph`` received by inductor.
+ - ``fx_graph_transformed.py`` is the fx graph after inductor has run all fx passes.
+ - ``ir\*.txt`` is the inductor ir pre and post fusion.
+ - ``output_code.py`` is the compiled triton kernel for the subgraph.
 
 Here are `example debug directory contents
 <https://gist.github.com/jansel/f4af078791ad681a0d4094adeb844396>`__
@@ -680,7 +671,7 @@ cost of recompilation outweighs any optimization benefits.
 
    torch._dynamo.config.cache_size_limit = <your desired cache limit>
 
-Torchdynamo plans to support many common cases of dynamic tensor shapes,
+TorchDynamo plans to support many common cases of dynamic tensor shapes,
 such as varying batch size or sequence length. It does not plan to
 support rank-dynamism. In the meantime, setting a specific cache limit
 can be used in coordination with bucketing techniques to achieve an
@@ -714,29 +705,3 @@ to detect bugs in our codegen or with a backend compiler.
 If you'd like to ensure that random number generation is the same across both torch
 and triton then you can enable ``torch._inductor.config.fallback_random = True``
 
-File an Issue
-~~~~~~~~~~~~~
-
-If you experience problems with TorchDynamo, `file a GitHub
-issue <https://github.com/pytorch/torchdynamo/issues>`__.
-
-Before filing an issue, read over the `README <../README.md>`__,
-`TROUBLESHOOTING <./TROUBLESHOOTING.md>`__, and search for similar
-issues.
-
-When filing an issue, include the information about your
-OS, Python< PyTorch, CUDA, and Triton versions info by running:
-
-.. code-block:: shell
-
-   python tools/verify_install.py
-
--  A minimal repro script if possible, which can be generated by running
-   Minifier
--  A description of the error
--  The expected behavior
--  A log (set ``torch._dynamo.config.log_file`` to a valid file name to
-   dump the logs to a file and
-   ``torch._logging.set_logs(dynamo = logging.DEBUG)`` and
-   ``torch._dynamo.config.verbose = True``), or
-   ``TORCH_LOGS="+dynamo" TORCHDYNAMO_VERBOSE=1``
