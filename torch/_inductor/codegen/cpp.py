@@ -1859,7 +1859,7 @@ class CppVecKernelChecker(CppVecKernel):
 
     def could_vec(self, name: str, index: sympy.Expr):
         assert self.itervars is not None
-        return len(self.itervars) > 0 and len(index.free_symbols) > 0
+        return len(self.itervars) > 0
 
     def is_mask(self, name: str, users: Dict[torch.fx.Node, None]):
         load_type = V.graph.get_dtype(name)
@@ -1990,6 +1990,8 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"store mode: {mode}")
                 return self.simd_vec
 
+            if len(index.free_symbols) == 0:
+                self.disable_vec(f"constant store index: {index}")
             if self.simd_vec and not self.could_vec(name, index):
                 self.disable_vec(f"not a loop: {index}")
             return self.simd_vec
