@@ -410,6 +410,11 @@ def distribute_tensor(
     if is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
         random._rng_tracker = OffsetBasedRNGTracker()
 
+    if not tensor.is_leaf:
+        raise RuntimeError(
+            "`distribute_tensor` should be used to distribute leaf tensors! but found non-leaf tensor!"
+        )
+
     # convert tensor to the corresponding device type if it's not in that device type
     if not tensor.is_meta:
         tensor = tensor.to(device_mesh.device_type)
