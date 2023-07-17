@@ -107,9 +107,9 @@ class _FSDPState(_State):
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._optim_state_dict_config: OptimStateDictConfig = FullOptimStateDictConfig()
         self._is_root: Optional[bool] = None
-        self._handle: flat_param_file.FlatParamHandle = None
+        self._handle: Optional[flat_param_file.FlatParamHandle] = None
         self._fully_sharded_module_to_handle: Dict[
-            nn.Module, flat_param_file.FlatParamHandle
+            nn.Module, Optional[flat_param_file.FlatParamHandle]
         ] = {}
         self.compute_device: Optional[torch.device] = None
         # Abstract device handle for fsdp compute device. For now,
@@ -170,16 +170,16 @@ def _is_composable(state: _FSDPState):
 
 
 @no_type_check
-def _module_handle(state: _FSDPState, module: nn.Module) -> "FlatParamHandle":
+def _module_handle(state: _FSDPState, module: nn.Module) -> Optional["FlatParamHandle"]:
     """
     Returns the ``FlatParamHandle`` s corresponding to ``module``. This is
-    the handle that contain some parameter in ``module``.
+    the handle that contains some parameter in ``module``.
     """
     if _is_composable(state):
         # A valid FSDP state may have no managed parameters and hence no
         # handles, meaning no entry in `_fully_sharded_module_to_handles`
-        if len(state._handles) == 0:
-            return []
+        if state._handle is None:
+            return None
         assert (
             module in state._fully_sharded_module_to_handle
         ), f"Expects a fully sharded module but got {module} on rank {state.rank}"

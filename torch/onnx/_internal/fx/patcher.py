@@ -1,14 +1,14 @@
 import copy
-from typing import List
+import io
+from typing import List, Union
 
 import torch
 
 
-class FxToOnnxContext:
-    """Context manager to make PyTorch friendly to FX-to-ONNX exporter.
-    This class means to collect all "patches" required by FX-to-ONNX
-    exporter. If PyTorch needs to be patched, please use this class to
-    manage the patch.
+class ONNXTorchPatcher:
+    """Context manager to temporarily patch PyTorch during FX-to-ONNX export.
+
+    This class is a collection of "patches" required by FX-to-ONNX exporter.
 
     This context overrides several torch functions to support symbolic
     export of large scale models.
@@ -26,13 +26,19 @@ class FxToOnnxContext:
         This list is extended with (torch.Tensor, "__getitem__") so that
         weight[x, :, y] becomes exportable with torch.fx.symbolic_trace.
 
-    Search for FxToOnnxContext in test_fx_to_onnx_with_onnxruntime.py for
+    Search for ONNXTorchPatcher in test_fx_to_onnx_with_onnxruntime.py for
     example usage.
+
+    TODO: Should this really be a global patcher? Can we make it a local patcher?
+        A reason for splitting this into several patchers is to patch one part of the code
+        as a collateral damage of patching another part of the code. For example, we
+        for tracing model with torch._dynamo.export, we don't need to patch
+        `torch.fx._symbolic_trace._wrapped_methods_to_patch`
     """
 
     def __init__(self):
         # List of file paths processed by torch.load.
-        self.paths: List[str] = []
+        self.paths: List[Union[str, io.BufferedIOBase]] = []
 
         def torch_load_wrapper(f, *args, **kwargs):
             # Record path.
