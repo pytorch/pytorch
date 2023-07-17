@@ -9,7 +9,6 @@
 #include <thread>
 #include <unordered_map>
 #include <utility>
-#include <distributed/c10d/Backend.hpp>
 
 #ifdef _WIN32
 #include <io.h>
