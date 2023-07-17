@@ -1439,12 +1439,16 @@ class TripletMarginLoss(_Loss):
     .. math::
         d(x_i, y_i) = \left\lVert {\bf x}_i - {\bf y}_i \right\rVert_p
 
+    The norm is calculated using the specified p value and a small constant :math:`\varepsilon` is
+    added for numerical stability.
+
     See also :class:`~torch.nn.TripletMarginWithDistanceLoss`, which computes the
     triplet margin loss for input tensors using a custom distance function.
 
     Args:
         margin (float, optional): Default: :math:`1`.
         p (int, optional): The norm degree for pairwise distance. Default: :math:`2`.
+        eps (float, optional): Small constant for numerical stability. Default: :math:`1e-6`.
         swap (bool, optional): The distance swap is described in detail in the paper
             `Learning shallow convolutional feature descriptors with triplet losses` by
             V. Balntas, E. Riba et al. Default: ``False``.
@@ -1471,7 +1475,7 @@ class TripletMarginLoss(_Loss):
 
     Examples::
 
-    >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
+    >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2, eps=1e-7)
     >>> anchor = torch.randn(100, 128, requires_grad=True)
     >>> positive = torch.randn(100, 128, requires_grad=True)
     >>> negative = torch.randn(100, 128, requires_grad=True)
