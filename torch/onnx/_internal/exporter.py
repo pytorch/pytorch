@@ -287,10 +287,10 @@ def enable_fake_mode():
     patcher_context = patcher.ONNXTorchPatcher()
     fake_context = ONNXFakeContext(fake_mode=fake_mode)
     with fake_mode, patcher_context:
-        fake_context.state_dict_paths = tuple(
-            patcher_context.paths,
-        )  # type: ignore[assignment]
         yield fake_context
+    fake_context.state_dict_paths = tuple(
+        patcher_context.paths,
+    )  # type: ignore[assignment]
 
 
 @runtime_checkable
