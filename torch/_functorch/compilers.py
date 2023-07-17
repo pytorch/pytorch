@@ -183,6 +183,11 @@ def debug_nop(fx_g: fx.GraphModule, _) -> Callable:
 @make_boxed_compiler
 def simple_ts_compile(fx_g, _):
     strip_overloads(fx_g)
+
+    # realize the lazy recompilication to make jit.script happy.
+    if fx_g._needs_recompile():
+        fx_g._real_recompile()
+
     f = torch.jit.script(fx_g)
     f = torch.jit.freeze(f.eval())
     return f

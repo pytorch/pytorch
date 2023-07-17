@@ -212,7 +212,7 @@ def export(
             # because aot_export expects a tuple as return type
             return_val = f(*args)
             flat_args, in_spec = pytree.tree_flatten(args)
-            out_spec = orig_out_spec = gm_torch_level._out_spec
+            out_spec = orig_out_spec = gm_torch_level.out_spec
             # this means it is scalar return value, so will make it tuple
             if not isinstance(return_val, (list, tuple)):
                 out_spec = pytree.tree_flatten((return_val,))[1]

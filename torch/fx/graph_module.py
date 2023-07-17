@@ -642,12 +642,21 @@ class {module_name}(torch.nn.Module):
         Return the Python code generated from the ``Graph`` underlying this
         ``GraphModule``.
         """
-        if self._needs_recompile():
-            self._real_recompile()
 
+        self.real_recompile()
         if not hasattr(self, '_code'):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
         return self._code
+
+    @property
+    def in_spec(self):
+        self.real_recompile()
+        return getattr(self, "_in_spec", None)
+
+    @property
+    def out_spec(self):
+        self.real_recompile()
+        return getattr(self, "_out_spec", None)
 
     @compatibility(is_backward_compatible=True)
     @classmethod
@@ -664,6 +673,17 @@ class {module_name}(torch.nn.Module):
         return self.forward(*args, **kwargs)
 
     forward = _lazy_forward
+
+    def real_recompile(self):
+        """
+        A torch script safe wrapper around _real_recompile.
+        Call _real_recompile only if we have not done that yet after the last
+        change to the fx.Graph
+        """
+        # Jit scripting can not handle `_needs_recompile` or `_real_recompile`.
+        if not torch.jit.is_scripting():
+            if self._needs_recompile():
+                self._real_recompile()
 
     def _real_recompile(self) -> PythonCode:
         """

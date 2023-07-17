@@ -3,6 +3,7 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch import fx
 import torch
+import torch._export
 
 class TestLazyRecompile(TestCase):
     def test_replace_sin_with_cos(self):
@@ -42,6 +43,15 @@ class TestLazyRecompile(TestCase):
         print(f"sin {x.sin()}, cos {x.cos()}, expected {expected}, actual {actual}")
         self.assertTrue(torch.allclose(expected, actual))
 
+    def test_export(self):
+        """
+        torch.export will access GraphModule._out_spec. Make sure we generate them
+        if we have not done that yet.
+        """
+        def f(x):
+            return x.sin()
+        gm = torch._export.export(f, (torch.randn(2, 3),))
+        self.assertTrue(isinstance(gm, torch._export.ExportedProgram))
 
 if __name__ == "__main__":
     run_tests()
