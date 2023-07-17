@@ -439,7 +439,7 @@ def _pre_forward(
         _register_post_backward_hook(state, handle)
         # We have to reallocate the _cpu_grad if optimizer overlap
         # set the grad to None in the backward pass.
-        if handle._offload_params and handle.flat_param._cpu_grad is None:
+        if handle and handle._offload_params and handle.flat_param._cpu_grad is None:
             handle.flat_param._cpu_grad = torch.zeros_like(
                 handle.flat_param._local_shard, device=torch.device("cpu")
             ).pin_memory()
