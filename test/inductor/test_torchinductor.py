@@ -2912,7 +2912,8 @@ class CommonTemplate:
 
     def test_view_as_real(self):
         def fn(x):
-            return torch.view_as_real(x)
+            y = torch.view_as_real(x)
+            return y + 1
 
         x = torch.randn(4, dtype=torch.complex64)
 
