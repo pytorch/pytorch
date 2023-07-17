@@ -912,7 +912,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     cudaThreadExchangeStreamCaptureMode(&mode);
     auto skew_end = std::chrono::steady_clock::now();
     auto skew = std::chrono::duration_cast<std::chrono::milliseconds>(skew_end - skew_start);
-    _timeout_skew += skew;
+    _timeout_skew += skew.count();
     workCleanupLoop();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
