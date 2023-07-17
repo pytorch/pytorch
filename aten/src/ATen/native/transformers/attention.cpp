@@ -628,8 +628,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     // Naive, composite implementation defined here.
 
     // Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for math
-    bool is_negative_scaling = scale.has_value() && scale.value() < 0;
-    auto scaling_factor = sdp::calculate_scale(query_, is_negative_scaling ? std::abs(scale.value()) : scale).sqrt();
+    bool is_negative_scaling = scale.has_value() && scale.value() < 0.0;
+    const auto scaling_factor = sdp::calculate_scale(query_, is_negative_scaling ? std::abs(scale.value()) : scale).sqrt();
 
     const auto query = query_ * (is_negative_scaling ? c10::SymFloat(0.0) - scaling_factor: scaling_factor);
     if (is_causal) {
