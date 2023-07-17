@@ -911,7 +911,8 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     cudaThreadExchangeStreamCaptureMode(&mode);
     cudaThreadExchangeStreamCaptureMode(&mode);
     auto skew_end = std::chrono::steady_clock::now();
-    auto skew = std::chrono::duration_cast<std::chrono::milliseconds>(skew_end - skew_start);
+    auto skew = std::chrono::duration_cast<std::chrono::milliseconds>(
+        skew_end - skew_start);
     _timeout_skew += skew.count();
     workCleanupLoop();
     VLOG(2) << "[Rank " << rank_
