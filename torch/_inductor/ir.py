@@ -1819,7 +1819,7 @@ class FixedLayout(Layout):
         device: torch.device,
         dtype: torch.dtype,
         size: Union[List[Expr], List[int]],
-        stride: Union[List[Expr], List[int]] = None,
+        stride: Optional[Union[List[Expr], List[int]]] = None,
         offset: Union[Expr, int] = Integer(0),
     ):
         if stride is None:

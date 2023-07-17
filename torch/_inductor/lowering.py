@@ -1318,7 +1318,7 @@ def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
     "Do not support writing tensor but can read from it"
     if unsupported_input_tensor(t):
         return True
-    return t.device.type == "cpu" and config.disable_cpp_codegen
+    return t.is_cpu and config.disable_cpp_codegen
 
 
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
@@ -2956,6 +2956,16 @@ def reflection_pad2d_backward(grad_output, x, padding):
             ub = ops.index_expr(ub, torch.int64)
             return ops.and_(ops.ge(i, lb), ops.le(i, ub))
 
+        # Areas after reflection:
+        #
+        #   top-left    |   top     |   top-right
+        # -----------------------------------------
+        #   left        |   center  |   right
+        # -----------------------------------------
+        #   bottom-left |   bottom  |   bottom-right
+        #
+        # The center area is the original matrix. Other areas are reflections.
+
         center_x, center_y = x + top, y + left
         top_reflect_x, left_reflect_y = top - x, left - y
         bot_reflect_x, right_reflect_y = 2 * h + top - x, 2 * w + left - y
@@ -2985,16 +2995,6 @@ def reflection_pad2d_backward(grad_output, x, padding):
                 cond = ops.and_(cond, index_range_condition(index_range2))
             g = ops.masked(cond, lambda: load_from_output(out_x, out_y), 0.0)
             grad = ops.add(grad, g)
-
-        # Areas after reflection:
-        #
-        #   top-left    |   top     |   top-right
-        # -----------------------------------------
-        #   left        |   center  |   right
-        # -----------------------------------------
-        #   bottom-left |   bottom  |   bottom-right
-        #
-        # The center area is the original matrix. Other areas are reflections.
 
         accumulate(center_x, left_reflect_y, range_cx, (y, 1, left))
         accumulate(center_x, right_reflect_y, range_cx, (y, w - right, w - 1))
