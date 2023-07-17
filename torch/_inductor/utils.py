@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import os
+import platform
 import shutil
 import sys
 import tempfile
@@ -14,7 +15,7 @@ import textwrap
 import time
 import unittest
 from io import StringIO
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Union
 from unittest import mock
 
 import sympy
@@ -30,6 +31,64 @@ log = logging.getLogger(__name__)
 
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
+
+def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> None:
+    fn()
+    torch.cuda.synchronize()
+    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device='cuda')
+
+    # Estimate the runtime of the function
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    start_event.record()
+    for _ in range(5):
+        cache.zero_()
+        fn()
+    end_event.record()
+    torch.cuda.synchronize()
+    estimate_ms = start_event.elapsed_time(end_event) / 5
+
+    # compute number of warmup and repeat
+    n_warmup = max(1, int(warmup / estimate_ms))
+    n_repeat = max(1, int(rep / estimate_ms))
+
+    # Warm-up
+    for _ in range(n_warmup):
+        fn()
+
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CUDA,
+        ]
+    ) as p:
+        # Benchmark
+        for i in range(n_repeat):
+            # we clear the L2 cache before each run
+            cache.zero_()
+            # record time of `fn`
+            fn()
+        # Record clocks
+        torch.cuda.synchronize()
+
+    print("profiling time breakdown")
+    print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
+
+    def _should_keep(key: str) -> bool:
+        if key.startswith("cuda"):
+            return False
+        if key == "Context Sync":
+            return False
+        if key == "cuLaunchKernel":
+            return False
+        if key.startswith("void at::native::vectorized_elementwise_kernel"):
+            return False
+        return True
+
+    filtered_events = [event for event in p.key_averages() if _should_keep(event.key)]
+    print(filtered_events)
+    res = sum(event.cuda_time for event in filtered_events) / 1000.0
+    print(f"profiling results: {res}")
+    return res
 
 def do_bench(*args, **kwargs):
     @functools.lru_cache(None)
@@ -54,11 +113,13 @@ def do_bench(*args, **kwargs):
             is not None
             else "percentiles"
         )
+        return triton_do_bench
 
     triton_do_bench, quantile_field_name = load_triton()
 
     if quantile_field_name not in kwargs:
         kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
+
     return triton_do_bench(*args, **kwargs)[0]
 
 
@@ -678,6 +739,21 @@ def use_triton_template(layout, *, enable_int32=False):
     )
 
 
+def use_cutlass_template(layout):
+    layout_dtypes = (torch.float16, torch.bfloat16, torch.float32)
+    return (
+        (
+            config.max_autotune
+            or config.max_autotune_gemm
+            or config.search_autotune_cache
+        )
+        and "CUTLASS" in config.max_autotune_gemm_backends.upper().split(",")
+        and layout.device.type == "cuda"
+        and layout.dtype in layout_dtypes
+        and is_big_gpu(layout.device.index or 0)
+    )
+
+
 def use_aten_gemm_kernels():
     return "ATEN" in config.max_autotune_gemm_backends.upper().split(",")
 
@@ -1011,3 +1087,11 @@ def try_find_schema(schemas, args, kwargs):
             return schema
 
     return None
+
+
+def is_linux() -> bool:
+    return platform.system() == "Linux"
+
+
+def is_windows() -> bool:
+    return os.name == "nt"

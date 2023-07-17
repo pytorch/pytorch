@@ -40,6 +40,7 @@ def buffer_reuse_key(node: ir.Buffer):
         V.graph.sizevars.simplify(sympy_product(size)),
         # Detect gaps in tensor storage caused by strides
         V.graph.sizevars.size_hint(last_element),
+        node.get_workspace_size(),
     )
 
 
@@ -212,8 +213,8 @@ class AllocateLine(MemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
-        line = self.wrapper.make_buffer_allocation(self.node)
-        code.writeline(line)
+        lines = self.wrapper.make_buffer_allocation(self.node)
+        code.writelines(lines)
 
 
 @dataclasses.dataclass
@@ -232,7 +233,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
         if not self.is_reused:
-            code.writeline(self.wrapper.make_buffer_free(self.node))
+            code.writelines(self.wrapper.make_buffer_free(self.node))
 
 
 @dataclasses.dataclass
@@ -250,7 +251,7 @@ class ReuseLine(MemoryPlanningLine):
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
         assert self.reused_as.get_name() not in V.graph.removed_buffers
-        code.writeline(
+        code.writelines(
             self.wrapper.make_buffer_reuse(
                 self.node,
                 self.reused_as,
@@ -721,22 +722,32 @@ class WrapperCodeGen(CodeGen):
         stack.enter_context(self.wrapper_call.indent())
 
     def generate_kernel_call(
-        self, name, call_args, grid=None, device_index=None, cuda=True
+        self, name, call_args, grid=None, device_index=None, cuda=True, triton=True,
     ):
         if cuda:
             call_args_str = ", ".join(pexpr(item) for item in call_args)
-            grid_str = ", ".join(pexpr(item) for item in grid)
             stream_name = self.write_get_cuda_stream(
                 V.graph.scheduler.current_device.index
             )
-            self.writeline(
-                f"{name}.run({call_args_str}, grid=grid({grid_str}), stream={stream_name})"
-            )
+            if triton:
+                grid_str = ", ".join(pexpr(item) for item in grid)
+                self.writeline(
+                    f"{name}.run({call_args_str}, grid=grid({grid_str}), stream={stream_name})"
+                )
+            else:
+                stream_ptr = f"c_void_p({stream_name})"
+                self.writeline(
+                    f"{name}.{name}({call_args_str}, {stream_ptr})"
+                )
+
         else:
             self.writeline(self.wrap_kernel_call(name, call_args))
 
-    def writeline(self, line):
+    def writeline(self, line: str) -> None:
         self.lines.append(line)
+
+    def writelines(self, lines: List[str]) -> None:
+        self.lines.extend(lines)
 
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
@@ -762,34 +773,62 @@ class WrapperCodeGen(CodeGen):
             return repr(s)
 
     # The following methods are for memory management
-    def make_buffer_allocation(self, buffer):
+    def make_buffer_allocation(self, buffer) -> List[str]:
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
-        return (
+        res = []
+        res.append(
             f"{buffer.get_name()} = empty_strided("
             f"{self.codegen_shape_tuple(shape)}, "
             f"{self.codegen_shape_tuple(stride)}, "
             f"device='{device.type}', dtype={dtype})"
         )
+        if buffer.get_workspace_size() > 0:
+            workspace_size = tuple(buffer.get_workspace_size())
+            workspace_stride = tuple(1)
+            res.append(
+                f"{buffer.get_name()}_workspace = empty_strided("
+                f"{self.codegen_shape_tuple(workspace_size)}, "
+                f"{self.codegen_shape_tuple(workspace_stride)}, "
+                f"device='{device.type}', dtype={torch.uint8})"
+            )
+        return res
 
-    def make_buffer_free(self, buffer):
-        return f"del {buffer.get_name()}"
+    def make_buffer_free(self, buffer) -> List[str]:
+        res = [f"del {buffer.get_name()}"]
+        if buffer.get_workspace_size() > 0:
+            res.append(f"del {buffer.get_name()}_workspace")
+        return res
 
-    def make_buffer_reuse(self, old, new):
+    def make_buffer_reuse(self, old, new) -> List[str]:
         assert old.get_dtype() == new.get_dtype()
-        del_line = ""
+        res = []
+        del_line0, del_line1 = ""
         if old.get_name() not in V.graph.get_output_names():
-            del_line = f"; {self.make_buffer_free(old)}"
-        if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
-            return f"{self.declare}{new.get_name()} = {old.get_name()}{del_line}  {self.comment} reuse"
+            del_lines = self.make_buffer_free(old)
+            del_line0 = "" if len(del_lines) < 1 else del_lines[0]
+            del_line1 = "" if len(del_lines) < 2 else del_lines[1]
+        if (
+            old.get_size() == new.get_size()
+            and old.get_stride() == new.get_stride()
+            and old.get_workspace_size() == new.get_workspace_size()
+        ):
+            res.append(f"{self.declare}{new.get_name()} = {old.get_name()}{del_line0}  {self.comment} reuse")
+            if new.get_workspace_size() > 0:
+                res.append(f"{self.declare}{new.get_name()}_workspace = {old.get_name()}_workspace{del_line1}  {self.comment} reuse")
+            return res
 
-        return (
+        res.append(
             f"{self.declare}{new.get_name()} = {self.namespace}as_strided({old.get_name()}, "
             f"{self.codegen_shape_tuple(new.get_size())}, "
-            f"{self.codegen_shape_tuple(new.get_stride())}){del_line}  {self.comment} reuse"
+            f"{self.codegen_shape_tuple(new.get_stride())}){del_line0}  {self.comment} reuse"
         )
+        if new.get_workspace_size() > 0:
+            res.append(f"{self.declare}{new.get_name()}_workspace = {old.get_name()}_workspace{del_line1}  {self.comment} reuse")
+        return res
+
 
     def codegen_deferred_allocation(self, name, layout):
         self.writeline(
@@ -845,7 +884,7 @@ class WrapperCodeGen(CodeGen):
 
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
-            self.writeline(self.make_buffer_free(buffer))
+            self.writelines(self.make_buffer_free(buffer))
             return
 
         if not self.can_reuse(buffer):
@@ -854,7 +893,7 @@ class WrapperCodeGen(CodeGen):
 
         layout = buffer.get_layout()
         if isinstance(layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
-            self.writeline(self.make_buffer_free(buffer))
+            self.writelines(self.make_buffer_free(buffer))
             return
 
         self.writeline(FreeIfNotReusedLine(self, buffer))
@@ -1206,12 +1245,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"{{{parts[0]}, }}"
         return f"{{{', '.join(parts)}}}"
 
-    def make_buffer_free(self, buffer):
-        return (
-            ""
-            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
-            else f"{buffer.get_name()}.reset();"
-        )
+    def make_buffer_free(self, buffer) -> List[str]:
+        res = []
+        if isinstance(buffer.get_layout(), ir.MultiOutputLayout):
+            return res
+        res.append(f"{buffer.get_name()}.reset();")
+        if buffer.get_workspace_size() > 0:
+            res.append(f"{buffer.get_name()}_workspace.reset();")
+        return res
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
@@ -1233,7 +1274,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         cpp_device = self.codegen_device(device)
         return f"at::TensorOptions({cpp_device}).dtype({DTYPE_TO_ATEN[dtype]}))"
 
-    def make_buffer_allocation(self, buffer):
+    def make_buffer_allocation(self, buffer) -> List[str]:
         name = buffer.get_name()
         # outputs are passed-in in the AOT mode
         if self.use_preallocated_ouput(buffer):
@@ -1253,19 +1294,19 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ):
                 return f"auto {name} = outputs[{output_idx}];"
             else:
-                self.outputs_need_copy.add(name)
+                [self.outputs_need_copy.add(name)]
 
         # TODO: map layout here.
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
-        return (
+        return [(
             f"{self.declare}{name} = {self.namespace}empty_strided("
             f"{self.codegen_shape_tuple(shape)}, "
             f"{self.codegen_shape_tuple(stride)}, "
             f"{self.codegen_tensor_option(device, dtype)};"
-        )
+        )]
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
@@ -1427,11 +1468,11 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         return ", ".join(new_args)
 
     def generate_kernel_call(
-        self, name, call_args, grid=None, device_index=None, cuda=True
+        self, name, call_args, grid=None, device_index=None, cuda=True, triton=True,
     ):
         if not cuda:
             return super().generate_kernel_call(
-                name, call_args, grid, device_index, cuda
+                name, call_args, grid, device_index, cuda, triton
             )
 
         params = CudaKernelParamCache.get(name)

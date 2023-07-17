@@ -2,13 +2,14 @@ import logging
 
 import torch
 from .. import config as inductor_config
+from ..codegen.cuda.gemm_template import CutlassGemmTemplate
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import use_aten_gemm_kernels, use_triton_template
+from ..utils import use_aten_gemm_kernels, use_triton_template, use_cutlass_template
 from .mm_common import (
     addmm_epilogue,
     int8_mm_configs,
@@ -103,6 +104,8 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 @register_lowering(aten.mm)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    print("lowering tuned_mm")
+    print(f"{m=}, {type(m)=}, {n=}, {type(n)=}, {k=}, {type(k)=}, {mat1=}, {mat2=}, {layout=}")
 
     # options to tune from
     choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
@@ -113,6 +116,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 (mat1, mat2),
                 layout,
                 **mm_options(config, k, layout),
+            )
+
+    if use_cutlass_template(layout):
+        cutlass_template = CutlassGemmTemplate([mat1, mat2], layout, alpha=1, beta=0)
+        ops = cutlass_template.gen_ops()
+        print(f"{len(ops)=}")
+        for op in ops:
+            cutlass_template.maybe_append_choice(
+                choices,
+                op=op,
             )
 
     return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
@@ -141,24 +154,10 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 @register_lowering(aten.addmm)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
+    print("lowering tuned_addmm")
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
 
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
-    if not use_triton_template(layout):
-        choices = (
-            [
-                aten_addmm.bind(
-                    (inp, mat1, mat2),
-                    layout,
-                    ordered_kwargs_for_cpp_kernel,
-                    alpha=alpha,
-                    beta=beta,
-                )
-            ]
-            if use_aten_gemm_kernels()
-            else []
-        )
-        return autotune_select_algorithm("addmm", choices, [inp, mat1, mat2], layout)
 
     choices = (
         [
@@ -174,7 +173,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         else []
     )
     if (
-        inp_expanded.get_stride()[0] == 0
+        use_aten_gemm_kernels()
+        and inp_expanded.get_stride()[0] == 0
         and inp_expanded.get_device().type == "cuda"
         and inductor_config.triton.autotune_cublasLt
     ):
@@ -186,15 +186,26 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             ),
         )
 
-    for config in mm_configs(m, n, k):
-        mm_template.maybe_append_choice(
-            choices,
-            (inp_expanded, mat1, mat2),
-            layout,
-            **mm_options(config, k, layout),
-            prefix_args=1,
-            epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
-        )
+    if use_triton_template(layout):
+        for config in mm_configs(m, n, k):
+            mm_template.maybe_append_choice(
+                choices,
+                (inp_expanded, mat1, mat2),
+                layout,
+                **mm_options(config, k, layout),
+                prefix_args=1,
+                epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
+            )
+
+    if use_cutlass_template(layout):
+        cutlass_template = CutlassGemmTemplate([mat1, mat2, inp_expanded], layout, alpha=alpha, beta=beta, input_reorder=[2,0,1])
+        ops = cutlass_template.gen_ops()
+        print(f"{len(ops)=}")
+        for op in ops:
+            cutlass_template.maybe_append_choice(
+                choices,
+                op=op,
+            )
 
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout

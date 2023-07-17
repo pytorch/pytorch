@@ -73,9 +73,10 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton.
+# Possible choices are combinations of: ATen, Triton, Cutlass.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor.
+# Cutlass: Cutlass templates and kernels.
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
 ).upper()
@@ -384,6 +385,36 @@ class triton:
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY = None
+
+
+class cuda:
+    # Whether to enable custom CUDA kernels.
+    # If True, both Triton and custom CUDA kernel codegen are enabled.
+    # If False, only Triton codegen is enabled.
+    enabled = False
+
+    # CUDA arch to use for CUDA template kernel compilation.
+    # Available options: "70", "75", "80", "90"
+    # When arch is None, the Inductor tries to detect CUDA arch by querying
+    # CUDA Python lib or "nvidia-smi" commandline.
+    arch = None
+
+    # CUDA version to use for CUDA template kernel compilation.
+    # e.g. "11.4", "12.1", etc.
+    # When version is None, the Inductor tries to detech CUDA version by
+    # querying CUDA Python lib for "nvidia-smi" commandline.
+    version = "12.1"
+
+    # Optimization level for the host compiler.
+    compile_opt_level = "-O1"
+
+    enable_cuda_lto = False
+
+    enable_ptxas_info = False
+
+    enable_debug_info = False
+
+    use_fast_math = False
 
 
 # create a directory containing lots of debug information
