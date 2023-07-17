@@ -5,14 +5,15 @@ import itertools
 
 import torch
 import torch._dynamo as torchdynamo
-import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+import torch.ao.quantization.pt2e.quantizer.x86_inductor_quantizer as xiq
+
+from torch._dynamo import config as dynamo_config
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import run_and_get_code
-from torch.ao.quantization._pt2e.quantizer import X86InductorQuantizer
 from torch.ao.quantization._quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
+from torch.ao.quantization.pt2e.quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
@@ -57,7 +58,7 @@ binary_list = {
 
 
 @config.patch({"freezing": True})
-class TestPaternMatcher(TestCase):
+class TestPatternMatcherBase(TestCase):
     def _check_unary_is_decomposed(self, unary_fn):
         return not any(
             isinstance(unary_fn, fn)
@@ -100,7 +101,7 @@ class TestPaternMatcher(TestCase):
                 prepare_model = prepare_pt2e_quantizer(export_model, quantizer)
                 prepare_model(*inputs)
                 convert_model = convert_pt2e(prepare_model).eval()
-                _ = compile_fx(convert_model, inputs)
+                _ = torch.compile(convert_model)(*inputs)
                 self.assertEqual(
                     counters["inductor"]["pattern_matcher_count"], matcher_count
                 )
@@ -137,6 +138,8 @@ class TestPaternMatcher(TestCase):
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
 
+
+class TestPatternMatcher(TestPatternMatcherBase):
     def test_conv2d_unary_cpu(self):
         class M(torch.nn.Module):
             def __init__(
@@ -606,6 +609,30 @@ class TestPaternMatcher(TestCase):
         mod = Model().eval()
         include_ops = ["mkldnn._convolution_pointwise_.binary"]
         self._test_code_common(mod, (input,), include_ops, [])
+
+
+@dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
+class TestDynamicPatternMatcher(TestPatternMatcherBase):
+    test_conv2d_unary_dynamic_shapes = TestPatternMatcher.test_conv2d_unary_cpu
+    test_conv2d_binary_dynamic_shapes = TestPatternMatcher.test_conv2d_binary
+    test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
+
+    def test_conv_transpose2d_dynamic_shapes(self):
+        # We don't support conv_transpose2d for now.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_transpose2d = torch.nn.ConvTranspose2d(
+                    3, 16, 3, stride=2, padding=1
+                )
+
+            def forward(self, x):
+                return self.conv_transpose2d(x)
+
+        x_shape = (1, 3, 28, 28)
+        mod = M().eval()
+        v = torch.randn(x_shape, dtype=torch.float32)
+        self._test_common(mod, (v,), 0, 0)
 
 
 if __name__ == "__main__":
