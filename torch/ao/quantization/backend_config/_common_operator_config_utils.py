@@ -532,6 +532,7 @@ def _get_share_qparams_op_configs(dtype_configs):
         "clamp",
         "detach",
         "detach_",
+        "flatten",
         "mean",
         "permute",
         "repeat",
