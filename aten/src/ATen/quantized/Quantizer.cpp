@@ -47,6 +47,13 @@ const at::NewQTensorFuncType& GetNewQTensorImpl(at::DeviceType t) {
   return impl.value();
 }
 
+bool HasRegisteredQTensorImpl(at::DeviceType t) {
+  if (new_qtensor_impls[static_cast<int>(t)].has_value()) {
+    return true;
+  }
+  return false;
+}
+
 // Note: this is not a native function as Quantizer is not exposed to python yet
 QuantizerPtr TensorBase::quantizer() const {
   // This is a terrible hack to emulate what VariableType is doing
@@ -128,7 +135,7 @@ inline Tensor new_qtensor(
     QuantizerPtr quantizer) {
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   auto device = options.device();
-  if (device.is_privateuseone()) {
+  if (device.is_privateuseone() && at::HasRegisteredQTensorImpl(device.type())) {
     return GetNewQTensorImpl(device.type())(sizes, options, quantizer);
   }
   at::Allocator* allocator = nullptr;
@@ -139,6 +146,8 @@ inline Tensor new_qtensor(
     allocator = at::getCPUAllocator();
   } else if (device.is_meta()) {
     allocator = GetAllocator(kMeta);
+  } else if (device.is_privateuseone()) {
+    allocator = GetAllocator(kPrivateUse1);
   } else {
     TORCH_INTERNAL_ASSERT(0, "unrecognized device for new_qtensor: ", device);
   }
