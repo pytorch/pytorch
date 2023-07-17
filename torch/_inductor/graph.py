@@ -666,6 +666,13 @@ class GraphLowering(torch.fx.Interpreter):
             elif n.op == "call_function" and n.target in layout_constraints:
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
+            elif n.target == torch.ops.aten.sym_stride:
+                # inductor graphs can occasionally return sizes/strides,
+                # e.g. if we need to save symints for the backward graph.
+                if isinstance(n.meta["val"], torch.SymInt):
+                    result = n.meta["val"].node.expr
+                else:
+                    result = super().run_node(n)
             elif is_magic_method(n.target):
                 if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
@@ -681,26 +688,28 @@ class GraphLowering(torch.fx.Interpreter):
             # with infallible strides.
             # 2: as_strided ops, we need make sure its input has same size/stride with
             # eager model to align with eager behavior.
-            if any(
-                user.op == "output" or user.target in as_strided_ops for user in n.users
-            ) and isinstance(n.meta["val"], torch.Tensor):
+            is_output = any(user.op == "output" for user in n.users)
+            is_input_for_as_strided = any(
+                user.target in as_strided_ops for user in n.users
+            )
+            if (is_output or is_input_for_as_strided) and isinstance(
+                n.meta["val"], torch.Tensor
+            ):
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+                # requiring a stride order for a non-dense output wouldn't
+                # recreate the same strides, and would fail with view, defer for now.
                 if dense and len(strides):
                     stride_order = ir.get_stride_order(strides)
-                    result = ir.ExternKernel.require_stride_order(result, stride_order)
-            else:
-                if (
-                    isinstance(n.meta["val"], torch.Tensor)
-                    and torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
-                    and len(n.meta["val"].stride())
-                    and len(result.get_size()) == 4
-                    and n in self.nodes_prefer_channels_last
-                    and n.name not in self.user_visible_outputs
-                ):
-                    stride_order = ir.NHWC_STRIDE_ORDER
+                    if (
+                        len(result.get_size()) == 4
+                        and n in self.nodes_prefer_channels_last
+                        and n.name not in self.user_visible_outputs
+                        and not is_input_for_as_strided
+                    ):
+                        stride_order = ir.NHWC_STRIDE_ORDER
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
 
             # Realize if (1) any user need inputs realized, or (2) there is
