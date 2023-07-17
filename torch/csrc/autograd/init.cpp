@@ -774,11 +774,13 @@ static PyObject* set_multithreading_enabled(PyObject* self, PyObject* args, PyOb
 }
 
 static PyObject* is_multithreading_enabled(PyObject* self, PyObject* args) {
+    HANDLE_TH_ERRORS
     if (c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
         Py_RETURN_TRUE;
     } else {
         Py_RETURN_FALSE;
     }
+    END_HANDLE_TH_ERRORS
 }
 
 static PyObject* is_inference_mode_enabled(PyObject* _unused, PyObject* arg) {
@@ -1031,7 +1033,7 @@ static PyMethodDef methods[] = { // NOLINT
      is_anomaly_check_nan_enabled,
      METH_NOARGS,
      nullptr},
-    {"is_multithreading_enabled", is_multithreading_enabled, METH_NOARGS, nullptr},
+    {"_is_multithreading_enabled", is_multithreading_enabled, METH_NOARGS, nullptr},
     {"_set_multithreading_enabled",
      castPyCFunctionWithKeywords(set_multithreading_enabled),
      METH_VARARGS | METH_KEYWORDS,
