@@ -351,13 +351,13 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-focal-rocm5_4_2-py3_8-build:
+  linux-focal-rocm5_6-py3_8-build:
     # don't run build twice on main
     if: github.event_name == 'pull_request'
-    name: linux-focal-rocm5.4.2-py3.8
+    name: linux-focal-rocm5.6-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.4.2-py3.8
+      build-environment: linux-focal-rocm5.6-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
