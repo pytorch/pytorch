@@ -1082,13 +1082,35 @@ class MultiheadAttention(Module):
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
             heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
             effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
-        is_causal: If specified, applies a causal mask as attention mask.
-            Default: ``False``.
-            Warning:
-            ``is_causal`` provides a hint that ``attn_mask`` is the
-            causal mask. Providing incorrect hints can result in
-            incorrect execution, including forward and backward
-            compatibility.
+            is_causal: If ``is_causal=True``, provides a hint that ``mask``
+                is a causal mask which will enable the use of a faster fused
+                ``scaled_dot_product_attention()`` operators (SDPA) on
+                hardware where such enhanced fused SDPA are supported.
+                If ``is_causal=False`, an SDPA operator using the mask will
+                be used (which may result in slower execution).  If
+                ``is_causal=None``, the TransformerEncoder and
+                TransformerDecoder modules may detect whether is_causal os
+                a causal mask. (Detecting the presence of a causal mask
+                imposes some overhead. Thus, specifying ``is_causal=True``
+                when the mask is known to be a causal mask, and
+                ``is_causal=False`` when the mask is known to not be causal,
+                or when the mask should be used without attempting to detect
+                the presence of a causal mask.)
+
+                Default: ``None``; try to detect a causal mask in the input.
+
+                Warning:
+                ``is_causal`` provides a hint that ``mask`` is the
+                causal mask. Providing incorrect hints can result in
+                seemingly non-determinstic,
+                including forward and backward compatibility.
+
+                Note: Individual Transformer layers in nn.Transformer,
+                nn.MultiHeadAttention, and
+                multi_had_attention_forward in nn.functional do not support
+                the detection of causal masks with ``is_causal=None``, because
+                the overhead of detecting at the layer or MHA level is
+                unlikely to yield overall performance improvement.
 
     Outputs:
         - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,

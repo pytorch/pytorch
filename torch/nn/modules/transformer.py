@@ -249,13 +249,35 @@ class TransformerEncoder(Module):
             src: the sequence to the encoder (required).
             mask: the mask for the src sequence (optional).
             src_key_padding_mask: the mask for the src keys per batch (optional).
-            is_causal: If specified, applies a causal mask as ``mask``.
-                Default: ``None``; try to detect a causal mask.
+            is_causal: If ``is_causal=True``, provides a hint that ``mask``
+                is a causal mask which will enable the use of a faster fused
+                ``scaled_dot_product_attention()`` operators (SDPA) on
+                hardware where such enhanced fused SDPA are supported.
+                If ``is_causal=False`, an SDPA operator using the mask will
+                be used (which may result in slower execution).  If
+                ``is_causal=None``, the TransformerEncoder and
+                TransformerDecoder modules may detect whether is_causal os
+                a causal mask. (Detecting the presence of a causal mask
+                imposes some overhead. Thus, specifying ``is_causal=True``
+                when the mask is known to be a causal mask, and
+                ``is_causal=False`` when the mask is known to not be causal,
+                or when the mask should be used without attempting to detect
+                the presence of a causal mask.)
+
+                Default: ``None``; try to detect a causal mask in the input.
+
                 Warning:
                 ``is_causal`` provides a hint that ``mask`` is the
                 causal mask. Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
+                seemingly non-determinstic,
+                including forward and backward compatibility.
+
+                Note: Individual Transformer layers in nn.Transformer,
+                nn.MultiHeadAttention, and
+                multi_had_attention_forward in nn.functional do not support
+                the detection of causal masks with ``is_causal=None``, because
+                the overhead of detecting at the layer or MHA level is
+                unlikely to yield overall performance improvement.
 
         Shape:
             see the docs in Transformer class.
@@ -384,13 +406,45 @@ class TransformerDecoder(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
-            tgt_is_causal: If specified, applies a causal mask as ``tgt mask``.
-                Default: ``None``; try to detect a causal mask.
+            tgt_is_causal: If ``tgt_is_causal=True``, provides a hint that ``mask``
+                is a causal mask which will enable the use of a faster fused
+                ``scaled_dot_product_attention()`` operators (SDPA) on
+                hardware where such enhanced fused SDPA are supported.
+                If ``tgt_is_causal=False`, an SDPA operator using the mask will
+                be used (which may result in slower execution).  If
+                ``tgt_is_causal=None``, the TransformerEncoder and
+                TransformerDecoder modules may detect whether is_causal os
+                a causal mask. (Detecting the presence of a causal mask
+                imposes some overhead. Thus, specifying ``tgt_is_causal=True``
+                when the mask is known to be a causal mask, and
+                ``tgt_is_causal=False`` when the mask is known to not be causal,
+                Default: ``None``; try to detect a causal mask in the input.
+
                 Warning:
-                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
-                the causal mask. Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
+                ``is_causal`` provides a hint that ``mask`` is the
+                causal mask. Providing incorrect hints can result in
+                seemingly non-determinstic,
+                including forward and backward compatibility.
+
+                Note: Individual Transformer layers in nn.Transformer and
+                MultiHeadAttention in nn.Transformer and
+                multi_had_attention_forward in nn.functional do not support
+                the detection of causal masks with ``is_causal=None``, because
+                the overhead of detecting at the layer or MHA level is
+                unlikely to yield overall performance improvement.
+
+                Warning:
+                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is the
+                causal mask. Providing incorrect hints can result in
+                seemingly non-determinstic,
+                including forward and backward compatibility.
+
+                Note: Individual Transformer layers in nn.Transformer,
+                nn.MultiHeadAttention, and
+                multi_had_attention_forward in nn.functional do not support
+                the detection of causal masks with ``is_causal=None``, because
+                the overhead of detecting at the layer or MHA level is
+                unlikely to yield overall performance improvement.
             memory_is_causal: If specified, applies a causal mask as
                 ``memory mask``.
                 Default: ``False``.
@@ -544,6 +598,50 @@ class TransformerEncoderLayer(Module):
             src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
             src_key_padding_mask: the mask for the src keys per batch (optional).
+            is_causal: If ``is_causal=True``, provides a hint that ``mask``
+                is a causal mask which will enable the use of a faster fused
+                ``scaled_dot_product_attention()`` operators (SDPA) on
+                hardware where such enhanced fused SDPA are supported.
+                If ``is_causal=False`, an SDPA operator using the mask will
+                be used (which may result in slower execution).  If
+                ``is_causal=None``, the TransformerEncoder and
+                TransformerDecoder modules may detect whether is_causal os
+                a causal mask. (Detecting the presence of a causal mask
+                imposes some overhead. Thus, specifying ``is_causal=True``
+                when the mask is known to be a causal mask, and
+                ``is_causal=False`` when the mask is known to not be causal,
+                or when the mask should be used without attempting to detect
+                the presence of a causal mask.)
+
+                Default: ``Fa;se``.
+
+                Warning:
+                ``is_causal`` provides a hint that ``mask`` is the
+                causal mask. Providing incorrect hints can result in
+                seemingly non-determinstic,
+                including forward and backward compatibility.
+
+                Note: Unlike TransformerEncoder and TransformerDecoder
+                nn.modules, ndividual Transformer layers in nn.Transformer,
+                the nn.MultiHeadAttention module, and
+                multi_had_attention_forward in nn.functional do not support
+                the detection of causal masks with ``is_causal=None``, because
+                the overhead of detecting at the layer or MHA level is
+                unlikely to yield overall performance improvement.
+
+                Warning:
+                ``is_causal`` provides a hint that ``mask`` is the
+                causal mask. Providing incorrect hints can result in
+                seemingly non-determinstic,
+                including forward and backward compatibility.
+
+                Note: Individual Transformer layers in nn.Transformer and
+                MultiHeadAttention in nn.Transformer and
+                multi_had_attention_forward in nn.functional do not support
+                the detection of causal masks with ``is_causal=None``, because
+                the overhead of detecting at the layer or MHA level is
+                unlikely to yield overall performance improvement.
+
             is_causal: If specified, applies a causal mask as ``src mask``.
                 Default: ``False``.
                 Warning:
@@ -762,13 +860,47 @@ class TransformerDecoderLayer(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
-            tgt_is_causal: If specified, applies a causal mask as ``tgt mask``.
-                Default: ``False``.
+            tgt_is_causal: If ``tgt_is_causal=True``, provides a hint that ``mask``
+                is a causal mask which will enable the use of a faster fused
+                ``scaled_dot_product_attention()`` operators (SDPA) on
+                hardware where such enhanced fused SDPA are supported.
+                If ``tgt_is_causal=False`, an SDPA operator using the mask will
+                be used (which may result in slower execution).  If
+                ``tgt_is_causal=None``, the TransformerEncoder and
+                TransformerDecoder modules may detect whether is_causal os
+                a causal mask. (Detecting the presence of a causal mask
+                imposes some overhead. Thus, specifying ``tgt_is_causal=True``
+                when the mask is known to be a causal mask, and
+                ``tgt_is_causal=False`` when the mask is known to not be causal,
+                Default: ``None``; try to detect a causal mask in the input.
+
                 Warning:
-                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
-                the causal mask. Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
+                ``is_causal`` provides a hint that ``mask`` is the
+                causal mask. Providing incorrect hints can result in
+                seemingly non-determinstic,
+                including forward and backward compatibility.
+
+                Note: Individual Transformer layers in nn.Transformer and
+                MultiHeadAttention in nn.Transformer and
+                multi_had_attention_forward in nn.functional do not support
+                the detection of causal masks with ``is_causal=None``, because
+                the overhead of detecting at the layer or MHA level is
+                unlikely to yield overall performance improvement.
+
+                Warning:
+                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is the
+                causal mask. Providing incorrect hints can result in
+                seemingly non-determinstic,
+                including forward and backward compatibility.
+
+                Note: Unlike TransformerEncoder and TransformerDecoder in
+                Individual Transformer layers in nn.Transformer,
+                nn.MultiHeadAttention, and
+                multi_had_attention_forward in nn.functional do not support
+                the detection of causal masks with ``is_causal=None``, because
+                the overhead of detecting at the layer or MHA level is
+                unlikely to yield overall performance improvement.
+
             memory_is_causal: If specified, applies a causal mask as
                 ``memory mask``.
                 Default: ``False``.

@@ -4971,6 +4971,12 @@ Note:
     In the event that a fused implementation is not available, an error will be raised with the
     reasons why the fused implementation cannot run.
 
+    Note: For the scaled_dot_product_attention() operator (SDPA), is_causal
+    is an indicator to use a causal mask for masking, and is
+    not a hint (unlike nn.Transformer and nn.MultiheadAttention and
+    F.multi_head_attention_forward). Consequently, the specification of
+    is_causal and attn_mask maere mutually exclusive.
+
     Due to the nature of fusing floating point operations, the output of this function may be different
     depending on what backend kernel is chosen.
     The c++ implementation supports torch.float64 and can be used when higher precision is required.
@@ -5154,14 +5160,37 @@ def multi_head_attention_forward(
             leads to a significant performance degradation.*
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
-        is_causal: If specified, applies a causal mask as attention mask, and ignores
-            attn_mask for computing scaled dot product attention.
-            Default: ``False``.
-            .. warning::
-                is_causal is provides a hint that the attn_mask is the
-                causal mask.Providing incorrect hints can result in
-                incorrect execution, including forward and backward
-                compatibility.
+
+            is_causal: If ``is_causal=True``, provides a hint that ``mask``
+                is a causal mask which will enable the use of a faster fused
+                ``scaled_dot_product_attention()`` operators (SDPA) on
+                hardware where such enhanced fused SDPA are supported.
+                If ``is_causal=False`, an SDPA operator using the mask will
+                be used (which may result in slower execution).  If
+                ``is_causal=None``, the TransformerEncoder and
+                TransformerDecoder modules may detect whether is_causal os
+                a causal mask. (Detecting the presence of a causal mask
+                imposes some overhead. Thus, specifying ``is_causal=True``
+                when the mask is known to be a causal mask, and
+                ``is_causal=False`` when the mask is known to not be causal,
+                or when the mask should be used without attempting to detect
+                the presence of a causal mask.)
+
+                Default: ``None``; try to detect a causal mask in the input.
+
+                Warning:
+                ``is_causal`` provides a hint that ``mask`` is the
+                causal mask. Providing incorrect hints can result in
+                seemingly non-determinstic,
+                including forward and backward compatibility.
+
+                Note: Individual Transformer layers in nn.Transformer,
+                nn.MultiHeadAttention, and
+                multi_had_attention_forward in nn.functional do not support
+                the detection of causal masks with ``is_causal=None``, because
+                the overhead of detecting at the layer or MHA level is
+                unlikely to yield overall performance improvement.
+
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
