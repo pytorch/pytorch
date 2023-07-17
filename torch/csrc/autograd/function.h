@@ -236,6 +236,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   const InputMetadata& input_metadata(size_t index) const {
     return input_metadata_[index];
   }
+
+  // Danger: not thread safe, caller must protect with lock
   InputMetadata& mutable_input_metadata(size_t index) {
     return input_metadata_[index];
   }
