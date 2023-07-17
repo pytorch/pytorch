@@ -4,6 +4,8 @@ aten::__irshift__.Scalar
 aten::__irshift__.Tensor
 aten::_adaptive_avg_pool2d
 aten::_adaptive_avg_pool2d.out
+aten::_addmm_activation
+aten::_addmm_activation.out
 aten::_euclidean_dist.out
 aten::_fused_dropout
 aten::_fused_dropout.out
@@ -183,8 +185,6 @@ aten::div_.Tensor
 aten::div_.Tensor_mode
 aten::embedding
 aten::embedding.out
-aten::empty_like
-aten::empty_like.out
 aten::empty_strided
 aten::empty_strided.out
 aten::eq.Scalar
@@ -487,6 +487,7 @@ aten::trunc
 aten::trunc.out
 aten::trunc_
 aten::unbind.int
+aten::unfold
 aten::uniform
 aten::uniform.out
 aten::uniform_

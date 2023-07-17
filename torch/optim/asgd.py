@@ -312,7 +312,11 @@ def _multi_tensor_asgd(
         torch._foreach_add_(grouped_state_steps, 1)
 
         if weight_decay != 0:
-            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+            # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+            if maximize:
+                torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
+            else:
+                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         # decay term
         eta = _get_value(grouped_etas[0])

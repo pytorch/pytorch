@@ -1,21 +1,46 @@
 from torch.fx import GraphModule
 
-from ._pt2e.prepare import prepare
-from ._pt2e._propagate_annotation import propagate_annotation
-from ._pt2e.qat_utils import (
+from .pt2e.prepare import prepare
+from .pt2e._propagate_annotation import propagate_annotation
+from .pt2e.qat_utils import (
     _fuse_conv_bn_qat,
     _fold_conv_bn_qat,
 )
-from ._pt2e.utils import (
+from .pt2e.utils import (
     _get_node_name_to_scope,
     _fuse_conv_bn_,
     _rearrange_weight_observer_for_decomposed_linear,
+    _replace_dropout_for_eval,
 )
-from ._pt2e.representation import reference_representation_rewrite
+from .pt2e.representation import reference_representation_rewrite
 from .fx.prepare import prepare as fx_prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
 from torch.ao.quantization import QConfigMapping
-from torch.ao.quantization._pt2e.quantizer import Quantizer
+# TODO: move quantizer to torch.ao.quantization
+from torch.ao.quantization.pt2e.quantizer import (  # noqa: F401
+    OperatorConfig,
+    OperatorPatternType,
+    QuantizationConfig,
+    Quantizer,
+    QuantizationSpecBase,
+    QuantizationSpec,
+    FixedQParamsQuantizationSpec,
+    SharedQuantizationSpec,
+    DerivedQuantizationSpec,
+    QuantizationAnnotation,
+    QNNPackQuantizer,
+    EmbeddingQuantizer,
+    ComposableQuantizer,
+)
+from torch.ao.quantization.pt2e.quantizer.utils import (  # noqa: F401
+    get_bias_qspec,
+    get_input_act_qspec,
+    get_output_act_qspec,
+    get_weight_qspec,
+)
+from torch.ao.quantization.pt2e.quantizer.qnnpack_quantizer import (  # noqa: F401
+    get_symmetric_quantization_config,
+)
 from torch.ao.quantization.backend_config import BackendConfig
 
 from typing import Any, Tuple
@@ -86,6 +111,9 @@ def convert_pt2e(
     model: GraphModule,
     use_reference_representation: bool = False,
 ) -> GraphModule:
+    # TODO: Handle this in export itself, outside of quantization
+    # See https://github.com/pytorch/pytorch/issues/103681.
+    _replace_dropout_for_eval(model)
     model = _convert_to_reference_decomposed_fx(model)
     model = _fold_conv_bn_qat(model)
     if use_reference_representation:

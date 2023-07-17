@@ -12,13 +12,13 @@ import weakref
 import torch
 
 import torch._dynamo as torchdynamo
-import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+import torch.ao.quantization.pt2e.quantizer.x86_inductor_quantizer as xiq
 from torch import nn
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import override_lowering, run_and_get_code
-from torch.ao.quantization._pt2e.quantizer import X86InductorQuantizer
 from torch.ao.quantization._quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
+from torch.ao.quantization.pt2e.quantizer import X86InductorQuantizer
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 
@@ -534,5 +533,5 @@ class OptimizeForInferenceQuantizationPT2E(TestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
