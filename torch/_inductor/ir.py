@@ -4175,6 +4175,11 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             unary_algorithm,
         ]
 
+        if fp32_output:
+            # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
+            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
+            kernel_layout.dtype = torch.float32
+
         return QConvPointWisePT2E(
             layout=kernel_layout,
             inputs=inputs,
