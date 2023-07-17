@@ -1859,7 +1859,7 @@ class CppVecKernelChecker(CppVecKernel):
 
     def could_vec(self, name: str, index: sympy.Expr):
         assert self.itervars is not None
-        return len(self.itervars) > 0
+        return len(self.itervars) > 0 and len(index.free_symbols) > 0
 
     def is_mask(self, name: str, users: Dict[torch.fx.Node, None]):
         load_type = V.graph.get_dtype(name)
