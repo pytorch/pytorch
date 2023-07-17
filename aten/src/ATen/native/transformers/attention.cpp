@@ -758,7 +758,6 @@ _scaled_dot_product_flash_attention_backward_cpu(
     const Tensor& philox_offset,
     c10::optional<double> scale) {
   if (!grad_out.defined()) {
-    std::cout << "!grad_out.defined()" << std::endl;
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
   auto grad_out_t = grad_out.transpose(1, 2);
