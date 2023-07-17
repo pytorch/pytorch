@@ -177,6 +177,16 @@ class FrameStateSizeEntry:
     size: Optional[List[int]]
 
 
+def variable_builder_no_source(value):
+    if isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+        return UserDefinedObjectVariable(value)
+    elif is_builtin_callable(value):
+        return BuiltinVariable(value)
+    elif ConstantVariable.is_literal(value):
+        return ConstantVariable(value)
+    unimplemented(f"{type(value)} is not supported")
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
