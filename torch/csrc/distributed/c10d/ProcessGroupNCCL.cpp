@@ -428,18 +428,20 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
 
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   auto mode = cudaStreamCaptureModeGlobal;
+  // push
   cudaThreadExchangeStreamCaptureMode(&mode);
   try {
     for (const auto i : c10::irange(devices_.size())) {
       // Checking the work's corresponding CUDA events' status
       if (!(*ncclEndEvents_)[i].query()) {
-        // C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+        // pop
+        cudaThreadExchangeStreamCaptureMode(&mode);
         return false;
       }
-      // C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
     }
   } catch (const std::exception& e) {
-    // C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+    // pop
+    cudaThreadExchangeStreamCaptureMode(&mode);
     if (std::string(e.what()).find("driver shutting down") ==
         std::string::npos) {
       throw;
@@ -447,6 +449,8 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
     LOG(INFO) << "[Rank " << rank_
               << "] Event query failed with exception: " << e.what();
   }
+  // pop
+  cudaThreadExchangeStreamCaptureMode(&mode);
   return true;
 }
 
