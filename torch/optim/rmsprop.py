@@ -332,7 +332,11 @@ def _multi_tensor_rmsprop(
             grouped_grads = torch._foreach_neg(grouped_grads)
 
         if weight_decay != 0:
-            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+            # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+            if maximize:
+                torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
+            else:
+                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         def _view_complex_as_real(tensor_list):
             return [
