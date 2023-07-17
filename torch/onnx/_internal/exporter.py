@@ -362,7 +362,7 @@ class ExportOutput:
     _input_adapter: Final[io_adapter.InputAdapter]
     _output_adapter: Final[io_adapter.OutputAdapter]
     _diagnostic_context: Final[infra.DiagnosticContext]
-    _fake_context: Final[ONNXFakeContext]
+    _fake_context: Final[Optional[ONNXFakeContext]]
 
     @_beartype.beartype
     def __init__(
@@ -371,7 +371,7 @@ class ExportOutput:
         input_adapter: io_adapter.InputAdapter,
         output_adapter: io_adapter.OutputAdapter,
         diagnostic_context: infra.DiagnosticContext,
-        fake_context: Optional[ONNXFakeContext],
+        fake_context: Optional[ONNXFakeContext] = None,
     ):
         self._model_proto = model_proto
         self._input_adapter = input_adapter
