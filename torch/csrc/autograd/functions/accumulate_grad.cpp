@@ -75,7 +75,7 @@ variable_list AccumulateGrad::apply_with_saved(
     return variable_list();
   }
   TORCH_CHECK(!variable.grad_fn() && grads.size() == 1);
-  TORCH_CHECK(grads[0].defined(), "not implemented")
+  TORCH_CHECK(grads[0].defined(), "not implemented for compiled autograd")
   at::Tensor variable_copy = variable;
   at::Tensor grad_copy = variable.grad();
   saved.before(variable_copy);
