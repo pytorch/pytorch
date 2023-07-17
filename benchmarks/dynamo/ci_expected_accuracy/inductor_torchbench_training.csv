@@ -48,5 +48,5 @@ timm_vision_transformer_large,pass_due_to_skip,0
 timm_vovnet,pass,8
 tts_angular,pass,10
 vgg16,pass,8
-vision_maskrcnn,fail_accuracy,42
+vision_maskrcnn,fail_accuracy,40
 yolov3,pass,10
