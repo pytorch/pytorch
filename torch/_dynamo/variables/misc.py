@@ -810,6 +810,8 @@ class NumpyVariable(VariableTracker):
             unimplemented(f"numpy.{self.value}()")
         import torch_np
 
+        SUPPORTED_MODULES = (torch_np, torch_np.linalg)
+
         from ..utils import numpy_to_tensor_wrapper
 
         from .builder import wrap_fx_proxy_cls
@@ -821,7 +823,7 @@ class NumpyVariable(VariableTracker):
             unimplemented(
                 f"numpy dtype function is not supported yet. Got type {type(self.value)}."
             )
-        elif hasattr(torch_np, self.value.__name__):
+        elif any(hasattr(module, self.value.__name__) for module in SUPPORTED_MODULES):
             # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
             #  wrapped by NumpyNdarrayVariable which is wrong!
             getattr_fn = get_custom_getattr(torch_np)
@@ -829,7 +831,15 @@ class NumpyVariable(VariableTracker):
                 unimplemented(
                     "torch_np has custom getattr implementation and dynamo doesn't support it"
                 )
-            func = getattr(torch_np, self.value.__name__)
+
+            for module in SUPPORTED_MODULES:
+                # We are sure that atleast one of the `getattr` will
+                # return as we do `hasattr` above.
+                func = getattr(module, self.value.__name__, None)
+                if func:
+                    break
+            assert func
+
             return wrap_fx_proxy_cls(
                 target_cls=NumpyNdarrayVariable,
                 tx=tx,
