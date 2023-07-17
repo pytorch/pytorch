@@ -29,113 +29,9 @@ namespace at {
 namespace native {
 
 #ifndef USE_ROCM
-// This kernel is for creating 2:4 sparse matrix metadata for given
-// "mask" matrix corresponding to the original dense matrix.  The
-// "mask" matrix contains true values where dense matrix elements are
-// zeros, and false values otherwise.  The "mask" matrix has
-// "length_m" rows and "length_n" columns, and it is assumed that this
-// matrix is in row-major format, with row stride "mask_stride" (and
-// that the column stride is 1).  The kernel will store metadata in
-// "meta" matrix, and it is also assumed that this matrix is in
-// row-major format, with row stride "meta_stride" (and with the
-// column stride equals 1).  If the "mask" matrix is not in 2:4 sparse
-// format, the kernel will set value pointed by "error" to 1.
-//
-// This kernel could be improved for efficiency, but it should be
-// called once for given sparse operand, so it should not affect
-// performance much.
-template<typename T>
-__global__ void two_four_create_meta_kernel(
-      const int length_m, const int length_k, const int mask_stride,
-      const bool* mask, const int meta_stride, T* meta, int* error) {
-    const auto k = blockDim.x * blockIdx.x + threadIdx.x;
-    const auto m = blockDim.y * blockIdx.y + threadIdx.y;
-
-    const auto in_range = m < length_m && k < length_k / 4;
-    unsigned active_mask = __ballot_sync(0xffffffff, in_range);
-    if (!in_range) {
-        return;
-    }
-
-    T val = 0;
-    const auto pos0 = mask[m * mask_stride + k * 4];
-    const auto pos1 = mask[m * mask_stride + k * 4 + 1];
-    const auto pos2 = mask[m * mask_stride + k * 4 + 2];
-    const auto pos3 = mask[m * mask_stride + k * 4 + 3];
-    const auto pos_tuple = std::make_tuple(pos0, pos1, pos2, pos3);
-
-    // See
-    // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-sparse-matrix-storage
-    // There are only 6 valid configurations (4 choose 2) and for each
-    // there is a special number.
-    if (pos_tuple == std::make_tuple(1, 1, 0, 0)) {
-        val = 4; // 0100
-    } else if (pos_tuple == std::make_tuple(1, 0, 1, 0)) {
-        val = 8; // 1000
-    } else if (pos_tuple == std::make_tuple(0, 1, 1, 0)) {
-        val = 9; // 1001
-    } else if (pos_tuple == std::make_tuple(1, 0, 0, 1)) {
-        val = 12; // 1100
-    } else if (pos_tuple == std::make_tuple(0, 1, 0, 1)) {
-        val = 13; // 1101
-    } else if (pos_tuple == std::make_tuple(0, 0, 1, 1)) {
-        val = 14; // 1110
-    } else {
-        atomicExch(error, 1);
-    }
-
-    auto tile_size = 2 * sizeof(T);
-    for (auto i = 1; i < tile_size; i *= 2) {
-        val |= __shfl_down_sync(active_mask, val, i) << (4 * i);
-    }
-    if (k % tile_size == 0) {
-        meta[m * meta_stride + k / tile_size] = val;
-    }
-}
-
-// This kernel reimplements reorder_meta() function from
-// tools/util/include/cutlass/util/host_reorder.h file from CUTLASS
-// source distribution.  The purpose of having CUDA version of this
-// function is to avoid to copy meta matrix to CPU and back, as
-// CUTLASS for now supplies only host versio of this function.
-//
-// Alike to the above kernel, this kernel should be called once for
-// given sparse operand, so not much effort is put into the
-// optimization (hopefully, CUTLASS may provide own CUDA version at
-// some point).
-template <typename Element, typename LayoutSrc, typename LayoutDest>
-__global__ void two_four_reorder_meta_kernel(
-      const int length_m, const int length_k,
-      const cutlass::TensorRef<Element, LayoutSrc> src,
-      cutlass::TensorRef<Element, LayoutDest> dst) {
-    const int k = blockDim.x * blockIdx.x + threadIdx.x;
-    const int m = blockDim.y * blockIdx.y + threadIdx.y;
-
-    if (m >= length_m || k >= length_k) {
-        return;
-    }
-
-    // First reorder the rows.
-    int group = (sizeof(Element) == 2) ? 32 : 16;
-    int interweave = (sizeof(Element) == 2) ? 4 : 2;
-
-    int dst_row = m / group * group + (m % 8) * interweave + (m % group) / 8;
-    int dst_col = k;
-
-    // Next swizzle the 2x2 blocks from Z to N.
-    if (((dst_row % 2) == 0) && ((dst_col % 2) == 1)) {
-      ++dst_row;
-      --dst_col;
-    } else if (((dst_row % 2) == 1) && ((dst_col % 2) == 0)) {
-      --dst_row;
-      ++dst_col;
-    }
-    dst.at({dst_row, dst_col}) = src.at({m, k});
-}
-
 // Wrapper function for CUTLASS sparse GEMM implementation, used
-// solely to simplify dispatching from _structured_sparse_linear()
-// function below.
+// solely to simplify dispatching from
+// _sparse_semi_structured_linear() function below.
 template <
     typename ElementInputA,
     typename ElementInputB,
@@ -148,12 +44,12 @@ template <
     typename EpilogueOp,
     typename LayoutInputA,
     typename LayoutInputB>
-std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
+Tensor two_four_sgemm_cutlass(
     const Tensor& tensor_a,
     const at::IntArrayRef::value_type& tensor_a_stride,
     const Tensor& tensor_b,
     const at::IntArrayRef::value_type& tensor_b_stride,
-    const Tensor& tensor_c, const Tensor& mask_or_meta) {
+    const Tensor& tensor_c, const Tensor& meta) {
     // Fix CUTLASS sparse GEMM template arguments that are not
     // provided as template argument of this function, and create an
     // alias for particular instantiation of this template.
@@ -184,6 +80,12 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
     using ElementInputE = typename Gemm::ElementE;
     using LayoutInputE = cutlass::layout::RowMajor;
     using ReorderedLayoutInputE = typename Gemm::LayoutE;
+    static_assert(
+        std::is_same<ReorderedLayoutInputE,
+                     cutlass::layout::ColumnMajorInterleaved<2>>::value,
+        "Matrix layout used by CUTLASS for reordered metadata for sparse GEMM "
+        "change, thus code doing conversions from/to dense matrix has to be "
+        "updated.");
 
     constexpr auto kSparse = Gemm::kSparse;
     constexpr int kElementsPerElementE = Gemm::kElementsPerElementE;
@@ -221,6 +123,9 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
         AT_ERROR("two_four_sgemm_cutlass: invalid size of meta tensor datatype "
                  "encountered");
     }
+    TORCH_CHECK(meta.dtype() == meta_dtype,
+                "two_four_sgemm_cutlass: Expected meta datatype ", meta_dtype,
+                ", but got ", meta.dtype());
 
     // Determine PyTorch datatype for the output matrix.
     auto tensor_d_dtype = at::kChar;
@@ -253,71 +158,6 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
                                at::TensorOptions().dtype(tensor_d_dtype));
     }
 
-    // If mask matrix passed as an argument, create metadata matrix.
-    // CUTLASS required metadata matrix in a shuffled order, so
-    // perform the reordering in that case too.
-    Tensor meta_reordered;
-    if (mask_or_meta.dtype() == at::kBool) {
-        auto mask = mask_or_meta;
-
-        // Check dimensions and format of the mask matrix.
-        TORCH_CHECK(mask.layout() == Layout::Strided,
-            "two_four_sgemm_cutlass: Expected mask argument to be strided, but "
-            "got layout ", mask.layout());
-        TORCH_CHECK(mask.dim() == 2,
-            "two_four_sgemm_cutlass: Expected mask argument to be 2D tensor, "
-            "got ", mask.dim(), " dims");
-        const auto strides_mask = mask.strides();
-        TORCH_CHECK(strides_mask[1] == 1,
-            "two_four_sgemm_cutlass: Invalid strides for mask_or_meta "
-            "argument: row stride = ", strides_mask[0], ", column stride = ",
-            strides_mask[1]);
-
-        // Create tensor for metadata matrix, and run CUDA kernel to
-        // build this matrix from mask matrix.
-        auto meta = mask.new_empty({length_m, meta_ncols},
-                                   at::TensorOptions().dtype(meta_dtype));
-        auto error = mask.new_zeros({1}, at::TensorOptions().dtype(at::kInt));
-        two_four_create_meta_kernel<<<
-            dim3((length_k + 63) / 64, (length_m + 15) / 16),
-            dim3(16, 16),
-            0,
-            at::cuda::getCurrentCUDAStream()>>> (
-                length_m, length_k, strides_mask[0], (bool*)mask.data_ptr(),
-                meta.stride(0), (ElementInputE*)meta.data_ptr(),
-                (int*)error.data_ptr());
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-        TORCH_CHECK(error.item().equal(0),
-                    "two_four_sgemm_cutlass: Mask matrix is not 2:4 sparse");
-
-        // Create tensor for reordered metadata matrix, and run CUDA
-        // kernel to build this matrix from above calculated metadata matrix.
-        meta_reordered = meta.new_empty(meta.sizes());
-        auto meta_device_ref =
-            cutlass::TensorRef<ElementInputE, cutlass::layout::RowMajor>(
-                (ElementInputE*)meta.data_ptr(),
-                LayoutInputE::packed({length_m, meta_ncols}));
-        auto meta_reordered_device_ref =
-            cutlass::TensorRef<ElementInputE, ReorderedLayoutInputE>(
-                (ElementInputE*)meta_reordered.data_ptr(),
-                ReorderedLayoutInputE::packed({length_m, meta_ncols}));
-        two_four_reorder_meta_kernel<<<
-            dim3((meta_ncols + 15) / 16, (length_m + 15) / 16),
-            dim3(16, 16),
-            0,
-            at::cuda::getCurrentCUDAStream()>>> (
-                length_m, meta_ncols, meta_device_ref,
-                meta_reordered_device_ref);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-    }
-    else {
-        TORCH_CHECK(mask_or_meta.dtype() == meta_dtype,
-                    "two_four_sgemm_cutlass: Expected mask_or_meta datatype ",
-                    meta_dtype, ", but got ",
-                    mask_or_meta.dtype());
-        meta_reordered = mask_or_meta;
-    }
-
     // Prepare arguments for CUTLASS sparse GEMM kernel.
     cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
     LayoutInputA layout_a(tensor_a_stride);
@@ -340,7 +180,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
             (ElementOutput*)tensor_d.data_ptr(), layout_d);
     auto tensor_e_reordered_device_ref =
         cutlass::TensorRef<ElementInputE, ReorderedLayoutInputE>(
-            (ElementInputE*)meta_reordered.data_ptr(),
+            (ElementInputE*)meta.data_ptr(),
             ReorderedLayoutInputE::packed({length_m, meta_ncols}));
     ElementComputeEpilogue alpha(1);
     ElementComputeEpilogue beta(tensor_c.numel() != 0 ? 1 : 0);
@@ -383,7 +223,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
 
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-    return std::make_tuple(tensor_d, meta_reordered);
+    return tensor_d;
 }
 
 // Dispatch according to the input tensors layouts combination.
@@ -401,9 +241,9 @@ template <
     bool EnableRowMajorColumnMajorLayouts,
     bool EnableColumnMajorRowMajorLayouts,
     bool EnableColumnMajorColumnMajorLayouts>
-std::tuple<Tensor, Tensor> two_four_sgemm_cutlass_dispatch_layouts(
+Tensor two_four_sgemm_cutlass_dispatch_layouts(
     const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
-    const Tensor& mask_or_meta) {
+    const Tensor& meta) {
     // Determine layouts (row-major or column-major) of input tensors.
     const auto strides_a = tensor_a.strides();
     auto tensor_a_row_major = strides_a[1] == 1;
@@ -432,7 +272,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass_dispatch_layouts(
                 tensor_b,
                 tensor_b_stride,
                 tensor_c,
-                mask_or_meta);
+                meta);
         }
     }
     if constexpr (EnableRowMajorColumnMajorLayouts) {
@@ -454,7 +294,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass_dispatch_layouts(
                 tensor_b,
                 tensor_b_stride,
                 tensor_c,
-                mask_or_meta);
+                meta);
         }
     }
     if constexpr (EnableColumnMajorRowMajorLayouts) {
@@ -476,7 +316,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass_dispatch_layouts(
                 tensor_b,
                 tensor_b_stride,
                 tensor_c,
-                mask_or_meta);
+                meta);
         }
     }
     if constexpr (EnableColumnMajorColumnMajorLayouts) {
@@ -498,7 +338,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass_dispatch_layouts(
                 tensor_b,
                 tensor_b_stride,
                 tensor_c,
-                mask_or_meta);
+                meta);
         }
     }
 
@@ -506,7 +346,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass_dispatch_layouts(
              tensor_a_row_major ? "row-major" : "column_major", "and ",
              tensor_b_row_major ? "row-major" : "column_major",
              " layouts for input tensors is not supported");
-    return std::make_tuple(Tensor{}, Tensor{});
+    return Tensor{};
 }
 
 // Dispatch according to the activation functions enabled.
@@ -526,9 +366,9 @@ template <
     bool EnableActivationNone,
     bool EnableActivationReLU,
     bool EnableActivationSiLU>
-std::tuple<Tensor, Tensor> two_four_sgemm_cutlass_dispatch_layouts_activation(
+Tensor two_four_sgemm_cutlass_dispatch_layouts_activation(
     const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
-    const Tensor& mask_or_meta, const c10::string_view& activation) {
+    const Tensor& meta, const c10::string_view& activation) {
     // Perform dispatching.
     if constexpr (EnableActivationNone) {
         if (activation == "none") {
@@ -555,7 +395,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass_dispatch_layouts_activation(
                 tensor_a,
                 tensor_b,
                 tensor_c,
-                mask_or_meta);
+                meta);
         }
     }
     if constexpr (EnableActivationReLU) {
@@ -583,7 +423,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass_dispatch_layouts_activation(
                 tensor_a,
                 tensor_b,
                 tensor_c,
-                mask_or_meta);
+                meta);
         }
     }
     if constexpr (EnableActivationSiLU) {
@@ -611,13 +451,13 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass_dispatch_layouts_activation(
                 tensor_a,
                 tensor_b,
                 tensor_c,
-                mask_or_meta);
+                meta);
         }
     }
 
     AT_ERROR("two_four_sgemm_cutlass_dispatch_layouts: Activation \"",
              activation, "\" is not supported for given input tensors");
-    return std::make_tuple(Tensor{}, Tensor{});
+    return Tensor{};
 }
 #endif
 
@@ -633,27 +473,16 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass_dispatch_layouts_activation(
 // "weight" tensors are supplied either in row-major or column-major
 // layouts (different layouts between these two tensors are OK, but
 // not all combinations of formats are supported for some datatypes of
-// these matrices).  The "mask_or_meta" argument contains either a
-// mask matrix corresponding to the original dense matrix with 2:4
-// sparsity pattern, from which sparse matrix "weight" is compressed,
-// or to the corresponding metadata matrix.  The function
-// differentiates between these two cases by the datatype of
-// "mask_or_meta" tensor: if it is of boolean datatype, then it is
-// assumed that the mask matrix is passed, otherwise it is assumed
-// that the metadata matrix is passed.  In the first case, metadata
-// matrix is calculated from the matrix matrix.  The function returns
-// a tuple with output tensor, and metadata tensor (that is a matrix,
-// either calculated by this function, in case mask is passed as
-// "mask_or_meta" argument, or the same one that is passed to this
-// function otherwise).
+// these matrices).  The "meta" argument contains metadata matrix. The
+// function returns the output tensor.
 //
 // There exists numerous limitations of CUTLASS sparse GEMM kernel,
 // with regards to sizes and alignments of input tensors, their
 // layouts and datatypes, and so on; this is the reason for large
 // number of checks throughout the code.
-std::tuple<Tensor, Tensor> _structured_sparse_linear(
+Tensor _sparse_semi_structured_linear(
       const Tensor& input, const Tensor& weight,
-      const Tensor& mask_or_meta, const c10::optional<Tensor>& bias_opt,
+      const Tensor& meta, const c10::optional<Tensor>& bias_opt,
       const c10::optional<c10::string_view> activation_opt) {
 #ifndef USE_ROCM
     // No need to check that all tensors are on CUDA device, as this
@@ -675,61 +504,61 @@ std::tuple<Tensor, Tensor> _structured_sparse_linear(
     const auto dprops = at::cuda::getCurrentDeviceProperties();
     const auto is_sm8x = dprops->major == 8;
     TORCH_CHECK(is_sm8x,
-                "torch._structured_sparse_linear: Supported only on GPUs with "
+                "_sparse_semi_structured_linear: Supported only on GPUs with "
                 "compute capability 8.x");
 
     // Validate datatypes of input tensors.
     TORCH_CHECK(tensor_a.dtype() == at::kChar ||
                 tensor_a.dtype() == at::kHalf ||
                 tensor_a.dtype() == at::kBFloat16,
-                "torch._structured_sparse_linear: The weight datatype ",
+                "_sparse_semi_structured_linear: The weight datatype ",
                 tensor_a.dtype(), " is not supported");
     TORCH_CHECK(tensor_b.dtype() == tensor_a.dtype(),
-                "torch._structured_sparse_linear: Expected input datatype ",
+                "_sparse_semi_structured_linear: Expected input datatype ",
                 tensor_a.dtype(), ", but got ", tensor_b.dtype());
 
     // Validate layouts of input tensors.
     TORCH_CHECK(tensor_a.layout() == Layout::Strided,
-                "torch._structured_sparse_linear: Expected weight argument "
+                "_sparse_semi_structured_linear: Expected weight argument "
                 "to be strided, but got layout ", tensor_a.layout());
     TORCH_CHECK(tensor_a.dim() == 2,
-                "torch._structured_sparse_linear: Expected weight argument "
+                "_sparse_semi_structured_linear: Expected weight argument "
                 "to be 2D tensor, got ", tensor_a.dim(), " dims");
     const auto strides_a = tensor_a.strides();
     TORCH_CHECK((strides_a[0] == 1 || strides_a[1] == 1) &&
                 strides_a[0] != strides_a[1],
-                "torch._structured_sparse_linear: Invalid strides for weight "
+                "_sparse_semi_structured_linear: Invalid strides for weight "
                 "argument: row stride = ", strides_a[0], ", column stride = ",
                 strides_a[1]);
     TORCH_CHECK(tensor_b.layout() == Layout::Strided,
-                "torch._structured_sparse_linear: Expected input argument "
+                "_sparse_semi_structured_linear: Expected input argument "
                 "to be strided, but got layout ", tensor_b.layout());
     TORCH_CHECK(tensor_b.dim() == 2,
-                "torch._structured_sparse_linear: Expected input argument "
+                "_sparse_semi_structured_linear: Expected input argument "
                 "to be 2D tensor, got ", tensor_b.dim(), " dims");
     const auto strides_b = tensor_b.strides();
     TORCH_CHECK((strides_b[0] == 1 || strides_b[1] == 1) &&
                 strides_b[0] != strides_b[1],
-                "torch._structured_sparse_linear: Invalid strides for input "
+                "_sparse_semi_structured_linear: Invalid strides for input "
                 "argument: row stride = ", strides_b[0], ", column stride = ",
                 strides_b[1]);
     if (tensor_c.numel() != 0) {
         TORCH_CHECK(tensor_c.layout() == Layout::Strided,
-                    "torch._structured_sparse_linear: Expected bias argument "
+                    "_sparse_semi_structured_linear: Expected bias argument "
                     "to be strided, but got layout ", tensor_c.layout());
         TORCH_CHECK(tensor_c.dim() == 1,
-                    "torch._structured_sparse_linear: Expected bias argument "
+                    "_sparse_semi_structured_linear: Expected bias argument "
                     "to be 1D tensor, got ", tensor_c.dim(), " dims");
     }
 
     // Validate sizes of input tensors.
     TORCH_CHECK(tensor_a.size(1) == tensor_b.size(0) / 2,
-                "torch._structured_sparse_linear: Expected weight argument "
+                "_sparse_semi_structured_linear: Expected weight argument "
                 "to have ", tensor_b.size(0) / 2, " columns, but got ",
                 tensor_a.size(1));
     if (tensor_c.numel() != 0) {
         TORCH_CHECK(tensor_c.size(0) == tensor_a.size(0),
-                    "torch._structured_sparse_linear: Expected bias argument "
+                    "_sparse_semi_structured_linear: Expected bias argument "
                     "to have ", tensor_a.size(0), " elements, but got ",
                     tensor_c.size(0));
     }
@@ -741,10 +570,10 @@ std::tuple<Tensor, Tensor> _structured_sparse_linear(
     // the wrapper function.  The tile sizes template arguments are
     // selected according to the CUTLASS profiler results, for number
     // of runs.
-    std::tuple<Tensor, Tensor> result;
+    Tensor output;
     AT_DISPATCH_SWITCH(
         tensor_a.scalar_type(),
-        "_structured_sparse_linear",
+        "_sparse_semi_structured_linear",
         AT_DISPATCH_CASE(
             at::ScalarType::Char,
             [&]() {
@@ -764,7 +593,7 @@ std::tuple<Tensor, Tensor> _structured_sparse_linear(
                 const auto EnableActviationNone = true;
                 const auto EnableActviationReLU = true;
                 const auto EnableActviationSiLU = false;
-                result = two_four_sgemm_cutlass_dispatch_layouts_activation<
+                output = two_four_sgemm_cutlass_dispatch_layouts_activation<
                     ElementInputA,
                     ElementInputB,
                     ElementOutput,
@@ -783,7 +612,7 @@ std::tuple<Tensor, Tensor> _structured_sparse_linear(
                     tensor_a,
                     tensor_b,
                     tensor_c,
-                    mask_or_meta,
+                    meta,
                     activation);
                 return;
             })
@@ -805,7 +634,7 @@ std::tuple<Tensor, Tensor> _structured_sparse_linear(
                 const auto EnableActviationNone = true;
                 const auto EnableActviationReLU = true;
                 const auto EnableActviationSiLU = true;
-                result = two_four_sgemm_cutlass_dispatch_layouts_activation<
+                output = two_four_sgemm_cutlass_dispatch_layouts_activation<
                     ElementInputA,
                     ElementInputB,
                     ElementOutput,
@@ -824,7 +653,7 @@ std::tuple<Tensor, Tensor> _structured_sparse_linear(
                     tensor_a,
                     tensor_b,
                     tensor_c,
-                    mask_or_meta,
+                    meta,
                     activation);
                 return;
             })
@@ -846,7 +675,7 @@ std::tuple<Tensor, Tensor> _structured_sparse_linear(
                 const auto EnableActviationNone = true;
                 const auto EnableActviationReLU = true;
                 const auto EnableActviationSiLU = true;
-                result = two_four_sgemm_cutlass_dispatch_layouts_activation<
+                output = two_four_sgemm_cutlass_dispatch_layouts_activation<
                     ElementInputA,
                     ElementInputB,
                     ElementOutput,
@@ -865,7 +694,7 @@ std::tuple<Tensor, Tensor> _structured_sparse_linear(
                     tensor_a,
                     tensor_b,
                     tensor_c,
-                    mask_or_meta,
+                    meta,
                     activation);
                 return;
             }));
@@ -873,12 +702,10 @@ std::tuple<Tensor, Tensor> _structured_sparse_linear(
     // Re-introduce batch dimensions into the output, and return.
     auto output_sizes = input_sizes;
     output_sizes.back() = weight.size(0);
-    return std::make_tuple(
-        std::get<0>(result).transpose(-1, -2).reshape(output_sizes),
-        std::get<1>(result));
+    return output.transpose(-1, -2).reshape(output_sizes);
 #else
-    AT_ERROR("torch._structured_sparse_linear: ROCm doesn't support CUTLASS");
-    return std::make_tuple(Tensor{}, Tensor{});
+    AT_ERROR("_sparse_semi_structured_linear: ROCm doesn't support CUTLASS");
+    return Tensor{};
 #endif
 }
 
@@ -929,8 +756,8 @@ _to_sparse_semi_structured(const Tensor& dense) {
 #ifndef USE_ROCM
   // Check dimensions of the dense matrix.
   TORCH_CHECK(dense.dim() == 2,
-              "torch._to_sparse_semi_structured: Expected dense argument to be "
-              "2D tensor, got ", dense.dim(), " dims");
+              "_to_sparse_semi_structured: Expected dense argument to be 2D "
+              "tensor, got ", dense.dim(), " dims");
 
   // Determine PyTorch datatype for the metadata matrix.
   auto meta_dtype = at::kChar;
@@ -942,22 +769,21 @@ _to_sparse_semi_structured(const Tensor& dense) {
     meta_dtype = at::kShort;
     dense_elems_per_meta_elem = 16;
   } else {
-    AT_ERROR("torch._to_sparse_semi_structured: Invalid dense argument "
-             "datatype ", dense.dtype(), "encountered");
+    AT_ERROR("_to_sparse_semi_structured: Invalid dense argument datatype ",
+             dense.dtype(), "encountered");
   }
 
   const auto dense_nrows = dense.size(0);
   const auto dense_ncols = dense.size(1);
 
   if (dense_nrows % 32 != 0) {
-    AT_ERROR("torch._to_sparse_semi_structured: Number of "
-             "row of dense matrix must be divisible by 32, but it is ",
-             dense_nrows);
+    AT_ERROR("_to_sparse_semi_structured: Number of rows of dense matrix must "
+             "be divisible by 32, but it is ", dense_nrows);
   }
   if (dense_ncols % dense_elems_per_meta_elem != 0) {
-    AT_ERROR("torch._to_sparse_semi_structured: Number of columns of dense "
-             "matrix must be divisible by ", dense_elems_per_meta_elem,
-             ", but it is ", dense_ncols);
+    AT_ERROR("_to_sparse_semi_structured: Number of columns of dense matrix "
+             "must be divisible by ", dense_elems_per_meta_elem, ", but it is ",
+             dense_ncols);
   }
 
   const auto dense_cpu = dense.to("cpu");
@@ -998,8 +824,8 @@ _to_sparse_semi_structured(const Tensor& dense) {
           meta_quadruple = 14; // 1110
         }
         else {
-          AT_ERROR("torch._to_sparse_semi_structured: dense argument does not "
-                   "match 2:4 sparsity pattern");
+          AT_ERROR("_to_sparse_semi_structured: dense argument does not match "
+                   "2:4 sparsity pattern");
         }
         meta_val = meta_val | (meta_quadruple << (4 * k));
       }
@@ -1046,7 +872,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
   return std::make_tuple(sparse_cpu.to(dense.device()),
                          meta_reordered_cpu.to(dense.device()));
 #else
-  AT_ERROR("torch._to_sparse_semi_structured: ROCm doesn't support CUTLASS");
+  AT_ERROR("_to_sparse_semi_structured: ROCm doesn't support CUTLASS");
   return std::make_tuple(Tensor{}, Tensor{});
 #endif
 }

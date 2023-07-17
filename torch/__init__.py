@@ -704,6 +704,10 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
           quantized, sets new elements to a known value.  Floating point or
           complex values are set to NaN. Integer values are set to the maximum
           value.
+        * :func:`torch.empty`, :func:`torch.empty_like`, :func:`torch.empty_strided`,
+          and :func:`torch.empty_permuted` will fill the output tensor with a known
+          value. Floating point or complex dtype tensors are filled with NaN. Integer
+          dtype tensors are filled with the maximum value.
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1511,13 +1515,6 @@ class _TorchCompileInductorWrapper:
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
             from torch._inductor import list_mode_options
-            if mode == "reduce-overhead" and self.dynamic:
-                raise RuntimeError(
-                    "mode=reduce-overhead cannot be used together with dynamic=True! "
-                    "reduce-overhead enables cudagraph. dynamic=True forces recompiliation "
-                    "for each new shape, which defeats the purpose of cudagraph. "
-                    "Please only enable one of them."
-                )
             self.apply_options(list_mode_options(mode, self.dynamic))
         else:
             raise RuntimeError(
