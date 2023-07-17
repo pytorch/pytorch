@@ -768,6 +768,7 @@ def mps_ops_error_inputs_modifier(ops):
         # Exceptions are not raised
         '__rmod__',
         '__rsub__',
+        '__rpow__',
         'bernoulli',
         'clamp_max',
         'clamp_min',
@@ -3452,6 +3453,9 @@ class TestMPS(TestCaseMPS):
         helper(torch.randint(3, (10, )), True, True)
         helper(torch.randint(3, (1, )), True, True)
         helper(torch.randint(3, (0, )), True, True)
+        # Regression test for https://github.com/pytorch/pytorch/issues/104879
+        x = torch.arange(2, device="mps")
+        self.assertEqual(x.reshape(1, 1, 2).unique(), x)
 
     def test_unique_consecutive(self):
         def helper(x, dim, return_inverse, return_counts):
@@ -4981,6 +4985,9 @@ class TestNLLLoss(TestCaseMPS):
         helper((1, 1, 3, 3))
         helper((7, 13))
         helper((2, 8, 4, 5))
+        x_cpu = torch.tensor([], dtype=torch.bool)
+        x_mps = x_cpu.to("mps")
+        assert x_cpu.all() == x_mps.all().cpu()
 
     # Test forward min
     def test_min_el(self):
