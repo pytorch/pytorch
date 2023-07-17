@@ -458,6 +458,17 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
   auto save_mean = at::empty({n_input}, options);
   auto save_invstd = at::empty({n_input}, options);
 
+  Tensor save_mean;
+  Tensor save_invstd;
+
+  if (train) {
+    save_mean = at::empty({n_input}, options);
+    save_invstd = at::empty({n_input}, options);
+  } else {
+    save_mean = at::empty({0}, options);
+    save_invstd = at::empty({0}, options);
+  }
+
   at::native::batch_norm_cuda_out(
       self,
       weight_opt,
