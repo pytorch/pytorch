@@ -13,6 +13,7 @@ from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import metrics
 from ..utils import (
@@ -596,8 +597,10 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
-    def __init__(self, name):
+    def __init__(self, name, bounds: ValueRanges):
+        assert isinstance(bounds, ValueRanges)
         self.name = name
+        self.bounds = bounds
 
     def __str__(self):
         return self.name
@@ -667,6 +670,8 @@ class CSE:
         self,
         buffer: IndentedBuffer,
         expr: typing.Union[str, CSEVariable, OpsValue],
+        *,
+        bounds: ValueRanges = ValueRanges.unknown(),
         write=True,
         assignment=True,
     ) -> CSEVariable:
@@ -676,11 +681,15 @@ class CSE:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         assert write or assignment
         if isinstance(expr, CSEVariable):
+            # If the expressions were always created with all the information, we could
+            # assert expr.bounds == bounds, but sometimes the expression is created
+            # with the loose ValueRanges.unknown(), so we need to tighten the bounds
+            expr.bounds = expr.bounds.tighten(bounds)
             return expr
         cache_key = expr
         var = self.cache.get(cache_key, None)
         if not var:
-            var = self.newvar() if assignment else None
+            var = self.newvar(bounds) if assignment else None
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
@@ -692,12 +701,14 @@ class CSE:
                 else:
                     line = f"{expr}{self.suffix}"
                 buffer.writeline(line)
+        else:
+            var.bounds = var.bounds.tighten(bounds)
 
         return var
 
-    def newvar(self) -> CSEVariable:
+    def newvar(self, bounds: ValueRanges = ValueRanges.unknown()) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name)
+        var = V.kernel.create_cse_var(var_name, bounds)
         self.varname_map[var_name] = var
         return var
 
@@ -731,13 +742,16 @@ class Kernel(CodeGen):
         self.stores = IndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
-        self.current_node = None
         self.store_buffer_names = set()
+        # set in set_current_node
+        self.current_node = None
+        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
 
     @contextlib.contextmanager
     def set_current_node(self, node):
         prior = self.current_node
         self.current_node = node
+        self.node_to_bounds = node._body.bounds().get_bounds()
         try:
             yield
         finally:
@@ -805,8 +819,18 @@ class Kernel(CodeGen):
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):
+                    # TritonTemplateKernel has no current_node
+                    buf_bounds = ValueRanges.unknown()
+                    if hasattr(V.interpreter, "current_node"):
+                        fx_node = V.interpreter.current_node
+                        buf_bounds = self.node_to_bounds.get(
+                            fx_node, ValueRanges.unknown()
+                        )
+
                     csevar = self.cse.generate(
-                        self.compute, getattr(parent_handler, name)(*args, **kwargs)
+                        self.compute,
+                        getattr(parent_handler, name)(*args, **kwargs),
+                        bounds=buf_bounds,
                     )
                     csevar.update_on_args(name, args, kwargs)
                     return csevar
