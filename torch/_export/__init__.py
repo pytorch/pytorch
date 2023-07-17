@@ -20,7 +20,7 @@ from .exported_program import (
 )
 from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from torch._decomp import core_aten_decompositions
-from torch._dynamo.export import Constraint
+from torch._dynamo.eval_frame import Constraint
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
