@@ -864,7 +864,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # The file will be loaded via .load_state_dict(...)
             state_dict = real_model.state_dict()
             # TODO: Remove explicit named_bufefrs when # https://github.com/pytorch/pytorch/issues/105233 is fixed
-            state_dict.update({k: v for k, v in real_model.named_buffers()})
+            state_dict.update(dict(real_model.named_buffers()))
             torch.save(state_dict, tmp_checkpoint_file.name)
 
             with torch.onnx.enable_fake_mode() as fake_context:
