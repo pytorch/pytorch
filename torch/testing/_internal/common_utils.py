@@ -1762,7 +1762,7 @@ class CudaMemoryLeakCheck():
         # Validates the discrepancy persists after garbage collection and
         #   is confirmed by the driver API
 
-        # NOTE: driver API iscrepancies alone are ignored because with the jiterator
+        # NOTE: driver API discrepancies alone are ignored because with the jiterator
         #   some tests may permanently increase the CUDA context size and
         #   that will appear as a driver memory leak but is the expected behavior.
 
