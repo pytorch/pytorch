@@ -28,7 +28,7 @@ on:
       BUILDER_ROOT:
         required: true
         type: string
-        description: Root directory for the ROCmSoftwarePlatform/builder repository
+        description: Root directory for the pytorch/builder repository
       PACKAGE_TYPE:
         required: true
         type: string
@@ -176,16 +176,16 @@ jobs:
           git clean -fxd
         working-directory: pytorch
 
-      - name: Checkout ROCmSoftwarePlatform/builder to builder dir
+      - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: rocm5.6_nightly_wheels
+          ref: main
           submodules: recursive
-          repository: ROCmSoftwarePlatform/builder
+          repository: pytorch/builder
           path: builder
           quiet-checkout: true
 
-      - name: Clean ROCmSoftwarePlatform/builder checkout
+      - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd

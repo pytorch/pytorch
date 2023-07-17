@@ -389,15 +389,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout ROCmSoftwarePlatform/builder
+      - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: rocm5.6_nightly_wheels
+          ref: main
           submodules: recursive
-          repository: ROCmSoftwarePlatform/builder
+          repository: pytorch/builder
           path: builder
           quiet-checkout: true
-      - name: Clean ROCmSoftwarePlatform/builder checkout
+      - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -490,15 +490,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout ROCmSoftwarePlatform/builder
+      - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: rocm5.6_nightly_wheels
+          ref: main
           submodules: recursive
-          repository: ROCmSoftwarePlatform/builder
+          repository: pytorch/builder
           path: builder
           quiet-checkout: true
-      - name: Clean ROCmSoftwarePlatform/builder checkout
+      - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -889,15 +889,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout ROCmSoftwarePlatform/builder
+      - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: rocm5.6_nightly_wheels
+          ref: main
           submodules: recursive
-          repository: ROCmSoftwarePlatform/builder
+          repository: pytorch/builder
           path: builder
           quiet-checkout: true
-      - name: Clean ROCmSoftwarePlatform/builder checkout
+      - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -990,15 +990,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout ROCmSoftwarePlatform/builder
+      - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: rocm5.6_nightly_wheels
+          ref: main
           submodules: recursive
-          repository: ROCmSoftwarePlatform/builder
+          repository: pytorch/builder
           path: builder
           quiet-checkout: true
-      - name: Clean ROCmSoftwarePlatform/builder checkout
+      - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1389,15 +1389,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout ROCmSoftwarePlatform/builder
+      - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: rocm5.6_nightly_wheels
+          ref: main
           submodules: recursive
-          repository: ROCmSoftwarePlatform/builder
+          repository: pytorch/builder
           path: builder
           quiet-checkout: true
-      - name: Clean ROCmSoftwarePlatform/builder checkout
+      - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1490,15 +1490,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout ROCmSoftwarePlatform/builder
+      - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: rocm5.6_nightly_wheels
+          ref: main
           submodules: recursive
-          repository: ROCmSoftwarePlatform/builder
+          repository: pytorch/builder
           path: builder
           quiet-checkout: true
-      - name: Clean ROCmSoftwarePlatform/builder checkout
+      - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1889,15 +1889,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout ROCmSoftwarePlatform/builder
+      - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: rocm5.6_nightly_wheels
+          ref: main
           submodules: recursive
-          repository: ROCmSoftwarePlatform/builder
+          repository: pytorch/builder
           path: builder
           quiet-checkout: true
-      - name: Clean ROCmSoftwarePlatform/builder checkout
+      - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1990,15 +1990,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout ROCmSoftwarePlatform/builder
+      - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: rocm5.6_nightly_wheels
+          ref: main
           submodules: recursive
-          repository: ROCmSoftwarePlatform/builder
+          repository: pytorch/builder
           path: builder
           quiet-checkout: true
-      - name: Clean ROCmSoftwarePlatform/builder checkout
+      - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
