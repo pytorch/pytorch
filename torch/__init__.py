@@ -1548,6 +1548,10 @@ class _TorchCompileInductorWrapper:
 
         return compile_fx(model_, inputs_, config_patches=self.config)
 
+    def get_compiler_config(self):
+        from torch._inductor.compile_fx import get_patched_config_dict
+        return get_patched_config_dict(config_patches=self.config)
+
     def reset(self):
         from torch._inductor import config
         if "triton.cudagraphs" in self.config or config.triton.cudagraphs:

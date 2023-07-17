@@ -1052,6 +1052,12 @@ def compile_fx(
         )(model_, example_inputs_)
 
 
+# pass config dict back to user
+def get_patched_config_dict(config_patches=None):
+    with config.patch(config_patches):
+        return config.get_config_copy()
+
+
 def _shape_env_from_inputs(inputs):
     shape_env = None
     fake_mode = detect_fake_mode(inputs)
