@@ -831,6 +831,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         create_model: Callable,
         create_args: Callable,
         create_kwargs: Callable,
+        with_checkpoint: bool,
     ):
         """Test helper for FakeTensorMode-enabled exporter.
 
@@ -867,7 +868,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 fake_args = create_args()
                 fake_kwargs = create_kwargs()
                 fake_model = create_model()
-                fake_model.load_state_dict(torch.load(tmp_checkpoint_file.name))
+                if with_checkpoint:
+                    fake_model.load_state_dict(torch.load(tmp_checkpoint_file.name))
 
             # Export the model with fake inputs and parameters
             export_options = torch.onnx.ExportOptions(
@@ -926,15 +928,17 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_args():
             return (torch.rand(5, 2, 2),)
 
-        def create_pytorch_only_extra_kwargs():
+        def create_kwargs():
             return {}
 
-        self._test_fake_tensor_mode_exporter(
-            "simple",
-            create_model,
-            create_args,
-            create_pytorch_only_extra_kwargs,
-        )
+        for with_checkpoint in (True, False):
+            self._test_fake_tensor_mode_exporter(
+                "simple",
+                create_model,
+                create_args,
+                create_kwargs,
+                with_checkpoint=with_checkpoint,
+            )
 
     @pytorch_test_common.skip_op_level_debug_test(
         "op_level_debug_test does not support FakeTensor yet."
@@ -952,15 +956,17 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             attention_mask = kwargs["attention_mask"]
             return input_ids, None, attention_mask
 
-        def create_pytorch_only_extra_kwargs():
+        def create_kwargs():
             return {"return_dict": False}
 
-        self._test_fake_tensor_mode_exporter(
-            "tiny_gpt2",
-            create_model,
-            create_args,
-            create_pytorch_only_extra_kwargs,
-        )
+        for with_checkpoint in (True, False):
+            self._test_fake_tensor_mode_exporter(
+                "tiny_gpt2",
+                create_model,
+                create_args,
+                create_kwargs,
+                with_checkpoint=with_checkpoint,
+            )
 
     @pytorch_test_common.skip_op_level_debug_test(
         "op_level_debug_test does not support FakeTensor yet."
@@ -993,12 +999,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_kwargs():
             return {}
 
-        self._test_fake_tensor_mode_exporter(
-            "toy_mlp1",
-            create_model,
-            create_args,
-            create_kwargs,
-        )
+        for with_checkpoint in (True, False):
+            self._test_fake_tensor_mode_exporter(
+                "toy_mlp1",
+                create_model,
+                create_args,
+                create_kwargs,
+                with_checkpoint=with_checkpoint,
+            )
 
 
 if __name__ == "__main__":
