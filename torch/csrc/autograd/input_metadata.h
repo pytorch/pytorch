@@ -149,6 +149,7 @@ struct InputMetadata {
     return c10::SymIntArrayRef(dim_shape.data(), dim_shape.size());
   }
 
+  // Danger: not thread safe, caller must protect with lock
   SymIntSmallVec& mutable_shape_as_dim_vector() {
     return c10::get<SymIntSmallVec>(shape_);
   }
