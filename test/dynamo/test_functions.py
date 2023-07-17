@@ -1129,6 +1129,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_numpy_builtin_len(x):
         return len(x.numpy())
 
+
 def global_func_with_default_tensor_args(
     x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))
 ):
