@@ -438,7 +438,6 @@ core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
 ]
 
 core_sources_full = core_sources_full_mobile + [
-    "torch/csrc/inductor/inductor_ops.cpp",
     "torch/csrc/jit/runtime/static/fusion.cpp",
     "torch/csrc/jit/runtime/static/generated_ops.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
@@ -501,11 +500,16 @@ lazy_tensor_core_python_sources = [
     "torch/csrc/lazy/python/python_util.cpp",
 ]
 
+inductor_core_resources = [
+    "torch/csrc/inductor/inductor_ops.cpp",
+]
+
 libtorch_core_sources = sorted(
     core_sources_common +
     torch_unpickler_common +
     core_sources_full +
     core_trainer_sources +
+    inductor_core_resources +
     libtorch_profiler_sources +
     lazy_tensor_core_sources,
 )

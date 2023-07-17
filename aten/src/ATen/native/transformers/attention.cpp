@@ -147,9 +147,6 @@ Tensor masked_softmax(
     return at::_nested_tensor_softmax_with_shape(attn_scores, query);
   }
   if (attn_mask && attn_mask->dtype() != at::kBool) {
-    TORCH_WARN(
-        "Converting mask without torch.bool dtype to bool; this will "
-        "negatively affect performance. Prefer to use a boolean mask directly.");
     attn_mask = attn_mask->to(at::kBool);
   }
   if (attn_mask) {
@@ -689,7 +686,7 @@ Tensor triton_multi_head_attention(
     const c10::optional<Tensor>& mask) {
   // query shape: [B, T, D]
   // qkv_weight shape: [3 * D, D]
-  TORCH_CHECK(!mask, "Only casual mask is supported for Triton.");
+  TORCH_CHECK(!mask, "Only causal mask is supported for Triton.");
 
   const auto D = embed_dim;
   TORCH_CHECK(
