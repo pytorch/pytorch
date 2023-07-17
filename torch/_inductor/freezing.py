@@ -84,6 +84,15 @@ class ConstantFolder(torch.fx.Interpreter):
         self.unknown_value = object()
         self.skip_constructors = skip_constructors
 
+    def is_impure(self, node: torch.fx.node.Node):
+        if node.target == torch.ops.quantized_decomposed.dequantize_per_channel.default:
+            # For the pattern fp32_weight -> quantized_decomposed.quantize_per_channel.default
+            # -> quantized_decomposed.dequantize_per_channel.default
+            # We only folding fp32_weight -> quantized_decomposed.quantize_per_channel.default into
+            # int8_weight and leave quantized_decomposed.dequantize_per_channel.default in graph to be fused
+            return True
+        return False
+
     def run_node(self, node):
         aten = torch.ops.aten
         args, kwargs = self.fetch_args_kwargs_from_env(node)
@@ -123,6 +132,8 @@ class ConstantFolder(torch.fx.Interpreter):
 
         # TODO - remove constant from node_replacement when it has no uses
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
+            if self.is_impure(node):
+                return self.unknown_value
             self.node_replacements[node] = out
 
         return out
@@ -135,35 +146,13 @@ class ConstantFolder(torch.fx.Interpreter):
         return super().run(initial_env=env)
 
 
-def is_impure(node: torch.fx.node.Node):
-    if node.target == torch.ops.quantized_decomposed.dequantize_per_channel.default:
-        # For the pattern fp32_weight -> quantized_decomposed.quantize_per_channel.default
-        # -> quantized_decomposed.dequantize_per_channel.default
-        # We only folding fp32_weight -> quantized_decomposed.quantize_per_channel.default into
-        # int8_weight and leave quantized_decomposed.dequantize_per_channel.default in graph to be fused
-        return True
-    if (node.target == torch.ops.aten.clone.default) and (
-        node.args[0].target
-        == torch.ops.quantized_decomposed.dequantize_per_channel.default
-    ):
-        # With the pass of convert_conv_weights_to_channels_last
-        # https://github.com/pytorch/pytorch/blob/07107919297db3f8ab37f11c12666b6d6d5f692e/torch/_inductor/freezing.py#L338-L362.
-        # There may have the pattern quantized_decomposed.dequantize_per_channel.default->
-        # aten.clone.default(weight, torch.channels_last) depending on the heuristics here
-        # https://github.com/pytorch/pytorch/blob/5913437a40a6e45ab7e164afb7c6ec930dd40b2f/torch/_inductor/graph.py#L213.
-        # We shouldn't do constant folding for this clone node.
-        return True
-    return False
-
-
 @torch.utils._python_dispatch._disable_current_modes()
 def constant_fold(gm):
     cf = ConstantFolder(gm, skip_constructors=True)
     cf.run()
 
     for node, constant in cf.node_replacements.items():
-        if not is_impure(node):
-            replace_node_with_constant(gm, node, constant)
+        replace_node_with_constant(gm, node, constant)
 
     erased_params = []
     for node in gm.graph.nodes:
