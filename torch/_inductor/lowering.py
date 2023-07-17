@@ -48,7 +48,6 @@ from .ir import (
 from .utils import (
     ceildiv,
     decode_device,
-    developer_warning,
     pad_listlike,
     sympy_product,
 )
@@ -1474,7 +1473,7 @@ def _foobar(_):
 
 @functools.lru_cache(1)
 def _warn_triton_random(salt):
-    developer_warning("using triton random, expect difference from eager")
+    log.info("using triton random, expect difference from eager")
 
 
 def warn_triton_random():
