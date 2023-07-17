@@ -200,11 +200,11 @@ def _is_valid_dequant_conv2d_pattern(match):
     return True
 
 
-def _register_qconv_weight_prepack_pass(pattern):
+def _register_qconv_weight_prepack_pass(pattern, pass_number):
     @register_freezing_graph_pattern(
         pattern,
         extra_check=_is_valid_dequant_conv2d_pattern,
-        pass_number=1,  # pass_number=1, ensure it's behand dequant promotion pass
+        pass_number=pass_number,
     )
     def qconv_weight_prepack(match: Match, *args, **kwargs):
         """
@@ -356,4 +356,5 @@ def _generate_qconv_weight_prepack_patterns():
 def _register_quantization_weight_pack_pass():
     weight_prepack_patterns = _generate_qconv_weight_prepack_patterns()
     for weight_prepack_pattern in weight_prepack_patterns:
-        _register_qconv_weight_prepack_pass(weight_prepack_pattern)
+        # Register to pass_number 1, so we can do dequant promotion in pass_number 0.
+        _register_qconv_weight_prepack_pass(weight_prepack_pattern, pass_number=1)
