@@ -65,6 +65,7 @@ class Action(enum.Enum):
     INCREMENT_VERSION = enum.auto()
     DESTROY = enum.auto()
 
+_ACTION_TO_INDEX = {i: i.value for i in Action}
 
 @dataclasses.dataclass(eq=True, unsafe_hash=False, frozen=True)
 class Key:
@@ -1045,6 +1046,43 @@ class MemoryProfileTimeline:
         import json
         with open(path, 'w') as f:
             json.dump([times, sizes], f)
+
+    def export_memory_timeline_raw(self, path, device_str) -> None:
+        """Saves the memory timeline as raw memory event tuples in the
+        form of (timestamp, action, numbytes, category)
+        as a JSON formatted file to the given path for the given
+        device."""
+        device = torch.device(device_str)
+        raw_events: List[Tuple[int, int, int, int]] = []
+
+        def get_category_index(key, version):
+            category = (
+                self.categories.get(key, version)
+                if isinstance(key, TensorKey)
+                else None
+            )
+            return _CATEGORY_TO_INDEX[category]
+
+        for t, action, (key, version), numbytes in self.timeline:
+            if key.device != device:
+                continue
+
+            if action in (Action.PREEXISTING, Action.CREATE):
+                raw_events.append((t, _ACTION_TO_INDEX[action], numbytes, get_category_index(key, version)))
+
+            elif action == Action.INCREMENT_VERSION:
+                raw_events.append((t, _ACTION_TO_INDEX[action], -numbytes, get_category_index(key, version)))
+                raw_events.append((t, _ACTION_TO_INDEX[action], numbytes, get_category_index(key, version + 1)))
+
+            elif action == Action.DESTROY:
+                raw_events.append((t, _ACTION_TO_INDEX[action], -numbytes, get_category_index(key, version)))
+
+            else:
+                raise ValueError(f"Unknown action: {action}")
+
+        import json
+        with open(path, 'w') as f:
+            json.dump(raw_events, f)
 
     def export_memory_timeline_html(self, path, device, figsize=(20, 12), title=None) -> None:
         """Exports the memory timeline as an HTML file which contains
