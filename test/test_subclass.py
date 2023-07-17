@@ -142,7 +142,7 @@ class TestSubclass(TestCase):
                     nn.init.normal_(self.p1)
                     for p in self.p_list:
                         nn.init.uniform_(p)
-                    for _, p in self.p_dict.items():
+                    for p in self.p_dict.values():
                         nn.init.uniform_(p)
 
             def forward(self, x):
@@ -150,7 +150,7 @@ class TestSubclass(TestCase):
                 for p in self.p_list:
                     out = p + out
 
-                for _, v in self.p_dict.items():
+                for v in self.p_dict.values():
                     out = v + out
 
                 return out

@@ -467,6 +467,8 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         has_both = False
         for fsdp_module in FSDP.fsdp_modules(fsdp_model):
             handle = fsdp_module._handle
+            if not handle:
+                continue
             flat_param = handle.flat_param
             assert flat_param._params is not None
             has_weight = False
