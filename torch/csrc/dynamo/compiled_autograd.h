@@ -78,6 +78,7 @@ struct NodeCall {
   std::vector<int> pre_hooks;
   std::vector<int> post_hooks;
   std::vector<std::pair<int, int>> graph_output;
+  bool needed = true;
 };
 
 struct NodeCalls : public std::unordered_map<Node*, NodeCall> {
@@ -227,7 +228,6 @@ class CompiledNodeArgs {
     collect_size(t.id);
     collect(t.graph_output);
     collect_hooks_from(t.node.get());
-    collect(t.node->next_edges());
   }
   void collect(const Edge& t) {
     if (cond(t.is_valid())) {
@@ -283,11 +283,11 @@ class CompiledNodeArgs {
   }
 
   void collect_hooks_from(Node* fn) {
+    TORCH_CHECK(
+        fn->retains_grad_hooks().empty(),
+        "retains_grad_hooks not implemented for compiled autograd");
     for (auto& i : fn->tensor_pre_hooks()) {
       i->compiled_args(*this);
-    }
-    for (auto& i : fn->retains_grad_hooks()) {
-      i.second->compiled_args(*this);
     }
     for (auto& i : fn->pre_hooks()) {
       i->compiled_args(*this);
@@ -406,11 +406,11 @@ struct TraceState {
     TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
   }
   const at::Tensor& next_proxy_input() {
-    TORCH_CHECK(proxy_inputs_index < proxy_inputs.size());
+    TORCH_INTERNAL_ASSERT(proxy_inputs_index < proxy_inputs.size());
     return proxy_inputs[proxy_inputs_index++];
   }
   c10::optional<c10::SymInt> next_sym_size() {
-    TORCH_CHECK(sym_sizes_index < sym_sizes.size());
+    TORCH_INTERNAL_ASSERT(sym_sizes_index < sym_sizes.size());
     return sym_sizes[sym_sizes_index++];
   }
 

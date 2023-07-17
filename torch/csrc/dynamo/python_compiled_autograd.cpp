@@ -281,7 +281,7 @@ variable_list compiled_autograd(
     const edge_list& output_edges) {
   TORCH_CHECK(
       output_edges.empty() || !accumulate_grad,
-      "outputs+accumulate_grad not yet implemented")
+      "specifying inputs= with .backward() not yet implemented for compiled autograd")
   static std::mutex lock;
   std::lock_guard<std::mutex> lock_guard(lock);
   pybind11::gil_scoped_acquire gil;
@@ -297,7 +297,8 @@ variable_list compiled_autograd(
   const bool check_exec_info = !graph_task.exec_info_.empty();
   CacheNode* cache = CacheNode::root();
   std::vector<NodeCall*> calls;
-  calls.reserve(dependencies.size() + 1);
+  calls.reserve(
+      check_exec_info ? graph_task.exec_info_.size() : dependencies.size() + 1);
 
   while (!worklist.empty()) {
     std::shared_ptr<Node> fn = std::move(worklist.back());
@@ -307,8 +308,11 @@ variable_list compiled_autograd(
 
     { // update cache and gather args into `compiler_call`
       CompiledNodeArgs node_args(compiler_call, call);
-      fn->compiled_args(node_args);
       node_args.collect(call);
+      if (node_args.cond(node_args.needed)) {
+        fn->compiled_args(node_args);
+        node_args.collect(call.node->next_edges());
+      }
       cache = cache->lookup(node_args.key());
     }
 
@@ -320,6 +324,9 @@ variable_list compiled_autograd(
         auto it = graph_task.exec_info_.find(edge.function.get());
         if (it == graph_task.exec_info_.end() || !it->second.should_execute()) {
           continue;
+        }
+        if (!it->second.needed_) {
+          compiler_call.node_calls.lookup(fn).needed = false;
         }
       }
       auto it = dependencies.find(edge.function.get());
@@ -352,14 +359,6 @@ variable_list compiled_autograd(
 
       variable_list inputs = input_buffers.lookup(call.node.get()).buffer;
 
-      for (const auto& graph_output : call.graph_output) {
-        int input_nr = graph_output.first;
-        int output_index = graph_output.second;
-        TORCH_CHECK(output_index < static_cast<int>(state.outputs.size()));
-        TORCH_CHECK(!state.outputs[output_index].defined());
-        state.outputs[output_index] = inputs[input_nr];
-      }
-
       if (call.tensor_pre_hooks.size() + call.pre_hooks.size() > 0) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         for (const auto& hook : call.tensor_pre_hooks) {
@@ -377,6 +376,16 @@ variable_list compiled_autograd(
         }
         inputs = THPVariable_UnpackList(pyinputs);
       }
+      for (const auto& graph_output : call.graph_output) {
+        int input_nr = graph_output.first;
+        int output_index = graph_output.second;
+        TORCH_CHECK(output_index < static_cast<int>(state.outputs.size()));
+        TORCH_CHECK(!state.outputs[output_index].defined());
+        state.outputs[output_index] = inputs[input_nr];
+      }
+      if (!call.needed) {
+        continue;
+      }
 
       SwapSavedVariables saved(state, call.node);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
@@ -390,7 +399,7 @@ variable_list compiled_autograd(
           });
       saved.after(call.node->next_edges());
 
-      if (call.post_hooks.size() > 0) {
+      if (call.post_hooks.size() > 0 && call.needed) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         THPObjectPtr pyoutputs(THPVariable_WrapList(outputs));
         for (const auto hook : call.post_hooks) {
@@ -404,7 +413,6 @@ variable_list compiled_autograd(
         }
         outputs = THPVariable_UnpackList(pyoutputs);
       }
-
       for (const auto i : c10::irange(outputs.size())) {
         auto& output = outputs[i];
         const auto& next = call.node->next_edge(i);
