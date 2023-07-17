@@ -112,6 +112,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "hstack",  # aten::cat is invoked instead
         "index_put",
         "logit",
+        "mean",
         # "new_empty",  non-deterministic
         # "new_empty_strided",  non-deterministic
         "new_full",
@@ -137,7 +138,9 @@ TESTED_OPS: frozenset[str] = frozenset(
         "scatter_add",
         "scatter_reduce",
         "square",
+        "sum",
         "unflatten",
+        # "var_mean",  # Segfault during onnx shape inference. Need to bump onnx version.
         "vstack",  # aten::cat is invoked instead
     ]
 )
@@ -169,34 +172,17 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
     ),
     xfail(
-        "all",
-        dtypes=(torch.uint8,),
-        reason=onnx_test_common.reason_onnx_does_not_support("ReduceMin", "uint8"),
-    ),
-    xfail(
         "allclose", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
     ),
     xfail(
-        "amax", dtypes=onnx_test_common.BOOL_TYPES,
-        reason=onnx_test_common.reason_dynamo_does_not_support("Amax", "bool")
-    ),
-    xfail(
         "amax",
-        dtypes=(torch.int16,),
-        reason=onnx_test_common.reason_onnx_does_not_support("ReduceMin", "int16"),
+        dtypes=(torch.int16, *onnx_test_common.BOOL_TYPES),
+        reason=onnx_test_common.reason_onnx_does_not_support("ReduceMin", "bool, int16"),
     ),
     xfail(
-        "amin", dtypes=onnx_test_common.BOOL_TYPES,
-        reason=onnx_test_common.reason_dynamo_does_not_support("Amin", "bool")
-    ),
-    xfail(
-        "amin", dtypes=(torch.int16,),
-        reason=onnx_test_common.reason_onnx_does_not_support("ReduceMin", "int16"),
-    ),
-    xfail(
-        "any", dtypes=(torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Any")
+        "amin", dtypes=(torch.int16, *onnx_test_common.BOOL_TYPES),
+        reason=onnx_test_common.reason_dynamo_does_not_support("ReduceMin", "bool, int16")
     ),
     xfail(
         "arange",
@@ -313,10 +299,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Cumsum", "bool, uint8, int8, int16")
     ),
     xfail(
-        "cumsum", dtypes=(torch.int32,),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("Cumsum", "int32 has type issue.")
-    ),
-    xfail(
         "cross",
         reason=onnx_test_common.reason_onnx_script_does_not_support("linalg_cross"),
     ),
@@ -425,6 +407,14 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Unflatten")
+    ),
+    xfail(
+        "var_mean", dtypes=(torch.float16, ),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("var_mean", "float16")
+    ),
+    xfail(
+        "var_mean", variant_name="unbiased", dtypes=(torch.float16, ),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("var_mean", "float16")
     ),
 )
 # fmt: on

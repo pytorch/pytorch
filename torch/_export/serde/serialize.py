@@ -9,7 +9,7 @@ import typing
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
+from typing import cast, Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import sympy
 
@@ -215,15 +215,15 @@ def deserialize_operator(serialized_target: str):
 
 def serialize_call_spec(call_spec: ep.CallSpec) -> CallSpec:
     return CallSpec(
-        in_spec=pytree_to_str(call_spec.in_spec),
-        out_spec=pytree_to_str(call_spec.out_spec),
+        in_spec=pytree_to_str(call_spec.in_spec) if call_spec.in_spec else "",
+        out_spec=pytree_to_str(call_spec.out_spec) if call_spec.out_spec else "",
     )
 
 
 def deserialize_call_spec(call_spec: CallSpec) -> ep.CallSpec:
     return ep.CallSpec(
-        in_spec=str_to_pytree(call_spec.in_spec),
-        out_spec=str_to_pytree(call_spec.out_spec),
+        in_spec=str_to_pytree(call_spec.in_spec) if call_spec.in_spec else None,
+        out_spec=str_to_pytree(call_spec.out_spec) if call_spec.out_spec else None,
     )
 
 
@@ -749,7 +749,7 @@ class GraphModuleDeserializer:
         self.module = torch.nn.Module()
 
     @contextmanager
-    def save_graph_module(self) -> None:
+    def save_graph_module(self) -> Iterator[None]:
         saved = self.graph, self.module, self.serialized_name_to_node, self.serialized_name_to_meta
         self.graph = torch.fx.Graph()
         self.module = torch.nn.Module()
@@ -773,7 +773,7 @@ class GraphModuleDeserializer:
 
                     if vr := self.symbol_name_to_range.get(val.expr_str):
                         symbolic_shapes._constrain_symbol_range(
-                            self.shape_env, sym, vr.lower, vr.upper
+                            self.shape_env, sym, vr.lower, vr.upper  # type: ignore[arg-type]
                         )
 
             return self.shape_env.create_symintnode(sym, hint=val.hint)
@@ -855,6 +855,7 @@ class GraphModuleDeserializer:
         output_node.meta["val"] = tuple(
             arg.meta["val"] for arg in output_node.args[0]
         )
+        return output_node
 
     def deserialize_node(self, serialized_node: Node, target: Callable) -> None:
         if target.__module__ == "_operator":  # TODO(zhxchen17) Follow up on this.
@@ -1050,7 +1051,7 @@ class GraphModuleDeserializer:
         self.serialized_name_to_node[fx_node.name] = fx_node
 
     def deserialize_metadata(self, metadata: Dict[str, str]) -> Dict[str, Any]:
-        ret = {}
+        ret: Dict[str, Any] = {}
         if stack_trace := metadata.get("stack_trace"):
             ret["stack_trace"] = stack_trace
 

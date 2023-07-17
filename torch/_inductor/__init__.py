@@ -54,13 +54,14 @@ def aot_compile(
     return lib_path
 
 
-def list_mode_options(mode: str = None) -> Dict[str, Any]:
+def list_mode_options(mode: str = None, dynamic: bool = None) -> Dict[str, Any]:
     r"""Returns a dictionary describing the optimizations that each of the available
     modes passed to `torch.compile()` performs.
 
     Args:
         mode (str, optional): The mode to return the optimizations for.
         If None, returns optimizations for all modes
+        dynamic (bool, optional): Whether dynamic shape is enabled.
 
     Example::
         >>> torch._inductor.list_mode_options()
@@ -76,7 +77,8 @@ def list_mode_options(mode: str = None) -> Dict[str, Any]:
         "max-autotune-no-cudagraphs": {
             "max_autotune": True,
         },
-        # enable both cuda-graphs and max-autotune
+        # enable max-autotune
+        # enable cudagraphs
         "max-autotune": {
             "max_autotune": True,
             "triton.cudagraphs": True,
