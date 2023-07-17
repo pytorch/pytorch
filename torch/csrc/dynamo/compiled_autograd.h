@@ -1,5 +1,6 @@
 #pragma once
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
@@ -138,7 +139,9 @@ class CompiledNodeArgs {
     }
   }
   void collect(const SavedVariable& t) {
-    TORCH_CHECK(!t.has_hooks(), "SavedVariable hooks not implemented")
+    TORCH_CHECK(
+        !t.has_hooks(),
+        "SavedVariable hooks not implemented in compiled autograd")
     collect(t.unpack(_node_call.node));
   }
   void collect(const c10::SymInt& t) {
@@ -238,6 +241,14 @@ class CompiledNodeArgs {
     collect(t.options());
     collect(t.is_tensor_subclass());
     collect(t.shape_as_dim_vector());
+  }
+  void collect(const VariableInfo& t) {
+    collect(t.layout);
+    collect(t.device);
+    collect(t.scalar_type);
+    collect(t.size);
+    collect(t.requires_grad);
+    collect(t.is_empty);
   }
   bool cond(bool cond) {
     collect(cond);
@@ -467,7 +478,6 @@ class SwapSavedVariables {
   void after(InputMetadata& t) {
     after(t.mutable_shape_as_dim_vector());
   }
-
   void before(at::TensorGeometry& t) {
     before(t.mutable_sizes());
     before(t.mutable_strides());
@@ -487,6 +497,12 @@ class SwapSavedVariables {
   void after(torch::autograd::TypeAndSize& t) {
     after(t.sym_sizes);
     after(t.options);
+  }
+  void before(VariableInfo& t) {
+    before(t.size);
+  }
+  void after(VariableInfo& t) {
+    after(t.size);
   }
 
   template <typename T>

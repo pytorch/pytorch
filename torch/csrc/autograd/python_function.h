@@ -107,7 +107,8 @@ struct THPFunction {
   // https://github.com/pytorch/pytorch/pull/98659#pullrequestreview-1376822560
   bool materialize_non_diff_grads;
 
-  // Cause AotAutograd to call the original FX graph rather than compiling.
+  // This is enabled by compiled autograd as a way to signal to AotAutograd it
+  // should call the original FX graph rather than compiling.
   bool compiled_autograd_tracing;
   std::vector<c10::SymInt> compiled_autograd_symints;
 

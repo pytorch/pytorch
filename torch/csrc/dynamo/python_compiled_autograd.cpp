@@ -30,7 +30,7 @@ we use a visitor pattern that walks each Node structure recursively.
 graph and builds a CacheKey for us to specialize on.  On a cache hit,
 we stop here and this is the only pass.
 
-- On a cache miss, a second pass kicks in to extract the FX grap using
+- On a cache miss, a second pass kicks in to extract the FX graph using
 apply_with_saved, which uses another visitor pattern.  The before()
 visitor swaps out all the Tensors, SavedVariables, and SymInt for
 fake/symbolic versions to allow tracing.  We then run the standard apply()

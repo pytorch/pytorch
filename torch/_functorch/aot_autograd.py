@@ -3003,9 +3003,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             del contiguous_args
 
             def call_compiled_backward():
-                if ctx._compiled_autograd_tracing:
+                if ctx._is_compiled_autograd_tracing():
                     # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
-                    symints = ctx._compiled_autograd_symints
+                    symints = ctx._get_compiled_autograd_symints()
                     assert len(symints) == len(ctx.symints)
                     all_args[:len(symints)] = symints
                     context = torch._C._DisableAutocast if disable_amp else nullcontext

@@ -62,9 +62,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 
 #ifdef TORCH_COMPILED_AUTOGRAD
 void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
-  if (args.cond(
-          variable.defined() && variable.requires_grad() &&
-          GradMode::is_enabled())) {
+  if (args.cond(variable.defined() && variable.requires_grad())) {
     args.collect(variable);
     args.collect(variable.grad());
     args.set_grad_target(variable);
@@ -73,8 +71,7 @@ void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
 variable_list AccumulateGrad::apply_with_saved(
     const variable_list& grads,
     SwapSavedVariables& saved) {
-  if (!(variable.defined() && variable.requires_grad() &&
-        GradMode::is_enabled())) {
+  if (!(variable.defined() && variable.requires_grad())) {
     return variable_list();
   }
   TORCH_CHECK(!variable.grad_fn() && grads.size() == 1);

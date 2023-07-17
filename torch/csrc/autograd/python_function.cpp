@@ -243,7 +243,10 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->saved_variables);
   args.collect(f->materialize_grads);
   args.collect(f->is_variable_input);
-  // TODO(jansel): are there other things we need to collect?
+  args.collect(f->needs_input_grad);
+  args.collect(f->materialize_non_diff_grads);
+  args.collect(f->output_info);
+  args.collect(f->input_info);
 }
 
 variable_list PyNode::apply_with_saved(
@@ -253,11 +256,19 @@ variable_list PyNode::apply_with_saved(
   TORCH_CHECK(!f->compiled_autograd_tracing);
   saved.before(f->compiled_autograd_symints);
   saved.before(f->saved_variables);
+  saved.before(f->needs_input_grad);
+  saved.before(f->materialize_non_diff_grads);
+  saved.before(f->output_info);
+  saved.before(f->input_info);
   f->compiled_autograd_tracing = true;
   auto result = apply(variable_list(inputs));
   f->compiled_autograd_tracing = false;
   saved.after(f->compiled_autograd_symints);
   saved.after(f->saved_variables);
+  saved.after(f->needs_input_grad);
+  saved.after(f->materialize_non_diff_grads);
+  saved.after(f->output_info);
+  saved.after(f->input_info);
   return result;
 }
 #endif
@@ -1276,24 +1287,28 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPFunction_compiled_autograd_tracing(
-    THPFunction* self,
-    void* _unused) {
-  // HANDLE_TH_ERRORS  // not needed since can't throw?
-  if (self->compiled_autograd_tracing) {
+PyObject* THPFunction_is_compiled_autograd_tracing(
+    PyObject* self,
+    PyObject* _unused) {
+  HANDLE_TH_ERRORS
+  if (((THPFunction*)self)->compiled_autograd_tracing) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
   }
-  // END_HANDLE_TH_ERRORS
+  END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPFunction_compiled_autograd_symints(
-    THPFunction* self,
-    void* _unused) {
+PyObject* THPFunction_get_compiled_autograd_symints(
+    PyObject* _self,
+    PyObject* _unused) {
   HANDLE_TH_ERRORS
+  auto self = (THPFunction*)_self;
   auto size = self->compiled_autograd_symints.size();
   PyObject* result = PyTuple_New(size);
+  if (!result) {
+    throw python_error();
+  }
   for (const auto i : c10::irange(size)) {
     PyTuple_SET_ITEM(
         result,
@@ -1484,16 +1499,6 @@ static struct PyGetSetDef THPFunction_properties[] = {
      (setter)THPFunction_set_materialize_non_diff_grads,
      nullptr,
      nullptr},
-    {"_compiled_autograd_tracing",
-     (getter)THPFunction_compiled_autograd_tracing,
-     nullptr,
-     nullptr,
-     nullptr},
-    {"_compiled_autograd_symints",
-     (getter)THPFunction_compiled_autograd_symints,
-     nullptr,
-     nullptr,
-     nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
@@ -1510,6 +1515,14 @@ static struct PyMethodDef THPFunction_methods[] = {
      nullptr},
     {(char*)"register_hook", THPFunction_register_hook, METH_O, nullptr},
     {(char*)"register_prehook", THPFunction_register_prehook, METH_O, nullptr},
+    {(char*)"_is_compiled_autograd_tracing",
+     THPFunction_is_compiled_autograd_tracing,
+     METH_NOARGS,
+     nullptr},
+    {(char*)"_get_compiled_autograd_symints",
+     THPFunction_get_compiled_autograd_symints,
+     METH_NOARGS,
+     nullptr},
     {nullptr}};
 
 PyTypeObject THPFunctionType = {
