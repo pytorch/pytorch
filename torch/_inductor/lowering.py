@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import sympy
 
@@ -255,7 +255,7 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args: Union[List, Tuple] = list(args)
+        args: Union[List[Any], Tuple[Any, ...]] = list(args)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
