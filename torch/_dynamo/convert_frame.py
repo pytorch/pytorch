@@ -484,7 +484,7 @@ def _compile(
         # new function frames, confusing export in thinking that there
         # are extra graphs now.
 
-        if output.is_empty_graph():
+        if output.export and output.is_empty_graph():
             return None
 
         assert output.guards is not None
