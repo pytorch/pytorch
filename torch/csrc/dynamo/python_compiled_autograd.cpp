@@ -405,7 +405,7 @@ variable_list compiled_autograd(
           });
       saved.after(call.node->next_edges());
 
-      if (call.post_hooks.size() > 0 && call.needed) {
+      if (call.post_hooks.size() > 0) {
         THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
         THPObjectPtr pyoutputs(THPVariable_WrapList(outputs));
         for (const auto hook : call.post_hooks) {
