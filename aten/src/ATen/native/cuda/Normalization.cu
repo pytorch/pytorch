@@ -455,9 +455,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
   int64_t n_input = self.size(1);
   auto options = self.options().dtype(
       at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
-  auto save_mean = at::empty({n_input}, options);
-  auto save_invstd = at::empty({n_input}, options);
-
   Tensor save_mean;
   Tensor save_invstd;
 
