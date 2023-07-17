@@ -93,6 +93,7 @@ output_codes = Tracker()
 
 initial_grad_state = None
 initial_deterministic_algorithms_state = None
+initial_torch_function_state = None
 
 
 @functools.wraps(original_forward_from_src)
@@ -244,7 +245,7 @@ def convert_frame_assert(
         ):
             if config.report_guard_failures:
                 message = (
-                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
                     f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
                 )
             else:
@@ -345,6 +346,9 @@ def convert_frame_assert(
         initial_deterministic_algorithms_state = (
             torch.are_deterministic_algorithms_enabled()
         )
+
+        global initial_torch_function_state
+        initial_torch_function_state = torch._C._is_torch_function_enabled()
 
         signpost_event(
             "dynamo",
