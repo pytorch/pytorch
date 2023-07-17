@@ -105,7 +105,7 @@ class SSGraph:
         self.reverse_level = {}
         self.reverse_level_predecessors = {}
         self.critical_path = []
-        self.stream_pool_size = int(environ.get("STREAM_POOL_SIZE", 1))
+        self.stream_pool_size = int(environ.get("STREAM_POOL_SIZE", 20))
         self.stream_pool = [0] * (self.stream_pool_size + 1)
         self.arg_to_stream = {}
         self.final_order = []
@@ -237,6 +237,12 @@ class SSGraph:
             for successor in ssnode.successors.values():
                 if successor.stream_id != ssnode.stream_id:
                     ssnode.cuda_event = True
+                    break
+                if successor.is_nop_node:
+                    for successor_successor in successor.successors.values():
+                        if successor_successor.stream_id != ssnode.stream_id:
+                            ssnode.cuda_event = True
+                            break
 
     def stream_scheduling(self):
         # Yueming TODO: do we need keep this fake 0?
