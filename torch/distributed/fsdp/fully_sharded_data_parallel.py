@@ -214,6 +214,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         instead of reacquiring the references each iteration, then it will not
         see FSDP's newly created views, and autograd will not work correctly.
 
+    .. note::
+        With ``limit_all_gathers=True``, you may see a gap in the FSDP
+        pre-forward where the CPU thread is not issuing any kernels. This is
+        intentional and shows the rate limiter in effect. Synchronizing the CPU
+        thread in that way prevents over-allocating memory for subsequent
+        all-gathers, and it should not actually delay GPU kernel execution.
+
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.
@@ -334,12 +341,16 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             bound workloads. This should only be used for static graph models
             since the forward order is fixed based on the first iteration's
             execution. (Default: ``False``)
-        limit_all_gathers (bool): If ``False``, then FSDP allows the CPU
-            thread to schedule all-gathers without any extra synchronization.
-            If ``True``, then FSDP explicitly synchronizes the CPU thread to
-            prevent too many in-flight all-gathers. This ``bool`` only affects
-            the sharded strategies that schedule all-gathers. Enabling this can
-            help lower the number of CUDA malloc retries.
+        limit_all_gathers (bool): If ``True``, then FSDP explicitly
+            synchronizes the CPU thread to ensure GPU memory usage from only
+            *two* consecutive FSDP instances (the current instance running
+            computation and the next instance whose all-gather is prefetched).
+            If ``False``, then FSDP allows the CPU thread to issue all-gathers
+            without any extra synchronization. (Default: ``True``) We often
+            refer to this feature as the "rate limiter". This flag should only
+            be set to ``False`` for specific CPU-bound workloads with low
+            memory pressure in which case the CPU thread can aggressively issue
+            all kernels without concern for the GPU memory usage.
         use_orig_params (bool): Setting this to ``True`` has FSDP use
             ``module`` 's original parameters. FSDP exposes those original
             parameters to the user via :meth:`nn.Module.named_parameters`
@@ -382,7 +393,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
         forward_prefetch: bool = False,
-        limit_all_gathers: bool = False,
+        limit_all_gathers: bool = True,
         use_orig_params: bool = False,
         ignored_states: Union[
             Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
@@ -480,7 +491,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     @property
     def _has_params(self) -> bool:
         """Returns whether this FSDP instance manages any parameters."""
-        return hasattr(self, "_handle") and self._handle > 0
+        return hasattr(self, "_handle") and self._handle is not None
 
     @property
     def _flat_param(self) -> Optional[FlatParameter]:
@@ -784,6 +795,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Runs the forward pass for the wrapped module, inserting FSDP-specific
         pre- and post-forward sharding logic.
         """
+        handle = self._handle
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel.forward"
         ):
@@ -791,13 +803,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             unused = None
             args, kwargs = _pre_forward(
                 self,
-                self._handle,
+                handle,
                 _pre_forward_unshard,
                 self._fsdp_wrapped_module,
                 args,
                 kwargs,
             )
-            handle = self._handle
             if handle:
                 _p_assert(
                     handle.flat_param.device == self.compute_device,
@@ -806,7 +817,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 )
             output = self._fsdp_wrapped_module(*args, **kwargs)
             return _post_forward(
-                self, self._handle, _post_forward_reshard, self, unused, output
+                self, handle, _post_forward_reshard, self, unused, output
             )
 
     @staticmethod
@@ -926,9 +937,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     def named_buffers(
         self,
-        prefix: str = "",
-        recurse: bool = True,
-        remove_duplicate: bool = True,
+        *args,
+        **kwargs,
     ) -> Iterator[Tuple[str, torch.Tensor]]:
         """
         Overrides :meth:`named_buffers()` to intercept buffer names and
@@ -936,9 +946,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         when inside the :meth:`summon_full_params` context manager.
         """
         should_clean_name = self.training_state == TrainingState.SUMMON_FULL_PARAMS
-        for buffer_name, buffer in super().named_buffers(
-            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate
-        ):
+        for buffer_name, buffer in super().named_buffers(*args, **kwargs):
             if should_clean_name:
                 # Remove any instances of the FSDP-specific prefix; there can
                 # be multiple in the case of nested FSDP modules

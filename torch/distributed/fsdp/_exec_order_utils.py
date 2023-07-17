@@ -90,7 +90,7 @@ class _ExecOrderData:
 
     def get_handle_to_backward_prefetch(
         self,
-        current_handles_key: FlatParamHandle,
+        current_handle: FlatParamHandle,
     ) -> Optional[FlatParamHandle]:
         """
         Returns a :class:`list` of the handles keys of the handles to backward
@@ -101,7 +101,7 @@ class _ExecOrderData:
         if current_index is None:
             return None
         target_index = current_index - 1
-        target_handles_key: FlatParamHandle = None
+        target_handles_key: Optional[FlatParamHandle] = None
         for _ in range(self._backward_prefetch_limit):
             if target_index < 0:
                 break
@@ -111,7 +111,7 @@ class _ExecOrderData:
 
     def get_handle_to_forward_prefetch(
         self,
-        current_handles_key: FlatParamHandle,
+        current_handle: FlatParamHandle,
     ) -> Optional[FlatParamHandle]:
         """
         Returns a :class:`list` of the handles keys of the handles to forward
@@ -122,15 +122,15 @@ class _ExecOrderData:
         if current_index is None:
             return None
         target_index = current_index + 1
-        target_handles_key: List[FlatParamHandle] = None
+        target_handle: Optional[FlatParamHandle] = None
         for _ in range(self._forward_prefetch_limit):
             if target_index >= len(self.handles_pre_forward_order):
                 break
-            target_handles_key = self.handles_pre_forward_order[target_index]
+            target_handle = self.handles_pre_forward_order[target_index]
             target_index += 1
-        return target_handles_key
+        return target_handle
 
-    def record_post_forward(self, handle: FlatParamHandle) -> None:
+    def record_post_forward(self, handle: Optional[FlatParamHandle]) -> None:
         """
         Records ``handles`` in the post-forward order, where ``handles`` should
         be a group of handles used in the same module's forward. If ``handles``
@@ -142,7 +142,6 @@ class _ExecOrderData:
         """
         if not handle:
             return
-        handles_key = handle
         # Only record the first usage of a handles key
         if handles_key._post_forward_index:
             return
@@ -150,7 +149,9 @@ class _ExecOrderData:
         handles_key._post_forward_index = index
         self.handles_post_forward_order.append(handles_key)
 
-    def record_pre_forward(self, handle: FlatParamHandle, is_training: bool) -> None:
+    def record_pre_forward(
+        self, handle: Optional[FlatParamHandle], is_training: bool
+    ) -> None:
         """
         Records ``handles`` in the pre-forward order, where ``handles`` should
         be a group of handles used in the same module's forward. If ``handles``
@@ -170,7 +171,7 @@ class _ExecOrderData:
         handle._pre_forward_order_index = index
         self.handles_pre_forward_order.append(handle)
 
-    def _check_order(self, handles_key: FlatParamHandle, is_training: bool) -> None:
+    def _check_order(self, handle: FlatParamHandle, is_training: bool) -> None:
         """
         Checks the forward execution order as long as ``is_training`` is
         ``True`` since checking in eval mode is not supported.
@@ -192,8 +193,8 @@ class _ExecOrderData:
             msg_prefix = "Forward order differs across ranks:"
             optional_local_indices: Tuple[
                 Optional[int], ...
-            ] = self._get_handle_indices(handles_key)
-            device = handles_key.device  # guaranteed to be non-CPU
+            ] = self._get_handle_indices(handle)
+            device = handle.device  # guaranteed to be non-CPU
             num_valid_indices = sum(
                 (index is not None) for index in optional_local_indices
             )
@@ -270,19 +271,17 @@ class _ExecOrderData:
                     "forward but trying to all-gather parameters for "
                 )
             else:
-                expected_handles_key = self.handles_pre_forward_order[
+                expected_handle = self.handles_pre_forward_order[
                     self.current_order_index
                 ]
-                if expected_handles_key != handles_key:
-                    expected_param_names = self._get_names_from_handles(
-                        expected_handles_key
-                    )
+                if expected_handle != handle:
+                    expected_param_names = self._get_names_from_handles(expected_handle)
                     msg_prefix = (
                         f"Expected to all-gather for {expected_param_names} "
                         "but trying to all-gather parameters for "
                     )
             if msg_prefix is not None:
-                param_names = self._get_names_from_handles(handles_key)
+                param_names = self._get_names_from_handles(handle)
                 msg_suffix = (
                     f"{param_names}"
                     if param_names
@@ -302,7 +301,7 @@ class _ExecOrderData:
     ) -> Tuple[Optional[int], ...]:
         """
         Returns the handle indices (i.e. indices into ``self.all_handles``)
-        corresponding to the handles in ``handles_key``. An entry in the
+        corresponding to the handles in ``handle``. An entry in the
         returned tuple is ``None`` if the handle is invalid.
         """
         indices: List[Optional[int]] = []
@@ -339,9 +338,8 @@ class _ExecOrderData:
         fqns: List[List[str]] = []
         if handle:
             flat_param = handle.flat_param
-            if flat_param not in self.param_to_fqn:
-                return
-            fqns.append(self.param_to_fqn[flat_param])
+            if flat_param in self.param_to_fqn:
+                fqns.append(self.param_to_fqn[flat_param])
         return fqns
 
     def next_iter(self):
