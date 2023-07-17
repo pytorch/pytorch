@@ -142,7 +142,7 @@ struct CacheNode {
       }
     }
 
-    TORCH_CHECK(expected_sizes.size() == call.all_size_inputs.size());
+    TORCH_INTERNAL_ASSERT(expected_sizes.size() == call.all_size_inputs.size());
     for (const auto i : c10::irange(len)) {
       auto& expected = expected_sizes[i];
       if (expected.dyn_type == SizeInput::DYNAMIC ||
@@ -180,26 +180,27 @@ struct CacheNode {
         PyTuple_SET_ITEM(pyinput, idx++, PyLong_FromSsize_t(i.value));
       }
     }
-    TORCH_CHECK(idx == dynamic_count);
+    TORCH_INTERNAL_ASSERT(idx == dynamic_count);
     return pyinput;
   }
 
   std::vector<c10::optional<SymInt>> unwrap_dynamic_inputs(PyObject* pyresult) {
-    TORCH_CHECK(PyList_CheckExact(pyresult));
+    TORCH_INTERNAL_ASSERT(PyList_CheckExact(pyresult));
     size_t idx = 0;
     size_t result_len = PyList_GET_SIZE(pyresult);
     std::vector<c10::optional<SymInt>> result;
     result.reserve(expected_sizes.size());
     for (const auto& i : expected_sizes) {
       if (i.dyn_type == SizeInput::DYNAMIC) {
-        TORCH_CHECK(idx < result_len);
+        TORCH_INTERNAL_ASSERT(idx < result_len);
         result.emplace_back(
             py::cast<c10::SymInt>(PyList_GET_ITEM(pyresult, idx++)));
       } else {
         result.emplace_back();
       }
     }
-    TORCH_CHECK(idx == result_len && result.size() == expected_sizes.size());
+    TORCH_INTERNAL_ASSERT(
+        idx == result_len && result.size() == expected_sizes.size());
     return result;
   }
 
@@ -326,11 +327,11 @@ variable_list compiled_autograd(
           continue;
         }
         if (!it->second.needed_) {
-          compiler_call.node_calls.lookup(fn).needed = false;
+          compiler_call.node_calls.lookup(edge.function).needed = false;
         }
       }
       auto it = dependencies.find(edge.function.get());
-      TORCH_CHECK(it != dependencies.end());
+      TORCH_INTERNAL_ASSERT(it != dependencies.end());
       if (--it->second == 0) {
         dependencies.erase(it);
         worklist.emplace_back(edge.function);
@@ -379,10 +380,12 @@ variable_list compiled_autograd(
       for (const auto& graph_output : call.graph_output) {
         int input_nr = graph_output.first;
         int output_index = graph_output.second;
-        TORCH_CHECK(output_index < static_cast<int>(state.outputs.size()));
-        TORCH_CHECK(!state.outputs[output_index].defined());
+        TORCH_INTERNAL_ASSERT(
+            output_index < static_cast<int>(state.outputs.size()));
+        TORCH_INTERNAL_ASSERT(!state.outputs[output_index].defined());
         state.outputs[output_index] = inputs[input_nr];
       }
+
       if (!call.needed) {
         continue;
       }
@@ -442,7 +445,8 @@ variable_list compiled_autograd(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   if (accumulate_grad) {
-    TORCH_CHECK(outputs.size() == compiler_call.set_grad_targets.size());
+    TORCH_INTERNAL_ASSERT(
+        outputs.size() == compiler_call.set_grad_targets.size());
     for (const auto i : c10::irange(outputs.size())) {
       // TODO(jansel): does this one need to be an inplace copy?  if so it
       // should go in the graph
@@ -451,7 +455,7 @@ variable_list compiled_autograd(
     }
     return variable_list();
   } else {
-    TORCH_CHECK(outputs.size() == output_edges.size());
+    TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
     return outputs;
   }
 }

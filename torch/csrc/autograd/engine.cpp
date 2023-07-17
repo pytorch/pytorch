@@ -1176,7 +1176,7 @@ auto Engine::execute(
   // Allows us to assert no other threads are in backwards
   CompiledAutogradThreadingDebugCheck _thread_check;
   auto compiled_autograd = the_compiled_autograd.load();
-  TORCH_CHECK(compiled_autograd != COMPILED_AUTOGRAD_POISON);
+  TORCH_INTERNAL_ASSERT(compiled_autograd != COMPILED_AUTOGRAD_POISON);
 
   // accumulate_grad is true if and only if the frontend call was to
   // grad(), not backward(). grad() returns the sum of the gradients

@@ -215,7 +215,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
       PyTuple_CheckExact(pykey.get()),
       "_compiled_autograd_key shoud return tuple of ints");
   auto size = PyTuple_GET_SIZE(pykey.get());
-  TORCH_CHECK(size > 0);
+  TORCH_INTERNAL_ASSERT(size > 0);
   // first value is unique ID of the AotAutograd graph
   ssize_t key = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
   if (C10_UNLIKELY(key < 0)) {
@@ -253,7 +253,7 @@ variable_list PyNode::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
   auto f = (THPFunction*)obj;
-  TORCH_CHECK(!f->compiled_autograd_tracing);
+  TORCH_INTERNAL_ASSERT(!f->compiled_autograd_tracing);
   saved.before(f->compiled_autograd_symints);
   saved.before(f->saved_variables);
   saved.before(f->needs_input_grad);
