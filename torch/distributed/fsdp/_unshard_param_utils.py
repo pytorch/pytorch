@@ -189,6 +189,11 @@ def _unshard_fsdp_state_params(
 
     for handle in handles:
         handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
+        # Since this context imposes special semantics for the unsharded flat
+        # parameter (e.g. forcing full precision), transition back to sharded
+        # views to reuse the existing logic for that special handling
+        if handle._skipped_use_sharded_views:
+            handle._use_sharded_views()
 
     _reset_flat_param_grad_info_if_needed(handles)
     free_unsharded_flat_params = [handle.needs_unshard() for handle in handles]
