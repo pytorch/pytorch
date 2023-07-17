@@ -13,7 +13,7 @@ from torch._functorch.compile_utils import fx_graph_cse
 from torch._inductor.compile_fx import fake_tensor_prop
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
-from torch.ao.quantization._pt2e.utils import _fuse_conv_bn_
+from torch.ao.quantization.pt2e.utils import _fuse_conv_bn_
 from torch.fx.experimental.proxy_tensor import make_fx
 from . import config
 from .decomposition import select_decomp_table
