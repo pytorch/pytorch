@@ -10792,23 +10792,23 @@ class TestMultithreadAutograd(TestCase):
     def test_set_multithreading_enabled_as_context_manager_and_function(self):
         # Test as a context manager
         with torch.autograd.set_multithreading_enabled(False):
-            self.assertFalse(torch._C._is_multithreading_enabled())
-        self.assertTrue(torch._C._is_multithreading_enabled())
+            self.assertFalse(torch.autograd.is_multithreading_enabled())
+        self.assertTrue(torch.autograd.is_multithreading_enabled())
 
         with torch.autograd.set_multithreading_enabled(True):
-            self.assertTrue(torch._C._is_multithreading_enabled())
-        self.assertTrue(torch._C._is_multithreading_enabled())
+            self.assertTrue(torch.autograd.is_multithreading_enabled())
+        self.assertTrue(torch.autograd.is_multithreading_enabled())
 
         with torch.autograd.set_multithreading_enabled(False):
             torch.autograd.set_multithreading_enabled(True)
-            self.assertTrue(torch._C._is_multithreading_enabled())
-        self.assertTrue(torch._C._is_multithreading_enabled())
+            self.assertTrue(torch.autograd.is_multithreading_enabled())
+        self.assertTrue(torch.autograd.is_multithreading_enabled())
 
         torch.autograd.set_multithreading_enabled(False)
-        self.assertFalse(torch._C._is_multithreading_enabled())
+        self.assertFalse(torch.autograd.is_multithreading_enabled())
 
         torch.autograd.set_multithreading_enabled(True)
-        self.assertTrue(torch._C._is_multithreading_enabled())
+        self.assertTrue(torch.autograd.is_multithreading_enabled())
 
 class TestNestedCheckpoint(TestCase):
     @staticmethod
