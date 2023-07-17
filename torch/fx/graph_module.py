@@ -271,7 +271,7 @@ class _WrappedCall:
             if self.cls_call is not None:
                 return self.cls_call(obj, *args, **kwargs)
             else:
-                return torch.nn.Module.__call__(obj, *args, **kwargs)  # type: ignore[misc]
+                return super(self.cls, obj).__call__(*args, **kwargs)  # type: ignore[misc]
         except Exception as e:
             assert e.__traceback__
             topmost_framesummary: traceback.FrameSummary = \
@@ -341,7 +341,6 @@ class GraphModule(torch.nn.Module):
                 to ``root``'s original name or a name that makes sense within the context of your transform.
         """
         super().__init__()
-        self.saved_call = None
         self.__class__.__name__ = class_name
         if isinstance(root, torch.nn.Module):
             if hasattr(root, 'training'):
@@ -643,30 +642,35 @@ class {module_name}(torch.nn.Module):
         Return the Python code generated from the ``Graph`` underlying this
         ``GraphModule``.
         """
-        self.real_recompile()
+        if self._needs_recompile():
+            self._real_recompile()
+
         if not hasattr(self, '_code'):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
         return self._code
 
     @compatibility(is_backward_compatible=True)
-    def recompile(self) -> PythonCode:
-        self.need_recompile = True
+    @classmethod
+    def recompile(cls):
+        cls.forward = cls._lazy_forward
 
-    def __call__(self, *args, **kwargs):
-        self.real_recompile()
+    @classmethod
+    def _needs_recompile(cls):
+        return cls.forward is cls._lazy_forward
 
-        return type(self).saved_call(self, *args, **kwargs)
+    def _lazy_forward(self, *args, **kwargs):
+        self._real_recompile()
+        assert not self._needs_recompile()
+        return self.forward(*args, **kwargs)
 
-    def real_recompile(self) -> PythonCode:
+    forward = _lazy_forward
+
+    def _real_recompile(self) -> PythonCode:
         """
         Recompile this GraphModule from its ``graph`` attribute. This should be
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
         """
-        if not self.need_recompile:
-            return
-
-        self.need_recompile = False
         if isinstance(self._graph._codegen, _PyTreeCodeGen):
             self._in_spec = self._graph._codegen.pytree_info.in_spec
             self._out_spec = self._graph._codegen.pytree_info.out_spec
@@ -684,9 +688,7 @@ class {module_name}(torch.nn.Module):
         # We do not want to hold a reference to Module.__call__ here; doing so will
         # bypass patching of torch.nn.Module.__call__ done while symbolic tracing.
 
-        # TODO: need better handling this
-        # cls_call = cls.__call__ if "__call__" in vars(cls) else None
-        cls_call = None
+        cls_call = cls.__call__ if "__call__" in vars(cls) else None
 
         if '_wrapped_call' not in vars(cls):
             cls._wrapped_call = _WrappedCall(cls, cls_call)  # type: ignore[attr-defined]
@@ -694,7 +696,7 @@ class {module_name}(torch.nn.Module):
         def call_wrapped(self, *args, **kwargs):
             return self._wrapped_call(self, *args, **kwargs)
 
-        cls.saved_call = call_wrapped
+        cls.__call__ = call_wrapped
         return python_code
 
     # Passing Tracer as argument allows subclasses extending fx.GraphModule

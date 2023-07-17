@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, Mod
 
 aten = torch.ops.aten
 
@@ -884,7 +884,7 @@ class TestDimConstraints(TestCase):
         self.assertEqual(solution, {8})
 
     def test_dim_constraints_solve_full(self):
-        from sympy import Eq, Integer, Mod, Ne, Symbol
+        from sympy import Eq, Integer, Ne, Symbol
         from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
 
         src0 = TensorPropertySource(
