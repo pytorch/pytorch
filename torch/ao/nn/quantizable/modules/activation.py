@@ -63,7 +63,7 @@ class MultiheadAttention(nn.MultiheadAttention):
     def __init__(self, embed_dim: int, num_heads: int,
                  dropout: float = 0., bias: bool = True,
                  add_bias_kv: bool = False, add_zero_attn: bool = False,
-                 kdim: int = None, vdim: int = None, batch_first: bool = False,
+                 kdim: Optional[int] = None, vdim: Optional[int] = None, batch_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__(embed_dim, num_heads, dropout,
