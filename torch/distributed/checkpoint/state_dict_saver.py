@@ -22,7 +22,7 @@ def save_state_dict(
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: Optional[SavePlanner] = None,
+    planner: SavePlanner = None,
 ) -> Metadata:
     """
     Saves a distributed model in SPMD style.
