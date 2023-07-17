@@ -12015,8 +12015,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # https://github.com/pytorch/pytorch/issues/85960
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
                # AssertionError: Booleans mismatch: True is not False
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
@@ -12046,8 +12044,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # https://github.com/pytorch/pytorch/issues/85960
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
                             "TestCompositeCompliance", "test_forward_ad"),
                # Extremal value issue on aten::native_batch_norm, which returns 'nan' for mean on 'inf' inputs
@@ -20387,10 +20383,6 @@ python_ref_db = [
             # There's a discrepancy in returned shape between CPU and other devices
             # AssertionError: Shapes torch.Size([0]) and torch.Size([2]) are not equal!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type="cpu"),
-        ),
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/85960
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
         ),
     ),
     PythonRefInfo(

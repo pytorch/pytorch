@@ -447,6 +447,14 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, co
   }
 
   batch_norm_elementwise(output, self, weight_opt, bias_opt, save_mean, save_invstd);
+
+  if (!train) {
+    auto options = self.options().dtype(
+        at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
+    save_mean = at::empty({0}, options);
+    save_invstd = at::empty({0}, options);
+  }
+
   return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_invstd);
 }
 
@@ -455,16 +463,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
   int64_t n_input = self.size(1);
   auto options = self.options().dtype(
       at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
-  Tensor save_mean;
-  Tensor save_invstd;
-
-  if (train) {
-    save_mean = at::empty({n_input}, options);
-    save_invstd = at::empty({n_input}, options);
-  } else {
-    save_mean = at::empty({0}, options);
-    save_invstd = at::empty({0}, options);
-  }
+  auto save_mean = at::empty({n_input}, options);
+  auto save_invstd = at::empty({n_input}, options);
 
   at::native::batch_norm_cuda_out(
       self,
