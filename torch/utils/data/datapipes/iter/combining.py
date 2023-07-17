@@ -421,7 +421,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self.main_datapipe_exhausted = False
         self._child_stop: List[bool] = [True for _ in range(num_instances)]
 
-    def _find_next(self, instance_id: int) -> T_co:
+    def _find_next(self, instance_id: int) -> T_co:  # type: ignore[type-var]
         while True:
             if self.main_datapipe_exhausted or self._child_stop[instance_id]:
                 raise StopIteration
