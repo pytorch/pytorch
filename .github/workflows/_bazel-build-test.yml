@@ -171,7 +171,7 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
-          echo "container_id=${container_name}" >> "${GITHUB_ENV}")
+          echo "container_id=${container_name}" >> "${GITHUB_ENV}"
 
       - name: Test
         id: test
