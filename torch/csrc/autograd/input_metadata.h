@@ -143,6 +143,17 @@ struct InputMetadata {
   bool is_nested_tensor() const {
     return (c10::holds_alternative<at::Tensor>(shape_));
   }
+
+  c10::SymIntArrayRef shape_as_dim_vector() const {
+    const auto& dim_shape = c10::get<SymIntSmallVec>(shape_);
+    return c10::SymIntArrayRef(dim_shape.data(), dim_shape.size());
+  }
+
+  SymIntSmallVec& mutable_shape_as_dim_vector() {
+    return c10::get<SymIntSmallVec>(shape_);
+  }
+
+ private:
   MetadataShape compute_variant_shape(const at::Tensor& input) {
     if (input.is_nested()) {
       auto nested_size = at::native::get_nested_sizes(input);
@@ -151,19 +162,10 @@ struct InputMetadata {
     return MetadataShape{c10::in_place_type<SymIntSmallVec>, input.sym_sizes()};
   }
 
-  c10::SymIntArrayRef shape_as_dim_vector() const {
-    const auto& dim_shape = c10::get<SymIntSmallVec>(shape_);
-    return c10::SymIntArrayRef(dim_shape.data(), dim_shape.size());
-  }
-  SymIntSmallVec& mutable_shape_as_dim_vector() {
-    return c10::get<SymIntSmallVec>(shape_);
-  }
-
   at::Tensor shape_as_tensor() const {
     return c10::get<at::Tensor>(shape_);
   }
 
- private:
   const at::TensorOptions options_;
   MetadataShape shape_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());
