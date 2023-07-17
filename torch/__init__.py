@@ -4,7 +4,11 @@ The torch package contains data structures for multi-dimensional
 tensors and defines mathematical operations over these tensors.
 Additionally, it provides many utilities for efficient serialization of
 Tensors and arbitrary types, and other useful utilities.
-
+It provides a flexible and efficient frameowrk for building and training
+neural networks.
+Torch is widely recognized for its expressive and user-friendly interface, 
+making it a preferred choice for researchers and practitioners in the field 
+of artificial intelligence.
 It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
