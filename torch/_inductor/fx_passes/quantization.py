@@ -190,26 +190,10 @@ def register_quantization_lowerings():
     )
 
 
-dequant_node_pattern = CallFunction(
-    aten.mul.Tensor,
-    CallFunction(
-        aten.sub.Tensor,
-        CallFunction(
-            prims.convert_element_type.default,
-            KeywordArg("x"),
-            KeywordArg("o_dtype"),  # dtype=torch.float32
-        ),
-        KeywordArg("dequant_zp"),  # dequant zp
-    ),
-    KeywordArg("dequant_scale"),  # dequant_scale
-)
-
-
 def _is_valid_dequant_promotion_pattern(match):
     mul_node = match.output_node()
     sub_node = mul_node.args[0]
     to_fp32_node = sub_node.args[0]
-
     if (
         mul_node.target is aten.mul.Tensor
         and sub_node.target is aten.sub.Tensor
@@ -228,6 +212,8 @@ def _register_dequant_promotion_pass(pattern, pass_number):
         pass_number=pass_number,
     )
     def dequant_promotion(match: Match, *args, **kwargs):
+        # If dequant pattern used by multiply nodes,
+        # we will do dequant promotion. So each user node has a seperate dequant pattern connected.
         def clone_to_new_node(graph, source_node, user_node):
             assert (
                 source_node.op == "call_function"
@@ -250,8 +236,6 @@ def _register_dequant_promotion_pass(pattern, pass_number):
         assert to_fp32_node.target is prims.convert_element_type.default
 
         graph = match.graph
-        # If dequant pattern used by multiply nodes,
-        # Will do dequant promotion, so each user node has a seperate dequant pattern connected.
         for index in range(len(list(mul_node.users)) - 1):
             user_node = list(mul_node.users)[index]
             # Step1: Duplicate the mul node
@@ -263,6 +247,11 @@ def _register_dequant_promotion_pass(pattern, pass_number):
 
 
 def _is_valid_dequant_conv2d_pattern(match):
+    # Here we do some further check to ensure:
+    # 1. It's a conv2d node with dim of 4, since we only support lowering of conv2d now.
+    # 2. The dequant pattern has only 1 user of conv2d node.
+    # If these conditions don't meet, we will not
+    # insert weight prepack node into the matched pattern.
     conv_node = match.output_node()
     assert conv_node.target is aten.convolution.default
     input_meta_value = conv_node.args[0].meta.get("val")
@@ -276,15 +265,13 @@ def _is_valid_dequant_conv2d_pattern(match):
             # Only support conv2d now
             return False
 
-    (
-        to_fp32_node,
-        sub_node,
-        mul_node,
-    ) = match.nodes[0:3]
+    mul_node = conv_node.args[0]
+    sub_node = mul_node.args[0]
+    to_fp32_node = sub_node.args[0]
 
-    assert to_fp32_node.target is torch.ops.prims.convert_element_type.default
-    assert sub_node.target is torch.ops.aten.sub.Tensor
-    assert mul_node.target is torch.ops.aten.mul.Tensor
+    assert to_fp32_node.target is prims.convert_element_type.default
+    assert sub_node.target is aten.sub.Tensor
+    assert mul_node.target is aten.mul.Tensor
     if (
         len(list(to_fp32_node.users)) != 1
         or len(list(sub_node.users)) != 1
@@ -304,7 +291,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number):
     )
     def qconv_weight_prepack(match: Match, *args, **kwargs):
         """
-        Macth the pattern:
+        Match the pattern:
         int8 activation
           |
         dequant_per_tensor
@@ -316,28 +303,26 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number):
           |
         onednn.qconv2d_pointwise <- onednn.qconv_prepack <- int8_weight
         """
-        has_clone_to_channel_last_node_in_pattern = any(
-            node.target == aten.clone.default for node in match.nodes
-        )
-
-        (
-            to_fp32_node,
-            sub_node,
-            mul_node,
-            dequant_per_channel,
-        ) = match.nodes[0:4]
-
-        clone_node = (
-            match.nodes[4] if has_clone_to_channel_last_node_in_pattern else None
-        )
-        conv_node = (
-            match.nodes[5]
-            if has_clone_to_channel_last_node_in_pattern
-            else match.nodes[4]
-        )
-        if clone_node is not None:
-            assert clone_node.target is aten.clone.default
+        conv_node = match.output_node()
         assert conv_node.target is aten.convolution.default
+        mul_node = conv_node.args[0]
+        sub_node = mul_node.args[0]
+        to_fp32_node = sub_node.args[0]
+        has_clone_to_channel_last_node_in_pattern = (
+            conv_node.args[1].target is aten.clone.default
+        )
+        clone_node = (
+            conv_node.args[1] if has_clone_to_channel_last_node_in_pattern else None
+        )
+        dequant_per_channel = (
+            clone_node.args[0]
+            if has_clone_to_channel_last_node_in_pattern
+            else conv_node.args[1]
+        )
+        assert (
+            dequant_per_channel.target
+            is quantized_decomposed.dequantize_per_channel.default
+        )
 
         # Activation QParams
         qx, x_zp, x_scale = (
@@ -453,7 +438,7 @@ def _generate_qconv_weight_prepack_patterns():
 @functools.lru_cache(None)
 def _register_quantization_weight_pack_pass():
     _register_dequant_promotion_pass(
-        dequant_node_pattern, pass_number=0
+        dequantize_per_tensor_activation_pattern, pass_number=0
     )  # pass_number=0 to run before weight prepack
     weight_prepack_patterns = _generate_qconv_weight_prepack_patterns()
     for weight_prepack_pattern in weight_prepack_patterns:
