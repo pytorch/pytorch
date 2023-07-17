@@ -136,10 +136,6 @@ struct alignas(1) Float8_e5m2 {
   inline C10_HOST_DEVICE bool isinf() const;
 };
 
-#ifdef __clang__
-#pragma GCC diagnostic pop
-#endif
-
 C10_API std::ostream& operator<<(std::ostream& out, const Float8_e5m2& value);
 
 } // namespace c10
