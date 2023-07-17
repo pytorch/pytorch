@@ -1070,7 +1070,18 @@ def same(
             log_error("Accuracy failed (numpy): %s != %s", ref, res)
         return r
     elif is_numpy_ndarray(ref):
-        return (type(ref) is type(res)) and (ref == res).all()
+        return (type(ref) is type(res)) and same(
+            torch.as_tensor(ref),
+            torch.as_tensor(res),
+            fp64_ref,
+            cos_similarity=cos_similarity,
+            tol=tol,
+            equal_nan=equal_nan,
+            exact_dtype=exact_dtype,
+            relax_numpy_equality=relax_numpy_equality,
+            ignore_non_fp=ignore_non_fp,
+            log_error=log_error,
+        )
     elif type(ref).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
