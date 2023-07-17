@@ -46,7 +46,6 @@ importlib.import_module("filelock")
 # xfail by default, set is_skip=True to skip
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
-    "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
 }
 
 if TEST_WITH_ROCM:
@@ -60,8 +59,9 @@ if TEST_WITH_ROCM:
     test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
         ("cuda"), is_skip=True
     )
-    # aten.miopen_batch_norm is not registered for lowering
-    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
+    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(
+        ("cuda"), is_skip=True
+    )
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):

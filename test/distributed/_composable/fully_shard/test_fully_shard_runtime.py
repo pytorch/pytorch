@@ -147,7 +147,8 @@ class TestRuntime(FSDPTest):
         # assumption about wrapper FQN being a suffix of composable FQN holds
         all_composable_handles = traversal_utils._get_fsdp_handles(composable_module)
         all_wrapped_handles = traversal_utils._get_fsdp_handles(fsdp_wrapped_model)
-        self._check_same_param_handles(all_composable_handles, all_wrapped_handles)
+        for c_handle, w_handle in zip(all_composable_handles, all_wrapped_handles):
+            self._check_same_param_handles(c_handle, w_handle)
         num_handles = len(all_composable_handles)
 
         orig_unshard = torch.distributed.fsdp._runtime_utils._unshard
