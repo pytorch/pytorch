@@ -161,7 +161,10 @@ def is_fake(x):
     if is_traceable_wrapper_subclass(x):
         flattened_tensors, _ = type(x).__tensor_flatten__(x)
         # need to recurse because we could have nested subclasses
-        return all(is_fake(x) for x in flattened_tensors)
+        all_fake = all(is_fake(x) for x in flattened_tensors)
+        any_fake = any(is_fake(x) for x in flattened_tensors)
+        assert all_fake == any_fake, "got mixed fake and real tensors!"
+        return all_fake
     return False
 
 

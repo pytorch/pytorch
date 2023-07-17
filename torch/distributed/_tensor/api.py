@@ -222,7 +222,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
     @staticmethod
     def __tensor_unflatten__(local_tensor, spec):
-        assert spec is not None
+        assert (
+            spec is not None
+        ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
         return DTensor(
             local_tensor,
             spec.mesh,
