@@ -2910,6 +2910,14 @@ class CommonTemplate:
 
         self.assertEqual(o1, o2)
 
+    def test_view_as_real(self):
+        def fn(x):
+            return torch.view_as_real(x)
+
+        x = torch.randn(4, dtype=torch.complex64)
+
+        self.common(fn, (x,))
+
     def test_cauchy(self):
         def fn(x, y):
             return torch.sum(1 / (torch.unsqueeze(x, -1) - y))
