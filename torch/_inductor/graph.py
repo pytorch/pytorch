@@ -692,8 +692,6 @@ class GraphLowering(torch.fx.Interpreter):
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):
-                # requiring a stride order for a non-dense output wouldn't
-                # recreate the same strides, and would fail with view, defer for now.
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
