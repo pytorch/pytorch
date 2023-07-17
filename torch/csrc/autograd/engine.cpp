@@ -455,7 +455,7 @@ std::vector<Node*> get_current_graph_task_execution_order() {
         }
       }
       auto it = dependencies.find(edge.function.get());
-      TORCH_CHECK(it != dependencies.end());
+      TORCH_INTERNAL_ASSERT(it != dependencies.end());
       if (--it->second == 0) {
         dependencies.erase(it);
         heap.push(next_ptr);
