@@ -6,7 +6,7 @@ import warnings
 import functools
 import math
 
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple, Optional
 from torch import Tensor
 
 import torch.utils.hooks as hooks
@@ -105,7 +105,10 @@ def _default_to_fused_or_foreach(params: List[torch.Tensor],
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use
             foreach over the for-loop implementation on CUDA, since it is usually
-            significantly more performant. (default: None)"""
+            significantly more performant. Note that the foreach implementation uses
+            ~ sizeof(params) more peak memory than the for-loop version due to the intermediates
+            being a tensorlist vs just one tensor. If memory is prohibitive, batch fewer
+            parameters through the optimizer at a time or switch this flag to False (default: None)"""
 
 _fused_doc = r"""fused (bool, optional): whether the fused implementation (CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
@@ -205,7 +208,7 @@ class Optimizer:
                             "an iterable of Tensors or dicts, but got " +
                             torch.typename(params))
 
-        self.state = defaultdict(dict)
+        self.state: Dict[int, Any] = defaultdict(dict)
         self.param_groups = []
 
         param_groups = list(params)
@@ -337,8 +340,8 @@ class Optimizer:
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
         hooked = getattr(self.__class__.step, "hooked", None)
         if not hooked:
-            self.__class__.step = self.profile_hook_step(self.__class__.step)
-            self.__class__.step.hooked = True
+            self.__class__.step = self.profile_hook_step(self.__class__.step)  # type: ignore[method-assign]
+            self.__class__.step.hooked = True  # type: ignore[attr-defined]
 
     def register_step_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
         r"""Register an optimizer step pre hook which will be called before
@@ -415,14 +418,15 @@ class Optimizer:
         }
 
     @staticmethod
-    def _process_value_according_to_param_policy(param: Tensor, value: Tensor, param_id: int = None,
-                                                 param_groups: List[Dict[Any, Any]] = None, key=None) -> Tensor:
+    def _process_value_according_to_param_policy(param: Tensor, value: Tensor, param_id: Optional[int] = None,
+                                                 param_groups: Optional[List[Dict[Any, Any]]] = None, key=None) -> Tensor:
         # Floating-point types are a bit special here. They are the only ones
         # that are assumed to always match the type of params.
         # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
         # UNLESS fused or capturable, see note [special device hosting for step]
         fused = False
         capturable = False
+        assert param_groups is not None
         for pg in param_groups:
             if param_id in pg["params"]:
                 fused = pg["fused"] if "fused" in pg else False
@@ -474,14 +478,14 @@ class Optimizer:
             elif isinstance(value, dict):
                 return {k: cast(param, v, param_id=param_id, param_groups=param_groups, key=k) for k, v in value.items()}
             elif isinstance(value, container_abcs.Iterable):
-                return type(value)(cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)
+                return type(value)(cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)  # type: ignore[call-arg]
             else:
                 return value
 
         # Copy state assigned to params (and cast tensors to appropriate types).
         # State that is not assigned to params is copied as is (needed for
         # backward compatibility).
-        state = defaultdict(dict)
+        state: Dict[Any, Dict[Any, Any]] = defaultdict(dict)
         for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]
@@ -518,7 +522,7 @@ class Optimizer:
         if not hasattr(self, "_zero_grad_profile_name"):
             self._patch_step_function()
         if foreach:
-            per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
+            per_device_and_dtype_grads: Dict[Any, Dict[Any, List[Any]]] = defaultdict(lambda: defaultdict(list))
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
             for group in self.param_groups:
                 for p in group['params']:
