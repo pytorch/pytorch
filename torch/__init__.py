@@ -9,7 +9,6 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
-import copy
 import math
 import os
 import sys
@@ -1546,15 +1545,14 @@ class _TorchCompileInductorWrapper:
                 )
             self.config[attr_name] = val
 
-    def get_compiler_config(self):
-        from torch._inductor import config as inductor_config
-        with inductor_config.patch(self.config):
-            return copy.deepcopy(inductor_config.to_dict())
-
     def __call__(self, model_, inputs_):
         from torch._inductor.compile_fx import compile_fx
 
         return compile_fx(model_, inputs_, config_patches=self.config)
+
+    def get_compiler_config(self):
+        from torch._inductor.compile_fx import get_patched_config_dict
+        return get_patched_config_dict(config_patches=self.config)
 
     def reset(self):
         from torch._inductor import config

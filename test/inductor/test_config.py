@@ -124,7 +124,7 @@ class TestInductorConfig(TestCase):
 
         default_cudagraphs = inductor_default_config._default["triton.cudagraphs"]
 
-        # should update default config with a new value
+        # nn.Module: should update default config with a new value
         model = DummyModule()
         optimized_module = torch.compile(
             model, options={"triton.cudagraphs": not default_cudagraphs}
@@ -132,15 +132,34 @@ class TestInductorConfig(TestCase):
         compiler_config = optimized_module.get_compiler_config()
         self.assertEqual(compiler_config["triton.cudagraphs"], not default_cudagraphs)
 
-        # keep default config
+        # nn.Module: keep default config
         model = DummyModule()
         optimized_module = torch.compile(model)
         compiler_config = optimized_module.get_compiler_config()
-
         self.assertEqual(
             compiler_config["triton.cudagraphs"],
             default_cudagraphs,
         )
+
+        # compile user func: should update default config with a new value
+        optimized_module = torch.compile(
+            dummy_fn, options={"triton.cudagraphs": not default_cudagraphs}
+        )
+        compiler_config = optimized_module.get_compiler_config()
+        self.assertEqual(compiler_config["triton.cudagraphs"], not default_cudagraphs)
+
+        # compile user func: keep default config
+        optimized_module = torch.compile(dummy_fn)
+        compiler_config = optimized_module.get_compiler_config()
+        self.assertEqual(
+            compiler_config["triton.cudagraphs"],
+            default_cudagraphs,
+        )
+
+        # backend=eager: expect None
+        optimized_module = torch.compile(dummy_fn, backend="eager")
+        compiler_config = optimized_module.get_compiler_config()
+        self.assertTrue(compiler_config is None)
 
     def test_compile_api_passes_config(self):
         # ensure configs are actually passed down to inductor
