@@ -567,7 +567,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
         # Keep everything deterministic.
         torch.manual_seed(0)
         tensor = torch.rand(size)
-        if torch.cuda.is_available():
+        if self.device_type == "cuda":
             return tensor.cuda()
         else:
             return tensor
