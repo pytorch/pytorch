@@ -215,7 +215,7 @@ def _fx_args_to_torch_args(
                 wrapped_args.append(real_tensor)
             elif isinstance(fake_tensor, (int, float, bool)):
                 wrapped_args.append(fake_tensor)
-            elif isinstance(fake_tensor, (torch.SymBool, torch.SymInt, torch.SymFloat)):
+            elif fx_type_utils.is_torch_symbolic_type(fake_tensor):
                 raise ValueError(
                     f"Unexpected input argument Sym type found inside fx.Node. arg: {arg}; "
                     f"arg.meta['static_shape']: {fake_tensor}; type(arg.meta['static_shape']): "

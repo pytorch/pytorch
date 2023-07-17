@@ -15,7 +15,12 @@ from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import decorator, formatter, utils
 
-_LENGTH_LIMIT: int = 89
+from torch.onnx._internal.fx import type_utils as fx_type_utils
+
+# NOTE: Symbolic shapes could be a calculation of values, such as
+# Tensor(i64[s0, 64, (s1//2) - 2, (s1//2) - 2]) where s0 and s1 are symbolic
+# so we need to relax the length limit.
+_LENGTH_LIMIT: int = 120
 
 # NOTE(bowbao): This is a shim over `torch.onnx._internal.diagnostics`, which is
 # used in `torch.onnx`, and loaded with `torch`. Hence anything related to `onnxscript`
@@ -31,21 +36,23 @@ def format_argument(obj: Any) -> str:
     formatter = _format_argument.dispatch(type(obj))
     result_str = formatter(obj)
 
-    if len(result_str) > _LENGTH_LIMIT:
-        # TODO(bowbao): group diagnostics.
-        #   Related fields of sarif.Result: occurance_count, fingerprints.
-        #   Do a final process to group results before outputing sarif log.
-        diag = infra.Diagnostic(
-            *diagnostics.rules.arg_format_too_verbose.format(
-                level=infra.levels.WARNING,
-                length=len(result_str),
-                length_limit=_LENGTH_LIMIT,
-                argument_type=type(obj),
-                formatter_type=type(format_argument),
+    result_str_lines = result_str.splitlines()
+    for line in result_str_lines:
+        if len(line) > _LENGTH_LIMIT:
+            # TODO(bowbao): group diagnostics.
+            #   Related fields of sarif.Result: occurance_count, fingerprints.
+            #   Do a final process to group results before outputing sarif log.
+            diag = infra.Diagnostic(
+                *diagnostics.rules.arg_format_too_verbose.format(
+                    level=infra.levels.WARNING,
+                    length=len(result_str),
+                    length_limit=_LENGTH_LIMIT,
+                    argument_type=type(obj),
+                    formatter_type=type(format_argument),
+                )
             )
-        )
-        diag.with_location(utils.function_location(formatter))
-        diagnostics.export_context().log(diag)
+            diag.with_location(utils.function_location(formatter))
+            diagnostics.export_context().log(diag)
 
     return result_str
 
@@ -71,35 +78,84 @@ def _torch_fx_graph_module(obj: torch.fx.GraphModule) -> str:
 
 @_format_argument.register
 def _torch_fx_node(obj: torch.fx.Node) -> str:
-    shape = obj.meta["val"].shape if "val" in obj.meta else None
-    dtype = obj.meta["val"].dtype if "val" in obj.meta else None
-    return f"fx.Node({obj.name}[{obj.op}]'{obj.target}', shape={shape}, dtype={dtype})"
+    node_string = f"fx.Node({obj.target})[{obj.op}]:"
+    if "val" not in obj.meta:
+        return node_string + "None"
+    return node_string + _format_nested_argument_by_dtype(obj.meta["val"])
+
+
+@_format_argument.register
+def _torch_fx_symbolic_value(
+    obj,  # NOTE: singledispatch does not support Union until 3.11, so we use Any here.
+) -> str:
+    return f"Sym({obj})"
+
+
+# from torch/fx/graph.py to follow torch format
+def _stringify_shape(shape: Optional[torch.Size]) -> str:
+    if shape is None:
+        return ""
+    return f"[{', '.join(str(x) for x in shape)}]"
+
+
+def _format_nested_argument_by_dtype(obj: Any) -> str:
+    """Dispatch to the correct formatter based on the type of the argument."""
+    if isinstance(obj, torch.Tensor):
+        return _torch_tensor(obj)
+    if isinstance(obj, torch.nn.Parameter):
+        return _torch_nn_parameter(obj)
+    if isinstance(obj, torch.fx.Node):
+        return _torch_fx_node(obj)
+    if fx_type_utils.is_torch_symbolic_type(obj):
+        return _torch_fx_symbolic_value(obj)
+    if isinstance(obj, graph_building.TorchScriptTensor):
+        return _onnxscript_torch_script_tensor(obj)
+    if isinstance(obj, onnxscript.OnnxFunction):
+        return _onnxscript_onnx_function(obj)
+    if isinstance(obj, onnxscript.TracedOnnxFunction):
+        return _onnxscript_traced_onnx_function(obj)
+    if isinstance(obj, list):
+        return _list(obj)
+    if isinstance(obj, tuple):
+        return _tuple(obj)
+    if isinstance(obj, dict):
+        return _dict(obj)
+    return format_argument(obj)
 
 
 @_format_argument.register
 def _torch_tensor(obj: torch.Tensor) -> str:
-    return f"Tensor(shape={obj.shape}, dtype={obj.dtype})"
+    return f"Tensor({fx_type_utils.from_torch_dtype_to_abbr(obj.dtype)}{_stringify_shape(obj.shape)})"
 
 
 @_format_argument.register
 def _list(obj: list) -> str:
-    if obj:
-        return f"List(length={len(obj)}, element_type={type(obj[0])})"
-    return f"List(length={len(obj)}, element_type=None)"
+    list_string = f"List[length={len(obj)}](\n"
+    if not obj:
+        return list_string + "None)"
+    for item in obj:
+        list_string += f"{_format_nested_argument_by_dtype(item)},\n"
+    return list_string + ")"
 
 
 @_format_argument.register
 def _tuple(obj: tuple) -> str:
-    if obj:
-        return f"Tuple(length={len(obj)}, element_type={type(obj[0])})"
-    return f"Tuple(length={len(obj)}, element_type=None)"
+    tuple_string = f"Tuple[length={len(obj)}](\n"
+    if not obj:
+        return tuple_string + "None)"
+    for item in obj:
+        tuple_string += f"{_format_nested_argument_by_dtype(item)},\n"
+    return tuple_string + ")"
 
 
 @_format_argument.register
 def _dict(obj: dict) -> str:
-    if obj:
-        return f"Dict(length={len(obj)}, key_type={type(list(obj.keys())[0])}, value_type={type(list(obj.values())[0])})"
-    return f"Dict(length={len(obj)}, key_type=None, value_type=None)"
+    dict_string = f"Dict[length={len(obj)}](\n"
+    if not obj:
+        return dict_string + "None)"
+    for key, value in obj.items():
+        dict_string += f"{key}: {_format_nested_argument_by_dtype(value)},\n"
+    return dict_string + ")"
 
 
 @_format_argument.register
@@ -109,13 +165,17 @@ def _torch_nn_parameter(obj: torch.nn.Parameter) -> str:
 
 @_format_argument.register
 def _onnxscript_torch_script_tensor(obj: graph_building.TorchScriptTensor) -> str:
-    # TODO(bowbao) obj.dtype throws error.
-    return f"`TorchScriptTensor({obj.name}, {obj.onnx_dtype}, {obj.shape}, {obj.symbolic_value()})`"
+    return f"`TorchScriptTensor({fx_type_utils.from_torch_dtype_to_abbr(obj.dtype)}{_stringify_shape(obj.shape)})`"
 
 
 @_format_argument.register
 def _onnxscript_onnx_function(obj: onnxscript.OnnxFunction) -> str:
     return f"`OnnxFunction({obj.name})`"
+
+
+@_format_argument.register
+def _onnxscript_traced_onnx_function(obj: onnxscript.TracedOnnxFunction) -> str:
+    return f"`TracedOnnxFunction({obj.name})`"
 
 
 diagnose_call = functools.partial(

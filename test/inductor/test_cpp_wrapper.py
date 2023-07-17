@@ -82,9 +82,6 @@ test_failures_cpp_wrapper = {
 }
 
 test_failures_cuda_wrapper = {
-    "test_custom_op_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",), is_skip=True
-    ),
     "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
         ("cuda_wrapper",), is_skip=True
     ),
@@ -185,6 +182,7 @@ if RUN_CPU:
         BaseTest("test_mm_views"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_randint"),
+        BaseTest("test_randn_with_dtype_and_device"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
