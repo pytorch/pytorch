@@ -338,6 +338,8 @@ aten::mul.Tensor
 aten::mul.out
 aten::mul_.Scalar
 aten::mul_.Tensor
+aten::multilabel_margin_loss_forward
+aten::multilabel_margin_loss_forward.output
 aten::narrow_copy
 aten::narrow_copy.out
 aten::native_dropout

@@ -3502,6 +3502,57 @@ def multi_margin_loss(
         return z.mean(dim=1)
 
 
+@register_decomposition(aten.multilabel_margin_loss_forward)
+@aten.multilabel_margin_loss_forward.default.py_impl(DispatchKey.Autograd)
+@out_wrapper("output", "is_target")
+def multilabel_margin_loss_forward(
+    input: Tensor,
+    target: Tensor,
+    reduction: int,
+) -> Tuple[Tensor, Tensor]:
+    orig_target_shape = target.shape
+    input = torch.atleast_2d(input)
+    target = torch.atleast_2d(target)
+    dim = input.shape[1]
+    torch._check(
+        input.ndim == 2 and dim != 0,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+    )
+    torch._check(
+        target.ndim == 2 and target.shape == input.shape,
+        lambda: f"inconsistent size {orig_target_shape} for argument #2 'target'",
+    )
+    # ignores labels after the first -1, but detects when -1 is not present
+    idx = torch.arange(dim, device=target.device)
+    is_end = (target == -1).to(torch.uint8)  # no bool support for argmin/max
+    mins = is_end.argmin(dim=-1, keepdim=True)
+    maxs = is_end.argmax(dim=-1, keepdim=True)
+    end_idx = torch.where(mins != maxs, maxs, dim)
+    # target indices
+    target_mask = idx < end_idx
+    u = torch.gather(input, dim=-1, index=target)
+    # input indices (not in target)
+    tidx = torch.where(target_mask, target, -1)
+    input_mask = (idx != tidx.unsqueeze(dim=-1)).all(dim=1)
+    # loss
+    z = 1.0 - u.T.unsqueeze(dim=-1) + input
+    z = z.clamp_min(0)
+    z = z / dim
+    # masks loss
+    mask = target_mask.T.unsqueeze(dim=-1) == input_mask
+    z = torch.where(mask, z, 0)
+    # reduction
+    if reduction == Reduction.MEAN.value:
+        z = torch.sum(z, dim=(0, -1)).mean()
+    elif reduction == Reduction.SUM.value:
+        z = z.sum()
+    else:
+        z = torch.sum(z, dim=(0, -1))
+    # result
+    is_target = (~input_mask).to(input.dtype).reshape(orig_target_shape)
+    return z, is_target
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
