@@ -57,10 +57,10 @@ class _ToTorchTensor(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input: "DTensor"):  # type: ignore[override]
         ctx.dtensor_spec = input._spec
-        # detach local tensor from its autograd graph as autograd works
-        # on top of DTensor and when calling to_local, it should be
-        # transformed to the local tensor before we return it.
-        return input._local_tensor.detach()
+        # We need to return a fresh Tensor object there as autograd metadata
+        # will be inplaced into it. So we don't want to polute the Tensor
+        # object stored in _local_tensor.
+        return input._local_tensor.view_as(input._local_tensor)
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
@@ -114,10 +114,9 @@ class _FromTorchTensor(torch.autograd.Function):
                     input = input.contiguous()
                     device_mesh.broadcast(input, mesh_dim=idx)
 
-        # detach the local tensor passed to DTensor since after the construction
-        # of DTensor, autograd would work on top of DTensor instead of local tensor
+        # We want a fresh Tensor object that shares memory with the input tensor
         dist_tensor = DTensor(
-            input.detach(),
+            input.view_as(input),
             device_mesh,
             placements,
             shape=torch.Size(tensor_shape),
