@@ -65,7 +65,11 @@ void setDebugLevel(DebugLevel level) {
 }
 
 void setDebugLevelFromEnvironment() {
-  g_debug_level = detail::loadDebugLevelFromEnvironment();
+  // short circuit to produce useful DEBUG and TRACE in TCPStore initialization
+  // this is to capture the hard-to-produce TCPStore init failure in prod where
+  // TORCH_DISTRIBUTED_DEBUG is set to OFF.
+  g_debug_level = DebugLevel::Detail;
+  // g_debug_level = detail::loadDebugLevelFromEnvironment();
 }
 
 DebugLevel debug_level() noexcept {
