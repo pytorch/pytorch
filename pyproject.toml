@@ -45,6 +45,8 @@ ignore = [
     "F841",
     # these ignores are from flake8-logging-format; please fix!
     "G101", "G201", "G202",
+    # these ignores are from RUFF perf; please fix!
+    "PERF203", "PERF4",
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
     "SIM108",
@@ -65,6 +67,7 @@ select = [
     "SIM1",
     "W",
     # Not included in flake8
+    "PERF",
     "PLE",
     "TRY302",
 ]

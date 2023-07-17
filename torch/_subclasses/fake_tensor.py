@@ -1230,7 +1230,7 @@ class FakeTensorMode(TorchDispatchMode):
                 FakeTensor, lambda t: t.constant, (args, kwargs)
             )
             out = func(*const_args, **const_kwargs)
-            if self.may_turn_const(out):
+            if isinstance(out, torch.Tensor) and self.may_turn_const(out):
                 # NB: not in_kernel_invocation_manager because we're doing real
                 # compute here
                 with no_dispatch():
