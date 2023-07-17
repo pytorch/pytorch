@@ -45,12 +45,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import (
-    ceildiv,
-    decode_device,
-    pad_listlike,
-    sympy_product,
-)
+from .utils import ceildiv, decode_device, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
