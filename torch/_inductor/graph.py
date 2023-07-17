@@ -99,13 +99,6 @@ def is_magic_method(op):
     return op in magic_ops
 
 
-as_strided_ops = [
-    torch.ops.aten.as_strided.default,
-    torch.ops.aten.as_strided_.default,
-    torch.ops.aten.as_strided_scatter.default,
-]
-
-
 class GraphLowering(torch.fx.Interpreter):
     def symbolic_sizes_strides(self, ex: torch.Tensor):
         """
@@ -370,8 +363,7 @@ class GraphLowering(torch.fx.Interpreter):
         for n in self.module.graph.nodes:
             if n in output_set:
                 for child in n.users:
-                    if child.target not in as_strided_ops:
-                        output_set.add(child)
+                    output_set.add(child)
 
         return output_set
 
@@ -688,6 +680,11 @@ class GraphLowering(torch.fx.Interpreter):
             # with infallible strides.
             # 2: as_strided ops, we need make sure its input has same size/stride with
             # eager model to align with eager behavior.
+            as_strided_ops = [
+                torch.ops.aten.as_strided.default,
+                torch.ops.aten.as_strided_.default,
+                torch.ops.aten.as_strided_scatter.default,
+            ]
             is_output = any(user.op == "output" for user in n.users)
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users

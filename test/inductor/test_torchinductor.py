@@ -6233,7 +6233,7 @@ class CommonTemplate:
             (torch.randn(32), torch.randn(32)),
         )
 
-    def test_conv_with_unfold(self):
+    def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
