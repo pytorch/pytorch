@@ -4157,7 +4157,7 @@
     CUDA: batch_norm_backward_reduce_cuda
   autogen: batch_norm_backward_reduce.out
 
-- func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor mean_dy, Tensor mean_dy_xmu, Tensor count) -> Tensor
+- func: batch_norm_backward_elemt(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, Tensor sum_dy, Tensor sum_dy_xmu, Tensor count) -> Tensor
   dispatch:
     CUDA: batch_norm_backward_elemt_cuda
   autogen: batch_norm_backward_elemt.out
