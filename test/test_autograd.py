@@ -3697,6 +3697,18 @@ ExpBackward0, SinBackward0, CloneBackward0, torch::autograd::AccumulateGrad
         self.assertEqual(predicted[0], grad_fns(*actual))
         actual = []
 
+        # Accumulate grad node has more than one input
+        a = torch.tensor(1., requires_grad=True)
+        b = a.sin()
+        c = a.cos()
+        out = b * c
+        register_logging_hooks(a, b, c, out)
+        out.register_hook(hook)
+        with torch.autograd.set_multithreading_enabled(False):
+            out.backward()
+        self.assertEqual(predicted[0], grad_fns(*actual))
+        actual = []
+
         # Multiple roots are also OK
         a = torch.tensor(1., requires_grad=True)
         b = a * 2
