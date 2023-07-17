@@ -1655,8 +1655,8 @@ class FlatParamHandle:
         if self._use_orig_params:
             in_forward = self._training_state == HandleTrainingState.FORWARD
             if (
-            	torch.is_grad_enabled() 
-            	and in_forward
+                torch.is_grad_enabled()
+                and in_forward
                 and self._sharding_strategy
                 in NO_RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES
             ):

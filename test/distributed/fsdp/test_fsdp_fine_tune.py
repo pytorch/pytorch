@@ -103,8 +103,10 @@ class TestFSDPFineTune(FSDPTest):
 
         def _assert_post_backward_requires_grad(seq):
             if step_idx == num_steps - 1 and unfreeze_params:
-                self.assertTrue(all(p.requires_grad for p in seq.parameters()), 
-                                msg="Expected all parameters to require grad but some did not!")
+                self.assertTrue(
+                    all(p.requires_grad for p in seq.parameters()),
+                    msg="Expected all parameters to require grad but some did not!",
+                )
 
         def _assert_post_backward_reshard_count(step_idx, num_steps):
             if step_idx < num_steps - 1 or not unfreeze_params:
@@ -142,7 +144,7 @@ class TestFSDPFineTune(FSDPTest):
                     with torch.no_grad():
                         output = seq(inp)
                 else:
-                    output = seq(inp)  
+                    output = seq(inp)
                 if step_idx != nograd_step_idx:
                     output.sum().backward()
                     _assert_post_backward_requires_grad(seq)
