@@ -163,7 +163,9 @@ class BenchmarkRequest:
 
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
         if DEBUG:
-            print(f"benchmark module key: {self.module_cache_key}, path: {self.module_path}")
+            print(
+                f"benchmark module key: {self.module_cache_key}, path: {self.module_path}"
+            )
 
         run = getattr(mod, self.kernel_name).run
 

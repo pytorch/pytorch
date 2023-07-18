@@ -21,6 +21,7 @@ from ..utils import (
     free_symbol_startswith,
     get_sympy_Expr_dtype,
     IndentedBuffer,
+    is_size_var,
     sympy_dot,
     sympy_subs,
     unique,
@@ -928,7 +929,7 @@ class Kernel(CodeGen):
         replacements = {
             x: self.args.size(x)
             for x in sorted_symbols
-            if x.name.startswith("s") or x.name.startswith("ps")
+            if is_size_var(x.name)
         }
         return sympy_subs(index, replacements)
 
