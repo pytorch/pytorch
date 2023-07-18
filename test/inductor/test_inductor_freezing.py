@@ -12,15 +12,13 @@ import weakref
 import torch
 
 import torch._dynamo as torchdynamo
-import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
-import torch.nn.functional as F
+import torch.ao.quantization.pt2e.quantizer.x86_inductor_quantizer as xiq
 from torch import nn
-
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import override_lowering, run_and_get_code
-from torch.ao.quantization._pt2e.quantizer import X86InductorQuantizer
 from torch.ao.quantization._quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
+from torch.ao.quantization.pt2e.quantizer import X86InductorQuantizer
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
@@ -330,7 +328,7 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
 
-    def test_conv_with_unfold(self):
+    def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -339,20 +337,21 @@ class OptimizeForInferenceTemplate(TestCase):
                 )
 
             def forward(self, x):
-                B, _, H, W = x.shape
-                num_h_blocks = H // 8
-                num_w_blocks = W // 8
-                num_blocks = num_h_blocks * num_w_blocks
-
-                kv = self.kv(x)
-                kv = F.pad(kv, [2, 2, 2, 2])
-                kv = (
-                    kv.unfold(2, 12, 8)
-                    .unfold(3, 12, 8)
-                    .reshape(B * 8, 48, num_blocks, -1)
-                    .permute(0, 2, 3, 1)
+                convolution = self.kv(x)
+                constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
+                    convolution, [2, 2, 2, 2], 0.0
                 )
-                return kv
+                # as_strided inputs are depend on input's size and stide.
+                as_strided = torch.ops.aten.as_strided.default(
+                    constant_pad_nd, [8, 384, 2, 20, 12], [153600, 400, 160, 1, 20]
+                )
+                as_strided_1 = torch.ops.aten.as_strided.default(
+                    as_strided, [8, 384, 2, 2, 12, 12], [153600, 400, 160, 8, 20, 1]
+                )
+                clone = torch.ops.aten.clone.default(
+                    as_strided_1, memory_format=torch.contiguous_format
+                )
+                return clone
 
         mod = Model().to(self.device).eval()
 

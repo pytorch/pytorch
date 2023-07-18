@@ -496,6 +496,7 @@ class MetaConverter:
 
         if (
             type(t) is torch.Tensor
+            or type(t) is torch.nn.Buffer
             or type(t) is torch.nn.Parameter
             or (ignore_subclass and isinstance(t, torch.Tensor))
             or isinstance(t, FakeTensor)
@@ -544,6 +545,9 @@ class MetaConverter:
                     # NB: Cannot directly use Parameter constructor
                     # because that would force a detach, not desirable
                     r._is_param = True
+                elif type(t) is torch.nn.Buffer:
+                    # similar to above
+                    r._is_buffer = True
                 return r
         elif torch.overrides.is_tensor_like(t):
             # Blindly converting tensor subclasses to meta can cause
