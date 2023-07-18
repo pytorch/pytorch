@@ -1086,6 +1086,7 @@ class VariableBuilder:
                     example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
                     fake_tensor_value = example_value
+                    assert fake_tensor_value.fake_mode is self.tx.fake_mode
                 proxy.node.meta["grapharg"] = GraphArg(
                     self.get_source(),
                     wrapped_value,
@@ -1193,7 +1194,10 @@ def wrap_fx_proxy_cls(
             example_value = get_fake_value(proxy.node, tx)
 
         # Handle recursive calls here
-        elif isinstance(example_value, FakeTensor):
+        elif (
+            isinstance(example_value, FakeTensor)
+            and example_value.fake_mode is tx.fake_mode
+        ):
             pass
 
         elif isinstance(example_value, torch.Tensor):
@@ -1233,7 +1237,11 @@ def wrap_fx_proxy_cls(
         example_value = _clone_input(example_value)
         proxy.node.meta["example_value"] = example_value
         specialized_props = target_cls.specialize(example_value)
-        if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
+        # TODO: not sure about this fake mode test
+        if (
+            isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor)
+            and example_value.fake_mode is tx.fake_mode
+        ):
             # NB: This will be wrong for ignore_subclass; fix it up later!
             specialized_props["class_type"] = (
                 torch.nn.Parameter if is_parameter else torch.Tensor
@@ -1469,7 +1477,7 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
-    if type(e) in (torch.Tensor, torch.nn.Buffer, torch.nn.Parameter) or (
+    if type(e) in (torch.Tensor, torch.nn.Buffer, torch.nn.Parameter, FakeTensor) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
         assert source is not None
