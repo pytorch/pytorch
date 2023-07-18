@@ -29,7 +29,7 @@ from importlib import abc
 from pathlib import Path
 from threading import Thread
 from time import sleep, time
-from typing import Any, Callable, Dict, List, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import torch
 
