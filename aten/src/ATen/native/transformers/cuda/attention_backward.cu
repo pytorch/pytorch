@@ -194,9 +194,6 @@ _efficient_attention_backward(
   grad_v = at::empty(value.sizes(), value.options());
 
   if (bias_requires_grad) {
-    // Alignment has already been enforced
-    // grad_bias = at::empty_strided((*bias).sizes(), (*bias).strides(), (*bias).options());
-    // grad_bias = at::empty_like(*bias);
     // force alignment for the last dim
     std::vector<int64_t> sz = bias->sizes().vec();
     int64_t lastDim = sz[sz.size() - 1];
