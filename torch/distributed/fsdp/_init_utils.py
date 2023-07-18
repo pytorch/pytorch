@@ -1,4 +1,6 @@
 import collections
+import itertools
+import os
 import warnings
 from typing import (
     Any,
@@ -13,7 +15,6 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    Type,
     Union,
 )
 
@@ -35,7 +36,6 @@ from torch.distributed.fsdp._common_utils import (
     TrainingState,
 )
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
-from torch.distributed.fsdp._wrap_utils import _get_fully_sharded_module_to_states
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
@@ -47,6 +47,7 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.fsdp.flat_param import (
+    _FSDP_USE_FULL_PREC_IN_EVAL,
     _HandlesKey,
     FlatParameter,
     FlatParamHandle,
@@ -394,6 +395,9 @@ def _init_core_state(
         torch._C._log_api_usage_once(
             f"torch.distributed.fsdp.mixed_precision.{str(state.mixed_precision)}"
         )
+    state._use_full_prec_in_eval = (
+        os.environ.get(_FSDP_USE_FULL_PREC_IN_EVAL, "") == "1"
+    )
     state.cpu_offload = cpu_offload or CPUOffload()
     state.limit_all_gathers = limit_all_gathers
     state._use_orig_params = use_orig_params
@@ -479,16 +483,14 @@ def _init_param_handle_from_module(
     device_id: Optional[Union[int, torch.device]],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
-    module_wrapper_cls: Type,
 ) -> _FSDPState:
     """
     Initializes a ``FlatParamHandle`` from a module ``fully_sharded_module``.
-    This is the module wrapper code path.
     """
     _check_single_device_module(fully_sharded_module, state._ignored_params, device_id)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
     is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
-        fully_sharded_module, state._ignored_params
+        fully_sharded_module, state._ignored_params, state._ignored_modules
     )
     # Materialize the module if needed
     if (is_meta_module or is_torchdistX_deferred_init) and param_init_fn is not None:
@@ -498,7 +500,7 @@ def _init_param_handle_from_module(
     elif is_torchdistX_deferred_init:
         deferred_init.materialize_module(
             fully_sharded_module,
-            check_fn=lambda k: not isinstance(k, module_wrapper_cls),
+            check_fn=lambda k: _get_module_fsdp_state(k) is None,
         )
     _move_module_to_device(
         fully_sharded_module, state._ignored_params, device_from_device_id
@@ -516,90 +518,6 @@ def _init_param_handle_from_module(
             fully_sharded_module, managed_params, state.process_group
         )
     _init_param_handle_from_params(state, managed_params, fully_sharded_module)
-    return state
-
-
-@no_type_check
-def _init_param_handles_from_module(
-    state: _FSDPState,
-    root_module: nn.Module,
-    policy: _FSDPPolicy,
-    device_id: Optional[Union[int, torch.device]],
-    param_init_fn: Optional[Callable[[nn.Module], None]],
-    sync_module_states: bool,
-) -> _FSDPState:
-    """
-    Initializes all ``FlatParamHandle`` s from a module ``root_module``. This
-    is the non-module-wrapper code path. ``root_module`` is guaranteed to be
-    a fully sharded module, and some of its submodules may be as well,
-    depending on ``policy``. See [Note: Fully Sharded Module].
-    """
-    fully_sharded_module_to_states = _get_fully_sharded_module_to_states(
-        root_module,
-        policy,
-        state._ignored_modules,
-        state._ignored_params,
-    )
-    _check_single_device_module(root_module, state._ignored_params, device_id)
-    device_from_device_id = _get_device_from_device_id(device_id, state.rank)
-    # Initialize and shard `FlatParamHandle`s one by one following reverse
-    # depth-first order (i.e. reverse `.modules()` order), which represents a
-    # reverse topological sort order. This avoids increasing peak GPU memory
-    # usage when the unsharded model exists on CPU or meta device.
-    # NOTE: This order differs from that followed by the wrapper path when
-    # using auto wrapping, which also represents a valid reverse topological
-    # sort order, but the difference does not matter.
-    materialized_module = False
-    for fully_sharded_module, (params, buffers) in reversed(
-        fully_sharded_module_to_states.items()
-    ):
-        # Materialize the module if needed
-        is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
-            fully_sharded_module, state._ignored_params
-        )
-        if is_meta_module or is_torchdistX_deferred_init:
-            materialized_module = True
-            # Save the parameter and buffer names to reacquire references after
-            # after materialization since their variables may change
-            param_names, buffer_names = _get_state_names_for_states(
-                fully_sharded_module, params, buffers
-            )
-        if (
-            is_meta_module or is_torchdistX_deferred_init
-        ) and param_init_fn is not None:
-            _materialize_with_param_init_fn(fully_sharded_module, param_init_fn)
-        elif is_meta_module:
-            _materialize_meta_module(fully_sharded_module, device_id)
-        elif is_torchdistX_deferred_init:
-            deferred_init.materialize_module(
-                root_module,
-                check_fn=lambda _: True,
-            )
-        if materialized_module:
-            # Reacquire references using the pre-computed state names
-            params = [
-                fully_sharded_module.get_parameter(param_name)
-                for param_name in param_names
-            ]
-            buffers = [
-                fully_sharded_module.get_buffer(buffer_name)
-                for buffer_name in buffer_names
-            ]
-        _move_states_to_device(params, buffers, device_from_device_id)
-        if state.compute_device is None:  # only need to set once
-            state.compute_device = _get_compute_device(
-                fully_sharded_module,
-                state._ignored_params,
-                device_from_device_id,
-                state.rank,
-            )
-        if sync_module_states:
-            _sync_module_states(params, buffers, state.process_group)
-        _init_param_handle_from_params(state, params, fully_sharded_module)
-    # Reverse `_handles` to preserve depth-first `.modules()` order for
-    # consistency with the wrapper path (namely, so that `_get_fsdp_handles()`
-    # returns the same ordering for both paths).
-    state._handles.reverse()
     return state
 
 
@@ -638,38 +556,6 @@ def _init_param_handle_from_params(
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)
-
-
-def _get_state_names_for_states(
-    module: nn.Module,
-    params: List[nn.Parameter],
-    buffers: List[torch.Tensor],
-) -> Tuple[List[str], List[str]]:
-    """
-    Returns the parameter and buffer names of the given ``params`` and
-    ``buffers``, where the names are prefixed starting from ``module``. This
-    function assumes that the parameters and buffers are in the module tree.
-    """
-    param_names: List[str] = []
-    buffer_names: List[str] = []
-    param_to_param_name = {
-        param: param_name
-        for param_name, param in _named_parameters_with_duplicates(module)
-    }
-    buffer_to_buffer_name = {
-        buffer: buffer_name for buffer_name, buffer in module.named_buffers()
-    }
-    for param in params:
-        assert (
-            param in param_to_param_name
-        ), f"Parameter not in the module tree:\n{module}\n{param}"
-        param_names.append(param_to_param_name[param])
-    for buffer in buffers:
-        assert (
-            buffer in buffer_to_buffer_name
-        ), f"Buffer not in the module tree:\n{module}\n{buffer}"
-        buffer_names.append(buffer_to_buffer_name[buffer])
-    return param_names, buffer_names
 
 
 def _get_ignored_modules(
@@ -829,6 +715,7 @@ def _get_device_from_device_id(
 def _need_to_materialize_module(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
+    ignored_modules: Set[nn.Module],
 ) -> Tuple[bool, bool]:
     """
     Returns if ``module`` has parameters on meta device and if ``module`` is
@@ -838,6 +725,14 @@ def _need_to_materialize_module(
     """
     managed_params = list(_get_orig_params(module, ignored_params))
     is_meta_module = any(param.is_meta for param in managed_params)
+    # TODO: We need to establish a contract for FSDP and buffers. For now, we
+    # skip checking for meta buffers from ignored modules. We should consider
+    # refactoring the initialization holistically to avoid so many traversals.
+    for submodule in module.modules():
+        if submodule in ignored_modules:
+            continue
+        for buf in submodule.buffers(recurse=False):
+            is_meta_module |= buf.is_meta
     is_torchdistX_deferred_init = (
         not is_meta_module
         and _TORCHDISTX_AVAIL
@@ -847,35 +742,67 @@ def _need_to_materialize_module(
 
 
 def _materialize_with_param_init_fn(
-    module: nn.Module,
-    param_init_fn,
+    root_module: nn.Module,
+    param_init_fn: Callable[[nn.Module], None],
 ) -> None:
     if not callable(param_init_fn):
         raise ValueError(
             f"Expected {param_init_fn} to be callable but got {type(param_init_fn)}"
         )
-    param_init_fn(module)
+    modules_to_materialize = _get_modules_to_materialize(root_module)
+    for module in modules_to_materialize:
+        param_init_fn(module)
 
 
 def _materialize_meta_module(
-    module: nn.Module,
+    root_module: nn.Module,
     device_from_device_id: Optional[torch.device],
 ):
     # Run default meta device initialization
     materialization_device = device_from_device_id or torch.device(
         torch.cuda.current_device()
     )
-    module.to_empty(device=materialization_device)
+    modules_to_materialize = _get_modules_to_materialize(root_module)
     try:
+        # Assume that each module's `reset_parameters()` only initializes its
+        # own parameters and not those of its children
         with torch.no_grad():
-            module.reset_parameters()  # type: ignore[operator]
+            for module in modules_to_materialize:
+                # As a contract to the user, only call `reset_parameters()` if
+                # the module has directly managed parameters/buffers
+                module_state_iter = itertools.chain(
+                    module.parameters(recurse=False), module.buffers(recurse=False)
+                )
+                has_module_states = len(list(module_state_iter)) > 0
+                if has_module_states:
+                    module.to_empty(device=materialization_device, recurse=False)
+                    module.reset_parameters()  # type: ignore[operator]
     except BaseException as e:
         warnings.warn(
             "Unable to call `reset_parameters()` for module on meta "
-            f"device with error {str(e)}. Please ensure your "
-            "module implements a `reset_parameters()` method."
+            f"device with error {str(e)}. Please ensure that your module of"
+            f"type {type(module)} implements a `reset_parameters()` method."
         )
         raise e
+
+
+def _get_modules_to_materialize(root_module: nn.Module) -> List[nn.Module]:
+    # Run BFS to collect the modules to materialize via `reset_parameters()`,
+    # stopping at any module with FSDP already applied
+    modules_to_materialize: List[nn.Module] = []
+    queue = collections.deque([root_module])
+    visited_modules: Set[nn.Module] = {root_module}
+    while queue:
+        module = queue.popleft()
+        modules_to_materialize.append(module)
+        for child_module in module.children():
+            if (
+                child_module not in visited_modules
+                and _get_module_fsdp_state(child_module) is None
+            ):
+                visited_modules.add(child_module)
+                queue.append(child_module)
+    return modules_to_materialize
 
 
 def _move_module_to_device(

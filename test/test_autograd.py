@@ -311,6 +311,25 @@ class TestAutograd(TestCase):
         x = torch.ones(1, requires_grad=True)
         torch._C._functions.UndefinedGrad()(MyFunction.apply(x)).backward()
 
+    def test_set_materialize_non_diff_grads(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out0 = x.clone()
+                out1 = x.clone()
+                ctx.mark_non_differentiable(out1)
+                ctx._materialize_non_diff_grads = False
+                return out0, out1
+
+            @staticmethod
+            def backward(ctx, g0, g1):
+                self.assertIsNone(g1)
+                return g0
+
+        a = torch.tensor(1., requires_grad=True)
+        out = Func.apply(a)[0]
+        out.backward()
+
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
         class MyFunction(Function):
@@ -3672,6 +3691,18 @@ ExpBackward0, SinBackward0, CloneBackward0, torch::autograd::AccumulateGrad
         d = a.cos()
         out = c * d
         register_logging_hooks(a, b, c, d, out)
+        out.register_hook(hook)
+        with torch.autograd.set_multithreading_enabled(False):
+            out.backward()
+        self.assertEqual(predicted[0], grad_fns(*actual))
+        actual = []
+
+        # Accumulate grad node has more than one input
+        a = torch.tensor(1., requires_grad=True)
+        b = a.sin()
+        c = a.cos()
+        out = b * c
+        register_logging_hooks(a, b, c, out)
         out.register_hook(hook)
         with torch.autograd.set_multithreading_enabled(False):
             out.backward()
@@ -11248,6 +11279,7 @@ class TestAutogradMultipleDispatch(TestCase):
 
 from autograd.test_complex import TestAutogradComplex  # noqa: F401
 from autograd.test_functional import TestAutogradFunctional  # noqa: F401
+from autograd.test_fallback import TestAutogradFallback  # noqa: F401
 
 # e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
 instantiate_device_type_tests(

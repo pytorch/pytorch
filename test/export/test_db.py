@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import unittest
-from dataclasses import dataclass
 
 import torch._dynamo as torchdynamo
 from torch._export import export
@@ -16,18 +15,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-
-
-@dataclass
-class _DynamoConfig:
-    capture_scalar_outputs: bool = True
-    capture_dynamic_output_shape_ops: bool = True
-    guard_nn_modules: bool = True
-    dynamic_shapes: bool = True
-    specialize_int: bool = True
-    allow_rnn: bool = True
-    verbose: bool = True
-    assume_static_by_default: bool = False
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

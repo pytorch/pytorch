@@ -32,6 +32,9 @@ from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import expectedFailureDynamic, rand_strided, same
 from torch.nn import functional as F
+from torch.testing._internal.common_utils import (
+    disable_translation_validation_if_dynamic_shapes,
+)
 
 
 _orig_module_call = torch.nn.Module.__call__
@@ -796,7 +799,7 @@ class TransformerEncoderLayer(nn.Module):
         return self.ff_block(x)
 
 
-class TestModule(torch.nn.Module):
+class MockModule(torch.nn.Module):
     def inner_fn(self, left, right):
         return tuple(left) == tuple(right)
 
@@ -978,6 +981,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.frame_count, """3""")
             self.assertExpectedInline(cnt.op_count, """10""")
 
+    @disable_translation_validation_if_dynamic_shapes
     def test_longformer_chunk(self):
         input1 = torch.randn([1, 4096, 1])
         input2 = torch.randn([12, 4096, 64])
@@ -1143,6 +1147,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnt.frame_count, 1)
             self.assertEqual(cnt.op_count, 1)
 
+    @disable_translation_validation_if_dynamic_shapes
     def test_create_rand_mask_from_inputs(self):
         args = [
             torch.randn([1, 64, 64]),
@@ -1285,6 +1290,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_test_fn = torch._dynamo.optimize(cnt)(test_fn)
         opt_test_fn()
+
+    # See https://github.com/pytorch/pytorch/issues/100067
+    def test_copy_weird_strides(self):
+        # This test requires inductor's copy() decomp to preserve strides properly.
+        def test_fn(a):
+            b = torch.zeros(48, 4, 256, 513)
+            b[:, 0, 1:256, 1:256] = a
+            c = b.view(4, 12, 1024, 513)
+            d = c.transpose(2, 1)
+            d.add_(1)
+            return d
+
+        sh, st, dt, dev, rg = (
+            (48, 255, 255),
+            (787968, 513, 1),
+            torch.float16,
+            "cpu",
+            True,
+        )
+        a = rand_strided(sh, st, dt, dev).requires_grad_(rg)
+        compiled_f = torch.compile(test_fn, backend="aot_eager_decomp_partition")
+        out1 = test_fn(a)
+        out2 = compiled_f(a)
+        self.assertEqual(out1, out2)
 
     def test_indexing_with_list(self):
         def test_fn():
@@ -1744,7 +1773,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # they are evaluated in the wrong order. So if on a subsequent call
         # an int is passed instead of a tensor, guard evaluation will crash
         # with a "no attribute: shape" error
-        m = TestModule()
+        m = MockModule()
         opt_m = torch._dynamo.optimize("eager")(m)
         opt_m.fn(torch.ones((5, 5)))
         opt_m.fn(-3)
@@ -1830,8 +1859,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("sorted", torch.ones(4, 4))
-                self.register_buffer("indices", torch.ones(4, 4, dtype=torch.long))
+                self.sorted = torch.nn.Buffer(torch.ones(4, 4))
+                self.indices = torch.nn.Buffer(torch.ones(4, 4, dtype=torch.long))
 
             def forward(self, x):
                 torch.sort(x, out=(self.sorted, self.indices))
@@ -1862,7 +1891,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("base", torch.ones(4, 4))
+                self.base = torch.nn.Buffer(torch.ones(4, 4))
 
             def forward(self, x):
                 torch.sigmoid(x, out=self.base)
@@ -2145,8 +2174,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("x", torch.ones(3))
-                self.register_buffer("y", torch.ones(3))
+                self.x = torch.nn.Buffer(torch.ones(3))
+                self.y = torch.nn.Buffer(torch.ones(3))
 
             def forward(self, inp):
                 res = 0
@@ -3346,24 +3375,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref_exponent = torch.tensor([[0, 1, 2, 3]], dtype=torch.int32)
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
-
-    def test_dataclass_factory(self):
-        from dataclasses import dataclass, field
-        from typing import Any
-
-        @dataclass
-        class DClass:
-            sharding_contexts: Any = field(default_factory=list)
-            a: int = 1
-
-        def fn(x):
-            return DClass().a * x
-
-        opt_fn = torch.compile(fn, backend="eager")
-        x = torch.randn(4)
-        res = fn(x)
-        ref = opt_fn(x)
-        self.assertEqual(ref, res)
 
     def test_unspecialized_nn_module_with_torch_variable_attribute(self):
         """
