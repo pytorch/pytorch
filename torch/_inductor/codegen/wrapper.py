@@ -489,6 +489,7 @@ class WrapperCodeGen(CodeGen):
         ssnode = V.graph.stream_graph.name_mapping[node_name]
         if V.graph.cpp_wrapper:
             kernel_IndentedBuffer.writeline(f"cudaEvent_t event_{ssnode.get_name()};")
+            kernel_IndentedBuffer.writeline(f"cudaEventCreate(&event_{ssnode.get_name()});")
         else:
             kernel_IndentedBuffer.writeline(f"event_{ssnode.get_name()} = torch.cuda.Event()")
 
