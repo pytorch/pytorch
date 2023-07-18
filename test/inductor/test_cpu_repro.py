@@ -1968,6 +1968,14 @@ class CPUReproTests(TestCase):
         x = torch.rand(16)
         self.common(f, (x,))
 
+    def test_scalar_mul_low_precison(self):
+        def f(x):
+            return torch.ops.aten.mul.Tensor(x, 1.7015043497085571)
+
+        for dtype in [torch.float16, torch.bfloat16]:
+            x = torch.randn(4, 5, dtype=dtype)
+            self.common(f, (x,))
+
     def test_to_channels_last_bfloat16(self):
         def f(a):
             return a.to(memory_format=torch.channels_last)
