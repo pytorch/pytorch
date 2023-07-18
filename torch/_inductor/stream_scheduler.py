@@ -1,6 +1,7 @@
 from os import environ
 from .virtualized import V
 import logging
+from collections import deque
 log = logging.getLogger(__name__)
 
 
@@ -272,20 +273,40 @@ class SSGraph:
     def reorder(self):
         # self.dfs_search(self.ssnodes[0])
         # self.final_order.remove(self.name_mapping["OUTPUT"])
-        self.final_order = self.ssnodes.copy()
-        visited = set()
-        for index, ssnode in enumerate(self.ssnodes):
-            if index < 2:
-                continue
-            if len(ssnode.predecessors) > 1:
-                index_1_node = self.final_order[index-1]
-                index_2_node = self.final_order[index-2]
-                if index_1_node in ssnode.predecessors.values() and index_2_node in ssnode.predecessors.values() and index_1_node not in visited and index_2_node not in visited and index_1_node.stream_id != ssnode.stream_id and index_2_node.stream_id == ssnode.stream_id:
-                    self.final_order[index-1], self.final_order[index-2] = self.final_order[index-2], self.final_order[index-1]
-                    visited.add(index_1_node)
-                    visited.add(index_2_node)
-                    visited.add(ssnode)
+        # self.final_order = self.ssnodes.copy()
+        # visited = set()
+        # for index, ssnode in enumerate(self.ssnodes):
+        #     if index < 2:
+        #         continue
+        #     if len(ssnode.predecessors) > 1:
+        #         index_1_node = self.final_order[index-1]
+        #         index_2_node = self.final_order[index-2]
+        #         if index_1_node in ssnode.predecessors.values() and index_2_node in ssnode.predecessors.values() and index_1_node not in visited and index_2_node not in visited and index_1_node.stream_id != ssnode.stream_id and index_2_node.stream_id == ssnode.stream_id:
+        #             self.final_order[index-1], self.final_order[index-2] = self.final_order[index-2], self.final_order[index-1]
+        #             visited.add(index_1_node)
+        #             visited.add(index_2_node)
+        #             visited.add(ssnode)
+        # self.final_order.remove(self.name_mapping["OUTPUT"])
+
+        in_degree = {ssnode: 0 for ssnode in self.ssnodes}
+        for ssnode in self.ssnodes:
+            for successor in ssnode.successors.values():
+                in_degree[successor] += 1
+        init_nodes = [ssnode for ssnode in self.ssnodes if in_degree[ssnode] == 0]
+        init_nodes = sorted(init_nodes, key=lambda x: x.stream_id, reverse=True)
+        queue = deque(init_nodes)
+        while queue:
+            u = queue.popleft()
+            self.final_order.append(u)
+            sorted_successors = sorted(u.successors.values(), key=lambda x: x.stream_id, reverse=True)
+            for successor in sorted_successors:
+                in_degree[successor] -= 1
+                if in_degree[successor] == 0:
+                    queue.append(successor)
+        if len(self.final_order) != len(self.ssnodes):
+            raise RuntimeError("Error when processing the queue. The queue is not empty after the loop.")
         self.final_order.remove(self.name_mapping["OUTPUT"])
+
         log.info("=====findhao debug final order=====")
         for node in self.final_order:
             log.info(node.get_name())
