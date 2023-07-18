@@ -16,7 +16,7 @@ See `build.sh` for valid build environments (it's the giant switch).
 
 * `build.sh` -- dispatch script to launch all builds
 * `common` -- scripts used to execute individual Docker build stages
-* `ubuntu` -- Dockerfile for Ubuntu image for CPU jobs
+* `ubuntu` -- Dockerfile for Ubuntu image for CPU build and test jobs
 * `ubuntu-cuda` -- Dockerfile for Ubuntu image with CUDA support for nvidia-docker
 
 ## Usage
