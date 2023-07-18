@@ -100,7 +100,8 @@ def _retrieve_or_adapt_input_to_graph_set(
         #    in TorchScript graph.
         return fx_name_to_onnxscript_value[onnx_tensor.name]
     if isinstance(onnx_tensor, (tuple, list)) and any(
-        isinstance(node, torch.fx.Node) and isinstance(node.meta["val"], torch.SymInt)
+        isinstance(node, torch.fx.Node)
+        and isinstance(node.meta.get("val"), torch.SymInt)
         for node in onnx_tensor
     ):
         # This intends to handle dynamic axes. for example, if the input size of op.Expand
@@ -115,7 +116,7 @@ def _retrieve_or_adapt_input_to_graph_set(
         ] = []
         for tensor in onnx_tensor:
             if isinstance(tensor, torch.fx.Node) and isinstance(
-                tensor.meta["val"], torch.SymInt
+                tensor.meta.get("val"), torch.SymInt
             ):
                 sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
             elif isinstance(tensor, int):

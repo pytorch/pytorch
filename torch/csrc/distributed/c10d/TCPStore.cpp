@@ -233,7 +233,6 @@ void TCPStoreMasterDaemon::compareSetHandler(int socket) {
   if (pos == tcpStore_.end()) {
     if (currentValue.empty()) {
       tcpStore_[key] = newValue;
-      tcputil::sendVector<uint8_t>(socket, newValue);
     } else {
       // TODO: This code path is not ideal as we are "lying" to the caller in
       // case the key does not exist. We should come up with a working solution.
