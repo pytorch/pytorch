@@ -892,6 +892,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         tmp = mytuple(a, b, a + b)
         return mytuple(tmp.x, tmp[1], tmp.xy + b)
 
+    @make_test
+    def test_namedtuple_defaults(a, b):
+        mytuple = collections.namedtuple(
+            "mytuple", ["x", "y", "xy"], defaults=(None, 1, None)
+        )
+        tmp = mytuple(a, xy=b)
+        return mytuple(tmp.x, tmp[1], tmp.xy + b)
+
     class MyNamedTuple(NamedTuple):
         first: torch.Tensor
         second: torch.Tensor
@@ -1116,6 +1124,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_ndarray_builtin_functions(x):
         a = x.numpy()
         return a + a, a - a
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_dtype_argument_to_function(x):
+        import numpy as np
+
+        return np.empty_like(x, dtype=np.float64)
 
 
 def global_func_with_default_tensor_args(

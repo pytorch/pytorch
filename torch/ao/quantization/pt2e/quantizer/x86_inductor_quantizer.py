@@ -12,8 +12,8 @@ from .quantizer import (
     Quantizer,
     QuantizationAnnotation,
 )
-from torch.ao.quantization._pt2e.graph_utils import find_sequential_partitions
-from torch.ao.quantization._pt2e.quantizer.utils import (
+from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
+from torch.ao.quantization.pt2e.quantizer.utils import (
     get_input_act_qspec,
     get_output_act_qspec,
     get_weight_qspec,
@@ -40,7 +40,7 @@ __all__ = [
     "get_default_x86_inductor_quantization_config",
 ]
 
-def supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
+def _supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
     # TODO: Add more supported operators here.
     supported_operators: Dict[str, List[OperatorPatternType]] = {
         "conv2d": [
@@ -58,21 +58,21 @@ def supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
     for conv_op, add_op, relu_op in conv_add_relu_options:
         if add_op is None:
             # Append Conv ReLU
-            supported_operators["conv2d"].append([conv_op, relu_op])
+            supported_operators["conv2d"].append([conv_op, relu_op])  # type: ignore[list-item]
         elif relu_op is None:
             # Append Conv Add
-            supported_operators["conv2d"].append([conv_op, add_op])
+            supported_operators["conv2d"].append([conv_op, add_op])  # type: ignore[list-item]
         else:
             # Append Conv Add ReLU
-            supported_operators["conv2d"].append([conv_op, add_op, relu_op])
+            supported_operators["conv2d"].append([conv_op, add_op, relu_op])  # type: ignore[list-item]
 
     return copy.deepcopy(supported_operators)
 
 
-def get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
+def _get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
     supported_config_and_operators: List[OperatorConfig] = []
     for quantization_config in [get_default_x86_inductor_quantization_config(), ]:
-        ops = supported_quantized_operators()
+        ops = _supported_quantized_operators()
         for op_string, pattern_list in ops.items():
             supported_config_and_operators.append(
                 OperatorConfig(quantization_config, pattern_list)
@@ -120,12 +120,12 @@ def get_default_x86_inductor_quantization_config():
     return quantization_config
 
 
-def get_supported_config_and_operators() -> List[OperatorConfig]:
-    return get_supported_x86_inductor_config_and_operators()
+def _get_supported_config_and_operators() -> List[OperatorConfig]:
+    return _get_supported_x86_inductor_config_and_operators()
 
 
 class X86InductorQuantizer(Quantizer):
-    supported_config_and_operators = get_supported_config_and_operators()
+    supported_config_and_operators = _get_supported_config_and_operators()
 
     def __init__(self):
         super().__init__()
@@ -222,17 +222,17 @@ class X86InductorQuantizer(Quantizer):
         """
         conv_gemm_node_idx = None
         extra_input_node_idx = None
-        if (binary_node.args[0].op == "call_function") and (
+        if (binary_node.args[0].op == "call_function") and (  # type: ignore[union-attr]
             binary_node.args[0] == conv_gemm_node
         ):
             conv_gemm_node_idx = 0
             extra_input_node_idx = 1
-        elif (binary_node.args[1].op == "call_function") and (
+        elif (binary_node.args[1].op == "call_function") and (  # type: ignore[union-attr]
             binary_node.args[1] == conv_gemm_node
         ):
             conv_gemm_node_idx = 1
             extra_input_node_idx = 0
-        extra_input_node = binary_node.args[extra_input_node_idx]
+        extra_input_node = binary_node.args[extra_input_node_idx]  # type: ignore[index]
         assert isinstance(extra_input_node, Node)
         return conv_gemm_node_idx, extra_input_node_idx
 
