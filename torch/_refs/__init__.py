@@ -4564,10 +4564,16 @@ def linspace(
     requires_grad: bool = False,
 ) -> TensorLikeType:
     if isinstance(start, TensorLikeType):
-        torch._check(start.dim() == 0, lambda: "linspace only supports 0-dimensional start and end tensors")
+        torch._check(
+            start.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
         start = start.item()
     if isinstance(end, TensorLikeType):
-        torch._check(end.dim() == 0, lambda: "linspace only supports 0-dimensional start and end tensors")
+        torch._check(
+            end.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
         end = end.item()
 
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
@@ -4655,12 +4661,18 @@ def logspace(
         if isinstance(start, FloatLike):
             start = sym_int(start)
         elif isinstance(start, TensorLikeType):
-            torch._check(start.dim() == 0, lambda: "logspace only supports 0-dimensional start and end tensors")
+            torch._check(
+                start.dim() == 0,
+                lambda: "logspace only supports 0-dimensional start and end tensors",
+            )
             start = _maybe_convert_to_dtype(start, dtype)
         if isinstance(end, FloatLike):
             end = sym_int(end)
         elif isinstance(end, TensorLikeType):
-            torch._check(end.dim() == 0, lambda: "logspace only supports 0-dimensional start and end tensors")
+            torch._check(
+                end.dim() == 0,
+                lambda: "logspace only supports 0-dimensional start and end tensors",
+            )
             end = _maybe_convert_to_dtype(end, dtype)
 
     assert not isinstance(base, complex)  # for mypy
