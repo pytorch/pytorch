@@ -748,7 +748,6 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
                 return (output,)
 
-
         mod = Model()
         mod.train()
         x = torch.rand(100, 16, 32, 32, requires_grad=True)
@@ -759,19 +758,17 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         def _prepare_model_args():
             arg_list = []
-            named_parameters = dict(
-                g_mod.named_parameters(remove_duplicate=False))
-            named_buffers = dict(
-                g_mod.named_buffers(remove_duplicate=False))
+            named_parameters = dict(g_mod.named_parameters(remove_duplicate=False))
+            named_buffers = dict(g_mod.named_buffers(remove_duplicate=False))
             params_and_buffers = {
                 **dict(named_parameters),
                 **dict(named_buffers),
             }
             params_and_buffers_flat, params_spec = pytree.tree_flatten(
-                params_and_buffers)
+                params_and_buffers
+            )
             params_len = len(params_and_buffers_flat)
-            functional_call = create_functional_call(
-                    g_mod, params_spec, params_len)
+            functional_call = create_functional_call(g_mod, params_spec, params_len)
             return params_and_buffers_flat, functional_call
 
         full_args, fn_to_trace = _prepare_model_args()
@@ -791,53 +788,59 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         # Walk all the nodes in fx graph.
         # Write the resulting ops to a table
+        min_seq_nr = -1
         seq_table = "SeqNr|OrigAten|SrcFn\n"
         for node in fx_g.graph.nodes:
             if "call_" in node.op and "getitem" not in str(node.target):
                 seq_nr = node.meta.get("seq_nr", -1)
+                if min_seq_nr < 0 and seq_nr >= 0:
+                    min_seq_nr = seq_nr
                 mod_name = node.meta.get("source_fn", "")
                 orig_aten = node.meta.get("original_aten", "")
                 if isinstance(mod_name, tuple):
                     mod_name = mod_name[0]
+                # Make all seq_nr relative so it starts at 0
+                seq_nr = seq_nr - min_seq_nr
                 seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}\n"
 
+        print(f"{seq_table}")
         self.assertExpectedInline(
             seq_table,
             dedent(
                 """\
             SeqNr|OrigAten|SrcFn
-            53|aten.convolution.default|l__self___conv1
-            53|aten.add.Tensor|l__self___bn1
-            54|aten._native_batch_norm_legit_functional.default|l__self___bn1
-            55|aten.relu.default|l__self___relu1
-            56|aten.add.Tensor|add
-            57|aten.view.default|flatten
-            58|aten.t.default|l__self___fc1
-            59|aten.unsqueeze.default|l__self___fc1
-            60|aten.mm.default|l__self___fc1
-            61|aten.squeeze.dim|l__self___fc1
-            62|aten.add.Tensor|l__self___fc1
-            63|aten.sub.Tensor|l__self___loss_fn
-            64|aten.abs.default|l__self___loss_fn
-            65|aten.mean.default|l__self___loss_fn
-            65|aten.ones_like.default|
-            65|aten.expand.default|
-            65|aten.div.Scalar|
-            64|aten.sgn.default|
-            64|aten.mul.Tensor|
-            61|aten.unsqueeze.default|
-            60|aten.t.default|
-            60|aten.mm.default|
-            60|aten.t.default|
-            60|aten.t.default|
-            60|aten.mm.default|
-            59|aten.squeeze.dim|
-            58|aten.t.default|
-            57|aten.view.default|
-            55|aten.threshold_backward.default|
-            54|aten.native_batch_norm_backward.default|
-            53|aten.convolution_backward.default|
-            53|aten.add.Tensor|
+            0|aten.convolution.default|l__self___conv1
+            0|aten.add.Tensor|l__self___bn1
+            1|aten._native_batch_norm_legit_functional.default|l__self___bn1
+            2|aten.relu.default|l__self___relu1
+            3|aten.add.Tensor|add
+            4|aten.view.default|flatten
+            5|aten.t.default|l__self___fc1
+            6|aten.unsqueeze.default|l__self___fc1
+            7|aten.mm.default|l__self___fc1
+            8|aten.squeeze.dim|l__self___fc1
+            9|aten.add.Tensor|l__self___fc1
+            10|aten.sub.Tensor|l__self___loss_fn
+            11|aten.abs.default|l__self___loss_fn
+            12|aten.mean.default|l__self___loss_fn
+            12|aten.ones_like.default|
+            12|aten.expand.default|
+            12|aten.div.Scalar|
+            11|aten.sgn.default|
+            11|aten.mul.Tensor|
+            8|aten.unsqueeze.default|
+            7|aten.t.default|
+            7|aten.mm.default|
+            7|aten.t.default|
+            7|aten.t.default|
+            7|aten.mm.default|
+            6|aten.squeeze.dim|
+            5|aten.t.default|
+            4|aten.view.default|
+            2|aten.threshold_backward.default|
+            1|aten.native_batch_norm_backward.default|
+            0|aten.convolution_backward.default|
+            0|aten.add.Tensor|
             """
             ),
         )

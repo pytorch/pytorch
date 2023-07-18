@@ -3897,7 +3897,6 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             num_params_buffers=len(params_and_buffers_flat),
             no_tangents=True,
         )
-
     if trace_joint:
         def flattened_joint(*args):
             # The idea here is that the joint graph that AOTAutograd creates has some strict properties:
