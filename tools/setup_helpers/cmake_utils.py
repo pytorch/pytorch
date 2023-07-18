@@ -72,7 +72,7 @@ def get_cmake_cache_variables_from_file(
         )
         if matched is None:  # Illegal line
             raise ValueError(
-                "Unexpected line {} in {}: {}".format(i, repr(cmake_cache_file), line)
+                f"Unexpected line {i} in {repr(cmake_cache_file)}: {line}"
             )
         _, variable, type_, value = matched.groups()
         if type_ is None:
