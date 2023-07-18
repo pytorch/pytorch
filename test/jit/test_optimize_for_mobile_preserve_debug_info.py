@@ -76,7 +76,10 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
                 conv_transpose2d_weight,
                 conv_transpose2d_bias,
             ):
-                super().__init__()
+                super(
+                    TestPrepackedLinearBeforeInlineAndConv2dOp,
+                    self,
+                ).__init__()
                 self.linear_weight = linear_weight.float()
                 self.linear_bias = linear_bias.float()
                 self.conv2d_weight = conv2d_weight.float()
