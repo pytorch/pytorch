@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch.ao.quantization.pt2e.quantizer import (
     X86InductorQuantizer,
 )
-from torch.ao.quantization._quantize_pt2e import (
+from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
     prepare_pt2e_quantizer,
 )
