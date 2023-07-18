@@ -3263,7 +3263,7 @@
 - func: ldexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   tags: pointwise
 
-- func: linspace.Scalar(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: linspace(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: linspace
 
@@ -3272,7 +3272,7 @@
   dispatch:
     CompositeExplicitAutograd: linspace
 
-- func: linspace.Scalar_out(Scalar start, Scalar end, int steps, *, Tensor(a!) out) -> Tensor(a!)
+- func: linspace.out(Scalar start, Scalar end, int steps, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: linspace_out
     CUDA: linspace_cuda_out
