@@ -46,12 +46,17 @@ where
     and classname like :classname
     and _event_time > CURRENT_TIMESTAMP() - DAYS(7)
 """
+
 CLOSING_COMMENT = (
     "I cannot find any mention of this test in rockset for the past 7 days "
     "or in the logs for the past 5 commits on viable/strict.  Closing this "
     "issue as it is highly likely that this test has either been renamed or "
     "removed.  If you think this is a false positive, please feel free to "
     "re-open this issue."
+)
+
+DISABLED_TESTS_JSON = (
+    "https://ossci-metrics.s3.amazonaws.com/disabled-tests-condensed.json"
 )
 
 
@@ -140,11 +145,7 @@ def check_if_exists(
 
 if __name__ == "__main__":
     args = parse_args()
-    disabled_tests_json = json.loads(
-        requests.get(
-            "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/disabled-tests-condensed.json"
-        ).text
-    )
+    disabled_tests_json = json.loads(requests.get(DISABLED_TESTS_JSON).text)
 
     all_logs = []
     jobs = query_rockset(LOGS_QUERY)
@@ -161,8 +162,8 @@ if __name__ == "__main__":
             with open(f"{temp_dir}/{filename}") as f:
                 all_logs.append(f.read())
 
-    # If its less than 100 something definitely went wrong
-    assert len(all_logs) > 100
+    # If its less than 200 something definitely went wrong.
+    assert len(all_logs) > 200
     assert len(all_logs) == len(jobs)
 
     to_be_closed = []
