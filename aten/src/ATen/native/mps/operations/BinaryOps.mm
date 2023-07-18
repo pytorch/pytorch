@@ -276,7 +276,7 @@ void add_sub_lerp_template(const Tensor& self,
 
   if (!alpha_has_value && op_name == "lerp") {
     if (!self.is_alias_of(other)) { // if inplace, no-op
-      const_cast<Tensor&>(output) = other.clone();
+      output.copy_(other);
     }
     return;
   }
