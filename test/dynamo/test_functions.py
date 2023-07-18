@@ -1137,8 +1137,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_numpy_linalg(x):
         import numpy as np
 
-        norm = np.linalg.norm(x.numpy(), axis=0)
-        return torch.from_numpy(norm)
+        return np.linalg.norm(x.numpy(), axis=0)
 
 
 def global_func_with_default_tensor_args(

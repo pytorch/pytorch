@@ -46,6 +46,18 @@ except ModuleNotFoundError:
     torch_np = None
     HAS_NUMPY_TORCH_INTEROP = False
 
+if HAS_NUMPY:
+    # NOTE: Make sure `NP_SUPPORTED_MODULES` and `TORCH_NP_SUPPORTED_MODULES` are in sync.
+    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
+
+if HAS_NUMPY_TORCH_INTEROP:
+    TORCH_NP_SUPPORTED_MODULES = (
+        torch_np,
+        torch_np.fft,
+        torch_np.linalg,
+        torch_np.random,
+    )
+
 import importlib
 
 import torch

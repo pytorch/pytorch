@@ -17,6 +17,7 @@ from ..utils import (
     HAS_NUMPY_TORCH_INTEROP,
     identity,
     proxy_args_kwargs,
+    TORCH_NP_SUPPORTED_MODULES,
 )
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
@@ -794,6 +795,15 @@ class TypingVariable(VariableTracker):
         return self.value
 
 
+def get_torch_np_func(fn_name):
+    for module in TORCH_NP_SUPPORTED_MODULES:
+        fn = getattr(module, fn_name, None)
+        if fn:
+            return fn
+
+    return None
+
+
 class NumpyVariable(VariableTracker):
     """
     Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
@@ -810,8 +820,6 @@ class NumpyVariable(VariableTracker):
             unimplemented(f"numpy.{self.value}()")
         import torch_np
 
-        SUPPORTED_MODULES = (torch_np, torch_np.linalg)
-
         from ..utils import numpy_to_tensor_wrapper
 
         from .builder import wrap_fx_proxy_cls
@@ -823,35 +831,27 @@ class NumpyVariable(VariableTracker):
             unimplemented(
                 f"numpy dtype function is not supported yet. Got type {type(self.value)}."
             )
-        elif any(hasattr(module, self.value.__name__) for module in SUPPORTED_MODULES):
-            # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
-            #  wrapped by NumpyNdarrayVariable which is wrong!
-            getattr_fn = get_custom_getattr(torch_np)
-            if getattr_fn:
-                unimplemented(
-                    "torch_np has custom getattr implementation and dynamo doesn't support it"
+        elif get_custom_getattr(torch_np):
+            unimplemented(
+                "torch_np has custom getattr implementation and dynamo doesn't support it"
+            )
+        else:  # We are dealing with a callable.
+            func = get_torch_np_func(self.value.__name__)
+            if func:
+                # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
+                #  wrapped by NumpyNdarrayVariable which is wrong!
+                return wrap_fx_proxy_cls(
+                    target_cls=NumpyNdarrayVariable,
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        numpy_to_tensor_wrapper(func),
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                    example_value=None,
+                    **options,
                 )
 
-            for module in SUPPORTED_MODULES:
-                # We are sure that atleast one of the `getattr` will
-                # return as we do `hasattr` above.
-                func = getattr(module, self.value.__name__, None)
-                if func:
-                    break
-            assert func
-
-            return wrap_fx_proxy_cls(
-                target_cls=NumpyNdarrayVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    numpy_to_tensor_wrapper(func),
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-                example_value=None,
-                **options,
-            )
-        else:
             unimplemented(f"Can't find numpy function {self.value} in torch_np")
 
     def call_method(

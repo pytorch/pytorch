@@ -15,7 +15,7 @@ from torch.fx._symbolic_trace import is_fx_tracing
 
 from . import config
 from .external_utils import is_compiling
-from .utils import HAS_NUMPY, HAS_NUMPY_TORCH_INTEROP, is_safe_constant, np
+from .utils import HAS_NUMPY, is_safe_constant, np, NP_SUPPORTED_MODULES
 
 """
 A note on allowed functions:
@@ -252,10 +252,7 @@ def _builtin_function_ids():
 def _numpy_function_ids():
     rv = dict()
     if HAS_NUMPY:
-        modules = (
-            (np, np.random, np.linalg) if HAS_NUMPY_TORCH_INTEROP else (np, np.random)
-        )
-        for mod in modules:
+        for mod in NP_SUPPORTED_MODULES:
             rv.update(
                 {
                     id(v): f"{mod.__name__}.{k}"
