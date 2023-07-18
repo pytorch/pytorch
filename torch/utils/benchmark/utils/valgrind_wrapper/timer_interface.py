@@ -29,7 +29,8 @@ else:
 
 
 class FunctionCount(NamedTuple):
-    count: int
+    # TODO(#105471): Rename the count field
+    count: int  # type: ignore[assignment]
     function: str
 
 

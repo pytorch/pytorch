@@ -60,7 +60,7 @@ class InputAdapter:
     @_beartype.beartype
     def apply(
         self, *model_args, **model_kwargs
-    ) -> Sequence[Union[int, float, bool, str, torch.Tensor, None]]:
+    ) -> Sequence[Union[int, float, bool, str, "torch.Tensor", None]]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Args:
@@ -113,7 +113,7 @@ class OutputAdapter:
     @_beartype.beartype
     def apply(
         self, model_outputs: Any
-    ) -> Sequence[Union[torch.Tensor, int, float, bool, str]]:
+    ) -> Sequence[Union["torch.Tensor", int, float, bool, str]]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Args:
@@ -228,7 +228,7 @@ class MergeKwargsIntoArgsStep:
 class LiftParametersAndBuffersIntoArgsStep:
     """Append parameters and buffers to model's positional argument list."""
 
-    def __init__(self, inputs: Tuple[torch.Tensor, ...]) -> None:
+    def __init__(self, inputs: Tuple["torch.Tensor", ...]) -> None:
         self.inputs = inputs
 
     def apply(
