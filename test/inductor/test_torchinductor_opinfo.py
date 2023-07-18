@@ -178,6 +178,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "index_add": {f16},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
+    # Unsupported: data dependent operator: aten._local_scalar_dense.default
+    "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
@@ -280,6 +282,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "equal": {b8, f16, f32, f64, i32, i64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
+    # Unsupported: data dependent operator: aten._local_scalar_dense.default
+    "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
@@ -500,10 +504,6 @@ inductor_all_samples = {
     "triu",
 }
 
-allow_graph_breaks = {
-    "item",
-}
-
 
 class TestInductorOpInfo(TestCase):
     check_model = check_model
@@ -588,7 +588,6 @@ class TestInductorOpInfo(TestCase):
             else:
                 samples = [next(samples)]
 
-        nopython = op_name not in allow_graph_breaks
         try:
             for sample_input in samples:
                 args = [sample_input.input] + list(sample_input.args)
@@ -602,7 +601,7 @@ class TestInductorOpInfo(TestCase):
                     # so we don't need do additional copy by setting copy_to_cuda=False
                     adjusted_kwargs = {
                         "check_lowp": False,
-                        "nopython": nopython,
+                        "nopython": True,
                         "copy_to_cuda": False,
                         "reference_in_float": False,
                         "check_gradient": requires_grad,
@@ -617,7 +616,7 @@ class TestInductorOpInfo(TestCase):
                 elif device_type == "cpu":
                     adjusted_kwargs = {
                         "check_lowp": False,
-                        "nopython": nopython,
+                        "nopython": True,
                         # skip checking gradient on CPU for now
                         "check_gradient": False,
                     }
