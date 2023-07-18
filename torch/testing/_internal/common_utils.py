@@ -203,7 +203,7 @@ slow_tests_dict = {}
 
 def maybe_load_json(filename):
     if os.path.isfile(filename):
-        with open(filename, 'r') as fp:
+        with open(filename) as fp:
             return json.load(fp)
     log.warning("Attempted to load json file '%s' but it does not exist.", filename)
     return {}
@@ -355,12 +355,12 @@ def instantiate_parametrized_tests(generic_cls):
             def instantiated_test(self, param_kwargs=param_kwargs):
                 test(self, **param_kwargs)
 
-            assert not hasattr(generic_cls, name), "Redefinition of test {0}".format(name)
+            assert not hasattr(generic_cls, name), f"Redefinition of test {name}"
             setattr(generic_cls, name, instantiated_test)
 
         for (test, test_suffix, param_kwargs, decorator_fn) in class_attr.parametrize_fn(
                 class_attr, generic_cls=generic_cls, device_cls=None):
-            full_name = '{}_{}'.format(test.__name__, test_suffix)
+            full_name = f'{test.__name__}_{test_suffix}'
 
             # Apply decorators based on full param kwargs.
             for decorator in decorator_fn(param_kwargs):
@@ -830,7 +830,7 @@ def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if SLOW_TESTS_FILE:
         if os.path.exists(SLOW_TESTS_FILE):
-            with open(SLOW_TESTS_FILE, 'r') as fp:
+            with open(SLOW_TESTS_FILE) as fp:
                 global slow_tests_dict
                 slow_tests_dict = json.load(fp)
                 # use env vars so pytest-xdist subprocesses can still access them
@@ -839,7 +839,7 @@ def run_tests(argv=UNITTEST_ARGS):
             warnings.warn(f'slow test file provided but not found: {SLOW_TESTS_FILE}')
     if DISABLED_TESTS_FILE:
         if os.path.exists(DISABLED_TESTS_FILE):
-            with open(DISABLED_TESTS_FILE, 'r') as fp:
+            with open(DISABLED_TESTS_FILE) as fp:
                 global disabled_tests_dict
                 disabled_tests_dict = json.load(fp)
                 os.environ['DISABLED_TESTS_FILE'] = DISABLED_TESTS_FILE
@@ -905,7 +905,7 @@ def run_tests(argv=UNITTEST_ARGS):
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
         processes = []
         for i in range(RUN_PARALLEL):
-            command = [sys.executable] + argv + ['--log-suffix=-shard-{}'.format(i + 1)] + test_batches[i]
+            command = [sys.executable] + argv + [f'--log-suffix=-shard-{i + 1}'] + test_batches[i]
             processes.append(subprocess.Popen(command, universal_newlines=True))
         failed = False
         for p in processes:
@@ -1294,7 +1294,7 @@ def skipIfRocmVersionLessThan(version=None):
                 rocm_version = rocm_version.split("-")[0]    # ignore git sha
                 rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
                 if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
-                    reason = "ROCm {0} is available but {1} required".format(rocm_version_tuple, version)
+                    reason = f"ROCm {rocm_version_tuple} is available but {version} required"
                     raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
         return wrap_fn
@@ -1672,7 +1672,7 @@ def is_iterable_of_tensors(iterable, include_empty=False):
     return True
 
 
-class CudaNonDefaultStream():
+class CudaNonDefaultStream:
     def __enter__(self):
         # Before starting CUDA test save currently active streams on all
         # CUDA devices and set new non default streams to all CUDA devices
@@ -1698,7 +1698,7 @@ class CudaNonDefaultStream():
                                      device_type=self.beforeStreams[d].device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
-class CudaMemoryLeakCheck():
+class CudaMemoryLeakCheck:
     def __init__(self, testcase, name=None):
         self.name = testcase.id() if name is None else name
         self.testcase = testcase
@@ -2104,7 +2104,7 @@ class TensorOrArrayPair(TensorLikePair):
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
 
-        actual, expected = [self._to_tensor(input) for input in (actual, expected)]
+        actual, expected = (self._to_tensor(input) for input in (actual, expected))
         for tensor in (actual, expected):
             self._check_supported(tensor, id=id)
         return actual, expected
@@ -2201,7 +2201,7 @@ def set_warn_always_context(new_val: bool):
         torch.set_warn_always(old_val)
 
 
-class NoTest():
+class NoTest:
     # causes pytest to not recognize this class as a test
     __test__ = False
 
@@ -3408,12 +3408,12 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         subname_output = ""
         if subname:
             expected_file += "-" + subname
-            subname_output = " ({})".format(subname)
+            subname_output = f" ({subname})"
         expected_file += ".expect"
         expected = None
 
         def accept_output(update_type):
-            print("Accepting {} for {}{}:\n\n{}".format(update_type, munged_id, subname_output, s))
+            print(f"Accepting {update_type} for {munged_id}{subname_output}:\n\n{s}")
             with open(expected_file, 'w') as f:
                 # Adjust for producer_version, leave s unmodified
                 s_tag = re.sub(r'(producer_version): "[0-9.]*"',
@@ -3423,7 +3423,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         try:
             with open(expected_file) as f:
                 expected = f.read()
-        except IOError as e:
+        except OSError as e:
             if e.errno != errno.ENOENT:
                 raise
             elif expecttest.ACCEPT:
@@ -3442,7 +3442,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         # Adjust for producer_version
         expected = expected.replace(
             'producer_version: "CURRENT_VERSION"',
-            'producer_version: "{}"'.format(torch.onnx.producer_version)
+            f'producer_version: "{torch.onnx.producer_version}"'
         )
         if expecttest.ACCEPT:
             if expected != s:
@@ -3600,7 +3600,7 @@ def download_file(url, binary=True):
             f.write(data)
         return path
     except error.URLError as e:
-        msg = "could not download test file '{}'".format(url)
+        msg = f"could not download test file '{url}'"
         warnings.warn(msg, RuntimeWarning)
         raise unittest.SkipTest(msg) from e
 
@@ -4359,7 +4359,7 @@ def set_single_threaded_if_parallel_tbb(fn):
     return wrap_fn
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def get_cycles_per_ms() -> float:
     """Measure and return approximate number of cycles per millisecond for torch.cuda._sleep
     """
