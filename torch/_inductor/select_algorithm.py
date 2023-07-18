@@ -202,11 +202,6 @@ class TritonTemplateKernel(TritonKernel):
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
             ]
             assert len(indices) == len(lengths)
-            replacements = {
-                x: self.args.size(x)
-                for x in index_symbols + lengths
-                if isinstance(x, sympy.Symbol) and is_size_var(x.name)
-            }
 
             # glue to make generated code use same indexing from template
             for name, range_tree_entry in zip(
@@ -216,7 +211,7 @@ class TritonTemplateKernel(TritonKernel):
             contiguous_index = sympy_dot(
                 ir.FlexibleLayout.contiguous_strides(lengths), index_symbols
             )
-            contiguous_index = sympy_subs(contiguous_index, replacements)
+            contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
             self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
@@ -224,7 +219,7 @@ class TritonTemplateKernel(TritonKernel):
             self.template_mask = mask
             self.template_indices = indices
             output_index = self.output_node.get_layout().make_indexer()(index_symbols)
-            output_index = sympy_subs(output_index, replacements)
+            output_index = self.rename_indexing(output_index)
             if output_index == contiguous_index:
                 output_index = sympy.Symbol("xindex")
 
@@ -486,7 +481,7 @@ class TritonTemplate:
 =======
         assert list(call_args)[: len(expected_args)] == expected_args, (
             call_args,
-            expected_args
+            expected_args,
         )
 >>>>>>> 002be17eb79 (lint and comments)
         extra_args = V.graph.sizevars.size_hints(

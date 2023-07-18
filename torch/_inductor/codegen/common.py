@@ -929,7 +929,7 @@ class Kernel(CodeGen):
         replacements = {
             x: self.args.size(x)
             for x in sorted_symbols
-            if is_size_var(x.name)
+            if x.name.startswith("s") or x.name.startswith("ps")
         }
         return sympy_subs(index, replacements)
 

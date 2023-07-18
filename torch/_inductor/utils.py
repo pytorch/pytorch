@@ -986,10 +986,3 @@ def try_find_schema(schemas, args, kwargs):
             return schema
 
     return None
-
-
-def is_size_var(name: str) -> bool:
-    """
-    Checks if the input variable name stands for a size / precomputed_size variable.
-    """
-    return name.startswith("s") or name.startswith("ps")
