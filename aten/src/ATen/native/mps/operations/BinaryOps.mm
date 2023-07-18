@@ -260,7 +260,7 @@ void add_sub_lerp_template(const Tensor& self,
                            const Tensor& other,
                            const Scalar& alpha,
                            const Tensor& output,
-                            std::string op_name) {
+                           std::string op_name) {
   if (alpha.toDouble() == 0.0) {
     if (!self.is_alias_of(output)) { // if inplace, no-op
       const_cast<Tensor&>(output) = self.clone();
@@ -286,9 +286,9 @@ void add_sub_lerp_template(const Tensor& self,
     MPSGraphTensor* secondaryTensor = secondaryCastTensor;
 
     if (op_name == "lerp") {
-        secondaryCastTensor = [mpsGraph subtractionWithPrimaryTensor: secondaryCastTensor
-                                                     secondaryTensor: primaryCastTensor
-                                                                name: nil];
+      secondaryCastTensor = [mpsGraph subtractionWithPrimaryTensor:secondaryCastTensor
+                                                   secondaryTensor:primaryCastTensor
+                                                              name:nil];
     }
 
     // if alpha is 1.0, then we don't bother adding another multiply to graph
@@ -506,8 +506,7 @@ TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Te
   mps::binaryOpTensor(self, other, Scalar(1.0), output, "xlogy_out_mps", xlogy_op_block);
 }
 
-TORCH_IMPL_FUNC(lerp_Scalar_mps)(
-    const Tensor& self, const Tensor& end, const Scalar& weight, const Tensor& out) {
+TORCH_IMPL_FUNC(lerp_Scalar_mps)(const Tensor& self, const Tensor& end, const Scalar& weight, const Tensor& out) {
   mps::add_sub_lerp_template(self, end, weight, out, "lerp");
 }
 } // namespace at::native
