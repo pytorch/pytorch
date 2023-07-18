@@ -908,7 +908,7 @@ def export(
         graph = gm
 
         nonlocal fake_mode, example_inputs
-        fake_mode = fake_mode or _guards.detect_fake_mode(inner_example_inputs)
+        fake_mode = fake_mode or _guards.detect_fake_mode()
         example_inputs = inner_example_inputs
 
         def result_capturing_wrapper(*graph_inputs):
