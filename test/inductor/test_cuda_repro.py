@@ -928,6 +928,14 @@ class CudaReproTests(TestCase):
         ref = compiled(list(args))
         assert same(ref, correct)
 
+    def test_issue104937(self):
+        m = nn.Linear(in_features=0, out_features=0, bias=True).to("cuda")
+        x = torch.rand(1, 1, 0, device="cuda")
+        expect = m(x)
+        opt_fn = torch.compile(m)
+        actual = opt_fn(x)
+        self.assertEqual(expect, actual)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
