@@ -450,8 +450,9 @@ PyTorch to do. You need to be more specific about your use case. Some of the
 most common use cases you might want to consider:
 
 * If you want to disable compilation on this function frame and the
-  recursively invoked frames — use ``_dynamo.disable``.
-* If you want a particular operator, such as ``fbgemm`` to use the  eager mode –
+  recursively invoked frames, use ``_dynamo.disable``.
+
+* If you want a particular operator, such as ``fbgemm`` to use the  eager mode,
   use ``_dynamo.disallow_in_graph``.
 
 Some of the uncommon use cases include:
