@@ -1,4 +1,6 @@
 # Owner(s): ["module: functorch"]
+import unittest
+
 import torch
 import torch._dynamo
 import torch._export
@@ -8,6 +10,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 
 
+@unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOutDtypeOp(TestCase):
     def test_out_dtype_make_fx(self):
         class M(torch.nn.Module):

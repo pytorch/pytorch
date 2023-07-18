@@ -77,11 +77,11 @@ class OutDtypeOperator(HigherOrderOperator):
 
 
 out_dtype = OutDtypeOperator()
-out_dtype.fallthrough(DispatchKey.PythonDispatcher)
-out_dtype.fallthrough(DispatchKey.PythonTLSSnapshot)
-out_dtype.fallthrough(DispatchKey.ADInplaceOrView)
-out_dtype.fallthrough(DispatchKey.BackendSelect)
-out_dtype.fallthrough(DispatchKey.AutocastCPU)
+out_dtype.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
+out_dtype.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
+out_dtype.fallthrough(DispatchKey.ADInplaceOrView)  # type: ignore[attr-defined]
+out_dtype.fallthrough(DispatchKey.BackendSelect)  # type: ignore[attr-defined]
+out_dtype.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
 
 
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
