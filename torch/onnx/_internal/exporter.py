@@ -145,7 +145,9 @@ class ResolvedExportOptions(ExportOptions):
     logging diagnostics, and generating the SARIF log."""
 
     @_beartype.beartype
-    def __init__(self, options: Optional[Union[ExportOptions, ResolvedExportOptions]]):
+    def __init__(
+        self, options: Optional[Union[ExportOptions, "ResolvedExportOptions"]]
+    ):
         if options is None:
             options = ExportOptions()
         if isinstance(options, ResolvedExportOptions):
