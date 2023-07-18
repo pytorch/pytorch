@@ -15,7 +15,7 @@ from torch.ao.quantization import (
     ObserverOrFakeQuantize,
     QConfigMapping,
 )
-from torch.ao.quantization._pt2e.quantizer import (
+from torch.ao.quantization.pt2e.quantizer import (
     ComposableQuantizer,
     DerivedQuantizationSpec,
     EmbeddingQuantizer,
@@ -27,10 +27,10 @@ from torch.ao.quantization._pt2e.quantizer import (
     Quantizer,
     SharedQuantizationSpec,
 )
-from torch.ao.quantization._pt2e.quantizer.composable_quantizer import (  # noqa: F811
+from torch.ao.quantization.pt2e.quantizer.composable_quantizer import (  # noqa: F811
     ComposableQuantizer,
 )
-from torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer import (
+from torch.ao.quantization.pt2e.quantizer.qnnpack_quantizer import (
     get_symmetric_quantization_config,
 )
 from torch.ao.quantization._quantize_pt2e import (
@@ -1774,7 +1774,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def forward(self, x, y):
                 return x + y
 
-        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
+        import torch.ao.quantization.pt2e.quantizer.qnnpack_quantizer as qq
 
         quantizer = QNNPackQuantizer()
         operator_config = qq.get_symmetric_quantization_config(is_per_channel=True)
@@ -1799,7 +1799,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def forward(self, x, y):
                 return x + y
 
-        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
+        import torch.ao.quantization.pt2e.quantizer.qnnpack_quantizer as qq
 
         quantizer = QNNPackQuantizer()
         operator_config = qq.get_symmetric_quantization_config(is_per_channel=True)
@@ -1954,7 +1954,6 @@ class TestQuantizePT2EOps(QuantizationTestCase):
             model_graph = convert_pt2e(model_graph)
             self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
 
-
 # TODO: express this using self._test_quantizer
 class TestQuantizePT2EModels(PT2EQuantizationTestCase):
     @skip_if_no_torchvision
@@ -2040,8 +2039,8 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
             example_inputs = (torch.randn(1, 3, 224, 224),)
             m = torchvision.models.mobilenet_v2()
             self._verify_symmetric_qnnpack_qat_numerics(
-                m, example_inputs, is_per_channel=False, verify_convert=False,
+                m, example_inputs, is_per_channel=False, verify_convert=True,
             )
             self._verify_symmetric_qnnpack_qat_numerics(
-                m, example_inputs, is_per_channel=True, verify_convert=False,
+                m, example_inputs, is_per_channel=True, verify_convert=True,
             )

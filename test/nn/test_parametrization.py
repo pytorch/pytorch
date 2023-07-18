@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
 import torch.nn.utils.parametrize as parametrize
-from torch.nn import Parameter
+from torch.nn import Buffer, Parameter
 from torch.testing._internal.common_utils import run_tests, skipIfNoLapack, \
     TemporaryFileName, instantiate_parametrized_tests, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -305,7 +305,7 @@ class TestNNParametrization(NNTestCase):
 
         # Instantiate parametrizations on buffers. It should work as expected
         delattr(model, "bias")
-        model.register_buffer("bias", torch.ones(8))
+        model.bias = Buffer(torch.ones(8))
         parametrize.register_parametrization(model, "bias", FirstZero())
         parametrize.register_parametrization(model, "bias", LastZero())
         self.assertTrue(parametrize.is_parametrized(model))
@@ -333,8 +333,8 @@ class TestNNParametrization(NNTestCase):
         class Orthogonal(nn.Module):
             def __init__(self, n):
                 super().__init__()
-                self.register_buffer("id", torch.eye(n))
-                self.register_buffer("B", torch.empty(n, n))
+                self.id = Buffer(torch.eye(n))
+                self.B = Buffer(torch.empty(n, n))
                 init.orthogonal_(self.B)
 
             def forward(self, X):
@@ -396,7 +396,7 @@ class TestNNParametrization(NNTestCase):
         class Orthogonal(nn.Module):
             def __init__(self, n):
                 super().__init__()
-                self.register_buffer("B", torch.eye(n))
+                self.B = Buffer(torch.eye(n))
 
             def forward(self, X):
                 Id = torch.eye(X.size(0))

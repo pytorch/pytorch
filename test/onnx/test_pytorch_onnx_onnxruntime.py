@@ -297,7 +297,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 self,
             ):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 scale_1 = self.weight.reshape(1, -1, 1, 1)
@@ -1923,6 +1923,30 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.rand((22, 256))
         self.run_test(InputIndexSlice(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipScriptTest()  # Torchscript doesn't support 1d index.
+    def test_slice_with_1d_input_index(self):
+        class InputIndexSlice(torch.nn.Module):
+            def forward(self, x, y):
+                x[:y, 0, :] = y
+                return x
+
+        x = torch.zeros((56, 6, 256))
+        y = torch.tensor([5], dtype=torch.int64)
+        self.run_test(InputIndexSlice(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_slice_with_input_step_size(self):
+        class InputIndexSlice(torch.nn.Module):
+            def forward(self, x, y, z):
+                x[:y:z, 0::z, :] = 1
+                return x
+
+        x = torch.zeros((56, 6, 256))
+        y = torch.tensor(5, dtype=torch.int64)
+        z = torch.tensor(2, dtype=torch.int64)
+        self.run_test(InputIndexSlice(), (x, y, z))
+
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # scripting tuple/list append
     def test_slice_dynamic(self):
@@ -2607,6 +2631,37 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.tensor(np.arange(6.0).reshape(2, 3))
         self.run_test(MyModule(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_randint(self):
+        class RandInt(torch.nn.Module):
+            def forward(self, x):
+                randint = torch.randint(1, 10, x.shape)
+                x = 0 * randint + x
+                return x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandInt(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_randint_value(self):
+        class RandInt(torch.nn.Module):
+            def forward(self, x):
+                # This randint call always returns 3
+                return torch.randint(3, 4, x.shape) + x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandInt(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_randint_like(self):
+        class RandInt(torch.nn.Module):
+            def forward(self, x):
+                # This randint call always returns 3
+                return torch.randint_like(x, 3, 4) + x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandInt(), x)
 
     def test_randn(self):
         class RandN(torch.nn.Module):
@@ -4159,7 +4214,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class GatherModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
                 # torch.nn.Embedding is converted to ONNX::Gather.
                 # Constant folding will be triggerred for constant inputs.
                 # This pattern is common for constant mask inputs in transformer models.
@@ -4178,7 +4233,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class GatherModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(2))
+                self.weight = torch.nn.Buffer(torch.ones(2))
 
             def forward(self, x):
                 # shape is of rank 0
@@ -4193,7 +4248,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class GatherModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("rb", torch.randn(1, 1, 3, 1, 1))
+                self.rb = torch.nn.Buffer(torch.randn(1, 1, 3, 1, 1))
 
             def forward(self, x):
                 x += self.rb[0]
@@ -9339,7 +9394,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class ShapeModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("weight", torch.ones(5))
+                self.weight = torch.nn.Buffer(torch.ones(5))
 
             def forward(self, x):
                 shape = self.weight.shape[0]
@@ -10840,7 +10895,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self, embedding_dim):
                 super().__init__()
                 self.weights = InnerModule2.get_embedding(embedding_dim)
-                self.register_buffer("_float_tensor", torch.FloatTensor(1))
+                self._float_tensor = torch.nn.Buffer(torch.FloatTensor(1))
                 self.const = 2
 
             @staticmethod
@@ -10902,7 +10957,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 self.embedding_dim = embedding_dim
                 self.const = 2.5
                 self.weights = InnerModule.get_embedding(self.embedding_dim)
-                self.register_buffer("_float_tensor", torch.FloatTensor(1))
+                self._float_tensor = torch.nn.Buffer(torch.FloatTensor(1))
 
             @staticmethod
             def get_embedding(embedding_dim: int):

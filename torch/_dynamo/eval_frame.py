@@ -1132,11 +1132,6 @@ def export(
     return (new_graph, out_guards)
 
 
-def assume_constant_result(fn):
-    fn._dynamo_marked_constant = True
-    return fn
-
-
 def optimize_assert(
     backend,
     *,
@@ -1164,56 +1159,21 @@ def optimize_assert(
     )
 
 
-def run(fn=None):
-    """Don't do any dynamic compiles, just use prior optimizations"""
-    if fn is not None:
-        fn = innermost_fn(fn)
-        assert callable(fn)
-        return RunOnlyContext()(fn)
-    return RunOnlyContext()
-
-
-def disable(fn=None, recursive=True):
-    """
-    Decorator and context manager to disable TorchDynamo
-
-    If recursive=True, Dynamo is completely skipped on the decorated function
-    frame as well as the recursively invoked functions.
-
-    If recursive=False, Dynamo skips frames associated with the function code,
-    but still process recursively invoked frames.
-    """
-    if recursive:
-        if fn is not None:
-            fn = innermost_fn(fn)
-            assert callable(fn)
-            return DisableContext()(fn)
-        return DisableContext()
-    else:
-        return skip(fn)
-
-
-def skip(fn=None):
-    """
-    Skip frames associated with the function code, but still process recursively
-    invoked frames
-    """
-    if fn is None:
-        return skip
-    fn = innermost_fn(fn)
-    assert callable(fn)
-    skip_code(fn.__code__)
-    fn._torchdynamo_disable = True
-    return fn
-
-
 class TorchPatcher:
     @staticmethod
     @functools.lru_cache(None)
     def patch():
-        # Disable TorchDynamo on some torch.* compilers generated frames
-        torch.jit.trace = disable(torch.jit.trace)
+        # A better way to disable the following would be decorate the source
+        # functions with @torch._disable_dynamo. However, this causes issues
+        # with torch.deploy internally.
+        from .decorators import disable
 
+        torch.jit.trace = disable(torch.jit.trace)
+        torch.jit.trace_module = disable(torch.jit.trace_module)
+        torch.jit._get_trace_graph = disable(torch.jit._get_trace_graph)
+        torch.fx._symbolic_trace.Tracer.trace = disable(
+            torch.fx._symbolic_trace.Tracer.trace
+        )
         torch.distributions.Distribution.set_default_validate_args(False)
 
         optimizers = [
@@ -1236,7 +1196,7 @@ class TorchPatcher:
             sgd,
         )
 
-        for opt_mod in (
+        all_opts = {
             adadelta,
             adagrad,
             adam,
@@ -1247,11 +1207,28 @@ class TorchPatcher:
             rmsprop,
             rprop,
             sgd,
-        ):
+        }
+
+        disabled_multi_tensor_opts = {
+            adadelta,
+            adagrad,
+            adamax,
+            adamw,
+            asgd,
+            nadam,
+            rmsprop,
+            rprop,
+            sgd,
+        }
+
+        for opt_mod in all_opts:
             opt_name = opt_mod.__name__.split(".")[-1]
             multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
             fused_fn_name = f"_fused_{opt_name}"
-            if hasattr(opt_mod, multi_tensor_fn_name):
+            if (
+                hasattr(opt_mod, multi_tensor_fn_name)
+                and opt_mod in disabled_multi_tensor_opts
+            ):
                 setattr(
                     opt_mod,
                     multi_tensor_fn_name,
