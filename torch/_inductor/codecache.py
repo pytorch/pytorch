@@ -271,7 +271,10 @@ class PersistentCache(CacheBase):
                 self.update_local_cache(local_cache)
 
                 if use_global_cache():
-                    log_vals(timings)
+                    timings_to_log = {
+                        choice.hash_key(): timings[choice] for choice in choices
+                    }
+                    log_vals(timings_to_log)
         elif use_global_cache():
             # only check global cache, not local one
             check_cache(self.get_global_cache(), callback=log_stats)
