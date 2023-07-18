@@ -483,7 +483,7 @@ class TransformerEncoderLayer(Module):
          https://arxiv.org/abs/2205.14135
 
     """
-    __constants__ = ['batch_first', 'norm_first']
+    __constants__ = ['norm_first']
 
     def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,
                  activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
@@ -698,7 +698,7 @@ class TransformerDecoderLayer(Module):
         >>> tgt = torch.rand(32, 20, 512)
         >>> out = decoder_layer(tgt, memory)
     """
-    __constants__ = ['batch_first', 'norm_first']
+    __constants__ = ['norm_first']
 
     def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,
                  activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
