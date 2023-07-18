@@ -61,10 +61,8 @@ class CMake:
 
         _cmake_min_version = LooseVersion("3.13.0")
         if all(
-
-                ver is None or ver < _cmake_min_version
-                for ver in [cmake_version, cmake3_version]
-
+            ver is None or ver < _cmake_min_version
+            for ver in [cmake_version, cmake3_version]
         ):
             raise RuntimeError("no cmake or cmake3 with version >= 3.13.0 found")
 
@@ -172,9 +170,7 @@ class CMake:
                     args.append("-Ax64")
                     toolset_dict["host"] = "x64"
             if toolset_dict:
-                toolset_expr = ",".join(
-                    [f"{k}={v}" for k, v in toolset_dict.items()]
-                )
+                toolset_expr = ",".join([f"{k}={v}" for k, v in toolset_dict.items()])
                 args.append("-T" + toolset_expr)
 
         base_dir = os.path.dirname(
@@ -324,9 +320,7 @@ class CMake:
             if "CMAKE_C_COMPILER" not in build_options and "CC" not in os.environ:
                 CMake.defines(args, CMAKE_C_COMPILER=f"{expected_wrapper}/gcc")
             if "CMAKE_CXX_COMPILER" not in build_options and "CXX" not in os.environ:
-                CMake.defines(
-                    args, CMAKE_CXX_COMPILER=f"{expected_wrapper}/g++"
-                )
+                CMake.defines(args, CMAKE_CXX_COMPILER=f"{expected_wrapper}/g++")
 
         for env_var_name in my_env:
             if env_var_name.startswith("gh"):
@@ -335,9 +329,7 @@ class CMake:
                 try:
                     my_env[env_var_name] = str(my_env[env_var_name].encode("utf-8"))
                 except UnicodeDecodeError as e:
-                    shex = ":".join(
-                        f"{ord(c):02x}" for c in my_env[env_var_name]
-                    )
+                    shex = ":".join(f"{ord(c):02x}" for c in my_env[env_var_name])
                     print(
                         f"Invalid ENV[{env_var_name}] = {shex}",
                         file=sys.stderr,
