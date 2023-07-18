@@ -45,8 +45,11 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
-# enable experimental patterns for match+replace optimizations
-experimental_patterns = False
+# Optimize away split cat patterns (Experimental)
+split_cat_fx_passes = True
+
+# enable pattern match with group fusion (using fbgemm)
+group_fusion = False
 
 # enable reordering pass
 reordering = True
@@ -124,9 +127,6 @@ conv_1x1_as_mm = False
 # being reduced over is large (by splitting it)
 split_reductions = True
 
-# Only save random seed for backwards rather than full mask
-lowmem_dropout = True
-
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
 # Enable constant and index_expr folding
@@ -173,7 +173,14 @@ compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    global_cache_dir = "fb/cache"
+    from libfb.py import parutil
+
+    try:
+        global_cache_dir = parutil.get_dir_path(
+            os.path.join(__package__.replace(".", os.sep), "fb/cache")
+        )
+    except ValueError:
+        global_cache_dir = None
 else:
     global_cache_dir = None
 
@@ -206,7 +213,8 @@ _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
-disable_cpp_codegen = is_fbcode()
+# TODO: remove later
+disable_cpp_codegen = False
 
 
 # Freezing will attempt to inline weights as constants in optimization
