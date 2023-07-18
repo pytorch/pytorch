@@ -1996,13 +1996,14 @@ class CPUReproTests(TestCase):
             x = torch.rand(2, 3, 14, 14).to(dtype)
             self.common(f, (x,))
 
-    def test_broadcast_mul_bfloat16(self):
+    def test_broadcast_mul_16bit(self):
         def f(a, b):
             return a * b
 
-        a = torch.randn(2, 16, 16).bfloat16()
-        b = torch.randn(2, 1, 1).bfloat16()
-        self.common(f, (a, b))
+        for dtype in _16bit_dtypes:
+            a = torch.randn(2, 16, 16).to(dtype)
+            b = torch.randn(2, 1, 1).to(dtype)
+            self.common(f, (a, b))
 
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
