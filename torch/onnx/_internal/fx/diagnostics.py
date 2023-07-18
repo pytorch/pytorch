@@ -91,38 +91,6 @@ def _torch_fx_symbolic_value(
     return f"Sym({obj})"
 
 
-# from torch/fx/graph.py to follow torch format
-def _stringify_shape(shape: Optional[torch.Size]) -> str:
-    if shape is None:
-        return ""
-    return f"[{', '.join(str(x) for x in shape)}]"
-
-
-def _format_nested_argument_by_dtype(obj: Any) -> str:
-    """Dispatch to the correct formatter based on the type of the argument."""
-    if isinstance(obj, torch.Tensor):
-        return _torch_tensor(obj)
-    if isinstance(obj, torch.nn.Parameter):
-        return _torch_nn_parameter(obj)
-    if isinstance(obj, torch.fx.Node):
-        return _torch_fx_node(obj)
-    if fx_type_utils.is_torch_symbolic_type(obj):
-        return _torch_fx_symbolic_value(obj)
-    if isinstance(obj, graph_building.TorchScriptTensor):
-        return _onnxscript_torch_script_tensor(obj)
-    if isinstance(obj, onnxscript.OnnxFunction):
-        return _onnxscript_onnx_function(obj)
-    if isinstance(obj, onnxscript.TracedOnnxFunction):
-        return _onnxscript_traced_onnx_function(obj)
-    if isinstance(obj, list):
-        return _list(obj)
-    if isinstance(obj, tuple):
-        return _tuple(obj)
-    if isinstance(obj, dict):
-        return _dict(obj)
-    return format_argument(obj)
-
-
 @_format_argument.register
 def _torch_tensor(obj: torch.Tensor) -> str:
     return f"Tensor({fx_type_utils.from_torch_dtype_to_abbr(obj.dtype)}{_stringify_shape(obj.shape)})"
@@ -176,6 +144,38 @@ def _onnxscript_onnx_function(obj: onnxscript.OnnxFunction) -> str:
 @_format_argument.register
 def _onnxscript_traced_onnx_function(obj: onnxscript.TracedOnnxFunction) -> str:
     return f"`TracedOnnxFunction({obj.name})`"
+
+
+# from torch/fx/graph.py to follow torch format
+def _stringify_shape(shape: Optional[torch.Size]) -> str:
+    if shape is None:
+        return ""
+    return f"[{', '.join(str(x) for x in shape)}]"
+
+
+def _format_nested_argument_by_dtype(obj: Any) -> str:
+    """Dispatch to the correct formatter based on the type of the argument."""
+    if isinstance(obj, torch.Tensor):
+        return _torch_tensor(obj)
+    if isinstance(obj, torch.nn.Parameter):
+        return _torch_nn_parameter(obj)
+    if isinstance(obj, torch.fx.Node):
+        return _torch_fx_node(obj)
+    if fx_type_utils.is_torch_symbolic_type(obj):
+        return _torch_fx_symbolic_value(obj)
+    if isinstance(obj, graph_building.TorchScriptTensor):
+        return _onnxscript_torch_script_tensor(obj)
+    if isinstance(obj, onnxscript.OnnxFunction):
+        return _onnxscript_onnx_function(obj)
+    if isinstance(obj, onnxscript.TracedOnnxFunction):
+        return _onnxscript_traced_onnx_function(obj)
+    if isinstance(obj, list):
+        return _list(obj)
+    if isinstance(obj, tuple):
+        return _tuple(obj)
+    if isinstance(obj, dict):
+        return _dict(obj)
+    return format_argument(obj)
 
 
 diagnose_call = functools.partial(
