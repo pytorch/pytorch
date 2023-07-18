@@ -79,7 +79,7 @@ class PackagingErrorReason(Enum):
     """
 
     def __repr__(self):
-        return "<%s.%s>" % (self.__class__.__name__, self.name)
+        return f"<{self.__class__.__name__}.{self.name}>"
 
     IS_EXTENSION_MODULE = (
         "Module is a C extension module. torch.package supports Python modules only."

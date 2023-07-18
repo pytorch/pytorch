@@ -123,7 +123,7 @@ class modules(_TestParametrizer):
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
-                    print("Failed to instantiate {0} for module {1}!".format(test_name, module_info.name))
+                    print(f"Failed to instantiate {test_name} for module {module_info.name}!")
                     raise ex
 
 
@@ -454,7 +454,7 @@ def generate_regression_criterion_inputs(make_input):
             constructor_input=FunctionInput(reduction=reduction),
             forward_input=FunctionInput(make_input((4, )), make_input(4,)),
             reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True),
-            desc='no_batch_dim_{}'.format(reduction)
+            desc=f'no_batch_dim_{reduction}'
         ) for reduction in ['none', 'mean', 'sum']]
 
 
@@ -1369,7 +1369,7 @@ def module_inputs_torch_nn_LayerNorm(module_info, device, dtype, requires_grad, 
             desc='1d_elementwise_affine'),
         ModuleInput(
             constructor_input=FunctionInput([5], 1e-3),
-            forward_input=FunctionInput(make_input(((128, 5, 5)))),
+            forward_input=FunctionInput(make_input((128, 5, 5))),
             desc='1d_elementwise_affine_large_batch'),
         ModuleInput(
             constructor_input=FunctionInput([5], 1e-3, False),
