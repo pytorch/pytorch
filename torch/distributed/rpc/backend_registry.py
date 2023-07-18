@@ -69,7 +69,7 @@ def register_backend(
     """
     global BackendType
     if backend_registered(backend_name):
-        raise RuntimeError("RPC backend {}: already registered".format(backend_name))
+        raise RuntimeError(f"RPC backend {backend_name}: already registered")
     # Create a new enum type, `BackendType`, with extended members.
     existing_enum_dict = {member.name: member.value for member in BackendType}
     extended_enum_dict = dict(
@@ -115,7 +115,7 @@ def _init_process_group(store, rank, world_size):
 
     if (rank != -1) and (rank != group.rank()):
         raise RuntimeError(
-            "rank argument {} doesn't match pg rank {}".format(rank, group.rank())
+            f"rank argument {rank} doesn't match pg rank {group.rank()}"
         )
     if (world_size != -1) and (world_size != group.size()):
         raise RuntimeError(
@@ -306,7 +306,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     from . import TensorPipeAgent
     from . import TensorPipeRpcBackendOptions
     if not isinstance(store, dist.Store):
-        raise TypeError("`store` must be a c10d::Store. {}".format(store))
+        raise TypeError(f"`store` must be a c10d::Store. {store}")
 
     if not isinstance(
         rpc_backend_options, TensorPipeRpcBackendOptions
