@@ -649,7 +649,7 @@ def use_custom_generated_macros():
 
 def use_fb_internal_macros():
     if config.is_fbcode():
-        return "-D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG -D C10_MOBILE"
+        return "-D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG"
     else:
         return ""
 
