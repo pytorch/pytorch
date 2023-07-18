@@ -1282,21 +1282,60 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
-    def test_(self):
-        def fn(x: torch.Tensor, y: int):
-            z = x.detach()
-            w = y + 1
-            torch._dynamo.graph_break()
-            return z + w
+    @requires_numpy_pytorch_interop
+    def test_mandelbrot_numpy(self):
+        def mandelbrot_numpy(max_iter):
+            # Define the boundaries of the complex plane
+            xn = 450
+            yn = 375
+            xmin = -2.25
+            xmax = 0.75
+            ymin = -1.25
+            ymax = 1.25
+
+            # Create the grid of complex numbers
+            x_values = np.linspace(xmin, xmax, xn, dtype=np.float64)
+            y_values = np.linspace(ymin, ymax, yn, dtype=np.float64)
+            rx, iy = np.meshgrid(x_values, y_values, indexing="xy")
+
+            x = rx.copy()
+            y = iy.copy()
+            mask = np.zeros_like(x)
+            for i in range(max_iter):
+                x_prev = x
+                y_prev = y
+                x = x_prev**2 - y_prev**2 + rx
+                y = 2 * x_prev * y_prev + iy
+                inside = np.sqrt(x**2 + y**2) <= 2
+                mask += inside
+            return mask
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(mandelbrot_numpy)
+        for _ in range(10):
+            x = torch.randint(100, (1,))
+            ref = mandelbrot_numpy(x.item())
+            res = opt_fn(x.item())
+            self.assertTrue(same(ref, res))
+
+    def test_graph_break_correctly_when_passing_numpy_ndarray_to_torch_function(self):
+        # from transformers/models/big_bird/modeling_big_bird.py
+        def fn(x: int, y: torch.Tensor):
+            ndarray_list = [np.ones([2, x])]
+            ndarray = np.stack(ndarray_list, axis=0)
+            tensor = torch.tensor(ndarray, dtype=torch.long)
+            tensor.unsqueeze_(0)
+            return tensor + y
 
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
-        for _ in range(10):
-            x = torch.randn([1, 3])
-            y = 5
+        for x in range(1, 10):
+            y = torch.randn([1, 2, x])
             ref = fn(x, y)
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
+        # Graph break: call_function args: NumpyVariable() ConstantVariable(dtype) from user code at ...
+        #     tensor = torch.tensor(ndarray, dtype=torch.long)
         self.assertEqual(cnts.frame_count, 2)
 
     def test_inplace_view_on_graph_input(self):

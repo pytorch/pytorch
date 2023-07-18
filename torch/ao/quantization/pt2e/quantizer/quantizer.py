@@ -13,11 +13,13 @@ __all__ = [
     "QuantizationSpecBase",
     "QuantizationSpec",
     "FixedQParamsQuantizationSpec",
+    "EdgeOrNode",
     "SharedQuantizationSpec",
     "DerivedQuantizationSpec",
     "QuantizationAnnotation",
     "QuantizationConfig",
     "OperatorPatternType",
+    "OperatorConfig",
 ]
 
 # TODO: maybe remove torch.float32
@@ -86,17 +88,19 @@ class FixedQParamsQuantizationSpec(QuantizationSpecBase):
     quant_max: Optional[int] = None
     qscheme: Optional[torch.qscheme] = None
 
+"""
+The way we refer to other points of quantization in the graph will be either
+an input edge or an output value
+input edge is the connection between input node and the node consuming the input, so it's a Tuple[Node, Node]
+output value is an fx Node
+"""
 EdgeOrNode = Union[Tuple[Node, Node], Node]
+EdgeOrNode.__module__ = "torch.ao.quantization.pt2e.quantizer.quantizer"
 
 @dataclass(eq=True, frozen=True)
 class SharedQuantizationSpec(QuantizationSpecBase):
     """
     Quantization spec for the Tensors whose quantization parameters are shared with other Tensors
-
-    The way we refer to other points of quantization in the graph will be either
-    an input edge or an output value
-    input edge is the connection between input node and the node consuming the input, so it's a Tuple[Node, Node]
-    output value is an fx Node
     """
     edge_or_node: EdgeOrNode
 
@@ -122,6 +126,7 @@ class QuantizationConfig:
     is_qat: bool = False
 
 OperatorPatternType = List[Callable]
+OperatorPatternType.__module__ = "torch.ao.quantization.pt2e.quantizer.quantizer"
 
 OperatorConfig = NamedTuple(
     "OperatorConfig",
