@@ -70,6 +70,15 @@ dequantize_qconv_pt2e_pattern = CallFunction(
 )
 
 
+def generate_pattern_with_unary(computation_call, unary_post_op):
+    if unary_post_op is not None:
+        return CallFunction(
+            unary_post_op,
+            computation_call,
+        )
+    return computation_call
+
+
 def generate_pattern_with_output_quant(computation_call):
     """
     quantize output:
@@ -170,24 +179,37 @@ def _register_quantized_conv_lowering(
     return qconv
 
 
-def _register_quantization_lowerings():
+def _register_quantization_unary_fusion():
     class UnaryAttr:
         def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
             self.op_name = op_name
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
-    # Register dq-conv2d-q pattern for ExternKernel Lowering
-    quantize_conv_output_pattern_pt2e = generate_pattern_with_output_quant(
-        dequantize_qconv_pt2e_pattern
-    )
-    _register_quantized_conv_lowering(
-        quantize_conv_output_pattern_pt2e,
-        2,  # pass_number
-        torch.ops.onednn.qconv2d_pointwise,  # computation_op
-        False,  # fp32_output
-        UnaryAttr("none", [], ""),  # unary_attr
-    )
+    unary_replace_patterns = {
+        UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
+            dequantize_qconv_pt2e_pattern
+        ),
+        UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
+            generate_pattern_with_unary(
+                dequantize_qconv_pt2e_pattern, aten.relu.default
+            )
+        ),
+    }
+
+    for unary_attr, patterns in unary_replace_patterns.items():
+        # Register qconv2d pattern for ExternKernel Lowering
+        _register_quantized_conv_lowering(
+            patterns,
+            1 if unary_attr.op_name != "none" else 2,  # pass_number
+            torch.ops.onednn.qconv2d_pointwise,  # computation_op
+            False,  # fp32_output
+            unary_attr,  # unary_attr
+        )
+
+
+def _register_quantization_lowerings():
+    _register_quantization_unary_fusion()
 
 
 def _is_valid_dequant_promotion_pattern(match):
