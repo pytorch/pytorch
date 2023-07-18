@@ -96,20 +96,22 @@ def symeig(A: Tensor, largest: Optional[bool] = False) -> Tuple[Tensor, Tensor]:
 def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed.",
-        "Please use the `torch.linalg.matrix_rank` function instead.",
+        "Please use the `torch.linalg.matrix_rank` function instead,",
+        "The parameter `symmetric` was renamed in torch.linalg.matrix_rank() to `hermitian`."
     )
 
 
 def solve(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
     raise RuntimeError(
-        "This function was deprecated since version 1.9 and is now removed. Please use the `torch.linalg.solve` function instead.",
+        "This function was deprecated since version 1.9 and is now removed.",
+        "Please replace `torch.solve(B,A).solution` with `torch.linalg.solve(A,B)`.",
     )
 
 
 def lstsq(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed.",
-        "Please use the `torch.linalg.lstsq` function instead.",
+        "Please replace `torch.lstsq(B,A)` with `torch.linalg.lstsq(A,B)`.",
     )
 
 
