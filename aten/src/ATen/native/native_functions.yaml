@@ -4296,7 +4296,7 @@
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor
   dispatch:
-    CPU: channel_shuffle
+    CPU, CUDA: channel_shuffle
     QuantizedCPU: channel_shuffle_quantized_cpu
   autogen: channel_shuffle.out
 
