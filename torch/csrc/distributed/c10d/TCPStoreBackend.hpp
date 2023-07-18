@@ -45,6 +45,7 @@ class BackgroundThread {
   explicit BackgroundThread(Socket&& storeListenSocket);
 
   virtual ~BackgroundThread() = 0;
+  virtual std::uint16_t port() const = 0;
 
  protected:
   void dispose();

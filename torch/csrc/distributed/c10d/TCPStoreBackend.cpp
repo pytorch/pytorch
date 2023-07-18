@@ -108,6 +108,8 @@ class TCPStoreMasterDaemon : public BackgroundThread {
 
   ~TCPStoreMasterDaemon() override;
 
+  std::uint16_t port() const override;
+
  private:
   void run();
   void queryFds(std::vector<struct pollfd>& fds);
@@ -149,6 +151,10 @@ TCPStoreMasterDaemon::TCPStoreMasterDaemon(Socket&& storeListenSocket)
 
 TCPStoreMasterDaemon::~TCPStoreMasterDaemon() {
   dispose();
+}
+
+std::uint16_t TCPStoreMasterDaemon::port() const {
+  return storeListenSocket_.port();
 }
 
 void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
@@ -286,7 +292,6 @@ void TCPStoreMasterDaemon::compareSetHandler(int socket) {
   if (pos == tcpStore_.end()) {
     if (currentValue.empty()) {
       tcpStore_[key] = newValue;
-      tcputil::sendVector<uint8_t>(socket, newValue);
     } else {
       // TODO: This code path is not ideal as we are "lying" to the caller in
       // case the key does not exist. We should come up with a working solution.
