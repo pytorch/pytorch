@@ -15,6 +15,8 @@
 #include <limits>
 #include <sstream>
 
+PyObject* THPDeviceModule = nullptr;
+
 PyObject* THPDevice_New(const at::Device& device) {
   auto type = (PyTypeObject*)&THPDeviceType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
@@ -50,10 +52,14 @@ PyObject* THPDevice_pynew(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser(
-      {"Device(Device device)",
-       "Device(c10::string_view type, int64_t? index=-1)"});
+      {"device(Device device)",
+       "device(c10::string_view type, int64_t? index=-1)"});
   torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.has_torch_function()) {
+    return handle_torch_function(
+        r, nullptr, args, kwargs, THPDeviceModule, "torch");
+  }
   if (r.idx == 0) {
     auto device = r.device(0);
     return THPDevice_New(device);
@@ -267,6 +273,7 @@ void THPDevice_init(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPDeviceType);
+  THPDeviceModule = PyImport_ImportModule("torch");
   if (PyModule_AddObject(module, "device", (PyObject*)&THPDeviceType) != 0) {
     throw python_error();
   }

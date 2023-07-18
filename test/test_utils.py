@@ -30,6 +30,7 @@ from torch.utils._traceback import report_compile_source_on_error, format_traceb
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
+from torch.overrides import TorchFunctionMode
 from torch.testing._internal.common_utils import load_tests, IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -896,6 +897,28 @@ class TestDeviceUtils(TestCase):
             set_default_device(None)
 
         self.assertEqual(r.device.type, 'meta')
+
+    def test_context_device(self):
+        class _DeviceContext(TorchFunctionMode):
+            def __init__(self):
+                pass
+
+            def __enter__(self):
+                return super().__enter__()
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                return super().__exit__(exc_type, exc_val, exc_tb)
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func == torch.device and isinstance(kwargs.get('device'), int):
+                    kwargs['device'] = f"xla:{kwargs.get('device')}"
+                return func(*args, **kwargs)
+
+        with _DeviceContext():
+            dev = torch.device(device=0)
+            self.assertEqual(dev.type, "xla")
+            self.assertEqual(dev.index, 0)
 
     @onlyCPU
     @ops(op_db)
