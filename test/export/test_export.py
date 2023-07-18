@@ -297,11 +297,17 @@ class TestExport(TestCase):
         def kw_func(arg1, arg2, a, b=1):
             return arg1 + arg2, a["kw1"] + a["kw2"] + b
 
+        def kw_func2(arg1, arg2, a=1, b=2):
+            return arg1 + a, arg2 + b
+
+
         args = (torch.ones(6, 4), torch.ones(1, 1))
         kwargs1 = {"a": {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}}
         kwargs2 = {"a": {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}, "b": 2}
         self._test_export_same_as_eager(kw_func, args, kwargs1)
         self._test_export_same_as_eager(kw_func, args, kwargs2)
+        kwargs3 = {"b": 1}
+        self._test_export_same_as_eager(kw_func2, args, kwargs3)
 
     def test_export_func_with_var_postional_args(self):
         def kw_func(arg1, arg2, *args):
@@ -324,6 +330,15 @@ class TestExport(TestCase):
 
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         kwargs = {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4), "kw3": torch.ones(2, 3), "kw4": torch.ones(3, 4)}
+        self._test_export_same_as_eager(kw_func, args, kwargs)
+
+    def test_export_func_with_var_keyword_pytree_args(self):
+        def kw_func(arg1, arg2, *args, kw1, kw2, **kwargs):
+            return arg1 + arg2[0][0] + args[0] + kw1[0] + kwargs["kw3"][0], arg2[1] + args[1] + kw2 + kwargs["kw4"]
+
+        args = (torch.ones(2, 3), [(torch.ones(2, 3), ), torch.ones(3, 4)], torch.ones(2, 3), torch.ones(3, 4))
+        kwargs = {"kw1": (torch.ones(2, 3), ), "kw2": torch.ones(3, 4),
+                  "kw3": (torch.ones(2, 3), torch.ones(3, 4)), "kw4": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
     def test_linear_conv(self):
