@@ -831,7 +831,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         create_model: Callable,
         create_args: Callable,
         create_kwargs: Callable,
-        with_checkpoint: bool,
+        load_checkpoint_during_init: bool,
     ):
         """Test helper for FakeTensorMode-enabled exporter.
 
@@ -840,6 +840,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_model: A function that creates a model.
             create_args: A function that creates positional inputs for the model.
             create_kwargs: A function that creates keyword inputs for ther model.
+            load_checkpoint_during_init: Whether to load a checkpoint during model initialization.
+                (after or during model creation, but before exporting starts)
 
         This test contains several steps.
 
@@ -868,7 +870,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 fake_args = create_args()
                 fake_kwargs = create_kwargs()
                 fake_model = create_model()
-                if with_checkpoint:
+                if load_checkpoint_during_init:
                     fake_model.load_state_dict(torch.load(tmp_checkpoint_file.name))
 
             # Export the model with fake inputs and parameters
@@ -931,13 +933,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_kwargs():
             return {}
 
-        for with_checkpoint in (True, False):
+        for load_checkpoint_during_init in (True, False):
             self._test_fake_tensor_mode_exporter(
                 "simple",
                 create_model,
                 create_args,
                 create_kwargs,
-                with_checkpoint=with_checkpoint,
+                load_checkpoint_during_init=load_checkpoint_during_init,
             )
 
     @pytorch_test_common.skip_op_level_debug_test(
@@ -959,13 +961,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_kwargs():
             return {"return_dict": False}
 
-        for with_checkpoint in (True, False):
+        for load_checkpoint_during_init in (True, False):
             self._test_fake_tensor_mode_exporter(
                 "tiny_gpt2",
                 create_model,
                 create_args,
                 create_kwargs,
-                with_checkpoint=with_checkpoint,
+                load_checkpoint_during_init=load_checkpoint_during_init,
             )
 
     @pytorch_test_common.skip_op_level_debug_test(
@@ -999,13 +1001,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_kwargs():
             return {}
 
-        for with_checkpoint in (True, False):
+        for load_checkpoint_during_init in (True, False):
             self._test_fake_tensor_mode_exporter(
                 "toy_mlp1",
                 create_model,
                 create_args,
                 create_kwargs,
-                with_checkpoint=with_checkpoint,
+                load_checkpoint_during_init=load_checkpoint_during_init,
             )
 
 
