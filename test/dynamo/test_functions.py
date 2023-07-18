@@ -1151,7 +1151,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_numpy_random():
         import numpy as np
 
-        return np.random.randn(2, 2)
+        x = np.random.randn(2, 2)
+        return x - x
 
 
 def global_func_with_default_tensor_args(
