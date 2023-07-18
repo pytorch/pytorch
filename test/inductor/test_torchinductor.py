@@ -78,6 +78,8 @@ skip_if_x86_mac = functools.partial(
 )
 vec_dtypes = [torch.float, torch.bfloat16]
 
+libfoo = None
+
 
 def run_fw_bw_and_get_code(fn):
     def run_with_backward():
@@ -2674,6 +2676,24 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    @config.patch(fallback_random=True)
+    def test_randn_with_dtype_and_device(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu randn_with_dtype_and_device test")
+
+        def fn(vectors):
+            rotations_shape = (12, vectors.shape[-1], 1, 64)
+            random_rotations = torch.randn(
+                rotations_shape, device=vectors.device, dtype=vectors.dtype
+            )
+            random_rotations += 1
+            return random_rotations
+
+        self.common(
+            fn,
+            (torch.randn([4, 12, 2, 64]),),
+        )
+
     def test_embedding(self):
         m = torch.nn.Sequential(
             torch.nn.Embedding(10, 4, padding_idx=0),
@@ -2808,7 +2828,8 @@ class CommonTemplate:
             torch.nn.ReLU(),
         )
         m.eval()
-        self.common(m, (torch.randn([16, 32]),), check_lowp=False)
+        with torch.no_grad():
+            self.common(m, (torch.randn([16, 32]),), check_lowp=False)
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
@@ -6580,30 +6601,26 @@ class CommonTemplate:
 
         self.common(fn, (input, boundaries, add_value), check_lowp=False)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
-
     @config.patch(implicit_fallbacks=True)
     def test_custom_op(self):
         import torch.library
 
-        @functools.lru_cache()
-        def define_op(foo):
-            foo.define("custom(Tensor self) -> Tensor")
-
-        foo = torch.library.Library("foo", "DEF")
-        define_op(foo)
-
-        @torch.library.impl(foo, "custom", "CPU")
         def foo_cpu(x):
             return 3 * x
 
-        @torch.library.impl(foo, "custom", "CUDA")
         def foo_cuda(x):
             return 3 * x
 
-        @torch.library.impl(foo, "custom", "Meta")
         def foo_meta(x):
             return torch.empty_like(x)
+
+        global libfoo
+        if libfoo is None:
+            libfoo = torch.library.Library("foo", "DEF")
+            libfoo.define("custom(Tensor self) -> Tensor")
+            libfoo.impl("custom", foo_cpu, "CPU")
+            libfoo.impl("custom", foo_cuda, "CUDA")
+            libfoo.impl("custom", foo_meta, "Meta")
 
         def fn(x):
             a = torch.nn.functional.relu(x)

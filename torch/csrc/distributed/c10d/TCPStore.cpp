@@ -1101,8 +1101,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     server_ = detail::TCPServer::start(opts);
     // server successfully started
     C10D_DEBUG(
-      "The server has started on host:port = {} : {}.",
-      server_->host(),
+      "The server has started on port = {}.",
       server_->port());
 
     addr_.port = server_->port();
@@ -1112,7 +1111,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
   client_ = detail::TCPClient::connect(addr_, opts);
   // TCP connection established
-  C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port)
+  C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
 
   if (opts.waitWorkers) {
     waitForWorkers();
@@ -1120,8 +1119,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
   callbackClient_ = detail::TCPCallbackClient::connect(addr_, opts);
   // TCP CallbackClient connection established
-  C10D_DEBUG("TCP callback client connected to host {}:{}", addr_.host, addr_.port)
-  C10D_DEBUG("TCPStore successfully initialized.")
+  C10D_DEBUG("TCP callback client connected to host {}:{}", addr_.host, addr_.port);
 }
 
 TCPStore::~TCPStore() = default;
