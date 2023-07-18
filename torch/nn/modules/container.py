@@ -103,7 +103,7 @@ class Sequential(Module):
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
 
-    def _get_item_by_idx(self, iterator, idx) -> T:
+    def _get_item_by_idx(self, iterator, idx) -> T:  # type: ignore[misc, type-var]
         """Get the idx-th item of the iterator"""
         size = len(self)
         idx = operator.index(idx)
@@ -666,7 +666,10 @@ class ParameterList(Module):
         for k, p in enumerate(self):
             if isinstance(p, torch.Tensor):
                 size_str = 'x'.join(str(size) for size in p.size())
-                device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+                if p.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+                    device_str = ' ({})'.format(p.device)
+                else:
+                    device_str = ''
                 parastr = '{} containing: [{} of size {}{}]'.format(
                     "Parameter" if isinstance(p, Parameter) else "Tensor",
                     p.dtype, size_str, device_str)
@@ -890,7 +893,10 @@ class ParameterDict(Module):
         for k, p in self.items():
             if isinstance(p, torch.Tensor):
                 size_str = 'x'.join(str(size) for size in p.size())
-                device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+                if p.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+                    device_str = ' ({})'.format(p.device)
+                else:
+                    device_str = ''
                 parastr = '{} containing: [{} of size {}{}]'.format(
                     "Parameter" if isinstance(p, Parameter) else "Tensor",
                     torch.typename(p), size_str, device_str)

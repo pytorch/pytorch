@@ -1,10 +1,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 import operator
-from typing import Iterable, List, Sequence, Union
+from typing import cast, Iterable, List, Sequence, Union
 
 import torch
 from torch.distributed._tensor.api import DTensor
+from torch.distributed._tensor.placement_types import DTensorSpec, Shard
 
 
 # convenient wrapper to register sharding propagation rules
@@ -39,7 +40,7 @@ def register_op_strategy(op):
 def as_list(
     x: Union[List[object], object]
     # pyre-fixme[11]: Annotation `immutable_list` is not defined as a type.
-) -> Union[List[object], torch.fx.immutable_collections.immutable_list]:
+) -> Union[List[object], torch.fx.immutable_collections.immutable_list]:  # type: ignore[valid-type]
     # During tracing, `aten.sum.dim_IntList` uses `immutable_list` for its args,
     # which is an object but treated as a list by the tracer. Therefore, keep
     # `immutable_list` intact here as well.
@@ -69,3 +70,33 @@ def normalize_dims(dims: Union[int, Sequence[int]], ndim: int) -> Sequence[int]:
 
 def prod(xs: Iterable[int]) -> int:
     return functools.reduce(operator.mul, xs, 1)
+
+
+def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
+    """
+    Check if the shape is shardable according to the spec.
+    """
+    # number of shards in each tensor dimension
+    shards_map = [1] * len(shape)
+    for i, placement in enumerate(spec.placements):
+        if placement.is_shard():
+            shard_dim = cast(Shard, placement).dim
+            shards_map[shard_dim] *= spec.mesh.size(i)
+
+    for i, dim_size in enumerate(shape):
+        # TODO: maybe we should determine is_shardable based on
+        #       whether it's evenly sharded or not
+        if dim_size < shards_map[i]:
+            return False
+
+    return True
+
+
+def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
+    """Return True if tensor dim is sharded"""
+    return any(p.is_shard(dim) for p in spec.placements)
+
+
+def is_tensor_partial(spec: DTensorSpec) -> bool:
+    """Return True if tensor is partial on the mesh"""
+    return any(p.is_partial() for p in spec.placements)

@@ -14,6 +14,8 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <typeindex>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace torch {
@@ -1266,7 +1268,7 @@ public:
       // representation with Tensor.
       c10::intrusive_ptr_target* as_intrusive_ptr;
       struct {
-        DeviceType type;
+        c10::DeviceType type;
         DeviceIndex index;
       } as_device;
     } u;

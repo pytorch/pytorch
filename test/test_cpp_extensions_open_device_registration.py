@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 from typing import Union
+import tempfile
 import unittest
 
 import torch.testing._internal.common_utils as common
@@ -51,6 +52,9 @@ class DummyModule(object):
     def is_available():
         return True
 
+    @staticmethod
+    def current_device():
+        return 0
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
 class TestCppExtensionOpenRgistration(common.TestCase):
@@ -148,6 +152,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                 torch.utils.rename_privateuse1_backend('xxx')
             # register foo module, torch.foo
             torch._register_device_module('foo', DummyModule)
+            self.assertTrue(torch.utils.backend_registration._get_custom_mod_func("device_count")() == 1)
+            with self.assertRaisesRegex(RuntimeError, "Try to call torch.foo"):
+                torch.utils.backend_registration._get_custom_mod_func("func_name_")
             # default set for_tensor and for_module are True, so only set for_storage is True
             torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
             # generator tensor and module can be registered only once
@@ -232,6 +239,11 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             z1 = z1.cpu()
             self.assertFalse(self.module.custom_add_called())
             self.assertFalse(z1.is_foo)
+            z1 = z1.foo(device="foo:0", non_blocking=False)
+            self.assertFalse(self.module.custom_add_called())
+            self.assertTrue(z1.is_foo)
+            with self.assertRaisesRegex(RuntimeError, "Invalid device"):
+                z1.foo(device="cuda:0", non_blocking=False)
             # check UntypedStorage
             y = torch.empty(4, 4)
             z2 = y.untyped_storage()
@@ -256,21 +268,60 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(cpu_tensor.is_pinned("foo"))
             cpu_tensor_pin = cpu_tensor.pin_memory("foo")
             self.assertTrue(cpu_tensor_pin.is_pinned("foo"))
-            # Test storage pin_memory on custom device
+            # Test storage pin_memory on custom device string
             cpu_storage = cpu_tensor.storage()
+            foo_device = torch.device("foo")
             self.assertFalse(cpu_storage.is_pinned("foo"))
             cpu_storage_pin = cpu_storage.pin_memory("foo")
+            self.assertFalse(cpu_storage.is_pinned())
             self.assertFalse(cpu_storage.is_pinned("foo"))
+            self.assertFalse(cpu_storage.is_pinned(foo_device))
+            self.assertFalse(cpu_storage_pin.is_pinned())
             self.assertTrue(cpu_storage_pin.is_pinned("foo"))
+            self.assertTrue(cpu_storage_pin.is_pinned(foo_device))
             cpu_storage_pin_already = cpu_storage_pin.pin_memory("foo")
             self.assertTrue(cpu_storage_pin.is_pinned("foo"))
+            self.assertTrue(cpu_storage_pin.is_pinned(foo_device))
             self.assertTrue(cpu_storage_pin_already.is_pinned("foo"))
-            # Test storage pin_memory on error device
+            self.assertTrue(cpu_storage_pin_already.is_pinned(foo_device))
+
+            # Test storage pin_memory on torch.device
             self.assertFalse(cpu_storage.is_pinned("foo"))
-            with self.assertRaisesRegex(TypeError, "cannot pin CPU memory to hpu device, please check the target device."):
-                cpu_storage_pin = cpu_storage.pin_memory("hpu")
-            self.assertFalse(cpu_storage.is_pinned("hpu"))
+            cpu_storage_pinned = cpu_storage.pin_memory(foo_device)
             self.assertFalse(cpu_storage.is_pinned())
+            self.assertFalse(cpu_storage.is_pinned("foo"))
+            self.assertFalse(cpu_storage.is_pinned(foo_device))
+            self.assertFalse(cpu_storage_pinned.is_pinned())
+            self.assertTrue(cpu_storage_pinned.is_pinned("foo"))
+            self.assertTrue(cpu_storage_pinned.is_pinned(foo_device))
+
+            # Test untyped storage pin_memory and is_pin
+            cpu_tensor = torch.randn([3, 2, 1, 4])
+            cpu_untyped_storage = cpu_tensor.untyped_storage()
+            self.assertFalse(cpu_untyped_storage.is_pinned())
+            self.assertFalse(cpu_untyped_storage.is_pinned("foo"))
+            cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("foo")
+            self.assertFalse(cpu_untyped_storage_pinned.is_pinned())
+            self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
+            self.assertTrue(cpu_untyped_storage_pinned.is_pinned(foo_device))
+            cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory(foo_device)
+            self.assertFalse(cpu_untyped_storage_pinned.is_pinned())
+            self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
+            self.assertTrue(cpu_untyped_storage_pinned.is_pinned(foo_device))
+            with self.assertRaisesRegex(TypeError, "positional arguments but 3 were given"):
+                cpu_untyped_storage_pinned.is_pinned("foo1", "foo2")
+
+            # Test storage pin_memory on error device
+            self.assertFalse(cpu_storage_pinned.is_pinned("hpu"))
+            with self.assertRaisesRegex(NotImplementedError, "with arguments from the 'HPU' backend"):
+                cpu_storage.pin_memory("hpu")
+            self.assertFalse(cpu_untyped_storage_pinned.is_pinned("hpu"))
+            with self.assertRaisesRegex(NotImplementedError, "with arguments from the 'HPU' backend"):
+                cpu_untyped_storage.pin_memory("hpu")
+            invalid_device = torch.device("hpu")
+            self.assertFalse(cpu_untyped_storage_pinned.is_pinned(invalid_device))
+            with self.assertRaisesRegex(NotImplementedError, "with arguments from the 'HPU' backend"):
+                cpu_untyped_storage.pin_memory(invalid_device)
 
         def test_open_device_serialization():
             self.module.set_custom_device_index(-1)
@@ -284,8 +335,30 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             cpu_storage = torch.empty(4, 4).storage()
             foo_storage = torch.serialization.default_restore_location(cpu_storage, 'foo:0')
             self.assertTrue(foo_storage.is_foo)
+            # test tensor MetaData serialization
+            x = torch.empty(4, 4).long()
+            y = x.foo()
+            self.assertFalse(self.module.check_backend_meta(y))
+            self.module.custom_set_backend_meta(y)
+            self.assertTrue(self.module.check_backend_meta(y))
 
-        def test_open_device_storage_resize(self):
+            self.module.custom_serialization_registry()
+            with tempfile.TemporaryDirectory() as tmpdir:
+                path = os.path.join(tmpdir, 'data.pt')
+                torch.save(y, path)
+                z1 = torch.load(path)
+                # loads correctly onto the foo backend device
+                self.assertTrue(z1.is_foo)
+                # loads BackendMeta data correctly
+                self.assertTrue(self.module.check_backend_meta(z1))
+                # cross-backend
+                z2 = torch.load(path, map_location='cpu')
+                # loads correctly onto the cpu backend device
+                self.assertFalse(z2.is_foo)
+                # loads BackendMeta data correctly
+                self.assertFalse(self.module.check_backend_meta(z2))
+
+        def test_open_device_storage_resize():
             torch.utils.rename_privateuse1_backend('foo')
             cpu_tensor = torch.randn([8])
             foo_tensor = cpu_tensor.foo()
@@ -293,8 +366,52 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertTrue(foo_storage.size() == 8)
             foo_storage.resize_(8)
             self.assertTrue(foo_storage.size() == 8)
-            with self.assertRaisesRegex(RuntimeError, 'overflow'):
+            with self.assertRaisesRegex(RuntimeError, 'Overflow'):
                 foo_storage.resize_(8**29)
+
+        def test_open_device_storage_type():
+            torch.utils.rename_privateuse1_backend('foo')
+            # test cpu float storage
+            cpu_tensor = torch.randn([8]).float()
+            cpu_storage = cpu_tensor.storage()
+            self.assertEqual(cpu_storage.type(), "torch.FloatStorage")
+
+            # test custom float storage before defining FloatStorage
+            foo_tensor = cpu_tensor.foo()
+            foo_storage = foo_tensor.storage()
+            self.assertEqual(foo_storage.type(), "torch.storage.TypedStorage")
+
+            class CustomFloatStorage():
+                @property
+                def __module__(self):
+                    return "torch." + torch._C._get_privateuse1_backend_name()
+
+                @property
+                def __name__(self):
+                    return "FloatStorage"
+
+            # test custom float storage after defining FloatStorage
+            try:
+                torch.foo.FloatStorage = CustomFloatStorage()
+                self.assertEqual(foo_storage.type(), "torch.foo.FloatStorage")
+
+                # test custom int storage after defining FloatStorage
+                foo_tensor2 = torch.randn([8]).int().foo()
+                foo_storage2 = foo_tensor2.storage()
+                self.assertEqual(foo_storage2.type(), "torch.storage.TypedStorage")
+            finally:
+                torch.foo.FloatStorage = None
+
+        def test_open_device_faketensor():
+            torch.utils.rename_privateuse1_backend('foo')
+            with torch._subclasses.fake_tensor.FakeTensorMode.push():
+                a = torch.empty(1, device="foo")
+                b = torch.empty(1, device="foo:0")
+                result = a + b
+
+        def test_open_device_named_tensor():
+            torch.utils.rename_privateuse1_backend('foo')
+            a = torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])
 
         test_base_device_registration()
         test_before_common_registration()
@@ -308,6 +425,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_pin_memory()
         test_open_device_serialization()
         test_open_device_storage_resize()
+        test_open_device_storage_type()
+        test_open_device_faketensor()
+        test_open_device_named_tensor()
 
 
 if __name__ == "__main__":

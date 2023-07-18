@@ -25,6 +25,11 @@
 #
 # Environment variables for feature toggles:
 #
+#   DEBUG_CUDA=1
+#     if used in conjunction with DEBUG or REL_WITH_DEB_INFO, will also
+#     build CUDA kernels with -lineinfo --source-in-ptx.  Note that
+#     on CUDA 12 this may cause nvcc to OOM, so this is disabled by default.
+#
 #   USE_CUDNN=0
 #     disables the cuDNN build
 #
@@ -205,6 +210,10 @@
 #      Use system-provided libraries to satisfy the build dependencies.
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
+#
+#   USE_MIMALLOC
+#      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
+#      By default, It is only enabled on Windows.
 
 import sys
 if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
@@ -1052,6 +1061,7 @@ def main():
         'py.typed',
         'bin/*',
         'test/*',
+        '*.pyi',
         '_C/*.pyi',
         'cuda/*.pyi',
         'fx/*.pyi',
@@ -1089,6 +1099,7 @@ def main():
         'include/ATen/hip/detail/*.cuh',
         'include/ATen/hip/detail/*.h',
         'include/ATen/hip/impl/*.h',
+        'include/ATen/mps/*.h',
         'include/ATen/miopen/*.h',
         'include/ATen/detail/*.h',
         'include/ATen/native/*.h',
@@ -1097,6 +1108,7 @@ def main():
         'include/ATen/native/cuda/*.cuh',
         'include/ATen/native/hip/*.h',
         'include/ATen/native/hip/*.cuh',
+        'include/ATen/native/mps/*.h',
         'include/ATen/native/quantized/*.h',
         'include/ATen/native/quantized/cpu/*.h',
         'include/ATen/quantized/*.h',
@@ -1147,6 +1159,8 @@ def main():
         'include/torch/csrc/distributed/autograd/context/*.h',
         'include/torch/csrc/distributed/autograd/functions/*.h',
         'include/torch/csrc/distributed/autograd/rpc_messages/*.h',
+        'include/torch/csrc/dynamo/eval_frame.h',
+        'include/torch/csrc/inductor/*.h',
         'include/torch/csrc/jit/*.h',
         'include/torch/csrc/jit/backends/*.h',
         'include/torch/csrc/jit/generated/*.h',
@@ -1176,6 +1190,7 @@ def main():
         'include/torch/csrc/lazy/core/*.h',
         'include/torch/csrc/lazy/core/internal_ops/*.h',
         'include/torch/csrc/lazy/core/ops/*.h',
+        'include/torch/csrc/lazy/python/python_util.h',
         'include/torch/csrc/lazy/ts_backend/*.h',
         'include/pybind11/*.h',
         'include/pybind11/detail/*.h',
@@ -1188,7 +1203,8 @@ def main():
         'include/THH/*.h*',
         'include/THH/generic/*.h',
         'include/sleef.h',
-        "_inductor/codegen/*.h",
+        '_inductor/codegen/*.cpp',
+        '_inductor/codegen/*.h',
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',

@@ -2,6 +2,7 @@ import copy
 import gc
 import inspect
 import runpy
+import sys
 import threading
 from collections import namedtuple
 from enum import Enum
@@ -16,7 +17,7 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
     NATIVE_DEVICES, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
-    TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC
+    TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC, _get_torch_rocm_version
 from torch.testing._internal.common_dtype import get_all_dtypes
 
 try:
@@ -705,7 +706,10 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
         # because many of them will fail.
         # So instead, the only way to opt a specific device-agnostic test file into
         # lazy tensor testing is with include_lazy=True
-        desired_device_type_test_bases.append(LazyTestBase)
+        if IS_FBCODE:
+            print("TorchScript backend not yet supported in FBCODE/OVRSOURCE builds", file=sys.stderr)
+        else:
+            desired_device_type_test_bases.append(LazyTestBase)
 
     def split_if_not_empty(x: str):
         return x.split(",") if len(x) != 0 else []
@@ -973,6 +977,11 @@ class skipXLAIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='xla')
 
+class skipPRIVATEUSE1If(skipIf):
+
+    def __init__(self, dep, reason):
+        device_type = torch._C._get_privateuse1_backend_name()
+        super().__init__(dep, reason, device_type=device_type)
 
 def _has_sufficient_memory(device, size):
     if torch.device(device).type == 'cuda':
@@ -1231,6 +1240,13 @@ def onlyCUDA(fn):
 def onlyMPS(fn):
     return onlyOn('mps')(fn)
 
+def onlyPRIVATEUSE1(fn):
+    device_type = torch._C._get_privateuse1_backend_name()
+    device_mod = getattr(torch, device_type, None)
+    if device_mod is None:
+        reason = "Skip as torch has no module of {0}".format(device_type)
+        return unittest.skip(reason)(fn)
+    return onlyOn(device_type)(fn)
 
 def disablecuDNN(fn):
 
@@ -1296,13 +1312,27 @@ def skipCUDAIfNoMagma(fn):
 def has_cusolver():
     return not TEST_WITH_ROCM
 
-# Skips a test on CUDA if cuSOLVER is not available
+def has_hipsolver():
+    rocm_version = _get_torch_rocm_version()
+    # hipSOLVER is disabled on ROCM < 5.3
+    return rocm_version >= (5, 3)
+
+# Skips a test on CUDA/ROCM if cuSOLVER/hipSOLVER is not available
 def skipCUDAIfNoCusolver(fn):
-    return skipCUDAIf(not has_cusolver(), "cuSOLVER not available")(fn)
+    return skipCUDAIf(not has_cusolver() and not has_hipsolver(), "cuSOLVER not available")(fn)
+
 
 # Skips a test if both cuSOLVER and MAGMA are not available
 def skipCUDAIfNoMagmaAndNoCusolver(fn):
     if has_cusolver():
+        return fn
+    else:
+        # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
+        return skipCUDAIfNoMagma(fn)
+
+# Skips a test if both cuSOLVER/hipSOLVER and MAGMA are not available
+def skipCUDAIfNoMagmaAndNoLinalgsolver(fn):
+    if has_cusolver() or has_hipsolver():
         return fn
     else:
         # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
@@ -1326,9 +1356,7 @@ def skipCUDAIfRocmVersionLessThan(version=None):
                 if not TEST_WITH_ROCM:
                     reason = "ROCm not available"
                     raise unittest.SkipTest(reason)
-                rocm_version = str(torch.version.hip)
-                rocm_version = rocm_version.split("-")[0]    # ignore git sha
-                rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+                rocm_version_tuple = _get_torch_rocm_version()
                 if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
                     reason = "ROCm {0} is available but {1} required".format(rocm_version_tuple, version)
                     raise unittest.SkipTest(reason)
@@ -1416,6 +1444,9 @@ def skipXLA(fn):
 
 def skipMPS(fn):
     return skipMPSIf(True, "test doesn't work on MPS backend")(fn)
+
+def skipPRIVATEUSE1(fn):
+    return skipPRIVATEUSE1If(True, "test doesn't work on privateuse1 backend")(fn)
 
 # TODO: the "all" in the name isn't true anymore for quite some time as we have also have for example XLA and MPS now.
 #  This should probably enumerate all available device type test base classes.

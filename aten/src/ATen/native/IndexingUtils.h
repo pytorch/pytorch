@@ -5,7 +5,7 @@
 #include <ATen/core/IListRef.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 [[noreturn]]
 static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, int64_t maskIdx) {
@@ -157,4 +157,4 @@ struct AdvancedIndex {
 };
 
 
-}}
+} //namespace at::native

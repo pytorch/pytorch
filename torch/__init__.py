@@ -35,7 +35,7 @@ if _running_with_deploy():
 else:
     from .torch_version import __version__ as __version__
 
-from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
 import builtins
 
 __all__ = [
@@ -417,7 +417,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type]
+        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type, call-overload]
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
@@ -700,6 +700,14 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
+        * :func:`torch.Tensor.resize_`, when called with a tensor that is not
+          quantized, sets new elements to a known value.  Floating point or
+          complex values are set to NaN. Integer values are set to the maximum
+          value.
+        * :func:`torch.empty`, :func:`torch.empty_like`, :func:`torch.empty_strided`,
+          and :func:`torch.empty_permuted` will fill the output tensor with a known
+          value. Floating point or complex dtype tensors are filled with NaN. Integer
+          dtype tensors are filled with the maximum value.
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -735,12 +743,14 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
-        * :func:`torch.bincount` when called on a CUDA tensor
+        * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
+          tensor is given
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
+        * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -936,8 +946,8 @@ def is_warn_always_enabled():
 # These error checking functions must be kept consistent with their C++
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
-def _check_with(error_type, cond, message):
-    if not isinstance(cond, builtins.bool):
+def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callable[[], str]):
+    if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
     if cond:
@@ -1311,7 +1321,7 @@ if TYPE_CHECKING:
     # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
-    from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
+    from torch._C._VariableFunctions import *  # type: ignore[assignment, misc] # noqa: F403
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
     del segment_reduce
@@ -1335,6 +1345,15 @@ for name in dir(_C._VariableFunctions):
     globals()[name] = obj
     if not name.startswith("_"):
         __all__.append(name)
+
+
+
+################################################################################
+# Import TorchDynamo's lazy APIs to avoid circular dependenices
+################################################################################
+
+# needs to be before from .functional import * to avoid circular dependencies
+from ._compile import _disable_dynamo
 
 ################################################################################
 # Import interface functions defined in Python
@@ -1400,14 +1419,7 @@ from torch import hub as hub
 from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
-import torch.backends.cpu
-import torch.backends.cuda
-import torch.backends.mps
-import torch.backends.cudnn
-import torch.backends.mkl
-import torch.backends.mkldnn
-import torch.backends.openmp
-import torch.backends.quantized
+from torch import backends as backends
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
@@ -1485,16 +1497,14 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        self.config = dict()
+        self.config: Dict[str, Any] = dict()
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
-        if dynamic:
-            # cudagraphs conflicts with dynamic shapes
-            self.config["triton.cudagraphs"] = False
-            assert "triton.cudagraphs" not in (
-                options or ()
-            ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
+
+        # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
+        if self.config.get("triton.cudagraphs", False):
+            os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileInductorWrapper) and
@@ -1505,7 +1515,8 @@ class _TorchCompileInductorWrapper:
         if mode is None or mode == "default":
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
-            self.apply_options(torch._inductor.list_mode_options(mode))
+            from torch._inductor import list_mode_options
+            self.apply_options(list_mode_options(mode, self.dynamic))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
@@ -1536,6 +1547,10 @@ class _TorchCompileInductorWrapper:
         from torch._inductor.compile_fx import compile_fx
 
         return compile_fx(model_, inputs_, config_patches=self.config)
+
+    def get_compiler_config(self):
+        from torch._inductor.compile_fx import get_patched_config_dict
+        return get_patched_config_dict(config_patches=self.config)
 
     def reset(self):
         from torch._inductor import config
@@ -1583,20 +1598,46 @@ def compile(model: Optional[Callable] = None, *,
     """
     Optimizes given model/function using TorchDynamo and specified backend.
 
+    Concretely, for every frame executed within the compiled region, we will attempt
+    to compile it and cache the compiled result on the code object for future
+    use.  A single frame may be compiled multiple times if previous compiled
+    results are not applicable for subsequent calls (this is called a "guard
+    failure), you can use TORCH_LOGS=guards to debug these situations.
+    Multiple compiled results can be associated with a frame up to
+    ``torch._dynamo.config.cache_size_limit``, which defaults to 64; at which
+    point we will fall back to eager.  Note that compile caches are per
+    *code object*, not frame; if you dynamically create multiple copies of a
+    function, they will all share the same code cache.
+
     Args:
        model (Callable): Module/function to optimize
        fullgraph (bool): Whether it is ok to break model into several subgraphs
-       dynamic (bool): Use dynamic shape tracing
+       dynamic (bool): Use dynamic shape tracing.  When this is True, we will up-front attempt
+        to generate a kernel that is as dynamic as possible to avoid recompilations when
+        sizes change.  This may not always work as some operations/optimizations will
+        force specialization; use TORCH_LOGS=dynamic to debug overspecialization.
+        In particular, if you use "reduce-overhead", this will force sizes to be static
+        even with dynamic=True.
        backend (str or Callable): backend to be used
         - "inductor" is the default backend, which is a good balance between performance and overhead
         - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
-        - To register an out-of-tree custom backend: https://pytorch.org/docs/master/dynamo/custom-backends.html
+        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/compile/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
         - "default" is the default mode, which is a good balance between performance and overhead
-        - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs, useful for small batches
+
+        - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs,
+          useful for small batches.  Reduction of overhead can come at the cost of more memory
+          usage, as we will cache the workspace memory required for the invocation so that we
+          do not have to reallocate it on subsequent runs.  Reduction of overhead is not guaranteed
+          to work; today, we only reduce overhead for CUDA only graphs which do not mutate inputs.
+          There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
+          to debug.
+
         - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+
         - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
+
        options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
         - `epilogue_fusion` which fuses pointwise ops into templates. Requires `max_autotune` to also be set
         - `max_autotune` which will profile to pick the best matmul configuration
@@ -1630,7 +1671,6 @@ def compile(model: Optional[Callable] = None, *,
                            disable=disable)
         return fn
 
-    import torch._dynamo
     if mode is not None and options is not None:
         raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
     if mode is None and options is None:
@@ -1678,8 +1718,6 @@ import torch.fx.experimental.symbolic_shapes
 from torch import func as func
 from torch.func import vmap
 
-# ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
-from torch import onnx as onnx  # ONNX depends on a bunch of Dynamo stuff
 
 # The function _sparse_coo_tensor_unsafe is removed from PyTorch
 # Python API (v. 1.13), here we temporarily provide its replacement
@@ -1692,6 +1730,55 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
     kwargs['check_invariants'] = False
     return torch.sparse_coo_tensor(*args, **kwargs)
 
+# Register MPS specific decomps
+torch.backends.mps._init()
+
+if not _running_with_deploy():
+    from torch import compiler as compiler
+
+    class _TritonLibrary(object):
+        lib = torch.library.Library("triton", "DEF")
+        ops_table: Dict[Tuple[str, str], Callable] = {}
+
+        @classmethod
+        def registerOp(cls, op_key, full_schema, op_impl, dispatch_key):
+            if (op_key, dispatch_key) not in cls.ops_table:
+                cls.lib.define(full_schema)
+                cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
+                cls.ops_table[(op_key, dispatch_key)] = op_impl
+
+            return cls.ops_table[(op_key, dispatch_key)]
+
+
+# Deprecated attributes
+_deprecated_attrs = {
+    "has_mps": torch.backends.mps.is_built,
+    "has_cuda": torch.backends.cuda.is_built,
+    "has_cudnn": torch.backends.cudnn.is_available,
+    "has_mkldnn": torch.backends.mkldnn.is_available,
+}
+
+_lazy_modules = {
+    "_dynamo",
+    "_inductor",
+    # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+    "onnx",
+}
+
+def __getattr__(name):
+    # Deprecated attrs
+    replacement = _deprecated_attrs.get(name)
+    if replacement is not None:
+        import warnings
+        warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
+        return replacement()
+
+    # Lazy modules
+    if name in _lazy_modules:
+        import importlib
+        return importlib.import_module(f".{name}", __name__)
+
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 from . import _logging
 _logging._init_logs()

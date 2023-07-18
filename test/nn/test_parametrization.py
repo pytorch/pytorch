@@ -1,6 +1,7 @@
 # Owner(s): ["module: nn"]
 from copy import deepcopy
 from itertools import product
+import pickle
 
 import torch
 
@@ -8,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
 import torch.nn.utils.parametrize as parametrize
-from torch.nn import Parameter
+from torch.nn import Buffer, Parameter
 from torch.testing._internal.common_utils import run_tests, skipIfNoLapack, \
     TemporaryFileName, instantiate_parametrized_tests, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -304,7 +305,7 @@ class TestNNParametrization(NNTestCase):
 
         # Instantiate parametrizations on buffers. It should work as expected
         delattr(model, "bias")
-        model.register_buffer("bias", torch.ones(8))
+        model.bias = Buffer(torch.ones(8))
         parametrize.register_parametrization(model, "bias", FirstZero())
         parametrize.register_parametrization(model, "bias", LastZero())
         self.assertTrue(parametrize.is_parametrized(model))
@@ -332,8 +333,8 @@ class TestNNParametrization(NNTestCase):
         class Orthogonal(nn.Module):
             def __init__(self, n):
                 super().__init__()
-                self.register_buffer("id", torch.eye(n))
-                self.register_buffer("B", torch.empty(n, n))
+                self.id = Buffer(torch.eye(n))
+                self.B = Buffer(torch.empty(n, n))
                 init.orthogonal_(self.B)
 
             def forward(self, X):
@@ -395,7 +396,7 @@ class TestNNParametrization(NNTestCase):
         class Orthogonal(nn.Module):
             def __init__(self, n):
                 super().__init__()
-                self.register_buffer("B", torch.eye(n))
+                self.B = Buffer(torch.eye(n))
 
             def forward(self, X):
                 Id = torch.eye(X.size(0))
@@ -1517,6 +1518,61 @@ class TestNNParametrization(NNTestCase):
         with self.assertRaisesRegex(ValueError, "matrices of shape"):
             m.weight = torch.randn(5, 5)
         torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
+
+
+    def test_weight_norm_parametrization(self):
+        for dtype in [torch.float, torch.bfloat16]:
+            input = torch.randn(3, 4, dtype=dtype)
+            m = nn.Linear(4, 5).to(dtype=dtype)
+            expected_output = m(input)
+
+            # add weight normalization
+            m = torch.nn.utils.parametrizations.weight_norm(m)
+            self.assertEqual(m.parametrizations.weight.original1.size(), m.weight.size())
+            self.assertEqual(m.parametrizations.weight.original0.size(), (5, 1))
+            self.assertEqual(m(input), expected_output)
+
+            # remove weight norm
+            torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
+            self.assertFalse(hasattr(m, "parametrizations"))
+            self.assertEqual(m(input), expected_output)
+
+            # test with dim=1
+            m = torch.nn.utils.parametrizations.weight_norm(m, dim=1)
+            self.assertEqual(m.parametrizations.weight.original1.size(), m.weight.size())
+            self.assertEqual(m.parametrizations.weight.original0.size(), (1, 4))
+            self.assertEqual(m(input), expected_output)
+
+            # test with dim=None
+            m = nn.Linear(4, 5).to(dtype=dtype)
+            expected_output = m(input)
+            m = torch.nn.utils.parametrizations.weight_norm(m, dim=None)
+            self.assertEqual(m(input), expected_output)
+
+    def test_weight_norm_state_dict_compat(self):
+        m = nn.Linear(4, 5)
+        m = torch.nn.utils.weight_norm(m)
+        old_dict = m.state_dict()
+
+        m2 = nn.Linear(4, 5)
+        m2 = torch.nn.utils.parametrizations.weight_norm(m2)
+        m2.load_state_dict(old_dict)
+
+        input = torch.randn(3, 4)
+        self.assertEqual(m(input), m2(input))
+
+    def test_weight_norm_pickle(self):
+        m = nn.Linear(4, 5)
+        m = torch.nn.utils.parametrizations.weight_norm(m)
+        with self.assertRaisesRegex(RuntimeError, 'state_dict'):
+            pickle.dumps(m)
+
+    def test_weight_norm_deepcopy(self):
+        m = nn.Linear(4, 5)
+        m = torch.nn.utils.parametrizations.weight_norm(m)
+        m2 = deepcopy(m)
+        input = torch.randn(3, 4)
+        self.assertEqual(m(input), m2(input))
 
 
 instantiate_parametrized_tests(TestNNParametrization)

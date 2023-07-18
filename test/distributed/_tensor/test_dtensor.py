@@ -15,6 +15,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class DummyMLP(torch.nn.Module):
@@ -230,6 +231,20 @@ class DTensorTest(DTensorTestBase):
 
         self.assertEqual(sharded_tensor.grad.to_local(), torch.ones(3, 3) * 3)
 
+        # test the case when grad stride is different from fwd input.
+        res = sharded_tensor.to_local()
+        model = torch.nn.ReLU()
+        res.register_hook(lambda grad: grad.t())
+        target = torch.randn(3, 3, device=self.device_type)
+        mae_loss = torch.nn.L1Loss()
+        output = mae_loss(model(res), target)
+        # The manual change to grad stride leads to the failure of the copy op afterwards.
+        # so that we need a try-catch here.
+        try:
+            output.backward()
+        except RuntimeError:
+            self.assertEqual(sharded_tensor.grad.stride(), [1, 3 * self.world_size])
+
     @with_comms
     def test_from_local_then_to_local(self):
         # this test ensure end to end from torch.Tensor -> dist tensor -> torch.Tensor works
@@ -302,6 +317,20 @@ class DTensorTest(DTensorTestBase):
         local_tensor = torch.randn(3, 3)
         sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
         self.assertEqual(sharded_tensor.device.type, self.device_type)
+
+    @with_comms
+    def test_dtensor_save_load(self):
+        import io
+
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+        local_tensor = torch.randn(3, 3)
+        sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
+        buffer = io.BytesIO()
+        torch.save(sharded_tensor, buffer)
+        buffer.seek(0)
+        reloaded_st = torch.load(buffer)
+        self.assertEqual(sharded_tensor, reloaded_st)
 
 
 class DTensorMeshTest(DTensorTestBase):
@@ -590,6 +619,41 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                     for unpadded_tensor in unpadded_list
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
+
+
+class TestDynamoDTensor(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        fake_store = FakeStore()
+        dist.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=self.world_size
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    @property
+    def device_type(self) -> str:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def test_fakify_dtensor(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # pass in DTensor as inputs/outputs to the function
+        def fn(x):
+            return x
+
+        x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
 
 
 if __name__ == "__main__":

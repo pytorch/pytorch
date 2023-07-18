@@ -13,9 +13,11 @@ import torch._guards
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
+from torch._prims_common import is_integer_dtype
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
@@ -33,6 +35,10 @@ NodeOrConstant = Union[Constant, torch.fx.Node]
 
 # Sentinel indicating multiple quantities can be matched
 MULTIPLE = object()
+
+# Preserve these keys while pattern matching. All the nodes in the replacement
+# graph will preserve the key from the first node in the original pattern.
+preserve_meta_keys = {"recompute"}
 
 
 class Match:
@@ -96,10 +102,13 @@ class Match:
     def replace_by_example(self, replacement_fn, args, trace_fn=None):
         if trace_fn is None:
             trace_fn = inference_graph
+        replacement = trace_fn(
+            replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+        )
         ReplacementPatternEntry.replace_with_graph(
             self,
             self.ctx.graph,
-            trace_fn(replacement_fn, [arg.meta["val"] for arg in args]),
+            replacement,
             args,
         )
 
@@ -124,6 +133,7 @@ class MatchContext:
         self.outputs = outputs
         self.pattern_to_node = pattern_to_node
         self.graph = graph
+        self.exclusive_node_set = []
         if self.pattern_to_node is None:
             self.pattern_to_node = {}
 
@@ -210,6 +220,26 @@ class KeywordArg(PatternExpr):
         return f"KeywordArg({self.name!r})"
 
     def _match(self, node: NodeOrConstant, ctx: MatchContext):
+        return Match(self, kwargs={self.name: node})  # matches anything
+
+
+class ExclusiveKeywordArg(PatternExpr):
+    """
+    Capture a kwarg which will become an input to the handler.
+    """
+
+    def __init__(self, name):
+        super().__init__()
+        self.name = name
+
+    def __repr__(self):
+        return f"ExclusiveKeywordArg({self.name!r})"
+
+    def _match(self, node: NodeOrConstant, ctx: MatchContext):
+        if node in ctx.exclusive_node_set:
+            return FailedMatch("exclusive arg appears twice")
+
+        ctx.exclusive_node_set.append(node)
         return Match(self, kwargs={self.name: node})  # matches anything
 
 
@@ -316,10 +346,10 @@ class _TargetArgsExpr(_TargetExpr):
             or len(node.args) != len(self.args)
             or len(node.kwargs) != len(self.kwargs)
         ):
-            return FailedMatch("function_mismatch")
+            return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
 
         if not self._match_users(node, ctx):
-            return FailedMatch("multiple_users")
+            return FailedMatch(f"multiple_users {node}")
 
         node_items, node_spec = self.flatten(node.args, node.kwargs)
         self_items, self_spec = self.flat_args_kwargs
@@ -355,10 +385,13 @@ class _TargetArgsExpr(_TargetExpr):
         for pattern in self.flat_args_kwargs[0]:
             if isinstance(pattern, PatternExpr):
                 for other_node in pattern.find_anchor_nodes(ctx, searched):
+                    if not isinstance(other_node, torch.fx.Node):
+                        continue
                     for node in other_node.users:
-                        if node not in searched and self._match_fns(node):
-                            yield node
-                            searched.add(node)
+                        if node not in searched:
+                            if self._match_fns(node):
+                                yield node
+                                searched.add(node)
 
 
 class CallFunction(_TargetArgsExpr):
@@ -377,12 +410,10 @@ class CallMethod(_TargetArgsExpr):
     op = "call_method"
 
 
-class CallFunctionVarArgs(_TargetExpr):
+class _TargetExprVarArgs(_TargetExpr):
     """
     Matches a call_function node with any arguments which are passed into the pattern
     """
-
-    op = "call_function"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
         if not self._match_fns(node):
@@ -397,6 +428,14 @@ class CallFunctionVarArgs(_TargetExpr):
         m.args.extend(node.args)
         m.kwargs.update(node.kwargs)
         return m
+
+
+class CallFunctionVarArgs(_TargetExprVarArgs):
+    op = "call_function"
+
+
+class CallMethodVarArgs(_TargetExprVarArgs):
+    op = "call_method"
 
 
 class ListOf(PatternExpr):
@@ -484,6 +523,38 @@ class MultiOutputPattern(PatternExpr):
             return e
 
 
+class RepeatedExpr(PatternExpr):
+    """
+    Checks for a repeated pattern. Useful for repeated operations after a node such as `split` or `unbind`
+    """
+
+    def __init__(self, inner_pattern):
+        super().__init__()
+        assert isinstance(inner_pattern, PatternExpr)
+        self.inner_pattern = inner_pattern
+
+    @property
+    def fns(self):
+        return self.inner_pattern.fns
+
+    def _match(self, node: torch.fx.Node, ctx: MatchContext):
+        m = ctx.match(self.inner_pattern, node)
+        if not m:
+            return m
+        ctx.pattern_to_node.pop(
+            self.inner_pattern,
+        )
+        # Check all anchor nodes match the pattern
+        for anchor_node in self.inner_pattern.find_anchor_nodes(ctx, set()):
+            anchor_m = MatchContext([self], graph=node.graph).match(
+                self.inner_pattern, anchor_node
+            )
+            if not anchor_m:
+                return anchor_m
+            m.extend(anchor_m)
+        return m
+
+
 @dataclasses.dataclass
 class PatternEntry:
     pattern: PatternExpr
@@ -544,6 +615,9 @@ class ReplacementPatternEntry(PatternEntry):
         replacement_graph: torch.fx.Graph,
         args: List[Any],
     ):
+        output_nodes = match.output_nodes()
+        first_node = output_nodes[0]
+
         class Replacer(torch.fx.Interpreter):
             call_method = None
             call_module = None
@@ -556,15 +630,33 @@ class ReplacementPatternEntry(PatternEntry):
                     target = node.target
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     result = graph.call_function(target, args, kwargs)
+                    # Retain the meta tags from the first node in the match.
+                    # This is useful for retaining tags like recompute.
+                    for key in first_node.meta.keys():
+                        if key in preserve_meta_keys:
+                            result.meta[key] = first_node.meta[key]
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
+                        if isinstance(node.meta["val"], torch.Tensor):
+                            assert "tensor_meta" in node.meta
+                            result.meta["tensor_meta"] = node.meta["tensor_meta"]
                     return result
                 raise NotImplementedError(f"unhandled {node}")
 
         output_nodes = match.output_nodes()
-        node = output_nodes[0]
 
-        with graph.inserting_before(node):
+        if len(output_nodes) == 1:
+            last_node = output_nodes[0]
+        else:
+            nodes = list(output_nodes[0].graph.nodes)
+            indices = [
+                (nodes.index(n), n)
+                for n in output_nodes
+                if isinstance(n, torch.fx.Node)
+            ]
+            last_node = min(indices, key=lambda tup: tup[0])[1]
+
+        with graph.inserting_before(last_node):
             replacement = Replacer(replacement_graph).run(*args)
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
@@ -602,7 +694,7 @@ def register_replacement(
     pass_dict,
     extra_check=_return_true,
     scalar_workaround=(),
-    prepend=False,
+    exclusive_arg_names=(),
 ):
     """
     Create a replacement rule based on example functions that get traced
@@ -632,15 +724,21 @@ def register_replacement(
         )
         for i, grad in enumerate(requires_grad):
             if isinstance(args[i], torch.Tensor):
-                args[i] = torch.empty_strided(
-                    args[i].size(),
-                    args[i].stride(),
-                    dtype=args[i].dtype,
-                    device=args[i].device,
-                    requires_grad=grad,
-                )
+                if grad and is_integer_dtype(args[i].dtype):
+                    return False
+
+                with torch._dynamo.utils.detect_fake_mode(args):
+                    args[i] = torch.empty_strided(
+                        args[i].size(),
+                        args[i].stride(),
+                        dtype=args[i].dtype,
+                        device=args[i].device,
+                        requires_grad=grad,
+                    )
         specific_graph = trace_fn(search_fn, args)
-        specific_pattern = fx_to_pattern(specific_graph, argnames=argnames)
+        specific_pattern = fx_to_pattern(
+            specific_graph, argnames=argnames, exclusive_arg_names=exclusive_arg_names
+        )
         specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
         if specific_pattern_match and extra_check(specific_pattern_match):
             # trace the pattern using the shapes form the user program
@@ -666,9 +764,10 @@ def register_replacement(
         search_gm = trace_fn(search_fn, example_inputs)
         pattern = fx_to_pattern(
             search_gm,
-            ignore_types=(int, float, torch.device, torch.dtype),
+            ignore_types=(int, float, list, torch.device, torch.dtype),
             argnames=argnames,
             scalar_workaround=scalar_workaround,
+            exclusive_arg_names=exclusive_arg_names,
         )
         assert repr(pattern) not in _seen_patterns
         _seen_patterns.add(repr(pattern))
@@ -718,10 +817,55 @@ def register_graph_pattern(
     return decorator
 
 
+def is_start_of_fx_graph(graph, node):
+    # first node in the graph
+    return node is next(iter(graph.nodes))
+
+
+# match: copy_, relu_, _set_grad_enabled, manual_seed, enter_functional_autocast, etc
+_mutation_op_re = re.compile(r"_$|(\b|_)(set|enter|exit|seed)(\b|_)")
+
+
+def is_mutation_op(node):
+    if node.op == "call_function":
+        if _mutation_op_re.search(node.target.__name__):
+            return True
+    elif node.op == "call_method":
+        if _mutation_op_re.search(node.target):
+            return True
+    return node.kwargs.get("out") is not None
+
+
+def get_mutation_region_id(graph, node):
+    n = node
+    while "mutation_region_id" not in n.meta and not is_start_of_fx_graph(graph, n):
+        n = n.prev
+    mutation_region_id = n.meta.get("mutation_region_id", 0)
+    while n is not node:
+        n = n.next
+        if is_mutation_op(n):
+            mutation_region_id += 1
+        n.meta["mutation_region_id"] = mutation_region_id
+    return mutation_region_id
+
+
+def should_compute_mutation_region_ids(graph):
+    return "mutation_region_id" not in next(iter(graph.nodes)).meta
+
+
+def compute_mutation_region_ids(graph):
+    mutation_region_id = 0
+    for nd in graph.nodes:
+        if is_mutation_op(nd):
+            mutation_region_id += 1
+        nd.meta["mutation_region_id"] = mutation_region_id
+
+
 class PatternMatcherPass:
-    def __init__(self):
+    def __init__(self, prevent_match_across_mutations=False):
         super().__init__()
         self.patterns = defaultdict(list)
+        self.prevent_match_across_mutations = prevent_match_across_mutations
 
     def __getitem__(self, item):
         return self.patterns[item]
@@ -731,6 +875,12 @@ class PatternMatcherPass:
             return 0
         if isinstance(graph, torch.fx.GraphModule):
             graph = graph.graph
+        if self.prevent_match_across_mutations:
+            if should_compute_mutation_region_ids(graph):
+                compute_mutation_region_ids(graph)
+            get_mutation_region_id_partial = functools.partial(
+                get_mutation_region_id, graph
+            )
         count = 0
         for node in reversed(graph.nodes):
             if (
@@ -747,6 +897,13 @@ class PatternMatcherPass:
                     if node._erased:
                         break
                     m = entry.pattern.match(node)
+                    # pattern match crosses mutation barrier - discard
+                    if (
+                        self.prevent_match_across_mutations
+                        and m
+                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1
+                    ):
+                        continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
                         log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
                     if m and entry.extra_check(m):
@@ -756,12 +913,17 @@ class PatternMatcherPass:
                         counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
         return count
 
+    def clear(self):
+        self.patterns.clear()
+
 
 def _not_implemented(*args, **kwargs):
     raise NotImplementedError()
 
 
-def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
+def fx_to_pattern(
+    gm, ignore_types=(), argnames=(), scalar_workaround=(), exclusive_arg_names=()
+):
     """
     Convert an FX graph into a PatternExpr.  This is useful for simple
     patterns that can only match single functions and fixed length lists.
@@ -777,6 +939,8 @@ def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
             return KeywordArg(inv_scalar_workaround[x])
         if type(x) in ignore_types:
             return Ignored()
+        if isinstance(x, list) and all(isinstance(y, Ignored) for y in x) and x:
+            return Ignored()
         return x
 
     argnum = itertools.count()
@@ -789,21 +953,33 @@ def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
         def placeholder(self, target, args, kwargs):
             n = next(argnum)
             if n < len(argnames):
-                return KeywordArg(argnames[n])
-            if argnames:
+                name = argnames[n]
+            elif argnames:
                 assert target.startswith("tangent")
-                return KeywordArg(target)
+                name = target
             else:
                 target = re.sub(r"_\d+$", "", target)  # de-mangle arg name
-                return KeywordArg(target)
+                name = target
+            if name in exclusive_arg_names:
+                return ExclusiveKeywordArg(name)
+            else:
+                return KeywordArg(name)
 
         def call_function(self, target, args, kwargs):
             args, kwargs = pytree.tree_map(process_arg, (args, kwargs))
+            if list in ignore_types:
+                # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
+                args = [process_arg(a) for a in args]
+                kwargs = {k: process_arg(a) for k, a in kwargs.items()}
             return CallFunction(target, *args, **kwargs)
 
         def run_node(self, n):
             rv = super().run_node(n)
-            if not isinstance(rv, tuple):
+            if n.op == "output" and isinstance(rv, tuple):
+                assert len(rv) == len(n.args[0])
+                for r, arg in zip(rv, n.args[0]):
+                    r.users = len(arg.users)
+            else:
                 rv.users = len(n.users)
             return rv
 
@@ -896,10 +1072,17 @@ def init_once_fakemode(fn):
     @functools.lru_cache(None)
     @functools.wraps(fn)
     def lazy_init():
+        counters_ref = counters["inductor"].copy()
+
         with torch._guards.tracing(
             None
         ), maybe_disable_fake_tensor_mode(), FakeTensorMode():
-            return fn()
+            result = fn()
+
+        # clear view matches encountered during tracing
+        counters["inductor"] = counters_ref
+
+        return result
 
     return lazy_init
 
@@ -919,6 +1102,9 @@ def clone_graph(input_graph):
             new_node = super().run_node(old_node)
             if isinstance(new_node, torch.fx.Proxy):
                 new_node.node.meta.update(old_node.meta)
+                new_node.node.name = self.new_graph._graph_namespace.create_name(
+                    old_node.name, None
+                )
             return new_node
 
     return CopyGraph(input_graph).transform()

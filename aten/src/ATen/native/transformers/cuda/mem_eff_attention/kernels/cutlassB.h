@@ -8,6 +8,7 @@
 // This file is auto-generated. See "generate_kernels.py"
 #pragma once
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
+using namespace PyTorchMemEffAttention;
 // ======== f16 / sm70 ========
 __global__ void __launch_bounds__(
     AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 32, true>::kNumThreads,
@@ -870,10 +871,10 @@ void dispatch_cutlassB(T cb, int cc = 0) {
     if (std::is_same<DT, cutlass::half_t>::value && 70 <= cc && cc < 75) {
         dispatch_cutlassB_f16_sm70(cb, cc);
     }
-    if (std::is_same<DT, cutlass::bfloat16_t>::value && 80 <= cc && cc < 90) {
+    if (std::is_same<DT, cutlass::bfloat16_t>::value && 80 <= cc && cc < 100) {
         dispatch_cutlassB_bf16_sm80(cb, cc);
     }
-    if (std::is_same<DT, cutlass::half_t>::value && 80 <= cc && cc < 90) {
+    if (std::is_same<DT, cutlass::half_t>::value && 80 <= cc && cc < 100) {
         dispatch_cutlassB_f16_sm80(cb, cc);
     }
     if (std::is_same<DT, cutlass::half_t>::value && 50 <= cc && cc < 70) {
@@ -891,7 +892,7 @@ void dispatch_cutlassB(T cb, int cc = 0) {
     if (std::is_same<DT, float>::value && 75 <= cc && cc < 80) {
         dispatch_cutlassB_f32_sm75(cb, cc);
     }
-    if (std::is_same<DT, float>::value && 80 <= cc && cc < 90) {
+    if (std::is_same<DT, float>::value && 80 <= cc && cc < 100) {
         dispatch_cutlassB_f32_sm80(cb, cc);
     }
 }

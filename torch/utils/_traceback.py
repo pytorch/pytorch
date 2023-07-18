@@ -1,7 +1,9 @@
 from types import TracebackType
 import tempfile
+import traceback
 import contextlib
 import inspect
+import os.path
 
 # This file contains utilities for ensuring dynamically compile()'d
 # code fragments display their line numbers in backtraces.
@@ -98,7 +100,7 @@ def report_compile_source_on_error():
                     # specifically _PyCode_InitAddressRange, reveals that
                     # this iterator is initialized from co_linetable and
                     # co_firstfileno.  So copy these we must!
-                    code = code.replace(
+                    code = code.replace(  # type: ignore[call-arg]
                         co_linetable=frame.f_code.co_linetable,  # type: ignore[attr-defined]
                         co_firstlineno=frame.f_code.co_firstlineno,  # type: ignore[attr-defined]
                     )
@@ -126,3 +128,25 @@ def report_compile_source_on_error():
             tb_next = tb
 
         raise exc.with_traceback(tb_next)
+
+def shorten_filename(fn):
+    """
+    Shorten a source filepath, under the assumption that anything under torch/
+    directory is "obvious" and doesn't need to be shown to user.
+    """
+    # Truncate torch/foo.py to foo.py
+    prefix = os.path.commonprefix([fn, os.path.join(os.path.dirname(os.path.dirname(__file__)), "")])
+    return fn[len(prefix):]
+
+def format_frame(frame):
+    """
+    Format a FrameSummary in a short way, without printing full absolute path
+    or code.  The idea is the result fits on a single line.
+    """
+    return f"{shorten_filename(frame.filename)}:{frame.lineno} in {frame.name}"
+
+def format_traceback_short(tb):
+    """
+    Format a TracebackType in a short way, printing only the inner-most frame.
+    """
+    return format_frame(traceback.extract_tb(tb)[-1])

@@ -14,7 +14,6 @@
 #include <ATen/native/cpu/LogAddExp.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeSafeSignMath.h>
-#include <c10/util/copysign.h>
 
 namespace at::native {
 
@@ -161,43 +160,8 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
   }
 }
 
-// NOTE: [Floor Division in Python]
-// Python's __floordiv__ operator is more complicated than just floor(a / b).
-// It aims to maintain the property: a == (a // b) * b + remainder(a, b)
-// which can otherwise fail due to rounding errors in the remainder.
-// So, instead it is calculated as: a // b = (a - remainder(a, b)) / b
-// With some additional fix-ups added to the result.
-//
-// For reference, see CPython's implementation:
-// https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
-
 template <typename scalar_t>
-inline scalar_t div_floor_internal(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ {
-  if (C10_UNLIKELY(b == 0)) {
-    // Divide by zero: return standard IEEE result
-    return a / b;
-  }
-
-  auto mod = std::fmod(a, b);
-  auto div = (a - mod) / b;
-  if ((mod != 0) && (b < 0) != (mod < 0)) {
-    div -= scalar_t(1);
-  }
-
-  scalar_t floordiv;
-  if (div != 0) {
-    floordiv = std::floor(div);
-    if (div - floordiv > scalar_t(0.5)) {
-      floordiv += scalar_t(1.0);
-    }
-  } else {
-    floordiv = c10::copysign(scalar_t(0), a / b);
-  }
-  return floordiv;
-}
-
-template <typename scalar_t>
-inline Vectorized<scalar_t> div_floor_internal(const Vectorized<scalar_t>& a, const Vectorized<scalar_t>& b) {
+inline Vectorized<scalar_t> div_floor_floating_vec(const Vectorized<scalar_t>& a, const Vectorized<scalar_t>& b) {
   using vec_t = Vectorized<scalar_t>;
   auto mod = a.fmod(b);
   auto div = (a - mod) / b;
@@ -226,16 +190,7 @@ void div_floor_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
-        if (c10::is_negative(a) != c10::is_negative(b)) {
-          // Subtracts one from the results of truncation division if the
-          // divisor and dividend have different sign(bit)s and the remainder of
-          // the division is nonzero
-          const auto quot = a / b;
-          const auto rem = a % b;
-          return rem ? quot - 1 : quot;
-        }
-
-        return a / b;
+        return div_floor_integer(a, b);
       });
     });
   } else {
@@ -248,10 +203,10 @@ void div_floor_kernel(TensorIteratorBase& iter) {
         using vec_t = Vectorized<opmath_t>;
         cpu_kernel_vec(iter,
           [=](scalar_t a) -> scalar_t {
-            return div_floor_internal(static_cast<opmath_t>(a), b);
+            return div_floor_floating(static_cast<opmath_t>(a), b);
           },
           [=](Vectorized<scalar_t> a) {
-            return binary_op_scalar(a, b, [](const vec_t& x, const vec_t& y) { return div_floor_internal(x, y); });
+            return binary_op_scalar(a, b, [](const vec_t& x, const vec_t& y) { return div_floor_floating_vec(x, y); });
           });
       });
     } else {
@@ -259,10 +214,10 @@ void div_floor_kernel(TensorIteratorBase& iter) {
         using vec_t = Vectorized<scalar_t>;
         cpu_kernel_vec(iter,
           [](scalar_t a, scalar_t b) -> scalar_t {
-            return div_floor_internal(a, b);
+            return div_floor_floating(a, b);
           },
           [](vec_t a, vec_t b) -> vec_t {
-            return div_floor_internal(a, b);
+            return div_floor_floating_vec(a, b);
           });
       });
     }

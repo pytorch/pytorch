@@ -116,8 +116,8 @@ using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 
 struct FallbackPair {
-  ProfilerEventStub cuda_event_start_ = nullptr;
-  ProfilerEventStub cuda_event_end_ = nullptr;
+  ProfilerVoidEventStub device_event_start_ = nullptr;
+  ProfilerVoidEventStub device_event_end_ = nullptr;
 };
 
 template <>
@@ -131,7 +131,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
-      FallbackPair&& gpu_fallback,
+      FallbackPair&& device_fallback,
       bool allow_tf32_cublas,
       std::unique_ptr<perf_counters_t>&& perf_event_counters)
       : TorchOpBasicFields(std::move(f)),
@@ -142,7 +142,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
-        gpu_fallback_{std::move(gpu_fallback)},
+        device_fallback_{std::move(device_fallback)},
         allow_tf32_cublas_{allow_tf32_cublas},
         perf_event_counters_{std::move(perf_event_counters)} {}
   uint64_t correlation_id_;
@@ -152,7 +152,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;
-  FallbackPair gpu_fallback_;
+  FallbackPair device_fallback_;
   bool allow_tf32_cublas_;
   std::unique_ptr<perf_counters_t> perf_event_counters_;
 };
@@ -359,8 +359,9 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
       using extra_fields_t = typename std::remove_cv<
           typename std::remove_reference<decltype(extra_fields)>::type>::type;
 
-      c10::guts::if_constexpr<std::is_base_of<T, extra_fields_t>::value>(
-          [&](auto _) { fn(_(extra_fields)); });
+      if constexpr (std::is_base_of_v<T, extra_fields_t>) {
+        fn(extra_fields);
+      }
     });
   }
 
@@ -578,8 +579,9 @@ class TORCH_API ThreadLocalSubqueue {
     // with_flops
     AppendOnlyList<extra_args_t, BlockSize> extra_args_;
 
-    // ProfilerState::KINETO_GPU_FALLBACK
-    AppendOnlyList<FallbackPair, BlockSize> gpu_fallback_;
+    // ProfilerState::KINETO_GPU_FALLBACK or
+    // ProfilerState::KINETO_PRIVATEUSE1_FALLBACK
+    AppendOnlyList<FallbackPair, BlockSize> device_fallback_;
   } torch_ops_;
 
   // reportBackendEventToActiveKinetoProfiler
@@ -630,6 +632,10 @@ class TORCH_API RecordQueue {
 TORCH_API bool get_record_concrete_inputs_enabled();
 TORCH_API void set_record_concrete_inputs_enabled_fn(std::function<bool()>);
 TORCH_API void set_record_concrete_inputs_enabled_val(bool);
+
+TORCH_API bool get_fwd_bwd_enabled();
+TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()>);
+TORCH_API void set_fwd_bwd_enabled_val(bool);
 
 } // namespace impl
 } // namespace profiler

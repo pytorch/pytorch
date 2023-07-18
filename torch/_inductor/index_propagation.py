@@ -27,6 +27,7 @@ import sympy
 
 import torch
 from torch._prims_common import is_boolean_dtype, is_integer_dtype
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 
 @dataclass
@@ -97,6 +98,33 @@ class SymPyOps:
     @staticmethod
     def neg(x):
         return TypedExpr(-x.expr, x.dtype)
+
+    @staticmethod
+    def floordiv(x, y):
+        result_type = torch.promote_types(x.dtype, y.dtype)
+        if not is_integer_dtype(result_type):
+            return NotImplemented
+
+        return TypedExpr(FloorDiv(x.expr, y.expr), result_type)
+
+    @staticmethod
+    def remainder(x, y):
+        result_type = torch.promote_types(x.dtype, y.dtype)
+        if not is_integer_dtype(result_type):
+            return NotImplemented
+
+        result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
+        return TypedExpr(result_expr, result_type)
+
+    @staticmethod
+    def minimum(x, y):
+        result_type = torch.promote_types(x.dtype, y.dtype)
+        return TypedExpr(sympy.Min(x.expr, y.expr), result_type)
+
+    @staticmethod
+    def maximum(x, y):
+        result_type = torch.promote_types(x.dtype, y.dtype)
+        return TypedExpr(sympy.Max(x.expr, y.expr), result_type)
 
 
 @dataclass

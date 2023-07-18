@@ -54,6 +54,8 @@ include_patterns = [
     'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/vulkan/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.cpp',
+    'aten/src/ATen/native/cuda/MultiTensorApply.cuh',
+    'aten/src/ATen/native/**/Foreach*.*',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
@@ -148,9 +150,9 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'numpy==1.23.1',
+    'numpy==1.24.3',
     'expecttest==0.1.3',
-    'mypy==0.960',
+    'mypy==1.4.1',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
     'types-tabulate==0.8.8',
@@ -179,6 +181,7 @@ include_patterns = [
     'torch/_dynamo/repro/**/*.py',
     'torch/_inductor/graph.py',
     'torch/_inductor/codegen/wrapper.py',
+    'torch/_inductor/cudagraph_trees.py',
     'torch/_C/_dynamo/**/*.py',
     'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
 ]
@@ -226,7 +229,7 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
-    'c10/core/**/*.cpp',
+    'c10/**/*.cpp',
     'torch/csrc/fx/**/*.cpp',
     'torch/csrc/generic/**/*.cpp',
     'torch/csrc/onnx/**/*.cpp',
@@ -239,6 +242,7 @@ exclude_patterns = [
     # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
     # in a follow up PR.
     # that are not easily converted to accepted c++
+    'c10/cuda/**/*.cpp',
     'c10/test/**/*.cpp',
     'torch/csrc/jit/passes/onnx/helper.cpp',
     'torch/csrc/jit/passes/onnx/shape_type_inference.cpp',
@@ -1018,6 +1022,6 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.0.265',
+    'ruff==0.0.277',
 ]
 is_formatter = true

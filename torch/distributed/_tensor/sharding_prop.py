@@ -18,11 +18,6 @@ from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
 from torch.utils._pytree import tree_flatten, tree_map
 
-"""
-Print information on ops input shape and sharding for debugging purposes.
-"""
-_DEBUG_VERBOSE = False
-
 
 def unwrap_schema(e: object) -> object:
     return e._spec if isinstance(e, dtensor.DTensor) else e
@@ -64,19 +59,7 @@ class ShardingPropagator:
         args_schema = tree_map(unwrap_schema, args)
         kwargs_schema = tree_map(unwrap_schema, kwargs)
 
-        op_schema = OpSchema(op_call._schema, args_schema, kwargs_schema)
-
-        if _DEBUG_VERBOSE and torch.distributed.get_rank() == 0:
-            print(f"OpSchema({op_schema})")
-            local_shapes = tree_map(
-                lambda t: t.to_local().shape
-                if isinstance(t, dtensor.DTensor)
-                else None,
-                args,
-            )
-            print(f"    local shapes: {local_shapes}")
-
-        return op_schema
+        return OpSchema(op_call._schema, args_schema, kwargs_schema)
 
     def propagate(self, op_overload: OpOverload, op_schema: OpSchema) -> OutputSharding:
         if op_overload in self.op_strategy_funcs:
@@ -252,14 +235,13 @@ class ShardingPropagator:
         op_overload: OpOverload,
         op_schema: OpSchema,
     ) -> Optional[torch.fx.GraphModule]:
-        # right now we only use the graph for metadata prop, but next we will use
-        # the graph to do sharding prop together
-
+        # prepare the op graph for sharding propagation
         # special case op list, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         skip_prop_list = [
             torch.ops.aten._local_scalar_dense.default,
             torch.ops.aten.equal.default,
+            torch.ops.aten.is_same_size.default,
         ]
         if op_overload in skip_prop_list:
             return None
