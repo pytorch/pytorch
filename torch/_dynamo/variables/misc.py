@@ -794,19 +794,25 @@ class TypingVariable(VariableTracker):
         return self.value
 
 
-def get_torch_np_func(fn_name):
-    from ..utils import TORCH_NP_SUPPORTED_MODULES
+@functools.lru_cache(maxsize=1)
+def get_np_to_torch_np_map():
+    from ..utils import NP_SUPPORTED_MODULES, NP_TO_TORCH_NP_MODULE
 
-    for module in TORCH_NP_SUPPORTED_MODULES:
-        fn = getattr(module, fn_name, None)
-        # Verify that the attr is `callable`
-        # Eg. for `fn_name=fft`,
-        # `np` has a module named `fft` and also
-        # function named `fft` in `np.fft`
-        if callable(fn):
-            return fn
+    np_fn_to_torch_np_fn = {}
 
-    return None
+    for mod in NP_SUPPORTED_MODULES:
+        np_fn_to_torch_np_fn.update(
+            {
+                # `torch_np` doesn't implement internal details
+                # like `numpy.fromstring`, `numpy.fromfile`, etc.
+                v: getattr(NP_TO_TORCH_NP_MODULE[mod], k, None)
+                for k, v in mod.__dict__.items()
+                if callable(v)
+                and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
+            }
+        )
+
+    return np_fn_to_torch_np_fn
 
 
 class NumpyVariable(VariableTracker):
@@ -841,23 +847,23 @@ class NumpyVariable(VariableTracker):
                 "torch_np has custom getattr implementation and dynamo doesn't support it"
             )
         else:  # We are dealing with a callable.
-            func = get_torch_np_func(self.value.__name__)
-            if func:
-                # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
-                #  wrapped by NumpyNdarrayVariable which is wrong!
-                return wrap_fx_proxy_cls(
-                    target_cls=NumpyNdarrayVariable,
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        numpy_to_tensor_wrapper(func),
-                        *proxy_args_kwargs(args, kwargs),
-                    ),
-                    example_value=None,
-                    **options,
-                )
+            func = get_np_to_torch_np_map().get(self.value)
+            if func is None:
+                unimplemented(f"Can't find numpy function {self.value} in torch_np")
 
-            unimplemented(f"Can't find numpy function {self.value} in torch_np")
+            # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
+            #  wrapped by NumpyNdarrayVariable which is wrong!
+            return wrap_fx_proxy_cls(
+                target_cls=NumpyNdarrayVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    numpy_to_tensor_wrapper(func),
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+                example_value=None,
+                **options,
+            )
 
     def call_method(
         self,
