@@ -1404,7 +1404,7 @@ class TestClassType(JitTestCase):
         Test resolution of built-in torch types(e.g. torch.Tensor, torch.device) when a class is recursively compiled
         when compiling a module.
         """
-        class Wrapper():
+        class Wrapper:
             def __init__(self, t):
                 self.t = t
 
