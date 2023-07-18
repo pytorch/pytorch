@@ -257,7 +257,7 @@ def broadcast_shapes(shape1, shape2):
         elif d1 == d2:
             ret.append(d1)
         else:
-            raise Exception("Cannot broadcast shapes: {} and {}".format(shape1, shape2))
+            raise Exception(f"Cannot broadcast shapes: {shape1} and {shape2}")
     return tuple(ret)
 
 
@@ -607,8 +607,7 @@ class _NnapiSerializer:
             return (in0_id, in0_oper) + self.transpose_to_nhwc(in1_id, in1_oper)
 
         raise Exception(
-            "Automatic transpose not supported for dim_orders: %r, %r" %
-            (in0_oper.dim_order, in1_oper.dim_order))
+            f"Automatic transpose not supported for dim_orders: {in0_oper.dim_order!r}, {in1_oper.dim_order!r}")
 
     def get_size_arg(self, jitval):
         ctype, value = self.get_constant_value(jitval)
@@ -867,7 +866,7 @@ class _NnapiSerializer:
     def add_node(self, node):
         adder = self.ADDER_MAP.get(node.kind())
         if not adder:
-            raise Exception("Unsupported node kind (%r) in node %r" % (node.kind(), node))
+            raise Exception(f"Unsupported node kind ({node.kind()!r}) in node {node!r}")
         adder(self, node)
 
     def _identity(self, node):

@@ -109,7 +109,7 @@ def _masked_tensor_str(data, mask, formatter):
             for d in data
         ]
         max_len = max(
-            (8 if x[1] else len(x[0]) for x in zip(formatted_elements, ~mask))
+            8 if x[1] else len(x[0]) for x in zip(formatted_elements, ~mask)
         )
         return (
             "["
