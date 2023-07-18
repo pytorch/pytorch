@@ -17,7 +17,6 @@ from ..utils import (
     HAS_NUMPY_TORCH_INTEROP,
     identity,
     proxy_args_kwargs,
-    TORCH_NP_SUPPORTED_MODULES,
 )
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
@@ -796,6 +795,8 @@ class TypingVariable(VariableTracker):
 
 
 def get_torch_np_func(fn_name):
+    from ..utils import TORCH_NP_SUPPORTED_MODULES
+
     for module in TORCH_NP_SUPPORTED_MODULES:
         fn = getattr(module, fn_name, None)
         # Verify that the attr is `callable`
