@@ -18,29 +18,12 @@ void check_inputs(const Tensor& input1, const Tensor& input2) {
         get_dim<Dim4D::Batch>(input1) == 1 ||
             get_dim<Dim4D::Batch>(input2) == 1,
         broadcast_error_msg);
-    TORCH_CHECK(
-        get_dim<Dim4D::Channel>(input1) == get_dim<Dim4D::Channel>(input2) ||
-            get_dim<Dim4D::Channel>(input1) * get_dim<Dim4D::Batch>(input1) ==
-                1 ||
-            get_dim<Dim4D::Channel>(input2) * get_dim<Dim4D::Batch>(input2) ==
-                1,
-        "Invalid broadcasting for Vulkan binary elementwise op! "
-        "If batch dimensions aren't equal, then channel dimensions must be "
-        "equal or one of the inputs must have channel and batch dimensions "
-        "both equal to 1!");
   }
   if (get_dim<Dim4D::Channel>(input1) != get_dim<Dim4D::Channel>(input2)) {
     TORCH_CHECK(
         get_dim<Dim4D::Channel>(input1) == 1 ||
             get_dim<Dim4D::Channel>(input2) == 1,
         broadcast_error_msg);
-    TORCH_CHECK(
-        get_dim<Dim4D::Channel>(input1) * get_dim<Dim4D::Batch>(input1) == 1 ||
-            get_dim<Dim4D::Channel>(input2) * get_dim<Dim4D::Batch>(input2) ==
-                1,
-        "Invalid broadcasting for Vulkan binary elementwise op! "
-        "If channel dimensions aren't equal, then one of the inputs must have "
-        "channel and batch dimensions both equal to 1!");
   }
   if (get_dim<Dim4D::Height>(input1) != get_dim<Dim4D::Height>(input2)) {
     TORCH_CHECK(
@@ -216,20 +199,26 @@ Tensor arithmetic_tensor(
 
   const double alpha = alpha_arg ? alpha_arg->to<double>() : 1.0;
   const struct Block final {
-    uvec3 extents;
-    uint32_t channelSize;
-    uvec3 input1Extents;
-    uint32_t channelBatchSize1;
-    uvec3 input2Extents;
-    uint32_t channelBatchSize2;
+    uvec4 output_tensor_size;
+    uvec4 input_tensor_size;
+    uvec4 other_tensor_size;
     float alpha;
   } block{
-      v_output.extents(),
-      get_dim<Dim4D::Channel>(v_output),
-      v_self.extents(),
-      get_dim<Dim4D::Channel>(self) * get_dim<Dim4D::Batch>(self),
-      v_other.extents(),
-      get_dim<Dim4D::Channel>(other) * get_dim<Dim4D::Batch>(other),
+      {get_dim<Dim4D::Width>(v_output),
+       get_dim<Dim4D::Height>(v_output),
+       get_dim<Dim4D::Channel>(v_output),
+       get_dim<Dim4D::Batch>(v_output)},
+
+      {get_dim<Dim4D::Width>(v_self),
+       get_dim<Dim4D::Height>(v_self),
+       get_dim<Dim4D::Channel>(v_self),
+       get_dim<Dim4D::Batch>(v_self)},
+
+      {get_dim<Dim4D::Width>(v_other),
+       get_dim<Dim4D::Height>(v_other),
+       get_dim<Dim4D::Channel>(v_other),
+       get_dim<Dim4D::Batch>(v_other)},
+      // alpha
       safe_downcast<float>(alpha),
   };
 
