@@ -751,7 +751,7 @@ class {module_name}(torch.nn.Module):
         code to regenerate the underlying ``Graph``
         """
         dict_without_graph = self.__dict__.copy()
-        python_code = self.recompile()
+        python_code = self._real_recompile()
         import_block = _format_import_block(python_code.globals, sys_importer)
         del dict_without_graph['_graph']
         return (reduce_graph_module, (dict_without_graph, import_block))
