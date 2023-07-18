@@ -185,8 +185,7 @@ def simple_ts_compile(fx_g, _):
     strip_overloads(fx_g)
 
     # realize the lazy recompilication to make jit.script happy.
-    if fx_g._needs_recompile():
-        fx_g._real_recompile()
+    fx_g.real_recompile()
 
     f = torch.jit.script(fx_g)
     f = torch.jit.freeze(f.eval())
