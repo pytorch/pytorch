@@ -65,9 +65,9 @@ def register_kl(type_p, type_q):
         type_q (type): A subclass of :class:`~torch.distributions.Distribution`.
     """
     if not isinstance(type_p, type) and issubclass(type_p, Distribution):
-        raise TypeError('Expected type_p to be a Distribution subclass but got {}'.format(type_p))
+        raise TypeError(f'Expected type_p to be a Distribution subclass but got {type_p}')
     if not isinstance(type_q, type) and issubclass(type_q, Distribution):
-        raise TypeError('Expected type_q to be a Distribution subclass but got {}'.format(type_q))
+        raise TypeError(f'Expected type_q to be a Distribution subclass but got {type_q}')
 
     def decorator(fun):
         _KL_REGISTRY[type_p, type_q] = fun
