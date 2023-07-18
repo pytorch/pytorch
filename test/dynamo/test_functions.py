@@ -1130,7 +1130,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_numpy_dtype_argument_to_function(x):
         import numpy as np
 
-        return np.empty_like(x, dtype=np.float64)
+        return np.ones_like(x, dtype=np.float64)
 
     @requires_numpy_pytorch_interop
     @make_test
