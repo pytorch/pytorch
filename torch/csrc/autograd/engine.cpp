@@ -415,6 +415,8 @@ std::vector<Node*> get_current_graph_task_execution_order() {
   const bool check_exec_info = !task->exec_info_.empty();
   std::vector<Node*> out{};
   std::unordered_set<Node*> seen{};
+  // Do a copy since we mutate it later
+  std::unordered_map<Node*, int> dependencies = task->dependencies_;
 
   auto compare_seq_nr = [](Node* n1, Node* n2) {
     return n1->sequence_nr() < n2->sequence_nr();
@@ -427,7 +429,9 @@ std::vector<Node*> get_current_graph_task_execution_order() {
   }
 
   // Implementation notes:
-  // - Don't need to count dependencies because we have sequence_nr
+  // - We need count dependencies even though we have sequence_nr, because
+  //   in the accumulate_grad case we cannot assume the outputs to have higher
+  //   sequence_nr than the inputs
   // - Don't need to check topological_nr because we have exec_info
   while (!heap.empty()) {
     Node* fn = heap.top();
@@ -450,7 +454,12 @@ std::vector<Node*> get_current_graph_task_execution_order() {
           continue;
         }
       }
-      heap.push(next_ptr);
+      auto it = dependencies.find(edge.function.get());
+      TORCH_INTERNAL_ASSERT(it != dependencies.end());
+      if (--it->second == 0) {
+        dependencies.erase(it);
+        heap.push(next_ptr);
+      }
     }
   }
   return out;
