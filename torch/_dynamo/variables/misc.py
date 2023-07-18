@@ -796,21 +796,18 @@ class TypingVariable(VariableTracker):
 
 @functools.lru_cache(maxsize=1)
 def get_np_to_torch_np_map():
-    from ..utils import NP_SUPPORTED_MODULES, NP_TO_TORCH_NP_MODULE
+    from ..utils import NP_TO_TORCH_NP_MODULE
 
     np_fn_to_torch_np_fn = {}
 
-    for mod in NP_SUPPORTED_MODULES:
-        np_fn_to_torch_np_fn.update(
-            {
-                # `torch_np` doesn't implement internal details
-                # like `numpy.fromstring`, `numpy.fromfile`, etc.
-                v: getattr(NP_TO_TORCH_NP_MODULE[mod], k, None)
-                for k, v in mod.__dict__.items()
-                if callable(v)
-                and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
-            }
-        )
+    for np_mod, torch_np_mod in NP_TO_TORCH_NP_MODULE.items():
+        for fn_name, torch_np_fn in torch_np_mod.__dict__.items():
+            if callable(torch_np_fn):
+                # some internal details do leak,
+                # which are not part of numpy.
+                np_fn = getattr(np_mod, fn_name, None)
+                if np_fn:
+                    np_fn_to_torch_np_fn[np_fn] = torch_np_fn
 
     return np_fn_to_torch_np_fn
 
