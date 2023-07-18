@@ -1098,16 +1098,15 @@ def forward(self, crop_camera_1, mask_1):
     clone = torch.ops.aten.clone.default(transpose, memory_format = torch.contiguous_format);  transpose = None
     sym_size = torch.ops.aten.sym_size(index, 0);  index = None
     sym_size_1 = torch.ops.aten.sym_size(crop_camera_1, 2)
-    mul = sym_size * sym_size_1
+    mul = sym_size * sym_size_1;  sym_size_1 = None
     sym_size_2 = torch.ops.aten.sym_size(crop_camera_1, 1)
     _unsafe_view = torch.ops.aten._unsafe_view.default(clone, [mul, sym_size_2]);  clone = mul = sym_size_2 = None
     mm = torch.ops.aten.mm.default(_unsafe_view, t);  _unsafe_view = t = None
-    view = torch.ops.aten.view.default(mm, [sym_size, sym_size_1, 3]);  mm = sym_size_1 = None
-    transpose_1 = torch.ops.aten.transpose.int(view, -2, -1)
+    view = torch.ops.aten.view.default(mm, [sym_size, 3, 3]);  mm = None
+    transpose_1 = torch.ops.aten.transpose.int(view, -2, -1);  view = None
     clone_1 = torch.ops.aten.clone.default(transpose_1, memory_format = torch.contiguous_format);  transpose_1 = None
     mul_1 = sym_size * 3
-    sym_size_3 = torch.ops.aten.sym_size(view, 1);  view = None
-    view_1 = torch.ops.aten.view.default(clone_1, [mul_1, sym_size_3]);  clone_1 = mul_1 = sym_size_3 = None
+    view_1 = torch.ops.aten.view.default(clone_1, [mul_1, 3]);  clone_1 = mul_1 = None
     mm_1 = torch.ops.aten.mm.default(view_1, eye);  view_1 = eye = None
     view_2 = torch.ops.aten.view.default(mm_1, [sym_size, 3, 3]);  mm_1 = sym_size = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_2);  crop_camera_1 = mask_1 = view_2 = None
@@ -1291,10 +1290,10 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(3))
         meta_cos = _get_node(fx_g, lambda x: x.target == aten.cos.default)
         meta_inp = _get_node(fx_g, lambda x: x.op == 'placeholder')
-        self.assertTrue(meta_cos.meta['val'].shape[0].node.expr == 3)
+        self.assertTrue(meta_cos.meta['val'].shape[0] == 3)
         # Checks if the input expr has been updated even though the constraint
         # happened afterwards
-        self.assertTrue(meta_inp.meta['val'].shape[0].node.expr == 3)
+        self.assertTrue(meta_inp.meta['val'].shape[0] == 3)
 
     def test_elementwise_meta_with_sym_numbers(self):
         def f(x, offset, as_sym_float=False):
@@ -1434,8 +1433,14 @@ def forward(self, a_1):
         fx_g = _trace(f, 2, 4, 8, 16, 32)
         self.assertExpectedInline(show_guards(fx_g), """""")
 
+    @torch._dynamo.config.patch(translation_validation=True)
+    def test_constant_specialization(self):
+        def f(t):
+            assert t.shape[0] == 10
+            return t
 
-
+        tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(10))
+        self.assertExpectedInline(show_guards(tensor), """""")
 
 
 make_fx_failures = {
@@ -1529,7 +1534,6 @@ symbolic_tensor_failures = {
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.adaptive_max_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbolic meta funct...
     xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2) must be tupl...
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
@@ -1541,8 +1545,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.grid_sample', ''),  # aten.grid_sampler_2d.default - couldn't find symbolic meta function/decompos...
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
-    xfail('nn.functional.multi_margin_loss', ''),  # Could not run 'aten::multi_margin_loss' with arguments from the...
-    xfail('nn.functional.multilabel_margin_loss', ''),  # Could not run 'aten::multilabel_margin_loss_forward' with ...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('normal', 'number_mean'),  # aten.normal.float_Tensor - couldn't find symbolic meta function/decomposition
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
@@ -1555,7 +1557,6 @@ symbolic_tensor_failures = {
     xfail('repeat_interleave', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
-    xfail('roll', ''),  # Tensors of type TensorImpl do not have numel
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
     xfail('special.bessel_y0', ''),  # aten.special_bessel_y0.default - couldn't find symbolic meta function/decomposition

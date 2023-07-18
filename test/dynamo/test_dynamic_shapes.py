@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+import unittest
+
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 
@@ -29,25 +31,19 @@ except ImportError:
 test_classes = {}
 
 
-def make_dynamic_cls(cls, automatic_dynamic_shapes=False):
+def make_dynamic_cls(cls):
     suffix = "_dynamic_shapes"
-    if automatic_dynamic_shapes:
-        suffix = "_automatic_dynamic_shapes"
 
     cls_prefix = "DynamicShapes"
-    if automatic_dynamic_shapes:
-        cls_prefix = "AutomaticDynamicShapes"
 
     test_class = make_test_cls_with_patches(
         cls,
         cls_prefix,
         suffix,
-        (config, "assume_static_by_default", automatic_dynamic_shapes),
-        (config, "automatic_dynamic_shapes", automatic_dynamic_shapes),
+        (config, "assume_static_by_default", False),
         (config, "specialize_int", False),
-        xfail_prop="_expected_failure_automatic_dynamic"
-        if automatic_dynamic_shapes
-        else "_expected_failure_dynamic",
+        (config, "translation_validation", True),
+        xfail_prop="_expected_failure_dynamic",
     )
 
     test_classes[test_class.__name__] = test_class
@@ -69,7 +65,12 @@ tests = [
 ]
 for test in tests:
     make_dynamic_cls(test)
-    make_dynamic_cls(test, automatic_dynamic_shapes=True)
+
+unittest.expectedFailure(
+    # SymPy is incorrectly transforming 's0 / 6 == 0.5' into 'False'.
+    # Ref: https://github.com/sympy/sympy/issues/25146
+    DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

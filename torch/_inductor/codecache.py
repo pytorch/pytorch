@@ -9,6 +9,7 @@ import logging
 import multiprocessing
 import os
 import pathlib
+import platform
 import re
 import shutil
 import signal
@@ -25,6 +26,7 @@ from ctypes import cdll
 from dataclasses import field
 from functools import partial
 from importlib import abc
+from pathlib import Path
 from threading import Thread
 from time import sleep, time
 from typing import Any, Callable, Dict, List, Set, Union
@@ -119,6 +121,9 @@ class CacheBase:
                 "cuda": torch.version.cuda,
                 "triton": triton_version,
             },
+            "other": {
+                "allow_tf32": torch.backends.cuda.matmul.allow_tf32,
+            },
         }
 
         system["hash"] = hashlib.sha256(
@@ -127,27 +132,39 @@ class CacheBase:
 
         return system
 
+    @staticmethod
+    @functools.lru_cache(None)
+    def get_local_cache_path():
+        return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def get_global_cache_path():
+        return (
+            Path(os.path.join(config.global_cache_dir, CacheBase.get_system()["hash"]))
+            if config.global_cache_dir is not None
+            else None
+        )
+
     def __init__(self):
         if not torch.cuda.is_available():
             return
 
         self.system = CacheBase.get_system()
 
-        self.local_cache_path = os.path.join(cache_dir(), self.system["hash"])
-        self.global_cache_path = (
-            os.path.join(os.path.dirname(config.global_cache_dir), self.system["hash"])
-            if config.global_cache_dir is not None
-            else None
-        )
+        self.local_cache_path = CacheBase.get_local_cache_path()
+        self.global_cache_path = CacheBase.get_global_cache_path()
 
     def get_local_cache(self):
-        if not os.path.isfile(self.local_cache_path):
+        if not self.local_cache_path.is_file():
             return {}
         with open(self.local_cache_path, "r") as local_cache_fp:
             local_cache = json.load(local_cache_fp)
         return local_cache["cache"]
 
     def update_local_cache(self, local_cache):
+        if not os.path.exists(self.local_cache_path.parent):
+            os.makedirs(self.local_cache_path.parent, exist_ok=True)
         write_atomic(
             self.local_cache_path,
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
@@ -182,7 +199,7 @@ class LocalCache(CacheBase):
 class PersistentCache(CacheBase):
     @functools.lru_cache(None)
     def get_global_cache(self):
-        if self.global_cache_path is None or not os.path.isfile(self.global_cache_path):
+        if self.global_cache_path is None or not self.global_cache_path.is_file():
             return {}
         with open(self.global_cache_path, "r") as global_cache_fp:
             global_cache = json.load(global_cache_fp)
@@ -615,7 +632,10 @@ def optimization_flags():
         # Also, `-march=native` is unrecognized option on M1
         base_flags += " -Xclang"
     else:
-        base_flags += " -march=native"
+        if platform.machine() == "ppc64le":
+            base_flags += " -mcpu=native"
+        else:
+            base_flags += " -march=native"
 
     # Internal cannot find libgomp.so
     if not config.is_fbcode():
@@ -724,9 +744,13 @@ def cpp_compile_command(
         include_pytorch, vec_isa, cuda, aot_mode
     )
     if config.is_fbcode():
-        # We need to copy any absolute-path torch includes
-        inp_name = os.path.basename(input)
-        out_name = os.path.basename(output)
+        if aot_mode:
+            inp_name = input
+            out_name = output
+        else:
+            # We need to copy any absolute-path torch includes
+            inp_name = os.path.basename(input)
+            out_name = os.path.basename(output)
         linker_path = f"-B{os.path.dirname(build_paths.ld())}"
     else:
         inp_name = input
@@ -782,7 +806,9 @@ class AotCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_so_dir = input_path[:-4]
+                # Place the generated .so into a sub-folder with the full hex-hash to avoid
+                # any name collision.
+                output_so_dir = os.path.splitext(input_path)[0]
                 if not os.path.exists(output_so_dir):
                     os.makedirs(output_so_dir, exist_ok=False)
                 so_name = f"{config.dll_name}.so"
@@ -797,7 +823,7 @@ class AotCodeCache:
                     ).split(" ")
                     log.debug("aot compilation command: %s", " ".join(cmd))
                     try:
-                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                        subprocess.check_call(cmd)
                     except subprocess.CalledProcessError as e:
                         raise exc.CppCompileError(cmd, e.output) from e
 
@@ -810,6 +836,36 @@ class AotCodeCache:
         return wrapper_call
 
 
+# Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
+# Why? importing from cpp.py invokes codecache.pick_vec_isa(), which takes out a lock.
+# Cycle goes:
+# - CppCodeCache.load()
+# - pick_vec_isa()
+# - valid_vec_isa_list()
+# - VecISA.__bool__() <-- takes out a lock
+# - compile_file() <-- imports cpp_prefix_path from cpp, which causes us to try to take out the same lock.
+@functools.lru_cache()
+def cpp_prefix_path():
+    path = Path(__file__).parent / "codegen/cpp_prefix.h"
+    with path.open() as f:
+        content = f.read()
+        _, filename = write(
+            content,
+            "h",
+        )
+    return filename
+
+
+def cpp_prefix():
+    filename = cpp_prefix_path()
+    if config.is_fbcode():
+        # We need relative paths, since we bundle up
+        # everything that we compile into a folder for remote compilation.
+        return f'#include "{os.path.basename(filename)}"'
+    else:
+        return f'#include "{filename}"'
+
+
 # Given a path to an input cpp file and an output path,
 # Attempts to compile the file, storing the output in "output_path"
 def compile_file(input_path, output_path, cmd) -> None:
@@ -817,8 +873,6 @@ def compile_file(input_path, output_path, cmd) -> None:
     try:
         if config.is_fbcode():
             # Need to copy our header into the same folder as the sourcecode.
-            from torch._inductor.codegen.cpp import cpp_prefix_path
-
             header_path = cpp_prefix_path()
             header_name = os.path.basename(header_path)
             output_name = os.path.basename(output_path)

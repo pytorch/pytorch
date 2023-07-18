@@ -12,13 +12,13 @@ import weakref
 import torch
 
 import torch._dynamo as torchdynamo
-import torch.ao.quantization._pt2e.quantizer.x86_inductor_quantizer as xiq
+import torch.ao.quantization.pt2e.quantizer.x86_inductor_quantizer as xiq
 from torch import nn
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import override_lowering, run_and_get_code
-from torch.ao.quantization._pt2e.quantizer import X86InductorQuantizer
 from torch.ao.quantization._quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
+from torch.ao.quantization.pt2e.quantizer import X86InductorQuantizer
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 
@@ -167,6 +166,11 @@ class OptimizeForInferenceTemplate(TestCase):
                 self.assertEqual(out_eager, out_compiled)
 
     def test_mm_concat(self):
+        # CPU path will replace mm with mkl._linear,
+        # skip this case for now.
+        if self.device == "cpu":
+            raise unittest.SkipTest("NYI CPU")
+
         class MM(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -323,6 +327,29 @@ class OptimizeForInferenceTemplate(TestCase):
 
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
+
+    def test_conv_layout_convert_with_view(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(
+                    3, 128, kernel_size=3, padding=1, stride=1, bias=False
+                )
+
+            def forward(self, x):
+                x = self.conv(x)
+                return torch.flatten(x, 1)
+
+        mod = Model().to(self.device).eval()
+
+        @torch.compile()
+        def foo(mod, inp):
+            return mod(inp)
+
+        with torch.no_grad():
+            x = torch.rand(2, 3, 5, 5).to(self.device)
+            mod_eager = mod(x)
+            self.assertEqual(foo(mod, x), mod_eager)
 
     def test_conv_weight_layout_convert(self):
         class Model(torch.nn.Module):
@@ -506,5 +533,5 @@ class OptimizeForInferenceQuantizationPT2E(TestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
