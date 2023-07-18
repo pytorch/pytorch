@@ -449,22 +449,25 @@ Graph break on a function is not enough to sufficiently express what you  want
 PyTorch to do. You need to be more specific about your use case. Some of the
 most common use cases you might want to consider:
 
+* If you want to disable compilation on this function frame and the recursively
+  invoked frames, use ``torch._dynamo.disable
+
 * If you want to disable compilation on this function frame and the
-  recursively invoked frames, use ``_dynamo.disable``.
+  recursively invoked frames, use ``torch._dynamo.disable``.
 
 * If you want a particular operator, such as ``fbgemm`` to use the  eager mode,
-  use ``_dynamo.disallow_in_graph``.
+  use ``torch._dynamo.disallow_in_graph``.
 
 Some of the uncommon use cases include:
 
 * If you want to disable TorchDynamo on the function frame but enable it back
-  on the recursively invoked frames – use ``_dynamo.disable(recursive=False)``.
+  on the recursively invoked frames – use ``torch._dynamo.disable(recursive=False)``.
 
-* If you want to prevent inlining of a function frame – use ``_dynamo.graph_break``
+* If you want to prevent inlining of a function frame – use ``torch._dynamo.graph_break``
   at the beginning of the function you want to prevent inlining.
 
-What's the difference between ``_dynamo.disable`` and ``_dynamo.disallow_in_graph``
------------------------------------------------------------------------------------
+What's the difference between ``torch._dynamo.disable`` and ``torch._dynamo.disallow_in_graph``
+-----------------------------------------------------------------------------------------------
 
 Disallow-in-graph works at the level of operators, or more specifically,
 the operators that you see in the TorchDynamo extracted graphs.
@@ -472,13 +475,13 @@ the operators that you see in the TorchDynamo extracted graphs.
 Disable works at the function frame level and decides if TorchDynamo
 should look into the function frame or not.
 
-What's the difference between ``_dynamo.disable`` and ``_dynamo_skip``
-----------------------------------------------------------------------
+What's the difference between ``torch._dynamo.disable`` and ``torch._dynamo_skip``
+----------------------------------------------------------------------------------
 
 .. note::
-   ``_dynamo_skip`` is deprecated.
+   ``torch._dynamo_skip`` is deprecated.
 
-You most likely need ``_dynamo.disable``. But in an unlikely scenario, you
+You most likely need ``torch._dynamo.disable``. But in an unlikely scenario, you
 might need even finer control. Suppose you want to disable the tracing on just
 the ``a_fn`` function, but want to continue the tracing back in ``aa_fn`` and
 ``ab_fn``. The image below demonstrates this use case:
@@ -488,5 +491,5 @@ the ``a_fn`` function, but want to continue the tracing back in ``aa_fn`` and
    :alt: diagram of torch.compile + disable(a_fn, recursive=False)
 
 In this case, you can use ``torch._dynamo.disable(recursive=False)``.
-In previous versions, this functionality was provided by ``_dynamo.skip``.
+In previous versions, this functionality was provided by ``torch._dynamo.skip``.
 This is now supported by the ``recursive`` flag inside ``torch._dynamo.disable``.

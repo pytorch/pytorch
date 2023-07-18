@@ -137,9 +137,6 @@ Similarly, let’s try out a TIMM example:
    opt_model = torch.compile(model, backend="inductor")
    opt_model(torch.randn(64,3,7,7))
 
-Our goal with TorchDynamo and TorchInductor is to build the highest coverage
-ML compiler which should work with any model you throw at it.
-
 Next Steps
 ~~~~~~~~~~
 

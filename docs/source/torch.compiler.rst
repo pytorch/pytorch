@@ -30,16 +30,15 @@ written in PyThon and it marks the transition of PyTorch from C++ to PyThon.
   acceleration of both forwards and backwards pass using TorchInductor.
 
 .. note:: In some cases, the terms ``torch.compile``, TorchDynamo, ``torch.compiler``
-  might be used interchangeably in this documentation.
+   might be used interchangeably in this documentation.
 
 As mentioned above, to run your workflows faster, ``torch.compile`` through
 TorchDynamo requires a backend that converts the captured graphs into fast
 machine code. Different backends can result in various optimization gains.
 The default backend is called TorchInductor, also known as *inductor*,
-TorchDynamo has a growing list of backends developed by our partners,
-which can be found in the `backends <https://github.com/pytorch/pytorch/tree/main/torch/_dynamo/backends>`_
-folder or by running  ``torch.compile.list_backends()`` each of which with its
-optional dependencies.
+TorchDynamo has a list of supported backends developed by our partners,
+which can be see by running ``torch.compile.list_backends()`` each of which
+with its optional dependencies.
 
 Some of the most commonly used backends include:
 

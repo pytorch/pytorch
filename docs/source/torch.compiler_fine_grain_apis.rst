@@ -1,11 +1,15 @@
 .. _torchdynamo_fine_grain_tracing:
 
-TorchDynamo APIs to control fine-grained tracing
-================================================
+TorchDynamo APIs for fine-grained tracing
+=========================================
+
+.. note:: In this document ``torch.compiler.compile`` and
+   ``torch.compile`` are used interchangeably. Both versions
+   will work in your code.
 
 ``torch.compile`` performs TorchDynamo tracing on the whole user model.
 However, it is possible that a small part of the model code cannot be
-handeled by ``torch.cmpile``. In this case, you might want to disable
+handeled by ``torch.compiler``. In this case, you might want to disable
 the compiler on that particular portion, while running compilation on
 the rest of the model. This section describe the existing APIs that
 use to define parts of your code in which you want to skip compilation
@@ -18,15 +22,15 @@ disable compilation are listed in the following table:
    :header: "API", "Description", "When to use?"
    :widths: auto
 
-   "``torch._dynamo.disable``", "Disables Dynamo on the decorated function as well as recursively invoked functions.", "Excellent for unblocking a user, if a small portion of the model cannot be handeled with ``torch.compile``."
-   "``torch._dynamo.disallow_in_graph``", "Disallows the marked op in the TorchDynamo graph. TorchDynamo causes graph break, and runs the op in the eager (no compile) mode.\n\nThis is suitable for the ops, while ``_dynamo.disable`` is suitable for decorating functions.", "This API is excellent for both debugging and unblocking if a custom op like ``torch.ops.fbgemm.*`` is causing issues with ``torch.compile``."
-   "``torch._dynamo.allow_in_graph``", "The annotated callable goes as is in the TorchDynamo graph. For example, a black-box for TorchDynamo Dynamo.\n\nNote that AOT Autograd will trace through it, so the ``allow_in_graph`` is only a Dynamo-level concept.", "This API is useful for portions of the model which have known TorchDynamo hard-to-support features, like hooks or ``autograd.Function``. However, each usage of ``allow_in_graph`` **must be carefully screened** (no graph breaks, no closures)."
+   "``torch.compiler.disable``", "Disables Dynamo on the decorated function as well as recursively invoked functions.", "Excellent for unblocking a user, if a small portion of the model cannot be handeled with ``torch.compile``."
+   "``torch._dynamo.disallow_in_graph``", "Disallows the marked op in the TorchDynamo graph. TorchDynamo causes graph break, and runs the op in the eager (no compile) mode.\n\nThis is suitable for the ops, while ``torch.compiler.disable`` is suitable for decorating functions.", "This API is excellent for both debugging and unblocking if a custom op like ``torch.ops.fbgemm.*`` is causing issues with the ``torch.compile`` function."
+   "``torch.compile.allow_in_graph``", "The annotated callable goes as is in the TorchDynamo graph. For example, a black-box for TorchDynamo Dynamo.\n\nNote that AOT Autograd will trace through it, so the ``allow_in_graph`` is only a Dynamo-level concept.", "This API is useful for portions of the model which have known TorchDynamo hard-to-support features, like hooks or ``autograd.Function``. However, each usage of ``allow_in_graph`` **must be carefully screened** (no graph breaks, no closures)."
    "``torch._dynamo.graph_break``", "Adds a graph break. The code before and after the graph break goes through TorchDynamo.", "**Rarely useful for deployment** - If you think you need this, most probably you need either ``disable`` or ``disallow_in_graph``."
 
-``torch._dynamo.disable``
-~~~~~~~~~~~~~~~~~~~~~~~~~
+``torch.compiler.disable``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``torch._dynamo.disable`` disables compilation on the decorated function frame and all the function frames recursively invoked from the decorated function frame.
+``torch.compiler.disable`` disables compilation on the decorated function frame and all the function frames recursively invoked from the decorated function frame.
 
 TorchDynamo intercepts the execution of each Python function frame. So, suppose you have a code structure (image below) where the function ``fn`` calls functions ``a_fn`` and ``b_fn``. And ``a_fn`` calls ``aa_fn`` and ``ab_fn``. When you use the PyTorch eager mode rather than ``torch.compile``, these function frames run as is. With ``torch.compile``, TorchDynamo intercepts each of these function frames (indicated by the green color):
 
@@ -34,12 +38,12 @@ TorchDynamo intercepts the execution of each Python function frame. So, suppose 
    :alt: Callstack diagram of differnet apis.
 
 Let's imagine, that function ``a_fn`` is causing troubles with ``torch.compile``.
-And this is a non-critical portion of the model. You can use ``_dynamo.disable``
+And this is a non-critical portion of the model. You can use ``compiler.disable``
 on function ``a_fn``. As shown above, TorchDynamo will stop looking at frames
 originating from the ``a_fn`` call (white color indicates original Python behavior).
 
 To skip compilation, you can decorate the offending function with
-``@torch._dynamo.disable``.
+``@torch.compiler.disable``.
 
 You can also use the non-decorator syntax if you don’t want to change the source
 code
@@ -69,10 +73,10 @@ and not the ATen level operator. See more in the Limitations section of the doc.
    different backend compilers, you might have to call ``allow_in_graph`` for
    the disallowed operator when switching to the other compiler.
 
-``torch._dynamo.allow_in_graph``
+``torch.compiler.allow_in_graph``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``torch._dynamo.allow_in_graph`` is useful when the relevant function frame
+``torch.compiler.allow_in_graph`` is useful when the relevant function frame
 has some known hard-to-support TorchDynamo feature, such as hooks and
 ``autograd.Function``, and you are confident that downstream PyTorch components
 such as AOTAutograd can safely trace through the decorated function. When a
@@ -94,7 +98,7 @@ All the existing APIs are applied at the TorchDynamo level. Therefore, these
 APIs have visibility to only what TorchDynamo sees. This can lead to confusing
 scenarios.
 
-For example, ``_dynamo.disallow_in_graph`` will not work for ATen operators
+For example, ``torch._dynamo.disallow_in_graph`` will not work for ATen operators
 because they are visible to AOT Autograd. For example,
 ``torch._dynamo.disallow_in_graph(torch.ops.aten.add)`` will not work in the
 above example.
