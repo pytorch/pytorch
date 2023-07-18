@@ -105,7 +105,7 @@ class OnnxFunctionDispatcher:
         ],
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
-    ) -> Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction]:
+    ) -> Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]:
         """Dispatches an ONNX function based on the given FX node, arguments, and keyword arguments.
         Args:
             node: The TorchFX node to dispatch the function for.
@@ -405,7 +405,7 @@ class _OnnxSchemaChecker:
 
     """
 
-    def __init__(self, onnxfunction: onnxscript.OnnxFunction):
+    def __init__(self, onnxfunction: "onnxscript.OnnxFunction"):
         """Initialize the OnnxSchemaChecker .
 
         Args:
@@ -579,7 +579,7 @@ class _OnnxSchemaChecker:
     @_beartype.beartype
     def _separate_input_attributes_from_arguments(
         self,
-        param_schemas: Sequence[onnxscript.values.ParamSchema],
+        param_schemas: Sequence["onnxscript.values.ParamSchema"],
         args: Sequence[
             Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
         ],
