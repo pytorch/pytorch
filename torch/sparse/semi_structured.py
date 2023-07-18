@@ -136,28 +136,22 @@ class SparseSemiStructuredTensor(torch.Tensor):
             # check device
             if not original_tensor.is_cuda:
                 raise RuntimeError(
-                    (
-                        f"Error original_tensor.device= {original_tensor.device} is not supported! "
-                        "Only CUDA tensors are currently supported."
-                    )
+                    f"Error original_tensor.device= {original_tensor.device} is not supported! "
+                    "Only CUDA tensors are currently supported."
                 )
 
             # check dim
             if original_tensor.dim() != 2:
                 raise RuntimeError(
-                    (
-                        f"Error original_tensor.dim = {original_tensor.dim()} is not supported! "
-                        "Only 2d tensors are currently supported."
-                    )
+                    f"Error original_tensor.dim = {original_tensor.dim()} is not supported! "
+                    "Only 2d tensors are currently supported."
                 )
 
             # check dtype
             if original_tensor.dtype not in _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG:
                 raise RuntimeError(
-                    (
-                        f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype! "
-                        "dtype must be one of: {_DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG}"
-                    )
+                    f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype! "
+                    "dtype must be one of: {_DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG}"
                 )
 
             # check shape
@@ -167,10 +161,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
             if m < min_rows or m % min_rows or n < min_cols or n % min_cols:
                 # TODO in the future we can add in padding to support dimensions that aren't perfect multiples
                 raise RuntimeError(
-                    (
-                        f"Error original_tensor.shape {original_tensor.shape} is not supported! "
-                        "Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
-                    )
+                    f"Error original_tensor.shape {original_tensor.shape} is not supported! "
+                    "Both dimensions must be larger or equal than and a multiple of ({min_rows}, {min_cols})"
                 )
 
             # This code calculates the size of the compressed tensor.
@@ -199,7 +191,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         self.compressed_tensor = compressed_tensor
         self.transposed = transposed
 
-    def __repr__(self) -> str:
+    def __repr__(self) -> str:  # type: ignore[override]
         """Return string representation of SparseSemiStructuredTensor
 
         Returns:

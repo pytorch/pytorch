@@ -45,13 +45,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import (
-    ceildiv,
-    decode_device,
-    developer_warning,
-    pad_listlike,
-    sympy_product,
-)
+from .utils import ceildiv, decode_device, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -1051,6 +1045,31 @@ def unbind(x, dim=0):
     return result
 
 
+@register_lowering(aten.unfold, type_promotion_kind=None)
+def unfold(x, dimension, size, step):
+    sizes = x.get_size()
+    ndim = len(sizes)
+    dim = canonicalize_dim(ndim, dimension)
+
+    if ndim == 0:
+        return slice_(unsqueeze(x, 0), end=size)
+
+    sizevars = V.graph.sizevars
+    sizevars.guard_leq(size, sizes[dim])
+    sizevars.guard_lt(0, step)
+
+    new_dim_size = FloorDiv(sizes[dim] - size, step) + 1
+    x.mark_reuse(sizevars.size_hint(CeilDiv(new_dim_size * size, sizes[dim])))
+
+    out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
+
+    def reindexer(idx):
+        dim_idx = idx[-1] + idx[dim] * step
+        return (*idx[:dim], dim_idx, *idx[dim + 1 : -1])
+
+    return TensorBox(ir.GenericView.create(x, out_size, reindexer))
+
+
 @register_lowering(aten.unsqueeze, type_promotion_kind=None)
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
@@ -1449,7 +1468,7 @@ def _foobar(_):
 
 @functools.lru_cache(1)
 def _warn_triton_random(salt):
-    developer_warning("using triton random, expect difference from eager")
+    log.info("using triton random, expect difference from eager")
 
 
 def warn_triton_random():
@@ -1721,7 +1740,6 @@ make_fallback(aten.max_unpool3d)
 make_fallback(aten.median)
 make_fallback(aten.mode)
 make_fallback(aten.multilabel_margin_loss_forward)
-make_fallback(aten.multi_margin_loss)
 make_fallback(aten.nanmedian)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
@@ -1775,7 +1793,6 @@ make_fallback(aten.fractional_max_pool3d_backward)
 make_fallback(aten._linalg_check_errors)
 make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten.multilabel_margin_loss_backward)
-make_fallback(aten.multi_margin_loss_backward)
 make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
