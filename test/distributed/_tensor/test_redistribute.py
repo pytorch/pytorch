@@ -37,7 +37,7 @@ class RedistributeTest(DTensorTestBase):
                 input_size, device=self.device_type, requires_grad=True
             )
             dtensor = distribute_tensor(
-                expected_tensor.clone(), device_mesh, shard_spec
+                expected_tensor, device_mesh, shard_spec
             )
             reshard_dtensor = dtensor.redistribute(device_mesh, replica_spec)
             self.assertEqual(reshard_dtensor.size(), torch.Size(input_size))
