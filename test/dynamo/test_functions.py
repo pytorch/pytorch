@@ -1139,6 +1139,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         return np.linalg.norm(x.numpy(), axis=0)
 
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_fft(x):
+        import numpy as np
+
+        return np.fft.fftshift(x.numpy())
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_random():
+        import numpy as np
+
+        return np.random.randn(2, 2)
+
 
 def global_func_with_default_tensor_args(
     x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))

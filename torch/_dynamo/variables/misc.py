@@ -798,7 +798,11 @@ class TypingVariable(VariableTracker):
 def get_torch_np_func(fn_name):
     for module in TORCH_NP_SUPPORTED_MODULES:
         fn = getattr(module, fn_name, None)
-        if fn:
+        # Verify that the attr is `callable`
+        # Eg. for `fn_name=fft`,
+        # `np` has a module named `fft` and also
+        # function named `fft` in `np.fft`
+        if callable(fn):
             return fn
 
     return None
