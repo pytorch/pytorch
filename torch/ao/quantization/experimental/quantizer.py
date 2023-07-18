@@ -44,7 +44,7 @@ class APoTQuantizer():
 
         from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 
-        result = TensorAPoT(self, tensor2quantize)
+        result = TensorAPoT(self, tensor2quantize)  # type: ignore[assignment]
 
         return result
 
@@ -83,7 +83,7 @@ class APoTQuantizer():
     def quant_dequant(self, tensor2quantize: Tensor) -> Tensor:
         levels_lst = list(self.quantization_levels)
 
-        result = tensor2quantize.apply_(lambda x: quant_dequant_util(x, levels_lst))
+        result = tensor2quantize.apply_(lambda x: quant_dequant_util(x, levels_lst))  # type: ignore[call-arg]
 
         return result
 
