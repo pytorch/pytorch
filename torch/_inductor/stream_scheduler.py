@@ -21,9 +21,7 @@ def temporary_log_path(temp_log_path):
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
         root_logger.handlers = handlers
-
     return reset_log_path
-
 
 class SSNode:
     """
@@ -271,14 +269,30 @@ class SSGraph:
     """
     For current global order, the nodes off the critical path are usually the adjacent nodes before the next common successor. It will block the critical path if we don't reorder them.
     """
-
     def reorder(self):
-        self.dfs_search(self.ssnodes[0])
+        # self.dfs_search(self.ssnodes[0])
+        # self.final_order.remove(self.name_mapping["OUTPUT"])
+        self.final_order = self.ssnodes.copy()
+        visited = set()
+        for index, ssnode in enumerate(self.ssnodes):
+            if index < 2:
+                continue
+            if len(ssnode.predecessors) > 1:
+                index_1_node = self.final_order[index-1]
+                index_2_node = self.final_order[index-2]
+                if index_1_node in ssnode.predecessors.values() and index_2_node in ssnode.predecessors.values() and index_1_node not in visited and index_2_node not in visited and index_1_node.stream_id != ssnode.stream_id and index_2_node.stream_id == ssnode.stream_id:
+                    self.final_order[index-1], self.final_order[index-2] = self.final_order[index-2], self.final_order[index-1]
+                    visited.add(index_1_node)
+                    visited.add(index_2_node)
+                    visited.add(ssnode)
         self.final_order.remove(self.name_mapping["OUTPUT"])
         log.info("=====findhao debug final order=====")
         for node in self.final_order:
             log.info(node.get_name())
         log.info("=====findhao debug final order=====")
+
+
+        
 
     def print_graph(self):
         import datetime
