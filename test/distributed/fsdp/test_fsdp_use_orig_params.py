@@ -1133,6 +1133,7 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
         with FSDP.state_dict_type(fsdp_model, StateDictType.SHARDED_STATE_DICT):
             sd = fsdp_model.state_dict()
             fsdp_model.load_state_dict(sd)
+        fsdp_model(*inp).sum().backward()
 
 
 class TestFSDPUseOrigParamsFQNs(FSDPTest):
