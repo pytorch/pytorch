@@ -381,7 +381,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
                 1
             )
-            # Totally 3 pattern_matcher_count, 9 or 10 pattern_matcher_nodes
+            # Totally 4 pattern_matcher_count, 16 or 17 pattern_matcher_nodes
             # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
             #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
             # 2. dequant-conv pattern matched in quantization weight prepack
@@ -420,15 +420,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
         v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
         # For now, we have annotated conv_add in x86InductorQuantizer. But we didn't implement the lowering.
         # TODO <leslie>: Modify the pattern matcher count after we implement the qconv2d_add lowering.
-        # Totally 3 pattern_matcher_count, 9 or 10 pattern_matcher_nodes
-        # 1. Pair of to_int8 and to_fp32 at conv input * 3, and graph output * 1
+        # Totally 10 pattern_matcher_count, 40 pattern_matcher_nodes
+        # 1. Pair of to_int8 and to_fp32 at conv input * 2, extra input of add * 1, and graph output * 1
         #    matched in pointless_convert pass at
         #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
         # 2. Dequant pattern matcher for dequant promotion * 1
         #    [convert_element_type_3, sub_1, mul_3]
         # 3. Dequant-conv pattern matched in quantization weight prepack * 3
         #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, convolution]
-        #    auto_insert_channel_last_node: [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
         # 4. Quantization fusion in post-grad fusion pass * 2
         #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
         self._test_common(
