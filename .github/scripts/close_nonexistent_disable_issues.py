@@ -49,7 +49,9 @@ where
 CLOSING_COMMENT = (
     "I cannot find any mention of this test in rockset for the past 7 days "
     "or in the logs for the past 5 commits on viable/strict.  Closing this "
-    "issue as it is highly likely that this test has either bee renamed or removed."
+    "issue as it is highly likely that this test has either been renamed or "
+    "removed.  If you think this is a false positive, please feel free to "
+    "re-open this issue."
 )
 
 
@@ -102,6 +104,40 @@ def close_issue(num: int) -> None:
     )
 
 
+def check_if_exists(
+    item: Tuple[str, Tuple[int, str, List[str]]], all_logs: List[str]
+) -> Tuple[bool, str]:
+    test, (_, link, _) = item
+    # Test names should look like `test_a (module.path.classname)`
+    reg = re.match(r"(\S+) \((\S*)\)", test)
+    if reg is None:
+        return False, "poorly formed"
+
+    name = reg[1]
+    classname = reg[2].split(".")[-1]
+
+    # Check if there is any mention of the link or the test name in the logs.
+    # The link usually shows up in the skip reason.
+    present = False
+    for log in all_logs:
+        if link in log:
+            present = True
+            break
+        if f"{classname}::{name}" in log:
+            present = True
+            break
+    if present:
+        return True, "found in logs"
+
+    # Query rockset to see if the test is there
+    count = query_rockset(
+        TEST_EXISTS_QUERY, {"name": f"{name}%", "classname": f"{classname}%"}
+    )
+    if count[0]["c"] == 0:
+        return False, "not found"
+    return True, "found in rockset"
+
+
 if __name__ == "__main__":
     args = parse_args()
     disabled_tests_json = json.loads(
@@ -131,36 +167,12 @@ if __name__ == "__main__":
 
     to_be_closed = []
     for item in disabled_tests_json.items():
-        test, (num, link, _) = item
-        reg = re.match(r"(\S+) \((\S*)\)", test)
-        if reg is None:
-            printer(item, "poorly formed")
+        exists, reason = check_if_exists(item, all_logs)
+        printer(item, reason)
+        if not exists:
             to_be_closed.append(item)
-            continue
-        name = reg[1]
-        classname = reg[2].split(".")[-1]
-        present = False
-        for log in all_logs:
-            if link in log:
-                present = True
-                break
-            if f"{classname}::{name}" in log:
-                present = True
-                break
-        if present:
-            printer(item, "found in logs")
-            continue
 
-        count = query_rockset(
-            TEST_EXISTS_QUERY, {"name": f"{name}%", "classname": f"{classname}%"}
-        )
-        if count[0]["c"] == 0:
-            printer(item, "not found")
-            to_be_closed.append(item)
-        else:
-            printer(item, "found in rockset")
-
-    print("The following issues will be closed:")
+    print(f"There are {len(to_be_closed)} issues that will be closed:")
     for item in to_be_closed:
         printer(item, "")
 
