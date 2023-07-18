@@ -220,29 +220,29 @@ def object_annotation(obj):
     if isinstance(obj, BASE_TYPES):
         return repr(obj)
     if type(obj).__name__ == 'function':
-        return "function\n{}".format(obj.__name__)
+        return f"function\n{obj.__name__}"
     elif isinstance(obj, types.MethodType):
         try:
             func_name = obj.__func__.__qualname__
         except AttributeError:
             func_name = "<anonymous>"
-        return "instancemethod\n{}".format(func_name)
+        return f"instancemethod\n{func_name}"
     elif isinstance(obj, list):
         return f"[{format_sequence(obj)}]"
     elif isinstance(obj, tuple):
         return f"({format_sequence(obj)})"
     elif isinstance(obj, dict):
-        return "dict[{}]".format(len(obj))
+        return f"dict[{len(obj)}]"
     elif isinstance(obj, types.ModuleType):
-        return "module\n{}".format(obj.__name__)
+        return f"module\n{obj.__name__}"
     elif isinstance(obj, type):
-        return "type\n{}".format(obj.__name__)
+        return f"type\n{obj.__name__}"
     elif isinstance(obj, weakref.ref):
         referent = obj()
         if referent is None:
             return "weakref (dead referent)"
         else:
-            return "weakref to id 0x{:x}".format(id(referent))
+            return f"weakref to id 0x{id(referent):x}"
     elif isinstance(obj, types.FrameType):
         filename = obj.f_code.co_filename
         if len(filename) > FRAME_FILENAME_LIMIT:
