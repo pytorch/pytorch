@@ -931,7 +931,7 @@ class TestForeach(TestCase):
         else:
             value_range = {}
         for sample in op.sample_inputs(
-            device, dtype, requires_grad=False, num_input_tensors=[5], same_size=True, **value_range,
+            device, dtype, requires_grad=True, num_input_tensors=[5], same_size=True, **value_range,
         ):
             # Skip `_foreach_pow.ScalarAndTensor(Scalar, Tensor[])`
             if op.name == "_foreach_pow" and isinstance(sample.input, Number):
