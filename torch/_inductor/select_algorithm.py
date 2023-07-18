@@ -465,7 +465,7 @@ class TritonTemplate:
             mod = PyCodeCache.load(code, extra)
             _, call_args, _ = kernel.args.python_argdefs()
 
-        expected_args = list(set(x.get_name() for x in input_nodes)) + [fake_out.get_name()]
+        expected_args = list({x.get_name() for x in input_nodes}) + [fake_out.get_name()]
         assert list(call_args) == expected_args, (call_args, expected_args)
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
@@ -774,7 +774,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
         # de-duplicate args
         unique_input_nodes = {x.get_name(): x for x in input_nodes}
-        example_inputs = [cls.benchmark_example_value(x) for x in unique_input_nodes.values()]
+        example_inputs = [
+            cls.benchmark_example_value(x) for x in unique_input_nodes.values()
+        ]
 
         out = cls.benchmark_example_value(layout)
         out_extern = torch.as_strided(
