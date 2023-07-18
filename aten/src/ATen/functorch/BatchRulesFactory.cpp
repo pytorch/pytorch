@@ -103,6 +103,62 @@ static std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_ba
   return std::make_tuple(result, 0);
 }
 
+static std::tuple<Tensor,optional<int64_t>> linspace_logspace_batch_rule_helper(
+    const at::Tensor& start, optional<int64_t> start_bdim,
+    const at::Tensor& end, optional<int64_t> end_bdim,
+    int64_t steps,
+    c10::optional<double> base,
+    c10::optional<at::ScalarType> dtype,
+    c10::optional<at::Layout> layout,
+    c10::optional<at::Device> device,
+    c10::optional<bool> pin_memory)
+{
+  auto batch_size = get_bdim_size2(start, start_bdim, end, end_bdim);
+  auto start_ = ensure_has_bdim(start, start_bdim.has_value(), batch_size);
+  auto end_ = ensure_has_bdim(end, end_bdim.has_value(), batch_size);
+  start_ = moveBatchDimToFront(start_, start_bdim);
+  end_ = moveBatchDimToFront(end_, end_bdim);
+
+  auto tensor_options = at::TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  Tensor result;
+  if (steps == 0){
+    result = at::full({batch_size, 0}, 0, tensor_options);
+  } else if (steps == 1){
+    result = at::empty({start_.size(0), 1}, tensor_options).copy_(start_.unsqueeze_(1));
+  } else {
+    result = (start_ + at::arange(0, steps, tensor_options).unsqueeze_(1) * (end_ - start_) / (steps - 1)).transpose(0, 1);
+  }
+
+  if (base){
+    result = at::pow(*base, result);
+  }
+  return std::make_tuple(result, 0);
+}
+
+static std::tuple<Tensor,optional<int64_t>> linspace_batch_rule(
+    const at::Tensor& start, optional<int64_t> start_bdim,
+    const at::Tensor& end, optional<int64_t> end_bdim,
+    int64_t steps,
+    c10::optional<at::ScalarType> dtype,
+    c10::optional<at::Layout> layout,
+    c10::optional<at::Device> device,
+    c10::optional<bool> pin_memory){
+  return linspace_logspace_batch_rule_helper(start, start_bdim, end, end_bdim, steps, c10::nullopt, dtype, layout, device, pin_memory);
+}
+
+static std::tuple<Tensor,optional<int64_t>> logspace_batch_rule(
+    const at::Tensor& start, optional<int64_t> start_bdim,
+    const at::Tensor& end, optional<int64_t> end_bdim,
+    int64_t steps,
+    double base,
+    c10::optional<at::ScalarType> dtype,
+    c10::optional<at::Layout> layout,
+    c10::optional<at::Device> device,
+    c10::optional<bool> pin_memory){
+  return linspace_logspace_batch_rule_helper(start, start_bdim, end, end_bdim, steps, c10::make_optional(base), dtype, layout, device, pin_memory);
+}
+
 static bool _has_same_storage_numel_batch_rule(const Tensor& a, const Tensor& b) {
   return true;
 }
@@ -119,6 +175,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(new_zeros, NEW_BLAH_BATCH_RULE_SYMINT(ATEN_FN(new_zeros)));
   VMAP_SUPPORT(new_ones, NEW_BLAH_BATCH_RULE_SYMINT(ATEN_FN(new_ones)));
   VMAP_SUPPORT(new_full, NEW_BLAH_BATCH_RULE_SYMINT(ATEN_FN(new_full)));
+  VMAP_SUPPORT2(linspace, Tensor, linspace_batch_rule);
+  VMAP_SUPPORT2(logspace, Tensor, logspace_batch_rule);
   VMAP_SUPPORT(_new_zeros_with_same_feature_meta, _new_zeros_with_same_feature_meta_batch_rule);
   // Not sure how to add the ones with irregular args to the mix cleanly (i.e. randint takes an extra int parameter)
 }
