@@ -20,9 +20,9 @@ class Rprop(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 < etas[0] < 1.0 < etas[1]:
-            raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
+            raise ValueError(f"Invalid eta values: {etas[0]}, {etas[1]}")
 
         defaults = dict(
             lr=lr,

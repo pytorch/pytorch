@@ -1,8 +1,7 @@
-#include "aot_inductor_interface.h"
-
+#include <torch/csrc/inductor/aot_inductor_interface.h>
+#include <torch/csrc/inductor/aot_inductor_model_container.h>
 #include <stdexcept>
 #include <vector>
-#include "aot_inductor_model_container.h"
 
 #define CONVERT_EXCEPTION_TO_ERROR_CODE(...)     \
   try {                                          \
@@ -26,7 +25,8 @@ AOTInductorError AOTInductorModelContainerCreate(
     return AOTInductorError::Failure;
   }
   CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* container = new aot_inductor::AOTInductorModelContainer(num_models);
+    auto* container =
+        new torch::aot_inductor::AOTInductorModelContainer(num_models);
     *container_handle =
         reinterpret_cast<AOTInductorModelContainerHandle>(container);
   })
@@ -36,7 +36,7 @@ AOTInductorError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle) {
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     auto* container =
-        reinterpret_cast<aot_inductor::AOTInductorModelContainer*>(
+        reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
             container_handle);
     delete container;
   });
@@ -49,8 +49,9 @@ AOTInductorError AOTInductorModelContainerRun(
     AOTInductorTensorHandle outputs_handle,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle) {
-  auto* container = reinterpret_cast<aot_inductor::AOTInductorModelContainer*>(
-      container_handle);
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
 
   const auto* inputs = reinterpret_cast<const at::Tensor*>(inputs_handle);
   std::vector<at::Tensor> input_tensors;
@@ -74,8 +75,9 @@ AOTInductorError AOTInductorModelContainerRun(
 AOTInductorError AOTInductorModelContainerGetNumInputs(
     AOTInductorModelContainerHandle container_handle,
     size_t* num_inputs_out) {
-  auto* container = reinterpret_cast<aot_inductor::AOTInductorModelContainer*>(
-      container_handle);
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *num_inputs_out = container->num_inputs(); })
 }
@@ -84,8 +86,9 @@ AOTInductorError AOTInductorModelContainerGetInputName(
     AOTInductorModelContainerHandle container_handle,
     size_t input_idx,
     const char** input_name_out) {
-  auto* container = reinterpret_cast<aot_inductor::AOTInductorModelContainer*>(
-      container_handle);
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *input_name_out = container->input_name(input_idx); })
 }
@@ -93,8 +96,9 @@ AOTInductorError AOTInductorModelContainerGetInputName(
 AOTInductorError AOTInductorModelContainerGetNumOutputs(
     AOTInductorModelContainerHandle container_handle,
     size_t* num_outputs_out) {
-  auto* container = reinterpret_cast<aot_inductor::AOTInductorModelContainer*>(
-      container_handle);
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *num_outputs_out = container->num_outputs(); })
 }
@@ -103,8 +107,9 @@ AOTInductorError AOTInductorModelContainerGetOutputName(
     AOTInductorModelContainerHandle container_handle,
     size_t output_idx,
     const char** output_name_out) {
-  auto* container = reinterpret_cast<aot_inductor::AOTInductorModelContainer*>(
-      container_handle);
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *output_name_out = container->output_name(output_idx); })
 }
@@ -113,8 +118,9 @@ AOTInductorError AOTInductorModelContainerGetMaxInputShape(
     AOTInductorModelContainerHandle container_handle,
     size_t input_idx,
     AOTInductorParamShape* input_shape) {
-  auto* container = reinterpret_cast<aot_inductor::AOTInductorModelContainer*>(
-      container_handle);
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     const std::vector<int64_t>& max_input_shape =
         container->max_input_shape(input_idx);
@@ -127,8 +133,9 @@ AOTInductorError AOTInductorModelContainerGetMaxOutputShape(
     AOTInductorModelContainerHandle container_handle,
     size_t output_idx,
     AOTInductorParamShape* output_shape) {
-  auto* container = reinterpret_cast<aot_inductor::AOTInductorModelContainer*>(
-      container_handle);
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     const std::vector<int64_t>& max_output_shape =
         container->max_output_shape(output_idx);
