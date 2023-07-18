@@ -970,7 +970,7 @@ def convert(
         # all the values either match what was set in prepare node_name_to_qconfig
         # or are set to None in the convert_node_name_to_qconfig.
         for k, v in node_name_to_qconfig.items():
-            assert k in convert_node_name_to_qconfig, 'Expected key {} in convert node_name_to_qconfig'.format(k)
+            assert k in convert_node_name_to_qconfig, f'Expected key {k} in convert node_name_to_qconfig'
             if convert_node_name_to_qconfig[k] is not None:
                 assert qconfig_equals(v, convert_node_name_to_qconfig[k]), \
                     "Expected k {} to have the same value in prepare and convert QConfigMappings, " \

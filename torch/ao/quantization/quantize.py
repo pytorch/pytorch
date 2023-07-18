@@ -442,7 +442,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             }
         else:
             raise ValueError(
-                "Don't know how to quantize with default settings for {}. Provide full qconfig please".format(dtype))
+                f"Don't know how to quantize with default settings for {dtype}. Provide full qconfig please")
     elif isinstance(qconfig_spec, set):
         if dtype is torch.qint8:
             default_qconfig = default_dynamic_qconfig

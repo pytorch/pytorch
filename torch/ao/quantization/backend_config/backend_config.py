@@ -599,8 +599,7 @@ class BackendPatternConfig:
                 return obj
             if isinstance(obj, Dict):
                 return DTypeConfig.from_dict(obj)
-            raise ValueError("Expected a list of DTypeConfigs in backend_pattern_config_dict[\"%s\"], got '%s'" %
-                             (DTYPE_CONFIGS_DICT_KEY, type(obj)))
+            raise ValueError(f"Expected a list of DTypeConfigs in backend_pattern_config_dict[\"{DTYPE_CONFIGS_DICT_KEY}\"], got '{type(obj)}'")
 
         conf = cls()
         if PATTERN_DICT_KEY in backend_pattern_config_dict:
