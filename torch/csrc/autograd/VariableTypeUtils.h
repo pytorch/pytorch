@@ -444,6 +444,13 @@ inline std::vector<SavedVariable> make_saved_variable_list(
       });
 }
 
+inline std::vector<SavedVariable> make_saved_variable_list_foreach_output(
+    at::ITensorListRef tensors) {
+  return fmap(tensors, [](const at::Tensor& tensor) -> SavedVariable {
+    return SavedVariable{tensor, true /* is output */};
+  });
+}
+
 inline std::vector<std::vector<int64_t>> to_args_sizes(
     at::ITensorListRef tensors) {
   std::vector<std::vector<int64_t>> args_sizes(tensors.size());
