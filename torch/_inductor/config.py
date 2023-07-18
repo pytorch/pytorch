@@ -48,6 +48,9 @@ pattern_matcher = True
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
+# enable pattern match with group fusion (using fbgemm)
+group_fusion = False
+
 # enable reordering pass
 reordering = True
 
@@ -170,7 +173,14 @@ compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    global_cache_dir = "fb/cache"
+    from libfb.py import parutil
+
+    try:
+        global_cache_dir = parutil.get_dir_path(
+            os.path.join(__package__.replace(".", os.sep), "fb/cache")
+        )
+    except ValueError:
+        global_cache_dir = None
 else:
     global_cache_dir = None
 
