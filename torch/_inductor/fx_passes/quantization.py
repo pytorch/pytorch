@@ -169,7 +169,7 @@ def _register_quantized_conv_lowering(
     return qconv
 
 
-def register_quantization_lowerings():
+def _register_quantization_lowerings():
     class UnaryAttr:
         def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
             self.op_name = op_name
