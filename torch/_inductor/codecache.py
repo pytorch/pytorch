@@ -290,7 +290,7 @@ def get_lock_dir():
     return lock_dir
 
 
-def code_hash(code, extra=""):
+def code_hash(code, extra: str = ""):
     hashing_str = code
     if extra != "":
         hashing_str = hashing_str + "||" + extra
@@ -302,13 +302,19 @@ def code_hash(code, extra=""):
     )
 
 
-def get_path(basename: str, extension: str):
-    subdir = os.path.join(cache_dir(), basename[1:3])
+def get_path(basename: str, extension: str, specified_dir: str = ""):
+    if specified_dir:
+        if os.path.isabs(specified_dir):
+            subdir = specified_dir
+        else:
+            subdir = os.path.join(cache_dir(), specified_dir)
+    else:
+        subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{extension}")
     return basename, subdir, path
 
 
-def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
+def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
     assert hash_type in ["code", "cubin"], "Hash type not supported"
     if hash_type == "code":
         return code_hash(content, extra)
@@ -317,10 +323,14 @@ def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
 
 
 def write(
-    content: Union[str, bytes], extension: str, extra="", hash_type: str = "code"
+    content: Union[str, bytes],
+    extension: str,
+    extra: str = "",
+    hash_type: str = "code",
+    specified_dir: str = "",
 ):
     key: str = get_hash(content, extra, hash_type)
-    basename, subdir, path = get_path(key, extension)
+    basename, subdir, path = get_path(key, extension, specified_dir)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
@@ -794,7 +804,12 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
-        _, path = write(cubin, "cubin", hash_type="cubin")
+        _, path = write(
+            cubin,
+            "cubin",
+            hash_type="cubin",
+            specified_dir=config.aot_inductor_output_path,
+        )
         params["cubin_path"] = path
         cls.cache[key] = params
 
@@ -816,20 +831,20 @@ class AotCodeCache:
                 "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
             )
         )
-        key, input_path = write(source_code, "cpp", extra=cpp_command)
+        key, input_path = write(
+            source_code,
+            "cpp",
+            extra=cpp_command,
+            specified_dir=config.aot_inductor_output_path,
+        )
         if key not in cls.cache:
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                # Place the generated .so into a sub-folder with the full hex-hash to avoid
-                # any name collision.
-                output_so_dir = os.path.splitext(input_path)[0]
-                if not os.path.exists(output_so_dir):
-                    os.makedirs(output_so_dir, exist_ok=False)
-                so_name = f"{config.dll_name}.so"
-                output_so = os.path.join(output_so_dir, so_name)
+                output_so = os.path.splitext(input_path)[0] + ".so"
+
                 if not os.path.exists(output_so):
                     cmd = cpp_compile_command(
                         input=input_path,
