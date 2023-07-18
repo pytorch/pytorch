@@ -83,8 +83,8 @@ def test_batch_norm():
         [5, 512, 7, 7]]
     for n, c, h, w in batch_norm_shapes:
         x = torch.rand((n, c, h, w))
-        y = torch.rand((c))
-        z = torch.rand((c))
+        y = torch.rand(c)
+        z = torch.rand(c)
         traced = torch.jit.trace(lambda x, y, z: op(x, y, z), (x, y, z))
 
         # Warmup.
