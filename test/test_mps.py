@@ -424,7 +424,6 @@ def mps_ops_modifier(ops):
         'isposinf': None,
         'kthvalue': None,
         'lcm': None,
-        'lerp': None,
         'lgamma': None,
         'linalg.cholesky': None,
         'linalg.cholesky_ex': None,
