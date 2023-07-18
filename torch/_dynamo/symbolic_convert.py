@@ -888,7 +888,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if len(bits) < level:
             raise ImportError("attempted relative import beyond top-level package")
         base = bits[0]
-        return "{}.{}".format(base, name) if name else base
+        return f"{base}.{name}" if name else base
 
     def calc_package(self):
         """
@@ -1840,7 +1840,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             additional_stack_frames = []
         return "".join(
             traceback.format_list(
-                ([self.frame_summary()] + list(reversed(additional_stack_frames)))
+                [self.frame_summary()] + list(reversed(additional_stack_frames))
             )
         )
 
