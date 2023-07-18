@@ -26,7 +26,7 @@ from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 
 from .codegen.triton_utils import config_of, signature_of
 
-from .utils import do_bench, sympy_dot, sympy_product
+from .utils import do_bench, sympy_dot, sympy_product, unique
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -465,7 +465,8 @@ class TritonTemplate:
             mod = PyCodeCache.load(code, extra)
             _, call_args, _ = kernel.args.python_argdefs()
 
-        expected_args = list({x.get_name() for x in input_nodes}) + [fake_out.get_name()]
+        expected_args = list(unique(x.get_name() for x in input_nodes))
+        expected_args.extend([fake_out.get_name()])
         assert list(call_args) == expected_args, (call_args, expected_args)
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
