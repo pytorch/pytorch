@@ -5379,6 +5379,42 @@ class CommonTemplate:
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
 
+    def test_mm_dup_args(self):
+        def fn(a):
+            return torch.mm(a, a)
+
+        self.common(
+            fn,
+            [
+                torch.randn([64, 64]),
+            ],
+            check_lowp=False,
+        )
+        expected_kernel = 1
+        # codegen mm kernel from template
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count, expected_kernel
+        )
+
+    def test_mm_dup_args_view(self):
+        def fn(a):
+            q = a[:64, :]
+            k = a[64:, :]
+            return torch.mm(q, k.transpose(0, 1))
+
+        self.common(
+            fn,
+            [
+                torch.randn([128, 64]),
+            ],
+            check_lowp=False,
+        )
+        expected_kernel = 1
+        # codegen mm kernel from template
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count, expected_kernel
+        )
+
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_dtype_sympy_expr(self):
         torch._inductor.metrics.disable_cpp_wrapper = 0
