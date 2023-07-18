@@ -1310,7 +1310,7 @@ class GraphInfo:
         }
 
     @_beartype.beartype
-    def all_mismatch_leaf_graph_info(self) -> List["GraphInfo"]:
+    def all_mismatch_leaf_graph_info(self) -> List[GraphInfo]:
         """Return a list of all leaf `GraphInfo` objects that have mismatch."""
         if not self.has_mismatch():
             return []
@@ -1333,7 +1333,7 @@ class GraphInfo:
         return results
 
     @_beartype.beartype
-    def find_partition(self, id: str) -> Optional["GraphInfo"]:
+    def find_partition(self, id: str) -> Optional[GraphInfo]:
         """Find the `GraphInfo` object with the given id."""
         if id == self.id:
             return self

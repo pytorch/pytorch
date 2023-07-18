@@ -29,7 +29,7 @@ class SymbolicFunction:
 
     """
 
-    onnx_function: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]
+    onnx_function: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction]
     op_full_name: str
     is_custom: bool = False
 
@@ -99,7 +99,7 @@ class OnnxRegistry:
     @_beartype.beartype
     def register_custom_op(
         self,
-        function: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"],
+        function: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
         namespace: str,
         op_name: str,
         overload: Optional[str] = None,
