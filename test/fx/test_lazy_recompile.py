@@ -2,6 +2,7 @@
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch import fx
+from torch.fx.experimental.proxy_tensor import make_fx
 import torch
 import torch._export
 
@@ -106,6 +107,64 @@ class TestLazyRecompile(TestCase):
 
         gm = fx.symbolic_trace(f)
         self.assertTrue("sin" in str(gm))
+
+    def test_recapture_with_make_fx(self):
+        def f(x):
+            return x.sin()
+
+        gm = fx.symbolic_trace(f)
+        self.assertTrue(gm._needs_recompile())
+        gm2 = make_fx(gm, (torch.randn(2, 3),))
+
+        # gm still has pending recompilation make_fx can smoothly handle
+        # lazye recompilation since its implemented thru the dispatcher.
+        self.assertTrue(gm._needs_recompile())
+
+    def test_recapture_with_symbolic_trace(self):
+        def f(x):
+            return x.sin()
+
+        gm = fx.symbolic_trace(f)
+        self.assertTrue(gm._needs_recompile())
+        gm2 = fx.symbolic_trace(gm)
+
+        # the lazy recompilcation is already realized. We realize the
+        # recompilation in the beginning of symbolic_trace since symbolic_trace can not
+        # handle the tracing of lazy recompilation.
+        self.assertFalse(gm._needs_recompile())
+
+    def test_recapture_with_dynamo(self):
+        def f(x):
+            return x.sin()
+
+        gm = fx.symbolic_trace(f)
+        self.assertTrue(gm._needs_recompile())
+        gm2 = torch.compile(gm)(torch.rand(2, 3))
+
+        # the lazy recompilcation is already realized. We realize the
+        # recompilation in the beginning of dynamo since dynamo can not
+        # handle the tracing of lazy recompilation.
+        self.assertFalse(gm._needs_recompile())
+
+
+    def test_recapture_with_torchscript(self):
+        def f(x):
+            return x.sin()
+
+        gm = fx.symbolic_trace(f)
+        self.assertTrue(gm._needs_recompile())
+        gm2 = torch.jit.script(gm)
+
+        # the lazy recompilcation is already realized. We realize the
+        # recompilation in the beginning of torchscript since torchscript can not
+        # handle the tracing of lazy recompilation.
+        #
+        # The real recompilation is triggered for torchscript automatically
+        # when the get_overload_annotations API in torch/jit/_recursive.py is called.
+        # This API will access the perperties like graph_in_spec etc which force
+        # recompilation.
+        self.assertFalse(gm._needs_recompile())
+
 
 if __name__ == "__main__":
     run_tests()

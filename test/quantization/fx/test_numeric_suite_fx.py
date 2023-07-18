@@ -1275,7 +1275,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m, (torch.randn(1, 1, 2, 2),),
             results_len=2)
 
-    # @skipIfNoFBGEMM
+    @skipIfNoFBGEMM
     def test_add_mul_inputs_activations(self):
         m = AddMulFunctional().eval()
         res = self._test_match_activations(
