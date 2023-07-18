@@ -371,8 +371,10 @@ class OptimizeForInferenceTemplate(TestCase):
                 self.conv = nn.Conv2d(
                     3, 128, kernel_size=3, padding=1, stride=1, bias=False
                 )
+                self.bn = nn.BatchNorm2d(3)
 
             def forward(self, x):
+                x = self.bn(x)
                 x = self.conv(x)
                 return torch.flatten(x, 1)
 
