@@ -40,7 +40,7 @@ class GraphContext:
     block: _C.Block
     opset: int
     original_node: _C.Node
-    params_dict: Dict[str, "_C.IValue"]
+    params_dict: Dict[str, _C.IValue]
     env: Dict[_C.Value, _C.Value]
 
     # Relay methods from _C.Graph for compatibility with symbolic functions that expect
