@@ -93,6 +93,7 @@ output_codes = Tracker()
 
 initial_grad_state = None
 initial_deterministic_algorithms_state = None
+initial_torch_function_state = None
 
 
 @functools.wraps(original_forward_from_src)
@@ -346,6 +347,9 @@ def convert_frame_assert(
             torch.are_deterministic_algorithms_enabled()
         )
 
+        global initial_torch_function_state
+        initial_torch_function_state = torch._C._is_torch_function_enabled()
+
         signpost_event(
             "dynamo",
             "_convert_frame_assert._compile",
@@ -473,6 +477,16 @@ def _compile(
         )
 
         assert output is not None
+
+        # Skipping Dynamo on a frame without any extracted graph.
+        # This does not affect eager functionality. But this is necessary
+        # for export for cases where Dynamo-reconstructed bytecode can create
+        # new function frames, confusing export in thinking that there
+        # are extra graphs now.
+
+        if output.export and output.is_empty_graph():
+            return None
+
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(
