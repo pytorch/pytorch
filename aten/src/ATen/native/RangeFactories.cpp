@@ -23,6 +23,8 @@
 namespace at { namespace native {
 
 Tensor& linspace_out(const Tensor& start, const Tensor& end, int64_t steps, Tensor& result) {
+  TORCH_CHECK(start.dim() == 0 && end.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s) and end with ", end.dim()," dimension(s).");
   return at::linspace_out(result, start.item(), end.item(), steps);
 }
 
@@ -53,6 +55,8 @@ Tensor& linspace_out(const Scalar& start, const Scalar& end, int64_t steps, Tens
 }
 
 Tensor& logspace_out(const Tensor& start, const Tensor& end, int64_t steps, double base, Tensor& result) {
+  TORCH_CHECK(start.dim() == 0 && end.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s) and end with ", end.dim()," dimension(s).");
   return at::logspace_out(result, start.item(), end.item(), steps, base);
 }
 

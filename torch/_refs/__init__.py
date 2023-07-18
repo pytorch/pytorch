@@ -4564,8 +4564,10 @@ def linspace(
     requires_grad: bool = False,
 ) -> TensorLikeType:
     if isinstance(start, TensorLikeType):
+        torch._check(start.dim() == 0, lambda: "linspace only supports 0-dimensional start and end tensors")
         start = start.item()
     if isinstance(end, TensorLikeType):
+        torch._check(end.dim() == 0, lambda: "linspace only supports 0-dimensional start and end tensors")
         end = end.item()
 
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
@@ -4586,7 +4588,8 @@ def linspace(
     # steps does not participate in the computation of the dtype
     torch._check_type(
         isinstance(steps, IntLike),
-        lambda: "steps must be int, not float",
+        lambda: f"received an invalid combination of arguments - got \
+({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
     )
     assert isinstance(steps, IntLike)  # for mypy
     torch._check(steps >= 0, lambda: "number of steps must be non-negative")
@@ -4626,6 +4629,7 @@ def linspace(
         start + step * cast_rg(rg),  # type: ignore[arg-type,operator]
         end - step * cast_rg((steps - 1) - rg),  # type: ignore[arg-type,operator]
     )
+
     return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
 
@@ -4651,10 +4655,12 @@ def logspace(
         if isinstance(start, FloatLike):
             start = sym_int(start)
         elif isinstance(start, TensorLikeType):
+            torch._check(start.dim() == 0, lambda: "logspace only supports 0-dimensional start and end tensors")
             start = _maybe_convert_to_dtype(start, dtype)
         if isinstance(end, FloatLike):
             end = sym_int(end)
         elif isinstance(end, TensorLikeType):
+            torch._check(end.dim() == 0, lambda: "logspace only supports 0-dimensional start and end tensors")
             end = _maybe_convert_to_dtype(end, dtype)
 
     assert not isinstance(base, complex)  # for mypy

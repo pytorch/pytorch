@@ -714,6 +714,8 @@ Tensor linspace(
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0 && end.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s) and end with ", end.dim()," dimension(s).");
   return at::linspace(start.item(), end.item(), steps, dtype, layout, device, pin_memory);
 }
 
@@ -746,6 +748,8 @@ Tensor logspace(
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0 && end.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s) and end with ", end.dim()," dimension(s).");
   return at::logspace(start.item(), end.item(), steps, base, dtype, layout, device, pin_memory);
 }
 
