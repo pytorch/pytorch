@@ -100,5 +100,12 @@ class TestLazyRecompile(TestCase):
         _ = gm.code
         self.assertFalse(gm._needs_recompile())
 
+    def test_graph_module_str(self):
+        def f(x):
+            return x.sin()
+
+        gm = fx.symbolic_trace(f)
+        self.assertTrue("sin" in str(gm))
+
 if __name__ == "__main__":
     run_tests()

@@ -1146,6 +1146,10 @@ def symbolic_trace(
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
     """
+    if isinstance(root, GraphModule):
+        # If we retracing a GraphModule, make sure we realize the lazy
+        # recompilation.
+        root.real_recompile()
     tracer = Tracer()
     graph = tracer.trace(root, concrete_args)
     name = (

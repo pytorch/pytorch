@@ -242,6 +242,10 @@ class _TorchDynamoContext:
 
     def __call__(self, fn):
         fn = innermost_fn(fn)
+        if isinstance(fn, torch.fx.GraphModule):
+            # do the real recompile so dynamo don't need to handle the lazy
+            # recompilation forward method
+            fn.real_recompile()
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
             mod = fn

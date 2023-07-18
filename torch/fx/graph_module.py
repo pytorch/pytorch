@@ -814,7 +814,7 @@ class {module_name}(torch.nn.Module):
     def __str__(self) -> str:
         orig_str = super().__str__()
         print_readable_reminder = "# To see more debug info, please use `graph_module.print_readable()`"
-        return '\n'.join([orig_str, self._code, print_readable_reminder])
+        return '\n'.join([orig_str, self.code, print_readable_reminder])
 
     def _replicate_for_data_parallel(self):
         new_gm = self.__copy__()
