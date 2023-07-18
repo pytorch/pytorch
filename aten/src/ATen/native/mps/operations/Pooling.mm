@@ -224,7 +224,7 @@ static void pool2d_template(const Tensor& input,
     runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
 
     if (output_memory_format != suggested_memory_format) {
-      const_cast<Tensor&>(output) = output.to(suggested_memory_format);
+      output.copy_(output.to(suggested_memory_format));
     }
   }
 }
@@ -253,12 +253,12 @@ static void avg_pool2d_template(const Tensor& input,
                     "not supported on MPS backend. ",
                     "Falling back on CPU. This may have performance implications.");
     if (!is_backward_pass) {
-      const_cast<Tensor&>(output) =
+      output.copy_(
           at::avg_pool2d(input.to("cpu"), kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
               .clone()
-              .to("mps");
+              .to("mps"));
     } else {
-      const_cast<Tensor&>(output) = at::avg_pool2d_backward(grad_output.to("cpu"),
+      output.copy_(at::avg_pool2d_backward(grad_output.to("cpu"),
                                                             input.to("cpu"),
                                                             kernel_size,
                                                             stride,
@@ -267,7 +267,7 @@ static void avg_pool2d_template(const Tensor& input,
                                                             count_include_pad,
                                                             divisor_override)
                                         .clone()
-                                        .to("mps");
+                                        .to("mps"));
     }
     return;
   }
@@ -446,7 +446,7 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)
                        "max_pool2d_indices");
 
   if (indices_memory_format == MemoryFormat::ChannelsLast) {
-    const_cast<Tensor&>(indices) = indices.to(MemoryFormat::ChannelsLast);
+    indices.copy_(indices.to(MemoryFormat::ChannelsLast));
   }
 }
 
