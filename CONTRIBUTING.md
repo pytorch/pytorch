@@ -28,6 +28,7 @@ aspects of contributing to PyTorch.
     - [Tips](#tips)
     - [Building C++ Documentation](#building-c-documentation)
   - [Previewing changes locally](#previewing-changes-locally)
+  - [Adding diagrams](#adding-diagrams)
   - [Previewing documentation on PRs](#previewing-documentation-on-prs)
   - [Adding documentation tests](#adding-documentation-tests)
 - [Profiling with `py-spy`](#profiling-with-py-spy)
@@ -569,6 +570,16 @@ rsync -az me@my_machine:/path/to/pytorch/docs/cpp/build/html cpp/build
 PyTorch will host documentation previews at `https://docs-preview.pytorch.org/<pr number>/` once the
 `pytorch_python_doc_build` GitHub Actions job has completed on your PR. You can visit that page directly
 or find its link in the automated Dr. CI comment on your PR.
+
+### Adding diagrams
+
+Diagrams are very useful in the documentation; "a picture speaks a thousand words". Diagrams should be supplied in 
+[svg](https://en.wikipedia.org/wiki/SVG) format. An easy free way to author diagrams is to use
+[https://app.diagrams.net/](https://app.diagrams.net/). You can author your diagram in this tool and then export it as an 
+svg. 
+If at some stage later another user needs to amend the diagram, then they can open the svg file in 
+[https://app.diagrams.net/](https://app.diagrams.net/) make their changes and export again in svg format. 
+
 
 ### Adding documentation tests
 
