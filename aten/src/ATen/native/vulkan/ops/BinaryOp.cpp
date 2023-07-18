@@ -77,7 +77,7 @@ std::vector<int64_t> broadcast_size(const Tensor& t1, const Tensor& t2) {
 } // namespace
 using namespace api::utils;
 
-Tensor arithmetic_scalar(
+Tensor binary_op_scalar(
     const Tensor& self_arg,
     const Scalar& other,
     const c10::optional<Scalar>& alpha_arg,
@@ -97,9 +97,11 @@ Tensor arithmetic_scalar(
                                     : other.to<float>();
   const struct Block final {
     uvec3 extents;
+    int fill0;
     float other;
   } block{
       v_self.extents(),
+      0,
       other_val,
   };
 
@@ -129,7 +131,7 @@ Tensor arithmetic_scalar(
   return convert(v_output);
 }
 
-Tensor& arithmetic_scalar_(
+Tensor& binary_op_scalar_(
     Tensor& self_arg,
     const Scalar& other,
     const c10::optional<Scalar>& alpha_arg,
@@ -146,9 +148,11 @@ Tensor& arithmetic_scalar_(
                                     : other.to<float>();
   const struct Block final {
     uvec3 extents;
+    int fill0;
     float other;
   } block{
       v_self.extents(),
+      0,
       other_val,
   };
 
@@ -177,7 +181,7 @@ Tensor& arithmetic_scalar_(
   return self_arg;
 }
 
-Tensor arithmetic_tensor(
+Tensor binary_op_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
@@ -249,7 +253,7 @@ Tensor arithmetic_tensor(
   return convert(v_output);
 }
 
-Tensor quantized_arithmetic_tensor(
+Tensor quantized_binary_op_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const double scale,
@@ -337,7 +341,7 @@ Tensor quantized_arithmetic_tensor(
   return convert_quantized(v_output);
 }
 
-Tensor& arithmetic_tensor_(
+Tensor& binary_op_tensor_(
     Tensor& self_arg,
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
@@ -367,16 +371,20 @@ Tensor& arithmetic_tensor_(
 
   const double alpha = alpha_arg ? alpha_arg->to<double>() : 1.0;
   const struct Block final {
-    uvec3 extents;
-    uint32_t channelSize;
-    uvec3 inputExtents;
-    uint32_t channelBatchSizeOther;
+    uvec4 input_tensor_size;
+    uvec4 other_tensor_size;
     float alpha;
   } block{
-      v_self.extents(),
-      get_dim<Dim4D::Channel>(v_self),
-      v_other.extents(),
-      get_dim<Dim4D::Channel>(other) * get_dim<Dim4D::Batch>(other),
+      {get_dim<Dim4D::Width>(v_self),
+       get_dim<Dim4D::Height>(v_self),
+       get_dim<Dim4D::Channel>(v_self),
+       get_dim<Dim4D::Batch>(v_self)},
+
+      {get_dim<Dim4D::Width>(v_other),
+       get_dim<Dim4D::Height>(v_other),
+       get_dim<Dim4D::Channel>(v_other),
+       get_dim<Dim4D::Batch>(v_other)},
+      // alpha
       safe_downcast<float>(alpha),
   };
 
@@ -410,12 +418,12 @@ Tensor add_scalar(
     const Tensor& self_arg,
     const Scalar& other,
     const Scalar& alpha) {
-  return arithmetic_scalar(
+  return binary_op_scalar(
       self_arg, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar));
 }
 
 Tensor& add_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
-  return arithmetic_scalar_(
+  return binary_op_scalar_(
       self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_));
 }
 
@@ -424,7 +432,7 @@ Tensor quantized_add(
     const Tensor& other_arg,
     const double scale,
     const int64_t zero_point) {
-  return quantized_arithmetic_tensor(
+  return quantized_binary_op_tensor(
       self_arg, other_arg, scale, zero_point, VK_KERNEL(quantized_add));
 }
 
@@ -433,7 +441,7 @@ Tensor quantized_sub(
     const Tensor& other_arg,
     const double scale,
     const int64_t zero_point) {
-  return quantized_arithmetic_tensor(
+  return quantized_binary_op_tensor(
       self_arg, other_arg, scale, zero_point, VK_KERNEL(quantized_sub));
 }
 
@@ -442,7 +450,7 @@ Tensor quantized_mul(
     const Tensor& other_arg,
     const double scale,
     const int64_t zero_point) {
-  return quantized_arithmetic_tensor(
+  return quantized_binary_op_tensor(
       self_arg, other_arg, scale, zero_point, VK_KERNEL(quantized_mul));
 }
 
@@ -451,7 +459,7 @@ Tensor quantized_div(
     const Tensor& other_arg,
     const double scale,
     const int64_t zero_point) {
-  return quantized_arithmetic_tensor(
+  return quantized_binary_op_tensor(
       self_arg, other_arg, scale, zero_point, VK_KERNEL(quantized_div));
 }
 
@@ -459,7 +467,7 @@ Tensor add_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const Scalar& alpha) {
-  return arithmetic_tensor(
+  return binary_op_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add));
 }
 
@@ -467,7 +475,7 @@ Tensor& add_tensor_(
     Tensor& self,
     const Tensor& other_arg,
     const Scalar& alpha) {
-  return arithmetic_tensor_(
+  return binary_op_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_));
 }
 
@@ -475,7 +483,7 @@ Tensor sub_scalar(
     const Tensor& self_arg,
     const Scalar& other,
     const Scalar& alpha) {
-  return arithmetic_scalar(
+  return binary_op_scalar(
       self_arg,
       other,
       c10::optional<Scalar>(-1 * alpha.to<float>()),
@@ -483,7 +491,7 @@ Tensor sub_scalar(
 }
 
 Tensor& sub_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
-  return arithmetic_scalar_(
+  return binary_op_scalar_(
       self,
       other,
       c10::optional<Scalar>(-1 * alpha.to<float>()),
@@ -494,7 +502,7 @@ Tensor sub_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const Scalar& alpha) {
-  return arithmetic_tensor(
+  return binary_op_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub));
 }
 
@@ -502,32 +510,32 @@ Tensor& sub_tensor_(
     Tensor& self,
     const Tensor& other_arg,
     const Scalar& alpha) {
-  return arithmetic_tensor_(
+  return binary_op_tensor_(
       self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_));
 }
 
 Tensor mul_scalar(const Tensor& self_arg, const Scalar& other) {
-  return arithmetic_scalar(
+  return binary_op_scalar(
       self_arg, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar));
 }
 
 Tensor& mul_scalar_(Tensor& self, const Scalar& other) {
-  return arithmetic_scalar_(
+  return binary_op_scalar_(
       self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_));
 }
 
 Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
-  return arithmetic_tensor(
+  return binary_op_tensor(
       self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul));
 }
 
 Tensor& mul_tensor_(Tensor& self, const Tensor& other_arg) {
-  return arithmetic_tensor_(
+  return binary_op_tensor_(
       self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_));
 }
 
 Tensor div_scalar(const Tensor& self_arg, const Scalar& other) {
-  return arithmetic_scalar(
+  return binary_op_scalar(
       self_arg,
       1.0 / other.to<float>(),
       c10::optional<Scalar>(),
@@ -535,7 +543,7 @@ Tensor div_scalar(const Tensor& self_arg, const Scalar& other) {
 }
 
 Tensor& div_scalar_(Tensor& self, const Scalar& other) {
-  return arithmetic_scalar_(
+  return binary_op_scalar_(
       self,
       1.0 / other.to<float>(),
       c10::optional<Scalar>(),
@@ -543,12 +551,12 @@ Tensor& div_scalar_(Tensor& self, const Scalar& other) {
 }
 
 Tensor div_tensor(const Tensor& self_arg, const Tensor& other_arg) {
-  return arithmetic_tensor(
+  return binary_op_tensor(
       self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(div));
 }
 
 Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
-  return arithmetic_tensor_(
+  return binary_op_tensor_(
       self, other_arg, c10::optional<Scalar>(), VK_KERNEL(div_));
 }
 
