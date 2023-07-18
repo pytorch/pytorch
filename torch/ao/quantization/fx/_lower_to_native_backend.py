@@ -514,7 +514,7 @@ def _match_static_pattern(
     matched_dequantize = False
     for i in dequantize_node_arg_indices:
         assert i < len(ref_node.args),\
-            "Dequantize index %s exceeded reference node's arg length %s" % (i, len(ref_node.args))
+            f"Dequantize index {i} exceeded reference node's arg length {len(ref_node.args)}"
         arg = ref_node.args[i]
         if is_dequantize_node(arg):
             matched_dequantize = True

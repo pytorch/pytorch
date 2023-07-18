@@ -125,7 +125,7 @@ class LinearBn1d(_FusedModule):
     During quantization this will be replaced with the corresponding fused module."""
     def __init__(self, linear, bn):
         assert type_before_parametrizations(linear) == Linear and type_before_parametrizations(bn) == BatchNorm1d, \
-            'Incorrect types for input modules{}{}'.format(type_before_parametrizations(linear), type_before_parametrizations(bn))
+            f'Incorrect types for input modules{type_before_parametrizations(linear)}{type_before_parametrizations(bn)}'
         super().__init__(linear, bn)
 
 class LinearLeakyReLU(_FusedModule):
