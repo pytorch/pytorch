@@ -64,17 +64,13 @@ TORCH_API at::Tensor not_implemented(const char* name, const char* reason = "");
 TORCH_API std::vector<Tensor> not_implemented_list(
     const char* name,
     const char* reason = "");
-at::Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result);
-at::Tensor maybe_multiply(const at::Tensor& t, const at::Scalar& s);
-int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim);
-Tensor restore_reduced_dims(
-    const Tensor& output,
-    IntArrayRef dims,
-    bool keepdim);
-Tensor scale_grad_by_count(
-    const Tensor& grad,
-    const Tensor& mask,
-    IntArrayRef dims);
+TORCH_API at::Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result);
+TORCH_API at::Tensor maybe_multiply(const at::Tensor& t, const at::Scalar& s);
+TORCH_API int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim);
+TORCH_API Tensor
+restore_reduced_dims(const Tensor& output, IntArrayRef dims, bool keepdim);
+TORCH_API Tensor
+scale_grad_by_count(const Tensor& grad, const Tensor& mask, IntArrayRef dims);
 at::Tensor norm_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
@@ -183,9 +179,10 @@ at::Tensor nansum_backward(
     const at::Tensor& self,
     at::OptionalIntArrayRef dims,
     bool keepdim);
-std::vector<int64_t> reverse_list(const at::IntArrayRef list);
-std::vector<c10::SymInt> reverse_list_symint(const c10::SymIntArrayRef list);
-at::Tensor reverse_dim(const at::Tensor& t, int64_t dim);
+TORCH_API std::vector<int64_t> reverse_list(const at::IntArrayRef list);
+TORCH_API std::vector<c10::SymInt> reverse_list_symint(
+    const c10::SymIntArrayRef list);
+TORCH_API at::Tensor reverse_dim(const at::Tensor& t, int64_t dim);
 at::Tensor prod_safe_zeros_backward(
     const at::Tensor& grad,
     const at::Tensor& inp,
@@ -236,12 +233,14 @@ at::Tensor logcumsumexp_jvp(
     const at::Tensor& self_t,
     int64_t dim);
 at::Tensor unbind_backward(const variable_list& grads, int64_t dim);
-at::Tensor unsqueeze_to(const at::Tensor& self, c10::SymIntArrayRef sym_sizes);
-at::Tensor unsqueeze_to(
+TORCH_API at::Tensor unsqueeze_to(
+    const at::Tensor& self,
+    c10::SymIntArrayRef sym_sizes);
+TORCH_API at::Tensor unsqueeze_to(
     const at::Tensor& self,
     int64_t dim,
     c10::SymIntArrayRef sym_sizes);
-at::Tensor unsqueeze_to(
+TORCH_API at::Tensor unsqueeze_to(
     const at::Tensor& self,
     IntArrayRef dim,
     c10::SymIntArrayRef sym_sizes);
