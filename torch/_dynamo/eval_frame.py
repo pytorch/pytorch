@@ -1210,15 +1210,8 @@ class TorchPatcher:
         }
 
         disabled_multi_tensor_opts = {
-            adadelta,
-            adagrad,
             adamax,
-            adamw,
-            asgd,
             nadam,
-            rmsprop,
-            rprop,
-            sgd,
         }
 
         for opt_mod in all_opts:
