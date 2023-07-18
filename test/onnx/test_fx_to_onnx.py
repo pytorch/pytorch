@@ -362,6 +362,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         # Scenario 6: Real model and fake input WITH fake_context
         # TODO: Delete the test below if https://github.com/pytorch/pytorch/pull/105246
+        #       Tracked by https://github.com/pytorch/pytorch/issues/105077
         # mixed mode (real+fake) will be permanently allowed.
         # with pytest.raises(torch.onnx.OnnxExporterError):
         #     export_options = ExportOptions(fake_context=fake_context)
