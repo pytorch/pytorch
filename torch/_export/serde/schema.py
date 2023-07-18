@@ -83,6 +83,12 @@ class SymInt(_Union):
 
 
 @dataclass
+class SymFloat(_Union):
+    as_expr: SymExpr
+    as_float: float
+
+
+@dataclass
 class SymBool(_Union):
     as_expr: str
     as_bool: bool
@@ -103,6 +109,12 @@ class TensorMeta:
 class SymIntArgument(_Union):
     as_name: str
     as_int: int
+
+
+@dataclass
+class SymFloatArgument(_Union):
+    as_name: str
+    as_float: float
 
 
 @dataclass
@@ -149,6 +161,8 @@ class Argument(_Union):
     as_bools: List[bool]
     as_sym_bool: SymBoolArgument
     as_sym_bools: List[SymBoolArgument]
+    as_sym_float: SymFloatArgument
+    as_sym_floats: List[SymFloatArgument]
     as_graph: GraphArgument
     as_optional_tensors: List[OptionalTensorArgument]
 
@@ -180,6 +194,7 @@ class Graph:
     tensor_values: Dict[str, TensorValue]
     sym_int_values: Dict[str, SymInt]
     sym_bool_values: Dict[str, SymBool]
+    sym_float_values: Dict[str, SymFloat]
 
 
 @dataclass

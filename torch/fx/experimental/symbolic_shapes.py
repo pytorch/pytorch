@@ -57,7 +57,7 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
-    "is_concrete_bool",
+    "is_concrete_bool", "is_concrete_float",
 ]
 
 # These are modules that contain generic code for interacting with ShapeEnv
@@ -162,6 +162,23 @@ def is_concrete_int(a: Union[int, SymInt]):
         return True
 
     if isinstance(a.node.expr, sympy.core.numbers.Integer):
+        return True
+
+    return False
+
+def is_concrete_float(a: Union[bool, SymFloat]):
+    r""" Utility to check if underlying object
+    in SymFloat is concrete value. Also returns
+    true if integer is passed in.
+    Args:
+        a (SymFloat or float): Object to test if it is float
+    """
+    assert isinstance(a, (SymFloat, float))
+
+    if isinstance(a, float):
+        return True
+
+    if isinstance(a.node.expr, sympy.core.numbers.Float):
         return True
 
     return False
@@ -2271,10 +2288,20 @@ Target Guards:
             source=source,
         )
 
-    def create_symboolnode(self, sym: "sympy.Expr"):
-        # This function is only being used in serialization, so we do not track it
-        # for validation.
-        return SymBool(SymNode(sym, self, bool, None))
+    def create_sym_x_node(
+        self,
+        sym_type: Union[SymInt, SymFloat, SymBool],
+        sym: "sympy.Expr",
+        pytype,
+        hint: Optional[Union[int, bool, float]],
+    ) -> Union[SymInt, SymFloat, SymBool]:
+        # This function is only being used in serialization, so we do not track
+        # it for validation
+        node = sym_type(SymNode(sym, self, pytype, hint))
+        if hint is not None:
+            self.var_to_val[sym] = hint
+        self.var_to_stack[sym] = ""
+        return node
 
     def create_unbacked_symfloat(self):
         symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
