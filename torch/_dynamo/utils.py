@@ -25,7 +25,7 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import torch._logging
 from torch._guards import detect_fake_mode  # noqa: F401
@@ -1718,15 +1718,17 @@ def build_checkpoint_variable(**options):
     )
 
 
-# The following functions are adapted from
+# The following 3.11 source code functions are adapted from
 # https://github.com/python/cpython/blob/v3.11.4/Lib/traceback.py
 # in order to output source code corresponding to bytecode in 3.11+.
 # We need our own versions since we want to support multiline expressions.
-def _fix_offset(str: str, offset: int):
+def _fix_offset(str: str, offset: int) -> int:
     """
     Convert byte offset `offset` of `str` into character offset.
     Byte offset is used for 3.11+ instruction column data.
     Takes things like unicode characters into consideration.
+
+    Unchanged from CPython implementation.
     """
     as_utf8 = str.encode("utf-8")
     return len(as_utf8[:offset].decode("utf-8", errors="replace"))
@@ -1742,7 +1744,7 @@ class _Anchors:
     right_start_offset: int
 
 
-def _extract_anchors_from_expr(segment: str):
+def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
     """
     Given source code `segment` corresponding to a bytecode
     instruction, determine:
@@ -1807,7 +1809,11 @@ def _extract_anchors_from_expr(segment: str):
             cur_col = normalize(cur_lineno, expr.left.end_col_offset)
             cur_lineno, cur_col = next_valid_char(cur_lineno, cur_col)
 
-            # heuristic to find the operator character
+            # Heuristic to find the operator character.
+            # The original CPython implementation did not look for ), \, or #,
+            # leading to incorrect anchor location, e.g.
+            # (x) + (y)
+            # ~~^~~~~~~
             while (ch := lines[cur_lineno][cur_col]).isspace() or ch in ")\\#":
                 if ch in "\\#":
                     cur_lineno, cur_col = nextline(cur_lineno, cur_col)
@@ -1847,7 +1853,7 @@ def _extract_anchors_from_expr(segment: str):
     return None
 
 
-def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction):
+def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> str:
     """
     Python 3.11+ only. Returns lines of source code (from code object `code`)
     corresponding to `inst`'s location data, and underlines relevant code to `inst`.
@@ -1862,9 +1868,11 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction):
     Python's `traceback` module doesn't handle multi-line expressions
     (and their anchor extraction code is not completely correct).
     """
-    result = ""
     if inst.positions.lineno is None:
-        return result
+        return ""
+    # The rstrip + "\n" pattern is used throughout this function to handle
+    # linecache.getline errors. Error lines are treated as empty strings "", but we want
+    # to treat them as blank lines "\n".
     first_line = linecache.getline(code.co_filename, inst.positions.lineno).rstrip()
     if inst.positions.end_lineno is None:
         return first_line
@@ -1874,12 +1882,14 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction):
     # character index of the start of the instruction
     start_offset = _fix_offset(first_line, inst.positions.col_offset)
     # character index of the end of the instruction
+    # compute later since end may be a different line
     end_offset = None
-    # expression relevant to the instruction
+    # expression corresponding to the instruction so we can get anchors
     segment = ""
-    # underline markers - start with `~` marker and replace with `^` later
+    # underline markers to be printed - start with `~` marker and replace with `^` later
     markers = []
 
+    # Compute segment and initial markers
     if inst.positions.end_lineno == inst.positions.lineno:
         end_offset = _fix_offset(first_line, inst.positions.end_col_offset)
         segment = first_line[start_offset:end_offset]
@@ -1901,7 +1911,7 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction):
         num_spaces = len(last_line) - len(last_line.lstrip())
         markers.append(" " * num_spaces + "~" * (end_offset - num_spaces))
 
-    anchors = None
+    anchors: Optional[_Anchors] = None
     try:
         anchors = _extract_anchors_from_expr(segment)
     except AssertionError:
@@ -1920,24 +1930,27 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction):
         if anchors.right_start_lineno == 0:
             anchors.right_start_offset += start_offset
 
-        if anchors.left_end_lineno == anchors.right_start_lineno:
-            for i in range(anchors.left_end_offset, anchors.right_start_offset):
-                markers[anchors.left_end_lineno][i] = "^"
-        else:
-            for i in range(
-                anchors.left_end_offset, len(markers[anchors.left_end_lineno])
-            ):
-                markers[anchors.left_end_lineno][i] = "^"
-            for line in range(anchors.left_end_lineno + 1, anchors.right_start_lineno):
-                markers[line] = ["^" if ch == "~" else ch for ch in markers[line]]
-            last_marker = markers[anchors.right_start_lineno]
-            for i in range(0, anchors.right_start_offset):
-                if last_marker[i] == "~":
-                    last_marker[i] = "^"
+        # Turn `~`` markers between anchors to `^`
+        for line in range(len(markers)):
+            for col in range(len(markers[line])):
+                if line < anchors.left_end_lineno:
+                    continue
+                if line == anchors.left_end_lineno and col < anchors.left_end_offset:
+                    continue
+                if (
+                    line == anchors.right_start_lineno
+                    and col >= anchors.right_start_offset
+                ):
+                    continue
+                if line > anchors.right_start_lineno:
+                    continue
+                if markers[line][col] == "~":
+                    markers[line][col] = "^"
 
         # make markers into strings again
         markers = ["".join(marker) for marker in markers]
 
+    result = ""
     for i in range(len(markers)):
         result += (
             linecache.getline(code.co_filename, inst.positions.lineno + i).rstrip()
