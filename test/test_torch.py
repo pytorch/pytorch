@@ -29,7 +29,7 @@ from itertools import product, combinations, permutations
 from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import (
+from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest,
@@ -8490,7 +8490,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             except RuntimeError:
                 pass
             with mp.Pool(1) as pool:
-                out: list = pool.map(method, [arg])
+                out = pool.map(method, [arg])
                 self.assertTrue(out[0])
 
         def _test_multinomial_invalid_probs(probs):

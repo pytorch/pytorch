@@ -132,27 +132,39 @@ class CacheBase:
 
         return system
 
+    @staticmethod
+    @functools.lru_cache(None)
+    def get_local_cache_path():
+        return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def get_global_cache_path():
+        return (
+            Path(os.path.join(config.global_cache_dir, CacheBase.get_system()["hash"]))
+            if config.global_cache_dir is not None
+            else None
+        )
+
     def __init__(self):
         if not torch.cuda.is_available():
             return
 
         self.system = CacheBase.get_system()
 
-        self.local_cache_path = os.path.join(cache_dir(), self.system["hash"])
-        self.global_cache_path = (
-            os.path.join(os.path.dirname(config.global_cache_dir), self.system["hash"])
-            if config.global_cache_dir is not None
-            else None
-        )
+        self.local_cache_path = CacheBase.get_local_cache_path()
+        self.global_cache_path = CacheBase.get_global_cache_path()
 
     def get_local_cache(self):
-        if not os.path.isfile(self.local_cache_path):
+        if not self.local_cache_path.is_file():
             return {}
         with open(self.local_cache_path, "r") as local_cache_fp:
             local_cache = json.load(local_cache_fp)
         return local_cache["cache"]
 
     def update_local_cache(self, local_cache):
+        if not os.path.exists(self.local_cache_path.parent):
+            os.makedirs(self.local_cache_path.parent, exist_ok=True)
         write_atomic(
             self.local_cache_path,
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
@@ -187,7 +199,7 @@ class LocalCache(CacheBase):
 class PersistentCache(CacheBase):
     @functools.lru_cache(None)
     def get_global_cache(self):
-        if self.global_cache_path is None or not os.path.isfile(self.global_cache_path):
+        if self.global_cache_path is None or not self.global_cache_path.is_file():
             return {}
         with open(self.global_cache_path, "r") as global_cache_fp:
             global_cache = json.load(global_cache_fp)

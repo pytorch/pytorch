@@ -1,6 +1,6 @@
 name,accuracy,graph_breaks
 AlbertForMaskedLM,pass,0
-AlbertForQuestionAnswering,pass,0
+AlbertForQuestionAnswering,pass_due_to_skip,0
 AllenaiLongformerBase,pass,4
 BartForCausalLM,pass,0
 BertForMaskedLM,pass,0

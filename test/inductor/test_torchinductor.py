@@ -2828,7 +2828,8 @@ class CommonTemplate:
             torch.nn.ReLU(),
         )
         m.eval()
-        self.common(m, (torch.randn([16, 32]),), check_lowp=False)
+        with torch.no_grad():
+            self.common(m, (torch.randn([16, 32]),), check_lowp=False)
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
@@ -6183,9 +6184,7 @@ class CommonTemplate:
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer(
-                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
-                )
+                self._tensor_constant0 = nn.Buffer(torch.randn([], dtype=torch.float32))
 
             def forward(self, arg0_1, arg1_1):
                 convert_element_type = torch.ops.prims.convert_element_type.default(
