@@ -2365,6 +2365,36 @@ def fn():
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_enum_as_dict_key_with_overloaded_str(self):
+        class MyEnum(enum.Enum):
+            FOO = 10
+            BAR = 20
+
+            def __str__(self):
+                return self.value
+
+        def fn(x):
+            y = x + 2
+            z = {
+                MyEnum.FOO: torch.tensor(1),
+                MyEnum.BAR: 10,
+                "MyEnum.BAR": torch.tensor(8),
+                5: torch.rand(3),
+            }
+            torch._dynamo.graph_break()
+            a = z[MyEnum.FOO] + z["MyEnum.BAR"]
+            b = y * 2
+            return a, b
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.rand(3)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_const_dict_variable_python_type(self):
         from torch._dynamo.variables import ConstantVariable, ConstDictVariable
 
