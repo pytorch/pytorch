@@ -770,7 +770,7 @@ def _im2col_col2im_indices_along_dim(
     # Apply dilation on kernel and find its indices along dim d
     kernel_grid = arange_kw(0, kernel_d * dilation_d, dilation_d).unsqueeze(-1)
 
-    # Broadcast and add kernel staring positions (indices) with
+    # Broadcast and add kernel starting positions (indices) with
     # kernel_grid along dim d, to get block indices along dim d
     return blocks_d_indices + kernel_grid
 
@@ -3522,32 +3522,32 @@ def multilabel_margin_loss_forward(
         target.ndim == 2 and target.shape == input.shape,
         lambda: f"inconsistent size {orig_target_shape} for argument #2 'target'",
     )
-    # ignores labels after the first -1, but detects when -1 is not present
+    # ignores labels after the first -1, detects when -1 is not present
     idx = torch.arange(dim, device=target.device)
-    is_end = (target == -1).to(torch.uint8)  # no bool support for argmin/max
-    mins = is_end.argmin(dim=-1, keepdim=True)
-    maxs = is_end.argmax(dim=-1, keepdim=True)
-    end_idx = torch.where(mins != maxs, maxs, dim)
+    is_end = target == -1
+    end_idx = torch.amin(torch.where(is_end, idx, dim), dim=-1, keepdim=True)
     # target indices
     target_mask = idx < end_idx
-    u = torch.gather(input, dim=-1, index=target)
+    # masks target to be able to use gather, which doesn't allow -1
+    tidx0 = torch.where(target_mask, target, 0)
+    u = torch.gather(input, dim=-1, index=tidx0)
     # input indices (not in target)
-    tidx = torch.where(target_mask, target, -1)
-    input_mask = (idx != tidx.unsqueeze(dim=-1)).all(dim=1)
+    tidx1 = torch.where(target_mask, target, -1)
+    input_mask = torch.all(idx != tidx1.unsqueeze(dim=-1), dim=1)
     # loss
     z = 1.0 - u.T.unsqueeze(dim=-1) + input
     z = z.clamp_min(0)
     z = z / dim
     # masks loss
-    mask = target_mask.T.unsqueeze(dim=-1) == input_mask
+    mask = target_mask.T.unsqueeze(dim=-1) & input_mask
     z = torch.where(mask, z, 0)
     # reduction
     if reduction == Reduction.MEAN.value:
-        z = torch.sum(z, dim=(0, -1)).mean()
+        z = z.sum(dim=(0, -1)).mean()
     elif reduction == Reduction.SUM.value:
         z = z.sum()
     else:
-        z = torch.sum(z, dim=(0, -1))
+        z = z.sum(dim=(0, -1))
     # result
     is_target = (~input_mask).to(input.dtype).reshape(orig_target_shape)
     return z, is_target

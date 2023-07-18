@@ -45,13 +45,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import (
-    ceildiv,
-    decode_device,
-    developer_warning,
-    pad_listlike,
-    sympy_product,
-)
+from .utils import ceildiv, decode_device, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -1474,7 +1468,7 @@ def _foobar(_):
 
 @functools.lru_cache(1)
 def _warn_triton_random(salt):
-    developer_warning("using triton random, expect difference from eager")
+    log.info("using triton random, expect difference from eager")
 
 
 def warn_triton_random():
