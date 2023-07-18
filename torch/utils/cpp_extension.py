@@ -151,10 +151,10 @@ def _join_rocm_home(*paths) -> str:
     '''
     if ROCM_HOME is None:
         raise OSError('ROCM_HOME environment variable is not set. '
-                               'Please set it to your ROCm install root.')
+                      'Please set it to your ROCm install root.')
     elif IS_WINDOWS:
         raise OSError('Building PyTorch extensions using '
-                               'ROCm and Windows is not supported.')
+                      'ROCm and Windows is not supported.')
     return os.path.join(ROCM_HOME, *paths)
 
 
@@ -2248,7 +2248,7 @@ def _join_cuda_home(*paths) -> str:
     '''
     if CUDA_HOME is None:
         raise OSError('CUDA_HOME environment variable is not set. '
-                               'Please set it to your CUDA install root.')
+                      'Please set it to your CUDA install root.')
     return os.path.join(CUDA_HOME, *paths)
 
 
