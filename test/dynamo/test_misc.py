@@ -52,7 +52,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_MULTIGPU,
 )
-from torch.testing._internal.common_utils import TEST_Z3, freeze_rng_state, IS_FBCODE
+from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE, TEST_Z3
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
@@ -5904,8 +5904,9 @@ def ___make_guard_fn():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 9)
 
-    def _prepare_for_translation_validator(self):
+    def _prepare_for_translation_validation(self):
         from torch.fx.experimental.validator import TranslationValidator
+
         validator = TranslationValidator()
 
         # SymPy symbols.
@@ -5919,14 +5920,14 @@ def ___make_guard_fn():
 
     @unittest.skipIf(not TEST_Z3, "Z3 not installed")
     def test_sympy_to_z3_translation(self):
-        from torch.fx.experimental.validator import SympyToZ3
         import z3
+        from torch.fx.experimental.validator import SympyToZ3
 
         (
             (s0, s1, s2),
             (z0, z1, z2),
             validator,
-        ) = self._prepare_for_translation_validator()
+        ) = self._prepare_for_translation_validation()
 
         test_cases = [
             # Integer constants.
@@ -5990,12 +5991,12 @@ def ___make_guard_fn():
             )
 
     @unittest.skipIf(not TEST_Z3, "Z3 not installed")
-    def test_translation_validator_sat(self):
+    def test_translation_validation_sat(self):
         (
             (s0, s1, s2),
             (z0, z1, z2),
             validator,
-        ) = self._prepare_for_translation_validator()
+        ) = self._prepare_for_translation_validation()
 
         validator.add_source_expr(z0 > 5)
         validator.add_source_expr(z1 / 2 > z0)
@@ -6010,12 +6011,12 @@ def ___make_guard_fn():
         self.assertIsNone(r.failed_source_expr)
 
     @unittest.skipIf(not TEST_Z3, "Z3 not installed")
-    def test_translation_validator_unsat(self):
+    def test_translation_validation_unsat(self):
         (
             (s0, s1, s2),
             (z0, z1, z2),
             validator,
-        ) = self._prepare_for_translation_validator()
+        ) = self._prepare_for_translation_validation()
 
         validator.add_source_expr(z0 > 5)
         validator.add_source_expr(z1 / 2 > z0)
