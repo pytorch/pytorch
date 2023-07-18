@@ -78,6 +78,8 @@ skip_if_x86_mac = functools.partial(
 )
 vec_dtypes = [torch.float, torch.bfloat16]
 
+libfoo = None
+
 
 def run_fw_bw_and_get_code(fn):
     def run_with_backward():
@@ -2674,6 +2676,24 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    @config.patch(fallback_random=True)
+    def test_randn_with_dtype_and_device(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu randn_with_dtype_and_device test")
+
+        def fn(vectors):
+            rotations_shape = (12, vectors.shape[-1], 1, 64)
+            random_rotations = torch.randn(
+                rotations_shape, device=vectors.device, dtype=vectors.dtype
+            )
+            random_rotations += 1
+            return random_rotations
+
+        self.common(
+            fn,
+            (torch.randn([4, 12, 2, 64]),),
+        )
+
     def test_embedding(self):
         m = torch.nn.Sequential(
             torch.nn.Embedding(10, 4, padding_idx=0),
@@ -2808,7 +2828,8 @@ class CommonTemplate:
             torch.nn.ReLU(),
         )
         m.eval()
-        self.common(m, (torch.randn([16, 32]),), check_lowp=False)
+        with torch.no_grad():
+            self.common(m, (torch.randn([16, 32]),), check_lowp=False)
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
@@ -2889,6 +2910,15 @@ class CommonTemplate:
         o2 = torch.compile(mod)(inp)
 
         self.assertEqual(o1, o2)
+
+    def test_view_as_real(self):
+        def fn(x):
+            y = torch.view_as_real(x)
+            return y + 1
+
+        x = torch.randn(4, dtype=torch.complex64)
+
+        self.common(fn, (x,))
 
     def test_cauchy(self):
         def fn(x, y):
@@ -6163,9 +6193,7 @@ class CommonTemplate:
         class Repro(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer(
-                    "_tensor_constant0", torch.randn([], dtype=torch.float32)
-                )
+                self._tensor_constant0 = nn.Buffer(torch.randn([], dtype=torch.float32))
 
             def forward(self, arg0_1, arg1_1):
                 convert_element_type = torch.ops.prims.convert_element_type.default(
@@ -6211,6 +6239,36 @@ class CommonTemplate:
         self.common(
             fn_or,
             (torch.randn(32), torch.randn(32)),
+        )
+
+    def test_conv_with_as_strided(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.kv = torch.nn.Conv2d(
+                    256, 384, kernel_size=(1, 1), stride=(1, 1), bias=False
+                )
+
+            def forward(self, x):
+                convolution = self.kv(x)
+                constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
+                    convolution, [2, 2, 2, 2], 0.0
+                )
+                # as_strided inputs are depend on input's size and stide.
+                as_strided = torch.ops.aten.as_strided.default(
+                    constant_pad_nd, [8, 384, 2, 20, 12], [153600, 400, 160, 1, 20]
+                )
+                as_strided_1 = torch.ops.aten.as_strided.default(
+                    as_strided, [8, 384, 2, 2, 12, 12], [153600, 400, 160, 8, 20, 1]
+                )
+                clone = torch.ops.aten.clone.default(
+                    as_strided_1, memory_format=torch.contiguous_format
+                )
+                return clone
+
+        self.common(
+            Model(),
+            (torch.randn(8, 256, 16, 16),),
         )
 
     def test_inplace_where_pointwise(self):
@@ -6580,28 +6638,28 @@ class CommonTemplate:
 
         self.common(fn, (input, boundaries, add_value), check_lowp=False)
 
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
     @config.patch(implicit_fallbacks=True)
     def test_custom_op(self):
         import torch.library
 
-        @functools.lru_cache()
-        def define_op(foo):
-            foo.define("custom(Tensor self) -> Tensor")
-
-        foo = torch.library.Library("foo", "DEF")
-        define_op(foo)
-
-        @torch.library.impl(foo, "custom", "CPU")
         def foo_cpu(x):
             return 3 * x
 
-        @torch.library.impl(foo, "custom", "CUDA")
         def foo_cuda(x):
             return 3 * x
 
-        @torch.library.impl(foo, "custom", "Meta")
         def foo_meta(x):
             return torch.empty_like(x)
+
+        global libfoo
+        if libfoo is None:
+            libfoo = torch.library.Library("foo", "DEF")
+            libfoo.define("custom(Tensor self) -> Tensor")
+            libfoo.impl("custom", foo_cpu, "CPU")
+            libfoo.impl("custom", foo_cuda, "CUDA")
+            libfoo.impl("custom", foo_meta, "Meta")
 
         def fn(x):
             a = torch.nn.functional.relu(x)

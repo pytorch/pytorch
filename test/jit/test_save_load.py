@@ -487,6 +487,7 @@ class TestSaveLoad(JitTestCase):
 
                 self.parameter_b = torch.nn.Parameter(torch.randn(4))
                 self.submodule_b = Submodule()
+                self.buffer_b = torch.nn.Buffer(torch.randn(4))
 
         m = TestModule()
         m_loaded = self.getExportImportCopy(torch.jit.script(m))
@@ -526,7 +527,7 @@ class TestSaveLoad(JitTestCase):
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 3, device="meta")
                 self.bar = torch.nn.Linear(3, 4)
-                self.register_buffer("buffer", torch.randn(4, device="meta"))
+                self.buffer = torch.nn.Buffer(torch.randn(4, device="meta"))
 
             def forward(self, x):
                 x = self.foo(x)
@@ -1150,6 +1151,7 @@ class TestSaveLoadFlatbuffer(JitTestCase):
 
                 self.parameter_b = torch.nn.Parameter(torch.randn(4))
                 self.submodule_b = Submodule()
+                self.buffer_b = torch.nn.Buffer(torch.randn(4))
 
         m = TestModule()
         m_loaded = self.getExportImportCopy(torch.jit.script(m))

@@ -54,7 +54,7 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, is_fake
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
 
@@ -449,6 +449,7 @@ def istensor(obj):
     """Check of obj is a tensor"""
     tensor_list = (
         torch.Tensor,
+        torch.nn.Buffer,
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
     )
@@ -844,9 +845,10 @@ def tuple_iterator_getitem(it, index):
 
 
 def enum_repr(value, local):
-    enum_name = str(value)
-
-    name, val = enum_name.split(".")
+    # enum class can override __str__ method. Use __class__ and name attribute
+    # to extract the class name and key name.
+    name = value.__class__.__name__
+    val = value.name
     scope = "L" if local else "G"
     local_name = f'{scope}["{name}"].{val}'
     return local_name
@@ -1071,7 +1073,18 @@ def same(
             log_error("Accuracy failed (numpy): %s != %s", ref, res)
         return r
     elif is_numpy_ndarray(ref):
-        return (type(ref) is type(res)) and (ref == res).all()
+        return (type(ref) is type(res)) and same(
+            torch.as_tensor(ref),
+            torch.as_tensor(res),
+            fp64_ref,
+            cos_similarity=cos_similarity,
+            tol=tol,
+            equal_nan=equal_nan,
+            exact_dtype=exact_dtype,
+            relax_numpy_equality=relax_numpy_equality,
+            ignore_non_fp=ignore_non_fp,
+            log_error=log_error,
+        )
     elif type(ref).__name__ in (
         "MaskedLMOutput",
         "Seq2SeqLMOutput",
@@ -1268,7 +1281,7 @@ def get_fake_value(node, tx):
 
     def fake_wrapper(e):
         if isinstance(e, torch.Tensor):
-            assert isinstance(e, FakeTensor)
+            assert is_fake(e)
         return e
 
     def visit(n: torch.fx.Node):
@@ -1718,6 +1731,21 @@ def build_checkpoint_variable(**options):
     )
 
 
+def is_compile_supported(device_type):
+    from .eval_frame import is_dynamo_supported
+
+    compile_supported = is_dynamo_supported()
+    if device_type == "cpu":
+        pass
+    elif device_type == "cuda" and compile_supported:
+        from torch._inductor.utils import has_triton
+
+        compile_supported = has_triton()
+    else:
+        compile_supported = False
+    return compile_supported
+
+
 # The following 3.11 source code functions are adapted from
 # https://github.com/python/cpython/blob/v3.11.4/Lib/traceback.py
 # in order to output source code corresponding to bytecode in 3.11+.
@@ -1739,8 +1767,8 @@ class _Anchors:
     # inclusive
     left_end_lineno: int
     left_end_offset: int
-    # exclusive
     right_start_lineno: int
+    # exclusive
     right_start_offset: int
 
 
@@ -1771,7 +1799,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
 
     # get character index given byte offset
     def normalize(lineno, offset):
-        return _fix_offset(lines[lineno - 1], offset)
+        return _fix_offset(lines[lineno], offset)
 
     # Gets the next valid character index in `lines`, if
     # the current location is not valid. Handles empty lines.
@@ -1804,7 +1832,8 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
             # ast gives locations for BinOp subexpressions, e.g.
             # ( left_expr ) + ( right_expr )
             #   left^^^^^       right^^^^^
-            # -2 since end_lineno is 1-indexed and exclusive
+            # -2 since end_lineno is 1-indexed and because we added an extra
+            # bracket to `segment` when calling ast.parse
             cur_lineno = expr.left.end_lineno - 2
             cur_col = normalize(cur_lineno, expr.left.end_col_offset)
             cur_lineno, cur_col = next_valid_char(cur_lineno, cur_col)
@@ -1821,33 +1850,44 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
                     cur_lineno, cur_col = increment(cur_lineno, cur_col)
 
             # binary op is 1 or 2 characters long, on the same line
-            right_anchor = cur_col + 1
+            right_col = cur_col + 1
             if (
-                right_anchor < len(lines[cur_lineno])
-                and not (ch := lines[cur_lineno][right_anchor]).isspace()
+                right_col < len(lines[cur_lineno])
+                and not (ch := lines[cur_lineno][right_col]).isspace()
                 and ch not in "\\#"
             ):
-                right_anchor += 1
-            # right_anchor can be invalid since it is exclusive
+                right_col += 1
+            # right_col can be invalid since it is exclusive
 
-            return _Anchors(cur_lineno, cur_col, cur_lineno, right_anchor)
+            return _Anchors(cur_lineno, cur_col, cur_lineno, right_col)
         elif isinstance(expr, ast.Subscript):
             # ast gives locations for value and slice subexpressions, e.g.
             # ( value_expr ) [ slice_expr ]
             #   value^^^^^     slice^^^^^
-            # find left bracket
+            # subscript^^^^^^^^^^^^^^^^^^^^
+            # find left bracket (first '[' after value)
             left_lineno = expr.value.end_lineno - 2
             left_col = normalize(left_lineno, expr.value.end_col_offset)
             left_lineno, left_col = next_valid_char(left_lineno, left_col)
             while lines[left_lineno][left_col] != "[":
                 left_lineno, left_col = increment(left_lineno, left_col)
-            # find right bracket
-            right_lineno = expr.slice.end_lineno - 2
-            right_col = normalize(right_lineno, expr.slice.end_col_offset)
-            right_lineno, right_col = next_valid_char(right_lineno, right_col)
-            while lines[right_lineno][right_col] != "]":
-                right_lineno, right_col = increment(right_lineno, right_col)
-            right_col += 1
+            # find right bracket (final character of expression)
+            right_lineno = expr.end_lineno - 2
+            right_col = normalize(right_lineno, expr.end_col_offset)
+            return _Anchors(left_lineno, left_col, right_lineno, right_col)
+        elif isinstance(expr, ast.Call):
+            # ( func_expr ) (args, kwargs)
+            #   func^^^^^
+            # call^^^^^^^^^^^^^^^^^^^^^^^^
+            # find left bracket (first '(' after func)
+            left_lineno = expr.func.end_lineno - 2
+            left_col = normalize(left_lineno, expr.func.end_col_offset)
+            left_lineno, left_col = next_valid_char(left_lineno, left_col)
+            while lines[left_lineno][left_col] != "(":
+                left_lineno, left_col = increment(left_lineno, left_col)
+            # find right bracket (final character of expression)
+            right_lineno = expr.end_lineno - 2
+            right_col = normalize(right_lineno, expr.end_col_offset)
             return _Anchors(left_lineno, left_col, right_lineno, right_col)
 
     return None

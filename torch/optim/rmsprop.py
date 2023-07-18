@@ -22,15 +22,15 @@ class RMSprop(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= momentum:
-            raise ValueError("Invalid momentum value: {}".format(momentum))
+            raise ValueError(f"Invalid momentum value: {momentum}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
         if not 0.0 <= alpha:
-            raise ValueError("Invalid alpha value: {}".format(alpha))
+            raise ValueError(f"Invalid alpha value: {alpha}")
 
         defaults = dict(
             lr=lr,

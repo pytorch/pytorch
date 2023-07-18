@@ -38,7 +38,7 @@ from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 if config.is_fbcode():
-    from torch._inductor.fb.logging import time_and_log
+    from torch._inductor.fb.utils import time_and_log
 else:
     # no-op decorator
     def time_and_log(attr: str):
@@ -981,6 +981,7 @@ def compile_fx(
                     original_output_start_index : original_output_start_index
                     + num_orig_model_outputs
                 ]
+                if isinstance(n, torch.fx.Node)
             }
 
         return inner_compile(
@@ -1049,6 +1050,12 @@ def compile_fx(
             partition_fn=partition_fn,
             keep_inference_input_mutations=True,
         )(model_, example_inputs_)
+
+
+# pass config dict back to user
+def get_patched_config_dict(config_patches=None):
+    with config.patch(config_patches):
+        return config.get_config_copy()
 
 
 def _shape_env_from_inputs(inputs):
