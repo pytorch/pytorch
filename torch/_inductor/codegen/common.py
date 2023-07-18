@@ -21,7 +21,6 @@ from ..utils import (
     free_symbol_startswith,
     get_sympy_Expr_dtype,
     IndentedBuffer,
-    is_size_var,
     sympy_dot,
     sympy_subs,
     unique,
