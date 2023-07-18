@@ -3510,16 +3510,17 @@ def multilabel_margin_loss_forward(
     target: Tensor,
     reduction: int,
 ) -> Tuple[Tensor, Tensor]:
+    orig_input_shape = input.shape
     orig_target_shape = target.shape
     input = torch.atleast_2d(input)
     target = torch.atleast_2d(target)
     dim = input.shape[1]
     torch._check(
-        input.ndim == 2 and dim != 0,
-        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
+        len(orig_input_shape) <= 2 and dim != 0,
+        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {orig_input_shape}",
     )
     torch._check(
-        target.ndim == 2 and target.shape == input.shape,
+        len(orig_target_shape) <= 2 and orig_target_shape == orig_input_shape,
         lambda: f"inconsistent size {orig_target_shape} for argument #2 'target'",
     )
     # ignores labels after the first -1, detects when -1 is not present

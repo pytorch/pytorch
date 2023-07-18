@@ -1395,6 +1395,7 @@ class FakeTensorMode(TorchDispatchMode):
                 "vision",
                 "torchtext",
                 "torchaudio",
+                "fbgemm",
             }
 
         # run kernel registered to meta for func, which include

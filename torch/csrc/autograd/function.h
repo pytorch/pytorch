@@ -230,6 +230,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return input_metadata_[index];
   }
 
+  // Danger: not thread safe, caller must protect with lock
+  InputMetadata& mutable_input_metadata(size_t index) {
+    return input_metadata_[index];
+  }
+
   /**
    * Note: Function Streams
    * A function's stream (for a given device type) is the stream of the first

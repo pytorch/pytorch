@@ -890,14 +890,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def write_header(self):
         if V.graph.aot_mode:
-            self.header.splice(
-                """
-                /* AOTInductor generated code */
-
-                #include <ATen/ScalarOps.h>
-                #include "aot_inductor_interface.cpp"
-                """
-            )
+            with open(
+                os.path.join(os.path.dirname(__file__), "aot_inductor_interface.cpp"),
+                "r",
+            ) as f:
+                self.header.splice(f.read())
         else:
             self.header.splice(
                 """
@@ -930,6 +927,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def write_prefix(self):
         if V.graph.aot_mode:
+            self.prefix.writeline("namespace torch {")
             self.prefix.writeline("namespace aot_inductor {")
 
     def write_wrapper_decl(self):
@@ -1067,6 +1065,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def generate_end(self, result):
         if V.graph.aot_mode:
             result.writeline("} // namespace aot_inductor")
+            result.writeline("} // namespace inductor")
             return
 
         result.writeline("'''\n)")
