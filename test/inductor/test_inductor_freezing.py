@@ -364,6 +364,21 @@ class OptimizeForInferenceTemplate(TestCase):
             mod_eager = mod(x)
             self.assertEqual(foo(mod, x), mod_eager)
 
+    def test_cpp_wrapper(self):
+        mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
+
+        x = torch.rand(3, 3, 32, 32).to(self.device)
+
+        @torch.compile(options={"cpp_wrapper": True})
+        def foo(mod, x):
+            return mod(x)
+
+        out_eager = mod(x)
+
+        with torch.no_grad():
+            self.assertEqual(foo(mod, x), out_eager)
+            self.assertEqual(foo(mod, x), out_eager)
+
     def test_conv_layout_convert_with_view(self):
         class Model(torch.nn.Module):
             def __init__(self):
