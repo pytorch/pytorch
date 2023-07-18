@@ -1167,6 +1167,14 @@ class FlatParamHandle:
         communication and is what should be all-gathered. This means that it
         matches the dtype of the expected unsharded parameter.
         """
+        if (
+            self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
+            and self._skipped_use_sharded_views
+        ):
+            # Since this path imposes special semantics for the unsharded flat
+            # parameter (e.g. forcing full precision), use sharded views to
+            # reuse the existing logic for that special handling
+            self._use_sharded_views()
         ret = False
         if self._use_orig_params and not self._skip_writeback_check:
             ret = self._writeback_orig_params()
