@@ -438,7 +438,8 @@ class CustomizedDictVariable(ConstDictVariable):
             if hasattr(user_cls, attr_name):
                 fn = getattr(user_cls, attr_name)
                 assert callable(fn), f"expect callable attr {attr_name}"
-                skip_code(fn.__code__)
+                if hasattr(fn, "__code__"):
+                    skip_code(fn.__code__)
 
     @staticmethod
     def is_matching_cls(cls):
@@ -456,18 +457,30 @@ class CustomizedDictVariable(ConstDictVariable):
     @classmethod
     def create(cls, user_cls, args, kwargs, options):
         CustomizedDictVariable._patch_once(user_cls)
-        keys = [f.name for f in dataclasses.fields(user_cls)]
-        bound = inspect.signature(user_cls).bind(*args, **kwargs)
-        bound.apply_defaults()
-        assert set(bound.arguments.keys()) == set(keys)
+
+        if not args and not kwargs:
+            # CustomDict() init with empty arguments
+            raw_items = collections.OrderedDict()
+        elif dataclasses.is_dataclass(user_cls):
+            # @dataclass CustomDict(a=1, b=2)
+            bound = inspect.signature(user_cls).bind(*args, **kwargs)
+            bound.apply_defaults()
+            raw_items = bound.arguments
+        elif len(args) == 1 and isinstance(args[0], ConstDictVariable) and not kwargs:
+            # CustomDict({'a': 1, 'b': 2})
+            raw_items = args[0].items
+        else:
+            unimplemented("custome dict init with args/kwargs unimplemented")
+
         items = collections.OrderedDict()
-        for key in keys:
-            val = bound.arguments[key]
+        for key in raw_items.keys():
+            val = raw_items[key]
             if isinstance(val, VariableTracker):
                 items[key] = val
-            else:
-                assert variables.ConstantVariable.is_literal(val)
+            elif variables.ConstantVariable.is_literal(val):
                 items[key] = variables.ConstantVariable(val)
+            else:
+                unimplemented("expect VariableTracker or ConstantVariable.is_literal")
 
         return cls(items, user_cls, **options)
 
@@ -501,9 +514,17 @@ class CustomizedDictVariable(ConstDictVariable):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name in ("__getitem__", "to_tuple", "__setitem__", "__setattr__"):
-            # TODO add arg check
             fn = getattr(self.user_cls, name)
             source = None if self.source is None else AttrSource(self.source, name)
+
+            # for python dict method without overridden
+            if hasattr(fn, "__objclass__") and fn.__objclass__ in (
+                dict,
+                collections.OrderedDict,
+            ):
+                return super().call_method(tx, name, args, kwargs)
+
+            # for user overridden method
             return tx.inline_user_function_return(
                 variables.UserFunctionVariable(fn, source=source, **options),
                 [self] + list(args),
@@ -511,7 +532,7 @@ class CustomizedDictVariable(ConstDictVariable):
             )
         elif name in ("keys", "items"):
             return super().call_method(tx, name, args, kwargs)
-        raise TorchRuntimeError("custom dict: call_method unimplemented name=%s", name)
+        unimplemented("custom dict: call_method unimplemented name=%s", name)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         if name in self.items:
