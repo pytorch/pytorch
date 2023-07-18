@@ -153,9 +153,8 @@ class TestExport(TestCase):
         kwargs = kwargs or {}
         exported_program = export(f, args, kwargs)
         reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
-        expected = f(*args, **kwargs)
-        self.assertEqual(exported_program(*args, **kwargs), expected)
-        self.assertEqual(exported_program(*args, **reversed_kwargs), expected)
+        self.assertEqual(exported_program(*args, **kwargs), f(*args, **kwargs))
+        self.assertEqual(exported_program(*args, **reversed_kwargs), f(*args, **reversed_kwargs))
 
     def test_basic(self):
         def f(x, y):
