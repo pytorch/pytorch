@@ -219,11 +219,11 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         # there's an off-by-one error. See
         # https://github.com/pytorch/pytorch/issues/81996
         # https://github.com/pytorch/pytorch/issues/82230
-        (torch.int8, torch.ops.aten.linspace.Scalar) : (0, 1),
-        (torch.uint8, torch.ops.aten.linspace.Scalar) : (0, 1),
-        (torch.int16, torch.ops.aten.linspace.Scalar) : (0, 1),
-        (torch.int32, torch.ops.aten.linspace.Scalar) : (0, 1),
-        (torch.int64, torch.ops.aten.linspace.Scalar) : (0, 1),
+        (torch.int8, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.default) : (0, 1),
         (torch.int8, torch.ops.aten.linspace.Tensor) : (0, 1),
         (torch.uint8, torch.ops.aten.linspace.Tensor) : (0, 1),
         (torch.int16, torch.ops.aten.linspace.Tensor) : (0, 1),
