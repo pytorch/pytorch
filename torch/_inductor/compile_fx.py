@@ -799,7 +799,6 @@ def fw_compiler_freezing(
     cudagraphs,
     graph_id,
     forward_device,
-    cpp_wrapper,
 ):
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
@@ -1023,7 +1022,6 @@ def compile_fx(
             cudagraphs=cudagraphs,
             graph_id=graph_id,
             forward_device=forward_device,
-            cpp_wrapper=config.cpp_wrapper,
         )
     else:
         inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
