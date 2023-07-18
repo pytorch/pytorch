@@ -2632,7 +2632,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # https://github.com/pytorch/pytorch/issues/93781
         @torch.compile
         def f():
-            _generator_type = type((_ for _ in ()))
+            _generator_type = type(_ for _ in ())
 
         self.assertNoUnraisable(f)
 

@@ -823,7 +823,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v2 = torch.randn((10, 10))
         correct = fn(v1, v2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize((cnts))(fn)
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
@@ -837,7 +837,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v2 = torch.randn((10, 10))
         correct = fn(v1, v2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize((cnts))(fn)
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -2202,7 +2202,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 def fn():
     foo.bar(1, 2, 3)
 {str(chr(10)).join(' ' * 4 + 'x' + str(i) + ' = 1' for i in range(1 << 9))}
-    l = [{str(' ').join('x' + str(i) + ',' for i in range(1 << 9))}]
+    l = [{' '.join('x' + str(i) + ',' for i in range(1 << 9))}]
         """
         locals = {}
         exec(fn_str, {}, locals)
@@ -3087,7 +3087,7 @@ def fn():
                     memo=memo, prefix=prefix, remove_duplicate=remove_duplicate
                 ):
                     for pn, p in self.named_parameters():
-                        fpn = "%s.%s" % (mn, pn) if mn else pn
+                        fpn = f"{mn}.{pn}" if mn else pn
                         self.names.append(fpn)
 
         # Test plain recurse
@@ -5032,11 +5032,11 @@ def fn():
             (15, 16, 7),
             (17, 17, 6),
         ]
-        self.assertEquals(len(tab), len(expected))
+        self.assertEqual(len(tab), len(expected))
         for entry, exp in zip(tab, expected):
-            self.assertEquals(entry.start, exp[0] * 2)
-            self.assertEquals(entry.end, exp[1] * 2)
-            self.assertEquals(entry.target, exp[2] * 2)
+            self.assertEqual(entry.start, exp[0] * 2)
+            self.assertEqual(entry.end, exp[1] * 2)
+            self.assertEqual(entry.target, exp[2] * 2)
 
     @skipIfNotPy311
     def test_remove_dead_code_with_exn_table_entries(self):
@@ -5060,17 +5060,17 @@ def fn():
         )
         bytecode_transformation.propagate_inst_exn_table_entries(insts)
         insts = bytecode_analysis.remove_dead_code(insts)
-        self.assertEquals(len(insts), 5)
+        self.assertEqual(len(insts), 5)
         self.assertNotIn(exn_start, insts)
         self.assertNotIn(exn_end, insts)
         self.assertIn(target2, insts)
         self.assertIn(target3, insts)
         bytecode_transformation.update_offsets(insts)
         tab = bytecode_transformation.compute_exception_table(insts)
-        self.assertEquals(len(tab), 1)
-        self.assertEquals(tab[0].start, 2)
-        self.assertEquals(tab[0].end, 4)
-        self.assertEquals(tab[0].target, 6)
+        self.assertEqual(len(tab), 1)
+        self.assertEqual(tab[0].start, 2)
+        self.assertEqual(tab[0].end, 4)
+        self.assertEqual(tab[0].target, 6)
 
     def test_unhandled_exception_in_dynamo(self):
         # traceback.format_exc() approximates an unhandled exception
@@ -5757,7 +5757,7 @@ def ___make_guard_fn():
     def test_dynamo_compiling_fake_tensor_to_vararg_int(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 # use numpy int so it's wrapped as fake tensor in dynamo
@@ -5776,7 +5776,7 @@ def ___make_guard_fn():
     def test_scalar_tensor_is_equivalent_to_symint_argument(self):
         class GumbelTopKSampler(torch.nn.Module):
             def __init__(self, T, k):
-                super(GumbelTopKSampler, self).__init__()
+                super().__init__()
                 self.T = torch.nn.Parameter(
                     torch.tensor(T, dtype=torch.float32), requires_grad=False
                 )
@@ -5803,7 +5803,7 @@ def ___make_guard_fn():
     def test_scalar_tensor_is_equivalent_to_symint_list_argument(self):
         class Jitter(torch.nn.Module):
             def __init__(self, jitter_val):
-                super(Jitter, self).__init__()
+                super().__init__()
                 self.jitter_val = jitter_val
 
             def roll_tensor(self, input):
@@ -5986,7 +5986,7 @@ def ___make_guard_fn():
 
         # Z3 symbols.
         [validator.add_var(s, int) for s in (s0, s1, s2)]
-        z0, z1, z2 = [validator.z3var(s) for s in (s0, s1, s2)]
+        z0, z1, z2 = (validator.z3var(s) for s in (s0, s1, s2))
 
         return (s0, s1, s2), (z0, z1, z2), validator
 
