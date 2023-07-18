@@ -12,7 +12,10 @@ from ..pattern_matcher import Arg, CallFunction, filter_nodes, get_arg_value, Ke
 from ..virtualized import ops
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
-from .quantization import _register_quantization_weight_pack_pass
+from .quantization import (
+    _register_quantization_lowerings,
+    _register_quantization_weight_pack_pass,
+)
 
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
@@ -916,6 +919,7 @@ if torch._C._has_mkldnn:
             _register_inplace_fusion()
             _register_binary_unary_fusion()
             _register_binary_fusion()
+            _register_quantization_lowerings()
 
     @functools.lru_cache(None)
     def _mkldnn_weight_pack_init():
