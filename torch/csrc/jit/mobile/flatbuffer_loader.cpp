@@ -290,6 +290,7 @@ mobile::Module FlatbufferLoader::parseModule(
   module_parsed_ = false;
 
   const auto* ivalues = module->ivalues();
+  TORCH_CHECK(ivalues != nullptr, "Corrupted ivalues field")
   all_ivalues_.resize(ivalues->size());
   all_types_.resize(module->object_types()->size());
   storages_.resize(module->storage_data_size());

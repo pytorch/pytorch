@@ -151,3 +151,62 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         with_automatic = run_with_automatic()
         self.assertEqual(with_automatic.frame_count, 3)
         self.assertEqual(with_automatic.op_count, 3)
+
+    def test_aliasing_guard_failures(self):
+        def foo(a, b, c):
+            a.add_(b)
+            return c + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+
+        x = torch.randn([3])
+        y = torch.randn([3])
+        z = torch.randn([3])
+        cmp_result = compiled_foo(
+            x.clone().detach(), y.clone().detach(), z.clone().detach()
+        )
+        eager_result = foo(x.clone().detach(), y.clone().detach(), z.clone().detach())
+        self.assertEqual(cmp_result, eager_result)
+        self.assertEqual(cnt.frame_count, 1)
+
+        cmp_result = compiled_foo(
+            z.clone().detach(), y.clone().detach(), x.clone().detach()
+        )
+        eager_result = foo(z.clone().detach(), y.clone().detach(), x.clone().detach())
+        self.assertEqual(cmp_result, eager_result)
+        # No recompile, alias preserved
+        self.assertEqual(cnt.frame_count, 1)
+
+        x_clone = x.clone().detach()
+        cmp_result = compiled_foo(x_clone, y.clone().detach(), x_clone)
+        x_clone = x.clone().detach()
+        eager_result = compiled_foo(x_clone, y.clone().detach(), x_clone)
+        self.assertEqual(cmp_result, eager_result)
+        # Recompile, alias changed
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_aliasing_guard_failures_with_globals(self):
+        g1 = torch.randn([3])
+        g2 = torch.randn([3])
+
+        def foo(a):
+            a.add_(g1)
+            return g2 + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+
+        z = torch.randn([3])
+        cmp_result = compiled_foo(z.clone().detach())
+        eager_result = foo(z.clone().detach())
+        self.assertEqual(cmp_result, eager_result)
+        self.assertEqual(cnt.frame_count, 1)
+
+        g1 = g1.clone().detach()
+        cmp_result = compiled_foo(g1)
+        g1 = g1.clone().detach()
+        eager_result = compiled_foo(g1)
+        self.assertEqual(cmp_result, eager_result)
+        # Recompile, alias changed
+        self.assertEqual(cnt.frame_count, 2)

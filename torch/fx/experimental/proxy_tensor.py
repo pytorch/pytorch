@@ -114,14 +114,6 @@ def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
 def snapshot_fake(val):
     return val.detach()
 
-def unwrap_proxy(proxy_mode, e):
-    if isinstance(e, torch.Tensor):
-        return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
-    elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-        return get_proxy_slot(e.node, proxy_mode.tracer, e, lambda e: e())
-    else:
-        return e
-
 def extract_val(val):
     if isinstance(val, FakeTensor):
         return snapshot_fake(val)
@@ -246,7 +238,7 @@ def fetch_sym_proxy(tracer):
 def fetch_tensor_proxy(tracer):
     return lambda t: get_proxy_slot(t, tracer, t)
 
-HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
+HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, torch.nn.Buffer)
 
 def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     unrecognized_types = []
@@ -457,6 +449,14 @@ class PythonKeyTracer(Tracer):
             assert a.node.constant is not None
             return a.node.constant
         return super().create_arg(a)
+
+    def unwrap_proxy(self, e):
+        if isinstance(e, torch.Tensor):
+            return get_proxy_slot(e, self, e, lambda e: e.proxy)
+        elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            return get_proxy_slot(e.node, self, e, lambda e: e())
+        else:
+            return e
 
 
 @torch._disable_dynamo
