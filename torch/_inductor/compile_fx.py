@@ -1023,7 +1023,7 @@ def compile_fx(
             cudagraphs=cudagraphs,
             graph_id=graph_id,
             forward_device=forward_device,
-            cpp_wrapper=config.cpp_wrapper
+            cpp_wrapper=config.cpp_wrapper,
         )
     else:
         inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
