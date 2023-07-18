@@ -50,7 +50,7 @@ class TestExperimentalExport(TestCase):
         class Foo(torch.nn.Module):
             def __init__(self, float_val):
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 1))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 1))
 
             def forward(self, x):
                 self.buffer1.add_(2)
@@ -269,6 +269,38 @@ class TestExport(TestCase):
         inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
         exported_program = export(list_tensor_map, inps)
         self.assertTrue(torch.allclose(exported_program(*inps), list_tensor_map(*inps)))
+
+    def test_linear_conv(self):
+
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                x_conv = self.conv(x)
+                x_linear = self.linear(x_conv)
+                return x_linear.cos()
+
+        ep = export(Foo(), (torch.randn(20, 16, 50, 100),))
+        for node in ep.graph.nodes:
+            if (
+                node.op == "placeholder" and
+                node.name in ep.graph_signature.inputs_to_buffers or
+                node.name in ep.graph_signature.inputs_to_parameters
+            ):
+                self.assertTrue("source_fn" in node.meta)
+                self.assertTrue("nn_module_stack" in node.meta)
 
 if __name__ == '__main__':
     run_tests()
