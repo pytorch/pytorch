@@ -1028,7 +1028,8 @@ def emit_body(
     base_name = get_base_name(f)
     view_info = get_view_info(f)
 
-    is_inplace_foreach = name.startswith("_foreach") and inplace
+    is_foreach = name.startswith("_foreach")
+    is_inplace_foreach = is_foreach and inplace
     if is_inplace_foreach:
         inplace_foreacharg2refarg: Dict[Argument, Argument] = {}
         refargname2inplace_foreacharg: Dict[str, Argument] = {}
@@ -1459,7 +1460,10 @@ def emit_body(
                 or type == ListCType(OptionalCType(BaseCType(tensorT)))
                 or type == BaseCType(iTensorListRefT)
             ):
-                expr = f"make_saved_variable_list({name})"
+                if is_foreach and is_output:
+                    expr = f"make_saved_variable_list_foreach_output({name})"
+                else:
+                    expr = f"make_saved_variable_list({name})"
                 name += "_"
             elif type == BaseCType(intArrayRefT):
                 expr = expr + ".vec()"
