@@ -22,9 +22,11 @@ class NAdam(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if not 0.0 <= momentum_decay:
             raise ValueError("Invalid momentum_decay value: {}".format(momentum_decay))
+        # Note: capturable is internal-only, used by dynamo/inductor to enable
+        # compiler/cudagraphs friendly implementation
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, momentum_decay=momentum_decay,
-                        foreach=foreach, differentiable=differentiable)
+                        foreach=foreach, differentiable=differentiable, capturable=False)
         super().__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -53,8 +55,12 @@ class NAdam(Optimizer):
                 state = self.state[p]
                 # Lazy state initialization
                 if len(state) == 0:
-                    state['step'] = torch.tensor(0.)
-                    state['mu_product'] = torch.tensor(1.)
+                    if group['capturable']:
+                        state['step'] = torch.zeros((), dtype=torch.float, device=p.device)
+                        state['mu_product'] = torch.ones((), dtype=torch.float, device=p.device)
+                    else:
+                        state['step'] = torch.tensor(0.)
+                        state['mu_product'] = torch.tensor(1.)
                     # Exponential moving average of gradient values
                     state['exp_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     # Exponential moving average of squared gradient values
@@ -102,6 +108,7 @@ class NAdam(Optimizer):
                   momentum_decay=group['momentum_decay'],
                   eps=group['eps'],
                   foreach=group['foreach'],
+                  capturable=group['capturable'],
                   differentiable=group['differentiable'])
 
         return loss
@@ -165,6 +172,7 @@ def nadam(params: List[Tensor],
           # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
           # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
           foreach: Optional[bool] = None,
+          capturable: bool = False,
           differentiable: bool = False,
           *,
           beta1: float,
@@ -208,6 +216,7 @@ def nadam(params: List[Tensor],
          weight_decay=weight_decay,
          momentum_decay=momentum_decay,
          eps=eps,
+         capturable=capturable,
          differentiable=differentiable)
 
 
@@ -224,6 +233,7 @@ def _single_tensor_nadam(params: List[Tensor],
                          weight_decay: float,
                          momentum_decay: float,
                          eps: float,
+                         capturable: bool,
                          differentiable: bool):
 
     for i, param in enumerate(params):
@@ -283,6 +293,7 @@ def _multi_tensor_nadam(params: List[Tensor],
                         weight_decay: float,
                         momentum_decay: float,
                         eps: float,
+                        capturable: bool,
                         differentiable: bool):
 
     if len(params) == 0:
@@ -297,10 +308,21 @@ def _multi_tensor_nadam(params: List[Tensor],
         # update steps
         torch._foreach_add_(grouped_state_steps, 1)
 
-        bias_correction2 = [1 - beta2 ** _get_value(step) for step in grouped_state_steps]
-        mus = [beta1 * (1. - 0.5 * (0.96 ** (_get_value(step) * momentum_decay))) for step in grouped_state_steps]
-        mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((_get_value(step) + 1) * momentum_decay)))
-                    for step in grouped_state_steps]
+        # scalar python math is faster in eager
+        # however, it is not visible to cudagraphs
+        # and can be slow to trace
+        if capturable:
+            bias_correction2 = torch._foreach_pow(beta2, grouped_state_steps)
+            bias_correction2 = torch._foreach_add(torch._foreach_mul(bias_correction2, -1.0), 1.0)
+            raised_step = torch._foreach_pow(0.96, torch._foreach_mul(grouped_state_steps, momentum_decay))
+            mus = torch._foreach_mul(torch._foreach_add(torch._foreach_mul(raised_step, -0.5), 1.0), beta1)
+            raised_step_next = torch._foreach_pow(0.96, torch._foreach_mul(torch._foreach_add(grouped_state_steps, 1.0), momentum_decay))
+            mu_nexts = torch._foreach_mul(torch._foreach_add(torch._foreach_mul(raised_step_next, -0.5), 1.0), beta1)
+        else:
+            bias_correction2 = [1 - beta2 ** step.item() for step in grouped_state_steps]
+            mus = [beta1 * (1. - 0.5 * (0.96 ** (step.item() * momentum_decay))) for step in grouped_state_steps]
+            mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((step.item() + 1) * momentum_decay)))
+                        for step in grouped_state_steps]
 
         # update mu_products
         torch._foreach_mul_(grouped_mu_products, mus)
@@ -319,10 +341,24 @@ def _multi_tensor_nadam(params: List[Tensor],
         torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
         torch._foreach_add_(exp_avg_sq_sqrt, eps)
 
-        step_size_grads = _stack_if_compiling([(lr * (1. - mu) / (1. - _get_value(mu_product))) * -1
-                                               for mu_product, mu in zip(grouped_mu_products, mus)])
-        step_size_expavg = _stack_if_compiling([(lr * mu_next / (1. - _get_value(mu_product) * mu_next)) * -1
-                                                for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)])
+        if capturable:
+            mus_modified = torch._foreach_mul(torch._foreach_add(torch._foreach_mul(mus, -1.0), 1.0), lr)
+            mu_products_modified = torch._foreach_add(torch._foreach_mul(grouped_mu_products, -1.0), 1.0)
+            mu_quotient = torch._foreach_div(mus_modified, mu_products_modified)
+            step_size_grads = torch._foreach_mul(mu_quotient, -1.0)
 
-        torch._foreach_addcdiv_(grouped_params, grouped_grads, exp_avg_sq_sqrt, step_size_grads)
-        torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, exp_avg_sq_sqrt, step_size_expavg)
+            mu_nexts_modified = torch._foreach_mul(mu_nexts, lr)
+            mu_products_next_modified = torch._foreach_add(torch._foreach_mul(torch._foreach_mul(grouped_mu_products, mu_nexts), -1.0), 1.0)
+            mu_next_quotient = torch._foreach_div(mu_nexts_modified, mu_products_next_modified)
+            step_size_expavgs = torch._foreach_mul(mu_next_quotient, -1.0)
+
+            torch._foreach_addcdiv_(grouped_params, torch._foreach_mul(grouped_grads, step_size_grads), exp_avg_sq_sqrt)
+            torch._foreach_addcdiv_(grouped_params, torch._foreach_mul(grouped_exp_avgs, step_size_expavgs), exp_avg_sq_sqrt)
+        else:
+            step_size_grads = _stack_if_compiling([(lr * (1. - mu) / (1. - mu_product.item())) * -1
+                                                for mu_product, mu in zip(grouped_mu_products, mus)])
+            step_size_expavg = _stack_if_compiling([(lr * mu_next / (1. - mu_product.item() * mu_next)) * -1
+                                                    for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)])
+
+            torch._foreach_addcdiv_(grouped_params, grouped_grads, exp_avg_sq_sqrt, step_size_grads)
+            torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, exp_avg_sq_sqrt, step_size_expavg)

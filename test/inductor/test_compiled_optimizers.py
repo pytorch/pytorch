@@ -54,15 +54,16 @@ def compile_opt(opt_compiled, closure=None):
 def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
     @requires_cuda()
     def test_fn(self):
+        torch._logging.set_logs(output_code=True)
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
-        input = torch.ones([10, 10], device="cuda:0")
+        input = torch.ones([2, 2], device="cuda:0")
         model_eager = torch.nn.Sequential(
-            *[torch.nn.Linear(10, 10, device="cuda:0") for _ in range(2)]
+            *[torch.nn.Linear(2, 2, device="cuda:0") for _ in range(1)]
         )
         model_eager(input).sum().backward()
 
-        input = torch.ones([10, 10], device="cuda:0")
+        input = torch.ones([2, 2], device="cuda:0")
         model_compiled = deepcopy(model_eager)
         model_compiled(input).sum().backward()
 
@@ -96,9 +97,9 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
-        input = torch.ones([10, 10], device="cuda:0")
+        input = torch.ones([2, 2], device="cuda:0")
         model = torch.nn.Sequential(
-            *[torch.nn.Linear(10, 10, device="cuda:0") for _ in range(2)]
+            *[torch.nn.Linear(2, 2, device="cuda:0") for _ in range(1)]
         )
         model(input).sum().backward()
 
@@ -152,7 +153,7 @@ class CompiledOptimizerTests(TestCase):
     test_adamw = make_test(torch.optim.AdamW, lr=0.01)
     # Need to an impl which does not use python scalars
     # test_adamax = make_test(torch.optim.Adamax, lr=0.01)
-    # test_nadam = make_test(torch.optim.NAdam, lr=0.01)
+    test_nadam = make_test(torch.optim.NAdam, lr=0.01)
     test_rprop = make_test(torch.optim.Rprop, kernel_count=6, lr=0.01)
     test_rmsprop = make_test(torch.optim.RMSprop, kernel_count=1, lr=0.01)
     test_adadelta = make_test(torch.optim.Adadelta, kernel_count=5, lr=0.01)

@@ -1211,7 +1211,6 @@ class TorchPatcher:
 
         disabled_multi_tensor_opts = {
             adamax,
-            nadam,
         }
 
         for opt_mod in all_opts:
