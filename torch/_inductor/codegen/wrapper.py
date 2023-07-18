@@ -1058,6 +1058,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def generate_return(self, output_refs):
         # Output tensors are allocated by the AOT runtime.
         if V.graph.aot_mode:
+            for idx, output in enumerate(V.graph.graph_outputs):
+                if output.get_name() in self.reuses:
+                    # buffer was reused, so we need to explicitly copy it to the output tensor
+                    self.wrapper_call.writeline(
+                        f"outputs[{idx}].copy_({output.get_name()});"
+                    )
             self.wrapper_call.writeline("\n}")
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
@@ -1197,11 +1203,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def make_buffer_allocation(self, buffer):
         output_idx = None
         for idx, output in enumerate(V.graph.graph_outputs):
-            if isinstance(output, (ir.NoneAsConstantBuffer, ir.ShapeAsConstantBuffer)):
-                continue
-            if buffer == output.data:
+            if hasattr(output, "get_name") and buffer.get_name() == output.get_name():
                 output_idx = idx
                 break
+
         if output_idx is not None and V.graph.aot_mode:
             # In aot_mode, output buffers are managed by the AOT runtime.
             return (
