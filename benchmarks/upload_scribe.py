@@ -95,7 +95,7 @@ class PytorchBenchmarkUploader(ScribeUploader):
         for b in pytest_json['benchmarks']:
             test = b['name'].split('[')[0]
             net_name = b['params']['net_name']
-            benchmark_name = '{}[{}]'.format(test, net_name)
+            benchmark_name = f'{test}[{net_name}]'
             executor = b['params']['executor']
             fuser = b['params']['fuser']
             m = self.format_message({
