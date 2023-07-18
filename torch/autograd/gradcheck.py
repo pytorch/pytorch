@@ -726,7 +726,7 @@ def _get_analytical_vjps_wrt_specific_output(vjp_fn, sample_output, v) -> List[L
     return vjps
 
 
-def _check_inputs(tupled_inputs, check_backward_ad=True) -> bool:
+def _check_inputs(tupled_inputs) -> bool:
     # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False
     for idx, inp in enumerate(tupled_inputs):
@@ -754,7 +754,7 @@ def _check_inputs(tupled_inputs, check_backward_ad=True) -> bool:
                         '.contiguous on the input before passing it to gradcheck.')
             any_input_requiring_grad = True
 
-    if not any_input_requiring_grad and check_backward_ad:
+    if not any_input_requiring_grad:
         raise ValueError(
             'gradcheck expects at least one input tensor to require gradient, '
             'but none of the them have requires_grad=True.')
@@ -1554,7 +1554,7 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, nondet_tol, check_undefined
                       check_grad_dtypes, check_batched_grad, check_batched_forward_grad, check_forward_ad,
                       check_backward_ad, fast_mode, masked):
     tupled_inputs = _as_tuple(inputs)
-    _check_inputs(tupled_inputs, check_backward_ad)
+    _check_inputs(tupled_inputs)
 
     func_out = func(*tupled_inputs)
     outputs = _differentiable_outputs(func_out)
