@@ -651,6 +651,43 @@ class TorchPatcher:
         ]
 
         # Note: this excludes the optimizers that are unsupported in excluded_opts below
+        from ..optim import (
+            adadelta,
+            adagrad,
+            adamax,
+            adamw,
+            asgd,
+            nadam,
+            rmsprop,
+            rprop,
+            sgd,
+        )
+
+        for opt_mod in (
+            adadelta,
+            adagrad,
+            adamax,
+            adamw,
+            asgd,
+            nadam,
+            rmsprop,
+            rprop,
+            sgd,
+        ):
+            opt_name = opt_mod.__name__.split(".")[-1]
+            multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
+            fused_fn_name = f"_fused_{opt_name}"
+            if hasattr(opt_mod, multi_tensor_fn_name):
+                setattr(
+                    opt_mod,
+                    multi_tensor_fn_name,
+                    disable(getattr(opt_mod, multi_tensor_fn_name)),
+                )
+
+            if hasattr(opt_mod, fused_fn_name):
+                setattr(
+                    opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
+                )
 
         # Note: we don't support sparsity, data-dependent control, or tracing through backwards
         excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
