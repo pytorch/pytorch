@@ -448,6 +448,7 @@ def istensor(obj):
     """Check of obj is a tensor"""
     tensor_list = (
         torch.Tensor,
+        torch.nn.Buffer,
         torch.nn.Parameter,
         *config.traceable_tensor_subclasses,
     )
@@ -843,9 +844,10 @@ def tuple_iterator_getitem(it, index):
 
 
 def enum_repr(value, local):
-    enum_name = str(value)
-
-    name, val = enum_name.split(".")
+    # enum class can override __str__ method. Use __class__ and name attribute
+    # to extract the class name and key name.
+    name = value.__class__.__name__
+    val = value.name
     scope = "L" if local else "G"
     local_name = f'{scope}["{name}"].{val}'
     return local_name
