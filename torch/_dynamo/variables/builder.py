@@ -177,6 +177,16 @@ class FrameStateSizeEntry:
     size: Optional[List[int]]
 
 
+def variable_builder_no_source(value):
+    if isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+        return UserDefinedObjectVariable(value)
+    elif is_builtin_callable(value):
+        return BuiltinVariable(value)
+    elif ConstantVariable.is_literal(value):
+        return ConstantVariable(value)
+    unimplemented(f"{type(value)} is not supported")
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -265,7 +275,12 @@ class VariableBuilder:
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
             (
-                (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
+                (
+                    torch.Tensor,
+                    torch.nn.Buffer,
+                    torch.nn.Parameter,
+                    torch._subclasses.FakeTensor,
+                ),
                 cls.wrap_tensor,
             ),
             ((tuple, list, odict_values), cls.wrap_listlike),
@@ -858,6 +873,7 @@ class VariableBuilder:
         else:
             assert type(value) in (
                 torch.Tensor,
+                torch.nn.Buffer,
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
             ), type(value)
@@ -1456,7 +1472,7 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
-    if type(e) in (torch.Tensor, torch.nn.Parameter) or (
+    if type(e) in (torch.Tensor, torch.nn.Buffer, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
         assert source is not None

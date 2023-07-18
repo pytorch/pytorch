@@ -50,7 +50,7 @@ class TestExperimentalExport(TestCase):
         class Foo(torch.nn.Module):
             def __init__(self, float_val):
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 1))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 1))
 
             def forward(self, x):
                 self.buffer1.add_(2)

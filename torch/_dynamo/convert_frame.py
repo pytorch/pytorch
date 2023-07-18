@@ -477,6 +477,16 @@ def _compile(
         )
 
         assert output is not None
+
+        # Skipping Dynamo on a frame without any extracted graph.
+        # This does not affect eager functionality. But this is necessary
+        # for export for cases where Dynamo-reconstructed bytecode can create
+        # new function frames, confusing export in thinking that there
+        # are extra graphs now.
+
+        if output.export and output.is_empty_graph():
+            return None
+
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(
