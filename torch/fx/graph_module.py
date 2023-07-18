@@ -649,14 +649,34 @@ class {module_name}(torch.nn.Module):
         return self._code
 
     @property
-    def in_spec(self):
+    def graph_in_spec(self):
         self.real_recompile()
-        return getattr(self, "_in_spec", None)
+        # even after recompiliation, _graph_in_spec may still be undefined
+        # if self._graph._codegen is not a _PyTreeCodeGen. So we need provide
+        # a default value for getattr.
+        return getattr(self, "_graph_in_spec", None)
 
     @property
-    def out_spec(self):
+    def _in_spec(self):
+        """
+        Deprecated. Use graph_in_spec instead.
+        """
+        return self.graph_in_spec
+
+    @property
+    def graph_out_spec(self):
         self.real_recompile()
-        return getattr(self, "_out_spec", None)
+        # even after recompiliation, _graph_out_spec may still be undefined
+        # if self._graph._codegen is not a _PyTreeCodeGen. So we need provide
+        # a default value for getattr.
+        return getattr(self, "_graph_out_spec", None)
+
+    @property
+    def _out_spec(self):
+        """
+        Deprecated. Use graph_out_spec instead.
+        """
+        return self.graph_out_spec
 
     @compatibility(is_backward_compatible=True)
     @classmethod
@@ -692,8 +712,8 @@ class {module_name}(torch.nn.Module):
         code of this ``GraphModule`` will be out of date.
         """
         if isinstance(self._graph._codegen, _PyTreeCodeGen):
-            self._in_spec = self._graph._codegen.pytree_info.in_spec
-            self._out_spec = self._graph._codegen.pytree_info.out_spec
+            self._graph_in_spec = self._graph._codegen.pytree_info.in_spec
+            self._graph_out_spec = self._graph._codegen.pytree_info.out_spec
         python_code = self._graph.python_code(root_module='self')
         self._code = python_code.src
 
@@ -726,7 +746,7 @@ class {module_name}(torch.nn.Module):
         dict_without_graph['_graphmodule_cls_name'] = self.__class__.__name__
         del dict_without_graph['_graph']
 
-        python_code = self.recompile()
+        python_code = self._real_recompile()
         import_block = _format_import_block(python_code.globals, importer)
         return (reduce_deploy_graph_module, (dict_without_graph, import_block))
 
@@ -736,7 +756,7 @@ class {module_name}(torch.nn.Module):
         del dict_without_graph['_graph']
 
         generated_module_name = f'fx-generated._{exporter.get_unique_id()}'
-        python_code = self.recompile()
+        python_code = self._real_recompile()
         import_block = _format_import_block(python_code.globals, exporter.importer)
         module_code = import_block + self.code
         exporter.save_source_string(generated_module_name, module_code)
