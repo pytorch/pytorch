@@ -287,7 +287,7 @@ def get_lock_dir():
     return lock_dir
 
 
-def code_hash(code, extra=""):
+def code_hash(code, extra: str = ""):
     hashing_str = code
     if extra != "":
         hashing_str = hashing_str + "||" + extra
@@ -311,7 +311,7 @@ def get_path(basename: str, extension: str, specified_dir: str = ""):
     return basename, subdir, path
 
 
-def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
+def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
     assert hash_type in ["code", "cubin"], "Hash type not supported"
     if hash_type == "code":
         return code_hash(content, extra)
@@ -322,7 +322,7 @@ def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
 def write(
     content: Union[str, bytes],
     extension: str,
-    extra="",
+    extra: str = "",
     hash_type: str = "code",
     specified_dir: str = "",
 ):
@@ -840,7 +840,8 @@ class AotCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_so = f"{input_path[:-4]}.so"
+                output_so = os.path.splitext(input_path)[0] + ".so"
+
                 if not os.path.exists(output_so):
                     cmd = cpp_compile_command(
                         input=input_path,
