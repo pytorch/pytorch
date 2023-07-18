@@ -438,7 +438,7 @@ parameters of the ``nn.Module``. To get this to work, use
 Which API to use for fine grain tracing?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In some cases, you might need to exclude small parts of your code from the 
+In some cases, you might need to exclude small parts of your code from the
 torch.compile compilations. This section provides some of the answers and
 you can find more information in :ref:`torchdynamo_fine_grain_tracing`.
 
@@ -450,10 +450,7 @@ PyTorch to do. You need to be more specific about your use case. Some of the
 most common use cases you might want to consider:
 
 * If you want to disable compilation on this function frame and the recursively
-  invoked frames, use ``torch._dynamo.disable
-
-* If you want to disable compilation on this function frame and the
-  recursively invoked frames, use ``torch._dynamo.disable``.
+  invoked frames, use ``torch._dynamo.disable``.
 
 * If you want a particular operator, such as ``fbgemm`` to use the  eager mode,
   use ``torch._dynamo.disallow_in_graph``.

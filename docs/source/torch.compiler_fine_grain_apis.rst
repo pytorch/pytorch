@@ -68,7 +68,7 @@ operator by using the PyTorch eager mode.
 The catch is that you will have to find the corresponding Dynamo level operator,
 and not the ATen level operator. See more in the Limitations section of the doc.
 
-.. warning:: 
+.. warning::
    ``torch._dynamo.disallow_in_graph`` is a global flag. If you are comparing
    different backend compilers, you might have to call ``allow_in_graph`` for
    the disallowed operator when switching to the other compiler.
@@ -83,7 +83,7 @@ such as AOTAutograd can safely trace through the decorated function. When a
 function is decorated with ``allow_in_graph``, TorchDynamo treats it as a
 black-box and puts it as is in the generated graph.
 
-.. warning:: 
+.. warning::
    ``allow_in_graph`` skips TorchDynamo completely on the decorated function
    omitting all TorchDynamo safety checks, including graph breaks, handling
    closures, and others. Use `allow_in_graph` with caution. PyTorch downstream
