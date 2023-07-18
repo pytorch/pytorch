@@ -732,11 +732,3 @@ Operator Tags
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
 .. py:module:: torch.utils.viz
-
-Engine Configuration
-----------------------------------
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    set_multithreading_enabled
