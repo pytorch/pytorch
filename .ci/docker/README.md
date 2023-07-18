@@ -1,7 +1,7 @@
 # Docker images for Jenkins
 
 This directory contains everything needed to build the Docker images
-that are used in our CI
+that are used in our CI.
 
 The Dockerfiles located in subdirectories are parameterized to
 conditionally run build stages depending on build arguments passed to
