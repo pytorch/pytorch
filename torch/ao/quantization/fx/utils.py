@@ -149,7 +149,7 @@ def get_qconv_prepack_op(conv_op: Callable) -> Callable:
         torch.nn.functional.conv_transpose3d: torch.ops.quantized.conv_transpose3d_prepack,
     }
     prepack_op = prepack_ops.get(conv_op, None)
-    assert prepack_op, "Didn't find prepack op for {}".format(conv_op)
+    assert prepack_op, f"Didn't find prepack op for {conv_op}"
     return prepack_op
 
 # Returns a function that can get a new attribute name for module with given
@@ -811,24 +811,21 @@ def _qconfig_satisfies_dtype_config_constraints(
         # check quantization ranges
         if backend_quant_min is not None and backend_quant_max is not None:
             if app_quant_min is None or app_quant_max is None:
-                warnings.warn("QConfig %s must specify 'quant_min' and 'quant_max', ignoring %s" %
-                              (debug_string, qconfig))
+                warnings.warn(f"QConfig {debug_string} must specify 'quant_min' and 'quant_max', ignoring {qconfig}")
                 return False
             elif app_quant_min < backend_quant_min or app_quant_max > backend_quant_max:
-                warnings.warn(("QConfig %s quantization range must fall within the backend's:\n"
-                              "QConfig range = (%s, %s), BackendConfig range = (%s, %s), ignoring %s") %
-                              (debug_string, app_quant_min, app_quant_max,
+                warnings.warn(("QConfig {} quantization range must fall within the backend's:\n"
+                              "QConfig range = ({}, {}), BackendConfig range = ({}, {}), ignoring {}").format(debug_string, app_quant_min, app_quant_max,
                               backend_quant_min, backend_quant_max, qconfig))
                 return False
         # check scale min
         if backend_scale_min is not None:
             if app_scale_min is None:
-                warnings.warn("QConfig %s must specify 'eps', ignoring %s" % (debug_string, qconfig))
+                warnings.warn(f"QConfig {debug_string} must specify 'eps', ignoring {qconfig}")
                 return False
             elif app_scale_min < backend_scale_min:
-                warnings.warn(("QConfig %s eps (%s) must be greater than or equal to "
-                              "the backend's min scale value (%s), ignoring %s") %
-                              (debug_string, app_scale_min, backend_scale_min, qconfig))
+                warnings.warn(("QConfig {} eps ({}) must be greater than or equal to "
+                              "the backend's min scale value ({}), ignoring {}").format(debug_string, app_scale_min, backend_scale_min, qconfig))
                 return False
         # check fixed scale and zero point
         if backend_scale_exact_match is not None and backend_zero_point_exact_match is not None:
@@ -846,12 +843,11 @@ def _qconfig_satisfies_dtype_config_constraints(
             if not isinstance(activation_post_process, FixedQParamsObserver) and \
                     not isinstance(activation_post_process, FixedQParamsFakeQuantize):
                 warnings.warn(("QConfig must specify a FixedQParamsObserver or a FixedQParamsFakeQuantize "
-                              "for fixed qparams ops, ignoring %s.\n%s") % (qconfig, suggestion_str))
+                              "for fixed qparams ops, ignoring {}.\n{}").format(qconfig, suggestion_str))
                 return False
             if observer.scale != backend_scale_exact_match or observer.zero_point != backend_zero_point_exact_match:
-                warnings.warn(("QConfig fixed scale (%s) and zero point (%s) do not match the backend's "
-                              "(%s and %s), ignoring %s.\n%s") %
-                              (observer.scale, observer.zero_point, backend_scale_exact_match,
+                warnings.warn(("QConfig fixed scale ({}) and zero point ({}) do not match the backend's "
+                              "({} and {}), ignoring {}.\n{}").format(observer.scale, observer.zero_point, backend_scale_exact_match,
                               backend_zero_point_exact_match, qconfig, suggestion_str))
                 return False
         return True
