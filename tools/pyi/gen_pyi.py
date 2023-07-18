@@ -1119,9 +1119,7 @@ def gen_pyi(
         "bfloat16",
     ]
     for name in simple_conversions:
-        unsorted_tensor_method_hints[name].append(
-            f"def {name}(self) -> Tensor: ..."
-        )
+        unsorted_tensor_method_hints[name].append(f"def {name}(self) -> Tensor: ...")
 
     # pyi tensor methods don't currently include deprecated signatures for some reason
     # TODO: we should probably add them in
