@@ -1,4 +1,4 @@
-# Docker images for Jenkins
+# Docker images for GitHub CI
 
 This directory contains everything needed to build the Docker images
 that are used in our CI.
