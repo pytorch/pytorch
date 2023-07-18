@@ -218,7 +218,7 @@ class TestEnum(JitTestCase):
             return a.RED.value
 
         FileCheck() \
-            .check(f"prim::Constant[value={a.RED.value}]") \
+            .check("prim::Constant[value={}]".format(a.RED.value)) \
             .check_next("return") \
             .run(str(closed_over_aliased_type.graph))
 
@@ -231,7 +231,7 @@ class TestEnum(JitTestCase):
             return b.value
 
         FileCheck() \
-            .check(f"prim::Constant[value={b.value}]") \
+            .check("prim::Constant[value={}]".format(b.value)) \
             .check_next("return") \
             .run(str(closed_over_aliased_value.graph))
 
