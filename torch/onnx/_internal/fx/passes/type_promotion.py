@@ -1217,7 +1217,7 @@ class TypePromotionTable:
             ValueError: If the rule is invalid.
         """
         if not rule.is_valid():
-            raise ValueError("Invalid type promotion rule: {}".format(rule))
+            raise ValueError(f"Invalid type promotion rule: {rule}")
         self._rule_table[f"{rule.namespace}.{rule.op_name}"] = rule
 
     @_beartype.beartype
