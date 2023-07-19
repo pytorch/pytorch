@@ -3043,6 +3043,7 @@ resolve_neg(input) -> Tensor
 
 Returns a new tensor with materialized negation if :attr:`input`'s negative bit is set to `True`,
 else returns :attr:`input`. The output tensor will always have its negative bit set to `False`.
+
 Args:
     {input}
 
@@ -3053,12 +3054,11 @@ Example::
     >>> z = y.imag
     >>> z.is_neg()
     True
-    >>> out = y.resolve_neg()
+    >>> out = z.resolve_neg()
     >>> out
-    tensor([-1, -2, -3])
+    tensor([-1., -2., 3.])
     >>> out.is_neg()
     False
-
 """.format(
         **common_args
     ),

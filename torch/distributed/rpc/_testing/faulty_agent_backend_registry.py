@@ -38,9 +38,7 @@ def _faulty_tensorpipe_init_backend_handler(
         rpc_backend_options, FaultyTensorPipeRpcBackendOptions
     ):
         raise TypeError(
-            "`rpc_backend_options` must be a `FaultyTensorPipeRpcBackendOptions`. {}".format(
-                rpc_backend_options
-            )
+            f"`rpc_backend_options` must be a `FaultyTensorPipeRpcBackendOptions`. {rpc_backend_options}"
         )
 
     agent = FaultyTensorPipeAgent(

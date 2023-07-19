@@ -1968,6 +1968,15 @@ class CPUReproTests(TestCase):
         x = torch.rand(16)
         self.common(f, (x,))
 
+    def test_constant_store(self):
+        # https://github.com/pytorch/pytorch/issues/104515
+        def f(a):
+            a[0, [3, 3]] = -float("inf")
+            return a
+
+        x = torch.rand(4, 5)
+        self.common(f, (x,))
+
     def test_to_channels_last_bfloat16(self):
         def f(a):
             return a.to(memory_format=torch.channels_last)
