@@ -928,6 +928,69 @@ class CudaReproTests(TestCase):
         ref = compiled(list(args))
         assert same(ref, correct)
 
+    @skipIfRocm
+    @config.patch({"triton.cudagraphs": True})
+    def test_index_put_inplace_cudagraph(self):
+        def fn(x, y, z):
+            x = torch.zeros_like(x)
+            return x.index_put_([y], z, True)
+
+        x = torch.zeros((512, 512), device="cuda", dtype=torch.bool)
+        y = torch.zeros((512,), device="cuda", dtype=torch.int64)
+        z = torch.ones((512, 512), device="cuda", dtype=torch.bool)
+
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+
+        ref = fn(x, y, z)
+
+        # run it twice to test cuda graph issue
+        res = opt_fn(x, y, z)
+        res = opt_fn(x, y, z)
+
+        self.assertEqual(ref, res)
+
+    @skipIfRocm
+    @config.patch({"triton.cudagraphs": True})
+    def test_index_put_cudagraph(self):
+        def fn(x, y, z):
+            x = torch.zeros_like(x)
+            return x.index_put([y], z, True)
+
+        x = torch.zeros((512, 512), device="cuda", dtype=torch.bool)
+        y = torch.zeros((512,), device="cuda", dtype=torch.int64)
+        z = torch.ones((512, 512), device="cuda", dtype=torch.bool)
+
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+
+        ref = fn(x, y, z)
+
+        # run it twice to test cuda graph issue
+        res = opt_fn(x, y, z)
+        res = opt_fn(x, y, z)
+
+        self.assertEqual(ref, res)
+
+    @skipIfRocm
+    @config.patch({"triton.cudagraphs": True})
+    def test_index_put_no_fallback_cudagraph(self):
+        def fn(x, y, z):
+            x = torch.zeros_like(x)
+            return x.index_put([y], z, True)
+
+        x = torch.zeros((512, 512), device="cuda", dtype=torch.int32)
+        y = torch.zeros((512,), device="cuda", dtype=torch.int64)
+        z = torch.ones((512, 512), device="cuda", dtype=torch.int32)
+
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+
+        ref = fn(x, y, z)
+
+        # run it twice to test cuda graph issue
+        res = opt_fn(x, y, z)
+        res = opt_fn(x, y, z)
+
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
