@@ -628,6 +628,8 @@ class VariableBuilder:
                 guards=self.make_guards(GuardBuilder.ID_MATCH),
             )
         elif DeviceMeshVariable.is_device_mesh(value):
+            # TODO: see if we need to add custom guard instead
+            # of a simple ID_MATCH
             return DeviceMeshVariable(
                 value,
                 source=self.source,
