@@ -13,6 +13,7 @@ from ..exc import unimplemented
 from ..source import AttrSource, ODictGetItemSource
 from ..utils import (
     check_constant_args,
+    get_custom_getattr,
     HAS_NUMPY_TORCH_INTEROP,
     identity,
     proxy_args_kwargs,
@@ -193,6 +194,16 @@ class ClosureVariable(UnknownVariable):
         return [codegen.create_load_closure(self.name)]
 
 
+# closure variable created by an inlined function
+class InlinedClosureVariable(UnknownVariable):
+    def __init__(self, name, **kwargs):
+        super().__init__(**kwargs)
+        self.name = name
+
+    def reconstruct(self, codegen):
+        return [codegen.create_load_closure(self.name)]
+
+
 class NewCellVariable(VariableTracker):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -289,7 +300,7 @@ class AutogradFunctionVariable(VariableTracker):
             if jvp_fn is not torch.autograd.Function.jvp:
                 unimplemented("NYI - User defind jvp")
 
-            from .torch import (
+            from .higher_order_ops import (
                 safe_or_raise_always_restore,
                 TorchHigherOrderOperatorVariable,
             )
@@ -321,7 +332,7 @@ class AutogradFunctionVariable(VariableTracker):
             module_source = AttrSource(
                 tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
             )
-            higher_order_autograd_fn = TorchHigherOrderOperatorVariable(
+            higher_order_autograd_fn = TorchHigherOrderOperatorVariable.make(
                 trampoline_autograd_fwd, source=AttrSource(module_source, "forward")
             )
             speculated_fwd_result = higher_order_autograd_fn.call_function(
@@ -333,7 +344,7 @@ class AutogradFunctionVariable(VariableTracker):
                 tx,
                 graph_checkpoint,
                 checkpoint,
-                TorchHigherOrderOperatorVariable(
+                TorchHigherOrderOperatorVariable.make(
                     trampoline_autograd_bwd,
                     source=AttrSource(module_source, "backward"),
                 ),
@@ -342,7 +353,7 @@ class AutogradFunctionVariable(VariableTracker):
             # If fwd and backward are sound, we want apply in the graph.
             # And we don't want backwards for the obvious reasons.
             args = args[1:]
-            return TorchHigherOrderOperatorVariable(
+            return TorchHigherOrderOperatorVariable.make(
                 trampoline_autograd_apply
             ).call_function(tx, args, kwargs)
 
@@ -783,9 +794,26 @@ class TypingVariable(VariableTracker):
         return self.value
 
 
+@functools.lru_cache(maxsize=1)
+def get_np_to_torch_np_map():
+    from ..utils import NP_TO_TORCH_NP_MODULE
+
+    np_fn_to_torch_np_fn = {}
+
+    for np_mod, torch_np_mod in NP_TO_TORCH_NP_MODULE.items():
+        for fn_name, torch_np_fn in torch_np_mod.__dict__.items():
+            if callable(torch_np_fn):
+                # some internal details do leak from torch_np
+                # which are not part of numpy API.
+                if np_fn := getattr(np_mod, fn_name, None):
+                    np_fn_to_torch_np_fn[np_fn] = torch_np_fn
+
+    return np_fn_to_torch_np_fn
+
+
 class NumpyVariable(VariableTracker):
     """
-    Wrapper around `numpy.*` for better error messages.
+    Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
     """
 
     def __init__(self, value, **kwargs):
@@ -805,9 +833,22 @@ class NumpyVariable(VariableTracker):
         from .tensor import NumpyNdarrayVariable
 
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
-        # lookup method name in torch_np
-        if hasattr(torch_np, self.value.__name__):
-            func = getattr(torch_np, self.value.__name__)
+        # lookup method name in torch_np. Things like np.dtype(float) are not supported yet.
+        if self.value.__name__ == "dtype":
+            unimplemented(
+                f"numpy dtype function is not supported yet. Got type {type(self.value)}."
+            )
+        elif get_custom_getattr(torch_np):
+            unimplemented(
+                "torch_np has custom getattr implementation and dynamo doesn't support it"
+            )
+        else:  # We are dealing with a callable.
+            func = get_np_to_torch_np_map().get(self.value)
+            if func is None:
+                unimplemented(f"Can't find numpy function {self.value} in torch_np")
+
+            # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
+            #  wrapped by NumpyNdarrayVariable which is wrong!
             return wrap_fx_proxy_cls(
                 target_cls=NumpyNdarrayVariable,
                 tx=tx,
@@ -819,8 +860,6 @@ class NumpyVariable(VariableTracker):
                 example_value=None,
                 **options,
             )
-        else:
-            unimplemented(f"Can't find numpy function {self.value} in torch_np")
 
     def call_method(
         self,
@@ -837,11 +876,28 @@ class NumpyVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    def as_proxy(self):
+        # this handles numpy dtype attribute such as np.float32. TODO(larryliu0820): we should split NumpyVariable
+        #  into NumpyVariable for instances/objects and NumpyVariable for types.
+        if isinstance(self.value, type) and config.numpy_ndarray_as_tensor:
+            # retrieve attribute str. E.g., "float32" if given np.float32
+            import torch_np
+
+            attr = self.value.__name__
+            # get torch_np equivalent
+            tnp_dtype = torch_np.dtype(attr)
+            # returning a string here because we are assuming all `dtype` kwargs for numpy
+            # functions can take an equivalent string and the behavior of the function would
+            # be the same as taking a numpy dtype.
+            return tnp_dtype.name
+
+        return super().as_proxy()
+
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
 class NullVariable(VariableTracker):
     def __init__(self, **kwargs):
-        super(NullVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
     def __str__(self):
         return "NullVariable"

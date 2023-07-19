@@ -22,7 +22,7 @@ class ReduceBench(benchmark.Benchmark):
         elif case == "full":
             self.dims = [0, 1, 2]
         else:
-            raise ValueError("invalid case: %s" % case)
+            raise ValueError(f"invalid case: {case}")
 
     def forward(self, inputs):
         if self.skip_input_transform:
@@ -69,7 +69,7 @@ class ReduceBench(benchmark.Benchmark):
         elif input_str == "s1":
             self.skip_input_transform = True
         else:
-            raise ValueError('invalid skip_input_transform: %s' % (input_str))
+            raise ValueError(f'invalid skip_input_transform: {input_str}')
 
     def _skip_input_transform_str(self):
         if self.skip_input_transform:
@@ -139,7 +139,7 @@ class Reduce2DBench(benchmark.Benchmark):
         )]
 
         if red_dim != 0 and red_dim != 1 :
-            raise ValueError("invalid reduction dimension: {}".format(red_dim))
+            raise ValueError(f"invalid reduction dimension: {red_dim}")
 
     def forward(self, inputs):
         x = self.add(inputs, 0.001)

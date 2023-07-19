@@ -25,6 +25,11 @@
 #
 # Environment variables for feature toggles:
 #
+#   DEBUG_CUDA=1
+#     if used in conjunction with DEBUG or REL_WITH_DEB_INFO, will also
+#     build CUDA kernels with -lineinfo --source-in-ptx.  Note that
+#     on CUDA 12 this may cause nvcc to OOM, so this is disabled by default.
+#
 #   USE_CUDNN=0
 #     disables the cuDNN build
 #
@@ -318,7 +323,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
 package_type = os.getenv('PACKAGE_TYPE', 'wheel')
 version = get_torch_version()
-report("Building wheel {}-{}".format(package_name, version))
+report(f"Building wheel {package_name}-{version}")
 
 cmake = CMake()
 
@@ -356,7 +361,7 @@ def check_submodules():
             start = time.time()
             subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=cwd)
             end = time.time()
-            print(' --- Submodule initialization took {:.2f} sec'.format(end - start))
+            print(f' --- Submodule initialization took {end - start:.2f} sec')
         except Exception:
             print(' --- Submodule initalization failed')
             print('Please run:\n\tgit submodule update --init --recursive')
@@ -611,16 +616,16 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             fullname = self.get_ext_fullname(ext.name)
             filename = self.get_ext_filename(fullname)
-            report("\nCopying extension {}".format(ext.name))
+            report(f"\nCopying extension {ext.name}")
 
             relative_site_packages = sysconfig.get_path('purelib').replace(sysconfig.get_path('data'), '').lstrip(os.path.sep)
             src = os.path.join("torch", relative_site_packages, filename)
             if not os.path.exists(src):
-                report("{} does not exist".format(src))
+                report(f"{src} does not exist")
                 del self.extensions[i]
             else:
                 dst = os.path.join(os.path.realpath(self.build_lib), filename)
-                report("Copying {} from {} to {}".format(ext.name, src, dst))
+                report(f"Copying {ext.name} from {src} to {dst}")
                 dst_dir = os.path.dirname(dst)
                 if not os.path.exists(dst_dir):
                     os.makedirs(dst_dir)
@@ -637,7 +642,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             src = os.path.join(os.path.dirname(filename), "functorch" + fileext)
             dst = os.path.join(os.path.realpath(self.build_lib), filename)
             if os.path.exists(src):
-                report("Copying {} from {} to {}".format(ext.name, src, dst))
+                report(f"Copying {ext.name} from {src} to {dst}")
                 dst_dir = os.path.dirname(dst)
                 if not os.path.exists(dst_dir):
                     os.makedirs(dst_dir)
@@ -653,7 +658,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             src = os.path.join(os.path.dirname(filename), "nvfuser" + fileext)
             dst = os.path.join(os.path.realpath(self.build_lib), filename)
             if os.path.exists(src):
-                report("Copying {} from {} to {}".format(ext.name, src, dst))
+                report(f"Copying {ext.name} from {src} to {dst}")
                 dst_dir = os.path.dirname(dst)
                 if not os.path.exists(dst_dir):
                     os.makedirs(dst_dir)
@@ -665,7 +670,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
     def get_outputs(self):
         outputs = setuptools.command.build_ext.build_ext.get_outputs(self)
         outputs.append(os.path.join(self.build_lib, "caffe2"))
-        report("setup.py::get_outputs returning {}".format(outputs))
+        report(f"setup.py::get_outputs returning {outputs}")
         return outputs
 
     def create_compile_commands(self):
@@ -689,13 +694,13 @@ class build_ext(setuptools.command.build_ext.build_ext):
         new_contents = json.dumps(all_commands, indent=2)
         contents = ''
         if os.path.exists('compile_commands.json'):
-            with open('compile_commands.json', 'r') as f:
+            with open('compile_commands.json') as f:
                 contents = f.read()
         if contents != new_contents:
             with open('compile_commands.json', 'w') as f:
                 f.write(new_contents)
 
-class concat_license_files():
+class concat_license_files:
     """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
 
     LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
@@ -718,7 +723,7 @@ class concat_license_files():
         finally:
             sys.path = old_path
 
-        with open(self.f1, 'r') as f1:
+        with open(self.f1) as f1:
             self.bsd_text = f1.read()
 
         with open(self.f1, 'a') as f1:
@@ -766,7 +771,7 @@ class clean(setuptools.Command):
     def run(self):
         import glob
         import re
-        with open('.gitignore', 'r') as f:
+        with open('.gitignore') as f:
             ignores = f.read()
             pat = re.compile(r'^#( BEGIN NOT-CLEAN-FILES )?')
             for wildcard in filter(None, ignores.split('\n')):
@@ -929,31 +934,31 @@ def configure_extension_build():
     if cmake_cache_vars['BUILD_CAFFE2']:
         extensions.append(
             Extension(
-                name=str('caffe2.python.caffe2_pybind11_state'),
+                name='caffe2.python.caffe2_pybind11_state',
                 sources=[]),
         )
         if cmake_cache_vars['USE_CUDA']:
             extensions.append(
                 Extension(
-                    name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+                    name='caffe2.python.caffe2_pybind11_state_gpu',
                     sources=[]),
             )
         if cmake_cache_vars['USE_ROCM']:
             extensions.append(
                 Extension(
-                    name=str('caffe2.python.caffe2_pybind11_state_hip'),
+                    name='caffe2.python.caffe2_pybind11_state_hip',
                     sources=[]),
             )
     if cmake_cache_vars['BUILD_FUNCTORCH']:
         extensions.append(
             Extension(
-                name=str('functorch._C'),
+                name='functorch._C',
                 sources=[]),
         )
     if cmake_cache_vars['BUILD_NVFUSER']:
         extensions.append(
             Extension(
-                name=str('nvfuser._C'),
+                name='nvfuser._C',
                 sources=[]),
         )
 
@@ -1155,6 +1160,7 @@ def main():
         'include/torch/csrc/distributed/autograd/functions/*.h',
         'include/torch/csrc/distributed/autograd/rpc_messages/*.h',
         'include/torch/csrc/dynamo/eval_frame.h',
+        'include/torch/csrc/inductor/*.h',
         'include/torch/csrc/jit/*.h',
         'include/torch/csrc/jit/backends/*.h',
         'include/torch/csrc/jit/generated/*.h',
@@ -1197,9 +1203,8 @@ def main():
         'include/THH/*.h*',
         'include/THH/generic/*.h',
         'include/sleef.h',
-        "_inductor/codegen/*.h",
-        "_inductor/aot_inductor_include/*.cpp",
-        "_inductor/aot_inductor_include/*.h",
+        '_inductor/codegen/*.cpp',
+        '_inductor/codegen/*.h',
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',
@@ -1266,7 +1271,7 @@ def main():
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
-        python_requires='>={}'.format(python_min_version_str),
+        python_requires=f'>={python_min_version_str}',
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',
@@ -1282,7 +1287,7 @@ def main():
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Programming Language :: C++',
             'Programming Language :: Python :: 3',
-        ] + ['Programming Language :: Python :: 3.{}'.format(i) for i in range(python_min_version[1], version_range_max)],
+        ] + [f'Programming Language :: Python :: 3.{i}' for i in range(python_min_version[1], version_range_max)],
         license='BSD-3',
         keywords='pytorch, machine learning',
     )

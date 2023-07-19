@@ -851,7 +851,7 @@ def error_inputs_normal(op, device, **kwargs):
     yield ErrorInput(
         SampleInput(t, args=(0, invalid_std)),
         error_type=RuntimeError,
-        error_regex=r"normal expects std >= 0.0, but found std {}".format(invalid_std),
+        error_regex=fr"normal expects std >= 0.0, but found std {invalid_std}",
     )
 
 def sample_inputs_cauchy(op, device, dtype, requires_grad, **kwargs):
@@ -871,7 +871,7 @@ def error_inputs_cauchy(op, device, **kwargs):
     yield ErrorInput(
         SampleInput(t, args=(0, invalid_scale,)),
         error_type=RuntimeError,
-        error_regex=r"cauchy_ expects sigma > 0.0, but found sigma={}".format(invalid_scale),
+        error_regex=fr"cauchy_ expects sigma > 0.0, but found sigma={invalid_scale}",
     )
 
 
@@ -893,7 +893,7 @@ def error_inputs_exponential(op, device, **kwargs):
     yield ErrorInput(
         SampleInput(t, args=(invalid_rate,)),
         error_type=RuntimeError,
-        error_regex=r"exponential_ expects lambda > 0.0, but found lambda={}".format(invalid_rate),
+        error_regex=fr"exponential_ expects lambda > 0.0, but found lambda={invalid_rate}",
     )
 
 
@@ -915,7 +915,7 @@ def error_inputs_geometric(op, device, **kwargs):
     yield ErrorInput(
         SampleInput(t, args=(neg_prob,)),
         error_type=RuntimeError,
-        error_regex=r"geometric_ expects p to be in \(0, 1\), but got p={}".format(neg_prob),
+        error_regex=fr"geometric_ expects p to be in \(0, 1\), but got p={neg_prob}",
     )
 
 
@@ -937,7 +937,7 @@ def error_inputs_log_normal(op, device, **kwargs):
     yield ErrorInput(
         SampleInput(t, args=(0, invalid_std)),
         error_type=RuntimeError,
-        error_regex=r"log_normal_ expects std > 0.0, but found std={}".format(invalid_std),
+        error_regex=fr"log_normal_ expects std > 0.0, but found std={invalid_std}",
     )
 
 
@@ -1394,21 +1394,84 @@ def sample_inputs_zero_(op_info, device, dtype, requires_grad, **kwargs):
     for shape in cases:
         yield SampleInput(make_arg(shape))
 
-# TODO: add reduction kwargs
 def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_target = partial(_make_tensor, dtype=torch.long, requires_grad=False)
+    make_weight = partial(_make_tensor, requires_grad=False)
 
     inputs = (
         ((), make_target([], low=0, high=1), {}),
         ((S,), make_target([], low=0, high=S), {"p": 1}),
         ((S,), make_target([1], low=0, high=S), {"p": 2}),
         ((S, M), make_target([S], low=0, high=M), {"margin": 1.0}),
+        ((S, M), make_target([S], low=0, high=M), {"margin": -3.14}),
         ((M, S), make_target([M], low=0, high=S), {"weight": None}),
+        ((M, S), make_target([M], low=0, high=S), {"weight": make_weight([S], low=-10., high=10.)}),
+        ((M, S), make_target([M], low=0, high=S), {"reduction": "none"}),
+        ((M, S), make_target([M], low=0, high=S), {"reduction": "mean"}),
+        ((M, S), make_target([M], low=0, high=S), {"reduction": "sum"}),
     )
 
     for input_shape, target, kwargs in inputs:
         yield SampleInput(_make_tensor(input_shape), args=(target,), kwargs=kwargs)
+
+
+def reference_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwargs)
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(_make_tensor, dtype=torch.long, requires_grad=False)
+    make_weight = partial(_make_tensor, requires_grad=False)
+
+    inputs = (
+        ((), make_target([], low=0, high=1)),
+        ((S,), make_target([], low=0, high=S)),
+        ((S,), make_target([1], low=0, high=S)),
+        ((M, S), make_target([M], low=0, high=S)),
+    )
+    ps = (1, 2)
+    margins = (0, 7, -3.14)
+    weights = (False, True)
+    reductions = (None, "none", "mean", "sum")
+
+    for (input_shape, target), p, margin, weight, reduction in product(inputs, ps, margins, weights, reductions):
+        input = _make_tensor(input_shape)
+        weight_shape = [input.size(-1)] if input.ndim > 0 else [1]
+        weight = make_weight(weight_shape, low=-10., high=10.) if weight else None
+        kwargs = {"p": p, "margin": margin, "weight": weight}
+        if reduction is not None:
+            kwargs["reduction"] = reduction
+        yield SampleInput(input, args=(target,), kwargs=kwargs)
+
+
+def error_inputs_multi_margin_loss(op, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+    # invalid reduction
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={'reduction': 'abc'}),
+                     error_type=ValueError, error_regex='abc is not a valid value for reduction')
+    # invalid input
+    yield ErrorInput(SampleInput(make_input(5, 0), args=(make_input(5,),), kwargs={}),
+                     error_type=RuntimeError,
+                     error_regex=r'Expected non-empty vector or matrix with optional 0-dim batch size, but got: \[5, 0\]')
+    yield ErrorInput(SampleInput(make_input(0,), args=(make_input(5,),), kwargs={}),
+                     error_type=RuntimeError,
+                     error_regex=r'Expected non-empty vector or matrix with optional 0-dim batch size, but got: \[0\]')
+    # invalid target
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={}),
+                     error_type=RuntimeError, error_regex=r'inconsistent target size, expected 5 but got \[5, 4\]')
+    # invalid target dtype
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={}),
+                     error_type=RuntimeError, error_regex='expected scalar type Long but found Float')
+    # invalid weight
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={'weight': make_input(())}),
+                     error_type=ValueError, error_regex='weight must be one-dimensional')
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={'weight': make_input(5, 4)}),
+                     error_type=ValueError, error_regex='weight must be one-dimensional')
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={'weight': make_input(5,)}),
+                     error_type=RuntimeError, error_regex=r'inconsistent weight size, expected 4 but got \[5\]')
+    # invalid p
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={'p': 3}),
+                     error_type=ValueError, error_regex='only p == 1 and p == 2 supported')
+
 
 def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
     inputs = (
@@ -1826,9 +1889,10 @@ def sample_inputs_logcumsumexp(self, device, dtype, requires_grad, **kwargs):
             yield SampleInput(t, dim)
 
 def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
-    yield SampleInput((make_tensor((S, S), dtype=dtype, device=device,
-                                   low=None, high=None,
-                                   requires_grad=requires_grad)))
+    yield SampleInput(
+        make_tensor((S, S), dtype=dtype, device=device,
+                    low=None, high=None,
+                    requires_grad=requires_grad))
 
 
 def error_inputs_trace(op, device):
@@ -3957,7 +4021,7 @@ def error_inputs_group_norm(opinfo, device, **kwargs):
 
     # check that input has minimum number of dimensions
     err_msg1 = "Expected at least 2 dimensions for input tensor but received"
-    s1 = SampleInput(make_arg((1)), args=(1,))
+    s1 = SampleInput(make_arg(1), args=(1,))
     yield ErrorInput(s1, error_regex=err_msg1)
 
     # check that the channels dimension is compatible with number of groups
@@ -6887,7 +6951,7 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
 
         if mask_t.sum() == 0:
             def random_index(shape):
-                return tuple((random.randrange(0, max_idx) for max_idx in shape))
+                return tuple(random.randrange(0, max_idx) for max_idx in shape)
 
             mask_t[random_index(mask_t.shape)] = True
             return mask_t
@@ -10719,8 +10783,6 @@ op_db: List[OpInfo] = [
                        # 76047
                        DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                                     dtypes=(torch.bfloat16, torch.float32, torch.float64)),
-                       DecorateInfo(unittest.skip("unexpected success on ASAN"), 'TestNNCOpInfo',
-                                    'test_nnc_correctness', dtypes=(torch.bfloat16,), active_if=TEST_WITH_ASAN),
                    )),
     OpInfo('stft',
            decorators=[
@@ -12011,7 +12073,7 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_adaptive_avg_pool1d,
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
     OpInfo('nn.functional.adaptive_avg_pool2d',
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            decorators=(
                # RuntimeError:
@@ -12501,7 +12563,7 @@ op_db: List[OpInfo] = [
            variant_test_name='reflect',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_and_complex_types(),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
            skips=(
@@ -12516,7 +12578,7 @@ op_db: List[OpInfo] = [
            variant_test_name='replicate',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           dtypes=floating_and_complex_types(),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
            skips=(
@@ -12746,6 +12808,15 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_multi_margin_loss,
+        reference_inputs_func=reference_inputs_multi_margin_loss,
+        error_inputs_func=error_inputs_multi_margin_loss,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                "TestJit",
+                "test_variant_consistency_jit",
+            ),
+        ),
     ),
     OpInfo(
         "nn.functional.multilabel_margin_loss",
@@ -12892,13 +12963,10 @@ op_db: List[OpInfo] = [
            # got: Batching rule not implemented for aten::flatten.using_ints
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
-           sample_inputs_func=sample_inputs_max_pool,
-           decorators=(
-               DecorateInfo(slowTest, 'TestJit', 'test_variant_consistency_jit', active_if=TEST_WITH_ASAN),
-           )),
+           sample_inputs_func=sample_inputs_max_pool),
     OpInfo('max_pool2d_with_indices_backward',
            op=max_pool2d_backward,
            # We've defined a custom op, so there's no corresponding aten op
@@ -14478,6 +14546,7 @@ op_db: List[OpInfo] = [
                     supports_out=False,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
+                    supports_one_python_scalar=True,
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
@@ -14991,8 +15060,7 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
                                     'TestCommon', 'test_noncontiguous_samples',
-                                    device_type='cuda'),
-                       DecorateInfo(slowTest, 'TestCompositeCompliance', 'test_backward', active_if=TEST_WITH_ASAN)],
+                                    device_type='cuda')],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
