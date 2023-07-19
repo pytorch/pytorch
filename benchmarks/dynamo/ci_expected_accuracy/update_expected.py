@@ -59,7 +59,7 @@ def get_artifacts_urls(results, suites):
     for r in results:
         if "inductor" == r["workflowName"] and "test" in r["jobName"]:
             config_str, test_str = parse_job_name(r["jobName"])
-            suite, shard_id, num_shards, machine = parse_test_str(test_str)
+            suite, shard_id, num_shards, machine, *_ = parse_test_str(test_str)
             workflowId = r["workflowId"]
             id = r["id"]
             runAttempt = r["runAttempt"]
