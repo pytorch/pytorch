@@ -2,6 +2,7 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/TensorBody.h>
 #include <c10/core/SymInt.h>
@@ -467,35 +468,38 @@ static inline Tensor handleDimInMultiDimIndexing(
     Tensor result = prev_dim_result;
     const Tensor& tensor = index.tensor();
     auto scalar_type = tensor.scalar_type();
-    if (tensor.dim() == 0 &&
-        at::isIntegralType(scalar_type, /*includeBool=*/true)) {
-      if (scalar_type != at::kByte && scalar_type != at::kBool) {
-        result = impl::applySelect(
-            result,
-            *dim_ptr,
-            tensor.item<int64_t>(),
-            real_dim,
-            original_tensor_device,
-            prev_dim_result_sizes);
-      } else {
-        result = result.unsqueeze(*dim_ptr);
-        if (scalar_type == at::kBool) {
-          impl::recordTensorIndex(
-              impl::boolToIndexingTensor(
-                  result, tensor.item<bool>() != 0, original_tensor_device),
-              outIndices,
-              dim_ptr);
-        } else {
-          impl::recordTensorIndex(
-              impl::boolToIndexingTensor(
-                  result, tensor.item<uint8_t>() != 0, original_tensor_device),
-              outIndices,
-              dim_ptr);
-        }
-      }
-    } else {
+    if (tensor.dim() != 0) {
       impl::recordTensorIndex(tensor, outIndices, dim_ptr);
+      return result;
     }
+    if (scalar_type == at::kByte) {
+      result = result.unsqueeze(*dim_ptr);
+      impl::recordTensorIndex(
+          impl::boolToIndexingTensor(
+              result, tensor.item<uint8_t>() != 0, original_tensor_device),
+          outIndices,
+          dim_ptr);
+      return result;
+    } else if (scalar_type == at::kBool) {
+      result = result.unsqueeze(*dim_ptr);
+      impl::recordTensorIndex(
+          impl::boolToIndexingTensor(
+              result, tensor.item<bool>() != 0, original_tensor_device),
+          outIndices,
+          dim_ptr);
+      return result;
+    } else if (
+        at::isIntegralType(scalar_type, /*includeBool=*/false) &&
+        tensor.device() == at::kCPU && !at::isTensorSubclassLike(tensor)) {
+      return impl::applySelect(
+          result,
+          *dim_ptr,
+          tensor.item<int64_t>(),
+          real_dim,
+          original_tensor_device,
+          prev_dim_result_sizes);
+    }
+    impl::recordTensorIndex(tensor, outIndices, dim_ptr);
     return result;
   } else {
     TORCH_INTERNAL_ASSERT(false, "Invalid TensorIndex type");
