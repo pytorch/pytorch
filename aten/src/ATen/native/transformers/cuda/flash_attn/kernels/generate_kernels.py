@@ -2,7 +2,7 @@
 # They are written to several files in order to speed up compilation
 
 import itertools
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 import argparse
@@ -12,7 +12,7 @@ DTYPE_MAP = {
     "bf16": "cutlass::bfloat16_t",
 }
 
-SM = [80]  # Sm80 kernels support up to 
+SM = [80]  # Sm80 kernels support up to
 HEAD_DIMENSIONS = [32, 64, 96, 128, 160, 192, 224, 256]
 KERNEL_IMPL_TEMPLATE_FWD = """
 template<>
@@ -33,7 +33,7 @@ class Kernel:
     dtype: str
     head_dim: int
     direction: str
-    
+
     @property
     def template(self) -> str:
         if self.direction == "fwd":
@@ -70,7 +70,7 @@ def main(output_dir: Optional[str]) -> None:
         output_dir = Path(__file__).parent
     else:
         output_dir = Path(output_dir)
-    
+
     for kernel in get_all_kernels():
         write_kernel(kernel, output_dir)
 

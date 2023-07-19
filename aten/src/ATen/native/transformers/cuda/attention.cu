@@ -18,7 +18,7 @@
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
-#include "c10/util/Optional.h"
+#include <c10/util/Optional.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -701,6 +701,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, int64_t, int6
               scale);
   // Reshape output to convert nnz to batch_size and seq_len
   auto attention = output.transpose(1,2);
+
+  q_padded = q_padded.transpose(1,2);
+  k_padded = k_padded.transpose(1,2);
+  v_padded = v_padded.transpose(1,2);
 
   return std::make_tuple(attention, q_padded, k_padded, v_padded, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }

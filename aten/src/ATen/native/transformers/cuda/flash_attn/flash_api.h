@@ -35,7 +35,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                c10::optional<at::Generator> gen_);
 
 
-std::vector<at::Tensor>
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_size_og
         const at::Tensor &q,   // batch_size x seqlen_q x num_heads x head_size
         const at::Tensor &k,   // batch_size x seqlen_k x num_heads_k x head_size
@@ -48,7 +48,8 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         const float p_dropout,         // probability to drop
         const float softmax_scale,
         const bool is_causal,
-        c10::optional<at::Generator> gen_);
+        const at::Tensor philox_seed,
+        const at::Tensor philox_offset);
 
 std::vector<at::Tensor>
 mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
