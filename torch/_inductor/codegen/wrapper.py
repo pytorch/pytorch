@@ -501,7 +501,7 @@ class WrapperCodeGen(CodeGen):
             kernel_IndentedBuffer.writeline(f"event_{ssnode.get_name()}.record(stream{ssnode.stream_id}_raw)")  
 
 
-    def generate_extern_kernel_w_stream(self, node_name, call_strs):
+    def generate_extern_kernel_w_stream(self, node_name, call_strs, out_node=False):
         kernel_IndentedBuffer = IndentedBuffer()
         self.cuda_event_dependency(node_name, kernel_IndentedBuffer)
         ssnode = V.graph.stream_graph.name_mapping[node_name]
@@ -511,7 +511,8 @@ class WrapperCodeGen(CodeGen):
         kernel_IndentedBuffer = kernel_IndentedBuffer
         if stream_id != 0:
             if V.graph.cpp_wrapper:
-                kernel_IndentedBuffer.writeline(f"at::Tensor {node_name};")
+                if not out_node:
+                    kernel_IndentedBuffer.writeline(f"at::Tensor {node_name};")
                 kernel_IndentedBuffer.writeline(f"{{")
             else:
                 kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
@@ -891,12 +892,15 @@ class WrapperCodeGen(CodeGen):
         else:
             writer.writeline(self.wrap_kernel_call(name, call_args))
 
-    def writeline(self, line, caller=None):
+    def writeline(self, line, caller=None, out_node=False):
         if caller is not None and config.multiple_streams:
-            from ..ir import ExternKernel
-            assert(isinstance(caller, ExternKernel))
-            node_name = caller.name
-            self.generate_extern_kernel_w_stream(node_name, line)
+            if V.graph.cpp_wrapper:
+                node_name = caller
+            else:
+                from ..ir import ExternKernel
+                assert(isinstance(caller, ExternKernel))
+                node_name = caller.name
+            self.generate_extern_kernel_w_stream(node_name, line, out_node=out_node)
         else:
             if isinstance(line, list):
                 for l in line:
@@ -1309,15 +1313,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel, node_name=None):
+        lines = []
         if output_view:
             output_as_strided = f"{output_view.codegen_reference()}"
             output_name = f"{output_view.get_name()}_as_strided"
-            self.writeline(f"auto {output_name} = {output_as_strided};")
+            lines.append(f"auto {output_name} = {output_as_strided};")
 
             args.insert(0, output_name)
         else:
             args.insert(0, f"{codegen_reference}")
-        self.writeline(self.wrap_kernel_call(kernel, args))
+        lines.append(self.wrap_kernel_call(kernel, args))
+        self.writeline(lines, node_name, out_node=True)
 
     def add_benchmark_harness(self, output):
         if V.graph.aot_mode:
