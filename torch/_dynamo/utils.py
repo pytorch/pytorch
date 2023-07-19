@@ -53,7 +53,7 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, is_fake
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
 
@@ -1280,7 +1280,7 @@ def get_fake_value(node, tx):
 
     def fake_wrapper(e):
         if isinstance(e, torch.Tensor):
-            assert isinstance(e, FakeTensor)
+            assert is_fake(e)
         return e
 
     def visit(n: torch.fx.Node):
@@ -1727,4 +1727,26 @@ def build_checkpoint_variable(**options):
     return TorchHigherOrderOperatorVariable.make(
         activation_checkpoint_op,
         **options,
+    )
+
+
+def is_compile_supported(device_type):
+    from .eval_frame import is_dynamo_supported
+
+    compile_supported = is_dynamo_supported()
+    if device_type == "cpu":
+        pass
+    elif device_type == "cuda" and compile_supported:
+        from torch._inductor.utils import has_triton
+
+        compile_supported = has_triton()
+    else:
+        compile_supported = False
+    return compile_supported
+
+
+def is_guard_failure_reporting_enabled():
+    return (
+        config.report_guard_failures
+        or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
     )
