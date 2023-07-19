@@ -3554,7 +3554,7 @@ class TestMPS(TestCaseMPS):
             mps_dst = cpu_dst.to("mps")
             mps_result = mps_dst.copy_(mps_src)
             self.assertEqual(cpu_result, mps_result)
-        
+
         test_dtypes = [torch.float32, torch.int32, torch.int16, torch.int8]
 
         for (src_dtype, dst_dtype) in itertools.product(test_dtypes, test_dtypes):
@@ -3564,7 +3564,6 @@ class TestMPS(TestCaseMPS):
             helper((3,), (2, 3), src_dtype, dst_dtype)
             helper((2,), (2, 2), src_dtype, dst_dtype)
             helper((4, 1, 5), (3, 4, 4, 5), src_dtype, dst_dtype)
-
 
     # See https://github.com/pytorch/pytorch/pull/84742
     # and https://github.com/pytorch/pytorch/pull/78319
