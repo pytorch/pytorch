@@ -928,7 +928,8 @@ class CudaReproTests(TestCase):
         ref = compiled(list(args))
         assert same(ref, correct)
 
-    def test_issue104937(self):
+    # https://github.com/pytorch/pytorch/issues/104937
+    def test_linear_with_zero_infeature_size(self):
         m = nn.Linear(in_features=0, out_features=0, bias=True).to("cuda")
         x = torch.rand(1, 1, 0, device="cuda")
         expect = m(x)
