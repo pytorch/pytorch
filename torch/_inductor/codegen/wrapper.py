@@ -910,6 +910,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
+        self.header.splice(
+            """
+            #include <torch/csrc/inductor/inductor_ops.h>
+            """
+        )
+
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
         from ..ir import ShapeAsConstantBuffer
@@ -978,6 +984,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
                 c10::optional<at::Scalar> optional_scalar;
                 c10::optional<c10::string_view> optional_string;
+                c10::optional<at::Layout> optional_layout;
                 torch::List<c10::optional<at::Scalar>> optional_list;
                 """
             )
@@ -1178,14 +1185,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
         from .cpp import DEVICE_TO_ATEN
 
         return (
-            f"at::device(c10::Device({DEVICE_TO_ATEN[device.type]}, {device.index}))"
+            f"c10::Device({DEVICE_TO_ATEN[device.type]}, {device.index})"
             if device.index is not None
-            else f"at::device({DEVICE_TO_ATEN[device.type]})"
+            else f"{DEVICE_TO_ATEN[device.type]}"
         )
 
-    def make_buffer_allocation(self, buffer):
+    def codegen_tensor_option(self, device, dtype):
         from .cpp import DTYPE_TO_ATEN
 
+        cpp_device = self.codegen_device(device)
+        return f"at::TensorOptions({cpp_device}).dtype({DTYPE_TO_ATEN[dtype]}))"
+
+    def make_buffer_allocation(self, buffer):
         output_idx = None
         for idx, output in enumerate(V.graph.graph_outputs):
             if isinstance(output, (ir.NoneAsConstantBuffer, ir.ShapeAsConstantBuffer)):
@@ -1208,8 +1219,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
                 f"{self.codegen_shape_tuple(shape)}, "
                 f"{self.codegen_shape_tuple(stride)}, "
-                f"{self.codegen_device(device)}"
-                f".dtype({DTYPE_TO_ATEN[dtype]})){self.ending}"
+                f"{self.codegen_tensor_option(device, dtype)}{self.ending}"
             )
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
@@ -1275,6 +1285,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.header.splice(
             """
             #include <ATen/native/BinaryOps.h>
+            #include <ATen/core/dispatch/Dispatcher.h>
             #include <c10/util/Exception.h>
             #include <c10/cuda/CUDAGuard.h>
 

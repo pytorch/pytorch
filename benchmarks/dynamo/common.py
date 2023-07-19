@@ -2891,12 +2891,6 @@ def run(runner, args, original_dir=None):
             torch.use_deterministic_algorithms(True)
         if args.only in {"hf_T5_generate"}:
             torch._dynamo.config.automatic_dynamic_shapes = True
-        if args.only is not None and args.only.endswith("_generate"):
-            log.warning(
-                "Disabling cudagraphs for autoregressive generation (reenable if selective cudagraphs implemented)"
-            )
-            args.disable_cudagraphs = True
-            torch._inductor.config.triton.cudagraphs = False
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
@@ -3088,9 +3082,7 @@ def run(runner, args, original_dir=None):
         output_filename = "coverage.csv"
 
     if args.inductor or args.backend == "inductor":
-        inductor_config.triton.cudagraphs = (
-            not args.disable_cudagraphs and not args.dynamic_shapes
-        )
+        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
         inductor_config.triton.persistent_reductions = (
             not args.disable_persistent_reductions
         )
