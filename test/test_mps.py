@@ -19,7 +19,7 @@ import torch.nn.functional as F
 import itertools
 from collections import defaultdict
 from torch import inf
-from torch.nn import Parameter
+from torch.nn import Buffer, Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI, NoTest,
@@ -424,7 +424,6 @@ def mps_ops_modifier(ops):
         'isposinf': None,
         'kthvalue': None,
         'lcm': None,
-        'lerp': None,
         'lgamma': None,
         'linalg.cholesky': None,
         'linalg.cholesky_ex': None,
@@ -4985,6 +4984,9 @@ class TestNLLLoss(TestCaseMPS):
         helper((1, 1, 3, 3))
         helper((7, 13))
         helper((2, 8, 4, 5))
+        x_cpu = torch.tensor([], dtype=torch.bool)
+        x_mps = x_cpu.to("mps")
+        assert x_cpu.all() == x_mps.all().cpu()
 
     # Test forward min
     def test_min_el(self):
@@ -7640,14 +7642,14 @@ class TestNNMPS(NNTestCase):
             def __init__(self):
                 super().__init__()
                 self.layer_dummy_param = Parameter(torch.empty(3, 5))
-                self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
+                self.layer_dummy_buf = Buffer(torch.zeros(1, 3, 3, 7))
 
         class Net(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.l1 = Layer()
                 self.dummy_param = Parameter(torch.empty(3, 5))
-                self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))
+                self.dummy_buf = Buffer(torch.zeros(7, 3, 3, 1))
 
         l = Layer()
         n = Net()

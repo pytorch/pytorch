@@ -417,7 +417,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type]
+        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type, call-overload]
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
@@ -704,6 +704,10 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
           quantized, sets new elements to a known value.  Floating point or
           complex values are set to NaN. Integer values are set to the maximum
           value.
+        * :func:`torch.empty`, :func:`torch.empty_like`, :func:`torch.empty_strided`,
+          and :func:`torch.empty_permuted` will fill the output tensor with a known
+          value. Floating point or complex dtype tensors are filled with NaN. Integer
+          dtype tensors are filled with the maximum value.
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -739,7 +743,8 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
-        * :func:`torch.bincount` when called on a CUDA tensor
+        * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
+          tensor is given
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
@@ -1316,7 +1321,7 @@ if TYPE_CHECKING:
     # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
-    from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
+    from torch._C._VariableFunctions import *  # type: ignore[assignment, misc] # noqa: F403
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
     del segment_reduce
@@ -1511,13 +1516,6 @@ class _TorchCompileInductorWrapper:
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
             from torch._inductor import list_mode_options
-            if mode == "reduce-overhead" and self.dynamic:
-                raise RuntimeError(
-                    "mode=reduce-overhead cannot be used together with dynamic=True! "
-                    "reduce-overhead enables cudagraph. dynamic=True forces recompiliation "
-                    "for each new shape, which defeats the purpose of cudagraph. "
-                    "Please only enable one of them."
-                )
             self.apply_options(list_mode_options(mode, self.dynamic))
         else:
             raise RuntimeError(
@@ -1549,6 +1547,10 @@ class _TorchCompileInductorWrapper:
         from torch._inductor.compile_fx import compile_fx
 
         return compile_fx(model_, inputs_, config_patches=self.config)
+
+    def get_compiler_config(self):
+        from torch._inductor.compile_fx import get_patched_config_dict
+        return get_patched_config_dict(config_patches=self.config)
 
     def reset(self):
         from torch._inductor import config
