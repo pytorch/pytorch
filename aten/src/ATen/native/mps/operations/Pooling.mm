@@ -259,15 +259,15 @@ static void avg_pool2d_template(const Tensor& input,
               .to("mps"));
     } else {
       output.copy_(at::avg_pool2d_backward(grad_output.to("cpu"),
-                                                            input.to("cpu"),
-                                                            kernel_size,
-                                                            stride,
-                                                            padding,
-                                                            ceil_mode,
-                                                            count_include_pad,
-                                                            divisor_override)
-                                        .clone()
-                                        .to("mps"));
+                                           input.to("cpu"),
+                                           kernel_size,
+                                           stride,
+                                           padding,
+                                           ceil_mode,
+                                           count_include_pad,
+                                           divisor_override)
+                       .clone()
+                       .to("mps"));
     }
     return;
   }
