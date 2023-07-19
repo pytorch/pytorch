@@ -806,9 +806,7 @@ def saved_variables(
         (
             r"{}.sym_size\((-?\w+)\)",
             {
-                "suffix": lambda m: "_sym_argsize_{}".format(
-                    m.groups()[0].replace("-", "minus_")
-                ),
+                "suffix": lambda m: f"_sym_argsize_{m.groups()[0].replace('-', 'minus_')}",
                 "nctype": lambda name: NamedCType(name, BaseCType(SymIntT)),
             },
         ),

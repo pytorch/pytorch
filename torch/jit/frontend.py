@@ -889,8 +889,7 @@ class ExprBuilder(Builder):
                     sub_exprs.append(Dots(base.range()))
                 else:
                     raise NotSupportedError(base.range(),
-                                            "slicing multiple dimensions with "
-                                            "{} not supported".format(sub_type))
+                                            f"slicing multiple dimensions with {sub_type} not supported")
             return sub_exprs
         base = build_expr(ctx, expr.value)
         sub_type = type(expr.slice)

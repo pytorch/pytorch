@@ -118,8 +118,7 @@ class LRScheduler:
             else:
                 epoch_str = ("%.2f" if isinstance(epoch, float) else
                              "%.5d") % epoch
-                print('Epoch {}: adjusting learning rate'
-                      ' of group {} to {:.4e}.'.format(epoch_str, group, lr))
+                print(f'Epoch {epoch_str}: adjusting learning rate of group {group} to {lr:.4e}.')
 
 
     def step(self, epoch=None):
@@ -213,8 +212,7 @@ class LambdaLR(LRScheduler):
             self.lr_lambdas = [lr_lambda] * len(optimizer.param_groups)
         else:
             if len(lr_lambda) != len(optimizer.param_groups):
-                raise ValueError("Expected {} lr_lambdas, but got {}".format(
-                    len(optimizer.param_groups), len(lr_lambda)))
+                raise ValueError(f"Expected {len(optimizer.param_groups)} lr_lambdas, but got {len(lr_lambda)}")
             self.lr_lambdas = list(lr_lambda)
         super().__init__(optimizer, last_epoch, verbose)
 
@@ -297,8 +295,7 @@ class MultiplicativeLR(LRScheduler):
             self.lr_lambdas = [lr_lambda] * len(optimizer.param_groups)
         else:
             if len(lr_lambda) != len(optimizer.param_groups):
-                raise ValueError("Expected {} lr_lambdas, but got {}".format(
-                    len(optimizer.param_groups), len(lr_lambda)))
+                raise ValueError(f"Expected {len(optimizer.param_groups)} lr_lambdas, but got {len(lr_lambda)}")
             self.lr_lambdas = list(lr_lambda)
         super().__init__(optimizer, last_epoch, verbose)
 
@@ -973,8 +970,7 @@ class ReduceLROnPlateau:
 
         if isinstance(min_lr, (list, tuple)):
             if len(min_lr) != len(optimizer.param_groups):
-                raise ValueError("expected {} min_lrs, got {}".format(
-                    len(optimizer.param_groups), len(min_lr)))
+                raise ValueError(f"expected {len(optimizer.param_groups)} min_lrs, got {len(min_lr)}")
             self.min_lrs = list(min_lr)
         else:
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
@@ -1036,8 +1032,7 @@ class ReduceLROnPlateau:
                 if self.verbose:
                     epoch_str = ("%.2f" if isinstance(epoch, float) else
                                  "%.5d") % epoch
-                    print('Epoch {}: reducing learning rate'
-                          ' of group {} to {:.4e}.'.format(epoch_str, i, new_lr))
+                    print(f'Epoch {epoch_str}: reducing learning rate of group {i} to {new_lr:.4e}.')
 
     @property
     def in_cooldown(self):
@@ -1253,8 +1248,7 @@ class CyclicLR(LRScheduler):
         """Return correctly formatted lr/momentum for each param group."""
         if isinstance(param, (list, tuple)):
             if len(param) != len(optimizer.param_groups):
-                raise ValueError("expected {} values for {}, got {}".format(
-                    len(optimizer.param_groups), name, len(param)))
+                raise ValueError(f"expected {len(optimizer.param_groups)} values for {name}, got {len(param)}")
             return param
         else:
             return [param] * len(optimizer.param_groups)
@@ -1679,8 +1673,7 @@ class OneCycleLR(LRScheduler):
         """Return correctly formatted lr/momentum for each param group."""
         if isinstance(param, (list, tuple)):
             if len(param) != len(optimizer.param_groups):
-                raise ValueError("expected {} values for {}, got {}".format(
-                    len(optimizer.param_groups), name, len(param)))
+                raise ValueError(f"expected {len(optimizer.param_groups)} values for {name}, got {len(param)}")
             return param
         else:
             return [param] * len(optimizer.param_groups)

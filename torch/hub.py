@@ -650,8 +650,7 @@ def download_url_to_file(url: str, dst: str, hash_prefix: Optional[str] = None,
         if hash_prefix is not None:
             digest = sha256.hexdigest()
             if digest[:len(hash_prefix)] != hash_prefix:
-                raise RuntimeError('invalid hash value (expected "{}", got "{}")'
-                                   .format(hash_prefix, digest))
+                raise RuntimeError(f'invalid hash value (expected "{hash_prefix}", got "{digest}")')
         shutil.move(f.name, dst)
     finally:
         f.close()

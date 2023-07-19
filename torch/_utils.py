@@ -795,8 +795,7 @@ def _get_device_index(
                 device_idx = _get_current_device_index()
         else:
             raise ValueError(
-                "Expected a torch.device with a specified index "
-                "or an integer, but got:{}".format(device)
+                f"Expected a torch.device with a specified index or an integer, but got:{device}"
             )
     return device_idx
 

@@ -912,9 +912,7 @@ def _unpool_output_size(
             max_size = default_size[d] + stride[d]
             if not (min_size < output_size[d] < max_size):
                 raise ValueError(
-                    'invalid output_size "{}" (dim {} must be between {} and {})'.format(
-                        output_size, d, min_size, max_size
-                    )
+                    f'invalid output_size "{output_size}" (dim {d} must be between {min_size} and {max_size})'
                 )
 
         ret = output_size
@@ -1791,8 +1789,7 @@ See :class:`~torch.nn.Softplus` for more details.
 
 def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
     warnings.warn(
-        "Implicit dimension choice for {} has been deprecated. "
-        "Change the call to include dim=X as an argument.".format(name),
+        f"Implicit dimension choice for {name} has been deprecated. Change the call to include dim=X as an argument.",
         stacklevel=stacklevel,
     )
     if ndim == 0 or ndim == 1 or ndim == 3:
@@ -2575,10 +2572,7 @@ def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: flo
     dim = input.dim()
     if dim < 3:
         raise ValueError(
-            "Expected 3D or higher dimensionality \
-                         input (got {} dimensions)".format(
-                dim
-            )
+            f"Expected 3D or higher dimensionality                          input (got {dim} dimensions)"
         )
 
     if input.numel() == 0:
@@ -4277,8 +4271,7 @@ def grid_sample(
         )
     if mode != "bilinear" and mode != "nearest" and mode != "bicubic":
         raise ValueError(
-            "nn.functional.grid_sample(): expected mode to be "
-            "'bilinear', 'nearest' or 'bicubic', but got: '{}'".format(mode)
+            f"nn.functional.grid_sample(): expected mode to be 'bilinear', 'nearest' or 'bicubic', but got: '{mode}'"
         )
     if padding_mode != "zeros" and padding_mode != "border" and padding_mode != "reflection":
         raise ValueError(
@@ -4379,15 +4372,13 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     if len(size) == 4:
         if theta.dim() != 3 or theta.shape[-2] != 2 or theta.shape[-1] != 3:
             raise ValueError(
-                "Expected a batch of 2D affine matrices of shape Nx2x3 "
-                "for size {}. Got {}.".format(size, theta.shape)
+                f"Expected a batch of 2D affine matrices of shape Nx2x3 for size {size}. Got {theta.shape}."
             )
         spatial_size = size[-2:]  # spatial dimension sizes
     elif len(size) == 5:
         if theta.dim() != 3 or theta.shape[-2] != 3 or theta.shape[-1] != 4:
             raise ValueError(
-                "Expected a batch of 3D affine matrices of shape Nx3x4 "
-                "for size {}. Got {}.".format(size, theta.shape)
+                f"Expected a batch of 3D affine matrices of shape Nx3x4 for size {size}. Got {theta.shape}."
             )
         spatial_size = size[-3:]  # spatial dimension sizes
     else:

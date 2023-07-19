@@ -531,8 +531,7 @@ def replace_extern_shared(input_string):
     """
     output_string = input_string
     output_string = RE_EXTERN_SHARED.sub(
-        lambda inp: "HIP_DYNAMIC_SHARED({} {}, {})".format(
-            inp.group(1) or "", inp.group(2), inp.group(3)), output_string)
+        lambda inp: f"HIP_DYNAMIC_SHARED({inp.group(1) or ''} {inp.group(2)}, {inp.group(3)})", output_string)
 
     return output_string
 

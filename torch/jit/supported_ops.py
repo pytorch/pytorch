@@ -270,20 +270,20 @@ def _get_global_builtins():
     schematized_ops_str = textwrap.indent(schematized_ops_str, '\t')
     schemaless_ops_str = textwrap.indent(schemaless_ops_str, '\t')
     magic_methods_rows_str = textwrap.indent(magic_methods_rows_str, '\t')
-    section = """
+    section = f"""
 The functions in the following table are supported but do not have a static schema
 
 .. csv-table::
     :header: "Function", "Note"
 
-{}
+{schemaless_ops_str}
 
 The following functions will use the corresponding magic method on :any:`TorchScript classes`
 
 .. csv-table::
     :header: "Function", "Magic Method"
 
-{}
+{magic_methods_rows_str}
 
 These built-in functions use the schema
 
@@ -291,8 +291,8 @@ These built-in functions use the schema
 
 ::
 
-{}
-    """.format(schemaless_ops_str, magic_methods_rows_str, schematized_ops_str)
+{schematized_ops_str}
+    """
 
     return "Python Built-in Functions", section
 

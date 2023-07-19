@@ -918,8 +918,7 @@ class _NnapiSerializer:
             self.add_tensor_sequence(output, tensors)
         if const_vals is None and tensors is None:
             raise Exception(
-                "Unable to handle ListConstruct node."
-                "  Neither all constants nor all tensors. %r" % node)
+                f"Unable to handle ListConstruct node.  Neither all constants nor all tensors. {node!r}")
 
     def add_tuple_construct(self, node):
         assert node.outputsSize() == 1
