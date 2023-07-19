@@ -6669,6 +6669,69 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
 
+    def test_buffer_use_after_remove(self):
+        # https://github.com/pytorch/pytorch/issues/102857
+
+        def rotvec_to_rotmat(rotvec) -> torch.Tensor:
+            """Simplified rotvec to rotmat code from RoMa
+            (https://github.com/naver/roma/blob/06e4b0cdc1c802a60a012bb19c581d6600c63358/roma/mappings.py#L371)
+            """
+            theta = torch.norm(rotvec, dim=-1)
+            axis = rotvec / theta[..., None]
+            kx, ky, kz = axis[:, 0], axis[:, 1], axis[:, 2]
+            sin_theta = torch.sin(theta)
+            cos_theta = torch.cos(theta)
+            one_minus_cos_theta = 1 - cos_theta
+            xs = kx * sin_theta
+            ys = ky * sin_theta
+            zs = kz * sin_theta
+            xyc = kx * ky * one_minus_cos_theta
+            xzc = kx * kz * one_minus_cos_theta
+            yzc = ky * kz * one_minus_cos_theta
+            xxc = kx**2 * one_minus_cos_theta
+            yyc = ky**2 * one_minus_cos_theta
+            zzc = kz**2 * one_minus_cos_theta
+            R_rodrigues = torch.stack(
+                [
+                    1 - yyc - zzc,
+                    xyc - zs,
+                    xzc + ys,
+                    xyc + zs,
+                    1 - xxc - zzc,
+                    -xs + yzc,
+                    xzc - ys,
+                    xs + yzc,
+                    1 - xxc - yyc,
+                ],
+                dim=-1,
+            ).reshape(-1, 3, 3)
+            R = R_rodrigues
+            return R
+
+        def f(coord, rot, trans):
+            rot_mat = rotvec_to_rotmat(rot)
+            coord = torch.einsum("...ij,...bj->...bi", rot_mat, coord) + trans
+            return coord.sum()
+
+        foo_c = torch.compile(f, dynamic=True)
+
+        def run(fn):
+            coord = torch.ones((2, 3), device=self.device)
+            rot = nn.Parameter(torch.ones((2, 3), device=self.device))
+            trans = nn.Parameter(torch.ones((2, 3), device=self.device))
+
+            U = fn(coord, rot, trans)
+            U.backward()
+
+            return U, rot, trans
+
+        U_e, rot_e, trans_e = run(f)
+        U, rot, trans = run(foo_c)
+
+        self.assertEqual(U, U_e)
+        self.assertEqual(rot.grad, rot_e.grad)
+        self.assertEqual(trans.grad, trans_e.grad)
+
 
 @dataclasses.dataclass
 class TestFailure:

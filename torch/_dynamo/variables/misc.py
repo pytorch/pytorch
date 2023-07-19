@@ -794,6 +794,23 @@ class TypingVariable(VariableTracker):
         return self.value
 
 
+@functools.lru_cache(maxsize=1)
+def get_np_to_torch_np_map():
+    from ..utils import NP_TO_TORCH_NP_MODULE
+
+    np_fn_to_torch_np_fn = {}
+
+    for np_mod, torch_np_mod in NP_TO_TORCH_NP_MODULE.items():
+        for fn_name, torch_np_fn in torch_np_mod.__dict__.items():
+            if callable(torch_np_fn):
+                # some internal details do leak from torch_np
+                # which are not part of numpy API.
+                if np_fn := getattr(np_mod, fn_name, None):
+                    np_fn_to_torch_np_fn[np_fn] = torch_np_fn
+
+    return np_fn_to_torch_np_fn
+
+
 class NumpyVariable(VariableTracker):
     """
     Wrapper around `numpy.*`. Currently, is able to trace a small subset of numpy functions as well as numpy dtypes.
@@ -821,15 +838,17 @@ class NumpyVariable(VariableTracker):
             unimplemented(
                 f"numpy dtype function is not supported yet. Got type {type(self.value)}."
             )
-        elif hasattr(torch_np, self.value.__name__):
+        elif get_custom_getattr(torch_np):
+            unimplemented(
+                "torch_np has custom getattr implementation and dynamo doesn't support it"
+            )
+        else:  # We are dealing with a callable.
+            func = get_np_to_torch_np_map().get(self.value)
+            if func is None:
+                unimplemented(f"Can't find numpy function {self.value} in torch_np")
+
             # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
             #  wrapped by NumpyNdarrayVariable which is wrong!
-            getattr_fn = get_custom_getattr(torch_np)
-            if getattr_fn:
-                unimplemented(
-                    "torch_np has custom getattr implementation and dynamo doesn't support it"
-                )
-            func = getattr(torch_np, self.value.__name__)
             return wrap_fx_proxy_cls(
                 target_cls=NumpyNdarrayVariable,
                 tx=tx,
@@ -841,8 +860,6 @@ class NumpyVariable(VariableTracker):
                 example_value=None,
                 **options,
             )
-        else:
-            unimplemented(f"Can't find numpy function {self.value} in torch_np")
 
     def call_method(
         self,

@@ -394,7 +394,7 @@ try:
             # "QF_NRA" seems to work better on 'dynamo/test_dynamic_shapes.py'.
             solver = z3.SolverFor("QF_NRA")
             # Set a timeout for finding a solution.
-            solver.set(timeout=translation_validator_timeout())
+            solver.set(timeout=translation_validation_timeout())
 
             # Add all the assertions to the solver.
             for assertion in self._assertions:
@@ -432,15 +432,24 @@ except ImportError:
 else:
     _HAS_Z3 = True
 
+from torch._dynamo import config
 
-def translation_validator_enabled() -> bool:
-    from torch._dynamo import config
+def translation_validation_enabled() -> bool:
+    # Checks everytime this function is called, in case the Dynamo
+    # option is set, but Z3 is not installed.
+    assert_z3_installed_if_tv_set()
+    return _HAS_Z3 and config.translation_validation
+
+
+def translation_validation_timeout() -> int:
+    return config.translation_validation_timeout
+
+
+def assert_z3_installed_if_tv_set():
     assert _HAS_Z3 or not config.translation_validation, (
         "translation validation requires Z3 package. Please, either install "
         "z3-solver or disable translation validation."
     )
-    return config.translation_validation
 
-def translation_validator_timeout() -> int:
-    from torch._dynamo import config
-    return config.translation_validation_timeout
+# Checks when this module is loaded.
+assert_z3_installed_if_tv_set()
