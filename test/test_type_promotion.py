@@ -809,7 +809,7 @@ class TestTypePromotion(TestCase):
             return
 
         suffix = '_' if inplace else ''
-        err = "{} {}({}, {})".format("  coalesced" if coalesced else "uncoalesced", op_name + suffix, dtype1, dtype2)
+        err = f"{'  coalesced' if coalesced else 'uncoalesced'} {op_name + suffix}({dtype1}, {dtype2})"
 
         def op(t1, t2, suf=None):
             suf = suffix if suf is None else suf
@@ -984,21 +984,19 @@ class TestTypePromotion(TestCase):
                 # Note: These cases prettyprint the failing inputs to make
                 # debugging test failures easier.
                 if undesired_failure and same_result:
-                    msg = ("Failure: {} == {}. "
-                           "torch type was {}. NumPy type was {}. np_first is {} "
-                           "default type is {}.").format(actual, expected,
-                                                          torch_type, np_type,
-                                                          np_first,
-                                                          torch.get_default_dtype())
+                    msg = (
+                        f"Failure: {actual} == {expected}. torch type was {torch_type}. "
+                        f"NumPy type was {np_type}. np_first is {np_first} default type is "
+                        f"{torch.get_default_dtype()}."
+                    )
                     self.fail(msg)
 
                 if not undesired_failure and not same_result:
-                    msg = ("Failure: {} != {}. "
-                           "torch type was {}. NumPy type was {}. np_first is {} "
-                           "default type is {}.").format(actual, expected,
-                                                          torch_type, np_type,
-                                                          np_first,
-                                                          torch.get_default_dtype())
+                    msg = (
+                        f"Failure: {actual} != {expected}. torch type was {torch_type}. "
+                        f"NumPy type was {np_type}. np_first is {np_first} default type is "
+                        f"{torch.get_default_dtype()}."
+                    )
                     self.fail(msg)
 
 
