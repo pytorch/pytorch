@@ -12,8 +12,8 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
-from torch.ao.quantization._quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
 from torch.ao.quantization.pt2e.quantizer import X86InductorQuantizer
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
