@@ -2374,6 +2374,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_tensor_dtype_complex(self):
         self._test_tensor_dtype_complex(backend="gloo")
 
+    @requires_gloo()
+    def test_bool_tensors(self):
+        self._test_bool_tensors(backend="gloo")
+
 class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
     @requires_gloo()
     def test_collectives(self):
