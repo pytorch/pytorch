@@ -21,7 +21,7 @@ class Benchmark:
         elif mode == "fwd":
             self.requires_grad = False
         else:
-            raise ValueError("invalid mode: %s" % (mode))
+            raise ValueError(f"invalid mode: {mode}")
         self.result_grad = None
         self.grad_variables = []
         self.engine = tensor_engine.get_engine()
@@ -66,13 +66,7 @@ class Benchmark:
         if "NNC_NUM_THREADS" in os.environ:
             num_threads_str = os.environ["NNC_NUM_THREADS"]
             device += num_threads_str
-        return "{}: {}_{}_{}_{}".format(
-            self.engine.mode,
-            self.module(),
-            self.mode,
-            device,
-            config_str,
-        )
+        return f"{self.engine.mode}: {self.module()}_{self.mode}_{device}_{config_str}"
 
     @staticmethod
     def module():
@@ -210,7 +204,7 @@ class Benchmark:
                 result_dict["algorithmic"],
             )
             if "compute_workload" in result_dict:
-                msg += ", compute %.2f Gops/s" % result_dict["compute_workload"]
+                msg += f", compute {result_dict['compute_workload']:.2f} Gops/s"
             print(msg)
         else:
             raise Exception("Unknown output_type " + self.output_type)
