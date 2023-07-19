@@ -101,7 +101,7 @@ Read More
    torch.compiler_guards_overview
    torch.compiler_dynamic_shapes
    torch.compiler_nn_module
-   torch.compiler.best_practices_for_backends
+   torch.compiler_best_practices_for_backends
    torch.compiler_cudagraph_trees
    torch.compiler_fake_tensor
 
@@ -109,7 +109,6 @@ Read More
    :caption: HowTo for PyTorch Backend Vendors
    :maxdepth: 2
 
-   torch.compiler_backend_vendors
    torch.compiler_custom_backends
    torch.compiler_transformations
    torch.compiler_ir

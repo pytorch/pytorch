@@ -188,9 +188,12 @@ execute only the frame in which the error occurs to enable easier
 debugging. There are two tools available to enable this:
 
 - Setting the environment variable ``TORCHDYNAMO_DEBUG_FUNCTION``
-to the desired function name will only run torchdynamo on functions with that
-name.
-- Enabling the record/replay tool (set ``torch._dynamo.config.replay_record_enabled = True``) which dumps an execution record when an error is encountered. This record can then be replayed to run only the frame where an error occurred.
+  to the desired function name will only run torchdynamo on functions with that
+  name.
+
+- Enabling the record/replay tool (set ``torch._dynamo.config.replay_record_enabled = True``)
+  which dumps an execution record when an error is encountered. This record can
+  then be replayed to run only the frame where an error occurred.
 
 Diagnosing TorchInductor Errors
 -------------------------------
@@ -499,11 +502,12 @@ the inductor debug artifacts.
    debug.log  fx_graph_readable.py  fx_graph_runnable.py  fx_graph_transformed.py  ir_post_fusion.txt  ir_pre_fusion.txt  output_code.py
 
 Here is a summary of the contents:
- - ``fx_graph_readable.py`` and ``fx_graph_runnable.py`` are the readable and
- runnable versions of the ``fx_graph`` received by inductor.
- - ``fx_graph_transformed.py`` is the fx graph after inductor has run all fx passes.
- - ``ir\*.txt`` is the inductor ir pre and post fusion.
- - ``output_code.py`` is the compiled triton kernel for the subgraph.
+
+- ``fx_graph_readable.py`` and ``fx_graph_runnable.py`` are the readable and
+  runnable versions of the ``fx_graph`` received by inductor.
+- ``fx_graph_transformed.py`` is the fx graph after inductor has run all fx passes.
+- ``ir\*.txt`` is the inductor ir pre and post fusion.
+- ``output_code.py`` is the compiled triton kernel for the subgraph.
 
 Here are `example debug directory contents
 <https://gist.github.com/jansel/f4af078791ad681a0d4094adeb844396>`__

@@ -60,12 +60,15 @@ Do I still need to export whole graphs?
 For the vast majority of models you probably don’t and you can use
 ``torch.compile()`` as is but there are a few situations where
 full graphs are necessary and you can can ensure a full graph by simply
-running ``torch.compile(..., nopython=True)``. These situations include
+running ``torch.compile(..., nopython=True)``. These situations include:
+
 * Large scale training runs, such as $250K+ that require pipeline parallelism
-  and other advanced sharding strategies
+  and other advanced sharding strategies.
+
 * Inference optimizers like `TensorRT <https://github.com/pytorch/TensorRT>`__
   or `AITemplate <https://github.com/facebookincubator/AITemplate>`__ that
-  rely on fusing much more aggressively than training optimizers
+  rely on fusing much more aggressively than training optimizers.
+
 * Mobile training or inference.
 
 Future work will include tracing communication operations into graphs,
@@ -443,7 +446,7 @@ torch.compile compilations. This section provides some of the answers and
 you can find more information in :ref:`torchdynamo_fine_grain_tracing`.
 
 How do I graph break on a function?
-___________________________________
+-----------------------------------
 
 Graph break on a function is not enough to sufficiently express what you  want
 PyTorch to do. You need to be more specific about your use case. Some of the

@@ -34,7 +34,7 @@ disable compilation are listed in the following table:
 
 TorchDynamo intercepts the execution of each Python function frame. So, suppose you have a code structure (image below) where the function ``fn`` calls functions ``a_fn`` and ``b_fn``. And ``a_fn`` calls ``aa_fn`` and ``ab_fn``. When you use the PyTorch eager mode rather than ``torch.compile``, these function frames run as is. With ``torch.compile``, TorchDynamo intercepts each of these function frames (indicated by the green color):
 
-.. figure:: ../_static/img/fine_grained_apis/api_diagram.png
+.. figure:: _static/img/fine_grained_apis/api_diagram.png
    :alt: Callstack diagram of differnet apis.
 
 Let's imagine, that function ``a_fn`` is causing troubles with ``torch.compile``.
@@ -74,7 +74,7 @@ and not the ATen level operator. See more in the Limitations section of the doc.
    the disallowed operator when switching to the other compiler.
 
 ``torch.compiler.allow_in_graph``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``torch.compiler.allow_in_graph`` is useful when the relevant function frame
 has some known hard-to-support TorchDynamo feature, such as hooks and
