@@ -3,7 +3,7 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-from torchdynamo.exc import UserError
+from torch._dynamo.exc import UserError
 from torch._export import export, dynamic_dim
 from torch._export.trace import do_not_use_experimental_export
 from torch._export.constraints import constrain_as_size, constrain_as_value
@@ -381,8 +381,8 @@ class TestExport(TestCase):
             return x.cos() + x.sin()
 
         ep = export(foo, (torch.randn(1, 5),))
-        with self.assertRaisesRegexp(UserError, "Unflatten"):
-            ep.module(flat=True)
+        with self.assertRaisesRegex(UserError, "Unflatten"):
+            ep.module(flat=False)
 
 
 if __name__ == '__main__':
