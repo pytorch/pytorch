@@ -14257,7 +14257,7 @@ dedent """
         self.assertEqual(out, torch.tensor(6.0))
 
     def test_namedtuple_type_inference(self):
-        _AnnotatedNamedTuple = NamedTuple('_NamedTupleAnnotated', [('value', int)])
+        _AnnotatedNamedTuple = NamedTuple('_NamedTupleAnnotated', [('value', int)])  # noqa: UP014
         _UnannotatedNamedTuple = namedtuple('_NamedTupleUnAnnotated', ['value'])
 
         def test_check_named_tuple_value():
