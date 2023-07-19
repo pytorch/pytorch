@@ -172,7 +172,7 @@ class TestFX(JitTestCase):
 
         if not (IS_FBCODE or IS_WINDOWS or IS_MACOS):
             lib_file_path = find_library_location('libtorchbind_test.so')
-            # torch.ops.load_library(str(lib_file_path))
+            torch.ops.load_library(str(lib_file_path))
 
     def tearDown(self):
         super().tearDown()
