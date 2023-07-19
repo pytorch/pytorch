@@ -19,6 +19,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path
+from ..dependencies import MemoryDep, StarDep
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..triton_heuristics import AutotuneHint
@@ -2420,10 +2421,19 @@ class TritonScheduling:
         rw = node.pointwise_read_writes()
         assert len(rw.range_vars) == len(ranges)
 
+        # isinstance(dep, MemoryDep): this filters out StarDeps. StarDeps refer to reads
+        # that need to access the entire tensor; they don't contribute read indexing
+        # information (and practically, they don't have dep.index so they can't be used
+        # for stride_hints below
+        dep_sources = [rw.reads, rw.writes]
+        assert all(
+            isinstance(dep, (MemoryDep, StarDep))
+            for dep in itertools.chain(*dep_sources)
+        )
         deps = [
             dep
-            for dep in itertools.chain(rw.reads, rw.writes)
-            if dep.name not in V.graph.removed_buffers
+            for dep in itertools.chain(*dep_sources)
+            if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
         ]
         write_names = {dep.name for dep in rw.writes}
 
