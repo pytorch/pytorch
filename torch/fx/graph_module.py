@@ -746,21 +746,23 @@ class {module_name}(torch.nn.Module):
     # Passing Tracer as argument allows subclasses extending fx.GraphModule
     # define their own Tracer (extending fx.Tracer).
     def __reduce_deploy__(self, importer: Importer):
+        # call _real_recompile before accessing self.__dict__ since the former
+        # may add extra keys to self.__dict__.
+        python_code = self._real_recompile()
         dict_without_graph = self.__dict__.copy()
         dict_without_graph['_graphmodule_cls_name'] = self.__class__.__name__
         del dict_without_graph['_graph']
 
-        python_code = self._real_recompile()
         import_block = _format_import_block(python_code.globals, importer)
         return (reduce_deploy_graph_module, (dict_without_graph, import_block))
 
     def __reduce_package__(self, exporter: PackageExporter):
+        python_code = self._real_recompile()
         dict_without_graph = self.__dict__.copy()
         dict_without_graph['_graphmodule_cls_name'] = self.__class__.__name__
         del dict_without_graph['_graph']
 
         generated_module_name = f'fx-generated._{exporter.get_unique_id()}'
-        python_code = self._real_recompile()
         import_block = _format_import_block(python_code.globals, exporter.importer)
         module_code = import_block + self.code
         exporter.save_source_string(generated_module_name, module_code)
@@ -774,8 +776,8 @@ class {module_name}(torch.nn.Module):
         On the deserialization side, we symbolically trace through the generated
         code to regenerate the underlying ``Graph``
         """
-        dict_without_graph = self.__dict__.copy()
         python_code = self._real_recompile()
+        dict_without_graph = self.__dict__.copy()
         import_block = _format_import_block(python_code.globals, sys_importer)
         del dict_without_graph['_graph']
         return (reduce_graph_module, (dict_without_graph, import_block))
