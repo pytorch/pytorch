@@ -558,6 +558,33 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
+        if target.__name__ == "sdpa":
+            def create_placeholder(name):
+                return TensorBox.create(
+                        InputBuffer(
+                            "score",
+                            FixedLayout(args[0].get_device(), args[0].get_dtype(), (1,), (1,)),
+                        )
+                    )
+            # env = create_placeholder(name) for name in ["score", "b_1", "h_1", "m_1", "n_1"]]
+            scalar_inps = ["score_1", "b_1", "h_1", "m_1", "n_1"]
+            env = {}
+            output_buffer =
+            for node in args[3].graph.nodes:
+                if node.op == "placeholder":
+                    if node.target in scalar_inps:
+                        env[node] = create_placeholder(node.target)
+                    else:
+                        assert False, "NYI"
+                elif node.op == "call_function":
+                    from torch.utils._pytree import tree_map
+                    env[node] = lowerings[node.target](*tree_map(lambda x: env[x] if x in env else x, node.args))
+                elif node.op == "output":
+                    breakpoint()
+
+
+            breakpoint()
+            return lowerings[torch.ops.aten.scaled_dot_product_attention.default](args[0], args[1], args[2])
         try:
             out = lowerings[target](*args, **kwargs)
             return out
@@ -569,6 +596,8 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
+        if isinstance(value, torch.nn.Module):
+            return value
 
         if unsupported_output_tensor(value):
             return self.add_tensor_constant(value)

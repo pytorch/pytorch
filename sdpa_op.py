@@ -23,8 +23,6 @@ sdpa = HigherOrderOperator("sdpa")
 
 @sdpa.py_impl(DispatchKey.CompositeExplicitAutograd)
 def sdpa_dense(q, k, v, score_mod):
-    mode = _get_current_dispatch_mode()
-    assert (mode is None), "Mode should never be enabled for CPU/CUDA key"
     out = F.scaled_dot_product_attention(q, k, v)
     print(out.shape)
     return out
@@ -59,10 +57,15 @@ def sdpa_proxy_torch_dispatch_mode(q, k, v, score_mod):
         else:
             return sdpa(q, k, v, score_mod)
 
+@sdpa.py_impl(FakeTensorMode)
+def sdpa_fake_tensor_mode(*args, **kwargs):
+    return sdpa_dense(*args, **kwargs)
+
 sdpa.fallthrough(DispatchKey.PythonDispatcher)
 sdpa.fallthrough(DispatchKey.PythonTLSSnapshot)
 sdpa.fallthrough(DispatchKey.ADInplaceOrView)
 sdpa.fallthrough(DispatchKey.BackendSelect)
+sdpa.fallthrough(DispatchKey.AutocastCPU)
 sdpa.fallthrough(DispatchKey.AutocastCPU)
 
 Z = 1
@@ -74,8 +77,15 @@ q = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 k = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 v = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 
-@torch.compile
+# @torch.compile
 def foo(q, k, v):
-    return sdpa(q, k, v, lambda score, b, h, m, n: score * 2)
+    return (sdpa(q, k, v, lambda score, b, h, m, n: score * 2),)
 
-foo(q, k, v)
+# foo(q, k, v)
+# exit(0)
+fake_mode = FakeTensorMode()
+with fake_mode:
+    q, k, v = [fake_mode.from_tensor(t) for t in (q, k, v)]
+    out_graph = make_fx(foo)(q, k, v)
+    out_graph.print_readable()
+    compile_fx_inner(out_graph, (q, k, v))

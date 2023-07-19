@@ -882,7 +882,7 @@ class SdpaHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             graph_checkpoint,
             checkpoint,
-            manually_set_subgraph_inputs=False,
+            manually_set_subgraph_inputs=True,
         )
         breakpoint()
 
