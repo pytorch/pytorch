@@ -46,8 +46,8 @@ from torch.ao.quantization.backend_config import BackendConfig
 from typing import Any, Tuple
 
 __all__ = [
-    "prepare_pt2e_quantizer",
-    "prepare_qat_pt2e_quantizer",
+    "prepare_pt2e",
+    "prepare_qat_pt2e",
     "convert_pt2e",
 ]
 
@@ -77,9 +77,7 @@ def _prepare_pt2e_deprecated(
     _rearrange_weight_observer_for_decomposed_linear(model)
     return model
 
-# TODO: update this to prepare_pt2e after we have a usable quantizer
-# implemented
-def prepare_pt2e_quantizer(
+def prepare_pt2e(
     model: GraphModule,
     quantizer: Quantizer,
 ) -> GraphModule:
@@ -94,8 +92,7 @@ def prepare_pt2e_quantizer(
     model = prepare(model, node_name_to_scope, is_qat=False)
     return model
 
-# TODO: update this to prepare_qat_pt2e
-def prepare_qat_pt2e_quantizer(
+def prepare_qat_pt2e(
     model: GraphModule,
     quantizer: Quantizer,
 ) -> GraphModule:
