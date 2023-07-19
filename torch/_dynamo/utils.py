@@ -1743,3 +1743,10 @@ def is_compile_supported(device_type):
     else:
         compile_supported = False
     return compile_supported
+
+
+def is_guard_failure_reporting_enabled():
+    return (
+        config.report_guard_failures
+        or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
+    )
