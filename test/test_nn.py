@@ -6489,100 +6489,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.assertEqual(out_cpu, out_cuda)
                 self.assertEqual(input_cpu.grad, input_gpu.grad)
 
-    def test_channel_shuffle(self):
-        #  3D tensor
-        x = torch.tensor(
-            [[[1, 2],
-              [5, 6],
-              [9, 10],
-              [13, 14],
-              ]]
-        )
-        y_ref = torch.tensor(
-            [[[1, 2],
-              [9, 10],
-              [5, 6],
-              [13, 14],
-              ]]
-        )
-        #  ChannelsFirst
-        with warnings.catch_warnings(record=True) as w:
-            y = F.channel_shuffle(x, 2)
-            self.assertEqual(len(w), 0)
-        self.assertEqual(y, y_ref)
-        #  ChannelsLast not supported for 3dim
-
-        #  4D tensor
-        x = torch.tensor(
-            [[[[1, 2],
-               [3, 4]],
-              [[5, 6],
-               [7, 8]],
-              [[9, 10],
-               [11, 12]],
-              [[13, 14],
-               [15, 16]],
-              ]]
-        )
-        y_ref = torch.tensor(
-            [[[[1, 2],
-               [3, 4]],
-              [[9, 10],
-               [11, 12]],
-              [[5, 6],
-               [7, 8]],
-              [[13, 14],
-               [15, 16]],
-              ]]
-        )
-        #  ChannelsFirst NCHW
-        with warnings.catch_warnings(record=True) as w:
-            y = F.channel_shuffle(x, 2)
-            self.assertEqual(len(w), 0)
-        self.assertEqual(y, y_ref)
-        #  ChannelsLast NHWC
-        with warnings.catch_warnings(record=True) as w:
-            y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last), 2)
-            self.assertEqual(len(w), 0)
-        y = y.contiguous(memory_format=torch.contiguous_format)
-        self.assertEqual(y, y_ref)
-
-        #  5D tensor
-        x = torch.tensor(
-            [[[[[1, 2],
-               [3, 4]]],
-              [[[5, 6],
-               [7, 8]]],
-              [[[9, 10],
-               [11, 12]]],
-              [[[13, 14],
-               [15, 16]]],
-              ]]
-        )
-        y_ref = torch.tensor(
-            [[[[[1, 2],
-               [3, 4]]],
-              [[[9, 10],
-               [11, 12]]],
-              [[[5, 6],
-               [7, 8]]],
-              [[[13, 14],
-               [15, 16]]],
-              ]]
-        )
-        #  ChannelsFirst NCHW
-        with warnings.catch_warnings(record=True) as w:
-            y = F.channel_shuffle(x, 2)
-            self.assertEqual(len(w), 0)
-        self.assertEqual(y, y_ref)
-        #  ChannelsLast NHWC
-        with warnings.catch_warnings(record=True) as w:
-            y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last_3d), 2)
-            self.assertEqual(len(w), 0)
-        y = y.contiguous(memory_format=torch.contiguous_format)
-        self.assertEqual(y, y_ref)
-
-
     def test_channel_shuffle_return_alias_of_self(self):
         # gh-76616: nn.ChannelShuffle will return alias of self with an empty input tensor
         groups = 3
@@ -12765,6 +12671,100 @@ class TestNNDeviceType(NNTestCase):
             x.fill_(1.0 / numel)
             out = torch._softmax_backward_data(x, x, 2, x.dtype)
             self.assertEqual(out[0, 0, 0], 1 / numel)
+
+    @skipMeta
+    def test_channel_shuffle(self, device):
+        #  3D tensor
+        x = torch.tensor(
+            [[[1, 2],
+              [5, 6],
+              [9, 10],
+              [13, 14],
+              ]], device=device
+        )
+        y_ref = torch.tensor(
+            [[[1, 2],
+              [9, 10],
+              [5, 6],
+              [13, 14],
+              ]], device=device
+        )
+        #  ChannelsFirst
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x, 2).to(device)
+            self.assertEqual(len(w), 0)
+        self.assertEqual(y, y_ref)
+        #  ChannelsLast not supported for 3dim
+
+        #  4D tensor
+        x = torch.tensor(
+            [[[[1, 2],
+               [3, 4]],
+              [[5, 6],
+               [7, 8]],
+              [[9, 10],
+               [11, 12]],
+              [[13, 14],
+               [15, 16]],
+              ]], device=device
+        )
+        y_ref = torch.tensor(
+            [[[[1, 2],
+               [3, 4]],
+              [[9, 10],
+               [11, 12]],
+              [[5, 6],
+               [7, 8]],
+              [[13, 14],
+               [15, 16]],
+              ]], device=device
+        )
+        #  ChannelsFirst NCHW
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x, 2).to(device)
+            self.assertEqual(len(w), 0)
+        self.assertEqual(y, y_ref)
+        #  ChannelsLast NHWC
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last), 2).to(device)
+            self.assertEqual(len(w), 0)
+        y = y.contiguous(memory_format=torch.contiguous_format)
+        self.assertEqual(y, y_ref)
+
+        #  5D tensor
+        x = torch.tensor(
+            [[[[[1, 2],
+               [3, 4]]],
+              [[[5, 6],
+               [7, 8]]],
+              [[[9, 10],
+               [11, 12]]],
+              [[[13, 14],
+               [15, 16]]],
+              ]], device=device
+        )
+        y_ref = torch.tensor(
+            [[[[[1, 2],
+               [3, 4]]],
+              [[[9, 10],
+               [11, 12]]],
+              [[[5, 6],
+               [7, 8]]],
+              [[[13, 14],
+               [15, 16]]],
+              ]], device=device
+        )
+        #  ChannelsFirst NCHW
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x, 2).to(device)
+            self.assertEqual(len(w), 0)
+        self.assertEqual(y, y_ref)
+        #  ChannelsLast NHWC
+        with warnings.catch_warnings(record=True) as w:
+            y = F.channel_shuffle(x.contiguous(memory_format=torch.channels_last_3d), 2).to(device)
+            self.assertEqual(len(w), 0)
+        y = y.contiguous(memory_format=torch.contiguous_format)
+        self.assertEqual(y, y_ref)
 
 
 class TestFunctionalPickle(TestCase):
