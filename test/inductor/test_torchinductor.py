@@ -2663,6 +2663,7 @@ class CommonTemplate:
     def test_repeat(self):
         def fn(x):
             return (
+                x.repeat(0, 1, 1, 1),
                 x.repeat(2, 2, 3, 1),
                 x.repeat(8, 1, 1, 1),
                 x.repeat(2, 1, 1, 1, 1, 1),
