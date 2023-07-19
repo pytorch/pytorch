@@ -661,7 +661,7 @@ class SymNode:
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
         # the translation validation problem.
-        self.fx_node = fx_node if _translation_validator_enabled() else None
+        self.fx_node = fx_node if _translation_validation_enabled() else None
 
     @property
     def expr(self):
@@ -1402,9 +1402,9 @@ del method
 del func
 
 
-def _translation_validator_enabled() -> bool:
-    from torch.fx.experimental.validator import translation_validator_enabled
-    return translation_validator_enabled()
+def _translation_validation_enabled() -> bool:
+    from torch.fx.experimental.validator import translation_validation_enabled
+    return translation_validation_enabled()
 
 
 def _lru_cache(fn, maxsize=None):
@@ -1978,7 +1978,7 @@ class ShapeEnv:
         self.fx_node_cache: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
 
-        if _translation_validator_enabled():
+        if _translation_validation_enabled():
             from torch.fx.experimental.validator import TranslationValidator
 
             self.validator = TranslationValidator()
@@ -1991,7 +1991,7 @@ class ShapeEnv:
         self.frozen = True
 
     def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
-        if not _translation_validator_enabled():
+        if not _translation_validation_enabled():
             return None
         srcname = source.name()
         if source not in self.source_to_symbol:
@@ -1999,19 +1999,19 @@ class ShapeEnv:
         return self.source_to_symbol[srcname]
 
     def _add_z3var(self, symbol: sympy.Symbol, type: Type) -> None:
-        if _translation_validator_enabled():
+        if _translation_validation_enabled():
             self.validator.add_var(symbol, type)
 
     def _add_target_expr(self, expr) -> None:
-        if _translation_validator_enabled():
+        if _translation_validation_enabled():
             self.validator.add_target_expr(expr)
 
     def _add_assertion(self, expr) -> None:
-        if _translation_validator_enabled():
+        if _translation_validation_enabled():
             self.validator.add_assertion(expr)
 
     def _check_translation_validate(self) -> None:
-        if not _translation_validator_enabled():
+        if not _translation_validation_enabled():
             return
 
         result = self.validator.validate()
@@ -2053,7 +2053,7 @@ Target Guards:
         # Cache this tuple in order to avoid duplicated nodes.
         node_key = (op, args)
 
-        if _translation_validator_enabled() and node_key not in self.fx_node_cache:
+        if _translation_validation_enabled() and node_key not in self.fx_node_cache:
             from torch.fx.experimental.validator import z3op
 
             # Presence of None in the arguments implies that we should ignore this operation.
@@ -2076,7 +2076,7 @@ Target Guards:
             symbol: sympy.Symbol,
             type: Type,
     ) -> Optional[torch.fx.Node]:
-        if not _translation_validator_enabled():
+        if not _translation_validation_enabled():
             return None
 
         node_key = (self.graph.placeholder, (symbol,))
@@ -2241,7 +2241,7 @@ Target Guards:
             hint: Optional[int],
             source: Optional[Source] = None,
     ):
-        if _translation_validator_enabled() and source is not None:
+        if _translation_validation_enabled() and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
             assert symbol is not None
@@ -2638,7 +2638,7 @@ Target Guards:
 
         if not _simplified:
             for source, expr in input_guards:
-                if _translation_validator_enabled():
+                if _translation_validation_enabled():
                     # Ignore sources that were not turned into SymInts.
                     srcname = source.name()
                     if srcname in self.source_to_symbol:
@@ -2821,7 +2821,7 @@ Target Guards:
             },
         )
 
-        if _translation_validator_enabled():
+        if _translation_validation_enabled():
             from torch.fx.experimental.validator import PopulateValidator
 
             # Add value range bound guards for all symbols with no trivial bounds.
@@ -3245,7 +3245,7 @@ Target Guards:
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
         if (
-                _translation_validator_enabled()
+                _translation_validation_enabled()
                 and fx_node is not None
                 and not self._suppress_guards_tls()
         ):
