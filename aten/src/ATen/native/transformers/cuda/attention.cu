@@ -37,7 +37,7 @@
 
 #ifdef USE_FLASH_ATTENTION
 // FlashAttention Specific Imports
-#include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
+#include <ATen/native/transformers/cuda/flash_attn/flash_api.h>
 // MemoryEfficient Attention Specific Imports
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassF.h>

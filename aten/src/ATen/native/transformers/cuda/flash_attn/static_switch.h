@@ -1,6 +1,5 @@
 // Inspired by https://github.com/NVIDIA/DALI/blob/main/include/dali/core/static_switch.h
 // and https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/Dispatch.h
-// and https://github.com/facebookresearch/xformers/blob/main/xformers/csrc/attention/cuda/fmha/gemm_kernel_utils.h#L8
 
 #pragma once
 
@@ -10,31 +9,57 @@
 ///
 /// Usage:
 /// ```
-/// BOOL_SWITCH(flag, BoolConst, ([&] {
+/// BOOL_SWITCH(flag, BoolConst, [&] {
 ///     some_function<BoolConst>(...);
-/// }));
+/// });
 /// ```
-/// We need "({" and "})" to make sure that the code is a single argument being passed to the macro.
-#define BOOL_SWITCH(COND, CONST_NAME, F)       \
-    {                                          \
-        if (COND) {                            \
-            constexpr bool CONST_NAME = true;  \
-            F();                               \
-        } else {                               \
-            constexpr bool CONST_NAME = false; \
-            F();                               \
-        }                                      \
-    }
+#define BOOL_SWITCH(COND, CONST_NAME, ...)                                           \
+    [&] {                                                                            \
+        if (COND) {                                                                  \
+            constexpr bool CONST_NAME = true;                                        \
+            return __VA_ARGS__();                                                    \
+        } else {                                                                     \
+            constexpr bool CONST_NAME = false;                                       \
+            return __VA_ARGS__();                                                    \
+        }                                                                            \
+    }()
 
-// modified from BOOL_SWITCH
-// because MSVC cannot handle std::conditional with constexpr variable
-#define FP16_SWITCH(COND, F)                 \
-    {                                        \
-        if (COND) {                          \
-            using elem_type = __nv_bfloat16; \
-            F();                             \
-        } else {                             \
-            using elem_type = __half;        \
-            F();                             \
-        }                                    \
-    }
+#define FP16_SWITCH(COND, ...)                     \
+    [&] {                                          \
+        if (COND) {                                \
+            using elem_type = cutlass::half_t;     \
+            return __VA_ARGS__();                  \
+        } else {                                   \
+            using elem_type = cutlass::bfloat16_t; \
+            return __VA_ARGS__();                  \
+        }                                          \
+    }()
+
+#define FWD_HEADDIM_SWITCH(HEADDIM, ...)  \
+    [&] {                                 \
+        if (HEADDIM <= 32) {              \
+            constexpr int kHeadDim = 32;  \
+            return __VA_ARGS__();         \
+        } else if (HEADDIM <= 64) {       \
+            constexpr int kHeadDim = 64;  \
+            return __VA_ARGS__();         \
+        } else if (HEADDIM <= 96) {       \
+            constexpr int kHeadDim = 96;  \
+            return __VA_ARGS__();         \
+        } else if (HEADDIM <= 128) {      \
+            constexpr int kHeadDim = 128; \
+            return __VA_ARGS__();         \
+        } else if (HEADDIM <= 160) {      \
+            constexpr int kHeadDim = 160; \
+            return __VA_ARGS__();         \
+        } else if (HEADDIM <= 192) {      \
+            constexpr int kHeadDim = 192; \
+            return __VA_ARGS__();         \
+        } else if (HEADDIM <= 224) {      \
+            constexpr int kHeadDim = 224; \
+            return __VA_ARGS__();         \
+        } else if (HEADDIM <= 256) {      \
+            constexpr int kHeadDim = 256; \
+            return __VA_ARGS__();         \
+        }                                 \
+    }()
