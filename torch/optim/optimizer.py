@@ -246,10 +246,10 @@ class Optimizer:
         format_string = self.__class__.__name__ + ' ('
         for i, group in enumerate(self.param_groups):
             format_string += '\n'
-            format_string += 'Parameter Group {0}\n'.format(i)
+            format_string += f'Parameter Group {i}\n'
             for key in sorted(group.keys()):
                 if key != 'params':
-                    format_string += '    {0}: {1}\n'.format(key, group[key])
+                    format_string += f'    {key}: {group[key]}\n'
         format_string += ')'
         return format_string
 
@@ -304,7 +304,7 @@ class Optimizer:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             self, *_ = args
-            profile_name = "Optimizer.step#{}.step".format(self.__class__.__name__)
+            profile_name = f"Optimizer.step#{self.__class__.__name__}.step"
             with torch.autograd.profiler.record_function(profile_name):
                 # call optimizer step pre hooks
                 for pre_hook in chain(_global_optimizer_pre_hooks.values(), self._optimizer_step_pre_hooks.values()):
@@ -337,7 +337,7 @@ class Optimizer:
             return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
 
     def _patch_step_function(self):
-        self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
+        self._zero_grad_profile_name = f"Optimizer.zero_grad#{self.__class__.__name__}.zero_grad"
         hooked = getattr(self.__class__.step, "hooked", None)
         if not hooked:
             self.__class__.step = self.profile_hook_step(self.__class__.step)  # type: ignore[method-assign]
@@ -468,8 +468,8 @@ class Optimizer:
                              "that doesn't match the size of optimizer's group")
 
         # Update the state
-        id_map = dict(zip(chain.from_iterable((g['params'] for g in saved_groups)),
-                      chain.from_iterable((g['params'] for g in groups))))
+        id_map = dict(zip(chain.from_iterable(g['params'] for g in saved_groups),
+                      chain.from_iterable(g['params'] for g in groups)))
 
         def cast(param, value, param_id=None, param_groups=None, key=None):
             r"""Make a deep copy of value, casting all tensors to device of param."""
