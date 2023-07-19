@@ -1063,6 +1063,8 @@ TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
 
 TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
 
+TEST_Z3 = _check_module_exists('z3')
+
 BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
 # Python 2.7 doesn't have spawn
