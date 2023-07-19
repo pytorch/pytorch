@@ -264,6 +264,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return AutogradFunctionMethodHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "sdpa":
+            return SdpaHigherOrderVariable(value, source, **kwargs)
+            breakpoint()
         elif value.__name__ in (
             "wrap_activation_checkpoint",
             "tag_activation_checkpoint",
@@ -1038,6 +1041,11 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             example_value=example_value,
         )
 
+class SdpaHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def create_wrapped_node(self, tx, args, kwargs):
+        # See NOTE [HigherOrderOperator tracing design] for more details
+        checkpoint = tx.copy_graphstate()
+        graph_checkpoint = tx.output.graph
 
 class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
@@ -1066,6 +1074,90 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 self.value,
                 args=tuple(p_args),
                 kwargs={},
+            ),
+            example_value=example_value,
+        )
+
+class SdpaHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def create_wrapped_node(self, tx, args, kwargs):
+        # See NOTE [HigherOrderOperator tracing design] for more details
+        checkpoint = tx.copy_graphstate()
+        graph_checkpoint = tx.output.graph
+
+        example_vals = [torch.zeros((), dtype=args[0].dtype)] + [
+            torch.zeros((), dtype=torch.int) for _ in range(4)
+        ]
+        with tx.output.new_subtracer() as tracer:
+
+            def create_dynamo_inp(example_value, name):
+                new_proxy = tracer.create_graph_input(name)
+                from torch._dynamo.source import ConstantSource
+                from .builder import wrap_fx_proxy
+
+                new_arg = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=new_proxy,
+                    example_value=example_value,
+                    source=ConstantSource("foo"),
+                )
+                return new_arg
+
+            example_vals = [
+                create_dynamo_inp(example_val, f"inp_{i}")
+                for i, example_val in enumerate(example_vals)
+            ]
+        (
+            body_r,
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            args[3],  # function
+            example_vals,
+            {},
+            graph_checkpoint,
+            checkpoint,
+            manually_set_subgraph_inputs=True,
+        )
+
+        body_name = add_subgraph(
+            tx,
+            self.source,
+            "sdpa",
+            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+        )
+
+        body_node = make_attr(tx, body_name)
+
+        # Since, we call `speculate_subgraph` with `manually_set_subgraph_inputs=False`,
+        # all the arguments are lifted.
+        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+
+        proxy_args = (body_node,) + lifted_args
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        return proxy_args, {}, example_value
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        p_args, p_kwargs, example_value = self.create_wrapped_node(tx, args, kwargs)
+
+        # Store the invocation as a call
+        inp_args, _ = proxy_args_kwargs(args[:-1], kwargs)
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=inp_args + p_args,
+                kwargs=p_kwargs,
             ),
             example_value=example_value,
         )
