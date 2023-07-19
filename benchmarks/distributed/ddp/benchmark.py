@@ -102,7 +102,7 @@ def sweep(benchmark):
     benchmarks = []
 
     def append_benchmark(prefix, ranks, opts=None):
-        prefix = "%4d GPUs -- %s" % (len(ranks), prefix)
+        prefix = f"{len(ranks):4} GPUs -- {prefix}"
         benchmarks.append((prefix, ranks, opts))
 
     def local_print(msg):

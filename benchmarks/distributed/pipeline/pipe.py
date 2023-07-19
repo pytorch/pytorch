@@ -186,9 +186,7 @@ def train(lm_dataloader, model, criterion, optimizer, vocab_size, args):
 
     print('Peak memory usage for GPUs: ', end='')
     for i in range(len(model.devices)):
-        print("cuda:{}: {}, ".format(
-            i,
-            sizeof_fmt(torch.cuda.memory_stats(i)["allocated_bytes.all.peak"])), end='')
+        print(f"cuda:{i}: {sizeof_fmt(torch.cuda.memory_stats(i)['allocated_bytes.all.peak'])}, ", end='')
     print()
 
 
