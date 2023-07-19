@@ -82,8 +82,7 @@ def nvprof_output_filename(rnns, **params):
     rnn_tag = '-'.join(rnns)
     size_tag = describe_sizes(**params)
     date_tag = datetime.datetime.now().strftime("%m%d%y-%H%M")
-    return '{}prof_{}_{}_{}.nvvp'.format(OUTPUT_DIR, rnn_tag,
-                                         size_tag, date_tag)
+    return f'{OUTPUT_DIR}prof_{rnn_tag}_{size_tag}_{date_tag}.nvvp'
 
 
 def nvprof(cmd, outpath):
@@ -94,13 +93,12 @@ def full_profile(rnns, **args):
     profile_args = []
     for k, v in args.items():
         profile_args.append(f'--{k}={v}')
-    profile_args.append('--rnns {}'.format(' '.join(rnns)))
+    profile_args.append(f"--rnns {' '.join(rnns)}")
     profile_args.append('--internal-run')
 
     outpath = nvprof_output_filename(rnns, **args)
 
-    cmd = '{} -m fastrnns.profile {}'.format(
-        sys.executable, ' '.join(profile_args))
+    cmd = f"{sys.executable} -m fastrnns.profile {' '.join(profile_args)}"
     rc, stdout, stderr = nvprof(cmd, outpath)
     if rc != 0:
         raise RuntimeError(f'stderr: {stderr}\nstdout: {stdout}')

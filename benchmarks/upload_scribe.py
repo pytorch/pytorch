@@ -31,8 +31,7 @@ class ScribeUploader:
                 message['float'][field] = float(value)
             else:
 
-                raise ValueError("Field {} is not currently used, "
-                                 "be intentional about adding new fields".format(field))
+                raise ValueError(f"Field {field} is not currently used, be intentional about adding new fields")
         return message
 
     def _upload_intern(self, messages):
