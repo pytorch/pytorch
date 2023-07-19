@@ -108,7 +108,7 @@ class LoggingTests(LoggingTestCase):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(torch.ones(1000, 1000))
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
-        self.assertEqual(len([r for r in records if ".__trace_source" in r.name]), 0)
+        self.assertEqual(len([r for r in records if ".__output_code" in r.name]), 0)
 
     @make_logging_test(dynamo=logging.ERROR)
     def test_dynamo_error(self, records):
@@ -258,6 +258,24 @@ class LoggingTests(LoggingTestCase):
         self.assertIn("[INFO]", handler.format(records[0]))
         self.assertEqual("custom format", handler.format(records[1]))
 
+    @make_logging_test(dynamo=logging.INFO)
+    def test_multiline_format(self, records):
+        dynamo_log = logging.getLogger(torch._dynamo.__name__)
+        dynamo_log.info("test\ndynamo")
+        dynamo_log.info("%s", "test\ndynamo")
+        dynamo_log.info("test\n%s", "test\ndynamo")
+        self.assertEqual(len(records), 3)
+        # unfortunately there's no easy way to test the final formatted log other than
+        # to ask the dynamo logger's handler to format it.
+        for handler in dynamo_log.handlers:
+            if torch._logging._internal._is_torch_handler(handler):
+                break
+        self.assertIsNotNone(handler)
+        for record in records:
+            r = handler.format(record)
+            for l in r.splitlines():
+                self.assertIn("[INFO]", l)
+
     test_trace_source_simple = within_range_record_test(1, 100, trace_source=True)
 
     @make_logging_test(trace_source=True)
@@ -370,6 +388,25 @@ class LoggingTests(LoggingTestCase):
     def test_invalid_artifact_flag(self):
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
+
+    @requires_distributed()
+    def test_distributed_rank_logging(self):
+        env = dict(os.environ)
+        env["TORCH_LOGS"] = "dynamo"
+        stdout, stderr = self.run_process_no_exception(
+            """\
+import torch.distributed as dist
+import logging
+from torch.testing._internal.distributed.fake_pg import FakeStore
+store = FakeStore()
+dist.init_process_group("fake", rank=0, world_size=2, store=store)
+dynamo_log = logging.getLogger("torch._dynamo")
+dynamo_log.info("woof")
+print("arf")
+""",
+            env=env,
+        )
+        self.assertIn("[rank0]:", stderr.decode("utf-8"))
 
 
 # single record tests

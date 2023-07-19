@@ -565,8 +565,7 @@ class CudaReproTests(TestCase):
                 start = math.log2(0.5)
                 end = math.log2(1 / (2**8))
 
-                self.register_buffer(
-                    "scales",
+                self.scales = nn.Buffer(
                     2
                     ** torch.arange(
                         start,
@@ -736,6 +735,25 @@ class CudaReproTests(TestCase):
         mod = Model().cuda().eval()
         with torch.no_grad():
             self.common(mod, (torch.randn(4, 4),))
+
+    @config.patch({"fallback_random": True, "triton.cudagraphs": True})
+    def test_xlnet_lm_stride_repro(self):
+        class Repro(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dropout = nn.Dropout(p=0.1, inplace=False)
+
+            def forward(self, x):
+                y = torch._C._nn.gelu(x)
+                return self.dropout(y)
+
+        mod = Repro()
+        x = torch.randn((512, 1, 4096), requires_grad=True, device="cuda")
+        y = torch.compile(mod)(x)
+        # Inductor claims the output layout of gelu's saved variable for
+        # backwards will be (4096, 4096, 1) but in actuality it is (4096,
+        # 2097152, 1).  Fortunately this doesn't actually matter in practice.
+        y.sum().backward()
 
     def test_lookup_seed_backward(self):
         @torch.compile(fullgraph=True)

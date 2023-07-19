@@ -36,5 +36,6 @@ dev-discuss <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-co
    :maxdepth: 1
 
    guards-overview
+   best-practices-for-backends
    custom-backends
    deep-dive

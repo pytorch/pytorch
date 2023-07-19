@@ -69,7 +69,7 @@ def add_view_copy_derivatives(
 
     view_infos = {}
 
-    for _, info_dispatch_dict in infos.items():
+    for info_dispatch_dict in infos.values():
         # maybe_view_group only needs to be calculated once per info_dispatch_dict
         maybe_view_group = None
         view_copy_differentiability_infos = {}
@@ -98,7 +98,7 @@ def load_derivatives(
     global _GLOBAL_LOAD_DERIVATIVE_CACHE
     key = (derivatives_yaml_path, native_yaml_path)
     if key not in _GLOBAL_LOAD_DERIVATIVE_CACHE:
-        with open(derivatives_yaml_path, "r") as f:
+        with open(derivatives_yaml_path) as f:
             definitions = yaml.load(f, Loader=YamlLoader)
 
         funcs = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
