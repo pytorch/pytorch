@@ -387,20 +387,21 @@ class CodeGen:
             # Common case: this is a regular module name like 'foo.bar.baz'
             return add_global(typename, o)
 
+        def _get_repr(arg: Argument):
+            # Handle NamedTuples (if it has `_fields`) via add_global.
+            if isinstance(arg, tuple) and hasattr(arg, '_fields'):
+                qualified_name = _get_qualified_name(type(arg))
+                global_name = add_global(qualified_name, type(arg))
+                return f"{global_name}{repr(tuple(arg))}"
+            elif isinstance(arg, torch._ops.OpOverload):
+                qualified_name = _get_qualified_name(arg)
+                global_name = add_global(qualified_name, arg)
+                return f"{global_name}"
+            elif arg in python_builtin_types:
+                return arg.__name__  # type: ignore[union-attr]
+            return repr(arg)
+
         def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
-            def _get_repr(arg):
-                # Handle NamedTuples (if it has `_fields`) via add_global.
-                if isinstance(arg, tuple) and hasattr(arg, '_fields'):
-                    qualified_name = _get_qualified_name(type(arg))
-                    global_name = add_global(qualified_name, type(arg))
-                    return f"{global_name}{repr(tuple(arg))}"
-                elif isinstance(arg, torch._ops.OpOverload):
-                    qualified_name = _get_qualified_name(arg)
-                    global_name = add_global(qualified_name, arg)
-                    return f"{global_name}"
-                elif arg in python_builtin_types:
-                    return arg.__name__
-                return repr(arg)
             args_s = ', '.join(_get_repr(a) for a in args)
             kwargs_s = ', '.join(f'{k} = {_get_repr(v)}' for k, v in kwargs.items())
             if args_s and kwargs_s:
@@ -517,7 +518,7 @@ class CodeGen:
                 if getattr(node.target, "__module__", "") == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
                     body.append(f'{repr(node)}{maybe_type_annotation} = '
-                                f'{magic_methods[node.target.__name__].format(_format_args(args, kwargs))}')
+                                f'{magic_methods[node.target.__name__].format(*(_get_repr(a) for a in node.args))}')
                     return
 
                 # pretty print inplace operators; required for jit.script to work properly

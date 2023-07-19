@@ -1321,9 +1321,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     @requires_numpy_pytorch_interop
     @torch._dynamo.config.patch(numpy_ndarray_as_tensor=True)
     def test_no_graph_break_numpy_with_builtin_types(self):
-        x = np.ones(3, dtype='float64')
+        x = np.ones(3, dtype="float64")
 
         cnts = torch._dynamo.testing.CompileCounter()
+
         @torch._dynamo.optimize(cnts)
         def f(x):
             return x.astype(int)
