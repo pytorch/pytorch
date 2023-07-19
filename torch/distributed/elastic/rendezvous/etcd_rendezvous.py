@@ -861,9 +861,7 @@ class EtcdRendezvous:
         if not path.startswith("/"):
             path = "/" + path
 
-        return "{prefix}run_{run_id}{path}".format(
-            prefix=self._prefix, run_id=self._run_id, path=path
-        )
+        return f"{self._prefix}run_{self._run_id}{path}"
 
     def create_path_if_not_exists(self, full_path, ttl=None):
         try:

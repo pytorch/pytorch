@@ -121,7 +121,7 @@ def find_classes(root_dir):
                 r = root.split('/')
                 lr = len(r)
                 retour.append((f, r[lr - 2] + "/" + r[lr - 1], root))
-    print("== Found %d items " % len(retour))
+    print(f"== Found {len(retour)} items ")
     return retour
 
 
@@ -130,7 +130,7 @@ def index_classes(items):
     for i in items:
         if i[1] not in idx:
             idx[i[1]] = len(idx)
-    print("== Found %d classes" % len(idx))
+    print(f"== Found {len(idx)} classes")
     return idx
 
 

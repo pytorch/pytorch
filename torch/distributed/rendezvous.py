@@ -70,17 +70,13 @@ def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwa
         query_dict = _query_to_dict(result.query)
         assert (
             "rank" not in query_dict and "world_size" not in query_dict
-        ), "The url: {url} has node-specific arguments(rank, world_size) already.".format(
-            url=url
-        )
+        ), f"The url: {url} has node-specific arguments(rank, world_size) already."
         if rank != -1:
             query_dict["rank"] = str(rank)
         if world_size != -1 or world_size_opt is None:
             query_dict["world_size"] = str(world_size)
         result = result._replace(
-            query="{}".format(
-                "&".join([f"{k}={v}" for k, v in query_dict.items()])
-            )
+            query=f"{'&'.join([f'{k}={v}' for k, v in query_dict.items()])}"
         )
         url = urlunparse(result)
 
@@ -212,7 +208,7 @@ def _env_rendezvous_handler(
         return _rendezvous_error("env:// rendezvous: " + msg)
 
     def _env_error(var):
-        return _error("environment variable %s expected, but not set" % var)
+        return _error(f"environment variable {var} expected, but not set")
 
     def _get_env_or_raise(env_var: str) -> str:
         env_val = os.environ.get(env_var, None)
