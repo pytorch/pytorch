@@ -319,9 +319,14 @@ class TestSparseSemiStructured(TestCase):
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_conversions(self, device, dtype):
         def run_test(r, c, device, dtype):
+            from torch.sparse._semi_structured_conversions import (
+                sparse_semi_structured_from_dense,
+                sparse_semi_structured_to_dense,
+            )
+
             dense_ref = rand_dense_2by4(r, c, dtype, device)
 
-            compressed = to_sparse_semi_structured(dense_ref)
+            sparse, meta = sparse_semi_structured_from_dense(dense_ref, compile=False)
 
             # The torch.ops.aten._to_sparse_semi_structured operator
             # uses CUTLASS to perform conversion from given dense
@@ -331,10 +336,9 @@ class TestSparseSemiStructured(TestCase):
             # performed by SparseSemiStructuredTensor class
             # constructor against.
             _, meta_ref = torch.ops.aten._to_sparse_semi_structured(dense_ref)
-            meta = compressed.indices()
             torch.testing.assert_close(meta, meta_ref, rtol=0, atol=0)
 
-            dense = compressed.to_dense()
+            dense = sparse_semi_structured_to_dense(sparse, meta, compile=False)
             torch.testing.assert_close(dense, dense_ref, rtol=0, atol=0)
 
         shapes = [[32, 128], [32, 256], [64, 128], [64, 256]]
@@ -345,12 +349,17 @@ class TestSparseSemiStructured(TestCase):
     @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_conversions_all_patterns(self, device, dtype):
+        from torch.sparse._semi_structured_conversions import (
+            sparse_semi_structured_from_dense,
+            sparse_semi_structured_to_dense,
+        )
+
         r, c = 32, 128
 
         dense_inv, dense_val = rand_dense_2by4_all_patterns(r, c, dtype, device)
 
-        compressed = to_sparse_semi_structured(dense_inv)
-        dense = compressed.to_dense()
+        sparse, meta = sparse_semi_structured_from_dense(dense_inv, compile=False)
+        dense = sparse_semi_structured_to_dense(sparse, meta, compile=False)
 
         torch.testing.assert_close(dense, dense_val, rtol=0, atol=0)
 
