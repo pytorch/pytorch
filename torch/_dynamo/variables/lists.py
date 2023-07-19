@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
+from torch.fx import _pytree as fx_pytree
 from torch.utils import _pytree as pytree
 
 from .. import variables
@@ -704,6 +705,11 @@ def _register_dynamo_list_to_tree_spec():
         pytree._maybe_str_to_list,
     )
 
+    fx_pytree.register_pytree_flatten_spec(
+        ListVariable,
+        _listvariable_flatten,
+    )
+
 
 def _tuplevariable_flatten(d: TupleVariable) -> Tuple[List[Any], pytree.Context]:
     return d.items, None
@@ -725,6 +731,11 @@ def _register_dynamo_tuple_to_tree_spec():
         _tuplevariable_unflatten,
         pytree._tuple_to_str,
         pytree._maybe_str_to_tuple,
+    )
+
+    fx_pytree.register_pytree_flatten_spec(
+        TupleVariable,
+        _tuplevariable_flatten,
     )
 
 
