@@ -167,19 +167,21 @@ def cat(tensors, dim=0):
         return tensors[0].clone()
     return NotImplemented
 
+
 @register_decomposition([aten.angle])
 def angle(x):
     if x.is_complex():
-        return torch.where(torch.isnan(x.real), float("nan"), torch.atan2(x.imag, x.real))
+        return torch.where(
+            torch.isnan(x.real), float("nan"), torch.atan2(x.imag, x.real)
+        )
     else:
         # when x is real number
         #   if x >= 0, return 0
         #   if x < 0, return pi
         #   if x is nan, return nan
-        ret = torch.where(x.real < 0, math.pi, 0.)
-        nan = torch.where(torch.isnan(x), float("nan"), 0)
+        ret = torch.where(x.real < 0, math.pi, 0.0)
+        nan = torch.where(torch.isnan(x), float("nan"), 0.0)
         return ret + nan
-
 
 
 @register_decomposition([aten.conj_physical])
