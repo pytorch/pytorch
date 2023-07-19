@@ -3,7 +3,6 @@ name: Close nonexistent disable issues
 on:
   schedule:
     - cron: 5 22 * * 5  # this should be about 3PM PT on Friday
-  pull_request:
 
 jobs:
   close-nonexistent-disable-issues:
@@ -20,4 +19,4 @@ jobs:
         run: |
           pip3 install requests==2.26
           pip3 install rockset==1.0.3
-          python3 .github/scripts/close_nonexistent_disable_issues.py --dry-run
+          python3 .github/scripts/close_nonexistent_disable_issues.py

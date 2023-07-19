@@ -60,6 +60,9 @@ DISABLED_TESTS_JSON = (
     "https://ossci-metrics.s3.amazonaws.com/disabled-tests-condensed.json"
 )
 
+# Just in case this goes badly
+ROLLOUT_PERCENTAGE = 0.2
+
 
 def parse_args() -> Any:
     parser = argparse.ArgumentParser()
@@ -182,8 +185,7 @@ if __name__ == "__main__":
     if args.dry_run:
         print("dry run, not actually closing")
     else:
-        print("uh oh")
-        exit(0)
-        for item in to_be_closed:
+        print(f"Only closing {ROLLOUT_PERCENTAGE} for now")
+        for item in to_be_closed[:: int(1 / ROLLOUT_PERCENTAGE)]:
             _, (num, _, _) = item
             close_issue(num)
