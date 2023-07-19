@@ -2,21 +2,30 @@ import inspect
 from typing import Dict, List
 
 import torch
+from ..exc import unimplemented
 from ..utils import istype
 from .base import VariableTracker
 
 
+class DistributedVariable(VariableTracker):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if not DistributedVariable.is_available():
+            unimplemented("torch.distributed package is not available!")
+
+    @staticmethod
+    def is_available():
+        # check if the distributed package is available or not
+        return torch.distributed.is_available()
+
+
 def is_from_local(value):
-    if torch.distributed.is_available():
-        from torch.distributed._tensor import DTensor
+    from torch.distributed._tensor import DTensor
 
-        if inspect.isfunction(value) and value is DTensor.from_local:
-            return True
-
-    return False
+    return inspect.isfunction(value) and value is DTensor.from_local
 
 
-class PlacementClassVariable(VariableTracker):
+class PlacementClassVariable(DistributedVariable):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -24,12 +33,12 @@ class PlacementClassVariable(VariableTracker):
     @staticmethod
     def is_placement_type(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
-        if torch.distributed.is_available():
-            from torch.distributed._tensor.placement_types import Placement
+        if not DistributedVariable.is_available():
+            return False
 
-            if type(value) is type and issubclass(value, Placement):
-                return True
-        return False
+        from torch.distributed._tensor.placement_types import Placement
+
+        return type(value) is type and issubclass(value, Placement)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -49,7 +58,7 @@ class PlacementClassVariable(VariableTracker):
         return super().call_function(tx, args, kwargs)
 
 
-class PlacementVariable(VariableTracker):
+class PlacementVariable(DistributedVariable):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -57,11 +66,12 @@ class PlacementVariable(VariableTracker):
     @staticmethod
     def is_placement(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
-        if torch.distributed.is_available():
-            from torch.distributed._tensor.placement_types import Placement
+        if not DistributedVariable.is_available():
+            return False
 
-            return istype(value, Placement)
-        return False
+        from torch.distributed._tensor.placement_types import Placement
+
+        return istype(value, Placement)
 
     def as_python_constant(self):
         return self.value
@@ -81,7 +91,11 @@ class PlacementVariable(VariableTracker):
         # and __setattr__ methods, the latter is for case like `Shard(dim)`
         if name in allowed_methods:
             try:
-                method = inspect.getattr_static(type(self.value), name)
+                value_type = type(self.value)
+                assert (
+                    inspect.getattr_static(value_type, "__getattr__", None) is None
+                ), "no custom getattr allowed!"
+                method = inspect.getattr_static(value_type, name)
             except AttributeError:
                 method = None
             if method is object.__init__:
@@ -95,7 +109,7 @@ class PlacementVariable(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
 
-class DeviceMeshVariable(VariableTracker):
+class DeviceMeshVariable(DistributedVariable):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -103,11 +117,12 @@ class DeviceMeshVariable(VariableTracker):
     @staticmethod
     def is_device_mesh(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
-        if torch.distributed.is_available():
-            from torch.distributed._tensor.device_mesh import DeviceMesh
+        if not DistributedVariable.is_available():
+            return False
 
-            return istype(value, DeviceMesh)
-        return False
+        from torch.distributed._tensor.device_mesh import DeviceMesh
+
+        return istype(value, DeviceMesh)
 
     def as_python_constant(self):
         return self.value

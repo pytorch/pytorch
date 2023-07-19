@@ -634,10 +634,12 @@ class VariableBuilder:
                 guards=self.make_guards(GuardBuilder.ID_MATCH),
             )
         elif PlacementClassVariable.is_placement_type(value):
+            # TODO: see if we need to add custom guard instead
+            # of a simple ID_MATCH
             return PlacementClassVariable(
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                guards=make_guards(GuardBuilder.ID_MATCH),
             )
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
