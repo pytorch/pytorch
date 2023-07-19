@@ -391,8 +391,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
     devices_str = "_".join(devices)
     dtypes_str = "_".join(dtypes)
     compilers_str = "_".join(compilers)
-    generated_file = "run_{}_{}_{}_{}_{}.sh".format(
-        mode, devices_str, dtypes_str, suites_str, compilers_str
+    generated_file = (
+        f"run_{mode}_{devices_str}_{dtypes_str}_{suites_str}_{compilers_str}.sh"
     )
     with open(generated_file, "w") as runfile:
         lines = []

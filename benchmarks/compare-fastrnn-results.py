@@ -7,7 +7,7 @@ Result = namedtuple("Result", ["name", "base_time", "diff_time"])
 def construct_name(fwd_bwd, test_name):
     bwd = 'backward' in fwd_bwd
     suite_name = fwd_bwd.replace('-backward', '')
-    return '{suite}[{test}]:{fwd_bwd}'.format(suite=suite_name, test=test_name, fwd_bwd='bwd' if bwd else 'fwd')
+    return f"{suite_name}[{test_name}]:{'bwd' if bwd else 'fwd'}"
 
 def get_times(json_data):
     r = {}
