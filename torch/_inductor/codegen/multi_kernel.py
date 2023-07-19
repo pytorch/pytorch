@@ -86,11 +86,24 @@ class MultiKernelCall:
 
     def __init__(self, kernels):
         assert len(kernels) >= 2
-        if isinstance(kernels[0], TritonFuture):
-            kernels = [kernel.result() for kernel in kernels]
-        self.kernels = kernels
+        self._kernels = kernels
 
         self.picked_kernel = None
+
+    @property
+    def kernels(self):
+        """
+        Read results from future.
+
+        This should be called after parallel compilation is done.
+        In case you call this before compilation is done,
+        it may slow down the parallel compilation.
+        """
+        for i, kernel in enumerate(self._kernels):
+            if isinstance(kernel, TritonFuture):
+                self._kernels[i] = kernel.result()
+
+        return self._kernels
 
     def bench(self, kernel, *args, **kwargs):
         def kernel_call():
