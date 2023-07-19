@@ -107,13 +107,13 @@ class _ExecOrderData:
         if current_index is None:
             return None
         target_index = current_index - 1
-        target_handles_key: Optional[FlatParamHandle] = None
+        target_handle: Optional[FlatParamHandle] = None
         for _ in range(self._backward_prefetch_limit):
             if target_index < 0:
                 break
-            target_handles_key = self.handles_post_forward_order[target_index]
+            target_handle = self.handles_post_forward_order[target_index]
             target_index -= 1
-        return target_handles_key
+        return target_handle
 
     def get_handle_to_forward_prefetch(
         self,
