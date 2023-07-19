@@ -347,7 +347,8 @@ class SizeVarAllocator:
 
     def size_hint(self, expr: Expr) -> int:
         if not isinstance(expr, Expr):
-            return int(expr)
+            assert isinstance(expr, int)
+            return expr
         free_symbols = expr.free_symbols
         if not free_symbols:
             return int(expr)
