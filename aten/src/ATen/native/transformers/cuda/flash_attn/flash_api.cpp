@@ -28,6 +28,9 @@
 
 #include <cstdint>
 #include <tuple>
+#include "ATen/ops/atan2_meta_dispatch.h"
+
+
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -40,17 +43,22 @@
 #else
 #include <ATen/ops/scalar_tensor.h>
 #endif
+
+// #include <torch/nn/functional/padding.h>
+// #include <torch/nn/options/padding.h>
+
 #include <cutlass/numeric_types.h>
 
 #include <ATen/native/transformers/cuda/flash_attn/flash.h>
 #include <ATen/native/transformers/cuda/flash_attn/flash_api.h>
+#include <ATen/native/transformers/cuda/flash_attn/static_switch.h>
 
 #include <c10/util/Exception.h>
 
 
-namespace pytorch_fmha {
+namespace pytorch_flash {
 
-#define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == torch::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
+#define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
 
 void set_params_fprop(Flash_fwd_params &params,
@@ -78,9 +86,11 @@ void set_params_fprop(Flash_fwd_params &params,
                       bool is_causal) {
 
     // Reset the parameters
-    memset(&params, 0, sizeof(params));
+    // TODO should be equivalent
+    params = {};
+    // memset(&params, 0, sizeof(params));
 
-    params.is_bf16 = q.dtype() == torch::kBFloat16;
+    params.is_bf16 = q.dtype() == at::kBFloat16;
 
     // Set the pointers and strides.
     params.q_ptr = q.data_ptr();
@@ -221,8 +231,8 @@ void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream) {
         });
     });
 }
-
-std::vector<at::Tensor>
+// return {out, q_padded, k_padded, v_padded, out_padded, softmax_lse, p};
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
         const at::Tensor &k,         // batch_size x seqlen_k x num_heads_k x head_size
         const at::Tensor &v,         // batch_size x seqlen_k x num_heads_k x head_size
@@ -242,9 +252,9 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     // TORCH_CHECK(is_sm90 || is_sm8x || is_sm75, "FlashAttention only supports Turing GPUs or newer.");
 
     auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == torch::kFloat16 || q_dtype == torch::kBFloat16,
+    TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
                 "FlashAttention only support fp16 and bf16 data type");
-    if (q_dtype == torch::kBFloat16) {
+    if (q_dtype == at::kBFloat16) {
         TORCH_CHECK(is_sm90 || is_sm8x, "bfloat16 is only supported on Ampere GPUs or newer");
     }
     TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
@@ -276,9 +286,13 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
     at::Tensor q_padded, k_padded, v_padded;
     if (head_size_og % 8 != 0) {
-        q_padded = torch::nn::functional::pad(q, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
-        k_padded = torch::nn::functional::pad(k, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
-        v_padded = torch::nn::functional::pad(v, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
+        q_padded = at::pad(q, {0, 8 - head_size_og % 8});
+        k_padded = at::pad(k, {0, 8 - head_size_og % 8});
+        v_padded = at::pad(v, {0, 8 - head_size_og % 8});
+
+        // q_padded = torch::nn::functional::pad(q, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
+        // k_padded = torch::nn::functional::pad(k, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
+        // v_padded = torch::nn::functional::pad(v, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
     } else {
         q_padded = q;
         k_padded = k;
@@ -292,9 +306,9 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         TORCH_CHECK(out.is_cuda(), "Output tensor must be on CUDA device");
         TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
         CHECK_SHAPE(out, batch_size, seqlen_q, num_heads, head_size_og);
-        if (head_size_og % 8 != 0) { out = torch::empty_like(q_padded); }
+        if (head_size_og % 8 != 0) { out = at::empty_like(q_padded); }
     } else {
-        out = torch::empty_like(q_padded);
+        out = at::empty_like(q_padded);
     }
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
@@ -309,12 +323,12 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
     auto opts = q.options();
 
-    auto softmax_lse = torch::empty({batch_size, num_heads, seqlen_q}, opts.dtype(at::kFloat));
+    auto softmax_lse = at::empty({batch_size, num_heads, seqlen_q}, opts.dtype(at::kFloat));
     at::Tensor p;
     // Only return softmax if there's dropout to reduce compilation time
     if (return_softmax) {
         TORCH_CHECK(p_dropout > 0.0f, "return_softmax is only supported when p_dropout > 0.0");
-        p = torch::empty({ batch_size, num_heads, seqlen_q_rounded, seqlen_k_rounded }, opts);
+        p = at::empty({ batch_size, num_heads, seqlen_q_rounded, seqlen_k_rounded }, opts);
     }
 
     Flash_fwd_params params;
@@ -333,16 +347,40 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
                      softmax_scale,
                      is_causal);
 
+    
+    // We want to checkpoint and save the RNG state for backward if dropout
+    // We get the default generator and return the seed and offset which will
+    // be used in the backward function
+    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+    at::Tensor seed_t, offset_t;
     if (p_dropout > 0.0)  {
         // number of times random will be generated per thread, to offset philox counter in thc random
         // state
         // We use a custom RNG that increases the offset by batch_size * nheads * 32.
         int64_t counter_offset = params.b * params.h * 32;
-        auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-            gen_, at::cuda::detail::getDefaultCUDAGenerator());
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
-        params.philox_args = gen->philox_cuda_state(counter_offset);
+        at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
+        if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+          auto [seed, offset] = at::cuda::philox::unpack(philox_state);
+          seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
+          offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
+        } else {
+          seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+          offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+          params.seed = seed_t.data_ptr<int64_t>();
+          params.extragraph_offset = offset_t.data_ptr<int64_t>();
+        }
+        params.philox_args = philox_state;
+    } else {
+        if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+            seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+            offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+        } else {
+            seed_t = at::empty({}, at::dtype(at::kLong));
+            offset_t = at::empty({}, at::dtype(at::kLong));
+        }
+
     }
 
     auto stream = at::cuda::getCurrentCUDAStream().stream();
@@ -350,14 +388,14 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
     at::Tensor out_padded = out;
     if (head_size_og % 8 != 0) {
-        out = out.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
+        out = out.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
         if (out_.has_value()) { out_.value().copy_(out); }
     }
 
-    return {out, q_padded, k_padded, v_padded, out_padded, softmax_lse, p};
+    return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
 }
 
-std::vector<at::Tensor>
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
                const at::Tensor &k,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
                const at::Tensor &v,  // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -382,15 +420,15 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     // TORCH_CHECK(is_sm90 || is_sm8x || is_sm75, "FlashAttention only supports Turing GPUs or newer.");
 
     auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == torch::kFloat16 || q_dtype == torch::kBFloat16,
+    TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
                 "FlashAttention only support fp16 and bf16 data type");
-    if (q_dtype == torch::kBFloat16) {
+    if (q_dtype == at::kBFloat16) {
         TORCH_CHECK(is_sm90 || is_sm8x, "bfloat16 is only supported on Ampere GPUs or newer");
     }
     TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
     TORCH_CHECK(v.dtype() == q_dtype, "query and value must have the same dtype");
-    TORCH_CHECK(cu_seqlens_q.dtype() == torch::kInt32, "cu_seqlens_q must have dtype int32");
-    TORCH_CHECK(cu_seqlens_k.dtype() == torch::kInt32, "cu_seqlens_k must have dtype int32");
+    TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt, "cu_seqlens_q must have dtype int32");
+    TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt, "cu_seqlens_k must have dtype int32");
 
     TORCH_CHECK(q.is_cuda(), "Input tensor must be on CUDA device");
     TORCH_CHECK(k.is_cuda(), "Input tensor must be on CUDA device");
@@ -424,9 +462,13 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
     at::Tensor q_padded, k_padded, v_padded;
     if (head_size_og % 8 != 0) {
-        q_padded = torch::nn::functional::pad(q, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
-        k_padded = torch::nn::functional::pad(k, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
-        v_padded = torch::nn::functional::pad(v, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
+        q_padded = at::pad(q, {0, 8 - head_size_og % 8});
+        k_padded = at::pad(k, {0, 8 - head_size_og % 8});
+        v_padded = at::pad(v, {0, 8 - head_size_og % 8});
+
+        // q_padded = torch::nn::functional::pad(q, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
+        // k_padded = torch::nn::functional::pad(k, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
+        // v_padded = torch::nn::functional::pad(v, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
     } else {
         q_padded = q;
         k_padded = k;
@@ -440,9 +482,9 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         TORCH_CHECK(out.is_cuda(), "Output tensor must be on CUDA device");
         TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
         CHECK_SHAPE(out, total_q, num_heads, head_size_og);
-        if (head_size_og % 8 != 0) { out = torch::empty_like(q_padded); }
+        if (head_size_og % 8 != 0) { out = at::empty_like(q_padded); }
     } else {
-        out = torch::empty_like(q_padded);
+        out = at::empty_like(q_padded);
     }
 
     auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
@@ -457,12 +499,12 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
     auto opts = q.options();
 
-    auto softmax_lse = torch::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
+    auto softmax_lse = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
     at::Tensor p;
     // Only return softmax if there's dropout to reduce compilation time
     if (return_softmax) {
         TORCH_CHECK(p_dropout > 0.0f, "return_softmax is only supported when p_dropout > 0.0");
-        p = torch::empty({ batch_size, num_heads, seqlen_q_rounded, seqlen_k_rounded }, opts);
+        p = at::empty({ batch_size, num_heads, seqlen_q_rounded, seqlen_k_rounded }, opts);
     }
 
     if (zero_tensors) {
@@ -487,16 +529,39 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                      softmax_scale,
                      is_causal);
 
+   // We want to checkpoint and save the RNG state for backward if dropout
+    // We get the default generator and return the seed and offset which will
+    // be used in the backward function
+    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+    at::Tensor seed_t, offset_t;
     if (p_dropout > 0.0)  {
         // number of times random will be generated per thread, to offset philox counter in thc random
         // state
         // We use a custom RNG that increases the offset by batch_size * nheads * 32.
         int64_t counter_offset = params.b * params.h * 32;
-        auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-            gen_, at::cuda::detail::getDefaultCUDAGenerator());
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
-        params.philox_args = gen->philox_cuda_state(counter_offset);
+        at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
+        if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+          auto [seed, offset] = at::cuda::philox::unpack(philox_state);
+          seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
+          offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
+        } else {
+          seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+          offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+          params.seed = seed_t.data_ptr<int64_t>();
+          params.extragraph_offset = offset_t.data_ptr<int64_t>();
+        }
+        params.philox_args = philox_state;
+    } else {
+        if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+            seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+            offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+        } else {
+            seed_t = at::empty({}, at::dtype(at::kLong));
+            offset_t = at::empty({}, at::dtype(at::kLong));
+        }
+
     }
 
     auto stream = at::cuda::getCurrentCUDAStream().stream();
@@ -504,11 +569,11 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
     at::Tensor out_padded = out;
     if (head_size_og % 8 != 0) {
-        out = out.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
+        out = out.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
         if (out_.has_value()) { out_.value().copy_(out); }
     }
 
-    return {out, q_padded, k_padded, v_padded, out_padded, softmax_lse, p};
+    return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, p};
 }
 
 void run_mha_bwd(Flash_bwd_params &params, cudaStream_t stream, const bool configure) {
@@ -560,9 +625,9 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == torch::kFloat16 || q_dtype == torch::kBFloat16,
+    TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
                 "FlashAttention only support fp16 and bf16 data type");
-    if (q_dtype == torch::kBFloat16) {
+    if (q_dtype == at::kBFloat16) {
         TORCH_CHECK(is_sm90 || is_sm8x, "bfloat16 is only supported on Ampere GPUs or newer");
     }
     TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
@@ -621,7 +686,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         TORCH_CHECK(dq.stride(-1) == 1, "dq must have contiguous last dimension");
         CHECK_SHAPE(dq, batch_size, seqlen_q, num_heads, head_size);
     } else {
-        dq = torch::empty_like(q);
+        dq = at::empty_like(q);
     }
     if (dk_.has_value()) {
         dk = dk_.value();
@@ -630,7 +695,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         TORCH_CHECK(dk.stride(-1) == 1, "dk must have contiguous last dimension");
         CHECK_SHAPE(dk, batch_size, seqlen_k, num_heads_k, head_size);
     } else {
-        dk = torch::empty_like(k);
+        dk = at::empty_like(k);
     }
     if (dv_.has_value()) {
         dv = dv_.value();
@@ -639,12 +704,13 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         TORCH_CHECK(dv.stride(-1) == 1, "dv must have contiguous last dimension");
         CHECK_SHAPE(dv, batch_size, seqlen_k, num_heads_k, head_size);
     } else {
-        dv = torch::empty_like(k);
+        dv = at::empty_like(k);
     }
 
     at::Tensor dout_padded;
     if (head_size_og % 8 != 0) {
-        dout_padded = torch::nn::functional::pad(dout, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
+        dout_padded = at::pad(dout, {0, 8 - head_size_og % 8});
+        // dout_padded = torch::nn::functional::pad(dout, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
     } else {
         dout_padded = dout;
     }
@@ -658,19 +724,19 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     at::cuda::CUDAGuard device_guard{(char)q.get_device()};
 
     auto opts = q.options();
-    auto softmax_d = torch::empty({batch_size, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
+    auto softmax_d = at::empty({batch_size, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
     at::Tensor dq_accum;
     at::Tensor dk_accum, dv_accum;
     if (loop) {
-        dq_accum = torch::empty({batch_size, num_heads, seqlen_q_rounded, head_size_rounded}, opts.dtype(at::kFloat));
+        dq_accum = at::empty({batch_size, num_heads, seqlen_q_rounded, head_size_rounded}, opts.dtype(at::kFloat));
         // dk_accum = torch::empty({batch_size, num_heads_k, seqlen_k_rounded, head_size_rounded}, opts.dtype(at::kFloat));
         // dv_accum = torch::empty({batch_size, num_heads_k, seqlen_k_rounded, head_size_rounded}, opts.dtype(at::kFloat));
     }
 
     at::Tensor dk_expanded, dv_expanded;
     if (num_heads_k != num_heads) {  // MQA / GQA
-        dk_expanded = torch::empty({batch_size, seqlen_k, num_heads, head_size}, opts);
-        dv_expanded = torch::empty({batch_size, seqlen_k, num_heads, head_size}, opts);
+        dk_expanded = at::empty({batch_size, seqlen_k, num_heads, head_size}, opts);
+        dv_expanded = at::empty({batch_size, seqlen_k, num_heads, head_size}, opts);
     } else {
         dk_expanded = dk;
         dv_expanded = dv;
@@ -722,9 +788,9 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         at::sum_out(dv, at::reshape(dv_expanded, {batch_size, seqlen_k, num_heads_k, num_heads / num_heads_k, head_size}), {3});
     }
     if (head_size_og % 8 != 0) {
-        dq = dq.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
-        dk = dk.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
-        dv = dv.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
+        dq = dq.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
+        dk = dk.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
+        dv = dv.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
     }
 
     return { dq, dk, dv, softmax_d };
@@ -762,17 +828,17 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == torch::kFloat16 || q_dtype == torch::kBFloat16,
+    TORCH_CHECK(q_dtype == at::kHalf|| q_dtype == at::kBFloat16,
                 "FlashAttention only support fp16 and bf16 data type");
-    if (q_dtype == torch::kBFloat16) {
+    if (q_dtype == at::kBFloat16) {
         TORCH_CHECK(is_sm90 || is_sm8x, "bfloat16 is only supported on Ampere GPUs or newer");
     }
     TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
     TORCH_CHECK(v.dtype() == q_dtype, "query and value must have the same dtype");
     TORCH_CHECK(out.dtype() == q_dtype, "query and out must have the same dtype");
     TORCH_CHECK(dout.dtype() == q_dtype, "query and dout must have the same dtype");
-    TORCH_CHECK(cu_seqlens_q.dtype() == torch::kInt32, "cu_seqlens_q must have dtype int32");
-    TORCH_CHECK(cu_seqlens_k.dtype() == torch::kInt32, "cu_seqlens_k must have dtype int32");
+    TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt, "cu_seqlens_q must have dtype int32");
+    TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt, "cu_seqlens_k must have dtype int32");
 
     TORCH_CHECK(q.is_cuda(), "Input tensor must be on CUDA device");
     TORCH_CHECK(k.is_cuda(), "Input tensor must be on CUDA device");
@@ -831,7 +897,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         TORCH_CHECK(dq.stride(-1) == 1, "dq must have contiguous last dimension");
         CHECK_SHAPE(dq, total_q, num_heads, head_size);
     } else {
-        dq = torch::empty_like(q);
+        dq = at::empty_like(q);
     }
     if (dk_.has_value()) {
         dk = dk_.value();
@@ -840,7 +906,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         TORCH_CHECK(dk.stride(-1) == 1, "dk must have contiguous last dimension");
         CHECK_SHAPE(dk, total_k, num_heads_k, head_size);
     } else {
-        dk = torch::empty_like(k);
+        dk = at::empty_like(k);
     }
     if (dv_.has_value()) {
         dv = dv_.value();
@@ -849,12 +915,13 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         TORCH_CHECK(dv.stride(-1) == 1, "dv must have contiguous last dimension");
         CHECK_SHAPE(dv, total_k, num_heads_k, head_size);
     } else {
-        dv = torch::empty_like(k);
+        dv = at::empty_like(k);
     }
 
     at::Tensor dout_padded;
     if (head_size_og % 8 != 0) {
-        dout_padded = torch::nn::functional::pad(dout, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
+        dout_padded = at::pad(dout, {0, 8 - head_size_og % 8});
+        // dout_padded = torch::nn::functional::pad(dout, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
     } else {
         dout_padded = dout;
     }
@@ -868,16 +935,16 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     at::cuda::CUDAGuard device_guard{(char)q.get_device()};
 
     auto opts = q.options();
-    auto softmax_d = torch::empty({batch_size, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
+    auto softmax_d = at::empty({batch_size, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
     at::Tensor dq_accum;
     if (loop) {
-        dq_accum = torch::empty({batch_size, num_heads, seqlen_q_rounded, head_size_rounded}, opts.dtype(at::kFloat));
+        dq_accum = at::empty({batch_size, num_heads, seqlen_q_rounded, head_size_rounded}, opts.dtype(at::kFloat));
     }
 
     at::Tensor dk_expanded, dv_expanded;
     if (num_heads_k != num_heads) {  // MQA / GQA
-        dk_expanded = torch::empty({total_k, num_heads, head_size}, opts);
-        dv_expanded = torch::empty({total_k, num_heads, head_size}, opts);
+        dk_expanded = at::empty({total_k, num_heads, head_size}, opts);
+        dv_expanded = at::empty({total_k, num_heads, head_size}, opts);
     } else {
         dk_expanded = dk;
         dv_expanded = dv;
@@ -934,9 +1001,9 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         at::sum_out(dv, at::reshape(dv_expanded, {total_k, num_heads_k, num_heads / num_heads_k, head_size}), {2});
     }
     if (head_size_og % 8 != 0) {
-        dq = dq.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
-        dk = dk.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
-        dv = dv.index({"...", torch::indexing::Slice(torch::indexing::None, head_size_og)});
+        dq = dq.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
+        dk = dk.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
+        dv = dv.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
     }
 
     return { dq, dk, dv, softmax_d };

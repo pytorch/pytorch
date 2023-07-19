@@ -36,10 +36,10 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const Tensor& value,
     const Tensor& out,
     const Tensor& logsumexp,
-    const Tensor& cumulative_sequence_length_q,
-    const Tensor& cumulative_sequence_length_k,
-    const int64_t max_seqlen_batch_q,
-    const int64_t max_seqlen_batch_k,
+    const c10::optional<Tensor>& cumulative_sequence_length_q,
+    const c10::optional<Tensor>& cumulative_sequence_length_k,
+    c10::optional<int64_t> max_seqlen_batch_q,
+    c10::optional<int64_t> max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
     const Tensor& philox_seed,
@@ -52,7 +52,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   it will be set by an internal heuristic. We're exposing num_splits mostly for
   benchmarking. We will hard code it to 0 for now
   */
-  constexpr int num_splits{0};
+
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
@@ -63,29 +63,30 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
 
-  std::tie(dq, dk, dv, grad_softmax) = pytorch_fmha::mha_bwd(
-          contiguous_grad_out,
-          query,
-          key,
-          value,
-          contiguous_out,
-          logsumexp,
-          dq,
-          dk,
-          dv,
-          cumulative_sequence_length_q,
-          cumulative_sequence_length_k,
-          max_seqlen_batch_q,
-          max_seqlen_batch_k,
-          dropout_p,
-          softmax_scale,
-          false, /*zero_tensors = false for all calls here*/
-          is_causal,
-          num_splits,
-          philox_seed,
-          philox_offset
-  );
-  return std::make_tuple(dq, dk, dv);
+  return {Tensor(), Tensor(), Tensor()};
+  // std::tie(dq, dk, dv, grad_softmax) = pytorch_flash::mha_bwd(
+  //         contiguous_grad_out,
+  //         query,
+  //         key,
+  //         value,
+  //         contiguous_out,
+  //         logsumexp,
+  //         dq,
+  //         dk,
+  //         dv,
+  //         cumulative_sequence_length_q,
+  //         cumulative_sequence_length_k,
+  //         max_seqlen_batch_q,
+  //         max_seqlen_batch_k,
+  //         dropout_p,
+  //         softmax_scale,
+  //         false, /*zero_tensors = false for all calls here*/
+  //         is_causal,
+  //         num_splits,
+  //         philox_seed,
+  //         philox_offset
+  // );
+  // return std::make_tuple(dq, dk, dv);
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.");
   return std::make_tuple(Tensor(), Tensor(), Tensor());

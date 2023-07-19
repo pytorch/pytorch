@@ -87,6 +87,8 @@ struct Flash_fwd_params : public Qkv_params {
 
     // Random state.
     at::PhiloxCudaState philox_args;
+    int64_t * extragraph_offset;
+    int64_t * seed;
 
     bool is_bf16;
     bool is_causal;
