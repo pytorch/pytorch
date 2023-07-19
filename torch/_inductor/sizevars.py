@@ -301,9 +301,6 @@ class SizeVarAllocator:
         """
         Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
         """
-        if sympy.gcd(numerator, denominator) == denominator:
-            # can prove it symbolically
-            return True
         expr = sympy.Eq(numerator % denominator, 0)
         return self.is_expr_static_and_true(expr)
 
