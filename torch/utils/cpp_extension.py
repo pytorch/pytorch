@@ -43,6 +43,13 @@ SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
 MINIMUM_GCC_VERSION = (5, 0, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
 
+def get_cpp_compiler():
+    if IS_WINDOWS:
+        compiler = os.environ.get('CXX', 'cl')
+    else:
+        compiler = os.environ.get('CXX', 'c++')
+    return compiler
+
 VersionRange = Tuple[Tuple[int, ...], Tuple[int, ...]]
 VersionMap = Dict[str, VersionRange]
 # The following values were taken from the following GitHub gist that
@@ -883,10 +890,8 @@ class BuildExtension(build_ext):
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
-        elif IS_WINDOWS:
-            compiler = os.environ.get('CXX', 'cl')
         else:
-            compiler = os.environ.get('CXX', 'c++')
+            compiler = get_cpp_compiler()
         _, version = get_compiler_abi_compatibility_and_version(compiler)
         # Warn user if VC env is activated but `DISTUILS_USE_SDK` is not set.
         if IS_WINDOWS and 'VSCMD_ARG_TGT_ARCH' in os.environ and 'DISTUTILS_USE_SDK' not in os.environ:
@@ -1562,10 +1567,7 @@ def _write_ninja_file_and_compile_objects(
         verbose: bool,
         with_cuda: Optional[bool]) -> None:
     verify_ninja_availability()
-    if IS_WINDOWS:
-        compiler = os.environ.get('CXX', 'cl')
-    else:
-        compiler = os.environ.get('CXX', 'c++')
+    compiler = get_cpp_compiler()
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
@@ -1606,10 +1608,7 @@ def _write_ninja_file_and_build_library(
         with_cuda: Optional[bool],
         is_standalone: bool = False) -> None:
     verify_ninja_availability()
-    if IS_WINDOWS:
-        compiler = os.environ.get('CXX', 'cl')
-    else:
-        compiler = os.environ.get('CXX', 'c++')
+    compiler = get_cpp_compiler()
     get_compiler_abi_compatibility_and_version(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
@@ -2126,10 +2125,7 @@ def _write_ninja_file(path,
     assert len(sources) == len(objects)
     assert len(sources) > 0
 
-    if IS_WINDOWS:
-        compiler = os.environ.get('CXX', 'cl')
-    else:
-        compiler = os.environ.get('CXX', 'c++')
+    compiler = get_cpp_compiler()
 
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
