@@ -41,8 +41,6 @@ def _writeback_to_local_shard(
     Precondition: The handle's ``FlatParameter`` 's data points to the
     padded unsharded flattened parameter.
     """
-    if not handle:
-        return
 
     def _get_shard(flat_param_or_grad: torch.Tensor) -> torch.Tensor:
         if handle.uses_sharded_strategy:
