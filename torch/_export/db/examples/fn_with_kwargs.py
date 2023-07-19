@@ -14,7 +14,7 @@ from torch._export.db.case import export_case, ExportArgs, SupportLevel
     tags={"python.data-structure"},
     support_level=SupportLevel.SUPPORTED,
 )
-def fn_with_kwargs(pos0, tuple0, *myargs, mykw0=None, **mykwargs):
+def fn_with_kwargs(pos0, tuple0, *myargs, mykw0, **mykwargs):
     """
     Keyword arguments are not supported at the moment.
     """
