@@ -119,9 +119,7 @@ def _init_process_group(store, rank, world_size):
         )
     if (world_size != -1) and (world_size != group.size()):
         raise RuntimeError(
-            "world_size argument {} doesn't match pg size {}".format(
-                world_size, group.size()
-            )
+            f"world_size argument {world_size} doesn't match pg size {group.size()}"
         )
     return group
 
@@ -312,9 +310,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         rpc_backend_options, TensorPipeRpcBackendOptions
     ):
         raise TypeError(
-            "`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`. {}".format(
-                rpc_backend_options
-            )
+            f"`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`. {rpc_backend_options}"
         )
 
     device_count = torch.cuda.device_count()

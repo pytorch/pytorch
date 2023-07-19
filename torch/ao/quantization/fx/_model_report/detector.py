@@ -359,9 +359,7 @@ class PerChannelDetector(DetectorBase):
             fqn_dict = per_channel_info[fqn]
             if fqn_dict[self.PER_CHAN_SUPPORTED_KEY] and not fqn_dict[self.PER_CHAN_USED_KEY]:
                 optimizations_possible = True
-                further_optims_str += "Module {module_fqn} can be configured to use per_channel quantization.\n".format(
-                    module_fqn=fqn
-                )
+                further_optims_str += f"Module {fqn} can be configured to use per_channel quantization.\n"
 
         if optimizations_possible:
             further_optims_str += (

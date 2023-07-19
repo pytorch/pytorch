@@ -167,9 +167,7 @@ def celu(
     if alpha is not None:
         python_type = utils.dtype_to_type(a.dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
-            msg = "alpha argument of type {} cannot be safely cast to type {}!".format(
-                type(alpha), python_type
-            )
+            msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
         rhs = alpha * torch.expm1(torch.true_divide(a, alpha))  # type: ignore[arg-type]
     else:
@@ -435,9 +433,7 @@ def softplus(
     if beta is not None:
         python_type = utils.dtype_to_type(a.dtype)
         if not utils.is_weakly_lesser_type(type(beta), python_type):
-            msg = "beta argument of type {} cannot be safely cast to type {}!".format(
-                type(beta), python_type
-            )
+            msg = f"beta argument of type {type(beta)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
         scaled_input = a * beta
         rhs = torch.true_divide(torch.log1p(torch.exp(scaled_input)), beta)  # type: ignore[arg-type]
