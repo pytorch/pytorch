@@ -20,7 +20,7 @@ def assert_has_diagnostics(
     diagnostic_context: diagnostics.DiagnosticContext,
     rule: infra.Rule,
     level: infra.Level,
-    expected_error_node: str,
+    expected_node: str,
 ):
     rule_level_pairs = (rule.id, level.name.lower())
     sarif_log = diagnostic_context.sarif_log()
@@ -35,18 +35,17 @@ def assert_has_diagnostics(
                 rule_level_pairs == id_level_pair
                 and result.message.text
                 and result.message.markdown
-                and expected_error_node in result.message.text
+                and expected_node in result.message.text
             ):
                 return
 
     raise AssertionError(
         f"Expected diagnostic results of rule id and level pair {rule_level_pairs} "
-        f"not found with expected error node {expected_error_node} and "
+        f"not found with expected error node {expected_node} and "
         f"Actual diagnostic results: {actual_results}"
     )
 
 
-@common_utils.instantiate_parametrized_tests
 class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def setUp(self):
         super().setUp()
@@ -155,32 +154,28 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             export_output.diagnostic_context,
             diagnostics.rules.op_level_debugging,
             diagnostics.levels.WARNING,
-            expected_error_node="aten.embedding.default",
+            expected_node="aten.embedding.default",
         )
 
-    @common_utils.parametrize(
-        "op_level_debug, rule, expected_error_node",
-        [
-            common_utils.subtest(
-                (
-                    True,
-                    diagnostics.rules.op_level_debugging,
-                    "aten.convolution.default",
-                ),
-                name="bypassing_failed_op_level_debug",
-            ),
-            common_utils.subtest(
-                (
-                    False,
-                    diagnostics.rules.find_opschema_matched_symbolic_function,
-                    "aten.convolution.default",
-                ),
-                name="found_nearest_match",
-            ),
-        ],
-    )
-    def test_unsupported_function_schema_raises_diagnostic_warning(
-        self, op_level_debug: bool, rule: infra.Rule, expected_error_node: str
+    def test_unsupported_function_schema_raises_diagnostic_warning_when_found_nearest_match(
+        self,
+    ):
+        class TraceModel(torch.nn.Module):
+            def forward(self, input):
+                return input.new_zeros(())
+
+        x = torch.randn((2, 3), dtype=torch.float32)
+        export_output = dynamo_export(TraceModel(), x)
+
+        assert_has_diagnostics(
+            export_output.diagnostic_context,
+            diagnostics.rules.find_opschema_matched_symbolic_function,
+            diagnostics.levels.WARNING,
+            expected_node="aten.new_zeros.default",
+        )
+
+    def test_perfect_match_on_sequence_and_bool_attributes(
+        self,
     ):
         class TraceModel(torch.nn.Module):
             def __init__(self):
@@ -194,13 +189,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         x = torch.randn(20, 16, 50, 50)
         export_output = dynamo_export(
-            TraceModel(), x, export_options=ExportOptions(op_level_debug=op_level_debug)
+            TraceModel(), x, export_options=ExportOptions(op_level_debug=False)
         )
         assert_has_diagnostics(
             export_output.diagnostic_context,
-            rule,
-            diagnostics.levels.WARNING,
-            expected_error_node=expected_error_node,
+            diagnostics.rules.find_opschema_matched_symbolic_function,
+            diagnostics.levels.NONE,
+            expected_node="aten.convolution.default",
         )
 
     def test_dispatch_overload_fall_back_default_raise_diagnostic_warning(self):
@@ -214,7 +209,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             export_output.diagnostic_context,
             diagnostics.rules.find_operator_overloads_in_onnx_registry,
             diagnostics.levels.WARNING,
-            expected_error_node="aten.add.Tensor",
+            expected_node="aten.add.Tensor",
         )
 
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):

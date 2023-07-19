@@ -242,7 +242,7 @@ class _KinetoProfile:
         assert self.profiler is not None and self.profiler.kineto_results is not None
         return MemoryProfile(self.profiler.kineto_results)
 
-    def export_memory_timeline(self, path: str, device: str = None) -> None:
+    def export_memory_timeline(self, path: str, device: Optional[str] = None) -> None:
         """Extract the memory information from the memory profile collected
         tree for a given device, and export a timeline plot consisting of
         [times, [sizes by category]], where times are timestamps and sizes
@@ -266,7 +266,10 @@ class _KinetoProfile:
         elif path.endswith('.gz'):
             fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
             fp.close()
-            self.mem_tl.export_memory_timeline(fp.name, device)
+            if path.endswith('raw.json.gz'):
+                self.mem_tl.export_memory_timeline_raw(fp.name, device)
+            else:
+                self.mem_tl.export_memory_timeline(fp.name, device)
             with open(fp.name) as fin:
                 with gzip.open(path, 'wt') as fout:
                     fout.writelines(fin)

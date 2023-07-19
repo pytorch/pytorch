@@ -26,15 +26,15 @@ class AdamW(Optimizer):
         fused: Optional[bool] = None,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
+            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
         defaults = dict(
             lr=lr,
             betas=betas,
@@ -401,16 +401,14 @@ def _single_tensor_adamw(
         param.mul_(1 - lr * weight_decay)
 
         # Decay the first and second moment running average coefficient
-        exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+        exp_avg.lerp_(grad, 1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
         if capturable or differentiable:
             step = step_t
 
-            # 1 - beta1 ** step can't be captured in a CUDA graph, even if step is a CUDA tensor
-            # (incurs "RuntimeError: CUDA error: operation not permitted when stream is capturing")
-            bias_correction1 = 1 - torch.pow(beta1, step)
-            bias_correction2 = 1 - torch.pow(beta2, step)
+            bias_correction1 = 1 - beta1 ** step
+            bias_correction2 = 1 - beta2 ** step
 
             step_size = lr / bias_correction1
             step_size_neg = step_size.neg()
@@ -518,8 +516,7 @@ def _multi_tensor_adamw(
             torch._foreach_mul_(device_params, 1 - lr * weight_decay)
 
         # Decay the first and second moment running average coefficient
-        torch._foreach_mul_(device_exp_avgs, beta1)
-        torch._foreach_add_(device_exp_avgs, device_grads, alpha=1 - beta1)
+        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - beta1)
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
         torch._foreach_addcmul_(device_exp_avg_sqs, device_grads, device_grads, 1 - beta2)
