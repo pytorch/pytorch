@@ -729,6 +729,11 @@ def get_include_and_linking_paths(
             # GNU OpenMP generally is not available on MacOS
             # There is either Intel OpenMP(for x86) or LLVM OpenMP (for both x86 and arm64)
             libs = ["omp"]
+            if os.getenv("OMP_PREFIX") is not None:
+                # Support OpenMP on MacOS
+                ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
+                lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+
             if os.getenv("CONDA_PREFIX") is not None:
                 # On MacOS OpenMP is not available via the system install
                 # But on conda can be provided using https://anaconda.org/anaconda/llvm-openmp
