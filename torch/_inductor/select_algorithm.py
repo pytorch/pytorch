@@ -776,7 +776,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 V.graph.sizevars.size_hints(input_node.get_size()),
                 V.graph.sizevars.size_hints(input_node.get_stride()),
                 V.graph.sizevars.size_hint(input_node.get_layout().offset),
-            ) for input_node in input_nodes
+            )
+            for input_node in input_nodes
         ]
 
         out = cls.benchmark_example_value(layout)
