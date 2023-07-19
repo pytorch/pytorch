@@ -33,7 +33,7 @@ from torch.ao.quantization.pt2e.quantizer.composable_quantizer import (  # noqa:
 from torch.ao.quantization.pt2e.quantizer.qnnpack_quantizer import (
     get_symmetric_quantization_config,
 )
-from torch.ao.quantization._quantize_pt2e import (
+from torch.ao.quantization.quantize_pt2e import (
     _convert_to_reference_decomposed_fx,
     convert_pt2e,
     prepare_pt2e_quantizer,

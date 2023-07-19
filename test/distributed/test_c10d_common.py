@@ -1337,6 +1337,21 @@ class AbstractCommTest:
         dist.all_gather(tensor_list_c, tensor)
         dist.all_gather(tensor_list_c, tensor_c)
 
+    def _test_bool_tensors(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda" if backend == "nccl" else "cpu"
+        # test alltoall_base
+        tensor = torch.tensor([1, 0, 0, 1], dtype=torch.bool, device=device)
+        zeros = torch.tensor([0, 0, 0, 0], dtype=torch.bool, device=device)
+        outensor = zeros if self.rank > 0 else tensor
+        dist.broadcast(outensor, src=0)
+        self.assertEqual(outensor, tensor)
 
 # Variant of AbstractCommTest that expects world size of 4
 class AbstractLargeCommTest(object):
