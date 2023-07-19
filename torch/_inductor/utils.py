@@ -431,15 +431,12 @@ def has_incompatible_cudagraph_ops(gm):
         "run_and_save_rng_state",
     }
 
-    index_put_ops = {
-        "aten._unsafe_index_put.default",
-        "aten.index_put_.default",
-        "aten.index_put.default",
-    }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
             {
-                *index_put_ops,
+                "aten._unsafe_index_put.default",
+                "aten.index_put_.default",
+                "aten.index_put.default",
                 "aten.scatter.src",
                 "aten.scatter.reduce",
                 "aten.scatter.value_reduce",
@@ -450,15 +447,8 @@ def has_incompatible_cudagraph_ops(gm):
                 "aten.scatter_reduce.two_out",
             }
         )
-
-    def is_bad_index_put(node):
-        # index_put(..., accumulate=True) fails with CUDA graphs
-        if str(node.target) not in index_put_ops:
-            return False
-        return len(node.args) >= 4 and node.args[3] is True
-
     for node in gm.graph.nodes:
-        if str(node.target) in forbidden_set or is_bad_index_put(node):
+        if str(node.target):
             return True
     return False
 

@@ -45,13 +45,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import (
-    ceildiv,
-    decode_device,
-    developer_warning,
-    pad_listlike,
-    sympy_product,
-)
+from .utils import ceildiv, decode_device, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -1474,7 +1468,7 @@ def _foobar(_):
 
 @functools.lru_cache(1)
 def _warn_triton_random(salt):
-    developer_warning("using triton random, expect difference from eager")
+    log.info("using triton random, expect difference from eager")
 
 
 def warn_triton_random():
@@ -2450,6 +2444,10 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
+    if is_triton(values) and (
+        accumulate is True or torch.are_deterministic_algorithms_enabled()
+    ):
+        V.graph.cudagraphs_okay = False
     ir.IndexPutFallback(self, indices, values, accumulate)
     return self
 

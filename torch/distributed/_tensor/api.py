@@ -57,7 +57,10 @@ class _ToTorchTensor(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input: "DTensor"):  # type: ignore[override]
         ctx.dtensor_spec = input._spec
-        return input._local_tensor.detach()
+        # We need to return a fresh Tensor object there as autograd metadata
+        # will be inplaced into it. So we don't want to polute the Tensor
+        # object stored in _local_tensor.
+        return input._local_tensor.view_as(input._local_tensor)
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
@@ -111,8 +114,9 @@ class _FromTorchTensor(torch.autograd.Function):
                     input = input.contiguous()
                     device_mesh.broadcast(input, mesh_dim=idx)
 
+        # We want a fresh Tensor object that shares memory with the input tensor
         dist_tensor = DTensor(
-            input,
+            input.view_as(input),
             device_mesh,
             placements,
             shape=torch.Size(tensor_shape),
@@ -201,10 +205,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         r._spec = DTensorSpec(
             device_mesh, copy.deepcopy(placements), tensor_meta=tensor_meta
         )
-        # detach local tensor from autograd graph as we initialize the
-        # distributed tensor and autograd will be working on top of
-        # the wrapper tensor directly instead of local torch.Tensor
-        r._local_tensor = local_tensor.detach()
+        r._local_tensor = local_tensor
         return r
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
@@ -409,6 +410,11 @@ def distribute_tensor(
     if is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
         random._rng_tracker = OffsetBasedRNGTracker()
 
+    if not tensor.is_leaf:
+        raise RuntimeError(
+            "`distribute_tensor` should be used to distribute leaf tensors! but found non-leaf tensor!"
+        )
+
     # convert tensor to the corresponding device type if it's not in that device type
     if not tensor.is_meta:
         tensor = tensor.to(device_mesh.device_type)
@@ -459,8 +465,10 @@ def distribute_tensor(
             )
 
     assert local_tensor is not None, "distributing a tensor should not be None"
+    # detach the local tensor passed to DTensor since after the construction
+    # of DTensor, autograd would work on top of DTensor instead of local tensor
     return DTensor(
-        local_tensor,
+        local_tensor.detach(),
         device_mesh,
         placements,
         shape=tensor.size(),

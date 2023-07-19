@@ -38,7 +38,7 @@ from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 if config.is_fbcode():
-    from torch._inductor.fb.logging import time_and_log
+    from torch._inductor.fb.utils import time_and_log
 else:
     # no-op decorator
     def time_and_log(attr: str):
@@ -269,7 +269,7 @@ def fake_tensor_prop(
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
-    cudagraphs=None,
+    cudagraphs: Optional[BoxedBool] = None,
     num_fixed=0,
     is_backward=False,
     graph_id=None,
@@ -284,7 +284,7 @@ def compile_fx_inner(
         return make_boxed_func(gm.forward)
 
     if cudagraphs is None:
-        cudagraphs = config.triton.cudagraphs
+        cudagraphs = BoxedBool(config.triton.cudagraphs)
 
     # Inputs to fx_codegen_and_compile
     graph_args = [gm, example_inputs]
@@ -432,7 +432,7 @@ def compile_fx_inner(
 def fx_codegen_and_compile(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
-    cudagraphs=None,
+    cudagraphs: Optional[BoxedBool] = None,
     num_fixed=0,
     is_backward=False,
     graph_id=None,
@@ -441,7 +441,7 @@ def fx_codegen_and_compile(
     is_inference=False,
     user_visible_outputs=frozenset(),
     layout_opt=None,
-):
+) -> CompiledFxGraph:
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
@@ -514,6 +514,10 @@ def fx_codegen_and_compile(
                     else:
                         context.output_strides.append(None)
             compiled_fn = graph.compile_to_fn()
+
+            if not graph.cudagraphs_okay:
+                BoxedBool.disable(cudagraphs)
+
             compiled_graph = CompiledFxGraph(
                 compiled_artifact=compiled_fn,
                 cache_key=graph.cache_key,
@@ -1050,6 +1054,12 @@ def compile_fx(
             partition_fn=partition_fn,
             keep_inference_input_mutations=True,
         )(model_, example_inputs_)
+
+
+# pass config dict back to user
+def get_patched_config_dict(config_patches=None):
+    with config.patch(config_patches):
+        return config.get_config_copy()
 
 
 def _shape_env_from_inputs(inputs):
