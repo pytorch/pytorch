@@ -13,9 +13,9 @@ from torch.ao.quantization import (
     QConfigMapping,
     default_per_channel_symmetric_qnnpack_qconfig,
 )
-from torch.ao.quantization._quantize_pt2e import (
+from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
-    prepare_pt2e,
+    _prepare_pt2e_deprecated,
 )
 from torch.ao.quantization.backend_config import get_qnnpack_backend_config
 from torch.ao.quantization.backend_config._qnnpack_pt2e import (
@@ -77,7 +77,7 @@ class TestQuantizePT2EFX(QuantizationTestCase):
                 QConfigMapping().set_global(qconfig).set_module_name("conv2", None)
             )
             backend_config = get_qnnpack_pt2e_backend_config()
-            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+            m = _prepare_pt2e_deprecated(m, qconfig_mapping, example_inputs, backend_config)
             m(*example_inputs)
             m = convert_pt2e(m)
             m(*example_inputs)
@@ -131,7 +131,7 @@ class TestQuantizePT2EFX(QuantizationTestCase):
             qconfig = get_default_qconfig("qnnpack")
             qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Conv2d, qconfig)
             backend_config = get_qnnpack_pt2e_backend_config()
-            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+            m = _prepare_pt2e_deprecated(m, qconfig_mapping, example_inputs, backend_config)
             m(*example_inputs)
             m = convert_pt2e(m)
             m(*example_inputs)
@@ -192,7 +192,7 @@ class TestQuantizePT2EFX(QuantizationTestCase):
             qconfig = get_default_qconfig("qnnpack")
             qconfig_mapping = QConfigMapping().set_global(qconfig)
             backend_config = get_qnnpack_pt2e_backend_config()
-            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+            m = _prepare_pt2e_deprecated(m, qconfig_mapping, example_inputs, backend_config)
 
             # 1. Check graph nodes:
             # - args[0] of t should be the weight observer
@@ -254,7 +254,7 @@ class TestQuantizePT2EFX(QuantizationTestCase):
             qconfig = get_default_qconfig("qnnpack")
             qconfig_mapping = QConfigMapping().set_global(qconfig)
             backend_config = get_qnnpack_pt2e_backend_config()
-            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+            m = _prepare_pt2e_deprecated(m, qconfig_mapping, example_inputs, backend_config)
             # make sure it runs
             m(*example_inputs)
 
@@ -356,7 +356,7 @@ class TestQuantizePT2EFXX86Inductor(QuantizationTestCase):
                     qconfig = get_default_qconfig("x86")
                     qconfig_mapping = QConfigMapping().set_global(qconfig)
                     backend_config = get_x86_inductor_pt2e_backend_config()
-                    prepare_module = prepare_pt2e(
+                    prepare_module = _prepare_pt2e_deprecated(
                         export_module, qconfig_mapping, example_inputs, backend_config
                     )
                     prepare_module(*example_inputs)
@@ -482,7 +482,7 @@ class TestQuantizePT2EFXX86Inductor(QuantizationTestCase):
                     qconfig = get_default_qconfig("x86")
                     qconfig_mapping = QConfigMapping().set_global(qconfig)
                     backend_config_inductor = get_x86_inductor_pt2e_backend_config()
-                    prepared_model = prepare_pt2e(
+                    prepared_model = _prepare_pt2e_deprecated(
                         exported_model,
                         qconfig_mapping,
                         example_inputs,
@@ -535,7 +535,7 @@ class TestQuantizePT2EFXModels(QuantizationTestCase):
             qconfig_mapping = QConfigMapping().set_global(qconfig)
             before_fusion_result = m(*example_inputs)
 
-            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+            m = _prepare_pt2e_deprecated(m, qconfig_mapping, example_inputs, backend_config)
 
             # checking that we inserted observers correctly for maxpool operator (input and
             # output share observer instance)

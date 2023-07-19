@@ -346,6 +346,24 @@ class CppPrinter(ExprPrinter):
         r = f"std::ceil({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
+    def _print_Min(self, expr):
+        args = [self._print(a) for a in expr.args]
+        if len(args) == 2:
+            return f"std::min({args[0]}, {args[1]})"
+        else:
+            # Initializer list overload
+            il = "{" + ", ".join(args) + "}"
+            return f"std::min({il})"
+
+    def _print_Max(self, expr):
+        args = [self._print(a) for a in expr.args]
+        if len(args) == 2:
+            return f"std::max({args[0]}, {args[1]})"
+        else:
+            # Initializer list overload
+            il = "{" + ", ".join(args) + "}"
+            return f"std::max({il})"
+
 
 cexpr = CppPrinter().doprint
 
@@ -1972,6 +1990,8 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"store mode: {mode}")
                 return self.simd_vec
 
+            if len(index.free_symbols) == 0:
+                self.disable_vec(f"constant store index: {index}")
             if self.simd_vec and not self.could_vec(name, index):
                 self.disable_vec(f"not a loop: {index}")
             return self.simd_vec
@@ -2120,11 +2140,16 @@ class CppVecKernelChecker(CppVecKernel):
 
                 def can_use_int32():
                     free_symbols = list(expr.free_symbols)
-                    vars_ranges = {
-                        k: ValueRanges(0, v)
+                    sizes = {
+                        k: v
                         for k, v in zip(self.itervars, self.ranges)
                         if k in free_symbols
                     }
+                    # Trivial case: Range empty
+                    if any(v == 0 for v in sizes.values()):
+                        return True
+
+                    vars_ranges = {k: ValueRanges(0, v - 1) for k, v in sizes.items()}
                     if not vars_ranges or len(vars_ranges) != len(free_symbols):
                         i32_iinfo = numpy.iinfo(numpy.int32)
                         return (
@@ -2135,8 +2160,11 @@ class CppVecKernelChecker(CppVecKernel):
                     expr_ranges = bound_sympy(expr, vars_ranges)
                     if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):
                         return False
+                    # If something takes the values 0..7, we will compare in the loop
+                    # x < 8. As such, for the loop not to overflow in the last iteration, we want
+                    # to check that expr_ranges.upper + 1 is representable as well
                     return range_expressable_in_32_bits(
-                        ValueRanges(int(expr_ranges.lower), int(expr_ranges.upper))
+                        ValueRanges(int(expr_ranges.lower), int(expr_ranges.upper) + 1)
                     )
 
                 with RecordOptimizationContext(__name__) as node_ctx:

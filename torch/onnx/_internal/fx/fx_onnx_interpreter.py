@@ -4,7 +4,6 @@ import inspect
 import operator
 import re
 import types
-import warnings
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
@@ -101,7 +100,8 @@ def _retrieve_or_adapt_input_to_graph_set(
         #    in TorchScript graph.
         return fx_name_to_onnxscript_value[onnx_tensor.name]
     if isinstance(onnx_tensor, (tuple, list)) and any(
-        isinstance(node, torch.fx.Node) and isinstance(node.meta["val"], torch.SymInt)
+        isinstance(node, torch.fx.Node)
+        and isinstance(node.meta.get("val"), torch.SymInt)
         for node in onnx_tensor
     ):
         # This intends to handle dynamic axes. for example, if the input size of op.Expand
@@ -116,7 +116,7 @@ def _retrieve_or_adapt_input_to_graph_set(
         ] = []
         for tensor in onnx_tensor:
             if isinstance(tensor, torch.fx.Node) and isinstance(
-                tensor.meta["val"], torch.SymInt
+                tensor.meta.get("val"), torch.SymInt
             ):
                 sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
             elif isinstance(tensor, int):
@@ -139,11 +139,11 @@ def _retrieve_or_adapt_input_to_graph_set(
         output.shape = [len(sequence_mixed_elements)]
         return output
     elif isinstance(onnx_tensor, (tuple, list)) and all(
-        isinstance(node, torch.fx.Node) for node in onnx_tensor
+        isinstance(node, torch.fx.Node) or node is None for node in onnx_tensor
     ):
         sequence_elements: List[
             Union[
-                onnxscript_graph_building.TorchScriptTensor,
+                Optional[onnxscript_graph_building.TorchScriptTensor],
                 Tuple[
                     onnxscript_graph_building.TorchScriptTensor,
                     ...,
@@ -151,7 +151,9 @@ def _retrieve_or_adapt_input_to_graph_set(
             ]
         ] = []
         for tensor in onnx_tensor:
-            sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
+            sequence_elements.append(
+                fx_name_to_onnxscript_value[tensor.name] if tensor is not None else None
+            )
         return sequence_elements
     if isinstance(onnx_tensor, torch.dtype):
         onnx_tensor = int(
@@ -181,10 +183,7 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
                 # default case.
                 continue
             else:
-                filtered["dtype"] = int(
-                    jit_type_utils.JitScalarType.from_dtype(value).onnx_type()
-                )
-            continue
+                value = int(jit_type_utils.JitScalarType.from_dtype(value).onnx_type())
         filtered[key] = value
     return filtered
 
@@ -586,10 +585,6 @@ class FxOnnxInterpreter:
                     node_with_fixed_shape_args, node_with_fixed_shape_kwargs
                 )
             except ValueError as value_error:
-                warnings.warn(
-                    f"\nFound unsupported input types on PyTorch Op {node.target} with "
-                    f"ValueError: \n{value_error}.\n"
-                )
                 diagnostic = self.diagnostic_context.inflight_diagnostic()
                 diagnostic.with_additional_message(
                     f"### Op level debug fails due to unsupported input types\n"
