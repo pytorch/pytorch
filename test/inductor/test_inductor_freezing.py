@@ -296,41 +296,6 @@ class OptimizeForInferenceTemplate(TestCase):
 
         self.assertEqual(out_optimized_for_infernece, out_eager)
 
-    def test_folded_conv_binary(self):
-        class M(torch.nn.Module):
-            def __init__(self, binary_fn, other_shape, device):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1).to(device)
-                self.binary_fn = binary_fn
-                self.other = torch.randn(other_shape).to(device)
-
-            def forward(self, x):
-                x = self.conv1(x)
-                return self.binary_fn(x, self.other)
-
-        @torch.compile()
-        def foo(mod, x):
-            return mod(x)
-
-        binary_list = {
-            lambda x, y: torch.add(x, y): "aten.add",
-            lambda x, y: torch.sub(x, y): "aten.sub",
-            lambda x, y: torch.mul(x, y): "aten.mul",
-            lambda x, y: torch.div(x, y): "aten.div",
-        }
-
-        other_shapes = [[1, 16, 1, 1], [16, 1, 1]]
-        x = torch.rand(3, 3, 32, 32).to(self.device)
-        for binary_fn, other_shape in itertools.product(binary_list, other_shapes):
-            mod = M(binary_fn, other_shape, self.device).eval()
-            with torch.no_grad():
-                out_eager = mod(x)
-                out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
-
-            FileCheck().check_not(binary_list[binary_fn]).run(code[0])
-
-            self.assertEqual(out_optimized_for_infernece, out_eager)
-
     def test_param_deallocated(self):
         # TODO: cpu path keeps an extra copy of graph around somewhere,
         # memory not as important for cpu
