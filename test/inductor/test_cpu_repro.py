@@ -93,7 +93,7 @@ class CPUReproTests(TestCase):
     def test_conv2d_bn_mixed_dtype(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     3,
                     16,
@@ -1976,6 +1976,15 @@ class CPUReproTests(TestCase):
 
         x = torch.rand(4, 5)
         self.common(f, (x,))
+
+    def test_scalar_mul_bfloat16(self):
+        def f(x):
+            return torch.ops.aten.mul.Tensor(x, 1.7015043497085571)
+
+        metrics.reset()
+        x = torch.randn(4, 5, dtype=torch.bfloat16)
+        self.common(f, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_to_channels_last_bfloat16(self):
         def f(a):
