@@ -871,20 +871,21 @@ class SdpaHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 )
                 return new_arg
             example_vals = [create_dynamo_inp(example_val, f"inp_{i}") for i, example_val in enumerate(example_vals)]
-        (
-            body_r,
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            args[3],  # function
-            example_vals,
-            {},
-            graph_checkpoint,
-            checkpoint,
-            manually_set_subgraph_inputs=False,
-        )
-        breakpoint()
+            breakpoint()
+            (
+                body_r,
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                args[3],  # function
+                example_vals,
+                {},
+                graph_checkpoint,
+                checkpoint,
+                manually_set_subgraph_inputs=True,
+            )
+            breakpoint()
 
         body_name = add_subgraph(
             tx,
