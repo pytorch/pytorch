@@ -203,6 +203,7 @@ if RUN_CPU:
         BaseTest("test_tensor2"),  # constant input
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
         BaseTest("test_view_as_complex"),
+        BaseTest("test_view_as_real"),
     ]:
         make_test_case(
             item.name,
