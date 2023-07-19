@@ -90,9 +90,10 @@ includes = [
     "aten/src/ATen/native/nested/cuda/*",
     "aten/src/ATen/native/sparse/cuda/*",
     "aten/src/ATen/native/quantized/cuda/*",
-    # "aten/src/ATen/native/transformers/cuda/*",
-    "aten/src/ATen/native/transformers/cuda/flash_attn/*",
-    "aten/src/ATen/native/transformers/cuda/mem_eff_attention/*",
+    "aten/src/ATen/native/transformers/cuda/*",
+    "aten/src/ATen/native/transformers/cuda/mem_eff_attention/debug_utils.h",
+    "aten/src/ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h",
+    "aten/src/ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h",
     "aten/src/THC/*",
     "aten/src/ATen/test/*",
     # CMakeLists.txt isn't processed by default, but there are a few
@@ -134,6 +135,7 @@ ignores = [
     "aten/src/ATen/native/transformers/cuda/flash_attn/*",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/*",
     "aten/src/ATen/native/transformers/cuda/attention*",
+    "aten/src/ATen/native/transformers/cuda/sdp_utils.cpp",
 ]
 
 ignores = [os.path.join(proj_dir, ignore) for ignore in ignores]

@@ -351,8 +351,8 @@ mha_fwd(const at::Tensor &q,
         if (return_softmax) { s.zero_(); }
     }
 
-    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        gen_, at::cuda::detail::getDefaultCUDAGenerator());
+    auto gen = at::get_generator_or_default<at::HIPGeneratorImpl>(
+        gen_, at::cuda::detail::getDefaultHIPGenerator());
 
     set_params_fprop(launch_params.params,
                      batch_size,
@@ -499,8 +499,8 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         // softmax_d.zero_();
     }
     
-    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        gen_, at::cuda::detail::getDefaultCUDAGenerator());
+    auto gen = at::get_generator_or_default<at::HIPGeneratorImpl>(
+        gen_, at::cuda::detail::getDefaultHIPGenerator());
 
     if(!is_performance_mode){
         at::Tensor dq_tmp = at::empty(dq.sizes(), dq.options().dtype(at::kFloat)).contiguous();
