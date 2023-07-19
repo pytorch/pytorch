@@ -8,7 +8,7 @@ namespace opt {
 using namespace nom;
 using namespace nom::repr;
 
-static void deadCodeElim(NNModule* nn) {
+void deadCodeElim(NNModule* nn) {
   // Iteratively remove unconsumed non-external outputs.
   bool changed = false;
   do {

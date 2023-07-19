@@ -153,6 +153,10 @@ class Foo:  # noqa: B209
         self.a = a
         self.b = b
 
+class Add(torch.nn.Module):
+    def forward(self, x):
+        return x + x
+
 @torch.fx.has_side_effect
 @torch.fx.wrap
 def side_effect_func(x: torch.Tensor):
@@ -813,7 +817,7 @@ class TestFX(JitTestCase):
                 self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
                 self.lin = torch.nn.Linear(d_hid, d_hid)
-                self.register_buffer('buffer', torch.randn(bs + 100, d_hid))
+                self.buffer = torch.nn.Buffer(torch.randn(bs + 100, d_hid))
 
             def forward(self, x):
                 x = torch.mm(x, self.mm_param)
@@ -2656,7 +2660,7 @@ class TestFX(JitTestCase):
         class GetItemBase(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer('pe', torch.randn(8, 8))
+                self.pe = torch.nn.Buffer(torch.randn(8, 8))
 
         class GetItem1(GetItemBase):
             def forward(self, x):
@@ -3022,7 +3026,7 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(100, 200)
-                self.register_buffer("buf", torch.randn(2, 3))
+                self.buf = torch.nn.Buffer(torch.randn(2, 3))
                 self.net_c = C()
 
             def forward(self, x):
@@ -3192,7 +3196,7 @@ class TestFX(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.l1 = torch.nn.Linear(1, 1)
-                self.register_buffer('buffer', torch.ones(1))
+                self.buffer = torch.nn.Buffer(torch.ones(1))
 
             def forward(self, x):
                 return self.l1(x) + self.buffer
@@ -4076,6 +4080,18 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                 found = True
         self.assertTrue(found)
 
+    def test_preserve_unused_attr_after_unpickle(self):
+        gm = torch.fx.symbolic_trace(Add())
+        gm.add_submodule("foo", Add())
+        gm.register_buffer("dummy_buffer", torch.empty(1))
+        gm.register_parameter("dummy_parameter", torch.nn.Parameter(torch.empty(1)))
+        b = io.BytesIO()
+        torch.save(gm, b)
+        b.seek(0)
+        reload_gm = torch.load(b)
+        self.assertTrue(hasattr(reload_gm, "foo"))
+        self.assertTrue(hasattr(reload_gm, "dummy_buffer"))
+        self.assertTrue(hasattr(reload_gm, "dummy_parameter"))
 
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):

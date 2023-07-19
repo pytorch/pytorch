@@ -161,6 +161,9 @@ test_failures = {
     "test_empty2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_index3_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_inductor_bucketize_dynamic_shapes": TestFailure(("cpu")),
+    "test_inductor_bucketize_default_kwargs_dynamic_shapes": TestFailure(("cpu")),
+    "test_inductor_bucketize_int_dynamic_shapes": TestFailure(("cpu")),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -192,6 +195,9 @@ test_failures = {
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linear_float64_dynamic_shapes": TestFailure(("cpu")),
+    "test_adaptive_avg_pool_with_output_size_0_dynamic_shapes": TestFailure(
+        ("cpu", "cuda")
+    ),
     #
     # Tests not using 'common' or directly calling 'assertEqual':
     #
@@ -283,8 +289,6 @@ test_failures = {
 if TEST_WITH_ROCM:
     # aten.miopen_batch_norm is not registered for lowering
     test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
-    # Failed to find triton kernel after ROCm aten.prod fallback
-    test_failures["test_prod_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
     CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"
@@ -314,7 +318,7 @@ if HAS_CPU:
     )
 
 
-if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class DynamicShapesCodegenCudaTests(TestCase):
         maxDiff = None

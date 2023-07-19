@@ -34,6 +34,10 @@ TORCH_API bool is_hpu_enabled();
 TORCH_API void set_hpu_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_hpu_dtype();
 TORCH_API void set_autocast_hpu_dtype(at::ScalarType dtype);
+TORCH_API bool is_xla_enabled();
+TORCH_API void set_xla_enabled(bool enabled);
+TORCH_API at::ScalarType get_autocast_xla_dtype();
+TORCH_API void set_autocast_xla_dtype(at::ScalarType dtype);
 TORCH_API bool is_privateuseone_enabled();
 TORCH_API void set_privateuseone_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_privateuseone_dtype();
@@ -42,22 +46,24 @@ TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
 
 namespace {
-bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
+bool is_autocast_eligible(const Tensor& tensor, c10::DeviceType device_type) {
   switch (device_type) {
-    case DeviceType::CUDA:
+    case c10::DeviceType::CUDA:
       return (tensor.is_cuda() || tensor.is_xla()) &&
           tensor.is_floating_point();
-    case DeviceType::CPU:
+    case c10::DeviceType::CPU:
       return (tensor.is_cpu() || tensor.is_mkldnn()) &&
           tensor.is_floating_point();
-    case DeviceType::XPU:
+    case c10::DeviceType::XPU:
       return tensor.is_xpu() && tensor.is_floating_point();
-    case DeviceType::IPU:
+    case c10::DeviceType::IPU:
       return tensor.is_ipu() && tensor.is_floating_point();
-    case DeviceType::HPU:
+    case c10::DeviceType::HPU:
       return tensor.is_hpu() && tensor.is_floating_point();
-    case DeviceType::PrivateUse1:
-      return tensor.device().type() == DeviceType::PrivateUse1 &&
+    case c10::DeviceType::XLA:
+      return tensor.is_xla() && tensor.is_floating_point();
+    case c10::DeviceType::PrivateUse1:
+      return tensor.device().type() == c10::DeviceType::PrivateUse1 &&
           tensor.is_floating_point();
     default:
       return false;
@@ -66,19 +72,21 @@ bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
 } // namespace
 
 inline DispatchKey get_autocast_dispatch_key_from_device_type(
-    DeviceType device_type) {
+    c10::DeviceType device_type) {
   switch (device_type) {
-    case DeviceType::CUDA:
+    case c10::DeviceType::CUDA:
       return DispatchKey::Autocast;
-    case DeviceType::CPU:
+    case c10::DeviceType::CPU:
       return DispatchKey::AutocastCPU;
-    case DeviceType::XPU:
+    case c10::DeviceType::XPU:
       return DispatchKey::AutocastXPU;
-    case DeviceType::IPU:
+    case c10::DeviceType::IPU:
       return DispatchKey::AutocastIPU;
-    case DeviceType::HPU:
+    case c10::DeviceType::HPU:
       return DispatchKey::AutocastHPU;
-    case DeviceType::PrivateUse1:
+    case c10::DeviceType::XLA:
+      return DispatchKey::AutocastXLA;
+    case c10::DeviceType::PrivateUse1:
       return DispatchKey::AutocastPrivateUse1;
     default:
       throw std::runtime_error(
@@ -87,19 +95,21 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
 }
 
 inline at::ScalarType get_lower_precision_fp_from_device_type(
-    DeviceType device_type) {
+    c10::DeviceType device_type) {
   switch (device_type) {
-    case DeviceType::CUDA:
+    case c10::DeviceType::CUDA:
       return get_autocast_gpu_dtype();
-    case DeviceType::CPU:
+    case c10::DeviceType::CPU:
       return get_autocast_cpu_dtype();
-    case DeviceType::XPU:
+    case c10::DeviceType::XPU:
       return get_autocast_xpu_dtype();
-    case DeviceType::IPU:
+    case c10::DeviceType::IPU:
       return get_autocast_ipu_dtype();
-    case DeviceType::HPU:
+    case c10::DeviceType::HPU:
       return get_autocast_hpu_dtype();
-    case DeviceType::PrivateUse1:
+    case c10::DeviceType::XLA:
+      return get_autocast_xla_dtype();
+    case c10::DeviceType::PrivateUse1:
       return get_autocast_privateuseone_dtype();
     default:
       throw std::runtime_error(
@@ -117,7 +127,7 @@ Logic to extract the promote type from any Tensor or TensorList args.
 inline at::ScalarType prioritize(
     at::ScalarType current,
     const Tensor& nextArg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   if (current == at::kDouble) {
     AT_ERROR("promote type is double in at::autocast::prioritize");
     return current;
@@ -146,7 +156,7 @@ inline at::ScalarType prioritize(
 inline at::ScalarType prioritize(
     at::ScalarType current,
     const TensorList& list,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   for (const auto& tensor : list) {
     current = prioritize(current, tensor, device_type);
   }
@@ -156,7 +166,7 @@ inline at::ScalarType prioritize(
 inline at::ScalarType prioritize(
     at::ScalarType current,
     const ITensorListRef& list,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   for (const auto& tensor : list) {
     current = prioritize(current, tensor, device_type);
   }
@@ -168,14 +178,14 @@ template <typename T>
 inline at::ScalarType prioritize(
     at::ScalarType current,
     T nextArg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   return current;
 }
 
 // Overload for the tail case.
 inline at::ScalarType promote_type(
     at::ScalarType current,
-    DeviceType device_type) {
+    c10::DeviceType device_type) {
   return current;
 }
 
@@ -184,7 +194,7 @@ inline at::ScalarType promote_type(
 template <typename Arg0, typename... Args>
 inline at::ScalarType promote_type(
     at::ScalarType current,
-    DeviceType device_type,
+    c10::DeviceType device_type,
     Arg0 arg0,
     Args... args) {
   auto new_current = prioritize(current, arg0, device_type);
@@ -196,7 +206,7 @@ Logic to apply cached casting to any Tensor argument.
 ****************************************************/
 inline bool is_eligible(
     const Tensor& arg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   return (
       arg.defined() && is_autocast_eligible(arg, device_type) &&
       (arg.scalar_type() != at::kDouble));
@@ -206,13 +216,13 @@ inline bool is_eligible(
 TORCH_API Tensor cached_cast(
     at::ScalarType to_type,
     const Tensor& arg,
-    DeviceType device_type = DeviceType::CUDA);
+    c10::DeviceType device_type = c10::DeviceType::CUDA);
 
 // Overload to process optional<Tensor>
 inline c10::optional<Tensor> cached_cast(
     at::ScalarType to_type,
     const c10::optional<Tensor>& arg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   if (arg.has_value()) {
     return cached_cast(to_type, *arg, device_type);
   } else {
@@ -224,7 +234,7 @@ inline c10::optional<Tensor> cached_cast(
 inline std::vector<Tensor> cached_cast(
     at::ScalarType to_type,
     const TensorList& arg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   std::vector<Tensor> vec;
   vec.reserve(arg.size());
   for (const auto& t : arg) {
@@ -236,7 +246,7 @@ inline std::vector<Tensor> cached_cast(
 inline std::vector<Tensor> cached_cast(
     at::ScalarType to_type,
     const ITensorListRef& arg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   std::vector<Tensor> vec;
   vec.reserve(arg.size());
   for (const auto& t : arg) {
@@ -250,7 +260,7 @@ template <typename T>
 inline T cached_cast(
     at::ScalarType to_type,
     T arg,
-    DeviceType device_type = DeviceType::CUDA) {
+    c10::DeviceType device_type = c10::DeviceType::CUDA) {
   return arg;
 }
 
@@ -279,7 +289,7 @@ inline T set_opt_dtype(at::ScalarType to_type, T arg) {
 
 template <typename... Args>
 inline bool firstarg_is_eligible(
-    DeviceType device_type,
+    c10::DeviceType device_type,
     const Tensor& arg,
     Args... args) {
   return is_eligible(arg, device_type);
@@ -287,7 +297,7 @@ inline bool firstarg_is_eligible(
 
 template <typename... Args>
 inline at::ScalarType type_from_firstarg(
-    DeviceType device_type,
+    c10::DeviceType device_type,
     at::ScalarType to_type,
     const Tensor& arg,
     Args... args) {
@@ -336,7 +346,7 @@ Interior WrapFunction_ specializations are defined for each CastPolicy.
 // method each CastPolicy
 template <
     CastPolicy policy,
-    DeviceType device_type,
+    c10::DeviceType device_type,
     class Redispatch,
     Redispatch* F,
     class Ret,
@@ -345,7 +355,7 @@ struct WrapFunction_ {};
 
 // CastPolicy::lower_precision_fp General_DeviceType
 template <
-    DeviceType device_type,
+    c10::DeviceType device_type,
     class Redispatch,
     Redispatch* F,
     class Ret,
@@ -369,7 +379,7 @@ struct WrapFunction_<
 
 // CastPolicy::fp32 General_DeviceType
 template <
-    DeviceType device_type,
+    c10::DeviceType device_type,
     class Redispatch,
     Redispatch* F,
     class Ret,
@@ -390,7 +400,7 @@ struct WrapFunction_<
 
 // CastPolicy::fp32_set_opt_dtype General_DeviceType
 template <
-    DeviceType device_type,
+    c10::DeviceType device_type,
     class Redispatch,
     Redispatch* F,
     class Ret,
@@ -418,7 +428,7 @@ struct WrapFunction_<
 
 // CastPolicy::fp32_append_dtype General_DeviceType
 template <
-    DeviceType device_type,
+    c10::DeviceType device_type,
     class Redispatch,
     Redispatch* F,
     class Ret,
@@ -441,7 +451,7 @@ struct WrapFunction_<
 
 // CastPolicy::promote General_DeviceType
 template <
-    DeviceType device_type,
+    c10::DeviceType device_type,
     class Redispatch,
     Redispatch* F,
     class Ret,
@@ -468,7 +478,7 @@ struct WrapFunction_<
 // core/boxing/impl/WrapFunctionIntoFunctor.h)
 template <
     CastPolicy policy,
-    DeviceType device_type,
+    c10::DeviceType device_type,
     class Registered, // The signature for which we're registering.  The
                       // dispatcher's calling code invokes our registered
                       // functions with arguments matching Registered, so we

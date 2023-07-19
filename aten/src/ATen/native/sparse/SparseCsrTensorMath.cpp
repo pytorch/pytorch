@@ -31,7 +31,6 @@
 #include <ATen/ops/_sparse_csr_sum_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_mm_reduce_impl_backward_native.h>
-#include <ATen/ops/_sparse_mm_reduce_impl_backward_native.h>
 #include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/abs.h>
@@ -121,6 +120,7 @@
 #include <ATen/ops/trunc_native.h>
 #include <ATen/ops/zero_native.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 #include <algorithm>
@@ -735,7 +735,7 @@ Tensor& _sparse_csr_mm_out(
     const Tensor& mat1,
     const Tensor& mat2,
     Tensor& result) {
-  auto zero = at::zeros({mat1.size(0), mat2.size(1)}, mat2.options());
+  auto zero = at::zeros_like(result);
   return at::addmm_out(result, zero, mat1, mat2, 0.0, 1.0);
 }
 

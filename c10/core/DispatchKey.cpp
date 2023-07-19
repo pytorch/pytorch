@@ -146,6 +146,8 @@ const char* toString(DispatchKey t) {
       return "AutocastHPU";
     case DispatchKey::AutocastCUDA:
       return "AutocastCUDA";
+    case DispatchKey::AutocastXLA:
+      return "AutocastXLA";
     case DispatchKey::AutocastPrivateUse1:
       return "AutocastPrivateUse1";
 
@@ -293,6 +295,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutocastIPU", c10::DispatchKey::AutocastIPU},
       {"AutocastHPU", c10::DispatchKey::AutocastHPU},
       {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
+      {"AutocastXLA", c10::DispatchKey::AutocastXLA},
       {"AutocastPrivateUse1", c10::DispatchKey::AutocastPrivateUse1},
       {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
       {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},

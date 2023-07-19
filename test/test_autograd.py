@@ -311,6 +311,25 @@ class TestAutograd(TestCase):
         x = torch.ones(1, requires_grad=True)
         torch._C._functions.UndefinedGrad()(MyFunction.apply(x)).backward()
 
+    def test_set_materialize_non_diff_grads(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out0 = x.clone()
+                out1 = x.clone()
+                ctx.mark_non_differentiable(out1)
+                ctx._materialize_non_diff_grads = False
+                return out0, out1
+
+            @staticmethod
+            def backward(ctx, g0, g1):
+                self.assertIsNone(g1)
+                return g0
+
+        a = torch.tensor(1., requires_grad=True)
+        out = Func.apply(a)[0]
+        out.backward()
+
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
         class MyFunction(Function):
@@ -3672,6 +3691,18 @@ ExpBackward0, SinBackward0, CloneBackward0, torch::autograd::AccumulateGrad
         d = a.cos()
         out = c * d
         register_logging_hooks(a, b, c, d, out)
+        out.register_hook(hook)
+        with torch.autograd.set_multithreading_enabled(False):
+            out.backward()
+        self.assertEqual(predicted[0], grad_fns(*actual))
+        actual = []
+
+        # Accumulate grad node has more than one input
+        a = torch.tensor(1., requires_grad=True)
+        b = a.sin()
+        c = a.cos()
+        out = b * c
+        register_logging_hooks(a, b, c, out)
         out.register_hook(hook)
         with torch.autograd.set_multithreading_enabled(False):
             out.backward()
@@ -7908,6 +7939,24 @@ for shape in [(1,), ()]:
             with self.assertRaisesRegex(CustomError, "unpack"):
                 out.backward()
 
+    def test_saved_tensor_hooks_custom_function_intermediates(self):
+        class Func(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                intermediate = x.exp()
+                ctx.save_for_backward(intermediate.clone().detach_().requires_grad_(True))
+                return x.exp()
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                intermediate, = ctx.saved_tensors
+                return grad_out * intermediate
+
+        a = torch.tensor(1., requires_grad=True)
+
+        with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
+            out = Func.apply(a)
+        out.backward()
 
     def test_save_on_cpu_and_checkpoint(self):
         a = torch.randn(2, 2, requires_grad=True)
@@ -10740,6 +10789,27 @@ class TestMultithreadAutograd(TestCase):
         torch.autograd.gradcheck(fn2, [inp_r, inp_c], check_forward_ad=True)
         torch.autograd.gradcheck(fn2, [inp_c, inp_r], check_forward_ad=True)
 
+    def test_set_multithreading_enabled_as_context_manager_and_function(self):
+        # Test as a context manager
+        with torch.autograd.set_multithreading_enabled(False):
+            self.assertFalse(torch.autograd.is_multithreading_enabled())
+        self.assertTrue(torch.autograd.is_multithreading_enabled())
+
+        with torch.autograd.set_multithreading_enabled(True):
+            self.assertTrue(torch.autograd.is_multithreading_enabled())
+        self.assertTrue(torch.autograd.is_multithreading_enabled())
+
+        with torch.autograd.set_multithreading_enabled(False):
+            torch.autograd.set_multithreading_enabled(True)
+            self.assertTrue(torch.autograd.is_multithreading_enabled())
+        self.assertTrue(torch.autograd.is_multithreading_enabled())
+
+        torch.autograd.set_multithreading_enabled(False)
+        self.assertFalse(torch.autograd.is_multithreading_enabled())
+
+        torch.autograd.set_multithreading_enabled(True)
+        self.assertTrue(torch.autograd.is_multithreading_enabled())
+
 class TestNestedCheckpoint(TestCase):
     @staticmethod
     def grad(fn):
@@ -11230,6 +11300,7 @@ class TestAutogradMultipleDispatch(TestCase):
 
 from autograd.test_complex import TestAutogradComplex  # noqa: F401
 from autograd.test_functional import TestAutogradFunctional  # noqa: F401
+from autograd.test_fallback import TestAutogradFallback  # noqa: F401
 
 # e.g., TestAutogradDeviceTypeCPU and TestAutogradDeviceTypeCUDA
 instantiate_device_type_tests(

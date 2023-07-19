@@ -211,6 +211,7 @@ MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
 }
 
 FORCE_AMP_FOR_FP16_BF16_MODELS = {
+    "DALLE2_pytorch",
     "doctr_det_predictor",
     "doctr_reco_predictor",
     "Super_SloMo",
