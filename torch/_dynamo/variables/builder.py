@@ -967,7 +967,7 @@ class VariableBuilder:
         assert isinstance(value, np.ndarray)
 
         source = self.get_source()
-        tensor_value = torch.from_numpy(value)
+        tensor_value = torch.as_tensor(value)
 
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value)
