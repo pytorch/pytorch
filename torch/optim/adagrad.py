@@ -23,11 +23,11 @@ class Adagrad(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= lr_decay:
-            raise ValueError("Invalid lr_decay value: {}".format(lr_decay))
+            raise ValueError(f"Invalid lr_decay value: {lr_decay}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
         if not 0.0 <= initial_accumulator_value:
             raise ValueError(
                 "Invalid initial_accumulator_value value: {}".format(
@@ -35,7 +35,7 @@ class Adagrad(Optimizer):
                 )
             )
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
 
         defaults = dict(
             lr=lr,
