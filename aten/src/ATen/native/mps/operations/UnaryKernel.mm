@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -104,19 +105,15 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
       inputTensor = inputTensor.contiguous();
       outputTensor = outputTensor.contiguous();
       needs_output_copy = true;
-      // calling continguous triggers a command encoder so need to commit it
-      torch::mps::commit();
     }
 
-    // Get a reference of the MPSStream MTLCommandBuffer.
-    id<MTLCommandBuffer> commandBuffer = torch::mps::get_command_buffer();
-    TORCH_CHECK(commandBuffer, "Failed to retrieve command buffer reference");
-    dispatch_queue_t serialQueue = torch::mps::get_dispatch_queue();
-    dispatch_sync(serialQueue, ^() {
-      id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+    // Get a reference of the MPSStream
+    MPSStream* mpsStream = getCurrentMPSStream();
+    dispatch_sync(mpsStream->queue(), ^() {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       id<MTLBuffer> outBuf = mps::getMTLBufferStorage(outputTensor);
       id<MTLBuffer> inputBuf = mps::getMTLBufferStorage(inputTensor);
-
+      getMPSProfiler().beginProfileKernel(cplState, "erf_inv", {self});
       [computeEncoder setComputePipelineState:cplState];
       [computeEncoder setBuffer:outBuf offset:0 atIndex:0];
       [computeEncoder setBuffer:inputBuf offset:0 atIndex:1];
@@ -127,8 +124,7 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
       NSUInteger threadsPerGroupSize = std::min(maxThreadsPerGroup, length);
       MTLSize threadGroupSize = MTLSizeMake(threadsPerGroupSize, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
-      [computeEncoder endEncoding];
-      torch::mps::commit();
+      getMPSProfiler().endProfileKernel(cplState);
     });
   }
   torch::mps::synchronize();
