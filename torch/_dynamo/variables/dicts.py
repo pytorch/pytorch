@@ -12,7 +12,7 @@ from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 
-from ..exc import TorchRuntimeError, unimplemented
+from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
 from .base import MutableLocal, VariableTracker
@@ -487,14 +487,14 @@ class CustomizedDictVariable(ConstDictVariable):
     # called from builder.py
     @classmethod
     def wrap(cls, builder, obj):
-        raise TorchRuntimeError("custom dict: wrap unimplemented")
+        raise NotImplementedError()
 
     def __init__(self, items, user_cls, **options):
         super().__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
-        raise TorchRuntimeError("custom dict: as_proxy unimplemented")
+        raise NotImplementedError()
 
     # 'RETURN_VALUE triggered compile'
     # called from torch/_dynamo/codegen.py
@@ -513,25 +513,23 @@ class CustomizedDictVariable(ConstDictVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
-        if name in ("__getitem__", "to_tuple", "__setitem__", "__setattr__"):
-            fn = getattr(self.user_cls, name)
-            source = None if self.source is None else AttrSource(self.source, name)
+        fn = getattr(self.user_cls, name)
+        source = None if self.source is None else AttrSource(self.source, name)
 
+        if hasattr(fn, "__objclass__") and fn.__objclass__ in (
+            dict,
+            collections.OrderedDict,
+        ):
             # for python dict method without overridden
-            if hasattr(fn, "__objclass__") and fn.__objclass__ in (
-                dict,
-                collections.OrderedDict,
-            ):
-                return super().call_method(tx, name, args, kwargs)
-
+            return super().call_method(tx, name, args, kwargs)
+        elif name in ("__getitem__", "to_tuple", "__setitem__", "__setattr__"):
             # for user overridden method
             return tx.inline_user_function_return(
                 variables.UserFunctionVariable(fn, source=source, **options),
                 [self] + list(args),
                 kwargs,
             )
-        elif name in ("keys", "items"):
-            return super().call_method(tx, name, args, kwargs)
+
         unimplemented("custom dict: call_method unimplemented name=%s", name)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
