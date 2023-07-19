@@ -333,7 +333,7 @@ class OptimizeForInferenceTemplate(TestCase):
             def __init__(self):
                 super().__init__()
                 self.kv = torch.nn.Conv2d(
-                    256, 384, kernel_size=(1, 1), stride=(1, 1), bias=False
+                    256, 384, kernel_size=(1, 1), stride=(1, 1), bias=False, groups=2
                 )
 
             def forward(self, x):

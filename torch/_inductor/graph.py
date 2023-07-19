@@ -216,15 +216,27 @@ class GraphLowering(torch.fx.Interpreter):
         Decide if we should enable layout optimization for this graph based on
         heuristics.
         """
-        if not config.layout_optimization:
-            return False
-
         conv_nodes = [
             n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
         ]
         nconv = len(conv_nodes)
 
         if nconv == 0:
+            return False
+
+        # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
+        if (
+            all(
+                n.args[idx].meta["val"].device == torch.device("cpu")
+                for n in conv_nodes
+                for idx in [0, 1]
+            )
+            and torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+        ):
+            return True
+
+        if not config.layout_optimization:
             return False
 
         # Followering models are skipped due to this:
