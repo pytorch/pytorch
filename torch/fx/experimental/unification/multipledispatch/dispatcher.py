@@ -205,10 +205,9 @@ class Dispatcher:
             if not isinstance(typ, (type, list)):
                 str_sig = ', '.join(c.__name__ if isinstance(c, type)
                                     else str(c) for c in signature)
-                raise TypeError("Tried to dispatch on non-type: %s\n"
-                                "In signature: <%s>\n"
-                                "In function: %s" %
-                                (typ, str_sig, self.name))
+                raise TypeError("Tried to dispatch on non-type: {}\n"
+                                "In signature: <{}>\n"
+                                "In function: {}".format(typ, str_sig, self.name))
 
             # handle variadic signatures
             if isinstance(typ, list):
@@ -257,8 +256,7 @@ class Dispatcher:
             func = self.dispatch(*types)
             if not func:
                 raise NotImplementedError(
-                    'Could not find signature for %s: <%s>' %
-                    (self.name, str_signature(types))) from e
+                    f'Could not find signature for {self.name}: <{str_signature(types)}>') from e
             self._cache[types] = func
         try:
             return func(*args, **kwargs)
@@ -274,7 +272,7 @@ class Dispatcher:
 
             raise NotImplementedError(
                 "Matching functions for "
-                "%s: <%s> found, but none completed successfully" % (
+                "{}: <{}> found, but none completed successfully".format(
                     self.name, str_signature(types),),) from e
 
     def __str__(self):
@@ -408,8 +406,7 @@ class MethodDispatcher(Dispatcher):
         types = tuple([type(arg) for arg in args])
         func = self.dispatch(*types)
         if not func:
-            raise NotImplementedError('Could not find signature for %s: <%s>' %
-                                      (self.name, str_signature(types)))
+            raise NotImplementedError(f'Could not find signature for {self.name}: <{str_signature(types)}>')
         return func(self.obj, *args, **kwargs)
 
 

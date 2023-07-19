@@ -74,7 +74,7 @@ class VulkanShaderGenerator:
 
     def add_params_yaml(self, parameters_yaml_file):  # type: ignore[no-untyped-def]
         all_template_params = OrderedDict()
-        with open(parameters_yaml_file, "r") as f:
+        with open(parameters_yaml_file) as f:
             contents = yaml.load(f, Loader=UniqueKeyLoader)
             for key in contents:
                 all_template_params[key] = contents[key]
@@ -204,7 +204,7 @@ def determineDescriptorType(lineStr: str) -> str:
 
 def getShaderInfo(srcFilePath: str) -> ShaderInfo:
     shader_info = ShaderInfo([], [], "")
-    with open(srcFilePath, 'r') as srcFile:
+    with open(srcFilePath) as srcFile:
         for line in srcFile:
             if isDescriptorLine(line):
                 shader_info.layouts.append(determineDescriptorType(line))
@@ -271,13 +271,13 @@ def genCppH(
         if len(f) > 1:
             templateSrcPaths.append(f)
             templateSrcPaths.sort()
-    print("templateSrcPaths:{}".format(templateSrcPaths))
+    print(f"templateSrcPaths:{templateSrcPaths}")
 
     spvPaths = {}
     for templateSrcPath in templateSrcPaths:
-        print("templateSrcPath {}".format(templateSrcPath))
+        print(f"templateSrcPath {templateSrcPath}")
         name = getName(templateSrcPath).replace("_glsl", "")
-        print("name {}".format(name))
+        print(f"name {name}")
 
         codeTemplate = CodeTemplate.from_file(templateSrcPath)
         srcPath = tmpDirPath + "/" + name + ".glsl"
@@ -286,7 +286,7 @@ def genCppH(
             fw.write(content)
 
         spvPath = tmpDirPath + "/" + name + ".spv"
-        print("spvPath {}".format(spvPath))
+        print(f"spvPath {spvPath}")
 
         cmd = [
             glslcPath, "-fshader-stage=compute",
@@ -327,7 +327,7 @@ def genCppH(
     h += nsend
 
     cpp = "#include <ATen/native/vulkan/api/Shader.h>\n"
-    cpp += "#include <ATen/native/vulkan/{}>\n".format(H_NAME)
+    cpp += f"#include <ATen/native/vulkan/{H_NAME}>\n"
     cpp += "#include <stdint.h>\n"
     cpp += "#include <vector>\n"
     cpp += nsbegin
@@ -339,7 +339,7 @@ def genCppH(
     for spvPath, srcPath in spvPaths.items():
         name = getName(spvPath).replace("_spv", "")
 
-        print("spvPath:{}".format(spvPath))
+        print(f"spvPath:{spvPath}")
         with open(spvPath, 'rb') as fr:
             next_bin = array.array('I', fr.read())
             sizeBytes = 4 * len(next_bin)
@@ -361,8 +361,8 @@ def genCppH(
         shader_info_layouts = "{{{}}}".format(",\n ".join(shader_info.layouts))
 
         shader_info_args = [
-            "\"vulkan.{}\"".format(name),
-            "{}_bin".format(name),
+            f"\"vulkan.{name}\"",
+            f"{name}_bin",
             str(sizeBytes),
             shader_info_layouts,
             tile_size,

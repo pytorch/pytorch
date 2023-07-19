@@ -86,7 +86,7 @@ def _torch_fx_node(obj: torch.fx.Node) -> str:
 
 @_format_argument.register
 def _torch_fx_symbolic_value(
-    obj,  # NOTE: singledispatch does not support Union until 3.11, so we use Any here.
+    obj,  # NOTE: functools.singledispatch does not support Union until 3.11, so we use Any here.
 ) -> str:
     return f"Sym({obj})"
 
