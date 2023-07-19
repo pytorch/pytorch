@@ -45,7 +45,13 @@ from torch.ao.quantization.backend_config import BackendConfig
 
 from typing import Any, Tuple
 
-def prepare_pt2e(
+__all__ = [
+    "prepare_pt2e_quantizer",
+    "prepare_qat_pt2e_quantizer",
+    "convert_pt2e",
+]
+
+def _prepare_pt2e_deprecated(
     model: GraphModule,
     qconfig_mapping: QConfigMapping,
     example_inputs: Tuple[Any, ...],

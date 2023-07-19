@@ -6,7 +6,6 @@ requires = [
     "numpy",
     "ninja",
     "pyyaml",
-    "setuptools",
     "cmake",
     "typing-extensions",
     "requests",
