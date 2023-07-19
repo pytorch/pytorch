@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.utils._pytree import tree_map
 
 try:
     try:
@@ -480,10 +481,6 @@ inductor_all_samples = {
     "mH",
     "rsub",
     "triu",
-}
-
-allow_graph_breaks = {
-    "item",
 }
 
 
