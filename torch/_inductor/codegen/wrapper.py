@@ -668,7 +668,7 @@ class WrapperCodeGen(CodeGen):
         with output.indent():
             output.writelines(
                 [
-                    "from torch._inductor.utils import compiled_module_main",
+                    "from torch._inductor.wrapper_benchmark import compiled_module_main",
                     f"compiled_module_main('{get_benchmark_name()}', benchmark_compiled_module)",
                 ]
             )
