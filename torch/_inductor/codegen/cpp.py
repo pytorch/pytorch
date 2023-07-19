@@ -2239,7 +2239,12 @@ class CppVecKernelChecker(CppVecKernel):
                                 if input_value.target == "load"
                                 else input_value.args[-1]
                             )
-                            if dtype in [torch.float16, torch.bfloat16, torch.float, torch.uint8]:
+                            if dtype in [
+                                torch.float16,
+                                torch.bfloat16,
+                                torch.float,
+                                torch.uint8,
+                            ]:
                                 # Convert from dtype to torch.float
                                 pass
                             elif (
