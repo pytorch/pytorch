@@ -765,18 +765,18 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes,
         layout,
     ):
-        example_inputs_extern = [cls.benchmark_example_value(x) for x in input_nodes]
-        for i in range(len(example_inputs_extern)):
-            if input_nodes[i].get_layout().offset != 0:
-                offset = V.graph.sizevars.size_hint(input_nodes[i].get_layout().offset)
-                data = example_inputs_extern[i]
-                example_inputs_extern[i] = torch.as_strided(
-                    data, data.size(), data.stride(), offset
-                )
         # de-duplicate args
-        unique_input_nodes = {x.get_name(): x for x in input_nodes}
-        example_inputs = [
-            cls.benchmark_example_value(x) for x in unique_input_nodes.values()
+        unique_example_inputs = {
+            x.get_name(): cls.benchmark_example_value(x) for x in input_nodes
+        }
+        example_inputs = list(unique_example_inputs.values())
+        example_inputs_extern = [
+            torch.as_strided(
+                unique_example_inputs[input_node.get_name()],
+                V.graph.sizevars.size_hints(input_node.get_size()),
+                V.graph.sizevars.size_hints(input_node.get_stride()),
+                V.graph.sizevars.size_hint(input_node.get_layout().offset),
+            ) for input_node in input_nodes
         ]
 
         out = cls.benchmark_example_value(layout)
@@ -881,12 +881,14 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         if isinstance(node, ir.Layout):
             node = ir.Buffer("fake", node)
+        # triton templates want the base tensor.
+        if isinstance(node, ir.BaseView):
+            node = node.unwrap_view()
         return rand_strided(
             V.graph.sizevars.size_hints(node.get_size()),
             V.graph.sizevars.size_hints(node.get_stride()),
             device=node.get_device(),
             dtype=node.get_dtype(),
-            extra_size=V.graph.sizevars.size_hint(node.get_layout().offset),
         )
 
     @staticmethod
