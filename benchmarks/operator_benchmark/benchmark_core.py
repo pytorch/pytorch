@@ -216,23 +216,17 @@ class BenchmarkRunner:
                 ))
         else:
             if test_case.framework == "PyTorch":
-                print("# Mode: {}".format("JIT" if self.use_jit else "Eager"))
+                print(f"# Mode: {'JIT' if self.use_jit else 'Eager'}")
 
-            print("# Name: {}\n"
-                  "# Input: {}".format(
-                      test_case.test_config.test_name,
-                      test_case.test_config.input_config))
+            print(f"# Name: {test_case.test_config.test_name}\n# Input: {test_case.test_config.input_config}")
 
             mode = "Backward" if test_case.test_config.run_backward else "Forward"
             if self.num_runs > 1:
                 for run in range(self.num_runs):
-                    print("Run: {}, {} Execution Time (us) : {:.3f}".format(
-                        run,
-                        mode, reported_run_time_us[run]))
+                    print(f"Run: {run}, {mode} Execution Time (us) : {reported_run_time_us[run]:.3f}")
                 print()
             else:
-                print("{} Execution Time (us) : {:.3f}\n".format(
-                    mode, reported_run_time_us[0]))
+                print(f"{mode} Execution Time (us) : {reported_run_time_us[0]:.3f}\n")
 
     def _predict_num_iter_needed(self, i):
         return (i * self.multiplier)
@@ -383,9 +377,7 @@ class BenchmarkRunner:
                 # requirement.
                 np.random.seed(seed=hash(full_test_id) & ((1 << 32) - 1))
 
-                print("# Benchmarking {}: {}".format(
-                    test_case.framework,
-                    test_case.op_bench.module_name()))
+                print(f"# Benchmarking {test_case.framework}: {test_case.op_bench.module_name()}")
 
                 if op_test_config.run_backward:
                     launch_func = self._launch_backward
