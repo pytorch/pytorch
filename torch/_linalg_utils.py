@@ -97,21 +97,36 @@ def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed.",
         "Please use the `torch.linalg.matrix_rank` function instead,",
-        "The parameter `symmetric` was renamed in torch.linalg.matrix_rank() to `hermitian`."
+        "The parameter 'symmetric' was renamed in `torch.linalg.matrix_rank()` to 'hermitian'."
     )
 
 
 def solve(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed.",
-        "Please replace `torch.solve(B,A).solution` with `torch.linalg.solve(A,B)`.",
+        "`torch.solve` is deprecated in favor of `torch.linalg.solve`.",
+        "`torch.linalg.solve` has its arguments reversed and does not return the LU factorization.",
+        "To get the LU factorization see `torch.lu`, which can be used with `torch.lu_solve` or `torch.lu_unpack`.",
+        "`X = torch.solve(B, A).solution`",
+        "should be replaced with",
+        "`X = torch.linalg.solve(A, B)`",
     )
 
 
 def lstsq(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed.",
-        "Please replace `torch.lstsq(B,A)` with `torch.linalg.lstsq(A,B)`.",
+        "`torch.lstsq` is deprecated in favor of `torch.linalg.lstsq` and will be removed in a future PyTorch release.",
+        "`torch.linalg.lstsq` has reversed arguments and does not return the QR decomposition in "
+        "the returned tuple (although it returns other information about the problem).",
+        "To get the QR decomposition consider using `torch.linalg.qr`.",
+        "The returned solution in `torch.lstsq` stored the residuals of the solution in the ",
+        "last m - n columns of the returned value whenever m > n. In torch.linalg.lstsq, the ",
+        "residuals are in the field 'residuals' of the returned named tuple.",
+        "The unpacking of the solution, as in",
+        "`X, _ = torch.lstsq(B, A).solution[:A.size(1)]`",
+        "should be replaced with",
+        "`X = torch.linalg.lstsq(A, B).solution`",
     )
 
 
@@ -119,7 +134,16 @@ def _symeig(
     input, eigenvectors=False, upper=True, *, out=None
 ) -> Tuple[Tensor, Tensor]:
     raise RuntimeError(
-        "This function was deprecated since version 1.9 and is now removed. Please use the `torch.linalg.eigh` function instead.",
+        "This function was deprecated since version 1.9 and is now removed.",
+        "The default behavior has changed from using the upper triangular portion of the matrix by default ",
+        "to using the lower triangular portion.",
+        "`L, _ = torch.symeig(A, upper=upper)`",
+        "should be replaced with",
+        "`L = torch.linalg.eigvalsh(A, UPLO='U' if upper else 'L')`",
+        "and",
+        "`L, V = torch.symeig(A, eigenvectors=True)`"
+        "should be replaced with",
+        "`L, V = torch.linalg.eigh(A, UPLO='U' if upper else 'L')`",
     )
 
 
@@ -127,5 +151,14 @@ def eig(
     self: Tensor, eigenvectors: bool = False, *, e=None, v=None
 ) -> Tuple[Tensor, Tensor]:
     raise RuntimeError(
-        "This function was deprecated since version 1.9 and is now removed. Please use the `torch.linalg.eig` function instead.",
+        "This function was deprecated since version 1.9 and is now removed.",
+        "`torch.linalg.eig` returns complex tensors of dtype `cfloat` or `cdouble` rather than real tensors ",
+        "mimicking complex tensors.",
+        "`L, _ = torch.eig(A)`",
+        "should be replaced with",
+        "`L_complex = torch.linalg.eigvals(A)`",
+        "and",
+        "`L, V = torch.eig(A, eigenvectors=True)`",
+        "should be replaced with",
+        "`L_complex, V_complex = torch.linalg.eig(A)`",
     )
