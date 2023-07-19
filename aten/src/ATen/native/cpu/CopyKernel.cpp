@@ -183,8 +183,13 @@ void direct_copy_kernel(TensorIteratorBase &iter) {
   } else if (dtype == ScalarType::ComplexHalf) {
     cpu_kernel(iter, [=](c10::complex<at::Half> a) -> c10::complex<at::Half> { return a; });
   } else {
+#if !defined(C10_MOBILE)
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(
         kBool, kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, dtype, "copy_kernel", [&] {
+#else
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        kBool, kHalf, kBFloat16, dtype, "copy_kernel", [&] {
+#endif
       cpu_kernel_vec(
           iter,
           [=](scalar_t a) -> scalar_t { return a; },
@@ -237,9 +242,15 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
     sizeof(BFloat16) == strides_out[0] && (sizeof(float) == strides_in[0] || strides_in[0] == 0)))) {
     float_bfloat16_copy_kernel(iter, requires_neg);
   } else {
+#if !defined(C10_MOBILE)
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, ScalarType::Float8_e5m2, ScalarType::Float8_e4m3fn, dtype, "copy_", [&] {
       using dest_t = scalar_t;
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, ScalarType::Float8_e5m2, ScalarType::Float8_e4m3fn, iter.dtype(1), "copy_", [&] {
+#else
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
+      using dest_t = scalar_t;
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, iter.dtype(1), "copy_", [&] {
+#endif
         if (iter.has_contiguous_first_dim()) {
           TORCH_INTERNAL_ASSERT(iter.ninputs() == 1);
           TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);

@@ -186,7 +186,11 @@ static void abs_kernel(TensorIteratorBase& iter) {
     using opmath_t = at::opmath_type<scalar_t>;
     cpu_kernel(iter, [=](scalar_t a) -> scalar_t { return abs_impl(opmath_t{a}); });
   } else {
+#if !defined(C10_MOBILE)
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kBFloat16, kHalf, kFloat8_e5m2, kFloat8_e4m3fn, iter.dtype(), "abs_cpu", [&]() {
+#else
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
+#endif
       cpu_kernel_vec(
           iter,
           [=](scalar_t a) -> scalar_t { return abs_impl(a); },
