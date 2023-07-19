@@ -642,7 +642,7 @@ def report_all_anti_patterns(prof,
         json_report_path = os.path.join(json_report_dir,
                                         "torchtidy_report.json")
         if os.path.exists(json_report_path):
-            with open(json_report_path, "r") as f:
+            with open(json_report_path) as f:
                 exisiting_report = json.load(f)
                 exisiting_report.update(report_dict)
                 report_dict = exisiting_report

@@ -214,6 +214,28 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # TODO: consider all_gather the local tensors for better debugging
         return f"DTensor(local_tensor={self._local_tensor}, device_mesh={self._spec.mesh}, placements={self._spec.placements})"
 
+    def __tensor_flatten__(self):
+        """
+        protocol to inform how to flatten a DTensor to local tensor
+        for PT2 tracing
+        """
+        return self._local_tensor, self._spec
+
+    @staticmethod
+    def __tensor_unflatten__(local_tensor, spec):
+        assert (
+            spec is not None
+        ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
+        return DTensor(
+            local_tensor,
+            spec.mesh,
+            spec.placements,
+            shape=spec.tensor_meta.shape,
+            dtype=spec.tensor_meta.dtype,
+            requires_grad=spec.tensor_meta.requires_grad,
+            stride=spec.tensor_meta.stride,
+        )
+
     @classmethod
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
