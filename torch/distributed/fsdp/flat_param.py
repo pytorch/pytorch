@@ -521,7 +521,8 @@ class FlatParamHandle:
         self._needs_pre_forward_unshard = False
         # Used for guarding against mistargeted backward prefetches
         self._needs_pre_backward_unshard = False
-
+        # Was the handle prefetched? Set on successful _prefetch_handle and unshard
+        self._prefetched = False
         # NOTE: For the code path using this flag, we only skip calling
         # `_use_sharded_views()` and do not skip switching to the sharded flat
         # parameter since whether `self.flat_param` uses the sharded or
