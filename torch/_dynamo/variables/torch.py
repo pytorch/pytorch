@@ -12,7 +12,6 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
-from torch._dynamo.variables.user_defined import ProcessGroupVariable
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -35,7 +34,7 @@ from .ctx_manager import (
     NullContextVariable,
     TorchFunctionDisableVariable,
 )
-from .distributed import is_from_local
+from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
 from .tensor import TensorWithTFOverrideVariable
@@ -81,22 +80,9 @@ constant_fold_functions = [
     torch._C._get_privateuse1_backend_name,
 ]
 
-constant_processgroup_functions = []
 
 if torch.distributed.is_available():
     constant_fold_functions.append(torch.distributed.is_initialized)
-
-    from torch.distributed.distributed_c10d import (
-        _get_group_tag,
-        get_process_group_ranks,
-    )
-
-    constant_processgroup_functions.extend(
-        [
-            get_process_group_ranks,
-            _get_group_tag,
-        ]
-    )
 
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
@@ -539,10 +525,7 @@ class TorchVariable(VariableTracker):
             return TorchVariable(torch.add, **options).call_function(
                 tx, [args[0], result], {}
             )
-        elif (
-            inspect.isfunction(self.value)
-            and self.value in constant_processgroup_functions
-        ):
+        elif is_constant_pg_functions(self.value):
             # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
             # ID_MATCH based on how it was constructed.
 
