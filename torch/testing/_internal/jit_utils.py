@@ -176,12 +176,12 @@ class JitTestCase(JitCommonTestCase):
 
         fusion_groups : Dict[torch._C.Block, List[torch._C.Node]] = defaultdict(list)
         get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
-        self.assertTrue(len(fusion_groups) == 1, 'got {}'.format(graph))
+        self.assertTrue(len(fusion_groups) == 1, f'got {graph}')
         (graph, fusion_nodes) = list(fusion_groups.items())[0]
         # the block contains one FUSION_GROUP and the rest of nodes are `allowed_nodes`
-        self.assertTrue(len(fusion_nodes) == 1, 'got {}'.format(graph))
+        self.assertTrue(len(fusion_nodes) == 1, f'got {graph}')
         self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
-                        'got {}'.format(graph))
+                        f'got {graph}')
 
     def _isHookExceptionOk(self, e):
         se = str(e)
@@ -294,7 +294,7 @@ class JitTestCase(JitCommonTestCase):
 
         if consider_subgraphs:
             strgraph = str(graph)
-            count = strgraph.count(kind) - strgraph.count('with {}'.format(kind))
+            count = strgraph.count(kind) - strgraph.count(f'with {kind}')
             self.assertTrue(count > 0)
             return
 
@@ -321,7 +321,7 @@ class JitTestCase(JitCommonTestCase):
 
         if consider_subgraphs:
             strgraph = str(graph)
-            count = strgraph.count(kind) - strgraph.count('with {}'.format(kind))
+            count = strgraph.count(kind) - strgraph.count(f'with {kind}')
             perform_assert(graph, kind, count, num_kind_nodes,
                            consider_subgraphs)
             return
@@ -768,7 +768,7 @@ def _get_py3_code(code, fn_name):
         fn = getattr(module, fn_name)
         return fn
 
-class TensorExprTestOptions():
+class TensorExprTestOptions:
     def __init__(self):
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
         self.old_profiling_mode = torch._C._get_graph_executor_optimize(True)

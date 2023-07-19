@@ -888,7 +888,7 @@ def arange(g: jit_utils.GraphContext, *args):
         dtype = symbolic_helper._maybe_get_const(dtype, "i")
         return dtype
 
-    if len(args) == 2 and all((isinstance(val, int) for val in args)):
+    if len(args) == 2 and all(isinstance(val, int) for val in args):
         # aten::arange(Scalar start, Scalar end)
         dtype = torch.int64
         # Start index.

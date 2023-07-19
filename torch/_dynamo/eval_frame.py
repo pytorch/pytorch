@@ -207,6 +207,7 @@ class _TorchDynamoContext:
         *,
         export=False,
         dynamic=False,
+        compiler_config=None,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -217,6 +218,7 @@ class _TorchDynamoContext:
         self.first_ctx = first_ctx
         self.export = export
         self.dynamic = dynamic
+        self.compiler_config = compiler_config
         patch_fn()
 
     def __enter__(self):
@@ -242,6 +244,10 @@ class _TorchDynamoContext:
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
+        # public api for compiler config/options
+        def get_compiler_config():
+            return self.compiler_config
+
         fn = innermost_fn(fn)
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
@@ -250,6 +256,12 @@ class _TorchDynamoContext:
             # Save the function pointer to find the original callable while nesting
             # of decorators.
             new_mod._torchdynamo_orig_callable = mod.forward
+
+            # when compiling torch.nn.Module,
+            # provide public api OptimizedModule.get_compiler_config()
+            assert not hasattr(new_mod, "get_compiler_config")
+            new_mod.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+
             return new_mod
         assert callable(fn)
 
@@ -308,6 +320,11 @@ class _TorchDynamoContext:
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
+        # when compiling user function instead of nn.Module
+        # provide public api _fn.get_compiler_config()
+        assert not hasattr(_fn, "get_compiler_config")
+        _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
         if callback not in (None, False):
@@ -363,6 +380,7 @@ class OptimizeContext(_TorchDynamoContext):
         *,
         export=False,
         dynamic=False,
+        compiler_config=None,
     ):
         def on_enter():
             global most_recent_backend
@@ -386,6 +404,7 @@ class OptimizeContext(_TorchDynamoContext):
             first_ctx=first_ctx,
             export=export,
             dynamic=dynamic,
+            compiler_config=compiler_config,
         )
 
 
@@ -452,7 +471,12 @@ def catch_errors_wrapper(callback, hooks: Hooks):
 
 
 def _optimize_catch_errors(
-    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, export=False, dynamic=False
+    compile_fn,
+    hooks: Hooks,
+    backend_ctx_ctor=null_context,
+    export=False,
+    dynamic=False,
+    compiler_config=None,
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
@@ -460,6 +484,7 @@ def _optimize_catch_errors(
         first_ctx=True,
         export=export,
         dynamic=dynamic,
+        compiler_config=compiler_config,
     )
 
 
@@ -557,6 +582,9 @@ def optimize(
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
+        compiler_config=backend.get_compiler_config()
+        if hasattr(backend, "get_compiler_config")
+        else None,
     )
 
 
@@ -751,9 +779,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
         self.new_args = []
         for i in range(0, len(flat_args)):
-            arg = super(FlattenInputOutputSignature, self).placeholder(
-                f"arg{i}", (), {}
-            )
+            arg = super().placeholder(f"arg{i}", (), {})
             if i in matched_input_elements_to_fake:
                 arg.node.meta["val"] = matched_input_elements_to_fake[i]
             else:

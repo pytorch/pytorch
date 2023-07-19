@@ -743,7 +743,8 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
-        * :func:`torch.bincount` when called on a CUDA tensor
+        * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
+          tensor is given
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
@@ -1546,6 +1547,10 @@ class _TorchCompileInductorWrapper:
         from torch._inductor.compile_fx import compile_fx
 
         return compile_fx(model_, inputs_, config_patches=self.config)
+
+    def get_compiler_config(self):
+        from torch._inductor.compile_fx import get_patched_config_dict
+        return get_patched_config_dict(config_patches=self.config)
 
     def reset(self):
         from torch._inductor import config
