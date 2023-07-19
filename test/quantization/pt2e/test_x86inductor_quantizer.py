@@ -6,9 +6,9 @@ import torch.nn as nn
 from torch.ao.quantization.pt2e.quantizer import (
     X86InductorQuantizer,
 )
-from torch.ao.quantization._quantize_pt2e import (
+from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
-    prepare_pt2e_quantizer,
+    prepare_pt2e,
 )
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
@@ -172,7 +172,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
             *copy.deepcopy(example_inputs),
             aten_graph=True,
         )
-        m = prepare_pt2e_quantizer(m, quantizer)
+        m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m)

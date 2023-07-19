@@ -238,7 +238,7 @@ def _needs_obs_or_fq(
     # be converted to choose_qparams -> q -> dq in convert step
     if cur_target_is_dynamic:
         assert cur_target_dtype in _OBS_DTYPE_LIST, \
-            "Expected cur_target_dtype to be torch.float, but got: {}".format(cur_target_dtype)
+            f"Expected cur_target_dtype to be torch.float, but got: {cur_target_dtype}"
         assert prev_output_dtype not in _DO_NOT_OBS_DTYPE_LIST
         return is_zeroth_arg
     if reuse_input_obs_or_fq:

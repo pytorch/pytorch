@@ -1628,10 +1628,8 @@ def validate_revert(
         allowed_reverters.append("CONTRIBUTOR")
     if author_association not in allowed_reverters:
         raise PostCommentError(
-            (
-                f"Will not revert as @{author_login} is not one of "
-                f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
-            )
+            f"Will not revert as @{author_login} is not one of "
+            f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
         )
     skip_internal_checks = can_skip_internal_checks(pr, comment_id)
 
