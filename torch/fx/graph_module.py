@@ -771,7 +771,8 @@ class {module_name}(torch.nn.Module):
         output = module_code + submodule_code
         if print_output:
             print(module_code + submodule_code)
-        return output
+        else:
+            return output
 
     def __str__(self) -> str:
         orig_str = super().__str__()
