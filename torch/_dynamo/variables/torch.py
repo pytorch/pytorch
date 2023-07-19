@@ -423,7 +423,7 @@ class TorchVariable(VariableTracker):
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
-            log.warning("Profiler will be ignored")
+            log.warning("Profiler function %s will be ignored", self.value)
             return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
