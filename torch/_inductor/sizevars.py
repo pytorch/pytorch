@@ -265,8 +265,6 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
-        if left == right:
-            return True
         return self.is_expr_static_and_true(sympy.Eq(left, right))
 
     # See Note - [On Statically Known]
