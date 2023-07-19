@@ -11,6 +11,11 @@ from unittest.mock import patch
 import torch
 
 from torch._dynamo.test_case import run_tests
+from torch._subclasses.fake_tensor import (
+    DataDependentOutputException,
+    DynamicOutputShapeException,
+    FakeTensorMode,
+)
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -34,7 +39,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-from torch._subclasses.fake_tensor import UnsupportedFakeTensorException, DataDependentOutputException, DynamicOutputShapeException, FakeTensorMode
 
 try:
     try:
@@ -566,10 +570,10 @@ class TestInductorOpInfo(TestCase):
             else:
                 samples = [next(samples)]
 
-
         def do_nopython(fn, args, kwargs):
             try:
                 mode = FakeTensorMode()
+
                 def map_to_fake(e):
                     if isinstance(e, torch.Tensor):
                         return mode.from_tensor(e)
@@ -632,7 +636,6 @@ class TestInductorOpInfo(TestCase):
                     )
 
         except Exception as e:
-            raise e
             if test_expect is ExpectedTestResult.XFAILURE:
                 raise e
 
