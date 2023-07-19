@@ -95,12 +95,12 @@ inline C10_HOST_DEVICE float fp8e4m3fn_to_fp32_value(uint8_t input) {
    * mantissa will shift into exponent, turning the biased exponent into 1, and
    * making mantissa normalized (i.e. without leading 1).
    */
-#ifdef _MSC_VER
+#if defined(__CUDA_ARCH__)
+  uint32_t renorm_shift = __clz(nonsign);
+#elif defined(_MSC_VER)
   unsigned long nonsign_bsr;
   _BitScanReverse(&nonsign_bsr, (unsigned long)nonsign);
   uint32_t renorm_shift = (uint32_t)nonsign_bsr ^ 31;
-#elif defined(__CUDA_ARCH__)
-  uint32_t renorm_shift = __clz(nonsign);  
 #else
   uint32_t renorm_shift = __builtin_clz(nonsign);
 #endif
