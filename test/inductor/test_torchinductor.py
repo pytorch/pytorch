@@ -976,6 +976,12 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(4, (4,)),))
 
+    def test_dist(self):
+        def fn(a, b):
+            return torch.dist(a, b)
+
+        self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
+
     def test_arange1(self):
         def fn(x):
             rng1 = torch.arange(8 * 8, dtype=torch.float32, device=x.device).view(8, 8)
