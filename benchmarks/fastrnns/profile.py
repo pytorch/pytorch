@@ -54,7 +54,7 @@ def profile(rnns, sleep_between_seconds=1, nloops=5,
 
 def system(command):
     """Returns (return-code, stdout, stderr)"""
-    print('[system] {}'.format(command))
+    print(f'[system] {command}')
     p = subprocess.Popen(command, stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, shell=True)
     output, err = p.communicate()
@@ -82,28 +82,26 @@ def nvprof_output_filename(rnns, **params):
     rnn_tag = '-'.join(rnns)
     size_tag = describe_sizes(**params)
     date_tag = datetime.datetime.now().strftime("%m%d%y-%H%M")
-    return '{}prof_{}_{}_{}.nvvp'.format(OUTPUT_DIR, rnn_tag,
-                                         size_tag, date_tag)
+    return f'{OUTPUT_DIR}prof_{rnn_tag}_{size_tag}_{date_tag}.nvvp'
 
 
 def nvprof(cmd, outpath):
-    return system('nvprof -o {} {}'.format(outpath, cmd))
+    return system(f'nvprof -o {outpath} {cmd}')
 
 
 def full_profile(rnns, **args):
     profile_args = []
     for k, v in args.items():
-        profile_args.append('--{}={}'.format(k, v))
-    profile_args.append('--rnns {}'.format(' '.join(rnns)))
+        profile_args.append(f'--{k}={v}')
+    profile_args.append(f"--rnns {' '.join(rnns)}")
     profile_args.append('--internal-run')
 
     outpath = nvprof_output_filename(rnns, **args)
 
-    cmd = '{} -m fastrnns.profile {}'.format(
-        sys.executable, ' '.join(profile_args))
+    cmd = f"{sys.executable} -m fastrnns.profile {' '.join(profile_args)}"
     rc, stdout, stderr = nvprof(cmd, outpath)
     if rc != 0:
-        raise RuntimeError('stderr: {}\nstdout: {}'.format(stderr, stdout))
+        raise RuntimeError(f'stderr: {stderr}\nstdout: {stdout}')
 
 
 if __name__ == '__main__':

@@ -312,7 +312,8 @@ ALLOW_LIST = [
     ("aten::to_sparse_csc.out", datetime.date(2023, 12, 31)),
     ("aten::to_sparse_csr.out", datetime.date(2023, 12, 31)),
     ("aten::_structured_sparse_linear", datetime.date(2023, 12, 31)),
-
+    ("aten::batch_norm_backward_elemt.out", datetime.date(2023, 12, 31)),
+    ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
@@ -500,7 +501,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     existing_schema_dict = {}
     slist = []
-    with open(args.existing_schemas, "r") as f:
+    with open(args.existing_schemas) as f:
         while True:
             line = f.readline()
             if not line:
