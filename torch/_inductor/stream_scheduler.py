@@ -31,18 +31,23 @@ class SSNode:
         node_id: the index of the node in the graph
         successors: {buf_name: SSNode}. It records the successors of the node. The buf_name is the name of the original node(scheduler node or fused node).
         predecessors: {buf_name: SSNode}. It records the predecessors of the node. The buf_name is the name of the original node(scheduler node or fused node).
+        fake_successors, fake_predecessors: {buf_name: SSNode}. It is used to set a node's fake successors when reordering.
         name: the name of the original node.
         original_user_names: the names of the original users of the node. If the original node is a fused node, we'll check the users of scheduler nodes included in this fused node.
         stream_id: the stream id of the node. -1 means not assigned.
         snode_names: the names of the scheduler nodes included in this fused node.
         cuda_event: mark if this node needs to generate a CUDA event. CUDA events are used to keep the data dependencies between streams.
         is_fused: mark if this node is a fused node.
+        is_nop_node: mark if this node is a nop node.
+        node_type: the type of the node. It can be "template", "extern", "foreach", "fused_or_schedule", "nop"
     """
 
     def __init__(self, original_node) -> None:
         from .scheduler import NopKernelSchedulerNode
         self.successors = {}
         self.predecessors = {}
+        self.fake_successors = {}
+        self.fake_predecessors = {}
         self.name = original_node.get_name() if original_node else ""
         self.original_user_names = []
         self.original_node = original_node
@@ -53,6 +58,7 @@ class SSNode:
         # mark if this node needs to generate a CUDA event
         self.cuda_event = False
         self.is_nop_node = isinstance(original_node, NopKernelSchedulerNode)
+        self.node_type = None
         if hasattr(original_node, "snodes"):
             self.is_fused = True
             for snode in original_node.snodes:
@@ -267,6 +273,41 @@ class SSGraph:
             for successor in sorted_successors:
                 if successor not in self.final_order:
                     self.dfs_search(successor)
+
+    
+    def find_fake_predecessor(self, ssnode):
+        # the first successor in the critical path
+        common_successor = None
+        tmp_node = ssnode
+        tmp_queue = []
+        tmp_queue.append(tmp_node)
+        while len(tmp_queue) != 0:
+            cur_node = tmp_queue.pop(0)
+            if cur_node in self.critical_path:
+                common_successor = cur_node
+                break
+            for successor in cur_node.successors.values():
+                tmp_queue.append(successor)
+        assert common_successor is not None
+        target_type = ''
+        if ssnode.node_type == 'extern':
+            target_type = 'fused_or_schedule'
+        elif ssnode.node_type == 'fused_or_schedule':
+            target_type = 'extern'
+        
+        first_reverse_predecessor = None
+        common_successor_index = self.critical_path.index(common_successor)
+        if target_type == '' and common_successor_index != 1:
+            first_reverse_predecessor = self.critical_path[common_successor_index-1]
+
+        for index in range(common_successor_index-1, -1, -1):
+            if self.critical_path[index].node_type == target_type:
+                if index != 0:
+                    first_reverse_predecessor = self.critical_path[index-1]
+                break
+        # could be None
+        return first_reverse_predecessor
+
     """
     For current global order, the nodes off the critical path are usually the adjacent nodes before the next common successor. It will block the critical path if we don't reorder them.
     """
@@ -287,17 +328,45 @@ class SSGraph:
         #             visited.add(index_2_node)
         #             visited.add(ssnode)
         # self.final_order.remove(self.name_mapping["OUTPUT"])
-
+        from .scheduler import SchedulerNode, FusedSchedulerNode
         in_degree = {ssnode: 0 for ssnode in self.ssnodes}
         for ssnode in self.ssnodes:
+            node = ssnode.original_node
             for successor in ssnode.successors.values():
                 in_degree[successor] += 1
+            if node is None:
+                continue
+            if node.is_template():
+                ssnode.node_type = "template"
+            elif node.is_extern():
+                ssnode.node_type = "extern"
+            elif node.is_foreach():
+                ssnode.node_type = "foreach"
+            elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
+                ssnode.node_type = "fused_or_schedule"
+            else:
+                ssnode.node_type = "nop"
+
         init_nodes = [ssnode for ssnode in self.ssnodes if in_degree[ssnode] == 0]
+        init_nodes = sorted(init_nodes, key=lambda x: x.stream_id, reverse=True)
+        for node in init_nodes:
+            if node.stream_id != 0:
+                fake_predecessor = self.find_fake_predecessor(node)
+                if fake_predecessor:
+                    node.fake_predecessors[fake_predecessor.get_name()] = fake_predecessor
+                    fake_predecessor.fake_successors[node.get_name()] = node
+                    in_degree[node] += 1
+        init_nodes = [ssnode for ssnode in init_nodes if in_degree[ssnode] == 0]
         init_nodes = sorted(init_nodes, key=lambda x: x.stream_id, reverse=True)
         queue = deque(init_nodes)
         while queue:
             u = queue.popleft()
             self.final_order.append(u)
+            sorted_fake_successors = sorted(u.fake_successors.values(), key=lambda x: x.stream_id, reverse=True)
+            for fake_successor in sorted_fake_successors:
+                in_degree[fake_successor] -= 1
+                if in_degree[fake_successor] == 0:
+                    queue.append(fake_successor)
             sorted_successors = sorted(u.successors.values(), key=lambda x: x.stream_id, reverse=True)
             for successor in sorted_successors:
                 in_degree[successor] -= 1
