@@ -16,7 +16,7 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
-from torch.distributed._tensor import DTensor, Replicate, Shard as DShard
+from torch.distributed._tensor import DTensor, Replicate
 
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
@@ -642,14 +642,8 @@ def _sharded_pre_load_state_dict_hook(
             tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
             state_dict[fqn_from_global_root] = tensor
         else:
-            # TODO: make use_dtensor=True work with offload_to_cpu=True.
-            local_tensor = param.to_local()
-            if param.device != local_tensor.device:
-                # construct from a cpu local tensor with cuda device mesh
-                # will automatically convert the dist tensor to cuda
-                param = DTensor.from_local(
-                    local_tensor, fsdp_state._device_mesh, [DShard(0)]
-                )
+            if param.device != fsdp_state._device_mesh.device_type:
+                param = param.to(fsdp_state._device_mesh.device_type)
 
             param = param.redistribute(
                 device_mesh=param.device_mesh, placements=[Replicate()]
