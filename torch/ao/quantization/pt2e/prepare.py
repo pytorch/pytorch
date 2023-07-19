@@ -68,9 +68,9 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
             assert _is_activation_post_process_node(arg, named_modules)
             assert arg_as_input_act_obs_or_fq is not None
             observed_arg = arg.args[0]
-            assert isinstance(observed_arg, Node), "expect observed argument to be a Node, but got: {}".format(type(observed_arg))
+            assert isinstance(observed_arg, Node), f"expect observed argument to be a Node, but got: {type(observed_arg)}"
             assert observed_arg in obs_or_fq_map, \
-                "can't refer to a node that does not have observer/fake_quant inserted yet: {}".format(observed_arg)
+                f"can't refer to a node that does not have observer/fake_quant inserted yet: {observed_arg}"
             arg_as_input_act_obs_or_fq = obs_or_fq_map[observed_arg]
             new_arg = arg
             obs_or_fq_map[(observed_arg, node)] = arg_as_input_act_obs_or_fq

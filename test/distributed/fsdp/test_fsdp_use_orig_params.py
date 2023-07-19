@@ -17,10 +17,14 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     MixedPrecision,
     ShardingStrategy,
+    StateDictType,
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
 from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
-from torch.distributed.fsdp.flat_param import _FSDP_SKIP_WRITEBACK_CHECK
+from torch.distributed.fsdp.flat_param import (
+    _FSDP_SKIP_WRITEBACK_CHECK,
+    _FSDP_USE_FULL_PREC_IN_EVAL,
+)
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
@@ -1080,6 +1084,56 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
         )
         with self.assertRaisesRegex(AssertionError, assert_msg):
             loss.backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_no_reshard_and_mixed_precision(self):
+        """
+        Tests that writeback does not falsely get triggered for a few
+        configurations (exercising the sharded view skipping logic):
+        - Train forward -> full-precision unshard -> train forward
+        - Train forward -> eval forward
+        - Train forward/backward -> eval forward -> model checkpoint
+        """
+        self.run_subtests(
+            {"use_full_prec_in_eval": [False, True]},
+            self._test_no_reshard_and_mixed_precision,
+        )
+
+    def _test_no_reshard_and_mixed_precision(self, use_full_prec_in_eval: bool):
+        if use_full_prec_in_eval:
+            os.environ[_FSDP_USE_FULL_PREC_IN_EVAL] = "1"
+        fsdp_kwargs = {
+            "sharding_strategy": ShardingStrategy.SHARD_GRAD_OP,
+            "auto_wrap_policy": ModuleWrapPolicy({nn.Linear}),
+            "mixed_precision": MixedPrecision(param_dtype=torch.float16),
+            "use_orig_params": True,
+        }
+
+        # Train forward -> full-precision unshard -> train forward
+        fsdp_model = FSDP(
+            TestFSDPUseOrigParamsWriteback.Model(torch.device("cuda")), **fsdp_kwargs
+        )
+        inp = fsdp_model.get_input(torch.device("cuda"))
+        fsdp_model(*inp)
+        with FSDP.summon_full_params(fsdp_model):
+            ...
+        fsdp_model(*inp).sum()
+
+        # Train forward -> eval forward
+        fsdp_model.train()
+        fsdp_model(*inp)
+        fsdp_model.eval()
+        fsdp_model(*inp)
+
+        # Train forward/backward -> eval forward -> model checkpoint
+        fsdp_model.train()
+        fsdp_model(*inp).sum().backward()
+        fsdp_model.eval()
+        fsdp_model(*inp)
+        with FSDP.state_dict_type(fsdp_model, StateDictType.SHARDED_STATE_DICT):
+            sd = fsdp_model.state_dict()
+            fsdp_model.load_state_dict(sd)
+        fsdp_model(*inp).sum().backward()
 
 
 class TestFSDPUseOrigParamsFQNs(FSDPTest):

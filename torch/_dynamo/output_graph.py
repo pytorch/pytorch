@@ -1073,7 +1073,7 @@ class SubgraphTracer(fx.Tracer):
     """
 
     def __init__(self, output_graph, parent=None):
-        super(SubgraphTracer, self).__init__()
+        super().__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
         # Map from graph input name to its placeholder proxy object, where the
