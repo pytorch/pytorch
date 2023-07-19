@@ -2,9 +2,9 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/TensorBody.h>
-#include <ATen/TensorSubclassLikeUtils.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
@@ -465,9 +465,8 @@ static inline Tensor handleDimInMultiDimIndexing(
     const Tensor& tensor = index.tensor();
     auto scalar_type = tensor.scalar_type();
     if (tensor.dim() == 0 &&
-        at::isIntegralType(scalar_type, /*includeBool=*/true)
-        && tensor.device() == at::kCPU
-        && !at::isTensorSubclassLike(tensor)) {
+        at::isIntegralType(scalar_type, /*includeBool=*/true) &&
+        tensor.device() == at::kCPU && !at::isTensorSubclassLike(tensor)) {
       if (scalar_type != at::kByte && scalar_type != at::kBool) {
         result = impl::applySelect(
             result,
