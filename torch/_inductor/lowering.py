@@ -2446,6 +2446,10 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
+    if is_triton(values) and (
+        accumulate is True or torch.are_deterministic_algorithms_enabled()
+    ):
+        V.graph.disable_cudagraphs = True
     ir.IndexPutFallback(self, indices, values, accumulate)
     return self
 
