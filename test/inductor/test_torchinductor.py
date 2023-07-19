@@ -2354,7 +2354,7 @@ class CommonTemplate:
     def test_adaptive_avg_pool2d_low_prec(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
 
             def forward(self, x):
@@ -6004,7 +6004,7 @@ class CommonTemplate:
 
         self.common(
             fn,
-            [torch.randn((4, 2)), torch.randn((4))],
+            [torch.randn((4, 2)), torch.randn(4)],
         )
 
     # Shape padding causes the inputs to all get specialized, so the codegen
@@ -6056,7 +6056,7 @@ class CommonTemplate:
 
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 B, N, C = x.shape

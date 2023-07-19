@@ -93,7 +93,7 @@ class CPUReproTests(TestCase):
     def test_conv2d_bn_mixed_dtype(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     3,
                     16,

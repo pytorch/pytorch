@@ -379,12 +379,10 @@ class VariableBuilder:
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
-            (
-                ConstantVariable.is_literal(k)
-                or self.tensor_can_be_dict_key(k)
-                or isinstance(k, enum.Enum)
-                for k in value.keys()
-            )
+            ConstantVariable.is_literal(k)
+            or self.tensor_can_be_dict_key(k)
+            or isinstance(k, enum.Enum)
+            for k in value.keys()
         ):
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
