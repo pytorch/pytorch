@@ -783,8 +783,7 @@ def repeat(x, repeats):
     for i in range(len(repeats)):
         if repeats[i] == 0:
             zero_tensor = True
-        if repeats[i] != 1:
-            new_size[i] = new_size[i] * repeats[i]
+        new_size[i] = new_size[i] * repeats[i]
 
     if zero_tensor:
         return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
