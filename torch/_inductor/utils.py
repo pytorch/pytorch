@@ -430,13 +430,12 @@ def has_incompatible_cudagraph_ops(gm):
         "run_with_rng_state",
         "run_and_save_rng_state",
     }
-
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
             {
                 "aten._unsafe_index_put.default",
-                "aten.index_put_.default",
                 "aten.index_put.default",
+                "aten.index_put_.default",
                 "aten.scatter.src",
                 "aten.scatter.reduce",
                 "aten.scatter.value_reduce",
@@ -448,7 +447,7 @@ def has_incompatible_cudagraph_ops(gm):
             }
         )
     for node in gm.graph.nodes:
-        if str(node.target):
+        if str(node.target) in forbidden_set:
             return True
     return False
 
