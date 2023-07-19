@@ -499,7 +499,7 @@ def _multi_tensor_adamw(
         device_state_steps,
     ), _) in grouped_tensors.values():
         if maximize:
-            device_grads = torch._foreach_neg(tuple(device_grads))  # type: ignore[assignment]
+            device_grads = torch._foreach_neg(device_grads)
 
         device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
         device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
