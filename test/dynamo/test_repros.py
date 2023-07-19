@@ -1733,6 +1733,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = fn(y)
         self.assertTrue(same(ref, res))
 
+    def test_indexing_scalar(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x, y):
+            return x[y]
+
+        fn(torch.ones(20), torch.tensor(1))
+
     def test_setitem_boolean_mask_diff(self):
         def fn(x, b, y):
             x = x.clone()
