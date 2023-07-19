@@ -26,12 +26,12 @@ def main():
     jb = load(args.file[1])
 
     keys = (set(ja.keys()) | set(jb.keys())) - {"benchmark_results"}
-    print("{:20s} {:>20s}      {:>20s}".format("", "baseline", "test"))
-    print("{:20s} {:>20s}      {:>20s}".format("", "-" * 20, "-" * 20))
+    print(f"{'':20s} {'baseline':>20s}      {'test':>20s}")
+    print(f"{'':20s} {'-' * 20:>20s}      {'-' * 20:>20s}")
     for key in sorted(keys):
         va = str(ja.get(key, "-"))
         vb = str(jb.get(key, "-"))
-        print("{:20s} {:>20s}  vs  {:>20s}".format(key + ":", va, vb))
+        print(f"{key + ':':20s} {va:>20s}  vs  {vb:>20s}")
     print("")
 
     ba = ja["benchmark_results"]
@@ -49,9 +49,9 @@ def main():
 
         # Print header
         print("")
-        print("{:>10s}".format(""), end='')  # noqa: E999
+        print(f"{'':>10s}", end='')  # noqa: E999
         for _ in [75, 95]:
-            print("{:>16s}{:>10s}{:>10s}".format("sec/iter", "ex/sec", "diff"), end='')  # noqa: E999
+            print(f"{'sec/iter':>16s}{'ex/sec':>10s}{'diff':>10s}", end='')  # noqa: E999
         print("")
 
         # Print measurements
