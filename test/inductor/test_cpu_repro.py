@@ -55,7 +55,7 @@ class CPUReproTests(TestCase):
     common = check_model
 
     def test_conv_stride_constraints(self):
-        for fmt in [torch.channels_last, torch.contiguous_format]:
+        for fmt in [torch.contiguous_format, torch.channels_last]:
             # TorchDispatch doesn't work in our cuda invocation for some reason
             m = torch.nn.Conv2d(5, 6, [3, 3])
 
@@ -77,6 +77,12 @@ class CPUReproTests(TestCase):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                     kwargs = kwargs if kwargs else {}
                     if func == torch.ops.aten.convolution.default:
+                        # For CPU and mkldnn enable, we always using channles last
+                        if (
+                            torch.backends.mkldnn.enabled
+                            and torch.backends.mkldnn.is_available()
+                        ):
+                            fmt = torch.channels_last
                         test_self.assertTrue(args[0].is_contiguous(memory_format=fmt))
                         test_self.assertTrue(args[1].is_contiguous(memory_format=fmt))
                         nonlocal conv_seen
