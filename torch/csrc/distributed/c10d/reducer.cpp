@@ -440,6 +440,25 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
         logger_,
         "Expected variable to have sparse gradient.");
 
+    // Copy the indices of sparse metadata
+    if (sparse_metadata_) {
+      grad = grad.coalesce();
+      REDUCER_CHECK(
+          param_names_.size() != 0, logger_, "No parameter names were found");
+      std::string& param_name = param_names_[variable_index];
+      auto iter = sparse_metadata_->find(param_name);
+      REDUCER_CHECK(
+          iter != sparse_metadata_->end(),
+          logger_,
+          "param: " + param_name + " not found in sparse metadata");
+      bucket.sparse_tensor_indices =
+          iter->second.to(at::kLong).unsqueeze(0).to(grad.device());
+      auto indices = at::searchsorted(
+          bucket.sparse_tensor_indices.value(), grad.indices(), false, false);
+      // For indices we are using the ones set by sparse_metadata
+      grad = at::sparse_coo_tensor(indices, grad.values(), grad.sizes());
+    }
+
     // Sparse tensors cannot be grouped together with other sparse tensors in a
     // single reduction operation like we can for dense tensors. Therefore, the
     // `offsets` and `lengths` vectors in the bucket struct are empty, and
@@ -472,7 +491,8 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
         bucket.offsets,
         bucket.lengths,
         bucket.sizes_vec,
-        variables_for_bucket);
+        variables_for_bucket,
+        c10::nullopt);
   }
   return gradBuckets;
 }
@@ -924,7 +944,8 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.offsets,
       bucket.lengths,
       bucket.sizes_vec,
-      variables_for_bucket);
+      variables_for_bucket,
+      bucket.sparse_tensor_indices);
   bucket.future_work = run_comm_hook(grad_bucket);
 }
 
@@ -1546,7 +1567,21 @@ void Reducer::finalize_backward() {
         ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
     if (bucket.expect_sparse_gradient) {
-      bucket.gradients.copy_(future_result);
+      // sparse metadata is set so the bucket should have sparse_tensor_indices
+      if (sparse_metadata_) {
+        REDUCER_CHECK(
+            bucket.sparse_tensor_indices.value().numel() ==
+                bucket.gradients.sizes()[0],
+            logger_,
+            "Sparse metadata and gradient size mismatch");
+        auto sparse_result = at::sparse_coo_tensor(
+            bucket.sparse_tensor_indices.value(),
+            future_result,
+            bucket.gradients.sizes());
+        bucket.gradients.copy_(sparse_result);
+      } else {
+        bucket.gradients.copy_(future_result);
+      }
     } else {
       // Reinitialize only `bucket_views_out` with the future_result by
       // following the same logic in `initialize_buckets`.
@@ -1593,6 +1628,8 @@ void Reducer::finalize_backward() {
   if (should_collect_runtime_stats()) {
     record_backward_comm_end_time();
   }
+
+  sparse_metadata_.reset();
 }
 
 void Reducer::runGradCallbackForVariable(
@@ -1777,6 +1814,11 @@ bool Reducer::rebuild_buckets() {
   initialize_buckets(std::move(rebuilt_bucket_indices));
 
   return true;
+}
+
+void Reducer::setSparseMetadata(std::map<std::string, at::Tensor>& metadata) {
+  sparse_metadata_ =
+      std::make_unique<std::map<std::string, at::Tensor>>(metadata);
 }
 
 // See Note [DDP Communication Hook]
