@@ -690,7 +690,11 @@ class {module_name}(torch.nn.Module):
     def _lazy_forward(self, *args, **kwargs):
         self._real_recompile()
         assert not self._needs_recompile()
-        return self.forward(*args, **kwargs)
+
+        # call `__call__` rather than 'forward' since recompilation may
+        # install a wrapper for `__call__` to provide a customized error
+        # message.
+        return self(*args, **kwargs)
 
     forward = _lazy_forward
 
