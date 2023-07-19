@@ -888,6 +888,7 @@ init_command = [
 code = 'UFMT'
 include_patterns = [
     '**/*.py',
+    '**/*.pyi',
 ]
 command = [
     'python3',
@@ -901,7 +902,9 @@ exclude_patterns = [
     # We don't care too much about files in this directory, don't enforce
     # formatting on them
     'caffe2/**/*.py',
+    'caffe2/**/*.pyi',
     'third_party/**/*.py',
+    'third_party/**/*.pyi',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     '.ci/pytorch/create_test_cert.py',
