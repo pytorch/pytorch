@@ -486,7 +486,7 @@ static inline Tensor handleDimInMultiDimIndexing(
       return result;
     } else if (
         at::isIntegralType(scalar_type, /*includeBool=*/false) &&
-        tensor.device() == at::kCPU && at::isTensorSubclassLike(tensor)) {
+        tensor.device() == at::kCPU && !at::isTensorSubclassLike(tensor)) {
       return impl::applySelect(
           result,
           *dim_ptr,
