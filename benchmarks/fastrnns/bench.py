@@ -26,7 +26,7 @@ def fit_str(string, colwidth=16):
 
 def to_str(item):
     if isinstance(item, float):
-        return '%.4g' % item
+        return f'{item:.4g}'
     return str(item)
 
 
