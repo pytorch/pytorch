@@ -31,7 +31,7 @@ finally:
 TIMM_MODELS = dict()
 filename = os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
 
-with open(filename, "r") as fh:
+with open(filename) as fh:
     lines = fh.readlines()
     lines = [line.rstrip() for line in lines]
     for line in lines:
@@ -92,7 +92,7 @@ def refresh_model_names():
         models = set()
         # TODO - set the path to pytorch-image-models repo
         for fn in glob.glob("../pytorch-image-models/docs/models/*.md"):
-            with open(fn, "r") as f:
+            with open(fn) as f:
                 while True:
                     line = f.readline()
                     if not line:
@@ -169,7 +169,7 @@ def refresh_model_names():
             fw.write(model_name + "\n")
 
 
-class TimmRunnner(BenchmarkRunner):
+class TimmRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
@@ -339,7 +339,7 @@ class TimmRunnner(BenchmarkRunner):
 def timm_main():
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
-    main(TimmRunnner())
+    main(TimmRunner())
 
 
 if __name__ == "__main__":

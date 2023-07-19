@@ -250,14 +250,15 @@ class set_multithreading_enabled(_DecoratorContextManager):
     """
 
     def __init__(self, mode: bool) -> None:
+        self.prev = torch._C._is_multithreading_enabled()
+        torch._C._set_multithreading_enabled(mode)
         self.mode = mode
-        self.multithreadeding_enabled_guard = torch._C._MultithreadingEnabled(mode)
 
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, *args) -> None:
-        del self.multithreadeding_enabled_guard
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        torch._C._set_multithreading_enabled(self.prev)
 
     def clone(self) -> "set_multithreading_enabled":
         return self.__class__(self.mode)

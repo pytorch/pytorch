@@ -22,6 +22,7 @@ from torch.ao.quantization.fake_quantize import (
 
 from .observer import (
     _PartialWrapper,
+    MinMaxObserver,
     HistogramObserver,
     MovingAverageMinMaxObserver,
     NoopObserver,
@@ -56,6 +57,7 @@ __all__ = [
     "per_channel_dynamic_qconfig",
     "float_qparams_weight_only_qconfig",
     "float_qparams_weight_only_qconfig_4bit",
+    "default_quint8_weight_qconfig",
     "default_qat_qconfig",
     "default_dynamic_qat_qconfig",
     "default_weight_only_qconfig",
@@ -74,6 +76,7 @@ __all__ = [
     "get_default_qat_qconfig_dict",
     "QConfigAny",
     "qconfig_equals",
+
 ]
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
@@ -304,6 +307,8 @@ default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=
 
 default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
+
+default_quint8_weight_qconfig = QConfig(activation=HistogramObserver, weight=MinMaxObserver)
 
 def get_default_qat_qconfig(backend='x86', version=1):
     """

@@ -7,6 +7,7 @@ import functools
 import importlib
 import inspect
 import itertools
+import linecache
 import logging
 import operator
 import sys
@@ -60,9 +61,10 @@ from .utils import (
     get_fake_value,
     graph_break_dup_warning_checker,
     istype,
+    LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import MutableLocal, typestr, VariableTracker
+from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable, EnumVariable
@@ -82,12 +84,14 @@ from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    SetVariable,
     SliceVariable,
     TupleVariable,
 )
 from .variables.misc import (
     ClosureVariable,
     GetAttrVariable,
+    InlinedClosureVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
@@ -104,6 +108,7 @@ from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariab
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
+trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 
 
 @functools.lru_cache(None)
@@ -493,10 +498,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     next_instruction: Optional[Instruction]
     block_stack: List[BlockStackEntry]
     lineno: int
-    mutated_closure_cell_contents: Set[str]
     kw_names: Optional[ConstantVariable]
     accept_prefix_inst: bool
     prefix_insts: List[Instruction]
+    inline_depth: int
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
@@ -599,6 +604,20 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.restore_graphstate(state)
             raise
 
+    def get_log_starts_line_log_str(self):
+        inline_depth_str = (
+            f" (inline depth: {self.inline_depth})" if self.inline_depth > 0 else ""
+        )
+        log_str = f"TRACE starts_line {self.f_code.co_name} {self.f_code.co_filename}:{self.lineno}{inline_depth_str}\n"
+        line = linecache.getline(self.f_code.co_filename, self.lineno).rstrip()
+        log_str += f"    {line}"
+        return log_str
+
+    def log_starts_line(self):
+        trace_source_log.debug(
+            "%s", LazyString(lambda: self.get_log_starts_line_log_str())
+        )
+
     def step(self):
         """Process exactly one instruction, return False we should exit"""
         assert isinstance(self.instruction_pointer, int)
@@ -612,7 +631,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.next_instruction = None
         if inst.starts_line and self.lineno != inst.starts_line:
             self.lineno = inst.starts_line
-            log.debug("TRACE starts_line %s:%s", self.f_code.co_filename, self.lineno)
+            self.log_starts_line()
 
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
@@ -1259,6 +1278,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         self.push(ListVariable(items, mutable_local=MutableLocal(), **options))
 
+    def BUILD_SET(self, inst):
+        items = self.popn(inst.argval)
+        options = VariableTracker.propagate(items)
+        new_set = SetVariable(self, items, mutable_local=MutableLocal(), **options)
+        self.push(new_set)
+
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
         seqs = self.popn(inst.argval)
         options = VariableTracker.propagate(seqs)
@@ -1342,6 +1367,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 **VariableTracker.propagate([obj, k, v]),
             ),
         )
+
+    def SET_ADD(self, inst):
+        v = self.pop()
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, SetVariable)
+        assert obj.mutable_local
+        return obj.call_method(self, "add", [v], {})
 
     def LIST_APPEND(self, inst):
         v = self.pop()
@@ -1856,6 +1889,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         symbolic_globals: Dict[str, VariableTracker],
         f_code: types.CodeType,
         export: bool,
+        inline_depth: int,
     ):
         super().__init__()
 
@@ -1915,8 +1949,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ):
                 self.push(BuiltinVariable(None))
 
+        self.inline_depth = inline_depth
+        linecache.lazycache(f_code.co_filename, f_globals)
+        self.log_starts_line()
+
 
 class InstructionTranslator(InstructionTranslatorBase):
+    mutated_closure_cell_contents: Set[str]
+
     def __init__(
         self,
         instructions: List[Instruction],
@@ -1946,6 +1986,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 frame_state,
                 local_scope=f_locals,
                 global_scope=f_globals,
+                f_code=f_code,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -1957,6 +1998,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_globals=collections.OrderedDict(),
             f_code=f_code,
             export=export,
+            inline_depth=0,
         )
 
         # as soon as we create the tracing context we should keep it active, so any calls
@@ -2277,6 +2319,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             code_options={k: getattr(code, k) for k in dir(code)},
             f_code=code,
             export=parent.export,
+            inline_depth=parent.inline_depth + 1,
         )
         self.parent = parent
         self.symbolic_result = None
@@ -2295,6 +2338,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             cell = self.closure_cells[inst.argval]
             val = self.pop()
             if isinstance(cell, ClosureVariable):
+                if not self.output.is_root_tracer():
+                    unimplemented(
+                        "HigherOrderOperator: Mutating a variable not in the current scope (ClosureVariable)"
+                    )
                 self.output.root_tx.symbolic_locals[cell.name] = val
             else:
                 self.output.side_effects.store_cell(cell, val)
@@ -2311,7 +2358,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 if (
                     maybe_cell is not None
                     and maybe_cell.source.name()
-                    not in self.parent.mutated_closure_cell_contents
+                    not in self.output.root_tx.mutated_closure_cell_contents
                 ):
                     # Why is the source name here unique?
                     # mutated_closure_cell_contents is a per-frame
@@ -2319,7 +2366,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     # locals from the frame.  If you had two locals,
                     # they'll get different source names, and therefore
                     # differ here.
-                    self.parent.mutated_closure_cell_contents.add(
+                    self.output.root_tx.mutated_closure_cell_contents.add(
                         maybe_cell.source.name()
                     )
                     raise exc.RestartAnalysis()
@@ -2341,9 +2388,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def LOAD_CLOSURE(self, inst):
         assert inst.argval in self.cell_and_freevars()
-        self.push(self.closure_cells[inst.argval])
+        if inst.argval in self.closure_cells:
+            self.push(self.closure_cells[inst.argval])
+        else:
+            self.push(InlinedClosureVariable(name=inst.argval))
+
+    def check_replace_is_safe(self, oldvar):
+        if not is_side_effect_safe(oldvar.mutable_local):
+            unimplemented(
+                "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)"
+            )
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
+        self.check_replace_is_safe(oldvar)
         newvar = super().replace_all(oldvar, newvar)
         # recursively check and update parent's locals and stack in case oldvar is from parent
         translator: InstructionTranslatorBase = self

@@ -7,10 +7,11 @@ import itertools
 from typing import Iterator
 import torch._ops
 
-__all__ = ['enable_python_dispatcher', 'no_python_dispatcher']
+__all__ = ['enable_python_dispatcher', 'no_python_dispatcher', 'enable_pre_dispatch']
 
 no_python_dispatcher = torch._C._DisablePythonDispatcher
 enable_python_dispatcher = torch._C._EnablePythonDispatcher
+enable_pre_dispatch = torch._C._EnablePreDispatch
 
 CROSSREF_FUNCTIONALIZE = False
 

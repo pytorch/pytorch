@@ -48,6 +48,38 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
     return dtype(self.size()).copy_(self, non_blocking)
 
 
+def _hpu(self, device=None, non_blocking=False, **kwargs):
+    """Returns a copy of this object in HPU memory.
+
+    If this object is already in HPU memory and on the correct device, then
+    no copy is performed and the original object is returned.
+
+    Args:
+        device (int): The destination HPU id. Defaults to the current device.
+        non_blocking (bool): If ``True`` and the source is in pinned memory,
+            the copy will be asynchronous with respect to the host. Otherwise,
+            the argument has no effect.
+        **kwargs: For compatibility, may contain the key ``async`` in place of
+            the ``non_blocking`` argument.
+    """
+    non_blocking = _get_async_or_non_blocking("hpu", non_blocking, kwargs)
+    hpu = getattr(torch, "hpu", None)
+    assert hpu is not None, "HPU device module is not loaded"
+    if self.is_hpu:
+        if device is None:
+            device = hpu.current_device()
+        if self.get_device() == device:
+            return self
+    else:
+        if device is None:
+            device = -1
+    with hpu.device(device):
+        assert not self.is_sparse, "sparse storage is not supported for HPU tensors"
+        untyped_storage = torch.UntypedStorage(self.size(), device=torch.device("hpu"))
+        untyped_storage.copy_(self, non_blocking)
+        return untyped_storage
+
+
 def _cuda(self, device=None, non_blocking=False, **kwargs):
     """Returns a copy of this object in CUDA memory.
 
@@ -353,6 +385,17 @@ def _rebuild_qtensor(
     # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
     return tensor
+
+
+def _rebuild_buffer(data, requires_grad, persistent):
+    buffer = torch.nn.Buffer(data, requires_grad, persistent)
+    return buffer
+
+
+def _rebuild_buffer_with_state(data, requires_grad, persistent, state):
+    buffer = torch.nn.Buffer(data, requires_grad, persistent)
+    buffer = _set_obj_state(buffer, state)
+    return buffer
 
 
 def _rebuild_parameter(data, requires_grad, backward_hooks):

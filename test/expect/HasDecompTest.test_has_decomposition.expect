@@ -18,8 +18,6 @@ aten::_add_relu.Tensor
 aten::_add_relu.out
 aten::_add_relu_.Scalar
 aten::_add_relu_.Tensor
-aten::_addmm_activation
-aten::_addmm_activation.out
 aten::_aminmax
 aten::_aminmax.dim
 aten::_aminmax.dim_out
@@ -38,7 +36,6 @@ aten::_cdist_forward
 aten::_cdist_forward.out
 aten::_cholesky_solve_helper
 aten::_cholesky_solve_helper.out
-aten::_chunk_grad_outputs_efficient_attention
 aten::_coalesce
 aten::_coalesce.out
 aten::_coalesced
@@ -117,6 +114,7 @@ aten::_fft_c2r
 aten::_fft_c2r.out
 aten::_fft_r2c
 aten::_fft_r2c.out
+aten::_fill_mem_eff_dropout_mask_
 aten::_flash_attention_backward
 aten::_flash_attention_forward
 aten::_foobar
@@ -316,6 +314,8 @@ aten::_foreach_trunc_
 aten::_foreach_zero
 aten::_foreach_zero.out
 aten::_foreach_zero_
+aten::_functional_assert_async.msg
+aten::_functional_sym_constrain_range
 aten::_fused_adam
 aten::_fused_adam.out
 aten::_fused_adam_
@@ -364,6 +364,7 @@ aten::_logcumsumexp
 aten::_logcumsumexp.out
 aten::_lstm_mps
 aten::_lstm_mps.out
+aten::_make_dep_token
 aten::_make_dual
 aten::_make_dual_copy
 aten::_make_dual_copy.out
@@ -468,6 +469,7 @@ aten::_sparse_mask_projection
 aten::_sparse_mask_projection.out
 aten::_sparse_mm_reduce_impl
 aten::_sparse_mm_reduce_impl_backward
+aten::_sparse_semi_structured_linear
 aten::_sparse_softmax
 aten::_sparse_softmax.out
 aten::_sparse_softmax_backward_data
@@ -486,7 +488,6 @@ aten::_standard_gamma
 aten::_standard_gamma.out
 aten::_standard_gamma_grad
 aten::_standard_gamma_grad.out
-aten::_structured_sparse_linear
 aten::_test_autograd_multiple_dispatch.fullcoverage
 aten::_test_autograd_multiple_dispatch.fullcoverage_out
 aten::_test_autograd_multiple_dispatch_view
@@ -512,6 +513,19 @@ aten::_thnn_fused_lstm_cell_backward_impl
 aten::_thnn_fused_lstm_cell_backward_impl.out
 aten::_to_dense
 aten::_to_dense.out
+aten::_to_sparse
+aten::_to_sparse.out
+aten::_to_sparse.sparse_dim
+aten::_to_sparse.sparse_dim_out
+aten::_to_sparse_bsc
+aten::_to_sparse_bsc.out
+aten::_to_sparse_bsr
+aten::_to_sparse_bsr.out
+aten::_to_sparse_csc
+aten::_to_sparse_csc.out
+aten::_to_sparse_csr
+aten::_to_sparse_csr.out
+aten::_to_sparse_semi_structured
 aten::_transform_bias_rescale_qkv
 aten::_transform_bias_rescale_qkv.out
 aten::_transformer_encoder_layer_fwd
@@ -931,8 +945,6 @@ aten::mps_convolution_backward
 aten::mps_convolution_backward.out
 aten::mps_convolution_transpose_backward
 aten::mps_convolution_transpose_backward.out
-aten::multi_margin_loss
-aten::multi_margin_loss.out
 aten::multi_margin_loss_backward
 aten::multi_margin_loss_backward.grad_input
 aten::multilabel_margin_loss_backward
@@ -1068,8 +1080,6 @@ aten::reflection_pad3d
 aten::reflection_pad3d.out
 aten::reflection_pad3d_backward
 aten::reflection_pad3d_backward.grad_input
-aten::renorm
-aten::renorm.out
 aten::repeat_interleave.Tensor
 aten::repeat_interleave.Tensor_out
 aten::replication_pad1d
@@ -1253,18 +1263,6 @@ aten::to_mkldnn
 aten::to_mkldnn.out
 aten::to_padded_tensor
 aten::to_padded_tensor.out
-aten::to_sparse
-aten::to_sparse.out
-aten::to_sparse.sparse_dim
-aten::to_sparse.sparse_dim_out
-aten::to_sparse_bsc
-aten::to_sparse_bsc.out
-aten::to_sparse_bsr
-aten::to_sparse_bsr.out
-aten::to_sparse_csc
-aten::to_sparse_csc.out
-aten::to_sparse_csr
-aten::to_sparse_csr.out
 aten::topk
 aten::topk.values
 aten::transpose_

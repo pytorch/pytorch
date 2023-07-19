@@ -8,7 +8,7 @@ import math
 import operator
 import types
 import warnings
-from typing import Dict, Optional, Set
+from typing import cast, Dict, Optional, Set
 
 import torch
 from torch.fx._symbolic_trace import is_fx_tracing
@@ -192,6 +192,10 @@ def _allowed_function_ids():
 
                 if isinstance(obj, torch._ops.HigherOrderOperator):
                     continue
+                # We want to trace through `grad`
+                if obj is torch.func.grad:
+                    continue
+
                 if isinstance(obj, types.ModuleType):
                     if obj.__name__.startswith("torch.") and _is_allowed_module_prefix(
                         obj
@@ -239,6 +243,7 @@ def _builtin_function_ids():
     rv.update(
         {id(v): f"functools.{v.__name__}" for v in (itertools.chain, itertools.islice)}
     )
+    rv.update({id(cast): "typing.cast"})
     rv[id(functools.reduce)] = "functools.reduce"
     return rv
 

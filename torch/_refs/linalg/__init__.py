@@ -11,7 +11,6 @@ import torch._refs as refs
 import torch._refs.linalg as linalg
 from torch import Tensor
 from torch._prims_common import (
-    check,
     check_fp_or_complex,
     check_is_matrix,
     Dim,
@@ -29,11 +28,11 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
     Checks related to the dtype kwarg in `linalg.*norm` functions
     """
     if dtype is not None:
-        check(
+        torch._check(
             utils.is_float_dtype(dtype) or utils.is_complex_dtype(dtype),
             lambda: f"{fn_name}: dtype should be floating point or complex. Got {dtype}",
         )
-        check(
+        torch._check(
             utils.is_complex_dtype(dtype) == utils.is_complex_dtype(x_dtype),
             lambda: "{fn_name}: dtype should be {d} for {d} inputs. Got {dtype}".format(
                 fn_name=fn_name,
@@ -41,7 +40,7 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
                 dtype=dtype,
             ),
         )
-        check(
+        torch._check(
             utils.get_higher_dtype(dtype, x_dtype) == dtype,
             lambda: f"{fn_name}: the dtype of the input ({x_dtype}) should be convertible "
             "without narrowing to the specified dtype ({dtype})",
@@ -79,7 +78,7 @@ def vector_norm(
         dim = [dim]  # type: ignore[assignment]
 
     if x.numel() == 0 and (ord < 0.0 or ord == float("inf")):
-        check(
+        torch._check(
             dim is not None and len(dim) != 0,
             lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
             "because the operation does not have an identity",
@@ -87,7 +86,7 @@ def vector_norm(
         shape = x.shape
         assert dim is not None  # mypy does not seem to be able to see through check?
         for d in dim:
-            check(
+            torch._check(
                 shape[d] != 0,
                 lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
                 f"dimension {d} because this dimension is empty and the "
@@ -147,8 +146,10 @@ def matrix_norm(
     dim = utils.canonicalize_dims(A.ndim, dim)
     if isinstance(dim, Dim):
         dim = (dim,)  # type: ignore[assignment]
-    check(len(dim) == 2, lambda: "linalg.matrix_norm: dim must be a 2-tuple. Got {dim}")
-    check(
+    torch._check(
+        len(dim) == 2, lambda: "linalg.matrix_norm: dim must be a 2-tuple. Got {dim}"
+    )
+    torch._check(
         dim[0] != dim[1],
         lambda: "linalg.matrix_norm: dims must be different. Got ({dim[0]}, {dim[1]})",
     )
@@ -157,7 +158,7 @@ def matrix_norm(
 
     if isinstance(ord, str):
         # ord
-        check(
+        torch._check(
             ord in ("fro", "nuc"),
             lambda: "linalg.matrix_norm: Order {ord} not supported.",
         )
@@ -180,7 +181,7 @@ def matrix_norm(
     else:
         # ord
         abs_ord = abs(ord)
-        check(
+        torch._check(
             abs_ord in (2, 1, float("inf")),
             lambda: "linalg.matrix_norm: Order {ord} not supported.",
         )
@@ -224,12 +225,12 @@ def norm(
     if dim is not None:
         if isinstance(dim, Dim):
             dim = (dim,)  # type: ignore[assignment]
-        check(
+        torch._check(
             len(dim) in (1, 2),
             lambda: "linalg.norm: If dim is specified, it must be of length 1 or 2. Got {dim}",
         )
     elif ord is not None:
-        check(
+        torch._check(
             A.ndim in (1, 2),
             lambda: "linalg.norm: If dim is not specified but ord is, the input must be 1D or 2D. Got {A.ndim}D",
         )

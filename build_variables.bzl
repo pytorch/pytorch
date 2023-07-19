@@ -139,7 +139,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/kineto_client_interface.cpp",
     "torch/csrc/profiler/orchestration/observer.cpp",
     "torch/csrc/profiler/orchestration/python_tracer.cpp",
-    "torch/csrc/profiler/standalone/execution_graph_observer.cpp",
+    "torch/csrc/profiler/standalone/execution_trace_observer.cpp",
     "torch/csrc/profiler/standalone/itt_observer.cpp",
     "torch/csrc/profiler/standalone/nvtx_observer.cpp",
     "torch/csrc/profiler/stubs/base.cpp",
@@ -500,11 +500,16 @@ lazy_tensor_core_python_sources = [
     "torch/csrc/lazy/python/python_util.cpp",
 ]
 
+inductor_core_resources = [
+    "torch/csrc/inductor/inductor_ops.cpp",
+]
+
 libtorch_core_sources = sorted(
     core_sources_common +
     torch_unpickler_common +
     core_sources_full +
     core_trainer_sources +
+    inductor_core_resources +
     libtorch_profiler_sources +
     lazy_tensor_core_sources,
 )

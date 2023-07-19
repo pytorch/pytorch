@@ -4,7 +4,6 @@ import inspect
 import operator
 import re
 import types
-import warnings
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
@@ -14,9 +13,14 @@ from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
 
 import torch
 from torch._subclasses import fake_tensor
-from torch.onnx import _type_utils
+from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher, op_validation
+from torch.onnx._internal.fx import (
+    diagnostics,
+    onnxfunction_dispatcher,
+    op_validation,
+    type_utils as fx_type_utils,
+)
 from torch.utils import _pytree
 
 
@@ -71,7 +75,7 @@ def _location_from_fx_stack_trace(
 
 @_beartype.beartype
 def _retrieve_or_adapt_input_to_graph_set(
-    fx_node_arg: _type_utils.Argument,
+    fx_node_arg: fx_type_utils.Argument,
     fx_name_to_onnxscript_value: Dict[
         str,
         Union[
@@ -96,7 +100,8 @@ def _retrieve_or_adapt_input_to_graph_set(
         #    in TorchScript graph.
         return fx_name_to_onnxscript_value[onnx_tensor.name]
     if isinstance(onnx_tensor, (tuple, list)) and any(
-        isinstance(node, torch.fx.Node) and isinstance(node.meta["val"], torch.SymInt)
+        isinstance(node, torch.fx.Node)
+        and isinstance(node.meta.get("val"), torch.SymInt)
         for node in onnx_tensor
     ):
         # This intends to handle dynamic axes. for example, if the input size of op.Expand
@@ -111,7 +116,7 @@ def _retrieve_or_adapt_input_to_graph_set(
         ] = []
         for tensor in onnx_tensor:
             if isinstance(tensor, torch.fx.Node) and isinstance(
-                tensor.meta["val"], torch.SymInt
+                tensor.meta.get("val"), torch.SymInt
             ):
                 sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
             elif isinstance(tensor, int):
@@ -134,11 +139,11 @@ def _retrieve_or_adapt_input_to_graph_set(
         output.shape = [len(sequence_mixed_elements)]
         return output
     elif isinstance(onnx_tensor, (tuple, list)) and all(
-        isinstance(node, torch.fx.Node) for node in onnx_tensor
+        isinstance(node, torch.fx.Node) or node is None for node in onnx_tensor
     ):
         sequence_elements: List[
             Union[
-                onnxscript_graph_building.TorchScriptTensor,
+                Optional[onnxscript_graph_building.TorchScriptTensor],
                 Tuple[
                     onnxscript_graph_building.TorchScriptTensor,
                     ...,
@@ -146,10 +151,14 @@ def _retrieve_or_adapt_input_to_graph_set(
             ]
         ] = []
         for tensor in onnx_tensor:
-            sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
+            sequence_elements.append(
+                fx_name_to_onnxscript_value[tensor.name] if tensor is not None else None
+            )
         return sequence_elements
     if isinstance(onnx_tensor, torch.dtype):
-        onnx_tensor = int(_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type())
+        onnx_tensor = int(
+            jit_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type()
+        )
 
     # all other cases, we do nothing.
     return onnx_tensor
@@ -174,10 +183,7 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
                 # default case.
                 continue
             else:
-                filtered["dtype"] = int(
-                    _type_utils.JitScalarType.from_dtype(value).onnx_type()
-                )
-            continue
+                value = int(jit_type_utils.JitScalarType.from_dtype(value).onnx_type())
         filtered[key] = value
     return filtered
 
@@ -235,7 +241,7 @@ def _fill_tensor_shape_type(
 @_beartype.beartype
 def _fill_in_default_kwargs(
     node: torch.fx.Node,
-) -> Tuple[List[_type_utils.Argument], Dict[str, _type_utils.Argument]]:
+) -> Tuple[List[fx_type_utils.Argument], Dict[str, fx_type_utils.Argument]]:
     """Find and Fill in the not provided kwargs with default values."""
 
     # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
@@ -249,8 +255,8 @@ def _fill_in_default_kwargs(
 
     # This function assumes the order of arguments in FX op is the
     # same as the order of arguments in TorchScript op.
-    complete_args: List[_type_utils.Argument] = []
-    complete_kwargs: Dict[str, _type_utils.Argument] = {}
+    complete_args: List[fx_type_utils.Argument] = []
+    complete_kwargs: Dict[str, fx_type_utils.Argument] = {}
 
     if inspect.isbuiltin(node.target):
         complete_args = list(node.args)
@@ -269,8 +275,8 @@ def _fill_in_default_kwargs(
 
 @_beartype.beartype
 def _wrap_fx_args_as_onnxscript_args(
-    complete_args: List[_type_utils.Argument],
-    complete_kwargs: Dict[str, _type_utils.Argument],
+    complete_args: List[fx_type_utils.Argument],
+    complete_kwargs: Dict[str, fx_type_utils.Argument],
     fx_name_to_onnxscript_value: Dict[
         str,
         Union[
@@ -292,7 +298,7 @@ def _wrap_fx_args_as_onnxscript_args(
             ]
         ]
     ],
-    Dict[str, _type_utils.Argument],
+    Dict[str, fx_type_utils.Argument],
 ]:
     """Map all FX arguments of a node to arguments in TorchScript graph."""
 
@@ -403,8 +409,8 @@ class FxOnnxInterpreter:
         else:
             raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
 
-    @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
     @_beartype.beartype
+    @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
     def run(
         self,
         fx_graph_module: torch.fx.GraphModule,
@@ -579,10 +585,6 @@ class FxOnnxInterpreter:
                     node_with_fixed_shape_args, node_with_fixed_shape_kwargs
                 )
             except ValueError as value_error:
-                warnings.warn(
-                    f"\nFound unsupported input types on PyTorch Op {node.target} with "
-                    f"ValueError: \n{value_error}.\n"
-                )
                 diagnostic = self.diagnostic_context.inflight_diagnostic()
                 diagnostic.with_additional_message(
                     f"### Op level debug fails due to unsupported input types\n"
@@ -650,23 +652,16 @@ class FxOnnxInterpreter:
         ],
         fx_graph_module: torch.fx.GraphModule,
     ):
-        current_attr = fx_graph_module
-        sub_attr_names = node.target.split(".")  # type: ignore[union-attr]
-        # If node.targe is "conv.weight", the following loop first
-        # assigns fx_module_with_metadata.conv to current_attr, and then
-        # fx_module_with_metadata.conv.weight to current_attr.
-        while sub_attr_names:
-            sub_attr_name = sub_attr_names.pop(0)
-            if not hasattr(current_attr, sub_attr_name):
-                raise AttributeError(
-                    f"Attribute {sub_attr_name} is not found in {current_attr}."
-                )
-            current_attr = getattr(current_attr, sub_attr_name)
+        assert isinstance(node.target, str), f"node.target {node.target} is not a str."
+        attr_tensor = getattr(fx_graph_module, node.target)
+        assert isinstance(attr_tensor, torch.Tensor), f"{attr_tensor} is not a tensor."
 
-        input_ = onnxscript_graph.add_initializer(node.name, current_attr)
+        # Parameter/buffer name cannot contain "."
+        # Revert from "/" to restore namespace formatting.
+        input_ = onnxscript_graph.add_initializer(
+            node.target.replace("/", "."), attr_tensor
+        )
 
         assert isinstance(input_, onnxscript_graph_building.TorchScriptTensor)
         assert isinstance(input_, onnxscript.tensor.Tensor)
         fx_name_to_onnxscript_value[node.name] = input_
-        # FIXME: Refactor logic getting 'current_attr'.
-        assert isinstance(current_attr, torch.Tensor)

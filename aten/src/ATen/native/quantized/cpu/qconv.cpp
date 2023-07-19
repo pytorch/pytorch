@@ -931,7 +931,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     output_shape = MakeDeConvOutputShape<kSpatialDim>(
         N,
         M,
-        {H, W},
+        kSpatialDim == 2 ? std::vector<int64_t>{H, W} : std::vector<int64_t>{D, H, W},
         kernel_,
         stride(),
         padding(),

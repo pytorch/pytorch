@@ -800,8 +800,23 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
     view = torch.ops.aten.view.default(mul, [-1]);  mul = None
-    _unsafe_view = torch.ops.aten._unsafe_view.default(view, [9]);  view = None
-    return [_unsafe_view]""")
+    return [view]""")
+
+    def test_output_aliases_intermediate_mutation_linear(self):
+        def f(x):
+            return (x + 1).view(-1)
+
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        # use inductor's decomps (which will e.g. turn _unsafe_view() into view())
+        from torch._inductor.decomposition import decompositions
+        f_compiled = aot_function(f, nop, decompositions=decompositions)
+
+        out_ref = f(*inp)
+        out_test = f_compiled(*inp)
+
+        out_ref.mul_(2)
+        out_test.mul_(2)
+        self.assertEqual(out_ref, out_test)
 
     def test_output_aliases_intermediate_no_grad(self):
         def f(a, b):
@@ -959,8 +974,7 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     transpose = torch.ops.aten.transpose.int(mul_1, 1, 0);  mul_1 = None
     transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
-    _unsafe_view = torch.ops.aten._unsafe_view.default(transpose, [3, 3]);  transpose = None
-    return [view, _unsafe_view, transpose_1, mul]""")
+    return [view, transpose, transpose_1, mul]""")
 
     def test_output_all_alias_types(self):
         # There are 3 types of aliasing that require us to return metadata in the compiled fw:
@@ -1551,7 +1565,7 @@ def forward(self, tangents_1):
         f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
-        self.assertEqual(count, [(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)])
+        self.assertExpectedInline(str(count), """[(['0_forward'], 4), (['1_inference'], 4), (['0_backward'], 8)]""")
 
     def test_dupe_arg(self):
         def f(x, y):
@@ -1931,7 +1945,7 @@ def forward(self, tangents_1):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.ones(4, 5))
+                self.buffer = torch.nn.Buffer(torch.ones(4, 5))
 
             def forward(self, x):
                 y = self.buffer.add_(3)
@@ -2126,7 +2140,7 @@ class <lambda>(torch.nn.Module):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self, x):
                 x.add_(4)
@@ -2139,7 +2153,7 @@ class <lambda>(torch.nn.Module):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 4))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 4))
 
             def forward(self, x, y):
                 y.add_(4)
@@ -2805,7 +2819,6 @@ symbolic_aot_autograd_failures = {
     xfail('median', ''),  # could not find kernel
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d_backward.default - couldn't ...
-    xfail('nn.functional.adaptive_max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
     xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2...
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
@@ -2820,20 +2833,7 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.interpolate', 'area'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
-    xfail('nn.functional.max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.max_pool3d', ''),  # aten.max_pool3d_with_indices.default - couldn't find symbolic m...
-    xfail('nn.functional.max_unpool1d', ''),  # aten.max_unpool2d.default - couldn't find symbolic meta funct...
-    xfail('nn.functional.max_unpool1d', 'grad'),  # aten.max_unpool2d.default - couldn't find symbolic meta ...
-    xfail('nn.functional.max_unpool2d', ''),  # aten.max_unpool2d.default - couldn't find symbolic meta funct...
-    xfail('nn.functional.max_unpool2d', 'grad'),  # aten.max_unpool2d.default - couldn't find symbolic meta ...
-    xfail('nn.functional.max_unpool3d', ''),  # aten.max_unpool3d.default - couldn't find symbolic meta funct...
-    xfail('nn.functional.max_unpool3d', 'grad'),  # aten.max_unpool3d.default - couldn't find symbolic meta ...
-    xfail('nn.functional.multi_margin_loss', ''),  # could not find kernel
-    xfail('nn.functional.multilabel_margin_loss', ''),  # could not find kernel
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.pad', 'reflect'),  # aten.reflection_pad1d.default - couldn't find symbolic meta fu...
-    xfail('nn.functional.pad', 'replicate'),  # aten.replication_pad1d.default - couldn't find symbolic meta...
-    xfail('nn.functional.pdist', ''),  # could not find kernel
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
@@ -2845,9 +2845,7 @@ symbolic_aot_autograd_failures = {
     xfail('polygamma', 'polygamma_n_3'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
     xfail('polygamma', 'polygamma_n_4'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
     xfail('prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
-    xfail('roll', ''),  # narrow() received an invalid combination of arguments - got (FakeTensor, int, torch._C...
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2969,23 +2967,14 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
-    torch.nn.ReplicationPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.ReplicationPad2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.ReplicationPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.ReflectionPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.ReflectionPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveAvgPool3d,  # could not find kernel for aten._adaptive_avg_pool3d_backward.default at dispatch key
                                  # DispatchKey.Meta
-    torch.nn.AdaptiveMaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveMaxPool2d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
                          # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
     torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
-    torch.nn.MaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.MaxPool3d,  # torch._subclasses.fake_tensor.UnsupportedOperatorException:
-                         # aten.max_pool3d_with_indices.default
 }
 
 

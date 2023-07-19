@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import enum
 import typing
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Dict, Literal, Optional, Union
 
 import torch
 from torch._C import _onnx as _C_onnx
@@ -340,48 +340,3 @@ _SCALAR_TYPE_TO_DTYPE = {
 }
 
 _DTYPE_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_DTYPE.items()}
-
-# NOTE: this is a mapping from torch dtype to a set of compatible onnx types
-# It's used in dispatcher to find the best match overload for the input dtypes
-TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS = {
-    torch.bfloat16: {"tensor(bfloat16)"},
-    torch.bool: {"tensor(bool)"},
-    torch.float64: {"tensor(double)"},
-    torch.float32: {"tensor(float)"},
-    torch.float16: {"tensor(float16)"},
-    torch.int16: {"tensor(int16)"},
-    torch.int32: {"tensor(int32)"},
-    torch.int64: {"tensor(int64)"},
-    torch.int8: {"tensor(int8)"},
-    torch.uint8: {"tensor(uint8)"},
-    str: {"tensor(string)"},
-    int: {"tensor(int16)", "tensor(int32)", "tensor(int64)"},
-    float: {"tensor(float16)", "tensor(float)", "tensor(double)"},
-    bool: {"tensor(int32)", "tensor(int64)", "tensor(bool)"},
-}
-
-# NOTE: Belows are from torch/fx/node.py
-BaseArgumentTypes = Union[
-    str,
-    int,
-    float,
-    bool,
-    complex,
-    torch.dtype,
-    torch.Tensor,
-    torch.device,
-    torch.memory_format,
-    torch.layout,
-    torch._ops.OpOverload,
-]
-Argument = Optional[
-    Union[
-        Tuple[Any, ...],  # actually Argument, but mypy can't represent recursive types
-        List[Any],  # actually Argument
-        Dict[str, Any],  # actually Argument
-        slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
-        range,
-        "torch.fx.Node",
-        BaseArgumentTypes,
-    ]
-]

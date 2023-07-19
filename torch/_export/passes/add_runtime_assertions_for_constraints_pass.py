@@ -13,7 +13,6 @@ import torch
 import torch.fx
 from torch.fx.experimental.symbolic_shapes import SymInt
 from torch._export.pass_base import ExportPassBase, ProxyValue, PassResult
-from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._subclasses.fake_tensor import FakeTensor
 
 
@@ -187,11 +186,6 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 (dim_node, other_dim_node),
                 assert_msg
             )
-
-    def _create_dummy_node_metadata(self):
-        return NodeMetadata({
-            "stack_trace": traceback.format_exc(-1)
-        })
 
     def _insert_assert_async_inplace(self, graph, operator, args, assert_msg):
         """

@@ -670,25 +670,14 @@ class CommonDistributedDataParallelTest:
             l2 = nn.Linear(20, 20)
             l1.weight = l2.weight
             model = nn.Sequential(l1, l2)
-            # TODO: non-reentrant based checkpointing of DDP module with
-            # static_graph runs into the below issue, see
-            # https://github.com/pytorch/pytorch/issues/70865 and
-            # https://github.com/pytorch/pytorch/issues/58111 for details.
-            err_ctx = (
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "Your training graph has changed in this iteration"
-                ) if static_graph and not use_reentrant else nullcontext()
+            self._test_ddp_checkpointing(
+                model,
+                process_group=process_group,
+                use_bucket_view=use_bucket_view,
+                static_graph=static_graph,
+                run_checkpoint=True,
+                use_reentrant=use_reentrant,
             )
-            with err_ctx:
-                self._test_ddp_checkpointing(
-                    model,
-                    process_group=process_group,
-                    use_bucket_view=use_bucket_view,
-                    static_graph=static_graph,
-                    run_checkpoint=True,
-                    use_reentrant=use_reentrant,
-                )
 
     @skip_if_lt_x_gpu(2)
     def test_ddp_checkpointing_twice_weight_sharing(self):
@@ -1348,6 +1337,21 @@ class AbstractCommTest:
         dist.all_gather(tensor_list_c, tensor)
         dist.all_gather(tensor_list_c, tensor_c)
 
+    def _test_bool_tensors(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        device = "cuda" if backend == "nccl" else "cpu"
+        # test alltoall_base
+        tensor = torch.tensor([1, 0, 0, 1], dtype=torch.bool, device=device)
+        zeros = torch.tensor([0, 0, 0, 0], dtype=torch.bool, device=device)
+        outensor = zeros if self.rank > 0 else tensor
+        dist.broadcast(outensor, src=0)
+        self.assertEqual(outensor, tensor)
 
 # Variant of AbstractCommTest that expects world size of 4
 class AbstractLargeCommTest(object):

@@ -181,7 +181,7 @@ class TestParseNativeYaml(unittest.TestCase):
                 use_aten_lib=False,
                 out_file=out_file,
             )
-        with open(out_yaml_path, "r") as out_file:
+        with open(out_yaml_path) as out_file:
             es = yaml.load(out_file, Loader=LineLoader)
         self.assertTrue(all("func" in e for e in es))
         self.assertTrue(all(e.get("variants") == "function" for e in es))
@@ -268,7 +268,7 @@ class TestParseKernelYamlFiles(unittest.TestCase):
                 use_aten_lib=False,
                 out_file=out_file,
             )
-        with open(out_yaml_path, "r") as out_file:
+        with open(out_yaml_path) as out_file:
             es = yaml.load(out_file, Loader=LineLoader)
         self.assertTrue(all("func" in e for e in es))
         self.assertTrue(all(e.get("variants") == "function" for e in es))
@@ -366,7 +366,7 @@ class TestGenFunctionsDeclarations(unittest.TestCase):
 namespace custom_1 {
 
 // custom_1::op_1() -> bool
-TORCH_API inline bool op_1(torch::executor::RuntimeContext & context) {
+TORCH_API inline bool op_1(torch::executor::KernelRuntimeContext & context) {
     return ::at::native::kernel_1(context);
 }
 
@@ -380,7 +380,7 @@ TORCH_API inline bool op_1(torch::executor::RuntimeContext & context) {
 namespace custom_2 {
 
 // custom_2::op_2() -> bool
-TORCH_API inline bool op_2(torch::executor::RuntimeContext & context) {
+TORCH_API inline bool op_2(torch::executor::KernelRuntimeContext & context) {
     return ::at::native::kernel_2(context);
 }
 
@@ -403,7 +403,7 @@ TORCH_API inline bool op_2(torch::executor::RuntimeContext & context) {
 namespace custom_1 {
 
 // custom_1::op_1() -> bool
-TORCH_API inline bool op_1(torch::executor::RuntimeContext & context) {
+TORCH_API inline bool op_1(torch::executor::KernelRuntimeContext & context) {
     return at::op_1();
 }
 
@@ -463,7 +463,7 @@ class TestComputeCodegenUnboxedKernels(unittest.TestCase):
 Kernel(
     "custom_1::op_1",
     "v1/7;0,1,2,3|7;0,1,2,3|7;0,1,2,3",
-    [](torch::executor::RuntimeContext & context, EValue** stack) {
+    [](torch::executor::KernelRuntimeContext & context, EValue** stack) {
         """
             + """
 
@@ -548,7 +548,41 @@ Kernel(
             """
 Kernel(
     "custom_1::op_1",
-    [](torch::executor::RuntimeContext & context, EValue** stack) {
+    [](torch::executor::KernelRuntimeContext & context, EValue** stack) {
+        """
+            + """
+
+        EXECUTORCH_SCOPE_PROF("native_call_op_1");
+        bool result_ = at::native::default_kernel(context, );
+
+        *stack[0] = EValue(result_);
+    }
+),
+"""
+        )
+
+        self.assertEqual(expected_str, result)
+
+    def test_codegen_unboxed_default_kernel_key_selected(self) -> None:
+        """
+        This test checks that if there is no specialized kernel, the default kernel is used, when the selector only has default key.
+        """
+        selector = SelectiveBuilder.from_yaml_dict(
+            {
+                "include_all_operators": True,
+                "et_kernel_metadata": {"custom_1::op_1": ["default"]},
+            }
+        )
+        use_aten_lib = False
+        entry = (self.native_function_no_kern, self.default_kernel_entry)
+
+        result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
+        # Concat used to prevent whitespace stripping
+        expected_str = (
+            """
+Kernel(
+    "custom_1::op_1",
+    [](torch::executor::KernelRuntimeContext & context, EValue** stack) {
         """
             + """
 

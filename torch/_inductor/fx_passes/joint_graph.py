@@ -45,6 +45,13 @@ def remove_no_ops(
 
     def replace_no_op(node, replace_input_index):
         replacement = node.args[replace_input_index]
+
+        # https://github.com/pytorch/pytorch/issues/86128 causes
+        # non-Tensor inputs even for ops with only Tensor inputs.
+        # TODO - decompose/type promote to avoid this
+        if not all(isinstance(arg, torch.fx.Node) for arg in node.args):
+            return
+
         if not fake_tensors_eq(node.meta["val"], replacement.meta["val"]):
             if fake_tensors_eq(
                 node.meta["val"],

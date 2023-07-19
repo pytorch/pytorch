@@ -2,6 +2,7 @@ import contextlib
 
 import dataclasses
 import enum
+import functools
 import logging
 import traceback
 import unittest.mock
@@ -150,11 +151,17 @@ class Guard:
             self.source.value if self.source else -1,
             len(self.name),
             self.name,
-            self.create_fn.__code__.co_firstlineno,
+            self.inner_create_fn().__code__.co_firstlineno,
         )
 
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
+
+    def inner_create_fn(self):
+        if isinstance(self.create_fn, functools.partial):
+            return self.create_fn.func
+        else:
+            return self.create_fn
 
     @staticmethod
     def weakref_to_str(obj_weakref):
@@ -183,7 +190,7 @@ class Guard:
 
     def __repr__(self):
         s = f"""
-        {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
+        {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.inner_create_fn().__name__}
         {{
             'guard_types': {self.guard_types},
             'code': {self.code_list},
@@ -197,7 +204,7 @@ class Guard:
         output = f"Name: {repr(self.name)}\n"
         source = self.source.name.lower() if self.source else ""
         output += f"    Source: {source}\n"
-        output += f"    Create Function: {self.create_fn.__name__}\n"
+        output += f"    Create Function: {self.inner_create_fn().__name__}\n"
         output += f"    Guard Types: {self.guard_types}\n"
         output += f"    Code List: {self.code_list}\n"
         output += f"    Object Weakref: {self.weakref_to_str(self.obj_weakref)}\n"
@@ -387,6 +394,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 
     _supported_global_states = {
         "grad_enabled",
+        "torch_function_enabled",
         "autocast_enabled",
         "autocast_cpu_enabled",
         "autocast_gpu_dtype",
@@ -475,6 +483,16 @@ class TracingContext:
         # this is only set after aot_autograd
         self.fw_metadata = None
         self.params_flat = None
+        # this is for extended return calling convention from backend
+        # compiler to aot_autograd
+        # Per output, what the compiler specified stride of the output is,
+        # or None if no stride is known.  This is always the HINT, it
+        # is never a SymInt (it would be better if it was a SymInt, but
+        # I can't conveniently get this from Inductor atm.  Also, be
+        # careful not to accidentally induce guards on the SymInt if
+        # you ever do change this in aot_autograd.py; you should check
+        # on permutations preferentially.)
+        self.output_strides: Optional[List[Optional[List[int]]]] = None
 
     @staticmethod
     def extract_stack():
@@ -512,6 +530,20 @@ class TracingContext:
             yield
         finally:
             tc.frame_summary_stack.pop()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def report_output_strides():
+        tc = TracingContext.get()
+        if tc is None:
+            yield None
+            return
+        old_output_strides = tc.output_strides
+        tc.output_strides = []
+        try:
+            yield tc.output_strides
+        finally:
+            tc.output_strides = old_output_strides
 
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):

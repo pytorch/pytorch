@@ -78,8 +78,7 @@ from torch.testing._internal import composite_compliance
 from torch.utils._pytree import tree_flatten
 from torch.utils._python_dispatch import TorchDispatchMode
 
-# TODO: fixme https://github.com/pytorch/pytorch/issues/68972
-torch.set_default_dtype(torch.float32)
+assert torch.get_default_dtype() == torch.float32
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -254,7 +253,6 @@ class TestCommon(TestCase):
     # This test runs in double and complex double precision because
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
@@ -300,7 +298,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -463,7 +460,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namesapce are remapped to the refs namespace (torch.foo becomes refs.foo).
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -476,7 +472,6 @@ class TestCommon(TestCase):
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are preserved (torch.foo remains torch.foo).
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     @skipIfTorchInductor("Takes too long for inductor")
@@ -587,7 +582,6 @@ class TestCommon(TestCase):
     # TODO: get working with Windows by addressing failing operators
     # TODO: get working with ASAN by addressing failing operators
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
@@ -1270,7 +1264,6 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipMeta
     @onlyNativeDeviceTypes
     @ops(ops_and_refs, dtypes=OpDTypes.none)
@@ -1970,7 +1963,7 @@ fake_skips = (
     "nn.functional.embedding_bag",  # sometimes errors
     "nn.functional.nll_loss",  # sometimes errors
     "nn.functional.max_pool1d",  # The tensor has a non-zero number of elements
-    "to_sparse",  # Could not run 'aten::to_sparse' with arguments from the 'Meta' backend
+    "to_sparse",  # Could not run 'aten::_to_sparse' with arguments from the 'Meta' backend
     "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
     "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
     "_segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
@@ -2015,32 +2008,6 @@ aliasing_failures = (
     "histogramdd",
 )
 
-# tests which have inconsistent fake tensor stride propagation
-# XXX: no new tests should be added to this list as a result of a
-# decomp or prim, see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-fake_tensor_stride_failing_ops = {
-    "fft.fft2",
-    "fft.fft",
-    "fft.fftn",
-    "fft.hfft2",
-    "fft.hfft",
-    "fft.hfftn",
-    "fft.ifft2",
-    "fft.ifft",
-    "fft.ifftn",
-    "fft.ihfft2",
-    "fft.ihfft",
-    "fft.ihfftn",
-    "fft.irfft2",
-    "fft.irfft",
-    "fft.irfftn",
-    "fft.rfft2",
-    "fft.rfft",
-    "fft.rfftn",
-    "svd",
-    "linalg.svd",
-}
-
 fake_backward_skips = {
     "linalg.cond",
     "linalg.matrix_norm",
@@ -2057,7 +2024,7 @@ fake_backward_skips = {
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     xfail("_segment_reduce", "lengths"),
     skip('nn.functional.ctc_loss'),
-} | {skip(stride_skip) for stride_skip in fake_tensor_stride_failing_ops}
+}
 
 fake_autocast_backward_xfails = {
     skip("nn.functional.binary_cross_entropy"),
@@ -2113,11 +2080,9 @@ class TestFakeTensor(TestCase):
                     # if you see a shape exception here, you may need to add
                     # a `dynamic_output_shape` tag to an operator
 
-                    check_strides = name not in fake_tensor_stride_failing_ops
-
                     # prims/decomps must correctly model strides,
                     # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-                    prims.utils.compare_tensor_meta(fake_out, real_out, check_strides)
+                    prims.utils.compare_tensor_meta(fake_out, real_out, True)
 
                     if name not in aliasing_failures:
                         fake_aliasing = outputs_alias_inputs((input, args, kwargs), res_fake)

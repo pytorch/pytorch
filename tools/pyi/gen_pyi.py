@@ -93,14 +93,6 @@ blocklist = [
     "range",
     # defined in functional
     "einsum",
-    # reduction argument; these bindings don't make sense
-    "binary_cross_entropy_with_logits",
-    "ctc_loss",
-    "cosine_embedding_loss",
-    "hinge_embedding_loss",
-    "kl_div",
-    "margin_ranking_loss",
-    "triplet_margin_loss",
     # Somehow, these are defined in both _C and in functional. Ick!
     "broadcast_tensors",
     # Manually define named tensor type stubs in __init__.pyi.in
@@ -199,15 +191,15 @@ def sig_for_ops(opname: str) -> List[str]:
 
     name = opname[2:-2]
     if name in binary_ops:
-        return ["def {}(self, other: Any) -> Tensor: ...".format(opname)]
+        return [f"def {opname}(self, other: Any) -> Tensor: ..."]
     elif name in comparison_ops:
-        sig = "def {}(self, other: Any) -> Tensor: ...".format(opname)
+        sig = f"def {opname}(self, other: Any) -> Tensor: ..."
         if name in symmetric_comparison_ops:
             # unsafe override https://github.com/python/mypy/issues/5704
             sig += "  # type: ignore[override]"
         return [sig]
     elif name in unary_ops:
-        return ["def {}(self) -> Tensor: ...".format(opname)]
+        return [f"def {opname}(self) -> Tensor: ..."]
     elif name in to_py_type_ops:
         if name in {"bool", "float", "complex"}:
             tname = name
@@ -217,7 +209,7 @@ def sig_for_ops(opname: str) -> List[str]:
             tname = "int"
         if tname in {"float", "int", "bool", "complex"}:
             tname = "builtins." + tname
-        return ["def {}(self) -> {}: ...".format(opname, tname)]
+        return [f"def {opname}(self) -> {tname}: ..."]
     else:
         raise Exception("unknown op", opname)
 
@@ -604,7 +596,7 @@ def gen_pyi(
                                 "dtype: Optional[_dtype] = None",
                                 "device: Union[_device, str, None] = None",
                                 "requires_grad: _bool = False",
-                                "check_invariants: _bool = None",
+                                "check_invariants: Optional[_bool] = None",
                             ]
                         ),
                     )
@@ -680,7 +672,7 @@ def gen_pyi(
                             "dtype: Optional[_dtype] = None",
                             "device: Union[_device, str, None] = None",
                             "requires_grad: _bool = False",
-                            "check_invariants: _bool = None",
+                            "check_invariants: Optional[_bool] = None",
                         ]
                     )
                 )
@@ -698,7 +690,7 @@ def gen_pyi(
                             "layout: Optional[_layout] = None",
                             "device: Union[_device, str, None] = None",
                             "requires_grad: _bool = False",
-                            "check_invariants: _bool = None",
+                            "check_invariants: Optional[_bool] = None",
                         ]
                     )
                 )
@@ -854,112 +846,6 @@ def gen_pyi(
                 "def nonzero(input: Tensor, *, as_tuple: Literal[False] = False, out: Optional[Tensor] = None) -> Tensor: ...",
                 "def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...",
             ],
-            "binary_cross_entropy_with_logits": [
-                "def binary_cross_entropy_with_logits({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "target: Tensor",
-                            "weight: Optional[Tensor] = None",
-                            "size_average: Optional[bool] = None",
-                            "reduce: Optional[bool] = None",
-                            "reduction: str = ...",
-                            "pos_weight: Optional[Tensor] = None",
-                        ]
-                    )
-                )
-            ],
-            "cosine_embedding_loss": [
-                "def cosine_embedding_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input1: Tensor",
-                            "input2: Tensor",
-                            "target: Tensor",
-                            "margin: float = ...",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                        ]
-                    )
-                )
-            ],
-            "ctc_loss": [
-                "def ctc_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "log_probs: Tensor",
-                            "targets: Tensor",
-                            "input_lengths: Tensor",
-                            "target_lengths: Tensor",
-                            "blank: int = ...",
-                            "reduction: str = ...",
-                            "zero_infinity: bool = ...",
-                        ]
-                    )
-                )
-            ],
-            "hinge_embedding_loss": [
-                "def hinge_embedding_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "target: Tensor",
-                            "margin: float = ...",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                        ]
-                    )
-                )
-            ],
-            "kl_div": [
-                "def kl_div({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "target: Tensor",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                            "log_target: bool = ...",
-                        ]
-                    )
-                )
-            ],
-            "margin_ranking_loss": [
-                "def margin_ranking_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input1: Tensor",
-                            "input2: Tensor",
-                            "target: Tensor",
-                            "margin: float = ...",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                        ]
-                    )
-                )
-            ],
-            "triplet_margin_loss": [
-                "def triplet_margin_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "anchor: Tensor",
-                            "positive: Tensor",
-                            "negative: Tensor",
-                            "margin: float = ...",
-                            "p: float = ...",
-                            "eps: float = ...",
-                            "swap: bool = ...",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                        ]
-                    )
-                )
-            ],
             "dsmm": ["def dsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "hsmm": ["def hsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "saddmm": [
@@ -1028,8 +914,22 @@ def gen_pyi(
             else:
                 namedtuples[tuple_name] = tuple_def
 
+    def replace_special_case(hint: str) -> str:
+        # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
+        hint = hint.replace("at::Reduction::Mean", "1")
+        hint = hint.replace(": Tensor = None", ": Optional[Tensor] = None")
+        # Match both:
+        # ": Union[Tensor, Tuple[Tensor, ...], List[Tensor]] = None"
+        # ": Union[Tuple[Tensor, ...], List[Tensor]] = None"
+        hint = hint.replace(
+            "Tuple[Tensor, ...], List[Tensor]] = None",
+            "Tuple[Tensor, ...], List[Tensor], None] = None",
+        )
+        return hint
+
     function_hints = []
     for name, hints in sorted(unsorted_function_hints.items()):
+        hints = [replace_special_case(h) for h in hints]
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
         function_hints += hints
@@ -1135,6 +1035,7 @@ def gen_pyi(
                 "def is_contiguous(self, memory_format=torch.contiguous_format) -> _bool: ..."
             ],
             "_is_view": ["def _is_view(self) -> _bool: ..."],
+            "is_cpu": ["is_cpu: _bool"],
             "is_cuda": ["is_cuda: _bool"],
             "is_leaf": ["is_leaf: _bool"],
             "is_nested": ["is_nested: _bool"],
@@ -1219,9 +1120,7 @@ def gen_pyi(
         "bfloat16",
     ]
     for name in simple_conversions:
-        unsorted_tensor_method_hints[name].append(
-            "def {}(self) -> Tensor: ...".format(name)
-        )
+        unsorted_tensor_method_hints[name].append(f"def {name}(self) -> Tensor: ...")
 
     # pyi tensor methods don't currently include deprecated signatures for some reason
     # TODO: we should probably add them in
@@ -1250,7 +1149,7 @@ def gen_pyi(
                 namedtuples[tuple_name] = tuple_def
 
     for op in all_ops:
-        name = "__{}__".format(op)
+        name = f"__{op}__"
         unsorted_tensor_method_hints[name] += sig_for_ops(name)
 
     tensor_method_hints = []
@@ -1264,7 +1163,7 @@ def gen_pyi(
     # Generate namedtuple definitions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    namedtuple_defs = ["{}\n".format(defn) for defn in namedtuples.values()]
+    namedtuple_defs = [f"{defn}\n" for defn in namedtuples.values()]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1283,7 +1182,7 @@ def gen_pyi(
         "ByteTensor",
         "BoolTensor",
     ):
-        legacy_class_hints.append("class {}(Tensor): ...".format(c))
+        legacy_class_hints.append(f"class {c}(Tensor): ...")
 
     # Generate type signatures for dtype classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1291,7 +1190,7 @@ def gen_pyi(
     # TODO: don't explicitly list dtypes here; get it from canonical
     # source
     dtype_class_hints = [
-        "{}: dtype = ...".format(n)
+        f"{n}: dtype = ..."
         for n in [
             "float32",
             "float",
@@ -1332,7 +1231,7 @@ def gen_pyi(
     ]
     all_symbols = sorted(list(namedtuples.keys()) + hinted_function_names)
     all_directive = pformat(all_symbols, width=100, compact=True).split("\n")
-    all_directive[0] = "__all__ = {}".format(all_directive[0])
+    all_directive[0] = f"__all__ = {all_directive[0]}"
 
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
