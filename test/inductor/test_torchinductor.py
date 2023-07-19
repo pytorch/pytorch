@@ -978,7 +978,11 @@ class CommonTemplate:
 
     def test_dist(self):
         def fn(a, b):
-            return torch.dist(a, b)
+            return (
+                torch.dist(a, b),
+                torch.dist(a, b, p=1.2),
+                torch.dist(a.to(torch.bfloat16), b.to(torch.bfloat16)),
+            )
 
         self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
 
