@@ -620,7 +620,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 self._expected_output(i),
                 result,
-                msg="Mismatch in iteration {}".format(i),
+                msg=f"Mismatch in iteration {i}",
             )
 
     @requires_gloo()
@@ -642,7 +642,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 self._expected_output(i),
                 fut.wait(),
-                msg="Mismatch in iteration {}".format(i),
+                msg=f"Mismatch in iteration {i}",
             )
 
     @requires_gloo()
@@ -2482,11 +2482,11 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
     def setUp(self):
-        super(LargeCommTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(LargeCommTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
