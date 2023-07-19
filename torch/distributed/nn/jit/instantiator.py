@@ -31,9 +31,7 @@ def get_arg_return_types_from_interface(module_interface):
     module_interface_c = cu.get_interface(qualified_name)
     assert (
         "forward" in module_interface_c.getMethodNames()
-    ), "Expect forward in interface methods, while it has {}".format(
-        module_interface_c.getMethodNames()
-    )
+    ), f"Expect forward in interface methods, while it has {module_interface_c.getMethodNames()}"
     method_schema = module_interface_c.getMethod("forward")
 
     arg_str_list = []
@@ -46,9 +44,7 @@ def get_arg_return_types_from_interface(module_interface):
             default_value_str = f" = {argument.default_value}"
         else:
             default_value_str = ""
-        arg_type_str = "{name}: {type}{default_value}".format(
-            name=argument.name, type=argument.type, default_value=default_value_str
-        )
+        arg_type_str = f"{argument.name}: {argument.type}{default_value_str}"
         arg_type_str_list.append(arg_type_str)
 
     arg_str_list = arg_str_list[1:]  # Remove "self".
