@@ -3,6 +3,7 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
+from torchdynamo.exc import UserError
 from torch._export import export, dynamic_dim
 from torch._export.trace import do_not_use_experimental_export
 from torch._export.constraints import constrain_as_size, constrain_as_value
@@ -330,7 +331,7 @@ class TestExport(TestCase):
         inp_container = ((torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),)
 
         ep = export(Foo(), inp_container, _add_runtime_assertions=False)
-        ep_rexported = export(ep.module, inp_container, _add_runtime_assertions=False)
+        ep_rexported = export(ep.module(), inp_container, _add_runtime_assertions=False)
 
         inp_test = ((torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)),)
 
@@ -368,12 +369,20 @@ class TestExport(TestCase):
         inp_container = ({"a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)), "b": torch.randn(20, 16, 50, 100)},)
 
         ep = export(Foo(), inp_container, _add_runtime_assertions=False)
-        ep_rexported = export(ep.module, inp_container, _add_runtime_assertions=False)
+        ep_rexported = export(ep.module(), inp_container, _add_runtime_assertions=False)
 
         inp_test = ({"a": (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100)), "b": torch.randn(20, 16, 50, 100)},)
 
         self.assertTrue(torch.allclose(ep(*inp_test)["a"], ep_rexported(*inp_test)["a"]))
         self.assertTrue(torch.allclose(ep(*inp_test)["b"], ep_rexported(*inp_test)["b"]))
+
+    def test_module_invalid(self):
+        def foo(x):
+            return x.cos() + x.sin()
+
+        ep = export(foo, (torch.randn(1, 5),))
+        with self.assertRaisesRegexp(UserError, "Unflatten"):
+            ep.module(flat=True)
 
 
 if __name__ == '__main__':
