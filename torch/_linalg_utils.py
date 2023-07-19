@@ -97,7 +97,7 @@ def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed.",
         "Please use the `torch.linalg.matrix_rank` function instead,",
-        "The parameter 'symmetric' was renamed in `torch.linalg.matrix_rank()` to 'hermitian'."
+        "The parameter 'symmetric' was renamed in `torch.linalg.matrix_rank()` to 'hermitian'.",
     )
 
 
@@ -141,7 +141,7 @@ def _symeig(
         "should be replaced with",
         "`L = torch.linalg.eigvalsh(A, UPLO='U' if upper else 'L')`",
         "and",
-        "`L, V = torch.symeig(A, eigenvectors=True)`"
+        "`L, V = torch.symeig(A, eigenvectors=True)`",
         "should be replaced with",
         "`L, V = torch.linalg.eigh(A, UPLO='U' if upper else 'L')`",
     )
