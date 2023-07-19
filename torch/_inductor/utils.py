@@ -670,10 +670,14 @@ def use_triton_template(layout, *, enable_int32=False):
             or config.max_autotune_gemm
             or config.search_autotune_cache
         )
+        and "TRITON" in config.max_autotune_gemm_backends.split(",")
         and layout.device.type == "cuda"
         and layout.dtype in layout_dtypes
         and is_big_gpu(layout.device.index or 0)
     )
+
+def use_aten_gemm_kernels():
+    return "ATEN" in config.max_autotune_gemm_backends.split(",")
 
 
 class DebugDirManager:
