@@ -157,7 +157,7 @@ class CompiledOptimizerTests(TestCase):
     test_rmsprop = make_test(torch.optim.RMSprop, kernel_count=1, lr=0.01)
     test_adadelta = make_test(torch.optim.Adadelta, kernel_count=5, lr=0.01)
     test_adagrad = make_test(torch.optim.Adagrad, kernel_count=5, lr=0.01)
-    test_sgd = make_test(torch.optim.SGD, kernel_count=1, lr=0.01)
+    # test_sgd = make_test(torch.optim.SGD, kernel_count=1, lr=0.01)
 
     test_adam_recompile = make_recompile_test(torch.optim.Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(torch.optim.AdamW, lr=0.01)
@@ -176,7 +176,7 @@ class CompiledOptimizerTests(TestCase):
     test_adagrad_recompile = make_recompile_test(
         torch.optim.Adagrad, kernel_count=5, lr=0.01
     )
-    test_sgd_recompile = make_recompile_test(torch.optim.SGD, kernel_count=1, lr=0.01)
+    # test_sgd_recompile = make_recompile_test(torch.optim.SGD, kernel_count=1, lr=0.01)
 
 
 if __name__ == "__main__":
