@@ -455,11 +455,11 @@ class TestFSDPMiscMultiProcess(FSDPTest):
 
         # Check that `device_id` with `sync_module_states=True` works
         nested_wrapped_module = init_nested_wrapped_module()
-        nested_wrapped_module.register_buffer(
-            "buf", torch.ones((2, 2), device="cpu") * self.rank
+        nested_wrapped_module.buf = nn.Buffer(
+            torch.ones((2, 2), device="cpu") * self.rank
         )
-        nested_wrapped_module.module[0].register_buffer(
-            "buf", torch.ones((3, 2), device="cpu") * self.rank
+        nested_wrapped_module.module[0].buf = nn.Buffer(
+            torch.ones((3, 2), device="cpu") * self.rank
         )
         nested_wrapped_module = FSDP(
             nested_wrapped_module,
@@ -707,7 +707,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 torch.manual_seed(rank)
                 torch.cuda.manual_seed(rank)
                 self.lin = nn.Linear(10, 10, bias=False)
-                self.register_buffer("buffer", torch.ones(1) * rank)
+                self.buffer = nn.Buffer(torch.ones(1) * rank)
 
         m = MyModel(self.rank).cuda()
         _assert_module_states(

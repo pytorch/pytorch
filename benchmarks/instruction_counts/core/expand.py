@@ -58,7 +58,7 @@ def _generate_torchscript_file(model_src: str, name: str) -> Optional[str]:
         # to confirm.
         raise ValueError(f"File {module_path} already exists.")
 
-    with open(module_path, "wt") as f:
+    with open(module_path, "w") as f:
         f.write(model_src)
 
     # Import magic to actually load our function.

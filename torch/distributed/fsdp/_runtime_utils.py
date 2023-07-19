@@ -346,7 +346,6 @@ def _unshard(
     """
     if not handle:
         return
-    ran_pre_unshard = False
     with state._device_handle.stream(pre_unshard_stream):
         ran_pre_unshard = handle.pre_unshard()
     if ran_pre_unshard:
@@ -373,8 +372,6 @@ def _reshard(
     Reshards the handle. ``free_unsharded_flat_param`` indicates whether to
     free the handle's padded unsharded flat parameter.
     """
-    if not handle:
-        return
     handle.reshard(free_unsharded_flat_param)
     if state.limit_all_gathers and free_unsharded_flat_param:
         free_event = state._device_handle.Event()
@@ -388,14 +385,14 @@ def _reshard(
 
 
 def _unshard_grads(
-    handle: FlatParamHandle,
+    handle: Optional[FlatParamHandle],
 ) -> None:
     if handle:
         handle.unshard_grad()
 
 
 def _reshard_grads(
-    handle: FlatParamHandle,
+    handle: Optional[FlatParamHandle],
 ) -> None:
     if handle:
         handle.reshard_grad()
@@ -459,7 +456,7 @@ def _pre_forward(
 @no_type_check
 def _pre_forward_unshard(
     state: _FSDPState,
-    handle: FlatParamHandle,
+    handle: Optional[FlatParamHandle],
 ) -> None:
     """Unshards parameters in the pre-forward."""
     if not handle:
@@ -476,7 +473,7 @@ def _pre_forward_unshard(
 @no_type_check
 def _post_forward(
     state: _FSDPState,
-    handle: FlatParamHandle,
+    handle: Optional[FlatParamHandle],
     reshard_fn: Callable,
     module: nn.Module,
     input: Any,
@@ -1065,6 +1062,9 @@ def _catch_all_reshard(
             already_resharded = (
                 state._handle.flat_param.data_ptr()
                 == state._handle.flat_param._local_shard.data_ptr()
+                # If FSDP skipped using sharded views, then the flat parameter
+                # still points to the sharded data, so we need to reshard to
+                # use sharded views
                 and not state._handle._skipped_use_sharded_views
             )
             if already_resharded:
@@ -1117,7 +1117,7 @@ def _finalize_params(
 @no_type_check
 def _prefetch_handle(
     state: _FSDPState,
-    current_handle: FlatParamHandle,
+    current_handle: Optional[FlatParamHandle],
     prefetch_mode: _PrefetchMode,
 ) -> None:
     """
@@ -1318,7 +1318,7 @@ def _register_pre_backward_hooks(
 
 def _register_post_backward_hook(
     state: _FSDPState,
-    handle: FlatParamHandle,
+    handle: Optional[FlatParamHandle],
 ) -> None:
     """
     Registers post-backward hooks on the ``FlatParameter`` s'
@@ -1365,7 +1365,7 @@ def _register_post_backward_hook(
 
 def _register_post_backward_reshard_only_hook(
     state: _FSDPState,
-    handle: FlatParamHandle,
+    handle: Optional[FlatParamHandle],
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
 ) -> None:
@@ -1394,7 +1394,7 @@ def _register_post_backward_reshard_only_hook(
     hook_handle = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
-    handle.flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined]
+    handle.flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
 
 
 @no_type_check

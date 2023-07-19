@@ -198,7 +198,7 @@ def run_model(model_getter: GetterType, args: Any, task: str, run_once_fn: Calla
             pass
         do_sync = noop
     else:
-        device = torch.device("cuda:{}".format(args.gpu))
+        device = torch.device(f"cuda:{args.gpu}")
         do_sync = torch.cuda.synchronize
 
     model, inp = model_getter(device)
@@ -257,7 +257,7 @@ def main():
             runtimes = torch.tensor(runtimes)
             mean, var = runtimes.mean(), runtimes.var()
             results[name][task] = (mean.item(), var.item())
-            print("Results for model {} on task {}: {}s (var: {})".format(name, task, mean, var))
+            print(f"Results for model {name} on task {task}: {mean}s (var: {var})")
 
             if has_functorch:
                 try:
@@ -269,7 +269,7 @@ def main():
                 runtimes = torch.tensor(runtimes)
                 mean, var = runtimes.mean(), runtimes.var()
                 results[name][f"functorch {task}"] = (mean.item(), var.item())
-                print("Results for model {} on task {} using Functorch: {}s (var: {})".format(name, task, mean, var))
+                print(f"Results for model {name} on task {task} using Functorch: {mean}s (var: {var})")
 
     if args.output:
         with open(args.output, "w") as f:

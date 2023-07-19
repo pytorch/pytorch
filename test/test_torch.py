@@ -1746,11 +1746,20 @@ else:
     @skipIfMps
     def test_nondeterministic_alert_bincount(self, device):
         a = torch.tensor([], device=device, dtype=torch.long)
+        weights = torch.tensor([], device=device)
+
         for op_call in [torch.bincount, torch.Tensor.bincount]:
+            # Error should only be raised when device is CUDA and weights are
+            # given
+            self.check_nondeterministic_alert(
+                lambda: op_call(a, weights),
+                '_bincount_cuda',
+                torch.device(device).type == 'cuda')
+
             self.check_nondeterministic_alert(
                 lambda: op_call(a),
                 '_bincount_cuda',
-                torch.device(device).type == 'cuda')
+                False)
 
     # Ensures that kthvalue throws nondeterministic alerts in the correct cases
     @dtypes(torch.double)
