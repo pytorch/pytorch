@@ -54,7 +54,7 @@ class TraceDeviceMeshTestBase:
             ]
 
             def fn(tensor: torch.Tensor):
-                tensor = funcol.all_reduce(tensor, "sum", group=(mesh, mesh_dim))
+                tensor = funcol.all_reduce(tensor, "sum", group=(mesh, dim))
                 # multiply with 1 to trigger wait on read during tracing.
                 return tensor * 1
 
