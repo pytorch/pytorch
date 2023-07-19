@@ -18,6 +18,7 @@
 #include <ATen/ops/gt_native.h>
 #include <ATen/ops/hypot_native.h>
 #include <ATen/ops/le_native.h>
+#include <ATen/ops/lerp_native.h>
 #include <ATen/ops/logaddexp2_native.h>
 #include <ATen/ops/logaddexp_native.h>
 #include <ATen/ops/lt_native.h>
@@ -46,7 +47,7 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 #define BinaryOpFn(graph, primary, secondary) \
   MPSGraphTensor*(mps::BinaryOpCachedGraph * graph, MPSGraphTensor * primary, MPSGraphTensor * secondary)
 
-// alpha is always 1.0 except when this function is called from add_sub_template()
+// alpha is always 1.0 except when this function is called from add_sub_lerp_template()
 void binaryOpTensor(const Tensor& self,
                     const Tensor& other,
                     const Scalar& alpha,
@@ -173,7 +174,7 @@ void binaryOpTensor(const Tensor& self,
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
 
-    // 'cachedGraph->alphaTensor' is not nil only if add_sub_template() was called with an alpha value != 1.0
+    // 'cachedGraph->alphaTensor' is not nil only if add_sub_lerp_template() was called with an alpha value != 1.0
     if (cachedGraph->alphaTensor) {
       alpha_scalar = getMPSScalar(alpha, other.scalar_type());
       feeds[cachedGraph->alphaTensor] = getMPSGraphTensorFromScalar(mpsStream, alpha_scalar);
@@ -255,11 +256,11 @@ void div_mode_template(const Tensor& self,
                  div_mode_op_block);
 }
 
-void add_sub_template(const Tensor& self,
-                      const Tensor& other,
-                      const Scalar& alpha,
-                      const Tensor& output,
-                      std::string op_name) {
+void add_sub_lerp_template(const Tensor& self,
+                           const Tensor& other,
+                           const Scalar& alpha,
+                           const Tensor& output,
+                           std::string op_name) {
   if (alpha.toDouble() == 0.0) {
     if (!self.is_alias_of(output)) { // if inplace, no-op
       const_cast<Tensor&>(output) = self.clone();
@@ -273,9 +274,22 @@ void add_sub_template(const Tensor& self,
     at::native::alpha_check(commonDtype, alpha);
   }
 
-  BinaryOpBlock add_sub_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+  if (!alpha_has_value && op_name == "lerp") {
+    if (!self.is_alias_of(other)) { // if inplace, no-op
+      output.copy_(other);
+    }
+    return;
+  }
+
+  BinaryOpBlock add_sub_lerp_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
     MPSGraphTensor* secondaryTensor = secondaryCastTensor;
+
+    if (op_name == "lerp") {
+      secondaryCastTensor = [mpsGraph subtractionWithPrimaryTensor:secondaryCastTensor
+                                                   secondaryTensor:primaryCastTensor
+                                                              name:nil];
+    }
 
     // if alpha is 1.0, then we don't bother adding another multiply to graph
     if (alpha_has_value) {
@@ -284,7 +298,7 @@ void add_sub_template(const Tensor& self,
                                                   secondaryTensor:cachedGraph->alphaTensor
                                                              name:nil];
     }
-    if (op_name == "add")
+    if (op_name == "add" || op_name == "lerp")
       return [mpsGraph additionWithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryTensor name:nil];
     else
       return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryTensor name:nil];
@@ -295,7 +309,7 @@ void add_sub_template(const Tensor& self,
                  alpha,
                  output,
                  op_name + "_out_mps:" + (alpha_has_value ? getMPSTypeString(alpha.type()) : ""),
-                 add_sub_op_block);
+                 add_sub_lerp_op_block);
 }
 
 } // namespace mps
@@ -389,11 +403,11 @@ TORCH_IMPL_FUNC(div_out_mps)(const Tensor& self, const Tensor& other, const Tens
 }
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
-  mps::add_sub_template(self, other, alpha, output, "add");
+  mps::add_sub_lerp_template(self, other, alpha, output, "add");
 }
 
 TORCH_IMPL_FUNC(sub_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
-  mps::add_sub_template(self, other, alpha, output, "sub");
+  mps::add_sub_lerp_template(self, other, alpha, output, "sub");
 }
 
 TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const Tensor& out) {
@@ -492,4 +506,7 @@ TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Te
   mps::binaryOpTensor(self, other, Scalar(1.0), output, "xlogy_out_mps", xlogy_op_block);
 }
 
+TORCH_IMPL_FUNC(lerp_Scalar_mps)(const Tensor& self, const Tensor& end, const Scalar& weight, const Tensor& out) {
+  mps::add_sub_lerp_template(self, end, weight, out, "lerp");
+}
 } // namespace at::native
