@@ -35,6 +35,10 @@ from torch._inductor import config, cuda_properties, exc
 from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
 
+from torch.utils.cpp_extension import get_cpp_compiler
+import platform
+import os.path
+
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
 
@@ -73,6 +77,16 @@ def _compile_end():
 
 log = logging.getLogger(__name__)
 
+IS_LINUX = platform.system() == "Linux"
+
+def cpp_compiler_check():
+    compiler = get_cpp_compiler()
+    
+    if IS_LINUX is True:
+        if compiler.startswith('clang') is False:
+            print("warning: recommend to use clang++, and then get better compile performance.")
+    
+    return
 
 @functools.lru_cache(None)
 def cache_dir():
@@ -999,6 +1013,7 @@ class CppWrapperCodeCache:
                     extra_ldflags = f"{_shared} {_lpaths} {_libs} -ffast-math"
                     extra_include_paths = f"{_ipaths}"
 
+                    cpp_compiler_check()
                     mod = torch.utils.cpp_extension.load_inline(
                         name=name,
                         build_directory=cpp_wrapper_dir,
