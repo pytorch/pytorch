@@ -499,6 +499,8 @@ class DimDynamic(Enum):
     DUCK = 1
     # Treat the dimension statically based on its hint
     STATIC = 2
+    # Treat the dimension symbolically and without a backing hint
+    UNBACKED = 3
 
 # NB: These constraints affect both clients and backends: given some
 # constraint C, the client must pass inputs that satisfy the constraint,
@@ -2321,6 +2323,13 @@ Target Guards:
     ) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
         assert not (positive and val < 0), f"positive set for negative value: {val}"
+
+        if dynamic_dim is DimDynamic.UNBACKED:
+            # TODO: this is naughty
+            s = self.create_unbacked_symint()
+            constrain_range(s, min=2)
+            return s.node.expr
+
         # It's always sound to allocate a symbol as DYNAMIC.  If the user
         # constrained the symbol, force the policy to DYNAMIC, because our
         # constraint code will do weird stuff if, e.g., it's duck shaped

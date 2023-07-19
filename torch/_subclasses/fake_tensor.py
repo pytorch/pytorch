@@ -190,7 +190,8 @@ class FakeTensorConverter:
     meta_converter: MetaConverter
     constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
 
-    def __init__(self):
+    def __init__(self, cls=None):
+        self.cls = cls or FakeTensor
         self.meta_converter = MetaConverter()
 
         # map from to storage to corresponding constant tensors
@@ -200,7 +201,7 @@ class FakeTensorConverter:
         # when you have a constant, aliased tensor:
         # const_tensor.add_(torch.rand([1]))
         # all aliases of it must become no longer const
-        assert isinstance(fake_tensor, FakeTensor) and fake_tensor.constant is not None
+        assert isinstance(fake_tensor, cls) and fake_tensor.constant is not None
         weak_st = StorageWeakRef(fake_tensor.constant._typed_storage())
 
         # we need a map from a weak storage to all of its corresponding
@@ -211,7 +212,7 @@ class FakeTensorConverter:
         self.constant_storage_mapping[weak_st].append(weakref.ref(fake_tensor))
 
     def invalidate_constant_aliases(self, tensor):
-        assert not isinstance(tensor, FakeTensor)
+        assert not isinstance(tensor, cls)
 
         weak_st = StorageWeakRef(tensor._typed_storage())
         if weak_st not in self.constant_storage_mapping:
@@ -283,7 +284,7 @@ class FakeTensorConverter:
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
             with no_dispatch():
-                return FakeTensor(
+                return self.cls(
                     fake_mode,
                     make_meta_t(),
                     existing_device,
@@ -314,7 +315,7 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
-        out = FakeTensor(fake_mode, t, device)
+        out = self.cls(fake_mode, t, device)
         self.set_tensor_memo(t, out)
         return out
 
@@ -389,7 +390,7 @@ def constructors(fake_mode, func, *args, **kwargs):
     # to fail? hmmm)
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
-    return FakeTensor(fake_mode, r, out_device)
+    return fake_mode.cls(fake_mode, r, out_device)
 
 
 @register_op_impl(lambda func: func in (aten.to.prim_Device, aten.to.device))
@@ -534,7 +535,7 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
 
-    return FakeTensor(fake_mode, out, out_device)
+    return fake_mode.cls(fake_mode, out, out_device)
 
 
 # Dont default to default device handling,
@@ -631,7 +632,7 @@ def conv(fake_mode, func, *args, **kwargs):
             return t
         if mem_fmt is not None:
             t = t.to(memory_format=mem_fmt)
-        return FakeTensor(fake_mode, t, device)
+        return fake_mode.cls(fake_mode, t, device)
 
     with in_kernel_invocation_manager(fake_mode):
         out = func(**kwargs)
@@ -783,7 +784,7 @@ def make_fast_binary_impl(slow_ref):
         if is_contiguous:
             # do contiguous
             count_label("fast is_contiguous")
-            return FakeTensor(
+            return mode.cls(
                 mode,
                 torch.empty(
                     final_shape,
@@ -796,7 +797,7 @@ def make_fast_binary_impl(slow_ref):
         if is_channels_last:
             count_label("fast channels_last")
             # do channels last
-            return FakeTensor(
+            return mode.cls(
                 mode,
                 torch.empty(
                     final_shape,
@@ -1121,10 +1122,13 @@ class FakeTensorMode(TorchDispatchMode):
         allow_fallback_kernels=True,
         allow_non_fake_inputs=False,
         shape_env=None,
+        cls=None,
     ):
+        self.cls = cls or FakeTensor
+
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
-        self.fake_tensor_converter = FakeTensorConverter()
+        self.fake_tensor_converter = FakeTensorConverter(cls)
 
         import torch._functorch.config
 
