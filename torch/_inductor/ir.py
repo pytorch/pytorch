@@ -1818,9 +1818,9 @@ class FixedLayout(Layout):
         self,
         device: torch.device,
         dtype: torch.dtype,
-        size: List[Expr],
-        stride: List[Expr] = None,
-        offset: Expr = Integer(0),
+        size: Union[List[Expr], List[int]],
+        stride: Optional[Union[List[Expr], List[int]]] = None,
+        offset: Union[Expr, int] = Integer(0),
     ):
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
@@ -2229,11 +2229,17 @@ class ComputedBuffer(Buffer):
                 for r in reads
             ]
             # only consider reads to buffer of same size
+            # ignore StarDeps because they don't contribute stride information
+            assert all(
+                isinstance(r, (dependencies.StarDep, dependencies.MemoryDep))
+                for r in reads
+            )
             reads = [
                 sympy_subs(
                     r.index, {v: sympy.Integer(0) for v in reduction_vars if v != 0}
                 )
                 for r in reads
+                if isinstance(r, dependencies.MemoryDep)
             ]
 
             if reads:
@@ -3110,7 +3116,7 @@ class ScatterFallback(ExternKernel):
         index,
         src,
         *,
-        reduce: str = None,
+        reduce: Optional[str] = None,
         include_self: bool = True,
     ):
         assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
