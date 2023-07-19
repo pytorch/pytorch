@@ -986,6 +986,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
+            if V.graph.aot_mode:
+                self.wrapper_call.splice(
+                    f"at::cuda::CUDAStreamGuard stream_guard("
+                    f"at::cuda::getStreamFromExternal(stream, {V.graph.scheduler.current_device.index}));"
+                )
+
     def codegen_model_constructor(self):
         """
         // Generated code example
@@ -1303,7 +1309,17 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 return func;
             }
+            """
+        )
 
+        if V.graph.aot_mode:
+            stream_param = "cudaStream_t stream"
+            stream_arg = "stream"
+        else:
+            stream_param = "int device_index"
+            stream_arg = "at::cuda::getCurrentCUDAStream(device_index)"
+        self.header.splice(
+            f"""
             static inline void launchKernel(
                     CUfunction func,
                     int gridX,
@@ -1312,11 +1328,11 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     int numWraps,
                     int sharedMemBytes,
                     void* args[],
-                    int device_index) {
+                    {stream_param}) {{
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
                     func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
-                    at::cuda::getCurrentCUDAStream(device_index), args, nullptr));
-            }
+                    {stream_arg}, args, nullptr));
+            }}
             """
         )
 
@@ -1391,6 +1407,8 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         call_args = self.generate_args_decl(call_args)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
         self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
+
+        stream_arg = "stream" if V.graph.aot_mode else str(device_index)
         self.writeline(
             "launchKernel({}, {}, {}, {}, {}, {}, {}, {});".format(
                 name,
@@ -1400,6 +1418,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 params["num_warps"],
                 params["shared_mem"],
                 kernel_args_var,
-                device_index,
+                stream_arg,
             )
         )
