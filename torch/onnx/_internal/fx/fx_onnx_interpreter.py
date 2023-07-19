@@ -731,7 +731,7 @@ class FxOnnxInterpreter:
         # TODO: We may want to consider other naming styles. The goal is to be stable and
         # unique such that it can be easily identified in case of kernel substitution.
         # Example for current style is combination of qualified module class name and
-        # module attribute name: `torch_nn_modules_conv_Conv2d_conv1)`.
+        # module attribute name: `torch_nn_modules_conv_Conv2d_conv1`.
         # Other naming styles such as qualified module class name made unique can also
         # be considered.
         unique_module_name = f"{sub_module._get_name()}_{node.target}"
