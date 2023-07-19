@@ -63,6 +63,7 @@ from .utils import (
     counters,
     dynamo_timed,
     graph_break_reasons,
+    increment_op_count,
     lazy_format_graph_code,
     lazy_format_graph_tabular,
     LazyString,
@@ -945,7 +946,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 tot += 1
             if node.op == "placeholder":
                 placeholders.append(node)
-        torch._dynamo.utils.increment_op_count(tot)
+        increment_op_count(tot)
         for pl in placeholders:
             arg = pl.meta["grapharg"]
             # TODO: Why isn't this stored in meta :think:
