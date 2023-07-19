@@ -686,23 +686,26 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.aten.as_strided_.default,
                 torch.ops.aten.as_strided_scatter.default,
             ]
-            if any(
-                user.op == "output" or user.target in as_strided_ops for user in n.users
-            ) and isinstance(n.meta["val"], torch.Tensor):
+            is_output = any(user.op == "output" for user in n.users)
+            is_input_for_as_strided = any(
+                user.target in as_strided_ops for user in n.users
+            )
+            if (is_output or is_input_for_as_strided) and isinstance(
+                n.meta["val"], torch.Tensor
+            ):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
                 if dense and len(strides):
                     stride_order = ir.get_stride_order(strides)
-
                     if (
                         len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
                         and n.name not in self.user_visible_outputs
+                        and not is_input_for_as_strided
                     ):
                         stride_order = ir.NHWC_STRIDE_ORDER
-
                     result = ir.ExternKernel.require_stride_order(result, stride_order)
 
             # Realize if (1) any user need inputs realized, or (2) there is

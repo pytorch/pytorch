@@ -44,11 +44,21 @@ if config.is_fbcode():
     from triton.fb import build_paths
     from triton.fb.build import _run_build_command
 
-    from torch._inductor.fb.logging import global_cache_log
+    from torch._inductor.fb.utils import (
+        log_global_cache_stats,
+        log_global_cache_vals,
+        use_global_cache,
+    )
 else:
 
-    def global_cache_log(*args, **kwargs):
+    def log_global_cache_stats(*args, **kwargs):
         pass
+
+    def log_global_cache_vals(*args, **kwargs):
+        pass
+
+    def use_global_cache():
+        return False
 
 
 LOCK_TIMEOUT = 600
@@ -224,7 +234,8 @@ class PersistentCache(CacheBase):
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
 
-        gc_log = partial(global_cache_log, self.system, name, inputs)
+        log_stats = partial(log_global_cache_stats, self.system, name, inputs)
+        log_vals = partial(log_global_cache_vals, self.system, name, inputs)
         timings = {}
 
         def check_cache(cache, callback=None):
@@ -235,20 +246,20 @@ class PersistentCache(CacheBase):
                 if choice_hash in cache.get(name, {}).get(inputs, {}):
                     # cache hit
                     timings[choice] = cache[name][inputs][choice_hash]
-                    if callback:
-                        callback(choice_hash, cached=True)
                 else:
                     # cache miss
                     hit = False
-                    if callback:
-                        callback(choice_hash, cached=False)
+                    break
+            if callback:
+                callback(cached=hit)
             return hit
 
         if config.max_autotune or config.max_autotune_gemm:
             local_cache = self.get_local_cache()
             # check local cache first since it is data specific to the current machine
-            if not check_cache(local_cache) and not check_cache(
-                self.get_global_cache(), callback=gc_log
+            if not check_cache(local_cache) and not (
+                use_global_cache()
+                and check_cache(self.get_global_cache(), callback=log_stats)
             ):
                 # re-benchmark everything to try to get consistent numbers from the same machine
                 for choice in choices:
@@ -258,9 +269,15 @@ class PersistentCache(CacheBase):
                     local_cache[name][inputs][choice.hash_key()] = timings[choice]
 
                 self.update_local_cache(local_cache)
-        else:
+
+                if use_global_cache():
+                    timings_to_log = {
+                        choice.hash_key(): timings[choice] for choice in choices
+                    }
+                    log_vals(timings_to_log)
+        elif use_global_cache():
             # only check global cache, not local one
-            check_cache(self.get_global_cache(), callback=gc_log)
+            check_cache(self.get_global_cache(), callback=log_stats)
             # may have a partial cache hit, where not everything is benchmarked
 
         return timings
@@ -273,7 +290,7 @@ def get_lock_dir():
     return lock_dir
 
 
-def code_hash(code, extra=""):
+def code_hash(code, extra: str = ""):
     hashing_str = code
     if extra != "":
         hashing_str = hashing_str + "||" + extra
@@ -285,13 +302,19 @@ def code_hash(code, extra=""):
     )
 
 
-def get_path(basename: str, extension: str):
-    subdir = os.path.join(cache_dir(), basename[1:3])
+def get_path(basename: str, extension: str, specified_dir: str = ""):
+    if specified_dir:
+        if os.path.isabs(specified_dir):
+            subdir = specified_dir
+        else:
+            subdir = os.path.join(cache_dir(), specified_dir)
+    else:
+        subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{extension}")
     return basename, subdir, path
 
 
-def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
+def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
     assert hash_type in ["code", "cubin"], "Hash type not supported"
     if hash_type == "code":
         return code_hash(content, extra)
@@ -300,10 +323,14 @@ def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
 
 
 def write(
-    content: Union[str, bytes], extension: str, extra="", hash_type: str = "code"
+    content: Union[str, bytes],
+    extension: str,
+    extra: str = "",
+    hash_type: str = "code",
+    specified_dir: str = "",
 ):
     key: str = get_hash(content, extra, hash_type)
-    basename, subdir, path = get_path(key, extension)
+    basename, subdir, path = get_path(key, extension, specified_dir)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
@@ -670,16 +697,16 @@ def get_include_and_linking_paths(
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
         # and we need a way to link to what PyTorch links.
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
-        if aot_mode:
-            ipaths += [os.path.join(_TORCH_PATH, "_inductor", "aot_inductor_include")]
         lpaths = cpp_extension.library_paths(cuda) + [
             sysconfig.get_config_var("LIBDIR")
         ]
         libs = []
         # No need to manually specify libraries in fbcode.
         if not config.is_fbcode():
-            libs += ["c10", "torch", "torch_cpu", "torch_python"]
+            libs += ["c10", "torch", "torch_cpu"]
             libs += ["gomp"]
+            if not aot_mode:
+                libs += ["torch_python"]
         else:
             # internal remote execution is able to find omp, but not gomp
             libs += ["omp"]
@@ -777,7 +804,12 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
-        _, path = write(cubin, "cubin", hash_type="cubin")
+        _, path = write(
+            cubin,
+            "cubin",
+            hash_type="cubin",
+            specified_dir=config.aot_inductor_output_path,
+        )
         params["cubin_path"] = path
         cls.cache[key] = params
 
@@ -799,20 +831,20 @@ class AotCodeCache:
                 "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
             )
         )
-        key, input_path = write(source_code, "cpp", extra=cpp_command)
+        key, input_path = write(
+            source_code,
+            "cpp",
+            extra=cpp_command,
+            specified_dir=config.aot_inductor_output_path,
+        )
         if key not in cls.cache:
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                # Place the generated .so into a sub-folder with the full hex-hash to avoid
-                # any name collision.
-                output_so_dir = os.path.splitext(input_path)[0]
-                if not os.path.exists(output_so_dir):
-                    os.makedirs(output_so_dir, exist_ok=False)
-                so_name = f"{config.dll_name}.so"
-                output_so = os.path.join(output_so_dir, so_name)
+                output_so = os.path.splitext(input_path)[0] + ".so"
+
                 if not os.path.exists(output_so):
                     cmd = cpp_compile_command(
                         input=input_path,

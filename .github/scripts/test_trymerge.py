@@ -114,7 +114,7 @@ def mocked_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3)
 
 
 def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
-    class Object(object):
+    class Object:
         def __init__(self) -> None:
             self.revert = revert
             self.force = force
