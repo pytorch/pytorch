@@ -65,7 +65,7 @@ namespace detail {
  *
  * @note The implementation doesn't use any floating-point operations.
  */
-C10_HOST_DEVICE inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
+inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
   /*
    * Extend the half-precision floating-point number to 32 bits and shift to the
    * upper part of the 32-bit word:
@@ -163,7 +163,7 @@ C10_HOST_DEVICE inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
  * mode and no operations on denormals) floating-point operations and bitcasts
  * between integer and floating-point variables.
  */
-inline float fp16_ieee_to_fp32_value(uint16_t h) {
+C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
   /*
    * Extend the half-precision floating-point number to 32 bits and shift to the
    * upper part of the 32-bit word:
