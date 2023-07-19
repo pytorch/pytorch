@@ -46,43 +46,6 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
       SDPBackend::math};
-
-  constexpr std::array<SDPBackend, num_backends> efficient_first{
-      SDPBackend::efficient_attention,
-      SDPBackend::flash_attention,
-      SDPBackend::math};
-  // Logic is taken from xformers
-  // FlashAttention parallelizes across "batch_size * num_heads"
-  // MemEff parallelizes across "batch_size * num_heads * num_queries" and can
-  // be more efficient. batch_size, q_len, num_heads, k = inp.query.shape
-
-  if (has_for_nested_inputs(params)) {
-    return efficient_first;
-  }
-  if (params.query.dim() != 4) {
-    return default_order;
-  }
-  const auto batch_size{params.query.sym_size(0)},
-      num_heads{params.query.sym_size(1)},
-      query_lengths{params.query.sym_size(2)},
-      head_dim{params.query.sym_size(3)};
-  if (batch_size > 0) {
-    const auto threads_flash = batch_size * num_heads;
-    const auto threads_cutlass =
-        threads_flash * (query_lengths / c10::SymInt(64));
-    bool more_threads_cutlass = (threads_cutlass / 2) >= threads_flash;
-    bool small_threads_flash = threads_flash < 60;
-    bool large_head_dim = head_dim.max(params.key.sym_size(3)) == 128;
-
-    // The training heuristic is taken from
-    // https://github.com/pytorch/pytorch/pull/99644 Revisit when updated
-    // cutlass kernel is upstreamed.
-    if (input_requires_grad(params)) {
-      if (6 * threads_flash > query_lengths)
-        return efficient_first;
-    } else if ((small_threads_flash && more_threads_cutlass) || large_head_dim)
-      return efficient_first;
-  }
   return default_order;
 }
 
@@ -91,18 +54,16 @@ bool check_head_dim_size(sdp_params params, bool debug) {
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
   if (!(query_size_last == key_size_last &&
-        query_size_last == value_size_last && query_size_last % 8 == 0 &&
-        query_size_last <= 128 && value_size_last % 8 == 0 &&
-        value_size_last <= 128)) {
+        query_size_last == value_size_last && query_size_last <= max_size)) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 128.",
+          "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.",
           " Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
-          params.key.sym_size(-1),
+          key_size_last,
           ", Value.size(-1): ",
-          params.value.sym_size(-1),
+          value_size_last,
           " instead.");
     }
     return false;
@@ -186,15 +147,15 @@ bool check_sm_version(cudaDeviceProp * dprops) {
   return is_gte_lower_bound && is_lte_upper_bound;
 }
 
-bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
+bool check_flash_attention_hardware_support(sdp_params params, bool debug) {
   // Check that the gpu is capable of running flash attention
-  using sm75 = SMVersion<7, 5>;
+  using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  if (!check_sm_version<sm75, sm90>(dprops)) {
+  if (!check_sm_version<sm80, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention only supports gpu architectures in the range [sm75, sm90]. Attempting to run on a sm ",
+          "Flash attention only supports gpu architectures in the range [sm80, sm90]. Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
@@ -224,7 +185,7 @@ bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
+bool check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90(
     sdp_params params,
     bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
@@ -233,11 +194,11 @@ bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
   using sm89 = SMVersion<8, 9>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
   bool is_sm86_or_sm89 = check_sm_version<sm86, sm89>(dprops);
-  bool is_head_dim_gt64 = params.query.sym_size(-1) > 64;
-  if (input_requires_grad(params) && is_sm86_or_sm89 && is_head_dim_gt64) {
+  bool is_head_dim_gt192 = params.query.sym_size(-1) > 192;
+  if (input_requires_grad(params) && is_sm86_or_sm89 && is_head_dim_gt192) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention currently doesn't support training with head_dim greater than 64 on gpu architectures in the range[sm86, sm89].",
+          "Flash attention currently doesn't support training with head_dim greater than 192 on gpu architectures in the range[sm86, sm89].",
           "Attempting to run with head_dim: ",
           params.query.sym_size(-1), " on a sm ", dprops->major, ".",
           dprops->minor, " gpu.");
@@ -260,12 +221,13 @@ bool use_flash_attention(sdp_params params, bool debug) {
       check_tensor_shapes,
       check_batch_size_and_num_heads,
       check_for_attn_mask,
-      check_head_dim_size,
-      check_gpu_sm75_or_greater,
-      check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90,
+      check_head_dim_size_flash,
       check_for_seq_len_0_nested_tensor,
       check_nonzero_sequence_lengths,
-      check_last_dim_stride_equals_1);
+      check_last_dim_stride_equals_1,
+      check_flash_attention_hardware_support,
+      check_requires_grad_and_head_dim_gt192_and_sm_ge86_lt90,
+      check_for_seq_len_0_nested_tensor);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;

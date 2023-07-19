@@ -18,7 +18,7 @@
 
 #ifdef USE_FLASH_ATTENTION
 // FlashAttention Specific Imports
-#include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
+#include <ATen/native/transformers/cuda/flash_attn/flash_api.h>
 #endif
 #ifdef USE_MEM_EFF_ATTENTION
 // MemoryEfficient Attention Specific Imports
@@ -31,6 +31,7 @@ namespace at {
 
 namespace native {
 
+// Expect inputs in format [ B, Seqlen, head_dims E]
 std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const Tensor& grad_out,
     const Tensor& query,
@@ -38,56 +39,83 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const Tensor& value,
     const Tensor& out,
     const Tensor& logsumexp,
-    const Tensor& cumulative_sequence_length_q,
-    const Tensor& cumulative_sequence_length_k,
-    const int64_t max_seqlen_batch_q,
-    const int64_t max_seqlen_batch_k,
+    const c10::optional<Tensor>& cumulative_sequence_length_q,
+    const c10::optional<Tensor>& cumulative_sequence_length_k,
+    c10::optional<int64_t> max_seqlen_batch_q,
+    c10::optional<int64_t> max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
     const Tensor& philox_seed,
     const Tensor& philox_offset,
     c10::optional<double> scale) {
 #if defined(USE_FLASH_ATTENTION)
-  /*
-  num_splits determines how much to parallelize over the seqlen_q dimension
-  num_splits=0 means
-  it will be set by an internal heuristic. We're exposing num_splits mostly for
-  benchmarking. We will hard code it to 0 for now
-  */
-  constexpr int num_splits{0};
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
-  Tensor dq = at::empty_like(query);
-  Tensor dk = at::empty_like(key);
-  Tensor dv = at::empty_like(value);
+  // Tensor dq = at::empty_like(query);
+  // Tensor dk = at::empty_like(key);
+  // Tensor dv = at::empty_like(value);
+
+  c10::optional<at::Tensor> dq{c10::nullopt};
+  c10::optional<at::Tensor> dk{c10::nullopt};
+  c10::optional<at::Tensor> dv{c10::nullopt};
+
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
 
-  std::tie(dq, dk, dv, grad_softmax) = pytorch_fmha::mha_bwd(
-          contiguous_grad_out,
-          query,
-          key,
-          value,
-          contiguous_out,
-          logsumexp,
-          dq,
-          dk,
-          dv,
-          cumulative_sequence_length_q,
-          cumulative_sequence_length_k,
-          max_seqlen_batch_q,
-          max_seqlen_batch_k,
-          dropout_p,
-          softmax_scale,
-          false, /*zero_tensors = false for all calls here*/
-          is_causal,
-          num_splits,
-          philox_seed,
-          philox_offset
-  );
-  return std::make_tuple(dq, dk, dv);
+  TORCH_CHECK(
+      cumulative_sequence_length_q.has_value() ==
+          cumulative_sequence_length_k.has_value(),
+      "cumulative_sequence_length_q and cumulative_sequence_length_k must be both set or both not set");
+  TORCH_CHECK(
+      max_seqlen_batch_q.has_value() == max_seqlen_batch_k.has_value(),
+      "max_seqlen_batch_q and max_seqlen_batch_k must be both set or both not set");
+
+  if (cumulative_sequence_length_q.value().defined()) {
+    TORCH_CHECK(
+        max_seqlen_batch_q.has_value(),
+        "max_seqlen_batch_q must be set when cumulative_sequence_length_q is set");
+    TORCH_CHECK(false, "dont go down this path yet");
+    auto [dQuery, dKey, dValue, d_softmax] = pytorch_flash::mha_varlen_bwd(
+        contiguous_grad_out,
+        query,
+        key,
+        value,
+        contiguous_out,
+        logsumexp,
+        dq,
+        dk,
+        dv,
+        cumulative_sequence_length_q.value(),
+        cumulative_sequence_length_k.value(),
+        max_seqlen_batch_q.value(),
+        max_seqlen_batch_k.value(),
+        dropout_p,
+        softmax_scale,
+        false /*zero_tensors*/,
+        is_causal,
+        philox_seed,
+        philox_offset);
+    return std::make_tuple(dQuery, dKey, dValue);
+  } else {
+    auto [dQuery, dKey, dValue, d_softmax] = pytorch_flash::mha_bwd(
+        contiguous_grad_out,
+        query,
+        key,
+        value,
+        contiguous_out,
+        logsumexp,
+        dq,
+        dk,
+        dv,
+        dropout_p,
+        softmax_scale,
+        is_causal,
+        philox_seed,
+        philox_offset);
+    return std::make_tuple(dQuery, dKey, dValue);
+  }
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.");
   return std::make_tuple(Tensor(), Tensor(), Tensor());
@@ -507,24 +535,16 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
 
-  int64_t Nnz_q{batch_size * max_seqlen_batch_q};
-  int64_t Nnz_kv{batch_size * max_seqlen_batch_k};
-
-  // For the standard MHA these will actually be views
-  Tensor query_reshaped = q_t.reshape({Nnz_q, num_heads, head_dim});
-  Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
-  Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
-
-  auto grad_out_reshaped = grad_out_.transpose(1,2).reshape({{Nnz_q, num_heads, head_dim}});
-  auto out_reshaped = out.transpose(1,2).reshape({Nnz_q, num_heads, head_dim});
+  auto grad_out_t = grad_out_.transpose(1,2);
+  auto out_t = out.transpose(1,2);
 
   Tensor grad_q, grad_k, grad_v;
   std::tie(grad_q, grad_k, grad_v) = at::_flash_attention_backward(
-    grad_out_reshaped,
-    query_reshaped,
-    key_reshaped,
-    value_reshaped,
-    out_reshaped,
+    grad_out_t,
+    q_t,
+    k_t,
+    v_t,
+    out_t,
     logsumexp,
     cumulative_sequence_length_q,
     cumulative_sequence_length_k,
@@ -536,9 +556,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     philox_offset,
     scale);
 
-  grad_q = grad_q.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
-  grad_k = grad_k.view({batch_size, max_seqlen_batch_k, num_heads, head_dim}).transpose(1,2);
-  grad_v = grad_v.view({batch_size, max_seqlen_batch_k, num_heads, head_dim}).transpose(1,2);
+  grad_q = grad_q.transpose(1,2);
+  grad_k = grad_k.transpose(1,2);
+  grad_v = grad_v.transpose(1,2);
 
   return std::make_tuple(grad_q, grad_k, grad_v);
 }
