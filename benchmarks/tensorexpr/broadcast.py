@@ -34,7 +34,7 @@ class BroadcastMulBench(benchmark.Benchmark):
                 [1, N, K], device=device, dtype=dtype, requires_grad=self.requires_grad
             )
         else:
-            raise ValueError("invalid case: %s" % (case))
+            raise ValueError(f"invalid case: {case}")
 
         self.inputs = [self.d1, self.d2]
 
