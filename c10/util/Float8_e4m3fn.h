@@ -41,13 +41,6 @@
 #include <string>
 #include <utility>
 
-// Standard check for compiling CUDA with clang
-#if defined(__clang__) && defined(__CUDA__) && defined(__CUDA_ARCH__)
-#define C10_DEVICE_HOST_FUNCTION __device__ __host__
-#else
-#define C10_DEVICE_HOST_FUNCTION
-#endif
-
 #include <typeinfo> // operator typeid
 
 namespace c10 {
@@ -106,6 +99,8 @@ inline C10_HOST_DEVICE float fp8e4m3fn_to_fp32_value(uint8_t input) {
   unsigned long nonsign_bsr;
   _BitScanReverse(&nonsign_bsr, (unsigned long)nonsign);
   uint32_t renorm_shift = (uint32_t)nonsign_bsr ^ 31;
+#elif defined(__CUDA_ARCH__)
+  uint32_t renorm_shift = __clz(nonsign);  
 #else
   uint32_t renorm_shift = __builtin_clz(nonsign);
 #endif
