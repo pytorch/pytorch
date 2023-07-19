@@ -223,7 +223,7 @@ Works only with Python3.\n A few examples:
                     continue
                 else:
                     raise ValueError(
-                        "attempted to run an unsupported benchmark: %s" % (bench.desc())
+                        f"attempted to run an unsupported benchmark: {bench.desc()}"
                     )
             bench.run(args)
 
@@ -262,7 +262,7 @@ Works only with Python3.\n A few examples:
                     continue
                 else:
                     raise ValueError(
-                        "attempted to run an unsupported benchmark: %s" % (bench.desc())
+                        f"attempted to run an unsupported benchmark: {bench.desc()}"
                     )
             bench.run(args)
 
@@ -295,15 +295,15 @@ Works only with Python3.\n A few examples:
                 if name.startswith(cls_module):
                     match_class_name = True
                     if name[len(cls_module)] != "_":
-                        raise ValueError("invalid name: %s" % (name))
+                        raise ValueError(f"invalid name: {name}")
                     config_str = name[(len(cls_module) + 1) :]
                     config = config_str.split("_")
                     if len(config) < 2:
-                        raise ValueError("invalid config: %s" % config)
+                        raise ValueError(f"invalid config: {config}")
                     mode, device = config[0:2]
                     # TODO: make sure virtual devices such as 'cpu1' and 'cpu4' are supported.
                     if mode not in ["fwd", "both"]:
-                        raise ValueError("invalid mode: %s" % (mode))
+                        raise ValueError(f"invalid mode: {mode}")
                     for i, entry in enumerate(config):
                         try:
                             value = int(entry)
