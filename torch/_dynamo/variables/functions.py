@@ -272,13 +272,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     result[name] = out
 
                 else:
-                    val = cell.cell_contents
-                    if isinstance(val, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
-                        result[name] = variables.UserDefinedObjectVariable(val)
-                    elif is_builtin_callable(val):
-                        result[name] = variables.BuiltinVariable(val)
-                    else:
-                        unimplemented("inline with __closure__")
+                    from .builder import variable_builder_no_source
+
+                    result[name] = variable_builder_no_source(cell.cell_contents)
 
         return result, closure_cells
 
