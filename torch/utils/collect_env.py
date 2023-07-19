@@ -91,7 +91,7 @@ def run_and_return_first_line(run_lambda, command):
 
 def get_conda_packages(run_lambda):
     conda = os.environ.get('CONDA_EXE', 'conda')
-    out = run_and_read_all(run_lambda, f"{conda} list")
+    out = run_and_read_all(run_lambda, "{} list".format(conda))
     if out is None:
         return out
 
@@ -157,7 +157,7 @@ def get_cudnn_version(run_lambda):
         system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
         cuda_path = os.environ.get('CUDA_PATH', "%CUDA_PATH%")
         where_cmd = os.path.join(system_root, 'System32', 'where')
-        cudnn_cmd = f'{where_cmd} /R "{cuda_path}\\bin" cudnn*.dll'
+        cudnn_cmd = '{} /R "{}\\bin" cudnn*.dll'.format(where_cmd, cuda_path)
     elif get_platform() == 'darwin':
         # CUDA libraries and drivers can be found in /usr/local/cuda/. See
         # https://docs.nvidia.com/cuda/cuda-installation-guide-mac-os-x/index.html#install
@@ -185,7 +185,7 @@ def get_cudnn_version(run_lambda):
     if len(files) == 1:
         return files[0]
     result = '\n'.join(files)
-    return f'Probably one of the following:\n{result}'
+    return 'Probably one of the following:\n{}'.format(result)
 
 
 def get_nvidia_smi():
@@ -199,7 +199,7 @@ def get_nvidia_smi():
         smis = [new_path, legacy_path]
         for candidate_smi in smis:
             if os.path.exists(candidate_smi):
-                smi = f'"{candidate_smi}"'
+                smi = '"{}"'.format(candidate_smi)
                 break
     return smi
 
@@ -317,7 +317,7 @@ def get_windows_version(run_lambda):
     system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
     wmic_cmd = os.path.join(system_root, 'System32', 'Wbem', 'wmic')
     findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
-    return run_and_read_all(run_lambda, f'{wmic_cmd} os get Caption | {findstr_cmd} /v Caption')
+    return run_and_read_all(run_lambda, '{} os get Caption | {} /v Caption'.format(wmic_cmd, findstr_cmd))
 
 
 def get_lsb_version(run_lambda):
@@ -340,20 +340,20 @@ def get_os(run_lambda):
         version = get_mac_version(run_lambda)
         if version is None:
             return None
-        return f'macOS {version} ({machine()})'
+        return 'macOS {} ({})'.format(version, machine())
 
     if platform == 'linux':
         # Ubuntu/Debian based
         desc = get_lsb_version(run_lambda)
         if desc is not None:
-            return f'{desc} ({machine()})'
+            return '{} ({})'.format(desc, machine())
 
         # Try reading /etc/*-release
         desc = check_release_file(run_lambda)
         if desc is not None:
-            return f'{desc} ({machine()})'
+            return '{} ({})'.format(desc, machine())
 
-        return f'{platform} ({machine()})'
+        return '{} ({})'.format(platform, machine())
 
     # Unknown platform
     return platform
@@ -450,7 +450,7 @@ def get_env_info():
     return SystemEnv(
         torch_version=version_str,
         is_debug_build=debug_mode_str,
-        python_version=f'{sys_version} ({sys.maxsize.bit_length() + 1}-bit runtime)',
+        python_version='{} ({}-bit runtime)'.format(sys_version, sys.maxsize.bit_length() + 1),
         python_platform=get_python_platform(),
         is_cuda_available=cuda_available_str,
         cuda_compiled_version=cuda_version_str,
@@ -537,7 +537,7 @@ def pretty_str(envinfo):
     def maybe_start_on_next_line(string):
         # If `string` is multiline, prepend a \n to it.
         if string is not None and len(string.split('\n')) > 1:
-            return f'\n{string}\n'
+            return '\n{}\n'.format(string)
         return string
 
     mutable_dict = envinfo._asdict()
@@ -575,7 +575,7 @@ def pretty_str(envinfo):
     # If they were previously None, they'll show up as ie '[conda] Could not collect'
     if mutable_dict['pip_packages']:
         mutable_dict['pip_packages'] = prepend(mutable_dict['pip_packages'],
-                                               f'[{envinfo.pip_version}] ')
+                                               '[{}] '.format(envinfo.pip_version))
     if mutable_dict['conda_packages']:
         mutable_dict['conda_packages'] = prepend(mutable_dict['conda_packages'],
                                                  '[conda] ')
@@ -599,7 +599,7 @@ def main():
             latest = max(dumps, key=os.path.getctime)
             ctime = os.path.getctime(latest)
             creation_time = datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M:%S')
-            msg = f"\n*** Detected a minidump at {latest} created on {creation_time}, " + \
+            msg = "\n*** Detected a minidump at {} created on {}, ".format(latest, creation_time) + \
                   "if this is related to your bug please include it when you file a report ***"
             print(msg, file=sys.stderr)
 
