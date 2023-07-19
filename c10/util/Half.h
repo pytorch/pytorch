@@ -52,13 +52,6 @@
 #include <sycl/sycl.hpp> // for SYCL 2020
 #endif
 
-// Standard check for compiling CUDA with clang
-#if defined(__clang__) && defined(__CUDA__) && defined(__CUDA_ARCH__)
-#define C10_DEVICE_HOST_FUNCTION __device__ __host__
-#else
-#define C10_DEVICE_HOST_FUNCTION
-#endif
-
 #include <typeinfo> // operator typeid
 
 namespace c10 {
@@ -72,7 +65,7 @@ namespace detail {
  *
  * @note The implementation doesn't use any floating-point operations.
  */
-inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
+C10_HOST_DEVICE inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
   /*
    * Extend the half-precision floating-point number to 32 bits and shift to the
    * upper part of the 32-bit word:
