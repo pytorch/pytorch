@@ -113,8 +113,8 @@ class SuperVariable(VariableTracker):
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
             )
         elif (
-            isinstance(self.objvar, variables.CustomizedDictVariable)
-            and name in ("__setitem__", "__setattr__")
+            inner_fn in (collections.OrderedDict.__setitem__, object.__setattr__)
+            and isinstance(self.objvar, variables.CustomizedDictVariable)
             and args
             and variables.ConstDictVariable.is_valid_key(args[0])
             and self.objvar.mutable_local

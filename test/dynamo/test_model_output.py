@@ -188,7 +188,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
             def forward(
                 self,
                 hidden_states: torch.Tensor,
-            ) -> BaseModelOutputWithPoolingAndCrossAttentions:
+            ) -> BaseModelOutputWithPastAndCrossAttentions:
                 return BaseModelOutputWithPastAndCrossAttentions(
                     last_hidden_state=hidden_states,
                     past_key_values=None,
