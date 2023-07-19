@@ -463,7 +463,7 @@ print("arf")
             messages[0],
             """\
             return g(g(x))
-                     ^^^^""",
+                     ~^^^""",
         )
         self.assertExpectedInline(
             messages[1],
@@ -475,7 +475,7 @@ print("arf")
             messages[2],
             """\
             return g(g(x))
-                   ^^^^^^^""",
+                   ~^^^^^^""",
         )
         self.assertExpectedInline(
             messages[3],
