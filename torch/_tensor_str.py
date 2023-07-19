@@ -192,11 +192,7 @@ class _Formatter:
     def format(self, value):
         if self.floating_dtype:
             if self.sci_mode:
-                ret = (
-                    ("{{:{}.{}e}}")
-                    .format(self.max_width, PRINT_OPTS.precision)
-                    .format(value)
-                )
+                ret = f"{{:{self.max_width}.{PRINT_OPTS.precision}e}}".format(value)
             elif self.int_mode:
                 ret = f"{value:.0f}"
                 if not (math.isinf(value) or math.isnan(value)):

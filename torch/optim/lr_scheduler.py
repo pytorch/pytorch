@@ -29,8 +29,7 @@ class LRScheduler:
 
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
-            raise TypeError('{} is not an Optimizer'.format(
-                type(optimizer).__name__))
+            raise TypeError(f'{type(optimizer).__name__} is not an Optimizer')
         self.optimizer = optimizer
 
         # Initialize epoch and base learning rates
@@ -115,8 +114,7 @@ class LRScheduler:
         """
         if is_verbose:
             if epoch is None:
-                print('Adjusting learning rate'
-                      ' of group {} to {:.4e}.'.format(group, lr))
+                print(f'Adjusting learning rate of group {group} to {lr:.4e}.')
             else:
                 epoch_str = ("%.2f" if isinstance(epoch, float) else
                              "%.5d") % epoch
@@ -970,8 +968,7 @@ class ReduceLROnPlateau:
 
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
-            raise TypeError('{} is not an Optimizer'.format(
-                type(optimizer).__name__))
+            raise TypeError(f'{type(optimizer).__name__} is not an Optimizer')
         self.optimizer = optimizer
 
         if isinstance(min_lr, (list, tuple)):
@@ -1197,8 +1194,7 @@ class CyclicLR(LRScheduler):
 
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
-            raise TypeError('{} is not an Optimizer'.format(
-                type(optimizer).__name__))
+            raise TypeError(f'{type(optimizer).__name__} is not an Optimizer')
         self.optimizer = optimizer
 
         base_lrs = self._format_param('base_lr', optimizer, base_lr)
@@ -1581,8 +1577,7 @@ class OneCycleLR(LRScheduler):
 
         # Validate optimizer
         if not isinstance(optimizer, Optimizer):
-            raise TypeError('{} is not an Optimizer'.format(
-                type(optimizer).__name__))
+            raise TypeError(f'{type(optimizer).__name__} is not an Optimizer')
         self.optimizer = optimizer
 
         # Validate total_steps

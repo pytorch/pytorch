@@ -185,9 +185,7 @@ def sig_for_ops(opname: str) -> List[str]:
 
     # we have to do this by hand, because they are hand-bound in Python
 
-    assert opname.endswith("__") and opname.startswith("__"), "Unexpected op {}".format(
-        opname
-    )
+    assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
 
     name = opname[2:-2]
     if name in binary_ops:

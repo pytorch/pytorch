@@ -336,7 +336,7 @@ class Tensor(torch._C._TensorBase):
                 )
             else:
                 raise NotImplementedError(
-                    "sparse tensor __reduce_ex__ for layout `%s`" % (self.layout)
+                    f"sparse tensor __reduce_ex__ for layout `{self.layout}`"
                 )
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
         elif self.layout in {

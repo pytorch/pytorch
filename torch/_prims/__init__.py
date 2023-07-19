@@ -1482,9 +1482,7 @@ def _slice_meta(
 
     for x, y in zip(start_indices, a.shape):
         if x < 0:
-            msg = "Attempting to slice a tensor with a negative start index of {}!".format(
-                x
-            )
+            msg = f"Attempting to slice a tensor with a negative start index of {x}!"
             raise ValueError(msg)
         if x > y:
             msg = (
@@ -1497,11 +1495,7 @@ def _slice_meta(
 
     for x, y, z in zip(limit_indices, a.shape, start_indices):
         if x < 0:
-            msg = (
-                "Attempting to slice a tensor with a negative stop index of {}!".format(
-                    x
-                )
-            )
+            msg = f"Attempting to slice a tensor with a negative stop index of {x}!"
             raise ValueError(msg)
         if x > y:
             msg = (
@@ -1519,9 +1513,7 @@ def _slice_meta(
 
     for x in _strides:
         if x <= 0:
-            msg = "Attempting to slice a tensor with a non-positive step of {}!".format(
-                x
-            )
+            msg = f"Attempting to slice a tensor with a non-positive step of {x}!"
             raise ValueError(msg)
 
     new_shape = []

@@ -77,7 +77,7 @@ class InputError(Exception):
         self.message = message
 
     def __str__(self):
-        return "{}: {}".format("Input error", self.message)
+        return f"Input error: {self.message}"
 
 
 def openf(filename, mode):
@@ -225,7 +225,7 @@ def compute_stats(stats):
     print(", ".join(unsupported_calls))
 
     # Print the number of kernel launches
-    print("\nTotal number of replaced kernel launches: {:d}".format(len(stats["kernel_launches"])))
+    print(f"\nTotal number of replaced kernel launches: {len(stats['kernel_launches']):d}")
 
 
 def add_dim3(kernel_string, cuda_kernel):
@@ -711,7 +711,7 @@ class Trie:
             if cconly:
                 result += "?"
             else:
-                result = "(?:%s)?" % result
+                result = f"(?:{result})?"
         return result
 
     def pattern(self):

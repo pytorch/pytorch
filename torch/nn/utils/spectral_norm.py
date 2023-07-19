@@ -300,8 +300,7 @@ def remove_spectral_norm(module: T_module, name: str = 'weight') -> T_module:
             del module._forward_pre_hooks[k]
             break
     else:
-        raise ValueError("spectral_norm of '{}' not found in {}".format(
-            name, module))
+        raise ValueError(f"spectral_norm of '{name}' not found in {module}")
 
     for k, hook in module._state_dict_hooks.items():
         if isinstance(hook, SpectralNormStateDictHook) and hook.fn.name == name:

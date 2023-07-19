@@ -710,9 +710,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
                 shape = arg.shape
 
             if not is_same_shape(shape, arg.shape):
-                msg = "Shape {} is not the expected shape {}!".format(
-                    arg.shape, shape
-                )
+                msg = f"Shape {arg.shape} is not the expected shape {shape}!"
                 raise RuntimeError(msg)
         else:
             msg = (

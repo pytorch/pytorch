@@ -18,7 +18,7 @@ def _emit_arg(indent, i, arg):
     if default is not None:
         v = f"{v}={str(default)}"
     if i > 0:
-        v = "\n{}{}".format(" " * indent, v)
+        v = f"\n{' ' * indent}{v}"
     return v
 
 def _emit_args(indent, arguments):
@@ -30,7 +30,7 @@ def _emit_ret(ret):
 def _emit_rets(returns):
     if len(returns) == 1:
         return _emit_ret(returns[0])
-    return "Tuple[{}]".format(", ".join(_emit_ret(r) for r in returns))
+    return f"Tuple[{', '.join(_emit_ret(r) for r in returns)}]"
 
 def _emit_schema(mod, name, schema, arg_start=0, padding=4):
     if mod is None:
@@ -313,9 +313,9 @@ def _list_supported_ops():
         header, items = fn()
         link_target = header.replace('`', '').replace('-', '').lower().replace(' ', '-')
         if isinstance(items, str):
-            section = "{}\n{}\n{}\n".format(header, '~' * len(header), items)
+            section = f"{header}\n{'~' * len(header)}\n{items}\n"
         else:
-            section = "{}\n{}\n{}".format(header, '~' * len(header), emit_block(items))
+            section = f"{header}\n{'~' * len(header)}\n{emit_block(items)}"
         section = f'.. _{link_target}:' + '\n\n' + section
         body += section
 

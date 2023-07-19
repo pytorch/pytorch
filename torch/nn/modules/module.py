@@ -609,8 +609,7 @@ class Module:
             module (Module): child module to be added to the module.
         """
         if not isinstance(module, Module) and module is not None:
-            raise TypeError("{} is not a Module subclass".format(
-                torch.typename(module)))
+            raise TypeError(f"{torch.typename(module)} is not a Module subclass")
         elif not isinstance(name, str):
             raise TypeError("module name should be a string. Got {}".format(
                 torch.typename(name)))

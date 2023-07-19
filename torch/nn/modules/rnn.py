@@ -216,8 +216,7 @@ class RNNBase(Module):
         expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
             raise RuntimeError(
-                'input must have {} dimensions, got {}'.format(
-                    expected_input_dim, input.dim()))
+                f'input must have {expected_input_dim} dimensions, got {input.dim()}')
         if self.input_size != input.size(-1):
             raise RuntimeError(
                 'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(

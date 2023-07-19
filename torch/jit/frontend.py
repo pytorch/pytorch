@@ -124,7 +124,7 @@ class UnsupportedNodeError(NotSupportedError):
                                       offending_node.col_offset,
                                       offending_node.col_offset + range_len)
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
-        msg = "{} {}aren't supported".format(feature_name, reason + ' ' if reason else '')
+        msg = f"{feature_name} {reason + ' ' if reason else ''}aren't supported"
         super().__init__(source_range, msg)
 
 

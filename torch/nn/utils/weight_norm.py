@@ -151,5 +151,4 @@ def remove_weight_norm(module: T_module, name: str = 'weight') -> T_module:
             del module._forward_pre_hooks[k]
             return module
 
-    raise ValueError("weight_norm of '{}' not found in {}"
-                     .format(name, module))
+    raise ValueError(f"weight_norm of '{name}' not found in {module}")

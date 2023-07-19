@@ -1266,7 +1266,7 @@ def dropout(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool 
     if has_torch_function_unary(input):
         return handle_torch_function(dropout, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return _VF.dropout_(input, p, training) if inplace else _VF.dropout(input, p, training)
 
 
@@ -1278,7 +1278,7 @@ def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace
     if has_torch_function_unary(input):
         return handle_torch_function(alpha_dropout, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return _VF.alpha_dropout_(input, p, training) if inplace else _VF.alpha_dropout(input, p, training)
 
 
@@ -1300,7 +1300,7 @@ def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     if has_torch_function_unary(input):
         return handle_torch_function(dropout1d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
     if inp_dim not in (2, 3):
         raise RuntimeError(f"dropout1d: Expected 2D or 3D input, but received a {inp_dim}D input. "
@@ -1338,7 +1338,7 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     if has_torch_function_unary(input):
         return handle_torch_function(dropout2d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
     if inp_dim not in (3, 4):
         warn_msg = (f"dropout2d: Received a {inp_dim}-D input to dropout2d, which is deprecated "
@@ -1382,7 +1382,7 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     if has_torch_function_unary(input):
         return handle_torch_function(dropout3d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
     if inp_dim not in (4, 5):
         warn_msg = (f"dropout3d: Received a {inp_dim}-D input to dropout3d, which is deprecated "
@@ -1428,7 +1428,7 @@ def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False,
             feature_alpha_dropout, (input,), input, p=p, training=training, inplace=inplace
         )
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return _VF.feature_alpha_dropout_(input, p, training) if inplace else _VF.feature_alpha_dropout(input, p, training)
 
 
@@ -3368,10 +3368,8 @@ def margin_ranking_loss(
         reduction_enum = _Reduction.get_enum(reduction)
     if (input1.dim() != input2.dim() or input1.dim() != target.dim()):
         raise RuntimeError(
-
-                "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
-                "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())
-
+            f"margin_ranking_loss : All input tensors should have same dimension but got sizes: "
+            f"input1: {input1.size()}, input2: {input2.size()}, target: {target.size()} "
         )
     return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
@@ -4678,8 +4676,8 @@ def triplet_margin_with_distance_loss(
     if not (a_dim == p_dim and p_dim == n_dim):
         raise RuntimeError(
             f"The anchor, positive, and negative tensors are expected to have "
-             f"the same number of dimensions, but got: anchor {a_dim}D, "
-             f"positive {p_dim}D, and negative {n_dim}D inputs")
+            f"the same number of dimensions, but got: anchor {a_dim}D, "
+            f"positive {p_dim}D, and negative {n_dim}D inputs")
 
     # Calculate loss
     if distance_function is None:

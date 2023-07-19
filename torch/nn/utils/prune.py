@@ -384,9 +384,7 @@ class PruningContainer(BasePruningMethod):
                 # if dim is still negative after subtracting it from n_dims
                 if dim < 0:
                     raise IndexError(
-                        "Index is out of bounds for tensor with dimensions {}".format(
-                            n_dims
-                        )
+                        f"Index is out of bounds for tensor with dimensions {n_dims}"
                     )
                 # find channels along dim = dim that aren't already tots 0ed out
                 keep_channel = mask.sum(dim=[d for d in range(n_dims) if d != dim]) != 0
@@ -1244,7 +1242,7 @@ def _validate_pruning_amount_init(amount):
     """
     if not isinstance(amount, numbers.Real):
         raise TypeError(
-            "Invalid type for amount: {}. Must be int or float." "".format(amount)
+            f"Invalid type for amount: {amount}. Must be int or float."
         )
 
     if (isinstance(amount, numbers.Integral) and amount < 0) or (
