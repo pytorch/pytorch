@@ -12,8 +12,18 @@ pip_install \
   mock==5.0.1 \
   ninja==1.10.2 \
   networkx==2.0 \
-  numpy==1.22.4 \
-  onnx==1.14.0
+  numpy==1.22.4
+
+# Using 1.15dev branch for the following not yet released features and fixes.
+# - Segfault fix for shape inference.
+# - Inliner to workaround ORT segfault.
+pip_install "onnx@git+https://github.com/onnx/onnx@213b525a51ead28961d9b4f2764b08c7e336bf2c"
+
+# # Using 1.16dev branch for the following not yet released features and fixes.
+# # - Segfault fix for functions.
+# # - Duplicated node name fix for function inlining.
+# pip install coloredlogs  # dependency of ort-nightly
+# pip_install --index-url=https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ ort-nightly==1.16.0.dev20230528001
 
 pip_install \
   onnxruntime==1.15.0 \
