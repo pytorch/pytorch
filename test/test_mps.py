@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: mps"]
 
 import io
@@ -831,7 +830,7 @@ def skipMPSMemoryLeakCheckIf(condition):
         return fn
     return dec
 
-class MpsMemoryLeakCheck():
+class MpsMemoryLeakCheck:
     def __init__(self, testcase, name=None):
         self.name = testcase.id() if name is None else name
         self.testcase = testcase
@@ -3744,7 +3743,7 @@ class TestLogical(TestCaseMPS):
             result_cpu = torch.logical_and(cpu_x, cpu_other)
             self.assertEqual(result, result_cpu)
 
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
         helper(
             self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
             self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
@@ -3768,7 +3767,7 @@ class TestLogical(TestCaseMPS):
 
             self.assertEqual(result, result_cpu)
 
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
         helper(
             self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
             self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
@@ -3792,7 +3791,7 @@ class TestLogical(TestCaseMPS):
 
             self.assertEqual(result, result_cpu)
 
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
         helper(
             self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
             self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
@@ -9251,7 +9250,7 @@ class TestConvolutionMPS(TestCaseMPS):
                                     [[3.0000004768, 6.5000000000, 5.0000, 4.6675000191, 9.2500],
                                      [1.0000000000, 7.1665000916, 5.0000, 5.0000000000, 9.2500]], device="mps").view(1, 1, 2, 5)
                         else:
-                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
                     elif mode == 'nearest':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -9281,7 +9280,7 @@ class TestConvolutionMPS(TestCaseMPS):
                                     [[1., 8., 5., 7., 9.],
                                      [1., 8., 5., 8., 9.]], device="mps").view(1, 1, 2, 5)
                         else:
-                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
                     elif mode == 'bicubic':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -9311,10 +9310,10 @@ class TestConvolutionMPS(TestCaseMPS):
                                     [[2.7993753, 6.6050020, 4.25, 4.7138715, 10.269531],
                                      [0.8125000, 7.2822485, 4.25, 5.0000052, 9.332031]], device="mps").view(1, 1, 2, 5)
                         else:
-                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
 
                     else:
-                        raise AssertionError("missing groundtruth test for interpolation mode '{}'".format(mode))
+                        raise AssertionError(f"missing groundtruth test for interpolation mode '{mode}'")
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                            align_corners=align_corners)
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,

@@ -1317,6 +1317,22 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x.item())
             self.assertTrue(same(ref, res))
 
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @requires_numpy_pytorch_interop
+    @torch._dynamo.config.patch(numpy_ndarray_as_tensor=True)
+    def test_numpy_on_cuda(self):
+        x = np.arange(10)
+
+        @torch.compile
+        def fn(x):
+            return x**2
+
+        with torch.device("cuda"):
+            r = fn(x)
+
+        self.assertEqual(type(r), np.ndarray)
+        self.assertEqual(r, x**2)
+
     def test_graph_break_correctly_when_passing_numpy_ndarray_to_torch_function(self):
         # from transformers/models/big_bird/modeling_big_bird.py
         def fn(x: int, y: torch.Tensor):
