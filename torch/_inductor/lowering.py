@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Union
 
 import sympy
 
@@ -130,7 +130,7 @@ def is_integer_type(x):
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Symbol):
-        return x.is_integer is True
+        return x.is_integer is True  # type: ignore[attr-defined]
     else:
         return isinstance(x, int)
 
@@ -249,7 +249,7 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args = list(args)
+        args: Union[List[Any], Tuple[Any, ...]] = list(args)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
@@ -418,7 +418,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
         def is_dynamic(*args):
             return any(
                 isinstance(t, TensorBox)
-                and any(x.free_symbols for x in t.data.get_size())
+                and any(x.free_symbols for x in t.data.get_size())  # type: ignore[attr-defined]
                 for t in args
             )
 
@@ -430,7 +430,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 for t in args:
                     if isinstance(t, TensorBox):
                         if dtype is None:
-                            dtype = t.data.get_dtype()
+                            dtype = t.data.get_dtype()  # type: ignore[attr-defined]
                         elif dtype != t.data.get_dtype():
                             return True
                 return False
@@ -447,7 +447,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 device = None
                 for t in args:
                     if isinstance(t, TensorBox):
-                        device = t.data.get_device()
+                        device = t.data.get_device()  # type: ignore[attr-defined]
                         break
                 assert (
                     device is not None
@@ -630,8 +630,8 @@ def where(cond, a, b):
 def broadcast_tensors(*inputs):
     if len(inputs) == 1 and isinstance(inputs[0], (list, tuple)):
         return broadcast_tensors(*inputs[0])
-    target = functools.reduce(
-        broadcast_symbolic_shapes, [x.get_size() for x in inputs], ()
+    target: List[sympy.Expr] = functools.reduce(
+        broadcast_symbolic_shapes, [x.get_size() for x in inputs], []
     )
     outputs = []
     for x in inputs:
@@ -1645,7 +1645,9 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         return arg
 
-    args = [apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)]
+    args = tuple(
+        apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
+    )
     kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
 
@@ -1999,21 +2001,21 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     else:
         dtype = dtype or torch.get_default_dtype()
 
+    ranges: List[sympy.Expr] = []
+
     if isinstance(data, sympy.Expr):
-        ranges = []
 
         def inner_fn(index):
             return ops.index_expr(data, dtype)
 
     elif isinstance(data, (float, int)):
-        ranges = []
 
         def inner_fn(index):
             return ops.constant(data, dtype)
 
     elif len(data) == 0 or isinstance(data[0], (float, int)) and len(data) <= 8:
         # inline small tensors
-        ranges = [sympy.Integer(len(data))]
+        ranges.append(sympy.Integer(len(data)))
 
         def inner_fn(index):
             def binary_search(start, end):
@@ -2142,7 +2144,7 @@ def empty(
     assert memory_format in (None, torch.contiguous_format)
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
-        size = list(size[0])
+        size = tuple(size[0])
     return empty_strided(
         size, None, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
@@ -2184,7 +2186,7 @@ def new_constant(fill_value):
     def _new_constant(
         x, size, *, dtype=None, layout=None, device=None, pin_memory=None
     ):
-        assert isinstance(size, (list, type))
+        assert isinstance(size, (list, tuple))
         assert not pin_memory
         assert layout in (None, torch.strided)
         dtype = decode_dtype(dtype) or x.get_dtype()
@@ -2210,8 +2212,8 @@ def new_empty(x, size, *, dtype=None, layout=None, device=None, pin_memory=None)
 def empty_strided(
     size, stride, *, dtype=None, layout=None, device=None, pin_memory=None
 ):
-    assert isinstance(size, (list, type))
-    assert isinstance(stride, (list, type, type(None)))
+    assert isinstance(size, (list, tuple))
+    assert isinstance(stride, (list, tuple, type(None)))
     assert not pin_memory
     assert layout in (None, torch.strided)
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
@@ -2560,7 +2562,14 @@ def scatter(x, dim: int, index, src, **kwargs):
 
 
 def scatter_fallback(
-    fn, self, dim: int, index, src, *, reduce: str = None, include_self: bool = True
+    fn,
+    self,
+    dim: int,
+    index,
+    src,
+    *,
+    reduce: Optional[str] = None,
+    include_self: bool = True,
 ):
     reduce_ty = "add" if fn == "aten.scatter_" else "sum"
     if (
@@ -2577,7 +2586,7 @@ def scatter_fallback(
 
 
 @register_lowering(aten.scatter_, type_promotion_kind=None)
-def scatter_(self, dim: int, index, src, *, reduce: str = None):
+def scatter_(self, dim: int, index, src, *, reduce: Optional[str] = None):
     assert reduce in {None, "add", "multiply"}
 
     fallback_result = scatter_fallback(
@@ -2711,7 +2720,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     return self
 
 
-def upsample_nearestnd(x, output_size, scales_x: Tuple[float] = None, n: int = 2):
+def upsample_nearestnd(
+    x, output_size, scales_x: Tuple[Optional[float], ...], n: int = 2
+):
     x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
     i_sizes = x.get_size()[-n:]
@@ -2726,7 +2737,7 @@ def upsample_nearestnd(x, output_size, scales_x: Tuple[float] = None, n: int = 2
         if scale:
             scales[i] = scale
 
-    def scale(x, scale, size):
+    def scale_fn(x, scale, size):
         x = ops.index_expr(x, torch.float32)
         x = ops.mul(x, ops.constant(scale, torch.float32))
         x = ops.to_dtype(x, torch.int32)
@@ -2736,7 +2747,7 @@ def upsample_nearestnd(x, output_size, scales_x: Tuple[float] = None, n: int = 2
         x = idx[-n:]
         b = idx[:-n]
         return x_loader(
-            [*b, *[scale(i, s, size) for i, s, size in zip(x, scales, i_sizes)]]
+            [*b, *[scale_fn(i, s, size) for i, s, size in zip(x, scales, i_sizes)]]
         )
 
     return Pointwise.create(
@@ -2939,23 +2950,6 @@ def reflection_pad2d_backward(grad_output, x, padding):
             ub = ops.index_expr(ub, torch.int64)
             return ops.and_(ops.ge(i, lb), ops.le(i, ub))
 
-        def accumulate(out_x, out_y, index_range1, index_range2=None):
-            nonlocal grad
-
-            # If the upper bound is less than the lower bound, we can get rid of one accumulation.
-            # This happens when the padding size is zero.
-            upper_less_than_lower1 = index_range1[2] < index_range1[1]
-            if isinstance(upper_less_than_lower1, bool) and upper_less_than_lower1:
-                return
-            cond = index_range_condition(index_range1)
-            if index_range2 is not None:
-                upper_less_than_lower2 = index_range2[2] < index_range2[1]
-                if isinstance(upper_less_than_lower2, bool) and upper_less_than_lower2:
-                    return
-                cond = ops.and_(cond, index_range_condition(index_range2))
-            g = ops.masked(cond, lambda: load_from_output(out_x, out_y), 0.0)
-            grad = ops.add(grad, g)
-
         # Areas after reflection:
         #
         #   top-left    |   top     |   top-right
@@ -2978,6 +2972,24 @@ def reflection_pad2d_backward(grad_output, x, padding):
             index_range_condition(range_cx), index_range_condition(range_cy)
         )
         grad = ops.masked(cond, lambda: load_from_output(center_x, center_y), 0.0)
+
+        def accumulate(out_x, out_y, index_range1, index_range2=None):
+            nonlocal grad
+
+            # If the upper bound is less than the lower bound, we can get rid of one accumulation.
+            # This happens when the padding size is zero.
+            upper_less_than_lower1 = index_range1[2] < index_range1[1]
+            if isinstance(upper_less_than_lower1, bool) and upper_less_than_lower1:
+                return
+            cond = index_range_condition(index_range1)
+            if index_range2 is not None:
+                upper_less_than_lower2 = index_range2[2] < index_range2[1]
+                if isinstance(upper_less_than_lower2, bool) and upper_less_than_lower2:
+                    return
+                cond = ops.and_(cond, index_range_condition(index_range2))
+            g = ops.masked(cond, lambda: load_from_output(out_x, out_y), 0.0)
+            grad = ops.add(grad, g)
+
         accumulate(center_x, left_reflect_y, range_cx, (y, 1, left))
         accumulate(center_x, right_reflect_y, range_cx, (y, w - right, w - 1))
         accumulate(top_reflect_x, center_y, (x, 1, top), range_cy)
@@ -3076,7 +3088,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     )
 
 
-def range_mask_low(i: sympy.Expr, low: sympy.Expr):
+def range_mask_low(i: sympy.Expr, low: Union[sympy.Expr, int]):
     return ops.ge(
         ops.index_expr(i, torch.int64),
         ops.index_expr(sympy.Integer(low), torch.int64),
@@ -3262,8 +3274,8 @@ def max_pool2d_with_indices_backward(
         # some classes don't have `get_stride`
         # TODO will need a better way of determining if inputs are channels-last
         gO_stride = None
-    if isinstance(x, TensorBox) and isinstance(x.data.data, Pointwise):
-        data = x.data.data
+    if isinstance(x, TensorBox) and isinstance(x.data.data, Pointwise):  # type: ignore[attr-defined]
+        data = x.data.data  # type: ignore[attr-defined]
         x_buffer = ir.ComputedBuffer(
             name=None,
             layout=ir.FlexibleLayout(

@@ -1331,10 +1331,10 @@ def native_layer_norm_backward(
     input_shape = input.shape
     input_ndim = input.dim()
     computation_dtype = utils.get_computation_dtype(input.dtype)
-    grad_out_cast, input_cast, weight_cast, bias_cast = [
+    grad_out_cast, input_cast, weight_cast, bias_cast = (
         x.to(computation_dtype).contiguous() if x is not None else x
         for x in (grad_out, input, weight, bias)
-    ]
+    )
     assert grad_out_cast is not None
 
     axis = input_ndim - len(normalized_shape)
@@ -1745,7 +1745,7 @@ def native_batch_norm_backward(
         running_var_cast,
         save_mean_cast,
         save_invstd_cast,
-    ) = [
+    ) = (
         x.to(computation_dtype) if x is not None else x
         for x in (
             grad_out,
@@ -1756,7 +1756,7 @@ def native_batch_norm_backward(
             save_mean,
             save_invstd,
         )
-    ]
+    )
     input_shape = input.shape
     input_rank = input.dim()
     assert input_rank >= 2, "rank of the input must be at least 2"

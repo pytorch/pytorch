@@ -161,9 +161,9 @@ test_failures = {
     "test_empty2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_index3_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_inductor_bucketize_dynamic_shapes": TestFailure(("cpu")),
-    "test_inductor_bucketize_default_kwargs_dynamic_shapes": TestFailure(("cpu")),
-    "test_inductor_bucketize_int_dynamic_shapes": TestFailure(("cpu")),
+    "test_inductor_bucketize_dynamic_shapes": TestFailure("cpu"),
+    "test_inductor_bucketize_default_kwargs_dynamic_shapes": TestFailure("cpu"),
+    "test_inductor_bucketize_int_dynamic_shapes": TestFailure("cpu"),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -288,7 +288,7 @@ test_failures = {
 
 if TEST_WITH_ROCM:
     # aten.miopen_batch_norm is not registered for lowering
-    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
+    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure("cuda")
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
     CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"

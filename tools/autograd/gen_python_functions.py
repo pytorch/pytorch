@@ -553,7 +553,7 @@ def load_deprecated_signatures(
     # find matching original signatures for each deprecated signature
     results: List[PythonSignatureNativeFunctionPair] = []
 
-    with open(deprecated_yaml_path, "r") as f:
+    with open(deprecated_yaml_path) as f:
         deprecated_defs = yaml.load(f, Loader=YamlLoader)
 
     for deprecated in deprecated_defs:
