@@ -3916,7 +3916,7 @@ class TestQuantizeFx(QuantizationTestCase):
             elif arg_node.op == "call_module":
                 self.assertTrue(
                     not _is_activation_post_process(getattr(model, arg_node.target)),
-                    "Arg: {0} of node: {1} is observed but is not a float tensor".format(
+                    "Arg: {} of node: {} is observed but is not a float tensor".format(
                         arg_node, node
                     ),
                 )
@@ -5519,19 +5519,19 @@ class TestQuantizeFx(QuantizationTestCase):
         self.addCleanup(cleanUp)
 
         @_register_fusion_pattern("dummy_fusion")
-        class DummyFusion():
+        class DummyFusion:
             pass
 
         @_register_quant_pattern("dummy_quant")
-        class DummyQuant():
+        class DummyQuant:
             pass
 
         @_register_quant_pattern("dummy_quant2", default_fixed_qparams_range_0to1_observer)
-        class DummyQuant2():
+        class DummyQuant2:
             pass
 
         @_register_quant_pattern("dummy_quant3", default_fixed_qparams_range_neg1to1_observer)
-        class DummyQuant3():
+        class DummyQuant3:
             pass
 
         self.assertEqual(_DEFAULT_FUSION_PATTERNS["dummy_fusion"], DummyFusion)
