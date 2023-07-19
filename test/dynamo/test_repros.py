@@ -2668,6 +2668,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "input sum needs to be 3"):
             opt_fn(*args)
 
+    def test_rewrite_assert_dont_change_bytecode(self):
+        def fn(x):
+            with torch.no_grad():
+                assert x.max() < 5, f"invalid max {x.max()}"
+                x = torch.sin(x)
+            return x
+
+        x = torch.ones(4)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+
     def test_rewrite_assert_without_msg(self):
         def f(x):
             b = x.sin()
