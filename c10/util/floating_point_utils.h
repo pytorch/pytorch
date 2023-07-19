@@ -2,18 +2,9 @@
 
 #include <cstdint>
 
-// Standard check for compiling CUDA with clang
-#if defined(__clang__) && defined(__CUDA__) && defined(__CUDA_ARCH__)
-#define C10_DEVICE_HOST_FUNCTION __device__ __host__
-#else
-#define C10_DEVICE_HOST_FUNCTION
-#endif
+namespace c10::detail {
 
-namespace c10 {
-
-namespace detail {
-
-C10_DEVICE_HOST_FUNCTION inline float fp32_from_bits(uint32_t w) {
+C10_HOST_DEVICE inline float fp32_from_bits(uint32_t w) {
 #if defined(__OPENCL_VERSION__)
   return as_float(w);
 #elif defined(__CUDA_ARCH__)
@@ -29,7 +20,7 @@ C10_DEVICE_HOST_FUNCTION inline float fp32_from_bits(uint32_t w) {
 #endif
 }
 
-C10_DEVICE_HOST_FUNCTION inline uint32_t fp32_to_bits(float f) {
+C10_HOST_DEVICE inline uint32_t fp32_to_bits(float f) {
 #if defined(__OPENCL_VERSION__)
   return as_uint(f);
 #elif defined(__CUDA_ARCH__)
@@ -45,5 +36,4 @@ C10_DEVICE_HOST_FUNCTION inline uint32_t fp32_to_bits(float f) {
 #endif
 }
 
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail
