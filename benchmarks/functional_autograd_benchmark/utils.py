@@ -78,7 +78,7 @@ def to_markdown_table(res: TimingResultType, header: Tuple[str, ...] = None) -> 
 
     def write_line(*args):
         nonlocal out
-        out += "| {} |\n".format(" | ".join(str(a) for a in args))
+        out += f"| {' | '.join(str(a) for a in args)} |\n"
 
     # Make it a markdown table
     write_line(*header)
