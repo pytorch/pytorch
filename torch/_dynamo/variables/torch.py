@@ -574,6 +574,8 @@ class TorchVariable(VariableTracker):
                 return TupleVariable(list(unflattened), **options)
             if isinstance(unflattened, dict):
                 return ConstDictVariable(unflattened, type(unflattened), **options)
+            assert isinstance(unflattened, VariableTracker)
+            return unflattened
 
         elif self.value == torch.fx._pytree.tree_flatten_spec:
             if len(args) != 2:
