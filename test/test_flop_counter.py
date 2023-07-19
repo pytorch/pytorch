@@ -79,6 +79,28 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(get_total_flops(mode), """28800""")
 
         with mode:
+            torch.conv2d(T(2, 3, 6, 6), T(6, 3, 4, 4), padding=1, groups=3)
+
+        # out_image_size = 2 * 5 * 5
+        # kernel_size = 4 * 4
+        # c_out = 6
+        # c_in = 3
+        # out_image_size * kernel_size * (c_out // groups) * 2 * (c_in // groups) * groups
+
+        self.assertExpectedInline(get_total_flops(mode), """9600""")
+
+        with mode:
+            torch.conv2d(T(2, 10, 6, 6), T(20, 10, 3, 3), padding=1, groups=5)
+
+        # out_image_size = 2 * 5 * 5
+        # kernel_size = 3 * 3
+        # c_out = 20
+        # c_in = 10
+        # out_image_size * kernel_size * (c_out // groups) * 2 * (c_in // groups) * groups
+
+        self.assertExpectedInline(get_total_flops(mode), """36000""")
+
+        with mode:
             torch.conv1d(T(2, 3, 6), T(6, 3, 4), padding=1)
 
         # out_image_size = 2 * 5
