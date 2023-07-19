@@ -688,7 +688,7 @@ def run_and_get_code(fn, *args, **kwargs):
 
     def patched_compile_to_module(self):
         mod = compile_to_module(self)
-        with open(mod.__file__, "r") as f:
+        with open(mod.__file__) as f:
             source_codes.append(f.read())
         return mod
 
@@ -702,9 +702,10 @@ def run_and_get_code(fn, *args, **kwargs):
 
 def run_and_get_triton_code(fn, *args, **kwargs):
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
+    # Can have two outputs if backwards was eagerly compiled
     assert (
-        len(source_codes) == 1
-    ), f"expected exactly one code output got {len(source_codes)}"
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
 
 

@@ -19,7 +19,7 @@ if 'cpu' in test_name:
 elif 'gpu' in test_name:
     backend = 'gpu'
 
-data_file_path = '../{}_runtime.json'.format(backend)
+data_file_path = f'../{backend}_runtime.json'
 
 with open(data_file_path) as data_file:
     data = json.load(data_file)
@@ -69,7 +69,7 @@ else:
     print("z-value < 3, no perf regression detected.")
     if args.update:
         print("We will use these numbers as new baseline.")
-        new_data_file_path = '../new_{}_runtime.json'.format(backend)
+        new_data_file_path = f'../new_{backend}_runtime.json'
         with open(new_data_file_path) as new_data_file:
             new_data = json.load(new_data_file)
         new_data[test_name] = {}
