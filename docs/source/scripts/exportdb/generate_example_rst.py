@@ -31,7 +31,7 @@ def generate_example_rst(example_case: ExportCase):
         if isinstance(model, torch.nn.Module)
         else inspect.getfile(model)
     )
-    with open(source_file, "r") as file:
+    with open(source_file) as file:
         source_code = file.read()
     source_code = re.sub(r"from torch\._export\.db\.case import .*\n", "", source_code)
     source_code = re.sub(r"@export_case\((.|\n)*?\)\n", "", source_code)
@@ -114,7 +114,7 @@ def generate_index_rst(example_cases, tag_to_modules, support_level_to_modules):
 
     tag_names = "\n    ".join(t for t in tag_to_modules.keys())
 
-    with open(os.path.join(PWD, "blurb.txt"), "r") as file:
+    with open(os.path.join(PWD, "blurb.txt")) as file:
         blurb = file.read()
 
     # Generate contents of the .rst file
