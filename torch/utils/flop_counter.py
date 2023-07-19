@@ -62,6 +62,7 @@ def conv_flop_count(
     w_shape: List[int],
     out_shape: List[int],
     transposed: bool = False,
+    groups: int = 1,
 ) -> int:
     """
     Count flops for convolution. Note only multiplication is
@@ -79,17 +80,18 @@ def conv_flop_count(
     batch_size = x_shape[0]
     conv_shape = (x_shape if transposed else out_shape)[2:]
     c_out, c_in, *dims = w_shape
+    assert c_out % groups == 0 and c_in % groups == 0
 
     # NB(chilli): I don't think this properly accounts for padding :think:
     # NB(chilli): Should be 2 * c_in - 1 technically for FLOPs.
-    flop = batch_size * prod(conv_shape) * c_out * prod(dims) * 2 * c_in
+    flop = batch_size * prod(conv_shape) * c_out * prod(dims) * 2 * c_in // groups
     return flop
 
-def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out_shape=None, **kwargs) -> int:
+def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, groups=1, out_shape=None, **kwargs) -> int:
     """
     Count flops for convolution.
     """
-    return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)
+    return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed, groups=groups)
 
 def transpose_shape(shape):
     return [shape[1], shape[0]] + list(shape[2:])
@@ -104,17 +106,17 @@ def conv_backward_flop(
         _dilation,
         transposed,
         _output_padding,
-        _groups,
+        groups,
         output_mask,
         out_shape) -> int:
     flop_count = 0
 
     if output_mask[0]:
         grad_input_shape = get_shape(out_shape[0])
-        flop_count += conv_flop_count(grad_out_shape, w_shape, grad_input_shape, not transposed)
+        flop_count += conv_flop_count(grad_out_shape, w_shape, grad_input_shape, not transposed, groups)
     if output_mask[1]:
         grad_weight_shape = get_shape(out_shape[1])
-        flop_count += conv_flop_count(transpose_shape(x_shape), grad_out_shape, grad_weight_shape, transposed)
+        flop_count += conv_flop_count(transpose_shape(x_shape), grad_out_shape, grad_weight_shape, transposed, groups)
 
     return flop_count
 
