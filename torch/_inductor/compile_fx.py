@@ -515,7 +515,7 @@ def fx_codegen_and_compile(
                         context.output_strides.append(None)
             compiled_fn = graph.compile_to_fn()
 
-            if not graph.cudagraphs_okay:
+            if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
 
             compiled_graph = CompiledFxGraph(

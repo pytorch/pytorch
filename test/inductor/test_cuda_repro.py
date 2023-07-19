@@ -783,7 +783,7 @@ class CudaReproTests(TestCase):
     def test_issue100806(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.linear1 = torch.nn.Linear(10, 20)
                 self.linear2 = torch.nn.Linear(20, 30)
                 self.relu = torch.nn.ReLU()
