@@ -1318,6 +1318,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x.item())
             self.assertTrue(same(ref, res))
 
+    @requires_numpy_pytorch_interop
+    @torch._dynamo.config.patch(numpy_ndarray_as_tensor=True)
+    def test_no_graph_break_numpy_with_builtin_types(self):
+        x = np.ones(3, dtype='float64')
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        @torch._dynamo.optimize(cnts)
+        def f(x):
+            return x.astype(int)
+
+        r = f(x)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_graph_break_correctly_when_passing_numpy_ndarray_to_torch_function(self):
         # from transformers/models/big_bird/modeling_big_bird.py
         def fn(x: int, y: torch.Tensor):

@@ -1,5 +1,5 @@
 from collections import defaultdict
-from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
+from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name, python_builtin_types
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
@@ -398,6 +398,8 @@ class CodeGen:
                     qualified_name = _get_qualified_name(arg)
                     global_name = add_global(qualified_name, arg)
                     return f"{global_name}"
+                elif arg in python_builtin_types:
+                    return arg.__name__
                 return repr(arg)
             args_s = ', '.join(_get_repr(a) for a in args)
             kwargs_s = ', '.join(f'{k} = {_get_repr(v)}' for k, v in kwargs.items())
@@ -515,7 +517,7 @@ class CodeGen:
                 if getattr(node.target, "__module__", "") == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
                     body.append(f'{repr(node)}{maybe_type_annotation} = '
-                                f'{magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
+                                f'{magic_methods[node.target.__name__].format(_format_args(args, kwargs))}')
                     return
 
                 # pretty print inplace operators; required for jit.script to work properly

@@ -9,6 +9,7 @@ from typing import Dict, List
 
 import torch
 from torch import sym_float, sym_int
+from torch.fx.node import python_builtin_types
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
@@ -408,6 +409,11 @@ class BuiltinVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.fn
+
+    def as_proxy(self):
+        if self.fn in python_builtin_types:
+            return self.fn
+        return super().as_proxy()
 
     def reconstruct(self, codegen):
         name = self.fn.__name__

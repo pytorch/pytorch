@@ -12,7 +12,7 @@ from dataclasses import is_dataclass, fields
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, OrderedDict, Optional, Iterable, Any, Iterator, Callable
-from .node import Target, Node, Argument, base_types, map_aggregate
+from .node import Target, Node, Argument, base_types, map_aggregate, python_builtin_types
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
 import torch.fx.traceback as fx_traceback
@@ -269,7 +269,7 @@ class TracerBase:
             kwargs = {field.name: self.create_arg(getattr(a, field.name)) for field in fields(a)}
             return self.create_node("call_function", a.__class__, (), kwargs)
 
-        elif isinstance(a, base_types) or a is None or a is ...:
+        elif isinstance(a, base_types) or a in python_builtin_types or a is None or a is ...:
             return a
         raise NotImplementedError(f"argument of type: {type(a)}")
 
