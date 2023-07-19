@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 import rockset  # type: ignore[import]
+from gitutils import retries_decorator
 
 LOGS_QUERY = """
 with
@@ -70,6 +71,7 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
+@retries_decorator()
 def query_rockset(
     query: str, params: Optional[Dict[str, Any]] = None
 ) -> List[Dict[str, Any]]:
