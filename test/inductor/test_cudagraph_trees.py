@@ -137,7 +137,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         def get_manager(self, device_index=None):
             return torch._inductor.cudagraph_trees.get_container(
-                (self.device_idx if not device_index else device_index)
+                self.device_idx if not device_index else device_index
             ).tree_manager
 
         def get_roots(self):

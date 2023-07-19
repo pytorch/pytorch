@@ -226,6 +226,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "geometric": {f16},
     "log_normal": {f16},
     ("normal", "in_place"): {f16, f32, f64},
+    "uniform": {f16},
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16},
