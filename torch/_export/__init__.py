@@ -1,41 +1,44 @@
 import dataclasses
 import inspect
-import weakref
 import re
+import weakref
 from collections import OrderedDict
-from typing import Any, Callable, List, Tuple, Optional, Dict, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import sympy
 
 import torch
 import torch._dynamo
 import torch.fx
-from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from .exported_program import (
-    CallSpec,
-    ExportedProgram,
-    ExportBackwardSignature,
-    ExportGraphSignature,
-    _process_constraints,
-)
-from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
-from torch._decomp import core_aten_decompositions
-from torch._dynamo.eval_frame import Constraint
-from torch._functorch.aot_autograd import aot_export_module
-from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import torch.utils._pytree as pytree
+from torch._decomp import core_aten_decompositions, get_decompositions
+from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.eval_frame import Constraint
+from torch._dynamo.exc import UserError, UserErrorType
+from torch._functorch.aot_autograd import aot_export_module
+from torch._functorch.eager_transforms import functionalize
+from torch._guards import detect_fake_mode
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx import traceback as fx_traceback
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
     ShapeEnv,
     StrictMinMaxConstraint,
 )
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
-from torch._dynamo.exc import UserError, UserErrorType
-from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
-
+from .exported_program import (
+    _process_constraints,
+    CallSpec,
+    ExportBackwardSignature,
+    ExportedProgram,
+    ExportGraphSignature,
+)
+from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 
 
 # Note - [On Export Dynamic Dimension UX]
@@ -156,6 +159,7 @@ def export(
                 *args,
                 constraints=constraints,
                 assume_static_by_default=True,
+                tracing_mode="symbolic",
             )
 
             params_buffers: "OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]]" = OrderedDict()
@@ -190,11 +194,6 @@ def export(
                             params_buffers_to_node_meta[n.target] = meta
 
             fake_inps = []
-            for node in gm_torch_level.graph.nodes:
-                if node.op == "placeholder" and "val" in node.meta:
-                    fake_val = node.meta["val"]
-                    fake_inps.append(fake_val)
-
             fake_mode = FakeTensorMode(
                 allow_fallback_kernels=False,
                 allow_non_fake_inputs=True,
@@ -202,6 +201,10 @@ def export(
                     assume_static_by_default=True,
                 ),
             )
+            for node in gm_torch_level.graph.nodes:
+                if node.op == "placeholder" and "val" in node.meta:
+                    fake_val = node.meta["val"]
+                    fake_inps.append(fake_val)
 
             if detected_fake_mode := detect_fake_mode(fake_inps):
                 fake_mode = detected_fake_mode
@@ -228,6 +231,26 @@ def export(
             )
 
             gm_torch_level.recompile()
+
+            params_buffers_to_node_meta = OrderedDict()
+
+            for node in gm_torch_level.graph.nodes:
+                target = node.target
+                meta = node.meta
+                if node.op == "call_module":
+                    submodule = getattr(gm_torch_level, target)
+                    if isinstance(submodule, torch.nn.Module):
+                        for name, _ in submodule.named_parameters(recurse=True, remove_duplicate=False):
+                            params_buffers_to_node_meta[target + "." + name] = meta
+
+                        for name, _ in submodule.named_buffers(recurse=True, remove_duplicate=False):
+                            params_buffers_to_node_meta[target + "." + name] = meta
+
+                if node.op == "call_function" and not isinstance(node.target, torch._ops.HigherOrderOperator):
+                    for n in node._input_nodes:
+                        if n.op == "get_attr":
+                            params_buffers_to_node_meta[n.target] = meta
+
             gm, graph_signature = aot_export_module(gm_torch_level, fake_args, decompositions=DECOMP_TABLE, trace_joint=False)
 
             export_backward_signature = ExportBackwardSignature(

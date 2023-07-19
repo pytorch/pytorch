@@ -212,9 +212,7 @@ if is_available():
         for arg, arg_type in type_mapping.items():
             if not isinstance(arg, arg_type):  # type: ignore[arg-type]
                 raise RuntimeError(
-                    "Argument {} must be of type {} but got type {}".format(
-                        arg, arg_type, type(arg)
-                    )
+                    f"Argument {arg} must be of type {arg_type} but got type {type(arg)}"
                 )
 
     def _init_rpc_backend(

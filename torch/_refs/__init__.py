@@ -597,9 +597,7 @@ def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
 
     python_type = utils.dtype_to_type(a.dtype)
     if not utils.is_weakly_lesser_type(type(value), python_type):
-        msg = "value argument of type {} cannot be safely cast to type {}!".format(
-            type(value), python_type
-        )
+        msg = f"value argument of type {type(value)} cannot be safely cast to type {python_type}!"
         raise ValueError(msg)
 
     return prims.fill(a, value)
@@ -997,9 +995,7 @@ def add(
         if python_type != bool and not utils.is_weakly_lesser_type(
             type(alpha), python_type
         ):
-            msg = "alpha argument of type {} cannot be safely cast to type {}!".format(
-                type(alpha), python_type
-            )
+            msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
         b = prims.mul(b, alpha)
 
@@ -1096,10 +1092,7 @@ def div(
     elif rounding_mode == "floor":
         return floor_divide(a, b)
     else:
-        msg = (
-            "div expected rounding_mode to be one of None, 'trunc', or 'floor' "
-            "but found {}.".format(rounding_mode)
-        )
+        msg = f"div expected rounding_mode to be one of None, 'trunc', or 'floor' but found {rounding_mode}."
         raise ValueError(msg)
 
 
@@ -1376,21 +1369,15 @@ def _check_close_args(
 ) -> None:
     torch._check_value(
         a.dtype == b.dtype,
-        lambda: "{}: Attempting to compare tensors of different dtypes {} and {}!".format(
-            name, a.dtype, b.dtype
-        ),
+        lambda: f"{name}: Attempting to compare tensors of different dtypes {a.dtype} and {b.dtype}!",
     )
     torch._check(
         rtol >= 0,
-        lambda: "{}: rtol must be greater than or equal to zero, but got {}!".format(
-            name, rtol
-        ),
+        lambda: f"{name}: rtol must be greater than or equal to zero, but got {rtol}!",
     )
     torch._check(
         atol >= 0,
-        lambda: "{}: atol must be greater than or equal to zero, but got {}!".format(
-            name, atol
-        ),
+        lambda: f"{name}: atol must be greater than or equal to zero, but got {atol}!",
     )
 
 
@@ -1662,9 +1649,7 @@ def sub(
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
-            msg = "alpha argument of type {} cannot be safely cast to type {}!".format(
-                type(alpha), python_type
-            )
+            msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
         if isinstance(b, torch.Tensor):
             b = prims.mul(b, alpha)
@@ -1755,9 +1740,7 @@ def addcdiv(
         python_type = utils.dtype_to_type(dtype)
         torch._check_value(
             utils.is_weakly_lesser_type(type(value), python_type),
-            lambda: "value argument of type {} cannot be safely cast to type {}!".format(
-                type(value), python_type
-            ),
+            lambda: f"value argument of type {type(value)} cannot be safely cast to type {python_type}!",
         )
 
     return self + value * tensor1 / tensor2
@@ -1784,9 +1767,7 @@ def addcmul(
         python_type = utils.dtype_to_type(dtype)
         torch._check_value(
             utils.is_weakly_lesser_type(type(value), python_type),
-            lambda: "value argument of type {} cannot be safely cast to type {}!".format(
-                type(value), python_type
-            ),
+            lambda: f"value argument of type {type(value)} cannot be safely cast to type {python_type}!",
         )
 
     return self + value * tensor1 * tensor2
@@ -2094,9 +2075,7 @@ def _reduction(
     assert isinstance(a, TensorLike)
     if a.ndim > 64:
         raise RuntimeError(
-            "Received a tensor with {} dimensions, but only tensors with up to 64 dims are supported!".format(
-                a.ndim
-            )
+            f"Received a tensor with {a.ndim} dimensions, but only tensors with up to 64 dims are supported!"
         )
 
     if out is not None:
@@ -3720,9 +3699,7 @@ def tensor_split(
         )
 
         if sections <= 0:
-            msg = "tensor_split: number of sections must be greater than 0, but was {}".format(
-                sections
-            )
+            msg = f"tensor_split: number of sections must be greater than 0, but was {sections}"
             raise ValueError(msg)
 
         splits = []
@@ -3747,9 +3724,7 @@ def tensor_split(
         if isinstance(indices_or_sections, TensorLike):
             if indices_or_sections.ndim != 1:
                 msg = "tensor_split: non-scalar indices_or_sections tensors must have only one dimension, "
-                "but received a tensor with {} dimensions".format(
-                    indices_or_sections.ndim
-                )
+                f"but received a tensor with {indices_or_sections.ndim} dimensions"
                 raise ValueError(msg)
 
             indices = indices_or_sections.tolist()
