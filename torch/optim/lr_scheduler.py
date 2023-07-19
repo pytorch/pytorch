@@ -1366,11 +1366,11 @@ class CosineAnnealingWarmRestarts(LRScheduler):
 
     def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1, verbose=False):
         if T_0 <= 0 or not isinstance(T_0, int):
-            raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
+            raise ValueError(f"Expected positive integer T_0, but got {T_0}")
         if T_mult < 1 or not isinstance(T_mult, int):
-            raise ValueError("Expected integer T_mult >= 1, but got {}".format(T_mult))
+            raise ValueError(f"Expected integer T_mult >= 1, but got {T_mult}")
         if not isinstance(eta_min, (float, int)):
-            raise ValueError("Expected float or int eta_min, but got {} of type {}".format(eta_min, type(eta_min)))
+            raise ValueError(f"Expected float or int eta_min, but got {eta_min} of type {type(eta_min)}")
         self.T_0 = T_0
         self.T_i = T_0
         self.T_mult = T_mult
@@ -1425,7 +1425,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
                 self.T_i = self.T_i * self.T_mult
         else:
             if epoch < 0:
-                raise ValueError("Expected non-negative epoch, but got {}".format(epoch))
+                raise ValueError(f"Expected non-negative epoch, but got {epoch}")
             if epoch >= self.T_0:
                 if self.T_mult == 1:
                     self.T_cur = epoch % self.T_0
@@ -1590,13 +1590,13 @@ class OneCycleLR(LRScheduler):
             raise ValueError("You must define either total_steps OR (epochs AND steps_per_epoch)")
         elif total_steps is not None:
             if total_steps <= 0 or not isinstance(total_steps, int):
-                raise ValueError("Expected positive integer total_steps, but got {}".format(total_steps))
+                raise ValueError(f"Expected positive integer total_steps, but got {total_steps}")
             self.total_steps = total_steps
         else:
             if epochs <= 0 or not isinstance(epochs, int):
-                raise ValueError("Expected positive integer epochs, but got {}".format(epochs))
+                raise ValueError(f"Expected positive integer epochs, but got {epochs}")
             if steps_per_epoch <= 0 or not isinstance(steps_per_epoch, int):
-                raise ValueError("Expected positive integer steps_per_epoch, but got {}".format(steps_per_epoch))
+                raise ValueError(f"Expected positive integer steps_per_epoch, but got {steps_per_epoch}")
             self.total_steps = epochs * steps_per_epoch
 
         if three_phase:
@@ -1643,11 +1643,11 @@ class OneCycleLR(LRScheduler):
 
         # Validate pct_start
         if pct_start < 0 or pct_start > 1 or not isinstance(pct_start, float):
-            raise ValueError("Expected float between 0 and 1 pct_start, but got {}".format(pct_start))
+            raise ValueError(f"Expected float between 0 and 1 pct_start, but got {pct_start}")
 
         # Validate anneal_strategy
         if anneal_strategy not in ['cos', 'linear']:
-            raise ValueError("anneal_strategy must by one of 'cos' or 'linear', instead got {}".format(anneal_strategy))
+            raise ValueError(f"anneal_strategy must by one of 'cos' or 'linear', instead got {anneal_strategy}")
         elif anneal_strategy == 'cos':
             self.anneal_func = self._annealing_cos
         elif anneal_strategy == 'linear':
