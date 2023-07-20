@@ -51,6 +51,31 @@ aten = torch.ops.aten
 check_model = test_torchinductor.check_model
 
 
+class LstmModule(torch.nn.Module):
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        num_layers,
+        bias=True,
+        bidirectional=False,
+        batch_first=False,
+    ):
+        super(LstmModule, self).__init__()
+        self.lstm = torch.nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            bias=bias,
+            bidirectional=bidirectional,
+            batch_first=batch_first,
+        )
+
+    def forward(self, x, h=None):
+        x, h = self.lstm(x, h)
+        return x, h
+
+
 class CPUReproTests(TestCase):
     common = check_model
 
@@ -256,6 +281,134 @@ class CPUReproTests(TestCase):
                     mod,
                     (v,),
                 )
+
+    @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    @torch._dynamo.config.patch(allow_rnn=True)
+    def test_lstm_packed(self):
+        def _lstm_params_list():
+            params_dict = {
+                "unbatched": [True, False],
+                "input_size": [1, 2],
+                "hidden_size": [5, 32],
+                "num_layers": [1, 3],
+                "bidirectional": [False, True],
+                "bias": [False, True],
+                "empty_state": [False, True],
+                "batch_first": [True, False],
+                "batch_size": [1, 2],
+                "seq_len": [1, 3],
+            }
+
+            params_list = []
+            for key, value in params_dict.items():
+                params_list.append(value)
+            return params_list
+
+        params_list = _lstm_params_list()
+        for (
+            unbatched,
+            input_size,
+            hidden_size,
+            num_layers,
+            bidirectional,
+            bias,
+            empty_state,
+            batch_first,
+            batch_size,
+            seq_len,
+        ) in itertools.product(*params_list):
+            dtypes = [torch.float]
+            if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+                dtypes.append(torch.bfloat16)
+            for dtype in dtypes:
+                num_directions = 2 if bidirectional else 1
+
+                if unbatched:
+                    v = torch.randn(seq_len, input_size)
+                    h = torch.randn(num_layers * num_directions, hidden_size)
+                    c = torch.randn(num_layers * num_directions, hidden_size)
+                else:
+                    if batch_first:
+                        v = torch.randn(batch_size, seq_len, input_size)
+                    else:
+                        v = torch.randn(seq_len, batch_size, input_size)
+                    h = torch.randn(
+                        num_layers * num_directions, batch_size, hidden_size
+                    )
+                    c = torch.randn(
+                        num_layers * num_directions, batch_size, hidden_size
+                    )
+
+                mod = LstmModule(
+                    input_size,
+                    hidden_size,
+                    num_layers,
+                    bias,
+                    bidirectional,
+                    batch_first,
+                ).eval()
+                mod = mod.to(dtype)
+                v = v.to(dtype)
+                h = h.to(dtype)
+                c = c.to(dtype)
+                with torch.no_grad():
+                    inps = [v]
+                    if not empty_state:
+                        inps.append((h, c))
+
+                    fn_opt = torch._dynamo.optimize("inductor")(mod)
+                    code = run_and_get_cpp_code(fn_opt, *inps)
+                    self.assertTrue("torch.ops.mkldnn._lstm" in code)
+                    self.assertEqual(fn_opt(*inps), mod(*inps))
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    @torch._dynamo.config.patch(allow_rnn=True)
+    def test_pack_padded_sequence_lstm(self):
+        embedding_dim = 12
+        hidden_dim = 10
+        batch_size = 24
+        num_layers = 1
+        bidirectional = True
+        num_direc = 2
+        max_lens = 96
+
+        sent = torch.randn(batch_size, max_lens, embedding_dim)
+        hid_0 = torch.rand(num_layers * num_direc, batch_size, hidden_dim)
+        hid_1 = torch.randn(num_layers * num_direc, batch_size, hidden_dim)
+
+        sent_lens = torch.Tensor(
+            [1, 2, 3, 4, 5, 1, 3, 2, 96, 5, 3, 1, 1, 2, 1, 2, 3, 6, 1, 2, 4, 6, 2, 1]
+        )
+
+        assert sent_lens.shape[0] == batch_size
+        assert sent_lens.max().item() == max_lens
+
+        hidden_0 = hid_0.clone().requires_grad_(False)
+        hidden_1 = hid_1.clone().requires_grad_(False)
+        embeds = torch.nn.utils.rnn.pack_padded_sequence(
+            sent, sent_lens, batch_first=True, enforce_sorted=False
+        )
+
+        mod = LstmModule(
+            embedding_dim,
+            hidden_dim,
+            num_layers=num_layers,
+            bias=True,
+            bidirectional=bidirectional,
+            batch_first=True,
+        ).eval()
+
+        with torch.no_grad():
+            inps = [embeds, (hidden_0, hidden_1)]
+            fn_opt = torch._dynamo.optimize("inductor")(mod)
+            code = run_and_get_cpp_code(fn_opt, *inps)
+            # This case is unsupported
+            self.assertFalse("torch.ops.mkldnn._lstm" in code)
+            self.assertEqual(fn_opt(*inps), mod(*inps))
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_transpose2d_has_output_size_input(self):

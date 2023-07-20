@@ -3,7 +3,7 @@ import operator
 import sys
 from enum import Enum
 from functools import partial, reduce
-from itertools import product
+from itertools import chain, product
 from typing import Callable, cast, Iterable, List, Optional, Tuple, Union
 
 import torch
@@ -2354,6 +2354,51 @@ def one_layer_rnn(inp, hidden, params, has_biases, hidden_fn, reverse=False):
     return out, cur_hidden.squeeze(0)
 
 
+def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
+    w0 = params[0]
+    w1 = params[1]
+    if has_biases:
+        w2 = params[2]
+        w3 = params[3]
+    else:
+        w2 = torch.zeros(w0.size())
+        w3 = torch.zeros(w1.size())
+
+    hx = hidden[0].unsqueeze(0)
+    cx = hidden[1].unsqueeze(0)
+
+    batch_sizes: List[int] = []
+    mode = 2  # third_party/ideep/include/ideep/abstract_types.hpp: ideep::rnn_kind::LSTM = 2
+    hidden_size = hx.size(2)
+    num_layers = 1
+
+    # _rnn_helper already handles bidirectional and batch_first so we hard-code them to False here
+    bidirectional = False
+    batch_first = False
+
+    train = False
+    outputs = torch.ops.aten.mkldnn_rnn_layer.default(
+        inp,
+        w0,
+        w1,
+        w2,
+        w3,
+        hx,
+        cx,
+        reverse,
+        batch_sizes,
+        mode,
+        hidden_size,
+        num_layers,
+        has_biases,
+        bidirectional,
+        batch_first,
+        train,
+    )
+    y, hy, cy = outputs[0], outputs[1], outputs[2]
+    return y, (hy.squeeze(1), cy.squeeze(1))
+
+
 def _rnn_helper(
     input,
     hidden,
@@ -2631,6 +2676,45 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
     return out, hidden_out
 
 
+def use_mkldnn(input, hx, params):
+    if not torch._C._has_mkldnn:
+        return False
+
+    tensors = [input] + list(hx) + list(chain.from_iterable(params))
+    devices = {t.device for t in tensors}
+    if len(devices) != 1:
+        return False
+
+    dtypes = {t.dtype for t in tensors}
+    if len(dtypes) != 1:
+        return False
+
+    device = devices.pop()
+    dtype = dtypes.pop()
+    if device != torch.device("cpu"):
+        return False
+    if dtype not in [torch.float, torch.bfloat16]:
+        return False
+
+    if input.requires_grad:
+        return False
+
+    has_projections = hx[0].size(2) != hx[1].size(2)
+    if has_projections:
+        return False
+
+    return True
+
+
+def select_one_layer_lstm_function(input, hx, params):
+    # mkldnn_one_layer_lstm does not depend on seq_len while one_layer_lstm
+    # will expand over the seq_len dim
+    if use_mkldnn(input, hx, params):
+        return mkldnn_one_layer_lstm
+    else:
+        return one_layer_lstm
+
+
 @register_decomposition(aten.lstm.input)
 @aten.lstm.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.lstm.input.py_impl(DispatchKey.Autograd)
@@ -2648,6 +2732,7 @@ def lstm_impl(
     assert len(hx) == 2, "lstm expects two hidden states"
     params = gather_params(params, has_biases, hx[0].size(2) != hx[1].size(2))
     hidden = list(zip(hx[0], hx[1]))
+    layer_fn = select_one_layer_lstm_function(input, hx, params)
     out, final_hiddens = _rnn_helper(
         input,
         hidden,
@@ -2658,7 +2743,7 @@ def lstm_impl(
         train,
         bidirectional,
         batch_first,
-        one_layer_lstm,
+        layer_fn,
     )
     final_hiddens = list(zip(*final_hiddens))
     return out, torch.stack(final_hiddens[0], 0), torch.stack(final_hiddens[1], 0)
