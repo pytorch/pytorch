@@ -341,16 +341,15 @@ class TestAutogradFallback(TestCase):
             op = self.get_op("foo")
 
             def foo_impl(a, b):
-                return (
-                    torch._C._functions.UndefinedGrad()(a),
-                    torch._C._functions.UndefinedGrad()(b),
-                )
+                return a.sin(), b.cos()
 
             lib.impl("foo", foo_impl, "CPU")
 
             x = torch.randn(3, requires_grad=True)
             y = torch.randn(3)
             w, z = op(x, y)
+            w = torch._C._functions.UndefinedGrad()(w)
+            z = torch._C._functions.UndefinedGrad()(z)
             with self._check_ctx(mode):
                 (z + w).sum().backward()
 
