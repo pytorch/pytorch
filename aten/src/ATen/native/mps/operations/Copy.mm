@@ -298,7 +298,7 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
     const IntArrayRef src_sizes = src.sizes();
     const IntArrayRef dst_sizes = dst.sizes();
     for (const auto j : c10::irange(src.dim())) {
-      if (src_sizes[j] == 1 && dst_sizes[j] > 1) {
+      if (src_sizes[j] == 1 && dst_sizes[j] != 1) {
         needs_broadcasting = true;
         break;
       }
