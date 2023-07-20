@@ -168,8 +168,8 @@ class TestBinaryUfuncs(TestCase):
             if _numel(l) <= 100 and _numel(r) <= 100:
                 msg = (
                     "Failed to produce expected results! Input lhs tensor was"
-                    " {0}, rhs tensor was {1}, torch result is {2}, and reference result is"
-                    " {3}."
+                    " {}, rhs tensor was {}, torch result is {}, and reference result is"
+                    " {}."
                 ).format(l, r, actual, expected)
             else:
                 msg = None
@@ -491,7 +491,7 @@ class TestBinaryUfuncs(TestCase):
         )
 
         def _supported(dtypes):
-            return all((x in supported_dtypes for x in dtypes))
+            return all(x in supported_dtypes for x in dtypes)
 
         # int x int type promotion
         if _supported((torch.int16, torch.int32, torch.int64)):
@@ -2424,21 +2424,21 @@ class TestBinaryUfuncs(TestCase):
         for i in range(750):
             self.assertTrue(
                 torch.isnan(ma[i]),
-                "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]),
+                f"max(a, b): {ma[i]}, a: {a[i]}, b: {b[i]}",
             )
             self.assertTrue(
                 torch.isnan(mi[i]),
-                "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]),
+                f"min(a, b): {mi[i]}, a: {a[i]}, b: {b[i]}",
             )
 
         for i in range(750, 1000):
             self.assertFalse(
                 torch.isnan(ma[i]),
-                "max(a, b): {}, a: {}, b: {}".format(ma[i], a[i], b[i]),
+                f"max(a, b): {ma[i]}, a: {a[i]}, b: {b[i]}",
             )
             self.assertFalse(
                 torch.isnan(mi[i]),
-                "min(a, b): {}, a: {}, b: {}".format(mi[i], a[i], b[i]),
+                f"min(a, b): {mi[i]}, a: {a[i]}, b: {b[i]}",
             )
 
     @dtypes(
@@ -4448,8 +4448,8 @@ def generate_not_implemented_tests(cls):
         return test
 
     for op in tensor_binary_ops:
-        test_name = "test_{}_not_implemented".format(op)
-        assert not hasattr(cls, test_name), "{0} already in {1}".format(
+        test_name = f"test_{op}_not_implemented"
+        assert not hasattr(cls, test_name), "{} already in {}".format(
             test_name, cls.__name__
         )
 
