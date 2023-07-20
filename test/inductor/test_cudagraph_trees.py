@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
+    skipIfRocm,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
