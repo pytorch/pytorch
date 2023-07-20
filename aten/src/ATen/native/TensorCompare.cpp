@@ -369,6 +369,18 @@ Tensor isreal(const Tensor& self) {
   return at::imag(self) == 0;
 }
 
+
+#if !defined(C10_MOBILE)
+#define _AT_DISPATCH_INF_TYPES(TYPE, NAME, ...)                              \
+        AT_DISPATCH_ALL_FLOATING_TYPES_AND3( kHalf, kBFloat16, kFloat8_e5m2, \
+            TYPE, NAME, __VA_ARGS__)
+#else
+#define _AT_DISPATCH_INF_TYPES(TYPE, NAME, ...)               \
+        AT_DISPATCH_ALL_FLOATING_TYPES_AND2(kHalf, kBFloat16, \
+            TYPE, NAME, __VA_ARGS__)
+#endif
+
+
 Tensor isinf(const Tensor &self) {
   // Note: Integral tensor values are never infinite
   if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
@@ -381,11 +393,7 @@ Tensor isinf(const Tensor &self) {
           (at::isinf(at::imag(self)));
   }
 
-#if !defined(C10_MOBILE)
-  return AT_DISPATCH_FLOATING_TYPES_AND3(kBFloat16, kHalf, kFloat8_e5m2, self.scalar_type(), "isinf", [&]() {
-#else
-  return AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "isinf", [&]() {
-#endif
+  return _AT_DISPATCH_INF_TYPES(self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
 }
@@ -401,11 +409,7 @@ Tensor isfinite(const Tensor& self) {
     return at::isfinite(at::real(self)).__iand__(at::isfinite(at::imag(self)));
   }
 
-#if !defined(C10_MOBILE)
-  return AT_DISPATCH_FLOATING_TYPES_AND3(kHalf, kBFloat16, kFloat8_e5m2, self.scalar_type(), "isfinite", [&]() {
-#else
-  return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "isfinite", [&]() {
-#endif
+  return _AT_DISPATCH_INF_TYPES(self.scalar_type(), "isfinite", [&]() {
     return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
   });
 }

@@ -30,12 +30,12 @@ Scalar item(const Tensor& self) {
 
 #if !defined(C10_MOBILE)
 #define _AT_DISPATCH_SD_TYPES(TYPE, NAME, ...)                                   \
-	AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                  \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                  \
             kComplexHalf, kHalf, kBool, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
             TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_SD_TYPES(TYPE, NAME, ...)     \
-	AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(    \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(    \
             kComplexHalf, kHalf, kBool, kBFloat16, \
             TYPE, NAME, __VA_ARGS__)
 #endif
