@@ -168,10 +168,14 @@ class ProcessGroupVariable(DistributedVariable):
     """
 
     def __init__(self, value, **kwargs):
-        super().__init__(value, **kwargs)
+        super().__init__(**kwargs)
+        self.value = value
 
     def as_python_constant(self):
         return self.value
+
+    def python_type(self):
+        return type(self.value)
 
     def call_method(
         self,
