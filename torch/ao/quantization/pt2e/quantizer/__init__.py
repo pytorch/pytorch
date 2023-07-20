@@ -1,4 +1,4 @@
-from .qnnpack_quantizer import QNNPackQuantizer
+from .xnnpack_quantizer import XNNPACKQuantizer
 from .quantizer import (
     DerivedQuantizationSpec,
     EdgeOrNode,
@@ -25,7 +25,7 @@ __all__ = [
     "QuantizationConfig",
     "EmbeddingQuantizer",
     "Quantizer",
-    "QNNPackQuantizer",
+    "XNNPACKQuantizer",
     "QuantizationSpecBase",
     "QuantizationSpec",
     "FixedQParamsQuantizationSpec",

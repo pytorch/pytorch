@@ -106,9 +106,9 @@ x = $TILE_SIZE_X + $TILE_SIZE_Y
                     file_name_2 = os.path.join(tmp_dir, "conv2d_pw_1x2.glsl")
                     self.assertTrue(os.path.exists(file_name_1))
                     self.assertTrue(os.path.exists(file_name_2))
-                    with open(file_name_1, "r") as f:
+                    with open(file_name_1) as f:
                         contents = f.read()
                         self.assertTrue("1 + 1" in contents)
-                    with open(file_name_2, "r") as f:
+                    with open(file_name_2) as f:
                         contents = f.read()
                         self.assertTrue("1 + 2" in contents)

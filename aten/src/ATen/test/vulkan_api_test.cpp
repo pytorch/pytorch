@@ -3734,6 +3734,103 @@ TEST_F(VulkanAPITest, transpose_4d_height_and_width_large) {
   test_transpose({7, 51, 41, 3}, 2, 3);
 }
 
+// Test Unary Ops
+void test_exp(const at::IntArrayRef input_shape) {
+  c10::InferenceMode mode;
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::exp(in_cpu);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::exp(in_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "exp test failed with input shape: "
+              << input_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, unary_op_exp) {
+  test_exp({5});
+  test_exp({5, 6});
+  test_exp({7, 3, 5});
+  test_exp({11, 1, 4, 2});
+}
+
+void test_exp_(const at::IntArrayRef input_shape) {
+  c10::InferenceMode mode;
+  const auto cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto vulkan = cpu.vulkan();
+
+  cpu.exp_();
+  vulkan.exp_();
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+    std::cout << "exp_ test failed with input shape: "
+              << input_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, unary_op_exp_) {
+  test_exp_({5});
+  test_exp_({5, 6});
+  test_exp_({7, 3, 5});
+  test_exp_({11, 1, 4, 2});
+}
+
+void test_sqrt(const at::IntArrayRef input_shape) {
+  c10::InferenceMode mode;
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::sqrt(in_cpu);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::sqrt(in_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "sqrt test failed with input shape: "
+              << input_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, unary_op_sqrt) {
+  test_sqrt({5});
+  test_sqrt({5, 6});
+  test_sqrt({7, 3, 5});
+  test_sqrt({11, 1, 4, 2});
+}
+
+void test_sqrt_(const at::IntArrayRef input_shape) {
+  c10::InferenceMode mode;
+  const auto cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto vulkan = cpu.vulkan();
+
+  cpu.sqrt_();
+  vulkan.sqrt_();
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+    std::cout << "sqrt_ test failed with input shape: "
+              << input_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, unary_op_sqrt_) {
+  test_sqrt_({5});
+  test_sqrt_({5, 6});
+  test_sqrt_({7, 3, 5});
+  test_sqrt_({11, 1, 4, 2});
+}
+
 void test_unsqueeze(const at::IntArrayRef input_shape, int64_t dim) {
   c10::InferenceMode mode;
   const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
