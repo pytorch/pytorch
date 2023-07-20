@@ -13,11 +13,13 @@ from typing import (
     Callable,
     Dict,
     Final,
+    List,
     Mapping,
     Optional,
     Protocol,
     runtime_checkable,
     Sequence,
+    Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -68,6 +70,9 @@ class ONNXFakeContext:
 
     fake_mode: fake_tensor.FakeTensorMode
     """The fake tensor mode used for tracing model using fake tensors and parameters."""
+
+    state_dict_paths: Optional[Tuple[Union[str, io.BytesIO]]] = None
+    """List of paths of files that contain the model `state_dict`"""
 
 
 class ExportOptions:
@@ -283,6 +288,9 @@ def enable_fake_mode():
     fake_context = ONNXFakeContext(fake_mode=fake_mode)
     with fake_mode, patcher_context:
         yield fake_context
+    fake_context.state_dict_paths = tuple(
+        patcher_context.paths,
+    )  # type: ignore[assignment]
 
 
 @runtime_checkable
@@ -354,6 +362,7 @@ class ExportOutput:
     _input_adapter: Final[io_adapter.InputAdapter]
     _output_adapter: Final[io_adapter.OutputAdapter]
     _diagnostic_context: Final[infra.DiagnosticContext]
+    _fake_context: Final[Optional[ONNXFakeContext]]
 
     @_beartype.beartype
     def __init__(
@@ -362,11 +371,13 @@ class ExportOutput:
         input_adapter: io_adapter.InputAdapter,
         output_adapter: io_adapter.OutputAdapter,
         diagnostic_context: infra.DiagnosticContext,
+        fake_context: Optional[ONNXFakeContext] = None,
     ):
         self._model_proto = model_proto
         self._input_adapter = input_adapter
         self._output_adapter = output_adapter
         self._diagnostic_context = diagnostic_context
+        self._fake_context = fake_context
 
     @property
     def model_proto(self) -> onnx.ModelProto:  # type: ignore[name-defined]
@@ -379,6 +390,12 @@ class ExportOutput:
         """The diagnostic context associated with the export."""
 
         return self._diagnostic_context
+
+    @property
+    def fake_context(self) -> Optional[ONNXFakeContext]:
+        """The fake context associated with the export."""
+
+        return self._fake_context
 
     @_beartype.beartype
     def adapt_torch_inputs_to_onnx(
@@ -515,29 +532,36 @@ class ExportOutput:
             serializer = ProtobufExportOutputSerializer()
 
         # Add initializers when symbolic tracing is enabled
-        _model_state_dict_files = None
+        _model_state_dict_files: List[Union[str, io.BytesIO]] = []
         if model_state_dict is not None:
             if isinstance(model_state_dict, dict):
                 model_state_dict_file = io.BytesIO()
                 torch.save(model_state_dict, model_state_dict_file)
                 model_state_dict_file.seek(0)
+                _model_state_dict_files.append(model_state_dict_file)
             else:
                 isinstance(
                     model_state_dict, str
                 ), "model_state_dict must be a path to the model's state_dict or the actual state_dict"
-                model_state_dict_file = model_state_dict  # type: ignore[assignment]
+                _model_state_dict_files.append(model_state_dict)
 
-            ctx = patcher.ONNXTorchPatcher()
-            with ctx:
-                _ = torch.load(model_state_dict_file)
-                _model_state_dict_files = ctx.paths
+        # Load state from previous model.load_state_dict() call within enable_fake_mode() context
+        if self._fake_context and self._fake_context.state_dict_paths:
+            for path in self._fake_context.state_dict_paths:
+                if path in _model_state_dict_files:
+                    # ignore duplicate
+                    continue
+                try:
+                    extra_state_dict = torch.load(path)
+                    extra_state_dict_file = io.BytesIO()
+                    torch.save(extra_state_dict, extra_state_dict_file)
+                    extra_state_dict_file.seek(0)
+                    _model_state_dict_files.append(extra_state_dict_file)
+                except FileNotFoundError:
+                    # It is ok to ignore transient state_dict file created within context manager
+                    pass
 
-            # Reset the buffer to the beginning before reading it again
-            if isinstance(model_state_dict, dict):
-                for file_obj in ctx.paths:
-                    file_obj.seek(0)  # type: ignore[union-attr]
-
-        if _model_state_dict_files is not None:
+        if _model_state_dict_files:
             if not isinstance(destination, str):
                 raise RuntimeError(
                     "`destination` must be a string with a path when model_state_dict is specified."
@@ -649,6 +673,7 @@ class Exporter:
             self.options.fx_tracer.input_adapter,
             self.options.fx_tracer.output_adapter,
             self.options.diagnostic_context,
+            self.options.fake_context,
         )
 
     def _assert_fake_tensor_mode(self):
