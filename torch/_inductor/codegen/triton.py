@@ -25,7 +25,6 @@ from ..triton_heuristics import AutotuneHint
 from ..utils import (
     DeferredLineBase,
     get_fused_kernel_name,
-    get_kernel_category_by_source_code,
     get_kernel_metadata,
     green_text,
     next_power_of_2,
@@ -36,6 +35,7 @@ from ..utils import (
     yellow_text,
 )
 from ..virtualized import ops, V
+from ..wrapper_benchmark import get_kernel_category_by_source_code
 
 from .common import (
     CSEVariable,
