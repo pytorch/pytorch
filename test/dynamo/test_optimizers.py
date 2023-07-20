@@ -121,7 +121,7 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
         batch = {"x": input1, "y": input2}
         for _ in range(2):
             opt_training_iter_fn(batch, net, optimizer)
-        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_state_dict(self):
         @torch.compile(backend="eager")

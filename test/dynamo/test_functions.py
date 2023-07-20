@@ -1130,7 +1130,29 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_numpy_dtype_argument_to_function(x):
         import numpy as np
 
-        return np.empty_like(x, dtype=np.float64)
+        return np.ones_like(x, dtype=np.float64)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_linalg(x):
+        import numpy as np
+
+        return np.linalg.norm(x.numpy(), axis=0)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_fft(x):
+        import numpy as np
+
+        return np.fft.fftshift(x.numpy())
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_random():
+        import numpy as np
+
+        x = np.random.randn(2, 2)
+        return x - x
 
 
 def global_func_with_default_tensor_args(

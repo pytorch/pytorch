@@ -1548,6 +1548,10 @@ class _TorchCompileInductorWrapper:
 
         return compile_fx(model_, inputs_, config_patches=self.config)
 
+    def get_compiler_config(self):
+        from torch._inductor.compile_fx import get_patched_config_dict
+        return get_patched_config_dict(config_patches=self.config)
+
     def reset(self):
         from torch._inductor import config
         if "triton.cudagraphs" in self.config or config.triton.cudagraphs:
@@ -1753,6 +1757,14 @@ _deprecated_attrs = {
     "has_cudnn": torch.backends.cudnn.is_available,
     "has_mkldnn": torch.backends.mkldnn.is_available,
 }
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+    from torch import _dynamo as _dynamo
+    from torch import _inductor as _inductor
+    from torch import onnx as onnx
 
 _lazy_modules = {
     "_dynamo",

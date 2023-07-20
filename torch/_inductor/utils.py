@@ -688,7 +688,7 @@ def run_and_get_code(fn, *args, **kwargs):
 
     def patched_compile_to_module(self):
         mod = compile_to_module(self)
-        with open(mod.__file__, "r") as f:
+        with open(mod.__file__) as f:
             source_codes.append(f.read())
         return mod
 
