@@ -2154,13 +2154,15 @@ class TritonScheduling:
             wrapper.cuda_event_dependency(node_name, kernel_IndentedBuffer)
             if ssnode.cuda_event:
                 wrapper.cuda_event_create(node_name, kernel_IndentedBuffer)
-            if stream_id != 0 and V.graph.cpp_wrapper:
-                # python version doesn't need this.
-                kernel_IndentedBuffer.writeline(f"{{")
-                ssnode.stream_context_embrace = True
+            if stream_id != 0:
+                if V.graph.cpp_wrapper:
+                    kernel_IndentedBuffer.writeline(f"{{")
+                else:
+                    kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
                 with kernel_IndentedBuffer.indent():
-                    kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
-                kernel_IndentedBuffer.writeline(f"}}")
+                        kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
+                if V.graph.cpp_wrapper:
+                    kernel_IndentedBuffer.writeline(f"}}")
             else:
                 kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
             if ssnode.cuda_event:

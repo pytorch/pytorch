@@ -40,7 +40,6 @@ class SSNode:
         is_fused: mark if this node is a fused node.
         is_nop_node: mark if this node is a nop node.
         node_type: the type of the node. It can be "template", "extern", "foreach", "fused_or_schedule", "nop"
-        stream_context_embrace: indicate if there are `with` line generated in python or `streamGuard` line in cpp wrapper. The allocation line relies it to decide if we need to generate the stream context line.
     """
 
     def __init__(self, original_node) -> None:
@@ -60,7 +59,6 @@ class SSNode:
         self.cuda_event = False
         self.is_nop_node = isinstance(original_node, NopKernelSchedulerNode)
         self.node_type = None
-        self.stream_context_embrace = False
         if hasattr(original_node, "snodes"):
             self.is_fused = True
             for snode in original_node.snodes:
