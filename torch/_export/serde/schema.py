@@ -10,20 +10,20 @@ class _Union:
     @classmethod
     def create(cls, **kwargs):
         assert len(kwargs) == 1
-        return cls(**{**{f.name: None for f in fields(cls)}, **kwargs})
+        return cls(**{**{f.name: None for f in fields(cls)}, **kwargs})  # type: ignore[arg-type]
 
     def __post_init__(self):
-        assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1
+        assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1  # type: ignore[arg-type, misc]
 
     @property
     def value(self):
-        val = next((getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None), None)
+        val = next((getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None), None)  # type: ignore[arg-type]
         assert val is not None
         return val
 
     @property
     def type(self):
-        val_type = next((f.name for f in fields(self) if getattr(self, f.name) is not None), None)
+        val_type = next((f.name for f in fields(self) if getattr(self, f.name) is not None), None)  # type: ignore[arg-type]
         assert val_type is not None
         return val_type
 
@@ -71,14 +71,20 @@ class Device:
 
 
 @dataclass
+class SymExpr:
+    expr_str: str
+    hint: Optional[int]
+
+
+@dataclass
 class SymInt(_Union):
-    as_symbol: str
+    as_expr: SymExpr
     as_int: int
 
 
 @dataclass
 class SymBool(_Union):
-    as_symbol: str
+    as_expr: str
     as_bool: bool
 
 
@@ -110,6 +116,18 @@ class TensorArgument:
     name: str
 
 
+@dataclass
+class OptionalTensorArgument(_Union):
+    as_tensor: str
+    as_none: Tuple[()]
+
+
+@dataclass
+class GraphArgument:
+    name: str
+    graph: 'Graph'
+
+
 # This is actually a union type
 @dataclass
 class Argument(_Union):
@@ -131,6 +149,8 @@ class Argument(_Union):
     as_bools: List[bool]
     as_sym_bool: SymBoolArgument
     as_sym_bools: List[SymBoolArgument]
+    as_graph: GraphArgument
+    as_optional_tensors: List[OptionalTensorArgument]
 
 
 @dataclass
@@ -186,14 +206,21 @@ class CallSpec:
 
 
 @dataclass
+class RangeConstraint:
+    min_val: int
+    max_val: int
+
+
+@dataclass
 class GraphModule:
     graph: Graph
     signature: GraphSignature
     call_spec: CallSpec
 
 
-# TODO(angelayi) to add symbol to hint
 @dataclass
 class ExportedProgram:
     graph_module: GraphModule
     opset_version: Dict[str, int]
+    range_constraints: Dict[str, RangeConstraint]
+    equality_constraints: List[Tuple[Tuple[str, int], Tuple[str, int]]]

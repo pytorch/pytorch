@@ -23,7 +23,6 @@ from torch._export.verifier import (
 def capture(f, args):
     torchdynamo.config.capture_scalar_outputs = True
     torchdynamo.config.guard_nn_modules = True
-    torchdynamo.config.dynamic_shapes = True
     torchdynamo.config.allow_rnn = True
     torchdynamo.config.verbose = True
     torchdynamo.reset()
@@ -179,8 +178,7 @@ class VerifierTest(TestCase):
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer(
-                    "a",
+                self.a = torch.nn.Buffer(
                     torch.randn(1, 3, 100, 100).to(memory_format=torch.channels_last),
                 )
 

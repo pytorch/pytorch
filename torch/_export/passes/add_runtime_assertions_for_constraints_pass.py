@@ -13,7 +13,6 @@ import torch
 import torch.fx
 from torch.fx.experimental.symbolic_shapes import SymInt
 from torch._export.pass_base import ExportPassBase, ProxyValue, PassResult
-from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._subclasses.fake_tensor import FakeTensor
 
 
@@ -27,8 +26,8 @@ class InputDim(NamedTuple):
 
 @dataclass
 class RangeConstraint:
-    min_val: sympy.Integer
-    max_val: sympy.Integer
+    min_val: sympy.Expr
+    max_val: sympy.Expr
 
 
 def _convert_to_int(val):
@@ -65,6 +64,13 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         graph_module = copy.deepcopy(graph_module)
         graph = graph_module.graph
 
+        insert_loc = None
+        for node in graph.nodes:
+            if node.op != "placeholder":
+                continue
+            insert_loc = node
+        assert insert_loc is not None
+
         # Add runtime asserts for input shape constraints. We do this after all
         # placeholder nodes so that we can handle both (unary) predicates and
         # (binary) relations.
@@ -80,15 +86,14 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 continue
 
             fake_tensor_shape = node.meta["val"].shape
-            prev_node = node
             for dim, shape in enumerate(fake_tensor_shape):
-                with graph.inserting_after(prev_node):
+                with graph.inserting_after(insert_loc):
                     dim_node = graph.call_function(
                         torch.ops.aten.sym_size.int, (node, dim)
                     )
                 input_dim = InputDim(node.name, dim)
                 inputdim_to_node[input_dim] = dim_node
-                prev_node = dim_node
+                insert_loc = dim_node
 
                 if isinstance(shape, SymInt):
                     # If the shape is dynamic, add range assertions
@@ -181,11 +186,6 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 (dim_node, other_dim_node),
                 assert_msg
             )
-
-    def _create_dummy_node_metadata(self):
-        return NodeMetadata({
-            "stack_trace": traceback.format_exc(-1)
-        })
 
     def _insert_assert_async_inplace(self, graph, operator, args, assert_msg):
         """

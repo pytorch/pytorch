@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
-#include <torch/csrc/profiler/standalone/execution_graph_observer.h>
+#include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -283,20 +283,20 @@ void initPythonBindings(PyObject* module) {
         return r.endTimeNS() - r.start_time_ns_;
       });
 
-  // PyTorch profiler execution graph internal interface.
+  // PyTorch profiler execution trace internal interface.
   m.def(
-      "_add_execution_graph_observer",
-      &torch::profiler::impl::addExecutionGraphObserver,
+      "_add_execution_trace_observer",
+      &torch::profiler::impl::addExecutionTraceObserver,
       py::arg("output_file_name"));
   m.def(
-      "_remove_execution_graph_observer",
-      &torch::profiler::impl::removeExecutionGraphObserver);
+      "_remove_execution_trace_observer",
+      &torch::profiler::impl::removeExecutionTraceObserver);
   m.def(
-      "_enable_execution_graph_observer",
-      &torch::profiler::impl::enableExecutionGraphObserver);
+      "_enable_execution_trace_observer",
+      &torch::profiler::impl::enableExecutionTraceObserver);
   m.def(
-      "_disable_execution_graph_observer",
-      &torch::profiler::impl::disableExecutionGraphObserver);
+      "_disable_execution_trace_observer",
+      &torch::profiler::impl::disableExecutionTraceObserver);
   m.def(
       "_set_record_concrete_inputs_enabled_val",
       &torch::profiler::impl::set_record_concrete_inputs_enabled_val);

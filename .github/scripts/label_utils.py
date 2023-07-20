@@ -4,9 +4,8 @@ import json
 
 from functools import lru_cache
 from typing import Any, List, Tuple, TYPE_CHECKING, Union
-from urllib.request import Request, urlopen
 
-from github_utils import gh_fetch_url, GitHubComment
+from github_utils import gh_fetch_url_and_headers, GitHubComment
 
 # TODO: this is a temp workaround to avoid circular dependencies,
 #       and should be removed once GitHubPR is refactored out of trymerge script.
@@ -29,15 +28,11 @@ https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for
 """
 
 
-# Modified from https://github.com/pytorch/pytorch/blob/b00206d4737d1f1e7a442c9f8a1cadccd272a386/torch/hub.py#L129
-def _read_url(url: Request) -> Tuple[Any, Any]:
-    with urlopen(url) as r:
-        return r.headers, r.read().decode(r.headers.get_content_charset("utf-8"))
-
-
 def request_for_labels(url: str) -> Tuple[Any, Any]:
     headers = {"Accept": "application/vnd.github.v3+json"}
-    return _read_url(Request(url, headers=headers))
+    return gh_fetch_url_and_headers(
+        url, headers=headers, reader=lambda x: x.read().decode("utf-8")
+    )
 
 
 def update_labels(labels: List[str], info: str) -> None:
@@ -56,7 +51,7 @@ def get_last_page_num_from_header(header: Any) -> int:
     )
 
 
-@lru_cache()
+@lru_cache
 def gh_get_labels(org: str, repo: str) -> List[str]:
     prefix = f"https://api.github.com/repos/{org}/{repo}/labels?per_page=100"
     header, info = request_for_labels(prefix + "&page=1")
@@ -77,14 +72,14 @@ def gh_get_labels(org: str, repo: str) -> List[str]:
 def gh_add_labels(
     org: str, repo: str, pr_num: int, labels: Union[str, List[str]]
 ) -> None:
-    gh_fetch_url(
+    gh_fetch_url_and_headers(
         url=f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels",
         data={"labels": labels},
     )
 
 
 def gh_remove_label(org: str, repo: str, pr_num: int, label: str) -> None:
-    gh_fetch_url(
+    gh_fetch_url_and_headers(
         url=f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/labels/{label}",
         method="DELETE",
     )

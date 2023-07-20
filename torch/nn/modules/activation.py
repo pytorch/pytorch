@@ -657,7 +657,7 @@ class GELU(Module):
 
     When the approximate argument is 'tanh', Gelu is estimated with:
 
-    .. math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+    .. math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt{2 / \pi} * (x + 0.044715 * x^3)))
 
     Args:
         approximate (str, optional): the gelu approximation algorithm to use:
@@ -887,11 +887,11 @@ class Softshrink(Module):
         return str(self.lambd)
 
 
-def _arg_cuda_or_cpu(x: Optional[torch.Tensor]) -> bool:
+def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
     if x is None:
         return True
     else:
-        return x.is_cuda or 'cpu' in str(x.device)
+        return x.device.type in ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
 
     return False
 
@@ -1174,8 +1174,9 @@ class MultiheadAttention(Module):
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
-            elif not all(_arg_cuda_or_cpu(x) for x in tensor_args):
-                why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
+            elif not all(_check_arg_device(x) for x in tensor_args):
+                why_not_fast_path = ("some Tensor argument's device is neither one of "
+                                     f"cpu, cuda or {torch.utils.backend_registration._privateuse1_backend_name}")
             elif torch.is_grad_enabled() and any(_arg_requires_grad(x) for x in tensor_args):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
@@ -1525,7 +1526,10 @@ class Softmax2d(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        assert input.dim() == 4 or input.dim() == 3, 'Softmax2d requires a 3D or 4D tensor as input'
+        if input.dim() not in (3, 4):
+            raise ValueError(
+                "Softmax2d: expected input to be 3D or 4D, got {}D instead".format(input.dim())
+            )
         return F.softmax(input, -3, _stacklevel=5)
 
 

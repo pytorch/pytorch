@@ -1,8 +1,18 @@
 import torch
 from torch import Tensor, SymInt
-from torch.testing._internal.common_utils import run_tests, TestCase
+# from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._pytree import tree_map
 from typing import List, Union
+
+
+def _calc_contiguous_strides(sizes):
+    strides = []
+    curr = 1
+    for i in range(len(sizes) - 1, -1, -1):
+        strides.append(curr)
+        curr *= sizes[i]
+    return strides[::-1]
+
 
 # Python tensor subclass version of NT.
 # Properties:
@@ -12,9 +22,19 @@ from typing import List, Union
 #  * Supports size() / stride() -> [Union[int, List[int]]] for non-dynamic shapes
 class NestedTensor(Tensor):
     @staticmethod
-    def __new__(cls, buffer, *args, **kwargs):
-        # Put in obvious garbage; we don't ever want to actually hit the C++ side of this thing
-        return Tensor._make_subclass(cls, torch.empty(0, device=buffer.device))
+    def __new__(cls, buffer, sizes, jagged_sizes, jagged_strides, jagged_storage_offset,
+                acting_as_nt=True):
+        shape = jagged_sizes
+        kwargs = {}
+        kwargs["device"] = buffer.device
+        kwargs["dispatch_device"] = True
+        kwargs["strides"] = jagged_strides
+        kwargs["storage_offset"] = jagged_storage_offset
+        kwargs["requires_grad"] = buffer.requires_grad
+        kwargs["dtype"] = buffer.dtype
+        return torch.Tensor._make_wrapper_subclass(
+            cls, shape, **kwargs
+        )
 
     # sizes should be a list of SymInts for the dynamic shapes case
     def __init__(
@@ -98,14 +118,6 @@ class NestedTensor(Tensor):
         return size_to_index[dim]
 
     def stride(self, dim=None):
-        def _calc_contiguous_strides(sizes):
-            strides = []
-            curr = 1
-            for i in range(len(sizes) - 1, -1, -1):
-                strides.append(curr)
-                curr *= sizes[i]
-            return strides[::-1]
-
         strides = _calc_contiguous_strides(self.size()) if self.acting_as_nt else self.jagged_strides
         if dim is None:
             return strides
@@ -169,14 +181,26 @@ class NestedTensor(Tensor):
             return self.buffer.fake_mode
         if key == "constant":
             return self.buffer.constant
+        if key == "device" or key == "fake_device":
+            return self.buffer.device
 
         return super().__getattribute__(key)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        print('DISPATCH:', func, args)
-
         # Handle NT <-> JT conversion
+        # print('===== DISPATCH:', func)
+
+        if func is torch.ops.aten.sym_size.default:
+            nt = args[0]
+            assert isinstance(nt, NestedTensor)
+            return nt.jagged_sizes
+
+        if func.__name__ == "device.default":
+            nt = args[0]
+            assert isinstance(nt, NestedTensor)
+            return nt.buffer.device
+
         if func is torch.ops.aten._nested_view_as_jagged.default:
             nt = args[0]
             assert isinstance(nt, NestedTensor)
@@ -201,13 +225,17 @@ class NestedTensor(Tensor):
 
         unsupported = {
             torch.ops.aten.native_layer_norm.default,
-            torch.ops.aten.silu.default,
+            # torch.ops.aten.silu.default,
             torch.ops.aten.view.default,
-            torch.ops.aten.split_with_sizes.default,
-            torch.ops.aten.split_with_sizes_copy.default,
+            # torch.ops.aten.split_with_sizes.default,
+            # torch.ops.aten.split_with_sizes_copy.default,
             torch.ops.aten.transpose.int,
         }
-        if func in unsupported:
+        unsupported_names = {
+            # Why is it not easy to reference the function directly?
+            # "philox_seed_like.default"
+        }
+        if func in unsupported or func.__name__ in unsupported_names:
             from torch._dynamo.exc import unimplemented
 
             unimplemented(f"Purposefully not supporting {func} for now")
@@ -221,18 +249,37 @@ class NestedTensor(Tensor):
             )
 
         def wrap(t):
-            return NestedTensor(
-                # Collapse buffer to 1D
-                buffer=t.view(args[0].jagged_sizes[0] * args[0].jagged_sizes[1]),
-                sizes=args[0].sizes,
-                jagged_sizes=args[0].jagged_sizes,
-                jagged_strides=args[0].jagged_strides,
-                jagged_storage_offset=args[0].jagged_storage_offset,
-            )
+            # Assume jagged format output if it's a 2D tensor
+            # Horrible hack for size(0) to avoid wrapping e.g. shape (1, 128)
+            # Horrible hack for size(1) to avoid wrapping e.g. shape (128, 1)
+            if isinstance(t, torch.Tensor) and t.dim() == 2 and t.size(0) > 1 and t.size(1) > 1:
+                nt = args[0]
 
-        # TODO: Fix this; the size is certainly wrong and we can't always naively operate
-        # on the buffer and rewrap. Need to graph break if we're not calling a pointwise func.
-        out = wrap(func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+                stride_preserving_ops = {
+                    torch.ops.aten.detach.default,
+                    # NT's clone() preserves contiguity, unlike standard Tensor
+                    torch.ops.aten.clone.default,
+                }
+
+                # NB: Don't propagate stride / storage offset info for out-of-place ops
+                jagged_strides = nt.jagged_strides
+                jagged_storage_offset = nt.jagged_storage_offset
+                if func not in stride_preserving_ops:
+                    jagged_strides = _calc_contiguous_strides(nt.jagged_sizes)
+                    jagged_storage_offset = 0
+
+                return NestedTensor(
+                    buffer=t.view(nt.jagged_sizes[0] * nt.jagged_sizes[1]),
+                    sizes=nt.sizes,
+                    jagged_sizes=nt.jagged_sizes,
+                    jagged_strides=jagged_strides,
+                    jagged_storage_offset=jagged_storage_offset,
+                )
+            return t
+
+        # TODO: Need to graph break if we're not calling a pointwise func.
+        # out = wrap(func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+        out = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
 
         return out
 

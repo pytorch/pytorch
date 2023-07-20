@@ -16,7 +16,6 @@ import torch._logging
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
-    check,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -32,6 +31,7 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode_stack,
+    is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
 
@@ -154,6 +154,19 @@ def _is_tensor_constructor(func: OpOverload):
     return (
         len(schema.returns) == 1 and schema.returns[0].type is torch._C.TensorType.get()
     )
+
+
+def is_fake(x):
+    if isinstance(x, FakeTensor):
+        return True
+    if is_traceable_wrapper_subclass(x):
+        flattened_tensors, _ = type(x).__tensor_flatten__(x)
+        # need to recurse because we could have nested subclasses
+        all_fake = all(is_fake(x) for x in flattened_tensors)
+        any_fake = any(is_fake(x) for x in flattened_tensors)
+        assert all_fake == any_fake, "got mixed fake and real tensors!"
+        return all_fake
+    return False
 
 
 @functools.lru_cache(None)
@@ -858,7 +871,9 @@ def get_fast_op_impls():
 def init_cuda_context():
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
-        torch.empty(1, device="cuda")
+        torch.empty(1, device="cuda") if torch.version.hip is None else torch.zeros(
+            1, device="cuda"
+        )
 
 
 @contextlib.contextmanager
@@ -1146,7 +1161,7 @@ class FakeTensor(torch.Tensor, metaclass=FakeTensorMeta):
 # different operators. While this will keep all freshly allocated
 # tensors alive during `FakeTensorMode`, there will no be no
 # new allocations of Tensors which have non-meta storage so
-# memory should not significantly incraese.
+# memory should not significantly increase.
 
 
 class FakeTensorMode(TorchDispatchMode):
@@ -1269,7 +1284,7 @@ class FakeTensorMode(TorchDispatchMode):
                 FakeTensor, lambda t: t.constant, (args, kwargs)
             )
             out = func(*const_args, **const_kwargs)
-            if self.may_turn_const(out):
+            if isinstance(out, torch.Tensor) and self.may_turn_const(out):
                 # NB: not in_kernel_invocation_manager because we're doing real
                 # compute here
                 with no_dispatch():
@@ -1434,6 +1449,7 @@ class FakeTensorMode(TorchDispatchMode):
                 "vision",
                 "torchtext",
                 "torchaudio",
+                "fbgemm",
             }
 
         # run kernel registered to meta for func, which include
@@ -1465,6 +1481,7 @@ class FakeTensorMode(TorchDispatchMode):
                 not isinstance(x, FakeTensor)
                 and type(x) is not torch.Tensor
                 and type(x) is not torch.nn.Parameter
+                and type(x) is not torch.nn.Buffer
             )
 
         return [
@@ -1526,14 +1543,14 @@ class FakeTensorMode(TorchDispatchMode):
             nonlocal common_device
             nonlocal has_scalar_only_inputs
 
-            if common_device is None:
+            if isinstance(e, torch.Tensor) and common_device is None:
                 (
                     common_device,
                     has_scalar_only_inputs,
                 ) = FakeTensor._find_common_device(func, args, kwargs)
 
             if isinstance(e, FakeTensor):
-                check(
+                torch._check(
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
