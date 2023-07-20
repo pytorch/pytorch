@@ -33,7 +33,7 @@ namespace at::native {
 namespace {
 
 constexpr int kCUDANumThreads = 256;
-constexpr unsigned int kWarpSize = 32;
+constexpr unsigned int kWarpSize = C10_WARP_SIZE;
 constexpr int vec_size = 4; //we could make it dependent on dtype, but that would lead to different results between float and low-p types
 
 // aligned vector generates vectorized load/store on CUDA (copy-pasted from MemoryAccess.cuh)
@@ -504,7 +504,7 @@ __global__ void GammaBetaBackwardCUDAKernel_32x32(
 
   if (j < N) {
     constexpr int unroll_factor = 8;
-    int laneId = threadIdx.x & 0x1f;
+    int laneId = threadIdx.x & (C10_WARP_SIZE - 1);
 
     T_ACC mean_reg, mean_reg_tmp;
     T_ACC rstd_reg, rstd_reg_tmp;
@@ -550,10 +550,10 @@ __global__ void GammaBetaBackwardCUDAKernel_32x32(
       }
     }
 
-    // This kernel uses a block of (32 x 32) and gets called when M; N
-    // divide by 32. We can use warp shuffles for the final reduction
-    // step. This removes 4 shmem loads and stores with their
-    // corresponding __syncthreads()
+    // This kernel uses a block of (C10_WARP_SIZE x C10_WARP_SIZE) and
+    // gets called when M; N divide by 32. We can use warp shuffles
+    // for the final reduction step. This removes 4 shmem loads and
+    // stores with their corresponding __syncthreads()
 
     // This greatly reduces bank conflicts at the expense of a little
     // extra shared memory. It does not impact occupancy
@@ -568,7 +568,7 @@ __global__ void GammaBetaBackwardCUDAKernel_32x32(
     // Load transposed so that a warp holds an entire column
     T_ACC reg_dg = s_dg[threadIdx.x * padded_bx + threadIdx.y];
     T_ACC reg_db = s_db[threadIdx.x * padded_bx + threadIdx.y];
-    for (int delta = 16; delta >= 1; delta /= 2) {
+    for (unsigned delta = C10_WARP_SIZE >> 1; delta >= 1; delta >>= 1) {
       reg_dg += WARP_SHFL_XOR(reg_dg, delta, kWarpSize);
       reg_db += WARP_SHFL_XOR(reg_db, delta, kWarpSize);
     }
@@ -1192,8 +1192,10 @@ void LayerNormBackwardKernelImplInternal(
         dim3 threads{kWarpSize, kWarpSize};
         int blocks = (N + threads.x - 1) / threads.x;
 
-        // If M and N divide by 32, we can use warp shuffles for the final reduction. That requires
-        // transposing values in shared memory, so we apply a padding to reduce bank conflicts.
+        // If M and N divide by warp_size, we can use warp shuffles for the final reduction.
+        // That requires transposing values in shared memory, so we apply a padding to
+        // reduce bank conflicts.
+
         size_t shmem_sz = 2 * sizeof(T_ACC) * (threads.x + 1) * threads.y;
         GammaBetaBackwardCUDAKernel_32x32<T, T_ACC>
             <<<blocks, threads, shmem_sz, cuda_stream>>>(

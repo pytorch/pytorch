@@ -19,6 +19,7 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
+import sympy
 import torch
 
 import torch._dynamo.test_case
@@ -30,7 +31,6 @@ from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
-    expectedFailureAutomaticDynamic,
     expectedFailureDynamic,
     requires_numpy_pytorch_interop,
     same,
@@ -44,7 +44,12 @@ from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    FloorDiv,
+    Mod,
+)
+from torch.fx.experimental.validator import SympyToZ3, TranslationValidator
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -1277,21 +1282,60 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
-    def test_(self):
-        def fn(x: torch.Tensor, y: int):
-            z = x.detach()
-            w = y + 1
-            torch._dynamo.graph_break()
-            return z + w
+    @requires_numpy_pytorch_interop
+    def test_mandelbrot_numpy(self):
+        def mandelbrot_numpy(max_iter):
+            # Define the boundaries of the complex plane
+            xn = 450
+            yn = 375
+            xmin = -2.25
+            xmax = 0.75
+            ymin = -1.25
+            ymax = 1.25
+
+            # Create the grid of complex numbers
+            x_values = np.linspace(xmin, xmax, xn, dtype=np.float64)
+            y_values = np.linspace(ymin, ymax, yn, dtype=np.float64)
+            rx, iy = np.meshgrid(x_values, y_values, indexing="xy")
+
+            x = rx.copy()
+            y = iy.copy()
+            mask = np.zeros_like(x)
+            for i in range(max_iter):
+                x_prev = x
+                y_prev = y
+                x = x_prev**2 - y_prev**2 + rx
+                y = 2 * x_prev * y_prev + iy
+                inside = np.sqrt(x**2 + y**2) <= 2
+                mask += inside
+            return mask
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(mandelbrot_numpy)
+        for _ in range(10):
+            x = torch.randint(100, (1,))
+            ref = mandelbrot_numpy(x.item())
+            res = opt_fn(x.item())
+            self.assertTrue(same(ref, res))
+
+    def test_graph_break_correctly_when_passing_numpy_ndarray_to_torch_function(self):
+        # from transformers/models/big_bird/modeling_big_bird.py
+        def fn(x: int, y: torch.Tensor):
+            ndarray_list = [np.ones([2, x])]
+            ndarray = np.stack(ndarray_list, axis=0)
+            tensor = torch.tensor(ndarray, dtype=torch.long)
+            tensor.unsqueeze_(0)
+            return tensor + y
 
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
-        for _ in range(10):
-            x = torch.randn([1, 3])
-            y = 5
+        for x in range(1, 10):
+            y = torch.randn([1, 2, x])
             ref = fn(x, y)
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
+        # Graph break: call_function args: NumpyVariable() ConstantVariable(dtype) from user code at ...
+        #     tensor = torch.tensor(ndarray, dtype=torch.long)
         self.assertEqual(cnts.frame_count, 2)
 
     def test_inplace_view_on_graph_input(self):
@@ -1697,6 +1741,104 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(out[0], out[1]))
 
+    def test_closure_out_of_scope_cell(self):
+        cell1 = torch.rand(1).item()
+        cell2 = torch.rand(3, 3)
+
+        def indirect():
+            return direct()
+
+        def direct():
+            def inner():
+                return cell1 + 1, cell2 + 3
+
+            return inner()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(indirect)
+        result1, result2 = opt_fn()
+        self.assertAlmostEqual(cell1 + 1, result1)
+        self.assertTrue(torch.allclose(cell2 + 3, result2))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_closure_out_of_scope_cell_with_mutation(self):
+        cell1 = torch.rand(1).item()
+        orig1 = cell1
+        cell2 = torch.rand(3, 3)
+        orig2 = cell2.clone()
+
+        def indirect():
+            return direct()
+
+        def direct():
+            def inner():
+                nonlocal cell1, cell2
+                x = cell2 + 1
+                cell1 += 1
+                cell2 += 10
+                x = x + cell2
+                return cell1, cell2, x
+
+            return inner()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(indirect)
+        for i in range(1, 4):
+            result1, result2, _ = opt_fn()
+            self.assertAlmostEqual(orig1 + 1 * i, result1)
+            self.assertTrue(torch.allclose(orig2 + 10 * i, result2))
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(cnts.op_count, 3)
+            cnts.clear()
+
+    def test_closure_out_of_scope_cell_with_cond(self):
+        # Test closure with out-of-scope cell variable, used in a cond
+        # where the two branches read different closure variables
+        from functorch.experimental.control_flow import cond
+
+        def g(x):
+            return x
+
+        class ModuleCondDeep(torch.nn.Module):
+            def forward(self, pred, x):
+                return self._indirection(pred, x)
+
+            def _indirection(self, pred, x):
+                return self.indirection(pred, x)
+
+            def indirection(self, pred, x):
+                def true_fn(y):
+                    return y + 2
+
+                def false_fn(y):
+                    return y - 2
+
+                def shallow(x):
+                    return x * 2
+
+                def deep(x):
+                    # y = g(x)
+                    y = x
+                    return cond(
+                        x[0][0] > 0,
+                        true_fn,
+                        false_fn,
+                        [y],
+                    )
+
+                return cond(pred, shallow, deep, [x])
+
+        mod = ModuleCondDeep()
+        opt_mod = torch._dynamo.optimize("eager")(mod)
+        inp = torch.randn(3, 3)
+        exp1 = mod(torch.tensor(False), inp)
+        actual1 = opt_mod(torch.tensor(False), inp)
+        exp2 = mod(torch.tensor(True), inp)
+        actual2 = opt_mod(torch.tensor(True), inp)
+        self.assertTrue(torch.allclose(exp1, actual1))
+        self.assertTrue(torch.allclose(exp2, actual2))
+
     def test_top_package_import(self):
         def fn(x):
             import torch.fx
@@ -1970,10 +2112,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(res, ref_run1))
 
-    # NotImplementedError: SymNodeVariable() is not a constant
-    # https://github.com/pytorch/pytorch/issues/103618
-    @expectedFailureDynamic
-    @expectedFailureAutomaticDynamic
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -4418,6 +4556,19 @@ def fn():
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_cast(self):
+        from typing import cast
+
+        def fn(x):
+            return cast(torch.Tensor, torch.add(x, 1.0))
+
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        ref = fn(torch.ones(2, 2))
+        res = opt_fn(torch.ones(2, 2))
+
+        self.assertTrue(same(ref, res))
+
     def test_T_tensor_attribute(self):
         def fn(x, y):
             a = x.T
@@ -5240,7 +5391,8 @@ def fn():
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
-    @expectedFailureAutomaticDynamic
+    @expectedFailureDynamic
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):
@@ -5271,18 +5423,16 @@ def fn():
             else:
                 base_checker().check("No recompilation detected.").run(prof.report())
 
-            # Ensure correct guard fail message is selected to show to user
-            if torch._dynamo.config.assume_static_by_default:
-                new_shape_input = torch.rand((4, 3, 4))
-                _ = compiled(new_shape_input)
+            new_shape_input = torch.rand((4, 3, 4))
+            _ = compiled(new_shape_input)
 
-                base_checker().check("Recompile Reasons").check("'forward'").check(
-                    "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
-                ).check(
-                    "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
-                ).run(
-                    prof.report()
-                )
+            base_checker().check("Recompile Reasons").check("'forward'").check(
+                "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
+            ).check(
+                "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
+            ).run(
+                prof.report()
+            )
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call
@@ -5775,6 +5925,297 @@ def ___make_guard_fn():
         self.assertEqual(comp_out, real_out)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 18)
+
+    def test_tracing_tree_map_only(self):
+        import torch.utils._pytree as pytree
+
+        def fn(xs):
+            def mapper(x):
+                return x.clone()
+
+            y = pytree.tree_map_only(torch.Tensor, mapper, xs)
+            return y
+
+        xs = [torch.tensor(i) for i in range(3)] + ["hi"]
+        xsa = (xs, xs)
+        xsb = {"aa": xsa, "ab": xs}
+
+        counter = CompileCounter()
+        comp_out = torch._dynamo.optimize(counter, nopython=True)(fn)(xsb)
+        real_out = fn(xsb)
+
+        self.assertEqual(comp_out, real_out)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 9)
+
+    def _prepare_for_translation_validator(self):
+        validator = TranslationValidator()
+
+        # SymPy symbols.
+        s0, s1, s2 = sympy.symbols("s0 s1 s2", integer=True)
+
+        # Z3 symbols.
+        [validator.add_var(s, int) for s in (s0, s1, s2)]
+        z0, z1, z2 = [validator.z3var(s) for s in (s0, s1, s2)]
+
+        return (s0, s1, s2), (z0, z1, z2), validator
+
+    @torch._dynamo.config.patch(translation_validation=True)
+    def test_sympy_to_z3_translation(self):
+        import z3
+
+        (
+            (s0, s1, s2),
+            (z0, z1, z2),
+            validator,
+        ) = self._prepare_for_translation_validator()
+
+        test_cases = [
+            # Integer constants.
+            (sympy.S.Zero, z3.IntVal(0)),
+            (sympy.S.One, z3.IntVal(1)),
+            (sympy.S.NegativeOne, z3.IntVal(-1)),
+            (sympy.Integer(2), z3.IntVal(2)),
+            (
+                s0,
+                z0,
+            ),
+            # Arithmetic operations.
+            *[
+                (op(s0, s1), op(z0, z1))
+                for op in (
+                    operator.add,
+                    operator.mul,
+                    operator.pow,
+                )
+            ],
+            # Logical operations.
+            *[
+                (sympy_op(s0, s1), z3_op(z0, z1))
+                for sympy_op, z3_op in (
+                    (sympy.Eq, operator.eq),
+                    (sympy.Ne, operator.ne),
+                    (sympy.Lt, operator.lt),
+                    (sympy.Le, operator.le),
+                    (sympy.Gt, operator.gt),
+                    (sympy.Ge, operator.ge),
+                )
+            ],
+            # Other operations.
+            (
+                s0 - s1,
+                z0 + z3.IntVal(-1) * z1,
+            ),
+            (
+                s0 / s1,
+                z3.ToReal(z0) * (z1**-1),
+            ),
+            (FloorDiv(s0, s1), z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))),
+            (Mod(s0, s1), z0 - z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1)) * z1),
+            (
+                Mod(s2, (s0 / s1)),
+                z2
+                - z3.ToReal(z3.ToInt(z3.ToReal(z2) / (z3.ToReal(z0) * z1**-1)))
+                * (z3.ToReal(z0) * z1**-1),
+            ),
+            (
+                Mod(s2, s0**3),
+                z2 - z3.ToReal(z3.ToInt(z3.ToReal(z2) / z0**3)) * z0**3,
+            ),
+        ]
+
+        toZ3 = SympyToZ3(validator)
+        for sympy_expr, z3_expr in test_cases:
+            result = toZ3.run(sympy_expr)
+            self.assertTrue(
+                z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}"
+            )
+
+    @torch._dynamo.config.patch(translation_validation=True)
+    def test_translation_validator_sat(self):
+        (
+            (s0, s1, s2),
+            (z0, z1, z2),
+            validator,
+        ) = self._prepare_for_translation_validator()
+
+        validator.add_source_expr(z0 > 5)
+        validator.add_source_expr(z1 / 2 > z0)
+
+        # Solutions for target is a subset of the solutions for the source.
+        validator.add_target_expr(s0 > 20)
+        validator.add_target_expr(s1 > s0**2)
+
+        r = validator.validate()
+        self.assertEqual(r.success, True, msg=f"failed with model: {r.model}")
+        self.assertIsNone(r.model)
+        self.assertIsNone(r.failed_source_expr)
+
+    @torch._dynamo.config.patch(translation_validation=True)
+    def test_translation_validator_unsat(self):
+        (
+            (s0, s1, s2),
+            (z0, z1, z2),
+            validator,
+        ) = self._prepare_for_translation_validator()
+
+        validator.add_source_expr(z0 > 5)
+        validator.add_source_expr(z1 / 2 > z0)
+
+        # Solutions for target is NOT a subset of the solutions for the source.
+        validator.add_target_expr(s0 > 20)
+        # This expression is less restrictive than its counterpart.
+        validator.add_target_expr(s1 > s0 + 2)
+
+        r = validator.validate()
+        self.assertEqual(r.success, False, msg=f"failed with model: {r.model}")
+        self.assertIsNotNone(r.model)
+        self.assertIsNotNone(r.failed_source_expr)
+
+    def test_simple_set_usage(self):
+        def foo(x, y):
+            setty = {x, y}
+            return setty.pop() * setty.pop()
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter, nopython=True)(foo)
+        x = torch.randn(10, 10)
+        y = torch.randn(10, 10)
+        foo(x, y)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_add_to_set(self):
+        def foo(x, y):
+            setty = set()
+            setty.add(x[0])
+            setty.add(x[1])
+            setty.add(x[2])
+            setty.add(y)
+            return y * len(setty)
+
+        x = torch.randn(10, 10)
+        y = torch.randn(2, 2)
+        eager_result = foo([x, x, x, x, y], y)
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter, nopython=True)(foo)
+        result = foo([x, x, x, x, y], y)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(result, eager_result)
+
+    def test_iter_set(self):
+        def foo(x, y):
+            setty = set()
+            for t in x:
+                setty.add(t)
+            return y * len(setty)
+
+        x = torch.randn(10, 10)
+        y = torch.randn(2, 2)
+        eager_result = foo([x, x, x, x, y], y)
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter, nopython=True)(foo)
+        result = foo([x, x, x, x, y], y)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(result, eager_result)
+
+    def test_input_set_graph_break(self):
+        def foo(x):
+            return x.pop() * x.pop()
+
+        x = torch.randn(10, 10)
+        y = torch.randn(10, 10)
+
+        counter = CompileCounter()
+
+        inp = {x, x, x, x, y, y}
+        foo = torch._dynamo.optimize(counter, nopython=True)(foo)
+
+        # There's a lot of stuff about sets that cannot work without a good deal of exertion on our part.
+        # Specifically, getting a set as input won't ever work with how GetItemSource works (Can't arbitrary access set contents)
+        # and so the guard story for the objects passed into input just isn't there atm.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "^call_method UserDefinedObjectVariable\\(set\\).*",
+        ):
+            foo(inp)
+
+        foo = torch._dynamo.optimize(counter, nopython=False)(foo)
+        foo(inp)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_reconstruct_set_across_graph_break(self):
+        def foo(x, y):
+            setty = set()
+            for t in x:
+                setty.add(t)
+            print("Break!")
+            return y * len(setty)
+
+        x = torch.randn(10, 10)
+        y = torch.randn(2, 2)
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter)(foo)
+        result = foo([x, x, x, x, y], y)
+
+    def test_set_aliasing_recompiles(self):
+        g1 = torch.randn(10)
+        g2 = torch.randn(10)
+        g3 = torch.randn(10)
+        g4 = torch.randn(10)
+
+        def foo(a, b, c):
+            myset = {g1, a, b, c}
+            return a + len(myset)
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter)(foo)
+        # first call with no aliasing
+        foo(g2, g3, g4)
+        self.assertEqual(counter.frame_count, 1)
+
+        # no aliasing again
+        foo(g3, g2, g4)
+        # assert no recompile
+        self.assertEqual(counter.frame_count, 1)
+
+        # aliasing changes, we should recompile
+        foo(g2, g2, g2)
+        self.assertEqual(counter.frame_count, 2)
+
+        # same aliasing, different tensor
+        foo(g3, g3, g3)
+        self.assertEqual(counter.frame_count, 2)
+
+        # aliasing between global and arg, should recompile again
+        foo(g1, g1, g1)
+        self.assertEqual(counter.frame_count, 3)
+
+        # Reset
+        torch._dynamo.reset()
+
+        # aliasing between global and arg, first call
+        foo(g1, g1, g1)
+        self.assertEqual(counter.frame_count, 4)
+
+        # same aliasing, different tensor, all local, recompile
+        foo(g3, g3, g3)
+        self.assertEqual(counter.frame_count, 5)
+
+        # aliasing same tensor, we shouldn't recompile
+        foo(g2, g2, g2)
+        self.assertEqual(counter.frame_count, 5)
+
+        # No aliasing
+        foo(g2, g3, g4)
+        self.assertEqual(counter.frame_count, 6)
+
+        # No aliasing again
+        foo(g3, g2, g4)
+        # assert no recompile
+        self.assertEqual(counter.frame_count, 6)
 
 
 class TestTracer(JitTestCase):

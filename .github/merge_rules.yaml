@@ -17,6 +17,7 @@
   - torch/csrc/jit/serialization/onnx.*
   - torch/csrc/onnx/**
   - torch/onnx/**
+  - torch/testing/_internal/common_methods_invocations.py
   - third_party/onnx
   - caffe2/python/onnx/**
   - benchmarks/dynamo/_onnx/**
