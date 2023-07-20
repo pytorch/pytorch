@@ -85,9 +85,9 @@ pushd docs
 
 # Build the docs
 if [ "$is_main_doc" = true ]; then
-  if ! build_docs html; then
-    exit $?
-  fi
+  build_docs html
+  [ $? -eq 0 ] || exit $?
+
   make coverage
   # Now we have the coverage report, we need to make sure it is empty.
   # Count the number of lines in the file and turn that number into a variable
@@ -110,9 +110,8 @@ if [ "$is_main_doc" = true ]; then
   fi
 else
   # skip coverage, format for stable or tags
-  if ! build_docs html-stable; then
-    exit $?
-  fi
+  build_docs html-stable
+  [ $? -eq 0 ] || exit $?
 fi
 
 # Move them into the docs repo
