@@ -302,7 +302,7 @@ def _register_quantization_binary_fusion():
             algorithm_attr=None,
         ):
             self.binary_op_name = binary_op_name
-            self.alpha = alpha if scalars_attr else 1.0
+            self.alpha = alpha if alpha else 1.0
             self.unary_op_name = unary_op_name
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
