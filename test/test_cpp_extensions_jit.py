@@ -11,7 +11,6 @@ import subprocess
 import glob
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_cuda import TEST_CUDNN
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
@@ -21,7 +20,13 @@ import torch.multiprocessing as mp
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
+TEST_CUDNN = False
 TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
+if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
+    CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
+    TEST_CUDNN = (
+        TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
+    )
 TEST_MPS = torch.backends.mps.is_available()
 IS_WINDOWS = sys.platform == "win32"
 
