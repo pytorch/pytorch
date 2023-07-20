@@ -10,7 +10,6 @@
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
 #include <cstdint>
-#include <iostream>
 
 namespace at {
 namespace native {
@@ -19,6 +18,7 @@ cusparseLtHandle_t handle;
 
 at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
+  // Is there a better way to do this?
   TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
 
   cusparseLtMatDescriptor_t sparse_input_descriptor;
@@ -43,7 +43,6 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         type = CUDA_R_32F;
         break;
     default:
-        std::cout << "Invalid choice";
         break;
   }
 
@@ -127,7 +126,6 @@ at::Tensor _cslt_sparse_mm(
         compute_type = CUSPARSE_COMPUTE_TF32;
         break;
     default:
-        std::cout << "Invalid choice";
         break;
   }
 
