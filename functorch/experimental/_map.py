@@ -22,7 +22,7 @@ from torch.utils._python_dispatch import (
     _pop_mode_temporarily,
 )
 
-from ._cond import (
+from torch._higher_order_ops.cond import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
     UnsupportedAliasMutationException,

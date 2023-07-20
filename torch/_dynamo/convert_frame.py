@@ -132,8 +132,8 @@ def wrap_convert_context(fn):
             torch._C._set_grad_enabled(prior_grad_mode)
             random.setstate(py_rng_state)
             torch.random.set_rng_state(torch_rng_state)
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)
+            # if torch.cuda.is_available():
+            #     torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
