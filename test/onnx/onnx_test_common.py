@@ -311,8 +311,12 @@ def run_ort(
         ort_model = buffer.getvalue()
     else:
         ort_model = onnx_model
+
+    # Suppress floods of warnings from ONNX Runtime
+    session_options = onnxruntime.SessionOptions()
+    session_options.log_severity_level = 3  # Error
     session = onnxruntime.InferenceSession(
-        ort_model, providers=["CPUExecutionProvider"]
+        ort_model, providers=["CPUExecutionProvider"], sess_options=session_options
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
 
