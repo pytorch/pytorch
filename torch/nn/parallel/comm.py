@@ -162,7 +162,7 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
           into equal chunks.
         dim (int, optional): A dimension along which to chunk :attr:`tensor`.
           Default: ``0``.
-        streams (Iterable[Stream], optional): an iterable of Streams, among
+        streams (Iterable[torch.cuda.Stream], optional): an iterable of Streams, among
           which to execute the scatter. If not specified, the default stream will
           be utilized.
         out (Sequence[Tensor], optional, keyword-only): the GPU tensors to

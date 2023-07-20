@@ -450,7 +450,7 @@ def _multi_tensor_adam(params: List[Tensor],
     ), _) in grouped_tensors.values():
 
         if maximize:
-            device_grads = torch._foreach_neg(tuple(device_grads))  # type: ignore[assignment]
+            device_grads = torch._foreach_neg(device_grads)
 
         # Handle complex parameters
         device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
