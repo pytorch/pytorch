@@ -398,10 +398,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
   }
 
   // Set runtime src zero point
-  auto src_zero_point = {DNNL_RUNTIME_S32_VAL};
-  op_attr.set_zero_points(DNNL_ARG_SRC,
-                          ideep::utils::tensor_zp_mask(src_zero_point.size()),
-                          src_zero_point);
+  op_attr.set_zero_points_mask(DNNL_ARG_SRC, /* zero_points_mask= */0);
   at::Tensor weight_copy;
   ideep::tensor::desc w_desc;
   ideep::dims dims_iohw, dims_giohw;
