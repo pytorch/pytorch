@@ -8,9 +8,6 @@ from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 # TODO[jerryzh168]: move this to a more general util function
-from torch.ao.quantization.fx.prepare import (
-    _is_activation_post_process_node,
-)
 import copy
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple

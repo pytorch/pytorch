@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-import itertools
 
 import torch
 import torch._dynamo as torchdynamo
@@ -8,7 +7,6 @@ import torch.nn as nn
 from torch.ao.ns.fx.utils import compute_sqnr
 from torch.ao.quantization import (
     get_default_qconfig,
-    observer,
     QConfigMapping,
     default_per_channel_symmetric_qnnpack_qconfig,
 )
