@@ -371,30 +371,6 @@ class DeviceMesh:
 
         return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
 
-    def all_gather(
-        self,
-        tensor: torch.Tensor,
-        mesh_dim: int = 0,
-        gather_dim: int = 0,
-    ) -> torch.Tensor:
-        """
-        all_gather the tensor on each rank to a bigger tensor on a
-        device mesh dimension.
-
-        Args:
-            tensor (torch.Tensor): tensor to be gathered on each rank.
-            mesh_dim (int, optional): indicate which mesh dimension we want
-                to scatter on, we by default choose the first rank on the
-                mesh dimension as source of truth.
-            gather_dim (int, optional): Dimension to concatenate the resulting tensor.
-
-        Returns:
-            A :class:`AsyncCollectiveTensor` object
-        """
-        dim_group = self.get_dim_groups(mesh_dim)
-        assert isinstance(dim_group, ProcessGroup)
-        return funcol.all_gather_tensor(tensor, gather_dim=gather_dim, group=dim_group)
-
     def reduce_scatter(
         self,
         input: torch.Tensor,

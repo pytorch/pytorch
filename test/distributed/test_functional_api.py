@@ -258,6 +258,26 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(res[1], t1 * 4)
 
     @parametrize("device", ["cpu", "cuda"])
+    def test_all_gather_tensor(self, device):
+        if device == "cuda":
+            if torch.cuda.device_count() < self.world_size:
+                self.skipTest("Not enough CUDA devices")
+            torch.cuda.set_device(dist.get_rank())
+
+        # testing 1d/2d mesh
+        mesh_1d = dt.DeviceMesh(device, torch.arange(self.world_size))
+        mesh_2d = dt.DeviceMesh(device, torch.arange(self.world_size).view(2, 2))
+        for mesh in [mesh_1d, mesh_2d]:
+            dims_to_gather = [0, 1, 2]
+            for dim in dims_to_gather:
+                output_size = [3, 3, 3]
+                output_size[dim] *= mesh.size(0)
+                # each rank have its own tensor, all_gather gives a list
+                local_tensor = torch.ones([3, 3, 3], device=device)
+                gathered_tensor = ft_c.all_gather_tensor(local_tensor, gather_dim=dim, group=(mesh, 0))
+                self.assertEqual(gathered_tensor, torch.ones(output_size))
+
+    @parametrize("device", ["cpu", "cuda"])
     def test_all_gather_into_tensor_coalesced(self, device):
         if device == "cuda":
             if torch.cuda.device_count() < self.world_size:
