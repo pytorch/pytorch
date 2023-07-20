@@ -1,6 +1,8 @@
 import functools
 
 import torch
+from torch._inductor.compile_fx import fake_tensor_prop
+
 from .. import config
 from ..pattern_matcher import (
     _return_true,
@@ -22,14 +24,23 @@ pass_patterns = [
 ]
 
 
-def freezing_passes(gm: torch.fx.GraphModule):
+def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     """
     Passes that are applied to the graph to freeze pass.
     """
 
+    from ..freezing import constant_fold
+
     lazy_init()
-    for patterns in pass_patterns:
-        patterns.apply(gm.graph)
+    for pattern in pass_patterns:
+        # We need a few rounds of constant folding to get rid of all the
+        # unnecessary nodes, but may need a good method to chose the rounds number.
+        # works like: conv+binary+binary.
+        for _ in range(4):
+            constant_fold(gm)
+            # Make sure meta['val'] is properly set for all nodes
+            fake_tensor_prop(gm, aot_example_inputs, True)
+            pattern.apply(gm.graph)
 
     if torch._C._has_mkldnn and config.cpp.weight_prepack:
         from .mkldnn_fusion import _eliminate_duplicate_packed_nodes
