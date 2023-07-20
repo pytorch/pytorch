@@ -1309,17 +1309,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleGetFunction(&func, mod, funcName.c_str()));
                 return func;
             }
-            """
-        )
 
-        if V.graph.aot_mode:
-            stream_param = "cudaStream_t stream"
-            stream_arg = "stream"
-        else:
-            stream_param = "int device_index"
-            stream_arg = "at::cuda::getCurrentCUDAStream(device_index)"
-        self.header.splice(
-            f"""
             static inline void launchKernel(
                     CUfunction func,
                     int gridX,
@@ -1328,12 +1318,25 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     int numWraps,
                     int sharedMemBytes,
                     void* args[],
-                    {stream_param}) {{
+            """.rstrip()
+        )
+
+        if V.graph.aot_mode:
+            arg_str = "cudaStream_t stream) {"
+        else:
+            arg_str = (
+                """
+                int device_index) {
+                auto stream = at::cuda::getCurrentCUDAStream(device_index);
+                """
+            ).strip()
+        self.header.splice(
+            f"""
+                    {arg_str}
                 AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
-                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
-                    {stream_arg}, args, nullptr));
+                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes, stream, args, nullptr));
             }}
-            """
+            """.lstrip("\n")
         )
 
     def define_kernel(
