@@ -9,7 +9,6 @@ from torch.distributed._tensor.placement_types import Shard
 
 from torch.distributed.distributed_c10d import (
     get_global_rank,
-    get_process_group_ranks,
     get_world_size,
     init_process_group,
     is_initialized,
