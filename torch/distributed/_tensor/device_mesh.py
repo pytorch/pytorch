@@ -395,28 +395,6 @@ class DeviceMesh:
         assert isinstance(dim_group, ProcessGroup)
         return funcol.all_gather_tensor(tensor, gather_dim=gather_dim, group=dim_group)
 
-    def all_reduce(
-        self,
-        tensor: torch.Tensor,
-        op: ReduceOp.RedOpType = ReduceOp.SUM,
-        mesh_dim: int = 0,
-    ) -> torch.Tensor:
-        """
-        all_reduce the tensor on each rank on a device mesh dimension, and
-        return an output tensor on each rank after all_reduce.
-
-        Args:
-            tensor (torch.Tensor): tensor to be all_reduced on each rank.
-            op (:class:`torch.distributed.distributed_c10d.ReduceOp, optional):
-                the reduction op of all_reduce (i.e. ReduceOp.SUM)
-            mesh_dim (int, optional): indicate which mesh dimension we want
-                to reduce on.
-
-        Returns:
-            A :class:`AsyncCollectiveTensor` object
-        """
-        return funcol.all_reduce(tensor, reduceOp=op.name, group=(self, mesh_dim))
-
     def reduce_scatter(
         self,
         input: torch.Tensor,

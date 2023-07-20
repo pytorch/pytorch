@@ -6,6 +6,7 @@ from typing import Any, List, Type
 
 import torch
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 import torch.fx as fx
 import torch.nn as nn
 from torch.distributed._spmd.api import compile, COMPILED_OBJECT_KEY, Override
@@ -53,7 +54,7 @@ class TraceDeviceMeshTestBase:
             ]
 
             def fn(tensor: torch.Tensor):
-                tensor = mesh.all_reduce(tensor, mesh_dim=dim)
+                tensor = funcol.all_reduce(tensor, "sum", group=(mesh, dim))
                 # multiply with 1 to trigger wait on read during tracing.
                 return tensor * 1
 
