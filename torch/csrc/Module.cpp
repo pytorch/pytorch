@@ -83,7 +83,6 @@
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/verbose.h>
-#include <torch/csrc/sparse/CusparseLtKernels.cpp>
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
@@ -860,6 +859,7 @@ PyObject* THPModule_supportedQEngines(PyObject* _unused, PyObject* noargs) {
   }
   return list.release();
 }
+
 PyObject* THPModule_isEnabledXNNPACK(PyObject* _unused, PyObject* noargs) {
   if (at::globalContext().isXNNPACKAvailable())
     Py_RETURN_TRUE;
@@ -1026,26 +1026,6 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_isEnabledcuSPARSELt(PyObject* _unused, PyObject* noargs) {
-  Py_RETURN_TRUE;
-}
-
-PyObject* THPModule_cuSPARSELt_initExtension(PyObject* _unused, PyObject* unused) {
-  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
-  if (!torch_C_module)
-    return nullptr;
-  auto _C_m = py::handle(torch_C_module).cast<py::module>();
-  auto m = _C_m.def_submodule("sparse", "sparse bindings");
-
-  py::class_<torch::CusparseLt>(m, "cusparselt")
-      // constructor
-      .def(py::init<const at::Tensor&>())
-      .def("mm", &torch::CusparseLt::cusparselt_mm)
-      .def("addmm", &torch::CusparseLt::cusparselt_addmm)
-      .def("compress", &torch::CusparseLt::compress);
-
-  Py_RETURN_TRUE;
-}
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,
 // cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
@@ -1208,11 +1188,6 @@ static PyMethodDef TorchMethods[] = {
     {"_set_qengine", THPModule_setQEngine, METH_O, nullptr},
     {"_supported_qengines", THPModule_supportedQEngines, METH_NOARGS, nullptr},
     {"_is_xnnpack_enabled", THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
-    {"_is_cusparselt_enabled", THPModule_isEnabledcuSPARSELt, METH_NOARGS, nullptr},
-    {"_init_cusparselt",
-     THPModule_cuSPARSELt_initExtension,
-     METH_NOARGS,
-     nullptr},
     {"_set_check_sparse_tensor_invariants",
      THPModule_setCheckSparseTensorInvariants,
      METH_O,
