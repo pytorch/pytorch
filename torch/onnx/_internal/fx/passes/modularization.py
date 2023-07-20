@@ -165,9 +165,9 @@ class _ModuleStackMeta:
         ],
     ):
         self._module_stack = []
-        raw_meta = copy.copy(nn_module_stack_meta)
-        if raw_meta is None:
+        if nn_module_stack_meta is None:
             return
+        raw_meta = copy.copy(nn_module_stack_meta)
         is_fx_tracer_produced_raw_meta = isinstance(
             raw_meta, _FX_TRACER_NN_MODULE_STACK_META_TYPE
         )
@@ -281,7 +281,7 @@ def _get_unique_module_name(module_names: Dict[str, int], module_name: str) -> s
 class _IRNode(abc.ABC):
     """Base class for IR nodes.
 
-    IR nodes are used for modularization. They adds a layer of abstraction on top of
+    IR nodes are used for modularization. They add a layer of abstraction on top of
     torch.fx.Node.
     """
 
