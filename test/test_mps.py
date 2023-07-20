@@ -1899,6 +1899,24 @@ class TestMPS(TestCaseMPS):
             torch.randperm(n, out=non_contiguous_tensor)
             self.assertEqual(res.cpu().sort().values.long(), torch.arange(n, device=device))
 
+    def test_max_unpool2d(self):
+        batch = torch.randn(16, 3, 16, 16)
+
+        max_pooler2d = torch.nn.MaxPool2d(2, 2, return_indices=True)
+
+        pooled_cpu, indices_cpu = max_pooler2d(batch)
+        pooled_mps = pooled_cpu.detach().clone().to("mps")
+        indices_mps = indices_cpu.detach().clone().to("mps")
+
+        max_unpooler2d_cpu = torch.nn.MaxUnpool2d(2, stride=2)
+        max_unpooler2d_mps = torch.nn.MaxUnpool2d(2, stride=2).to('mps')
+
+        output_cpu = max_unpooler2d_cpu(pooled_cpu, indices_cpu)
+        output_mps = max_unpooler2d_mps(pooled_mps, indices_mps)
+
+        self.assertEqual(output_cpu, output_mps)
+        self.assertEqual(output_cpu.size(), output_mps.size())
+
     # Test forward maxpool2d
     def test_max_pool2d(self):
         def helper(shape, ks, padding=0, dilation=1, ceil_mode=False, return_indices=False, test_ties=False):
