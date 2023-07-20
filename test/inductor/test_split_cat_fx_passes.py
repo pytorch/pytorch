@@ -7,7 +7,13 @@ from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
+def patch(f):
+    f = torch._inductor.config.patch(split_cat_fx_passes=True)(f)
+    return f
+
+
 class TestSplitCatFxPasses(TestCase):
+    @patch
     def test_split_normalization(self):
         def arg_only(x):
             return [torch.relu(s) for s in torch.split(x, 2, 1)]
@@ -85,6 +91,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
+    @patch
     def test_consecutive_split_merge(self):
         def multi_split(x):
             return [torch.split(s, 2, 1) for s in torch.split(x, 2, 1)]
@@ -245,6 +252,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
+    @patch
     def test_split_cat_merge(self):
         def simple_split_cat(x):
             return torch.cat(torch.split(x, 4, dim=1), dim=1)
@@ -574,7 +582,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @torch._inductor.config.patch(pattern_matcher=False)
+    @torch._inductor.config.patch(split_cat_fx_passes=False)
     def test_config_flag_is_respected(self):
         def split_with_cat(x):
             fs = torch.split(x, [4, 4, 24], dim=-1)
@@ -604,6 +612,7 @@ class TestSplitCatFxPasses(TestCase):
             0,
         )
 
+    @patch
     def test_split_cat_merge_mutation(self):
         args = [
             torch.randn(2, 32, 32, 16),
@@ -622,6 +631,7 @@ class TestSplitCatFxPasses(TestCase):
         self.assertEqual(counters["inductor"]["scmerge_split_removed"], 0)
         self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 0)
 
+    @patch
     def test_split_squeeze(self):
         def split_squeeze_stack(x):
             items = list(torch.split(x, 1, dim=1))
@@ -711,6 +721,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
+    @patch
     def test_unbind_stack(self):
         def unbind_stack(x):
             return torch.stack(torch.unbind(x, dim=1), 1)

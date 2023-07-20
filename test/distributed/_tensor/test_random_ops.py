@@ -135,7 +135,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
                 # other rank should have an identical local tensor
                 other_slice = slice(4 * other_rank, 4 * other_rank + 4)
                 self.assertEqual(
-                    local_tensor[self_slice, :], local_tensor[other_slice, :]
+                    local_tensor[self_slice, :],
+                    local_tensor[other_slice, :],
                 )
 
     @with_comms

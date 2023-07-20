@@ -717,7 +717,6 @@ def _slice_helper(
     starts,
     ends,
     steps=None,
-    dynamic_slice=False,
 ):
     if g.opset <= 9:
         from torch.onnx.symbolic_opset9 import _slice as _slice9
@@ -726,7 +725,7 @@ def _slice_helper(
     else:
         from torch.onnx.symbolic_opset10 import _slice as _slice10
 
-        return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
+        return _slice10(g, input, axes, starts, ends, steps)
 
 
 @_beartype.beartype

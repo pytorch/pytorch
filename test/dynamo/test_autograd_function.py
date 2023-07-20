@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import math
+import unittest
 
 import torch
 
@@ -206,7 +207,7 @@ class ContextMarkAndSave(torch.autograd.Function):
 
 class ModuleWithGradFunc(torch.nn.Module):
     def __init__(self, func):
-        super(ModuleWithGradFunc, self).__init__()
+        super().__init__()
         self.f = func.apply
 
     def forward(self, x):
@@ -316,6 +317,36 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         before = mod(*args, **kwargs)
 
         torch._dynamo.reset()
+        compiled_model = torch._dynamo.optimize("eager")(mod)
+        after = compiled_model(*args, **kwargs)
+        self.assertEqual(before, after)
+
+    @unittest.expectedFailure
+    def test_function_with_bound_free_variable(self):
+        class LowerBound(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inputs, bound):
+                ctx.save_for_backward(inputs, inputs.new_ones(1) * bound)
+                return inputs.clamp(min=bound)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                inputs, bound = ctx.saved_tensors
+                return (inputs >= bound) * grad_output, None
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.gamma = torch.nn.Parameter(torch.rand([4, 128, 32, 32]))
+
+            def forward(self, x):
+                gamma = LowerBound.apply(self.gamma, 1)
+                return x + gamma
+
+        mod = MyMod()
+        args, kwargs = ([torch.rand([4, 128, 32, 32])], {})
+        before = mod(*args, **kwargs)
+
         compiled_model = torch._dynamo.optimize("eager")(mod)
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)

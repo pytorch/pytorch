@@ -30,7 +30,9 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.utils
+import torch._export
 import torch.distributed
+import torch.fx._pytree as fx_pytree
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
@@ -340,7 +342,7 @@ def load_model_from_path(path_and_class_str):
 
 def output_csv(filename, headers, row):
     if os.path.exists(filename):
-        with open(filename, "r") as fd:
+        with open(filename) as fd:
             lines = list(csv.reader(fd)) or [[]]
             if headers and len(headers) > len(lines[0]):
                 # if prior results failed the header might not be filled in yet
@@ -405,7 +407,7 @@ def summarize_graph_break(filename):
         df.to_csv(f"{log_file.rstrip('.csv')}_deduped.csv", index=False)
 
 
-def print_summary(filename):
+def print_summary(filename, print_dataframe=False):
     if not (filename and os.path.exists(filename)):
         return
     data = pd.read_csv(filename)
@@ -414,13 +416,18 @@ def print_summary(filename):
             if tag == "0.0000":
                 continue  # This happens for failed runs
             print(f"\nSummary for tag={tag}:")
-            print_summary_table(data[data.tag == tag])
+            print_summary_table(data[data.tag == tag], print_dataframe=print_dataframe)
     else:
-        print_summary_table(data)
+        print_summary_table(data, print_dataframe=print_dataframe)
     summarize_graph_break(filename)
 
 
-def print_summary_table(data):
+def print_summary_table(data, print_dataframe=False):
+    if print_dataframe:
+        pd.options.display.max_rows = 1000
+        pd.options.display.max_columns = 1000
+        pd.options.display.width = 2000
+        print(data)
     width = max(map(len, data.columns))
     for col in data.columns:
         try:
@@ -651,7 +658,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     torch._dynamo.config.repro_tolerance = tolerance
 
     with maybe_profile(args.export_profiler_trace) as p:
-        frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+        if args.export_aot_inductor:
+            frozen_model_iter_fn = export_aot_inductor(model_iter_fn)
+        else:
+            frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+
         for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
                 randomize_input(copy.deepcopy(example_inputs))
@@ -1072,6 +1083,91 @@ def try_script(model, example_inputs):
         return None
 
 
+class AOTInductorModelCache:
+    cache = dict()
+
+    @classmethod
+    def load(cls, model, example_inputs, eager_forward):
+        key = id(model)
+        if key not in cls.cache:
+            # AOTInductorModel relies on the caller to pass in output_tensors,
+            # so we need to explicitly allocate output tensors here.
+            output_tensors = []
+            # TODO: we should be able to do this by querying AOTInductorModel
+            example_outputs = eager_forward(
+                copy.deepcopy(model), clone_inputs(example_inputs)
+            )
+            if isinstance(example_outputs, dict):
+                # Workaround Huggingface output type issue ModelOutput
+                example_outputs = dict(example_outputs)
+            example_outputs, output_spec = pytree.tree_flatten(example_outputs)
+            for output in example_outputs:
+                output_tensors.append(torch.empty_like(output))
+
+            # The exact API is subject to change
+            exported = torch._export.export(model, example_inputs)
+            param_buffer_values = list(exported.state_dict.values())
+            flat_example_inputs = fx_pytree.tree_flatten_spec(
+                example_inputs, exported.call_spec.in_spec
+            )
+            all_args = (*param_buffer_values, *flat_example_inputs)
+            # AOT compile into a .so
+            so_path = torch._inductor.aot_compile(exported.graph_module, all_args)
+
+            # Use a utility function for easier benchmarking
+            source = """
+            #include <torch/csrc/inductor/aot_inductor_model.h>
+
+            torch::aot_inductor::AOTInductorModel model;
+
+            void run(
+                    const std::vector<at::Tensor>& input_tensors,
+                    std::vector<at::Tensor>& output_tensors) {
+                model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream());
+            }
+            """
+            module = torch.utils.cpp_extension.load_inline(
+                name="aot_inductor",
+                cpp_sources=[source],
+                functions=["run"],
+                extra_ldflags=[so_path],
+                with_cuda=True,
+            )
+
+            value = {
+                "module": module,
+                "exported": exported,
+                "output_tensors": output_tensors,
+                "output_spec": output_spec,
+            }
+            cls.cache[key] = value
+
+        return (
+            cls.cache[key]["module"],
+            cls.cache[key]["exported"],
+            cls.cache[key]["output_tensors"],
+            cls.cache[key]["output_spec"],
+        )
+
+
+def export_aot_inductor(forward: Callable):
+    eager_forward = forward
+
+    def opt_aot_inductor(model, example_inputs, collect_outputs=False):
+        module, exported, output_tensors, output_spec = AOTInductorModelCache.load(
+            model, example_inputs, eager_forward
+        )
+        param_buffer_values = list(exported.state_dict.values())
+        flat_example_inputs = fx_pytree.tree_flatten_spec(
+            example_inputs, exported.call_spec.in_spec
+        )
+        all_args = (*param_buffer_values, *flat_example_inputs)
+        module.run(all_args, output_tensors)
+        return pytree.tree_unflatten(output_tensors, output_spec)
+
+    return opt_aot_inductor
+
+
 def download_retry_decorator(download_fn):
     """
     Decorator function for applying retry logic to a download function.
@@ -1411,7 +1507,7 @@ def read_batch_size_from_file(args, filename, model_name):
     if os.path.exists("benchmarks"):
         filename = os.path.join("benchmarks", filename)
     assert os.path.exists(filename), filename
-    with open(filename, "r") as f:
+    with open(filename) as f:
         lines = f.readlines()
         lines = [i.split(",") for i in lines if len(i.strip()) > 0]
         for val in lines:
@@ -1613,7 +1709,7 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            self.optimizer = torch.optim.SGD(params, lr=0.01)
+            self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
         else:
             self.optimizer = None
 
@@ -1953,8 +2049,24 @@ class BenchmarkRunner:
             try:
                 model_copy = deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
-                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
-                new_result = optimized_model_iter_fn(model_copy, example_inputs)
+                if self.args.export:
+                    # TB and TIMM use list example_inputs
+                    # HF use dict example_inputs
+                    if isinstance(example_inputs, dict):
+                        raise RuntimeError(
+                            "expect example_inputs as list/tuple, but got dict. need to support kwargs in torch._export.export"
+                        )
+                    # apply export on module directly
+                    # no need for n iterations
+                    # the logic should be the same to self.model_iter_fn (forward_pass)
+                    with self.autocast():
+                        optimized_model_iter_fn = optimize_ctx(
+                            model_copy, example_inputs
+                        )
+                        new_result = optimized_model_iter_fn(*example_inputs)
+                else:
+                    optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+                    new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception(e)
                 print(
@@ -2132,7 +2244,6 @@ class BenchmarkRunner:
             if tag is not None:
                 experiment_kwargs["tag"] = tag
             results = []
-
             eager_latency, eager_peak_mem, _ = warmup(
                 self.model_iter_fn, model, example_inputs, "eager"
             )
@@ -2518,6 +2629,11 @@ def parse_args(args=None):
         help="print extra memory statistics",
     )
     parser.add_argument(
+        "--print-dataframe-summary",
+        action="store_true",
+        help="print dataframe result used for calculating accuracy",
+    )
+    parser.add_argument(
         "--cold-start-latency",
         "--cold_start_latency",
         action="store_true",
@@ -2602,6 +2718,13 @@ def parse_args(args=None):
         default=1,
         help="Set per-process GPU memory fraction (limit) for reducing usable size and reproducing OOMs",
     )
+
+    parser.add_argument(
+        "--no-translation-validation",
+        action="store_true",
+        help="Disable translation validation for accuracy builds.",
+    )
+
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -2659,6 +2782,16 @@ def parse_args(args=None):
         "--inductor",
         action="store_true",
         help="Measure speedup with TorchInductor",
+    )
+    group.add_argument(
+        "--export",
+        action="store_true",
+        help="Measure pass rate with export",
+    )
+    group.add_argument(
+        "--export-aot-inductor",
+        action="store_true",
+        help="Measure pass rate with Export+AOTInductor",
     )
     group.add_argument(
         "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
@@ -2782,6 +2915,10 @@ def run(runner, args, original_dir=None):
         if args.accuracy:
             # Run fewer iterations when checking accuracy
             args.repeat = 2
+
+            # Set translation validation on by default on CI accuracy runs.
+            torch._dynamo.config.translation_validation = True
+
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
             # caused solely by turning on dynamic shapes
@@ -2950,15 +3087,6 @@ def run(runner, args, original_dir=None):
         output_filename = "overheads.csv"
     elif args.inductor:
         inductor_config.debug = args.verbose
-        if (
-            args.ci
-            and args.accuracy
-            and args.training
-            and args.only in {"dla102", "gernet_l"}
-        ):
-            # Log generated code for flaky tests, to check if there is any codegen difference
-            inductor_config.debug = True
-
         if args.threads:
             inductor_config.cpp.threads = args.threads
 
@@ -2970,6 +3098,10 @@ def run(runner, args, original_dir=None):
         )
         experiment = speedup_experiment
         output_filename = "inductor.csv"
+    elif args.export:
+        optimize_ctx = torch._export.export
+        experiment = speedup_experiment
+        output_filename = "export.csv"
     elif args.xla:
         (dev,) = args.devices
         os.environ["PJRT_DEVICE"] = {"cuda": "GPU", "cpu": "CPU"}[dev]
@@ -3015,8 +3147,13 @@ def run(runner, args, original_dir=None):
         optimize_ctx = nothing
         experiment = speedup_experiment
         output_filename = "nothing.csv"
-    elif args.backend:
-        optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
+    elif args.backend or args.export_aot_inductor:
+        if args.export_aot_inductor:
+            assert not args.training, "AOTInductor only supports inference"
+            assert args.devices == ["cuda"], "AOTInductor only tested for CUDA"
+            optimize_ctx = export_aot_inductor
+        else:
+            optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"
@@ -3034,10 +3171,8 @@ def run(runner, args, original_dir=None):
         experiment = coverage_experiment
         output_filename = "coverage.csv"
 
-    if args.inductor or args.backend == "inductor":
-        inductor_config.triton.cudagraphs = (
-            not args.disable_cudagraphs and not args.dynamic_shapes
-        )
+    if args.inductor or args.backend == "inductor" or args.export_aot_inductor:
+        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
         inductor_config.triton.persistent_reductions = (
             not args.disable_persistent_reductions
         )
@@ -3075,6 +3210,10 @@ def run(runner, args, original_dir=None):
                 args.profiler_trace_name = "profile"
         else:
             args.profiler_trace_name = args.profiler_trace_name
+
+    if args.no_translation_validation:
+        # Overwrite 'translation_validation' config, if specified.
+        torch._dynamo.config.translation_validation = False
 
     experiment = functools.partial(experiment, args, runner.model_iter_fn)
 
@@ -3259,7 +3398,7 @@ def run(runner, args, original_dir=None):
             except subprocess.SubprocessError:
                 print("ERROR", file=sys.stderr)
                 write_csv("infra_error")
-        print_summary(output_filename)
+        print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
 
 
 def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):

@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import itertools
+import math
 import sys
 import unittest
 from typing import Callable
@@ -9,7 +10,6 @@ from unittest.mock import patch
 import numpy as np
 import sympy
 import torch
-import torch._dynamo
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
@@ -93,7 +93,7 @@ class CPUReproTests(TestCase):
     def test_conv2d_bn_mixed_dtype(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     3,
                     16,
@@ -426,6 +426,19 @@ class CPUReproTests(TestCase):
             (torch.randn(2, 3, 4, 4),),
         )
 
+    def test_load_inf_bf16(self):
+        def fn1(x):
+            return torch.where(x > 0, x, math.inf)
+
+        def fn2(x):
+            return torch.where(x > 0, x, -math.inf)
+
+        for fn in [fn1, fn2]:
+            self.common(
+                fn,
+                (torch.randn(1, 3, 16, 16),),
+            )
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_fp32_load_with_to_bf16(self):
         # From llama model.
@@ -494,6 +507,23 @@ class CPUReproTests(TestCase):
                 256,
             ),
         )
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_to_uint8_rounding_method(self):
+        def fn(x):
+            return x.to(torch.uint8)
+
+        numerical_testsuit = [4.4, 4.5, 4.6, 5.5]
+        for numerical_number in numerical_testsuit:
+            x = torch.ones((17)) * numerical_number
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -714,6 +744,53 @@ class CPUReproTests(TestCase):
             output_scale = 0.03
             self.common(channel_shuffle, (x, 2, output_scale, output_zero_point))
             assert metrics.generated_cpp_vec_kernel_count == 2
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_dequant_relu_quant_dequant_relu_quant_lowering(self):
+        def fn(x, scale, zero_point, scale2, zero_point2, scale3, zero_point3):
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, scale, zero_point, 0, 255, torch.uint8
+            )
+            x = torch.relu(x)
+            x = torch.ops.quantized_decomposed.quantize_per_tensor(
+                x, scale2, zero_point2, 0, 255, torch.uint8
+            )
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, scale2, zero_point2, 0, 255, torch.uint8
+            )
+            x = torch.relu(x)
+            x = torch.ops.quantized_decomposed.quantize_per_tensor(
+                x, scale3, zero_point3, 0, 255, torch.uint8
+            )
+            return x
+
+        for use_tensor_overload in [True, False]:
+            x = torch.clamp(
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100, 0, 255
+            ).to(torch.uint8)
+            zero_point_list = [100, 101, 102]
+            scale_list = [0.01, 0.02, 0.03]
+            if use_tensor_overload:
+                for i in range(len(zero_point_list)):
+                    zero_point_list[i] = torch.tensor(
+                        zero_point_list[i], dtype=torch.int64
+                    )
+                    scale_list[i] = torch.tensor(scale_list[i])
+            zero_point, zero_point2, zero_point3 = zero_point_list
+            scale, scale2, scale3 = scale_list
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(
+                    fn,
+                    (x, scale, zero_point, scale2, zero_point2, scale3, zero_point3),
+                    rtol=1e-2,
+                    atol=1e-2,
+                )
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_inplace_add_alpha(self):
         def fn(x, y):
@@ -1908,12 +1985,29 @@ class CPUReproTests(TestCase):
         x = torch.rand(16)
         self.common(f, (x,))
 
+    def test_constant_store(self):
+        # https://github.com/pytorch/pytorch/issues/104515
+        def f(a):
+            a[0, [3, 3]] = -float("inf")
+            return a
+
+        x = torch.rand(4, 5)
+        self.common(f, (x,))
+
     def test_to_channels_last_bfloat16(self):
         def f(a):
             return a.to(memory_format=torch.channels_last)
 
         x = torch.rand(2, 3, 14, 14).bfloat16()
         self.common(f, (x,))
+
+    def test_broadcast_mul_bfloat16(self):
+        def f(a, b):
+            return a * b
+
+        a = torch.randn(2, 16, 16).bfloat16()
+        b = torch.randn(2, 1, 1).bfloat16()
+        self.common(f, (a, b))
 
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):

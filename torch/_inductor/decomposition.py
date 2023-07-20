@@ -23,6 +23,7 @@ inductor_decompositions = get_decompositions(
         aten.bitwise_and_,
         aten.bitwise_or_,
         aten.clamp_min_,
+        aten.dist,
         aten.empty_like,
         aten.flip,
         aten.lcm,
@@ -149,17 +150,6 @@ def all_dim(input, dim, keepdim=False):
     return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
 
 
-# NB: this decomposition is not stride accurate, do not put it in the main
-# library
-@register_decomposition(aten.copy)
-def copy(self, src, non_blocking=False):
-    intermediate = src.to(self, non_blocking)
-    if self.size() != intermediate.size():
-        return aten.expand_copy.default(intermediate, self.size())
-    else:
-        return intermediate
-
-
 @register_decomposition([aten.baddbmm])
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     result = torch.bmm(batch1, batch2)
@@ -177,6 +167,22 @@ def cat(tensors, dim=0):
     if len(tensors) == 1:
         return tensors[0].clone()
     return NotImplemented
+
+
+@register_decomposition([aten.angle])
+def angle(x):
+    if x.is_complex():
+        return torch.where(
+            torch.isnan(x.real), float("nan"), torch.atan2(x.imag, x.real)
+        )
+    else:
+        # when x is real number
+        #   if x >= 0, return 0
+        #   if x < 0, return pi
+        #   if x is nan, return nan
+        ret = torch.where(x < 0, math.pi, 0.0)
+        nan = torch.where(torch.isnan(x), float("nan"), 0.0)
+        return ret + nan
 
 
 @register_decomposition([aten.conj_physical])
@@ -366,6 +372,16 @@ def _foreach_addcmul_scalar(self, left_tensors, right_tensors, scalar=1):
 def _foreach_addcdiv_scalar(self, left_tensors, right_tensors, scalar=1):
     return aten._foreach_add.List(
         self, aten._foreach_div.List(left_tensors, right_tensors), alpha=scalar
+    )
+
+
+@register_decomposition(aten._foreach_lerp.Scalar)
+def _foreach_lerp_scalar(start_tensors, end_tensors, weight):
+    return aten._foreach_add.List(
+        start_tensors,
+        aten._foreach_mul.Scalar(
+            aten._foreach_sub.List(end_tensors, start_tensors), weight
+        ),
     )
 
 
