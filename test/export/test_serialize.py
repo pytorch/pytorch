@@ -69,10 +69,10 @@ class TestSerialize(TestCase):
         )
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[-7]
-        self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
+        node = serialized.graph_module.graph.nodes[-1]
+        self.assertEqual(node.target, "torch.ops.aten.native_layer_norm.default")
         # aten::native_layer_norm returns 3 tensnors
-        self.assertEqual(len(node.outputs), 2)
+        self.assertEqual(len(node.outputs), 3)
 
         # check the names are unique
         seen = set()
