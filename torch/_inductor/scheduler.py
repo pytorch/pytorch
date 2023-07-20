@@ -788,10 +788,7 @@ class Scheduler:
         self.debug_draw_graph()
         if config.multiple_streams:
             ss_graph = stream_scheduler.stream_schedule(self.nodes)
-            new_node_list = []
-            for ssnode in ss_graph.final_order:
-                new_node_list.append(ssnode.original_node)
-            self.nodes = new_node_list
+            self.nodes = ss_graph.reorder(self.nodes)
         self.compute_last_usage()
         # used during codegen:
         self.current_device = None

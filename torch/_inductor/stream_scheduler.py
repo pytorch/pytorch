@@ -311,7 +311,7 @@ class SSGraph:
     """
     For current global order, the nodes off the critical path are usually the adjacent nodes before the next common successor. It will block the critical path if we don't reorder them.
     """
-    def reorder(self):
+    def reorder(self, original_nodes):
         # self.dfs_search(self.ssnodes[0])
         # self.final_order.remove(self.name_mapping["OUTPUT"])
         # self.final_order = self.ssnodes.copy()
@@ -328,6 +328,9 @@ class SSGraph:
         #             visited.add(index_2_node)
         #             visited.add(ssnode)
         # self.final_order.remove(self.name_mapping["OUTPUT"])
+        # if env STREAMSCHEDULER_REORDER is set to 1, then we'll reorder the nodes
+        if environ.get("STREAMSCHEDULER_REORDER", "0") == "0":
+            return original_nodes
         from .scheduler import SchedulerNode, FusedSchedulerNode
         in_degree = {ssnode: 0 for ssnode in self.ssnodes}
         for ssnode in self.ssnodes:
@@ -373,14 +376,16 @@ class SSGraph:
                 if in_degree[successor] == 0:
                     queue.append(successor)
         if len(self.final_order) != len(self.ssnodes):
-            raise RuntimeError("Error when processing the queue. The queue is not empty after the loop.")
+            raise RuntimeError(f"Error when processing the queue. The queue is not empty after the loop.\nlen(self.final_order):{len(self.final_order)}\nlen(self.ssnodes):{len(self.ssnodes)}")
         self.final_order.remove(self.name_mapping["OUTPUT"])
-
         log.info("=====findhao debug final order=====")
         for node in self.final_order:
             log.info(node.get_name())
         log.info("=====findhao debug final order=====")
-
+        new_node_list = []
+        for ssnode in self.final_order:
+            new_node_list.append(ssnode.original_node)
+        return new_node_list
 
         
 
@@ -438,9 +443,9 @@ class SSGraph:
 
 def stream_schedule(snodes):
     ssgraph = SSGraph(snodes)
-    ssgraph.reorder()
     import os
     if os.getenv("TORCHINDUCTOR_STREAM_PRINT_GRAPH", "0") == "1":
         ssgraph.print_graph()
     V.graph.stream_graph = ssgraph
     return ssgraph
+
