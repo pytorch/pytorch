@@ -1,6 +1,7 @@
 .. role:: hidden
     :class: hidden-section
 
+.. :_torch_logging
 torch._logging
 ==============
 
