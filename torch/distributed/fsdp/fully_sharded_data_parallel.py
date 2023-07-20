@@ -214,6 +214,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         instead of reacquiring the references each iteration, then it will not
         see FSDP's newly created views, and autograd will not work correctly.
 
+    .. note::
+        With ``limit_all_gathers=True``, you may see a gap in the FSDP
+        pre-forward where the CPU thread is not issuing any kernels. This is
+        intentional and shows the rate limiter in effect. Synchronizing the CPU
+        thread in that way prevents over-allocating memory for subsequent
+        all-gathers, and it should not actually delay GPU kernel execution.
+
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.
@@ -282,29 +289,28 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             FSDP. (Default: ``None``)
         param_init_fn (Optional[Callable[[nn.Module], None]]):
             A ``Callable[torch.nn.Module] -> None`` that
-            specifies how modules that are currently on the meta device should be initialized
-            onto an actual device. Note that as of v1.12, we detect modules on the meta
-            device via ``is_meta`` check and apply a default initialization that calls
-            ``reset_parameters`` method on the passed in ``nn.Module`` if ``param_init_fn``
-            is not specified, otherwise we run ``param_init_fn`` to initialize the passed
-            in ``nn.Module``. In particular, this means that if ``is_meta=True`` for any
-            module parameters for modules that will be wrapped with FSDP and ``param_init_fn``
-            is not specified, we assume your module properly implements a ``reset_parameters()``
-            and will throw errors if not. Note that additionally, we offer support for modules
-            initialized with torchdistX's (https://github.com/pytorch/torchdistX)
-            ``deferred_init`` API. In this case, deferred modules would be initialized
-            by a default initialization function that calls torchdistX's
-            ``materialize_module``, or the passed in ``param_init_fn``, if it is not
-            ``None``. The same ``Callable`` is applied to initialize all meta modules.
-            Note that this initialization function is applied before doing any FSDP sharding
-            logic.
+            specifies how modules that are currently on the meta device should
+            be initialized onto an actual device. As of v1.12, FSDP detects
+            modules with parameters or buffers on meta device via ``is_meta``
+            and either applies ``param_init_fn`` if specified or calls
+            ``nn.Module.reset_parameters()`` otherwise. For both cases, the
+            implementation should *only* initialize the parameters/buffers of
+            the module, not those of its submodules. This is to avoid
+            re-initialization. In addition, FSDP also supports deferred
+            initialization via torchdistX's (https://github.com/pytorch/torchdistX)
+            ``deferred_init()`` API, where the deferred modules are initialized
+            by calling ``param_init_fn`` if specified or torchdistX's default
+            ``materialize_module()`` otherwise. If ``param_init_fn`` is
+            specified, then it is applied to all meta-device modules, meaning
+            that it should probably case on the module type. FSDP calls the
+            initialization function before parameter flattening and sharding.
 
             Example::
 
                 >>> # xdoctest: +SKIP("undefined variables")
                 >>> module = MyModule(device="meta")
-                >>> def my_init_fn(module):
-                >>>     # responsible for initializing a module, such as with reset_parameters
+                >>> def my_init_fn(module: nn.Module):
+                >>>     # E.g. initialize depending on the module type
                 >>>     ...
                 >>> fsdp_model = FSDP(module, param_init_fn=my_init_fn, auto_wrap_policy=size_based_auto_wrap_policy)
                 >>> print(next(fsdp_model.parameters()).device) # current CUDA device
@@ -335,12 +341,16 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             bound workloads. This should only be used for static graph models
             since the forward order is fixed based on the first iteration's
             execution. (Default: ``False``)
-        limit_all_gathers (bool): If ``False``, then FSDP allows the CPU
-            thread to schedule all-gathers without any extra synchronization.
-            If ``True``, then FSDP explicitly synchronizes the CPU thread to
-            prevent too many in-flight all-gathers. This ``bool`` only affects
-            the sharded strategies that schedule all-gathers. Enabling this can
-            help lower the number of CUDA malloc retries.
+        limit_all_gathers (bool): If ``True``, then FSDP explicitly
+            synchronizes the CPU thread to ensure GPU memory usage from only
+            *two* consecutive FSDP instances (the current instance running
+            computation and the next instance whose all-gather is prefetched).
+            If ``False``, then FSDP allows the CPU thread to issue all-gathers
+            without any extra synchronization. (Default: ``True``) We often
+            refer to this feature as the "rate limiter". This flag should only
+            be set to ``False`` for specific CPU-bound workloads with low
+            memory pressure in which case the CPU thread can aggressively issue
+            all kernels without concern for the GPU memory usage.
         use_orig_params (bool): Setting this to ``True`` has FSDP use
             ``module`` 's original parameters. FSDP exposes those original
             parameters to the user via :meth:`nn.Module.named_parameters`
@@ -359,14 +369,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             use ``torch.compile()``. Setting this to ``False`` exposes FSDP's
             internal :class:`FlatParameter` s to the user via
             :meth:`nn.Module.named_parameters`. (Default: ``False``)
-        ignored_parameters (Optional[Iterable[torch.nn.Parameter]]): Ignored
-            parameters will not be managed by this FSDP instance, which means
-            that they will not be flattened and sharded and that their
-            gradients will not be reduced across ranks. With this newly added
-            argument, ``ignored_modules`` could be deprecated soon. For
-            backward compatibility, we keep both ``ignored_modules`` and
-            ``ignored_parameters``, but FSDP only allows one of them to be
-            specified as not ``None``.
+        ignored_states (Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]):
+            Ignored parameters or modules that will not be managed by this FSDP
+            instance, meaning that the parameters are not sharded and their
+            gradients are not reduced across ranks. This argument unifies with
+            the existing ``ignored_modules`` argument, and we may deprecate
+            ``ignored_modules`` soon. For backward compatibility, we keep both
+            ``ignored_states`` and `ignored_modules``, but FSDP only allows one
+            of them to be specified as not ``None``.
     """
 
     def __init__(
@@ -383,7 +393,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
         forward_prefetch: bool = False,
-        limit_all_gathers: bool = False,
+        limit_all_gathers: bool = True,
         use_orig_params: bool = False,
         ignored_states: Union[
             Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
@@ -406,14 +416,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             self, process_group, sharding_strategy, auto_wrap_policy
         )
         if auto_wrap_policy is not None:
-            auto_wrap_kwargs = {
-                "module": module,
-                "auto_wrap_policy": auto_wrap_policy,
-                "wrapper_cls": FullyShardedDataParallel,
-                "ignored_modules": self._ignored_modules,
-                "ignored_params": self._ignored_params,
-                "only_wrap_children": True,  # avoid double wrapping the root
-            }
             fsdp_kwargs = {
                 "process_group": process_group,
                 "sharding_strategy": sharding_strategy,
@@ -426,6 +428,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 "forward_prefetch": forward_prefetch,
                 "limit_all_gathers": limit_all_gathers,
                 "use_orig_params": use_orig_params,
+                "ignored_states": self._ignored_params,
             }
             if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
                 # Share root process groups with children to maintain
@@ -433,7 +436,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 # process groups.
                 fsdp_kwargs["process_group"] = (self.process_group, self._inter_node_pg)
 
-            _auto_wrap(auto_wrap_kwargs, fsdp_kwargs, FullyShardedDataParallel)
+            _auto_wrap(
+                module,
+                auto_wrap_policy,
+                self._ignored_modules,
+                self._ignored_params,
+                fsdp_kwargs,
+                FullyShardedDataParallel,
+            )
 
         backward_prefetch_limit = 1
         forward_prefetch_limit = 1
@@ -456,7 +466,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             device_id,
             param_init_fn,
             sync_module_states,
-            FullyShardedDataParallel,
         )
         self._fsdp_wrapped_module = module
         if not use_orig_params:
@@ -482,11 +491,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     @property
     def _has_params(self) -> bool:
         """Returns whether this FSDP instance manages any parameters."""
-        return hasattr(self, "_handles") and len(self._handles) > 0
+        return hasattr(self, "_handle") and self._handle is not None
 
     @property
     def _flat_param(self) -> Optional[FlatParameter]:
-        return self._handles[0].flat_param if self._handles else None
+        return self._handle.flat_param if self._handle else None
 
     def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to the wrapped module."""
@@ -786,24 +795,30 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Runs the forward pass for the wrapped module, inserting FSDP-specific
         pre- and post-forward sharding logic.
         """
+        handle = self._handle
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel.forward"
         ):
             args, kwargs = _root_pre_forward(self, self, args, kwargs)
             unused = None
-            unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
-            reshard_fn = functools.partial(_post_forward_reshard, self, self._handles)
             args, kwargs = _pre_forward(
-                self, self._handles, unshard_fn, self._fsdp_wrapped_module, args, kwargs
+                self,
+                handle,
+                _pre_forward_unshard,
+                self._fsdp_wrapped_module,
+                args,
+                kwargs,
             )
-            for handle in self._handles:
+            if handle:
                 _p_assert(
                     handle.flat_param.device == self.compute_device,
                     "Expected `FlatParameter` to be on the compute device "
                     f"{self.compute_device} but got {handle.flat_param.device}",
                 )
             output = self._fsdp_wrapped_module(*args, **kwargs)
-            return _post_forward(self, self._handles, reshard_fn, self, unused, output)
+            return _post_forward(
+                self, handle, _post_forward_reshard, self, unused, output
+            )
 
     @staticmethod
     @contextlib.contextmanager

@@ -33,7 +33,7 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
-class DummyModule(object):
+class DummyModule:
 
     @staticmethod
     def device_count() -> int:
@@ -152,6 +152,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                 torch.utils.rename_privateuse1_backend('xxx')
             # register foo module, torch.foo
             torch._register_device_module('foo', DummyModule)
+            self.assertTrue(torch.utils.backend_registration._get_custom_mod_func("device_count")() == 1)
+            with self.assertRaisesRegex(RuntimeError, "Try to call torch.foo"):
+                torch.utils.backend_registration._get_custom_mod_func("func_name_")
             # default set for_tensor and for_module are True, so only set for_storage is True
             torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
             # generator tensor and module can be registered only once
@@ -378,7 +381,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             foo_storage = foo_tensor.storage()
             self.assertEqual(foo_storage.type(), "torch.storage.TypedStorage")
 
-            class CustomFloatStorage():
+            class CustomFloatStorage:
                 @property
                 def __module__(self):
                     return "torch." + torch._C._get_privateuse1_backend_name()
@@ -401,12 +404,14 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         def test_open_device_faketensor():
             torch.utils.rename_privateuse1_backend('foo')
-            # register foo module, torch.foo
-            torch._register_device_module('foo', DummyModule)
             with torch._subclasses.fake_tensor.FakeTensorMode.push():
                 a = torch.empty(1, device="foo")
                 b = torch.empty(1, device="foo:0")
                 result = a + b
+
+        def test_open_device_named_tensor():
+            torch.utils.rename_privateuse1_backend('foo')
+            a = torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])
 
         test_base_device_registration()
         test_before_common_registration()
@@ -422,6 +427,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_resize()
         test_open_device_storage_type()
         test_open_device_faketensor()
+        test_open_device_named_tensor()
 
 
 if __name__ == "__main__":

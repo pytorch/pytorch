@@ -26,7 +26,7 @@ Tensor expand(
       self.dim() > 0 && self.dim() <= 4,
       "Vulkan expand supports up to 4d tensors");
   TORCH_CHECK(
-      self.dim() <= output_size.size(),
+      static_cast<size_t>(self.dim()) <= output_size.size(),
       "Vulkan expand: the number of sizes provided (",
       output_size.size(),
       ") must be greater or equal to the number of dimensions in the tensor (",

@@ -4,6 +4,7 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
+import functools
 
 import torch.distributed.distributed_c10d as distributed_c10d
 import torch.nn.functional as F
@@ -63,16 +64,15 @@ def _distribute_and_fsdp_wrap_module(
         module = parallelize_module(module, mesh_2d, PairwiseParallel(), tp_mesh_dim=1)
     pg = fsdp_pg if module_shard else distributed_c10d._get_default_group()
 
+    fsdp_ctor = functools.partial(FSDP, process_group=pg, use_orig_params=use_orig_params, device_id=torch.cuda.current_device())
     if fsdp_nested:
-        module.net1 = FSDP(
-            module.net1, process_group=pg, use_orig_params=use_orig_params
-        )
-        module.net2 = FSDP(
-            module.net2, process_group=pg, use_orig_params=use_orig_params
-        )
+        module.net1 = fsdp_ctor(module.net1)
+        module.net2 = fsdp_ctor(module.net2)
+
     if recompute_activation:
         module = checkpoint_wrapper(module, checkpoint_impl=CheckpointImpl.NO_REENTRANT)
-    return FSDP(module, process_group=pg, use_orig_params=use_orig_params)
+
+    return fsdp_ctor(module)
 
 
 def init_model(
@@ -85,7 +85,7 @@ def init_model(
     torch.cuda.set_device(rank)
     world_size = dist.get_world_size()
 
-    model = SimpleModel().cuda(rank)
+    model = SimpleModel()
 
     # 2-D mesh is [dp, tp]
     twod_mesh = DeviceMesh(

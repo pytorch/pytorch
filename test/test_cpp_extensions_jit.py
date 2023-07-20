@@ -129,8 +129,8 @@ class TestCppExtensionJIT(common.TestCase):
         )
 
         tensor_length = 100000
-        x = torch.zeros(tensor_length, device="cpu", dtype=torch.float32)
-        y = torch.zeros(tensor_length, device="cpu", dtype=torch.float32)
+        x = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+        y = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
 
         cpu_output = module.get_cpu_add_output(x, y)
         mps_output = module.get_mps_add_output(x.to("mps"), y.to("mps"))
@@ -230,7 +230,7 @@ class TestCppExtensionJIT(common.TestCase):
         # expected values is length-2 tuple: (list of ELF, list of PTX)
         # note: there should not be more than one PTX value
         archflags = {
-            '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
+            '': ([f'{capability[0]}{capability[1]}' for capability in capabilities], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
             "Volta": (['70'], ['70']),
         }
