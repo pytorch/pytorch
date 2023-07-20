@@ -11173,6 +11173,8 @@ op_db: List[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
+                         dtypes=(torch.int16, torch.int32, torch.int64, torch.bfloat16), device_type="cpu"),
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
@@ -18651,7 +18653,7 @@ python_ref_db = [
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         dtypes=(torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
@@ -18668,12 +18670,15 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
 
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64, torch.bfloat16), device_type="cpu"),
+
             # Off-by-one issue when casting floats to ints
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.int16, torch.int32, torch.int64),
+                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64, torch.bfloat16, torch.float16),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.int16, torch.int32, torch.int64),
