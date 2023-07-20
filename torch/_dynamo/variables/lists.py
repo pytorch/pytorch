@@ -100,7 +100,7 @@ class BaseListVariable(VariableTracker):
             assert not kwargs and len(args) == 1
             if isinstance(args[0], TensorVariable):
                 value = get_fake_value(args[0].as_proxy().node, tx)
-                if value.constant is not None:
+                if value.constant is not None and value.constant.numel() == 1:
                     value = variables.ConstantVariable(value.constant.item())
                 else:
                     unimplemented("__getitem__ with non-constant tensor")
