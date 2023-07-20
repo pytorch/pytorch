@@ -251,12 +251,12 @@ def convert_frame_assert(
                 )
             else:
                 message = (
-                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
                     "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further",
                 )
 
             if recompiles_log.isEnabledFor(logging.DEBUG):
-                recompiles_log.debug(message)
+                recompiles_log.debug(message, stack_info=True)
 
             if config.error_on_recompile:
                 raise exc.RecompileError(message)
