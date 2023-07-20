@@ -1058,6 +1058,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def generate_return(self, output_refs):
         # Output tensors are allocated by the AOT runtime.
         if V.graph.aot_mode:
+            for idx, output in enumerate(V.graph.graph_outputs):
+                if output.get_name() in self.reuses:
+                    # buffer was reused, so we need to explicitly copy it to the output tensor
+                    self.wrapper_call.writeline(
+                        f"outputs[{idx}].copy_({output.get_name()});"
+                    )
             self.wrapper_call.writeline("\n}")
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
@@ -1194,31 +1200,34 @@ class CppWrapperCodeGen(WrapperCodeGen):
         cpp_device = self.codegen_device(device)
         return f"at::TensorOptions({cpp_device}).dtype({DTYPE_TO_ATEN[dtype]}))"
 
+    def codegen_allocation(self, buffer):
+        name = buffer.get_name()
+        # outputs are passed-in in the AOT mode
+        if V.graph.aot_mode and name in set(V.graph.get_output_names()):
+            output_idx = None
+            for idx, output in enumerate(V.graph.graph_outputs):
+                if hasattr(output, "get_name") and name == output.get_name():
+                    output_idx = idx
+                    break
+
+            assert output_idx is not None, "Unkown output index"
+            self.writeline(f"auto {name} = outputs[{output_idx}];")
+            return
+
+        super().codegen_allocation(buffer)
+
     def make_buffer_allocation(self, buffer):
-        output_idx = None
-        for idx, output in enumerate(V.graph.graph_outputs):
-            if isinstance(output, (ir.NoneAsConstantBuffer, ir.ShapeAsConstantBuffer)):
-                continue
-            if buffer == output.data:
-                output_idx = idx
-                break
-        if output_idx is not None and V.graph.aot_mode:
-            # In aot_mode, output buffers are managed by the AOT runtime.
-            return (
-                f"at::Tensor {buffer.get_name()} = outputs[{output_idx}]{self.ending}"
-            )
-        else:
-            # TODO: map layout here.
-            device = buffer.get_device()
-            dtype = buffer.get_dtype()
-            shape = tuple(buffer.get_size())
-            stride = tuple(buffer.get_stride())
-            return (
-                f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
-                f"{self.codegen_shape_tuple(shape)}, "
-                f"{self.codegen_shape_tuple(stride)}, "
-                f"{self.codegen_tensor_option(device, dtype)}{self.ending}"
-            )
+        # TODO: map layout here.
+        device = buffer.get_device()
+        dtype = buffer.get_dtype()
+        shape = tuple(buffer.get_size())
+        stride = tuple(buffer.get_stride())
+        return (
+            f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
+            f"{self.codegen_shape_tuple(shape)}, "
+            f"{self.codegen_shape_tuple(stride)}, "
+            f"{self.codegen_tensor_option(device, dtype)}{self.ending}"
+        )
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,

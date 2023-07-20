@@ -258,9 +258,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             DTensor._propagator,
         )
 
-    @classmethod
+    @staticmethod
     def from_local(
-        cls,
         local_tensor: torch.Tensor,
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,

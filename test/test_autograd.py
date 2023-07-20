@@ -121,7 +121,7 @@ class TestAutograd(TestCase):
         # Decorating class is deprecated and should not be used
         with self.assertWarnsRegex(UserWarning, "Decorating classes is deprecated"):
             @torch.no_grad()
-            class Foo():
+            class Foo:
                 def __init__(self):
                     assert not torch.is_grad_enabled()
 
@@ -141,7 +141,7 @@ class TestAutograd(TestCase):
 
             foo()
 
-            class Foo2():
+            class Foo2:
                 @torch.no_grad()
                 def __init__(self):
                     assert not torch.is_grad_enabled()
@@ -7505,7 +7505,7 @@ for shape in [(1,), ()]:
         #
         #   grad_output -> grad_output.grad_fn -> graph -> hook -> grad_output
         #
-        class TestCls():
+        class TestCls:
             # Dummy class for the purpose of creating a weakref
             pass
 
@@ -7570,7 +7570,7 @@ for shape in [(1,), ()]:
             def backward(ctx, grad):
                 return grad
 
-        class Test():
+        class Test:
             pass
 
         count = [0]
@@ -9243,7 +9243,7 @@ class TestAutogradDeviceType(TestCase):
             if dtype.is_floating_point:
                 f()
             else:
-                with self.assertRaisesRegex(RuntimeError, 'floating point', msg="dt: {} device: {}".format(a.dtype, a.device)):
+                with self.assertRaisesRegex(RuntimeError, 'floating point', msg=f"dt: {a.dtype} device: {a.device}"):
                     f()
 
     @onlyCUDA
@@ -10865,7 +10865,7 @@ class TestNestedCheckpoint(TestCase):
 
                 yield node
 
-        class Handle():
+        class Handle:
             __slot__ = ["node_name"]
 
             def __init__(self, node_name):
