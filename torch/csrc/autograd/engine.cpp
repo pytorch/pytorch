@@ -414,7 +414,6 @@ std::vector<Node*> get_current_graph_task_execution_order() {
 
   const bool check_exec_info = !task->exec_info_.empty();
   std::vector<Node*> out{};
-  std::unordered_set<Node*> seen{};
   // Do a copy since we mutate it later
   std::unordered_map<Node*, int> dependencies = task->dependencies_;
 
@@ -436,11 +435,6 @@ std::vector<Node*> get_current_graph_task_execution_order() {
   while (!heap.empty()) {
     Node* fn = heap.top();
     heap.pop();
-
-    const bool was_inserted = seen.insert(fn).second;
-    if (!was_inserted) {
-      continue;
-    }
 
     out.push_back(fn);
     for (const auto& edge : fn->next_edges()) {
