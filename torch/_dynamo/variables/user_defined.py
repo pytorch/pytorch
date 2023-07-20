@@ -5,6 +5,7 @@ import importlib
 import inspect
 import itertools
 import random
+import threading
 import types
 from typing import Dict, List
 
@@ -17,14 +18,14 @@ from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     all_hook_names,
+    build_checkpoint_variable,
     check_constant_args,
     get_custom_getattr,
-    get_higher_order_op,
     is_namedtuple_cls,
+    is_utils_checkpoint,
     istype,
     namedtuple_fields,
     object_has_getattribute,
-    requires_higher_order_op,
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
@@ -347,10 +348,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
             }
             partial_kwargs.update(kwargs)
-            if requires_higher_order_op(self.value.func):
-                return variables.TorchHigherOrderOperatorVariable(
-                    get_higher_order_op(self.value.func), source=self.source, **options
-                ).call_function(tx, partial_args, partial_kwargs)
+            if is_utils_checkpoint(self.value.func):
+                options["source"] = self.source
+                return build_checkpoint_variable(**options).call_function(
+                    tx, partial_args, partial_kwargs
+                )
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
@@ -371,6 +373,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if (
             isinstance(self.value, torch.nn.Module)
             or "__slots__" in self.value.__class__.__dict__
+            or type(self.value) == threading.local
         ):
             # getattr_static doesn't work on these
             subobj = getattr(self.value, name)
@@ -435,10 +438,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     func, self, source=source, **options
                 )
             elif inspect.isfunction(dynamic_subobj):
-                if requires_higher_order_op(func):
-                    return variables.TorchHigherOrderOperatorVariable(
-                        get_higher_order_op(func), **options
-                    )
+                if is_utils_checkpoint(func):
+                    options["source"] = source
+                    return build_checkpoint_variable(**options)
+                elif is_allowed(func):
+                    return variables.TorchVariable(func, source=source, **options)
                 return variables.UserFunctionVariable(func, source=source, **options)
 
         if (

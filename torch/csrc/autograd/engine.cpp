@@ -798,7 +798,7 @@ void validate_outputs(
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
     ss << edges.size() << ", but got " << grads.size();
-    AT_ERROR(format_error(ss.str()));
+    TORCH_CHECK(false, format_error(ss.str()));
   }
   for (const auto i : c10::irange(grads.size())) {
     const auto& edge = edges[i];
@@ -811,7 +811,7 @@ void validate_outputs(
       // FIXME: TestJit.test_ge_optimized fails this assertion.
       // std::stringstream ss;
       // ss << "undefined gradient at index " << i;
-      // AT_ERROR(format_error(ss.str()));
+      // TORCH_CHECK(false, format_error(ss.str()));
       continue;
     }
 
@@ -820,7 +820,7 @@ void validate_outputs(
         grad = metadata.reduce_grad(grad);
       } else {
         const auto message = metadata.incompatible_shape_error_message(i, grad);
-        AT_ERROR(format_error(message.str()));
+        TORCH_CHECK(false, format_error(message.str()));
       }
     }
 
@@ -839,7 +839,7 @@ void validate_outputs(
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected dtype ";
       ss << metadata.dtype() << " but got " << grad.dtype();
-      AT_ERROR(format_error(ss.str()));
+      TORCH_CHECK(false, format_error(ss.str()));
     }
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for
@@ -856,7 +856,7 @@ void validate_outputs(
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected layout ";
         ss << metadata.layout() << " but got " << grad.layout();
-        AT_ERROR(format_error(ss.str()));
+        TORCH_CHECK(false, format_error(ss.str()));
       }
     }
 
@@ -871,7 +871,7 @@ void validate_outputs(
           std::stringstream ss;
           ss << "invalid gradient at index " << i << " - expected device ";
           ss << metadata.device() << " but got " << grad.device();
-          AT_ERROR(format_error(ss.str()));
+          TORCH_CHECK(false, format_error(ss.str()));
         }
       }
     }

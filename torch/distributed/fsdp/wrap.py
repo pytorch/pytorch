@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import contextlib
+import copy
 import functools
 from abc import ABC, abstractmethod
 from typing import (
@@ -12,6 +13,7 @@ from typing import (
     cast,
     Dict,
     Generator,
+    Iterable,
     Optional,
     Sequence,
     Set,
@@ -30,6 +32,111 @@ __all__ = [
     "wrap",
     "ModuleWrapPolicy",
 ]
+
+
+# NOTE: We intentionally keep this function simple and isolate the complexity
+# to `fn` to enable using this function generically. We may move this to a
+# non-FSDP-specific folder and/or make it public in the future.
+def _post_order_apply(
+    root_module: nn.Module,
+    fn: Callable[[nn.Module], Optional[nn.Module]],
+):
+    """
+    This applies ``fn`` to every module in the module tree of ``root_module``
+    following a post-order traversal. If ``fn`` returns an :class:`nn.Module`,
+    then this replaces the original module with the newly returned one in the
+    tree. Otherwise, ``fn`` should return ``None``, in which case the module is
+    not changed.
+    """
+    # Track visited modules to avoid visiting shared modules multiple times
+    visited_modules: Set[nn.Module] = {root_module}
+
+    def _post_order_apply_inner(
+        module: nn.Module,
+        module_name: str,
+        parent_module: Optional[nn.Module],
+    ):
+        for child_module_name, child_module in module.named_children():
+            if child_module not in visited_modules:
+                visited_modules.add(child_module)
+                _post_order_apply_inner(child_module, child_module_name, module)
+        optional_module = fn(module)
+        if optional_module is not None:
+            assert isinstance(parent_module, nn.Module), (
+                "Non-root modules should have their parent module set but got "
+                f"{parent_module} for {module}"
+            )
+            assert module_name, (
+                "Non-root modules should have their module name set but got "
+                f"an empty module name for {module}"
+            )
+            assert isinstance(
+                optional_module, nn.Module
+            ), f"fn should return None or an nn.Module but got {optional_module}"
+            setattr(parent_module, module_name, optional_module)
+
+    _post_order_apply_inner(root_module, "", None)
+
+
+def _construct_wrap_fn(
+    root_module: nn.Module,
+    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
+    fsdp_fn: Callable,
+) -> Callable[[nn.Module], Optional[nn.Module]]:
+    """
+    This constructs the "wrap" function to pass to :func:`_post_order_apply`
+    based on ``target_module_to_kwargs``, which should be constructed from the
+    wrapping policy.
+    """
+
+    def fn(module: nn.Module) -> Optional[nn.Module]:
+        # Explicitly avoid wrapping the root module since for FSDP, it is
+        # handled by the caller
+        if module in target_module_to_kwargs and module is not root_module:
+            kwargs = target_module_to_kwargs[module]
+            return fsdp_fn(module, **kwargs)
+        return None
+
+    return fn
+
+
+def _run_module_wrap_policy(
+    root_module: nn.Module,
+    module_classes: Iterable[Type[nn.Module]],
+    ignored_modules: Set[nn.Module],
+    fsdp_kwargs: Dict[str, Any],
+) -> Dict[nn.Module, Dict[str, Any]]:
+    """
+    TODO: To match the existing ``ModuleWrapPolicy`` behavior, every wrapped
+    module shares the same FSDP kwargs.
+    """
+    module_classes_tuple = tuple(set(module_classes))
+    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]] = {}
+    for module in root_module.modules():
+        if module in ignored_modules:
+            continue
+        elif isinstance(module, module_classes_tuple):
+            # Shallow copy to avoid coupling changes across modules
+            target_module_to_kwargs[module] = copy.copy(fsdp_kwargs)
+    return target_module_to_kwargs
+
+
+def _run_mixed_precision_override_policy(
+    root_module: nn.Module,
+    module_classes: Iterable[Type[nn.Module]],
+    ignored_modules: Set[nn.Module],
+    fsdp_kwargs: Dict[str, Any],
+    target_module_to_kwargs: Dict[nn.Module, Dict[str, Any]],
+):
+    module_classes_tuple = tuple(set(module_classes))
+    for module in root_module.modules():
+        if module in ignored_modules:
+            continue
+        elif isinstance(module, module_classes_tuple):
+            # This policy overrides any existing policy
+            target_module_to_kwargs[module] = fsdp_kwargs
+            target_module_to_kwargs[module]["mixed_precision"] = None
+    return target_module_to_kwargs
 
 
 def always_wrap_policy(*args, **kwargs) -> bool:
@@ -96,6 +203,7 @@ class ModuleWrapPolicy(_FSDPPolicy):
             _module_wrap_policy,
             module_classes=module_classes,
         )
+        self._module_classes = module_classes
         self._module_classes_str = str(module_classes)
 
     @property

@@ -24,7 +24,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfRocm
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
@@ -1817,7 +1816,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 aten_graph=True,
             )
 
-    @skipIfRocm
     @config.patch(capture_scalar_outputs=True)
     def test_dynamic_slicing_simple(self):
         def f(x):
@@ -1853,7 +1851,6 @@ def forward(self, x):
     return pytree.tree_unflatten([matmul_default], self._out_spec)""",
         )
 
-    @skipIfRocm
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_cond_in_aten_symbolic(self):
         class ConditionOp(torch.nn.Module):
@@ -2244,7 +2241,6 @@ def forward(self, x):
         torch._dynamo.export(my_dyn_fn, y, y, y)
         torch._dynamo.export(my_dyn_fn, y, y, y, constraints=[dynamic_dim(y, 0)])
 
-    @skipIfRocm
     def test_export_multi_dynamic_dim_unsafe_relationship(self):
         x = torch.randn([3, 3, 3])
         y = torch.randn([2, 2, 2])
@@ -2877,7 +2873,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "HigherOrderOperator can't return non-tensor scalar output",
+            "HigherOrderOperator body's output must consist of tensors only",
         ):
             torch._dynamo.export(
                 f_branch_return_non_tensor,
@@ -3209,7 +3205,7 @@ def forward(self, pred, x):
     ones_3 = torch.ones(6, 4)
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.cond(arg0, cond_true_0, cond_false_0, [arg1, ones, ones_1, ones_3, ones, ones_1, ones_2]);  arg0 = cond_true_0 = cond_false_0 = arg1 = ones = ones_1 = ones_3 = ones_2 = None
+    cond = torch.ops.higher_order.cond(arg0, cond_true_0, cond_false_0, [arg1, ones, ones_1, ones_3, ones, ones_1, ones_2]);  arg0 = cond_true_0 = cond_false_0 = arg1 = ones = ones_1 = ones_3 = ones_2 = None
     return pytree.tree_unflatten([cond], self._out_spec)""",  # noqa: B950,E122
         )
 

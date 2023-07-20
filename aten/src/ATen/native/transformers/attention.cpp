@@ -147,9 +147,6 @@ Tensor masked_softmax(
     return at::_nested_tensor_softmax_with_shape(attn_scores, query);
   }
   if (attn_mask && attn_mask->dtype() != at::kBool) {
-    TORCH_WARN(
-        "Converting mask without torch.bool dtype to bool; this will "
-        "negatively affect performance. Prefer to use a boolean mask directly.");
     attn_mask = attn_mask->to(at::kBool);
   }
   if (attn_mask) {
@@ -513,26 +510,6 @@ int64_t _fused_sdp_choice_meta(
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 
-//  !!!!!! TODO: THIS NEEDS TO BE REMOVED BUT PEOPLE HAVE TRAINED THEIR MODELS
-//  WITH THIS OP BUILTIN !!!!!!
-std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
-    const Tensor& query_,
-    const Tensor& key,
-    const Tensor& value,
-    const c10::optional<Tensor>& attn_mask_,
-    double dropout_p,
-    bool need_attn_weights,
-    bool is_causal) {
-  if (!need_attn_weights) {
-    return std::make_tuple(
-        at::scaled_dot_product_attention(
-            query_, key, value, attn_mask_, dropout_p, is_causal, c10::nullopt),
-        Tensor());
-  }
-  return at::_scaled_dot_product_attention_math(
-      query_, key, value, attn_mask_, dropout_p, is_causal, c10::nullopt);
-}
-
 inline void validate_sdpa_input(
     const Tensor& query_,
     const Tensor& key,
@@ -709,7 +686,7 @@ Tensor triton_multi_head_attention(
     const c10::optional<Tensor>& mask) {
   // query shape: [B, T, D]
   // qkv_weight shape: [3 * D, D]
-  TORCH_CHECK(!mask, "Only casual mask is supported for Triton.");
+  TORCH_CHECK(!mask, "Only causal mask is supported for Triton.");
 
   const auto D = embed_dim;
   TORCH_CHECK(
