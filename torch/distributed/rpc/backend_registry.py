@@ -266,7 +266,7 @@ def _get_device_count_info():
     device_count = dict()
     cuda_device_count = torch.cuda.device_count()
     device_count["cuda"] = cuda_device_count
-    # Whether a third-party device is registered, and if so, 
+    # Whether a third-party device is registered, and if so,
     # the information of the third-party device is also stored in device_count dictionary
     custom_backend_name = _get_privateuse1_backend_name()
     if hasattr(torch, custom_backend_name):
@@ -284,10 +284,10 @@ def _init_device_state(custom_backend_name):
     # "allocator not initialized", because other processes might send
     # CUDA-related RPC request to this process before user code in this
     # process initializes its PyTorch CUDA states.
-    # If the device type is not cuda, it must be a third-party device. 
+    # If the device type is not cuda, it must be a third-party device.
     # The corresponding methods must have been registered and can be called directly
-    if getattr(getattr(torch, custom_backend_name), "is_available")():
-        getattr(getattr(torch, custom_backend_name), "init")()
+    if getattr(torch, custom_backend_name).is_available():
+        getattr(torch, custom_backend_name).init()
 
 
 def _get_device_infos():
