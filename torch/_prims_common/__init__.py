@@ -120,11 +120,11 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     assert isinstance(b, TensorLike)
 
     if not same_shape(a.shape, b.shape):
-        msg = "Shapes {0} and {1} are not equal!".format(a.shape, b.shape)
+        msg = f"Shapes {a.shape} and {b.shape} are not equal!"
         raise AssertionError(msg)
 
     if a.dtype != b.dtype:
-        msg = "Dtypes {0} and {1} are not equal!".format(a.dtype, b.dtype)
+        msg = f"Dtypes {a.dtype} and {b.dtype} are not equal!"
         raise AssertionError(msg)
 
     if a.device != b.device:
@@ -135,7 +135,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
         ):
             pass
         else:
-            msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
+            msg = f"Devices {a.device} and {b.device} are not equal!"
             raise AssertionError(msg)
 
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
@@ -143,7 +143,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
         same_strides, idx = check_significant_strides(a, b)
         if not same_strides:
             msg = (
-                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+                "Stride mismatch! Strides are {} and {} (mismatched at {})!".format(
                     a.stride(), b.stride(), idx
                 )
             )
@@ -151,7 +151,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
 
         if a.storage_offset() != b.storage_offset():
             msg = (
-                "Storage offset mismatch! Storage offsets are {0} and {1}!".format(
+                "Storage offset mismatch! Storage offsets are {} and {}!".format(
                     a.storage_offset(), b.storage_offset()
                 )
             )
@@ -584,7 +584,7 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 
     if _idx < 0 or _idx >= rank:
         # Same error message as in aten/src/ATen/WrapDimUtils.h:49
-        msg = "Dimension out of range (expected to be in range of [{0}, {1}], but got {2})".format(
+        msg = "Dimension out of range (expected to be in range of [{}, {}], but got {})".format(
             -rank, rank - 1, idx
         )
         raise IndexError(msg)
@@ -710,7 +710,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
                 shape = arg.shape
 
             if not is_same_shape(shape, arg.shape):
-                msg = "Shape {0} is not the expected shape {1}!".format(
+                msg = "Shape {} is not the expected shape {}!".format(
                     arg.shape, shape
                 )
                 raise RuntimeError(msg)
@@ -1102,7 +1102,7 @@ def can_safe_cast_to(*, cast_to: torch.dtype, cast_from: torch.dtype) -> bool:
         if fn(cast_from):
             return False
 
-    raise ValueError("Received unknown dtypes {0}, {1}!".format(cast_to, cast_from))
+    raise ValueError(f"Received unknown dtypes {cast_to}, {cast_from}!")
 
 
 def check_same_dtype(*args):
@@ -1340,7 +1340,7 @@ def elementwise_dtypes(
     for x in args:
         if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
             msg = (
-                "Unexpected type {0} when computing elementwise type promotion!".format(
+                "Unexpected type {} when computing elementwise type promotion!".format(
                     str(type(x))
                 )
             )
@@ -1424,7 +1424,7 @@ def elementwise_dtypes(
         return get_computation_dtype(result_dtype), torch.bool
     else:
         raise ValueError(
-            "Unknown type promotion kind {0}".format(str(type_promotion_kind))
+            f"Unknown type promotion kind {str(type_promotion_kind)}"
         )
 
 
@@ -1648,8 +1648,8 @@ def check_in_bounds_for_storage(
     required_length = compute_required_storage_length(shape, strides, storage_offset)
     if a.size() < required_length:
         msg = (
-            "Can't view a storage of size {0} with an offset of {1}, shape of {2}, and strides of {3}, "
-            "which requires a storage of size {4}".format(
+            "Can't view a storage of size {} with an offset of {}, shape of {}, and strides of {}, "
+            "which requires a storage of size {}".format(
                 a.size(), storage_offset, str(shape), str(strides), required_length
             )
         )
@@ -1671,9 +1671,9 @@ def check(
     .. note:: This function is planned for removal in the future. Please use
         `torch._check*` functions instead.
     """
-    warnings.warn(DeprecationWarning((
+    warnings.warn(DeprecationWarning(
         "'torch._prims_common.check' will be removed in the future. Please use "
-        "'torch._check*' functions instead")))
+        "'torch._check*' functions instead"))
     torch._check_with(exc_type, b, s)
 
 

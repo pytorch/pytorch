@@ -1758,6 +1758,14 @@ _deprecated_attrs = {
     "has_mkldnn": torch.backends.mkldnn.is_available,
 }
 
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+    from torch import _dynamo as _dynamo
+    from torch import _inductor as _inductor
+    from torch import onnx as onnx
+
 _lazy_modules = {
     "_dynamo",
     "_inductor",
