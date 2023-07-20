@@ -401,7 +401,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
         )
 
         for binary_fn, has_relu in options:
-            has_relu = False
             mod = M(binary_fn, has_relu=has_relu).eval()
             v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
                 1
@@ -426,7 +425,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 40 if has_relu else 39,
                 check_quantization=True,
             )
-            return
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
