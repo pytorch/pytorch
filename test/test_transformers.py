@@ -1581,44 +1581,42 @@ class TestSDPACudaOnly(NNTestCase):
             query_padding_mask: (batch_size, seqlen_q)
             key_padding_mask: (batch_size, seqlen_k)
         """
-        seqlen_q, seqlen_k = S.shape[-2:]
+        b, h, seqlen_q, seqlen_k = S.shape
         warps_n = 4
-        block_size_m, block_size_n = _get_block_size(S.device, head_dim, is_dropout, causal)
-        nblocks_n = (seqlen_k + blocksize_n - 1) // blocksize_n
+        blocksize_m, blocksize_n = _get_block_size(S.device, head_dim, causal)
         nblocks_m = (seqlen_q + blocksize_m - 1) // blocksize_m
-        S_flat = S.view(S.shape[0], S.shape[1], S.shape[2] * S.shape[3])
-        loop_steps = math.ceil(seqlen_k / block_size)
-        mmas_n = (seqlen_k // warps_n //
-                  16) if seqlen_k <= block_size else (block_size // warps_n // 16)
+        nblocks_n = (seqlen_k + blocksize_n - 1) // blocksize_n
+        mmas_n = (blocksize_n + 16 - 1) // 16
 
-        S_converted = S_flat.view(S_flat.shape[0], S_flat.shape[1], loop_steps,
-                                  seqlen_q // 16, mmas_n, warps_n, 8, 4, 2, 2, 2)
-        S_converted = S_converted.permute(0, 1, 3, 8, 6, 2, 4, 5, 9, 7, 10)
-        S_converted = S_converted.reshape(S_flat.shape[0],
-                                          S_flat.shape[1], (seqlen_q // 16 * 2 * 8), (loop_steps * mmas_n * warps_n * 2 * 4 * 2))
+        # Reshape S using PyTorch native functions
+        S_flat = S.view(b, h, nblocks_m, blocksize_m, nblocks_n, blocksize_n)
+        S_flat = S_flat.permute(0, 1, 2, 4, 3, 5)
+        S_flat = S_flat.reshape(b, h, nblocks_m, nblocks_n, (blocksize_m * blocksize_n))
+        S_converted = S_flat.view(b, h, nblocks_m, nblocks_n, mmas_n, -1, warps_n, 8, 4, 2, 2, 2)
+        S_converted = S_converted.permute(0, 1, 2, 5, 6, 10, 7, 3, 4, 9, 8, 11)
+        S_converted = S_converted.reshape(b, h, (nblocks_m * S_converted.size(3) * warps_n * 2 * 8), (nblocks_n * mmas_n * 2 * 4 * 2))
+        
+        if causal:
+            causal_mask = torch.triu(torch.ones(seqlen_q, seqlen_k, dtype=torch.bool, device=S.device), 1)
+            S_converted.masked_fill_(causal_mask, 0.0)
         # Need to zero out things not in attention_mask in case S was initialized with random values
         # and some of those values aren't overwritten.
-        seqlen_q_og = query_padding_mask.shape[-1]
-        if seqlen_q_og < seqlen_q:
-            query_padding_mask = F.pad(
-                query_padding_mask, (0, seqlen_q - seqlen_q_og))
-        else:
-            query_padding_mask = query_padding_mask[:, :seqlen_q]
-        q_mask_fill = ~query_padding_mask.view(query_padding_mask.shape[0], 1, query_padding_mask.shape[1], 1)
-        S_converted = S_converted.masked_fill(q_mask_fill, 0.0)
-        seqlen_k_og = key_padding_mask.shape[-1]
-        if seqlen_k_og < seqlen_k:
-            key_padding_mask = F.pad(key_padding_mask, (0, seqlen_k - seqlen_k_og))
-        else:
-            key_padding_mask = key_padding_mask[:, :seqlen_k]
-
-        k_mask_fill = ~key_padding_mask.view(key_padding_mask.shape[0], 1, 1, key_padding_mask.shape[1])
-        S_converted = S_converted.masked_fill(k_mask_fill, 0.0)
-
-        if causal:
-            causal_mask = torch.triu(torch.ones(
-                seqlen_q, seqlen_k, dtype=torch.bool, device=S.device), 1)
-            S_converted.masked_fill_(causal_mask, 0.0)
+        seqlen_q_og = query_padding_mask.shape[-1] if query_padding_mask is not None else seqlen_q
+        if query_padding_mask is not None:
+            if seqlen_q_og < seqlen_q:
+                query_padding_mask = F.pad(query_padding_mask, (0, seqlen_q - seqlen_q_og))
+            else:
+                query_padding_mask = query_padding_mask[:, :seqlen_q]
+            q_mask_fill = ~query_padding_mask.view(query_padding_mask.shape[0], 1, query_padding_mask.shape[1], 1)
+            S_converted = S_converted.masked_fill(q_mask_fill, 0.0)
+        seqlen_k_og = key_padding_mask.shape[-1] if key_padding_mask is not None else seqlen_k
+        if key_padding_mask is not None:
+            if seqlen_k_og < seqlen_k:
+                key_padding_mask = F.pad(key_padding_mask, (0, seqlen_k - seqlen_k_og))
+            else:
+                key_padding_mask = key_padding_mask[:, :seqlen_k]
+            k_mask_fill = ~key_padding_mask.view(key_padding_mask.shape[0], 1, 1, key_padding_mask.shape[1])
+            S_converted = S_converted.masked_fill(k_mask_fill, 0.0)
         if seqlen_q_og < seqlen_q:
             S_converted = S_converted[:, :, :seqlen_q_og, :]
         else:
@@ -2267,8 +2265,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048])
     @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128])
     @parametrize("is_causal", [True, False])
-    @parametrize("dropout_p", [0.0])
-    # @parametrize("dropout_p", [0.0, 0.22, 0.48])
+    @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     @parametrize("scale", [None, "l1"])
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
@@ -2309,9 +2306,9 @@ class TestSDPACudaOnly(NNTestCase):
             # Build dropout_mask
             dbug_mask = output_tuple[-1]
             query_padding_mask = torch.ones(
-                1, seq_len_q, device=device, dtype=torch.bool)
+                batch_size, seq_len_q, device=device, dtype=torch.bool)
             key_padding_mask = torch.ones(
-                1, seq_len_k, device=device, dtype=torch.bool)
+                batch_size, seq_len_k, device=device, dtype=torch.bool)
 
             softmax_mask = self.convert_flash_attn_S_to_softmax(
                 dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=is_causal)
