@@ -1209,9 +1209,9 @@ torch.cuda.synchronize()
                 return torch.stack([col, col + 2], 1).view(2, 2, 2, 2)
 
         if adaptive:
-            cls_name = f'AdaptiveMaxPool{num_dim}d'
+            cls_name = 'AdaptiveMaxPool{}d'.format(num_dim)
         else:
-            cls_name = f'MaxPool{num_dim}d'
+            cls_name = 'MaxPool{}d'.format(num_dim)
         module_cls = getattr(nn, cls_name)
         module = module_cls(2, return_indices=True).to(device, dtype=dtype)
         numel = 4 ** (num_dim + 1)
