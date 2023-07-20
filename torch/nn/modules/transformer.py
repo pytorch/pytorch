@@ -15,6 +15,38 @@ from .normalization import LayerNorm
 
 __all__ = ['Transformer', 'TransformerEncoder', 'TransformerDecoder', 'TransformerEncoderLayer', 'TransformerDecoderLayer']
 
+def _generate_square_subsequent_mask(
+        sz: int,
+        device: torch.device = torch.device(torch._C._get_default_device()),  # torch.device('cpu'),
+        dtype: torch.dtype = torch.get_default_dtype(),
+) -> Tensor:
+    r"""Generate a square causal mask for the sequence. The masked positions are filled with float('-inf').
+        Unmasked positions are filled with float(0.0).
+    """
+    return torch.triu(
+        torch.full((sz, sz), float('-inf'), dtype=dtype, device=device),
+        diagonal=1,
+    )
+
+
+def _get_seq_len(
+        src: Tensor,
+        batch_first: bool
+) -> Optional[int]:
+
+    if src.is_nested:
+        return None
+    else:
+        src_size = src.size()
+        if len(src_size) == 2:
+            # unbatched: S, E
+            return src_size[0]
+        else:
+            # batched: B, S, E if batch_first else S, B, E
+            seq_len_pos = 1 if batch_first else 0
+            return src_size[seq_len_pos]
+
+
 class Transformer(Module):
     r"""A transformer model. User is able to modify the attributes as needed. The architecture
     is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
@@ -150,11 +182,15 @@ class Transformer(Module):
         return output
 
     @staticmethod
-    def generate_square_subsequent_mask(sz: int, device='cpu') -> Tensor:
-        r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
+    def generate_square_subsequent_mask(
+            sz: int,
+            device: torch.device = torch.device(torch._C._get_default_device()),  # torch.device('cpu'),
+            dtype: torch.dtype = torch.get_default_dtype(),
+    ) -> Tensor:
+        r"""Generate a square causal mask for the sequence. The masked positions are filled with float('-inf').
             Unmasked positions are filled with float(0.0).
         """
-        return torch.triu(torch.full((sz, sz), float('-inf'), device=device), diagonal=1)
+        return _generate_square_subsequent_mask(sz, dtype=dtype, device=device)
 
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
@@ -264,6 +300,7 @@ class TransformerEncoder(Module):
         src_key_padding_mask_for_layers = src_key_padding_mask
         why_not_sparsity_fast_path = ''
         str_first_layer = "self.layers[0]"
+        batch_first = first_layer.self_attn.batch_first
         if not hasattr(self, "use_nested_tensor"):
             why_not_sparsity_fast_path = "use_nested_tensor attribute not present"
         elif not self.use_nested_tensor:
@@ -314,20 +351,8 @@ class TransformerEncoder(Module):
                 output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
                 src_key_padding_mask_for_layers = None
 
-        # Prevent type refinement
-        make_causal = (is_causal is True)
-
-        if is_causal is None:
-            if mask is not None:
-                sz = mask.size(0)
-                causal_comparison = torch.triu(
-                    torch.ones(sz, sz, device=mask.device) * float('-inf'), diagonal=1
-                ).to(mask.dtype)
-
-                if torch.equal(mask, causal_comparison):
-                    make_causal = True
-
-        is_causal = make_causal
+        seq_len = _get_seq_len(src, batch_first)
+        is_causal = _detect_is_causal_mask(mask, is_causal, seq_len)
 
         for mod in self.layers:
             output = mod(output, src_mask=mask, is_causal=is_causal, src_key_padding_mask=src_key_padding_mask_for_layers)
@@ -367,7 +392,7 @@ class TransformerDecoder(Module):
 
     def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, tgt_key_padding_mask: Optional[Tensor] = None,
-                memory_key_padding_mask: Optional[Tensor] = None, tgt_is_causal: bool = False,
+                memory_key_padding_mask: Optional[Tensor] = None, tgt_is_causal: Optional[bool] = None,
                 memory_is_causal: bool = False) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
@@ -398,6 +423,9 @@ class TransformerDecoder(Module):
             see the docs in Transformer class.
         """
         output = tgt
+
+        seq_len = _get_seq_len(tgt, self.layers[0].self_attn.batch_first)
+        tgt_is_causal = _detect_is_causal_mask(tgt_mask, tgt_is_causal, seq_len)
 
         for mod in self.layers:
             output = mod(output, memory, tgt_mask=tgt_mask,
@@ -825,3 +853,45 @@ def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
         return F.gelu
 
     raise RuntimeError("activation should be relu/gelu, not {}".format(activation))
+
+
+def _detect_is_causal_mask(
+        mask: Optional[Tensor],
+        is_causal: Optional[bool],
+        size: Optional[int]
+) -> bool:
+    """Return whether the given attention mask is causal.
+
+    Warning:
+    If ``is_causal`` is not ``None``, its value will be returned as is.  If a
+    user supplies an incorrect ``is_causal`` hint,
+
+    ``is_causal=False`` when the mask is in fact a causal attention.mask
+       may lead to reduced performance relative to what would be achievable
+       with ``is_causal=True``;
+    ``is_causal=True`` when the mask is in fact not a causal attention.mask
+       may lead to incorrect and unpredictable execution - in some scenarios,
+       a causal mask may be applied based on the hint, in other execution
+       scenarios the specified mask may be used.  The choice may not appear
+       to be deterministic, in that a number of factors like alignment,
+       hardware SKU, etc influence the decision whether to use a mask or
+       rely on the hint.
+    ``size`` if not None, check whether the mask is a causal mask of the provided size
+       Otherwhise, checks for any causal mask.
+    """
+    # Prevent type refinement
+    make_causal = (is_causal is True)
+
+    if is_causal is None and mask is not None:
+        sz = size if size is not None else mask.size(-2)
+        causal_comparison = _generate_square_subsequent_mask(
+            sz, device=mask.device, dtype=mask.dtype)
+
+        # Do not use `torch.equal` so we handle batched masks by
+        # broadcasting the comparison.
+        if mask.size() == causal_comparison.size():
+            make_causal = bool((mask == causal_comparison).all())
+        else:
+            make_causal = False
+
+    return make_causal
