@@ -28,11 +28,7 @@ namespace c10d {
 namespace detail {
 
 // Background thread parent class methods
-BackgroundThread::BackgroundThread(Socket&& storeListenSocket)
-    : storeListenSocket_{std::move(storeListenSocket)} {
-  // Signal instance destruction to the daemon thread.
-  initStopSignal();
-}
+BackgroundThread::BackgroundThread() {}
 
 BackgroundThread::~BackgroundThread() = default;
 
@@ -44,62 +40,13 @@ void BackgroundThread::dispose() {
   // Stop the run
   stop();
   // Join the thread
-  join();
-  // Close unclosed sockets
-  sockets_.clear();
-  // Now close the rest control pipe
-  closeStopSignal();
-}
-
-void BackgroundThread::join() {
   daemonThread_.join();
 }
 
-#ifdef _WIN32
-void BackgroundThread::initStopSignal() {
-  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
-  if (ghStopEvent_ == NULL) {
-    TORCH_CHECK(
-        false,
-        "Failed to create the control pipe to start the "
-        "BackgroundThread run");
-  }
+void BackgroundThread::start() {
+  daemonThread_ = std::thread{&BackgroundThread::run, this};
+  is_running_.store(true);
 }
-
-void BackgroundThread::closeStopSignal() {
-  CloseHandle(ghStopEvent_);
-}
-
-void BackgroundThread::stop() {
-  SetEvent(ghStopEvent_);
-}
-#else
-void BackgroundThread::initStopSignal() {
-  if (pipe(controlPipeFd_.data()) == -1) {
-    TORCH_CHECK(
-        false,
-        "Failed to create the control pipe to start the "
-        "BackgroundThread run");
-  }
-}
-
-void BackgroundThread::closeStopSignal() {
-  for (int fd : controlPipeFd_) {
-    if (fd != -1) {
-      ::close(fd);
-    }
-  }
-}
-
-void BackgroundThread::stop() {
-  if (controlPipeFd_[1] != -1) {
-    ::write(controlPipeFd_[1], "\0", 1);
-    // close the write end of the pipe
-    ::close(controlPipeFd_[1]);
-    controlPipeFd_[1] = -1;
-  }
-}
-#endif
 
 // Separate thread that is only launched on master
 class TCPStoreMasterDaemon : public BackgroundThread {
@@ -110,8 +57,14 @@ class TCPStoreMasterDaemon : public BackgroundThread {
 
   std::uint16_t port() const override;
 
+ protected:
+  void run() override;
+  void stop() override;
+
  private:
-  void run();
+  void initStopSignal();
+  void closeStopSignal();
+
   void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
   void clearSocketWaitState(int socket);
@@ -141,21 +94,82 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   std::unordered_map<std::string, std::vector<int>> waitingSockets_;
   // From socket -> number of keys awaited
   std::unordered_map<int, size_t> keysAwaited_;
+
+  Socket storeListenSocket_;
+  std::vector<Socket> sockets_{};
+#ifdef _WIN32
+  const std::chrono::milliseconds checkTimeout_ = std::chrono::milliseconds{10};
+  HANDLE ghStopEvent_{};
+#else
+  std::array<int, 2> controlPipeFd_{{-1, -1}};
+#endif
 };
 
 // Simply start the daemon thread
 TCPStoreMasterDaemon::TCPStoreMasterDaemon(Socket&& storeListenSocket)
-    : BackgroundThread{std::move(storeListenSocket)} {
-  daemonThread_ = std::thread{&TCPStoreMasterDaemon::run, this};
+    : storeListenSocket_{std::move(storeListenSocket)} {
+  initStopSignal();
 }
 
 TCPStoreMasterDaemon::~TCPStoreMasterDaemon() {
   dispose();
+  // it's now safe for us to cleanup
+  // Close unclosed sockets
+  sockets_.clear();
+  // Now close the rest control pipe
+  closeStopSignal();
 }
 
 std::uint16_t TCPStoreMasterDaemon::port() const {
   return storeListenSocket_.port();
 }
+
+#ifdef _WIN32
+void TCPStoreMasterDaemon::initStopSignal() {
+  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
+  if (ghStopEvent_ == NULL) {
+    TORCH_CHECK(
+        false,
+        "Failed to create the control pipe to start the "
+        "BackgroundThread run");
+  }
+}
+
+void TCPStoreMasterDaemon::closeStopSignal() {
+  CloseHandle(ghStopEvent_);
+}
+
+void TCPStoreMasterDaemon::stop() {
+  SetEvent(ghStopEvent_);
+}
+
+#else
+void TCPStoreMasterDaemon::initStopSignal() {
+  if (pipe(controlPipeFd_.data()) == -1) {
+    TORCH_CHECK(
+        false,
+        "Failed to create the control pipe to start the "
+        "BackgroundThread run");
+  }
+}
+
+void TCPStoreMasterDaemon::closeStopSignal() {
+  for (int fd : controlPipeFd_) {
+    if (fd != -1) {
+      ::close(fd);
+    }
+  }
+}
+
+void TCPStoreMasterDaemon::stop() {
+  if (controlPipeFd_[1] != -1) {
+    ::write(controlPipeFd_[1], "\0", 1);
+    // close the write end of the pipe
+    ::close(controlPipeFd_[1]);
+    controlPipeFd_[1] = -1;
+  }
+}
+#endif
 
 void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
   // Skipping the fds[0] and fds[1],

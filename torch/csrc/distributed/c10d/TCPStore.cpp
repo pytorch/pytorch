@@ -1,7 +1,7 @@
 #include <c10/util/irange.h>
-#include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
+#include <torch/csrc/distributed/c10d/logging.h>
 
 #include <fcntl.h>
 #include <algorithm>
@@ -63,9 +63,9 @@ std::mutex TCPServer::cache_mutex_{};
 
 std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
   auto startCore = [&opts]() {
-    auto daemon = opts.useLibUV
-        ? create_libuv_tcpstore_backend(opts)
-        : create_tcpstore_backend(opts);
+    auto daemon = opts.useLibUV ? create_libuv_tcpstore_backend(opts)
+                                : create_tcpstore_backend(opts);
+    daemon->start();
     return std::make_shared<TCPServer>(daemon->port(), std::move(daemon));
   };
 
