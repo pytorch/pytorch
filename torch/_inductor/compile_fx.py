@@ -269,7 +269,7 @@ def fake_tensor_prop(
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
-    cudagraphs=None,
+    cudagraphs: Optional[BoxedBool] = None,
     num_fixed=0,
     is_backward=False,
     graph_id=None,
@@ -284,7 +284,7 @@ def compile_fx_inner(
         return make_boxed_func(gm.forward)
 
     if cudagraphs is None:
-        cudagraphs = config.triton.cudagraphs
+        cudagraphs = BoxedBool(config.triton.cudagraphs)
 
     # Inputs to fx_codegen_and_compile
     graph_args = [gm, example_inputs]
@@ -432,7 +432,7 @@ def compile_fx_inner(
 def fx_codegen_and_compile(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
-    cudagraphs=None,
+    cudagraphs: Optional[BoxedBool] = None,
     num_fixed=0,
     is_backward=False,
     graph_id=None,
@@ -441,7 +441,7 @@ def fx_codegen_and_compile(
     is_inference=False,
     user_visible_outputs=frozenset(),
     layout_opt=None,
-):
+) -> CompiledFxGraph:
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
@@ -514,6 +514,10 @@ def fx_codegen_and_compile(
                     else:
                         context.output_strides.append(None)
             compiled_fn = graph.compile_to_fn()
+
+            if graph.disable_cudagraphs:
+                BoxedBool.disable(cudagraphs)
+
             compiled_graph = CompiledFxGraph(
                 compiled_artifact=compiled_fn,
                 cache_key=graph.cache_key,
