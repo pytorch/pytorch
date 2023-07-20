@@ -2014,7 +2014,6 @@ class CommonTemplate:
         with self.assertRaisesRegex(RuntimeError, ""):
             fn(torch.randn(1, 5))
 
-
     def test_softshrink_backward(self):
         grad_output = torch.randn(1)
         lambd = 0.5
@@ -2023,7 +2022,10 @@ class CommonTemplate:
             a = a.cos()
             return torch.ops.aten.softshrink_backward(grad_output, a, lambd)
 
-        self.common(fn, (torch.randn(1), grad_output, lambd),)
+        self.common(
+            fn,
+            (torch.randn(10), grad_output, lambd),
+        )
 
     def test_inductor_assert(self):
         @torch._dynamo.optimize("inductor", dynamic=True)
