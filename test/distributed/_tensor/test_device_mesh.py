@@ -156,15 +156,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         return 8
 
     @with_comms
-    def test_all_reduce_1d(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
-        # multiply with 1 to trigger wait
-        local_tensor = mesh.all_reduce(local_tensor, mesh_dim=0) * 1
-        res_num = ((0 + self.world_size - 1) * self.world_size) / 2
-        self.assertEqual(local_tensor, torch.ones(3, 3) * res_num)
-
-    @with_comms
     def test_broadcast_1d(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
@@ -392,21 +383,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             res_num = torch.sum(torch.tensor(global_ranks))
             self.assertEqual(scattered_tensor, torch.ones(3, 3, 3) * res_num)
-
-    @with_comms
-    def test_all_reduce_nd(self):
-        mesh_tensor = torch.arange(8).reshape(2, 2, 2)
-        mesh = DeviceMesh(self.device_type, mesh_tensor)
-        local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
-
-        # check all dim groups
-        dim_to_subgroups = mesh.get_dim_groups()
-        for dim, dim_group in enumerate(dim_to_subgroups):
-            global_ranks = get_process_group_ranks(dim_group)
-            cloned_local_tensor = local_tensor.clone()
-            cloned_local_tensor = mesh.all_reduce(cloned_local_tensor, mesh_dim=dim) * 1
-            res_num = sum(global_ranks)
-            self.assertEqual(cloned_local_tensor, torch.ones(3, 3) * res_num)
 
     @with_comms
     def test_broadcast_nd(self):
