@@ -1492,7 +1492,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 1, 7)
         self.run_test(model, x)
 
-    # NOTE: ceil_mode is not included in the test, because of
+    # TODO: ceil_mode is not included in the test, because of
     # https://github.com/microsoft/onnxruntime/issues/16203
     # The ORT and PyTorch has different calculation for ceil_mode (the last value).
     @common_utils.parametrize(
@@ -1513,7 +1513,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(20, 16, 50, 32)
         self.run_test(model, x)
 
-    # NOTE: ceil_mode is not included in the test, because of
+    # TODO: ceil_mode is not included in the test, because of
     # https://github.com/microsoft/onnxruntime/issues/16203
     # The ORT and PyTorch has different calculation for ceil_mode (the last value).
     @skipIfUnsupportedMinOpsetVersion(19)
