@@ -661,11 +661,11 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   init();
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialized with following options:"
-            << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << "\nNCCL_DESYNC_DEBUG: " << desyncDebug_
-            << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
-            << "\nTIMEOUT(ms): " << options_->timeout.count()
-            << "\nUSE_HIGH_PRIORITY_STREAM: "
+            << "NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
+            << ", NCCL_BLOCKING_WAIT: " << blockingWait_
+            << ", TIMEOUT(ms): " << options_->timeout.count()
+            << ", USE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream;
 
   RECORD_PARAM_COMMS(
@@ -808,10 +808,10 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
-    LOG(INFO) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
+    VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
     workCleanupLoop();
-    LOG(INFO) << "[Rank " << rank_
-              << "] NCCL watchdog thread terminated normally";
+    VLOG(2) << "[Rank " << rank_
+            << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
     // Append error message reported from workCleanupLoop
     const auto exitMsg = c10::str(
