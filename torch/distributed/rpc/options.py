@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, Union
 
 import torch
 from torch._C._distributed_rpc import _TensorPipeRpcBackendOptionsBase
+from torch._C import _get_privateuse1_backend_name
 from . import constants as rpc_contants
 
 
@@ -12,10 +13,10 @@ __all__ = ["TensorPipeRpcBackendOptions"]
 def _to_device(device: DeviceType) -> torch.device:
     device = torch.device(device)
     if device.type != "cuda" and \
-        device.type != torch.utils.backend_registration._privateuse1_backend_name:
+            device.type != _get_privateuse1_backend_name():
         raise ValueError(
             "`set_devices` expect a list of CUDA devices or "
-            f"{torch.utils.backend_registration._privateuse1_backend_name} devices, but got "
+            f"{_get_privateuse1_backend_name()} devices, but got "
             f"device type {device.type}."
         )
     return device
