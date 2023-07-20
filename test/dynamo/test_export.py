@@ -3011,7 +3011,7 @@ def forward(self, x):
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 frame_id=0,
             ),
-        ) as fake_mode:
+        ):
             x = torch.randn(3)
 
             for aten_graph in [True, False]:
