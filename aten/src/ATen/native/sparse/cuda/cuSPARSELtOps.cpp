@@ -16,59 +16,51 @@ namespace at {
 namespace native {
 
 cusparseLtHandle_t handle;
-uint32_t alignment = 16;
 
-int num_streams = 0;
-cudaStream_t stream = nullptr;
-cudaStream_t* streams = nullptr;
-cusparseLtPruneAlg_t pruning_algo = CUSPARSELT_PRUNE_SPMMA_STRIP;
-constexpr static auto order = CUSPARSE_ORDER_ROW;
-
-
-Tensor _cslt_compress(
-    const Tensor& sparse_input
-)
+at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
-  cudaDataType type = CUDA_R_16F;
-  cusparseComputeType compute_type = CUSPARSE_COMPUTE_16F;
+  TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
+
+  cusparseLtMatDescriptor_t sparse_input_descriptor;
+  cudaDataType type;
+  auto compression_factor = 9;
+
+  switch(
+    sparse_input.scalar_type()
+  )
+  {
+    case at::ScalarType::Char:
+        type = CUDA_R_8I;
+        compression_factor = 10;
+        break;
+    case at::ScalarType::Half:
+        type = CUDA_R_16F;
+        break;
+    case at::ScalarType::BFloat16:
+        type = CUDA_R_16BF;
+        break;
+    case at::ScalarType::Float:
+        type = CUDA_R_32F;
+        break;
+    default:
+        std::cout << "Invalid choice";
+        break;
+  }
 
   // We create the tensor to store the compressed sparse matrix (non-pruned
   // elements + mask) in python with the same dtype as the sparse input tensor
   // so we know this wil be correct.
-  if (sparse_input.dtype() == c10::ScalarType::BFloat16) {
-    type = CUDA_R_16BF;
-  } else if (sparse_input.dtype() == c10::ScalarType::Float) {
-    type = CUDA_R_32F;
-    compute_type = CUSPARSE_COMPUTE_TF32_FAST;
-  } else if (sparse_input.dtype() == c10::ScalarType::Char) {
-    type = CUDA_R_8I;
-    compute_type = CUSPARSE_COMPUTE_32I;
-  }
-
-  auto compression_factor = 9;
-  auto original_size = sparse_input.numel();
-  auto compressed_tensor = sparse_input.new_empty(original_size * compression_factor / 16);
-
-  TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
-
-  // assert weight.contiguous()
-  // For PyTorch, we assume row major order
-
-  int64_t m = sparse_input.size(0);
-  int64_t k = sparse_input.size(1);
-  int64_t lda = k;
-
-  cusparseLtMatDescriptor_t sparse_input_descriptor;
+  auto compressed_tensor = sparse_input.new_empty(sparse_input.numel() * compression_factor / 16);
 
   TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
       &handle,
       &sparse_input_descriptor,
-      m,
-      k,
-      lda,
-      alignment,
+      sparse_input.size(0),
+      sparse_input.size(1),
+      sparse_input.size(1),
+      16,
       type,
-      order,
+      CUSPARSE_ORDER_ROW,
       CUSPARSELT_SPARSITY_50_PERCENT));
 
   // compress input
@@ -91,107 +83,119 @@ Tensor _cslt_compress(
       sparse_input.data_ptr(),
       compressed_tensor.data_ptr(),
       compressedBufferPtr.get(),
-      stream));
+      nullptr));
 
   return compressed_tensor;
 }
 
-Tensor _cslt_sparse_mm(
+at::Tensor _cslt_sparse_mm(
     const Tensor& compressed_A,
     const Tensor& dense_B,
-    const Tensor& bias
+    const c10::optional<Tensor>& bias_opt,
+    bool transpose_result
 )
 {
   // cupsarselt constructs
-  cusparseLtMatDescriptor_t sparse_input_descriptor;
-  cusparseLtMatDescriptor_t dense_input_descriptor;
-  cusparseLtMatDescriptor_t res_descriptor;
-
-  float alpha = 1.0;
-  float beta = 0.0;
-
-  cudaDataType type = CUDA_R_16F;
-  cusparseComputeType compute_type = CUSPARSE_COMPUTE_16F;
 
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
 
-  bool transpose_result = false;
-  bool transpose_dense = !dense_B.is_contiguous();
+  float alpha = 1.0;
+  float beta = 0.0;
+  cudaDataType type;
+  cusparseComputeType compute_type;
+  auto compression_factor = 9;
+
+  switch(compressed_A.scalar_type())
+  {
+    case at::ScalarType::Char:
+        type = CUDA_R_8I;
+        compute_type = CUSPARSE_COMPUTE_32I;
+        compression_factor = 10;
+        break;
+    case at::ScalarType::Half:
+        type = CUDA_R_16F;
+        compute_type = CUSPARSE_COMPUTE_16F;
+        break;
+    case at::ScalarType::BFloat16:
+        type = CUDA_R_16BF;
+        compute_type = CUSPARSE_COMPUTE_16F;
+        break;
+    case at::ScalarType::Float:
+        type = CUDA_R_32F;
+        compute_type = CUSPARSE_COMPUTE_TF32;
+        break;
+    default:
+        std::cout << "Invalid choice";
+        break;
+  }
 
   int64_t k = dense_B.size(0);
   int64_t n = dense_B.size(1);
-  // kind of a hack
-  int64_t m = (compressed_A.numel() * 16 / 9  ) / k;
-
-  // create result tensor
-  auto res = (transpose_result) ? dense_B.new_empty({n, m})
-                                : dense_B.new_empty({m, n});
-
-  cusparseOrder_t result_order =
-      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
-
-  cusparseOperation_t opB = (transpose_dense)
-      ? CUSPARSE_OPERATION_TRANSPOSE
-      : CUSPARSE_OPERATION_NON_TRANSPOSE;
-
-
-  int64_t num_B_rows = (transpose_dense) ? n : k;
-  int64_t num_B_cols = (transpose_dense) ? k : n;
-
-  int64_t ldb = (transpose_dense) ? num_B_cols : num_B_rows;
-  int64_t ldc = (transpose_result) ? m: n;
+  int64_t m = (compressed_A.numel() * 16 / compression_factor  ) / k;
 
   //initialize sparse descriptor
+  cusparseLtMatDescriptor_t sparse_input_descriptor;
   TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
       &handle,
       &sparse_input_descriptor,
       m,
       k,
       k,
-      alignment,
+      16,
       type,
-      order,
+      CUSPARSE_ORDER_ROW,
       CUSPARSELT_SPARSITY_50_PERCENT));
+
+
   // initalize dense input descriptor
+  cusparseLtMatDescriptor_t dense_input_descriptor;
   TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
       &handle,
       &dense_input_descriptor,
-      num_B_rows,
-      num_B_cols,
-      ldb,
-      alignment,
+      (dense_B.is_contiguous()) ? k : n,
+      (dense_B.is_contiguous()) ? n : k,
+      k,
+      16,
       type,
-      order));
+      CUSPARSE_ORDER_ROW));
 
+  // create result tensor
+  auto res = (transpose_result) ? dense_B.new_empty({n, m})
+                                : dense_B.new_empty({m, n});
+
+
+  cusparseLtMatDescriptor_t res_descriptor;
   TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
       &handle,
       &res_descriptor,
       m,
       n,
-      ldc,
-      alignment,
+      (transpose_result) ? m: n,
+      16,
       type,
-      result_order));
+      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
 
   // intialize matmul
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescriptorInit(
       &handle,
       &matmul,
       CUSPARSE_OPERATION_NON_TRANSPOSE,
-      opB,
+      (dense_B.is_contiguous()) ? CUSPARSE_OPERATION_NON_TRANSPOSE : CUSPARSE_OPERATION_TRANSPOSE,
       &sparse_input_descriptor,
       &dense_input_descriptor,
       &res_descriptor,
       &res_descriptor,
       compute_type));
 
-
   // set bias pointer for matmut, need to assign to get location
-  void* dBias = bias.data_ptr();
-  TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
-      &handle, &matmul, CUSPARSELT_MATMUL_BIAS_POINTER, &dBias, sizeof(dBias)));
+  if (bias_opt.has_value()) {
+    auto& bias = bias_opt.value();
+    void* dBias = bias.data_ptr();
+    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
+        &handle, &matmul, CUSPARSELT_MATMUL_BIAS_POINTER, &dBias, sizeof(dBias)));
+  }
 
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSelectionInit(
       &handle, &alg_sel, &matmul, CUSPARSELT_MATMUL_ALG_DEFAULT));
@@ -216,8 +220,9 @@ Tensor _cslt_sparse_mm(
       res.data_ptr(),
       res.data_ptr(),
       workspacePtr.get(),
-      streams,
-      num_streams));
+      nullptr,
+      0));
+
 
   TORCH_CUDASPARSE_CHECK(
       cusparseLtMatDescriptorDestroy(&sparse_input_descriptor));

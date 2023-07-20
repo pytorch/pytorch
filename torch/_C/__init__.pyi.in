@@ -1077,7 +1077,6 @@ def _get_qengine() -> _int: ...  # THPModule_qEngine
 def _set_qengine(qengine: _int) -> None: ...  # THPModule_setQEngine
 def _supported_qengines() -> List[_int]: ...  # THPModule_supportedQEngines
 def _is_xnnpack_enabled() -> _bool: ...  # THPModule_isEnabledXNNPACK
-def _init_cusparselt() -> _bool: ... #THPModule_cuSPARSELt_initExtension
 def _check_sparse_tensor_invariants() -> _bool: ...  # THPModule_checkSparseTensorInvariants
 def _set_check_sparse_tensor_invariants(
     arg: _bool,
