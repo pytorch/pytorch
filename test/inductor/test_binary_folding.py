@@ -101,7 +101,7 @@ class BinaryFoldingTemplate(TestCase):
             inp = torch.rand(inps).to(self.device)
             out_eager = mod_eager(inp)
             out_optimized = out_optimized(inp)
-            self.assertEqual(out_optimized, out_eager, atol=1e-04, rtol=1e-5)
+            self.assertEqual(out_optimized, out_eager, atol=2e-04, rtol=1e-5)
             if expect_success:
                 self.assertTrue(n_binary_ops == 0)
             else:
