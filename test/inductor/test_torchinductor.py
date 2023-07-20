@@ -581,6 +581,17 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(17),))
 
+    def test_angle(self):
+        def fn(a, b, c):
+            return torch.angle(a), torch.angle(b), torch.angle(c)
+
+        complex_input = torch.tensor(
+            [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1, float("nan")]
+        )
+        real_input = torch.tensor([-1.0, 0.0, 1.0, float("nan")])
+        interger_real_input = torch.tensor([-1, 0, 1])
+        self.common(fn, (complex_input, real_input, interger_real_input))
+
     def test_sgn(self):
         def fn(a):
             return torch.sgn(a), torch.sgn(a + 1) - 1
