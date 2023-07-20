@@ -45,7 +45,7 @@ void _foreach_tensor(
   }
 }
 
-AutogradFallbackMode kAutogradFallbackMode = AutogradFallbackMode::Warn;
+AutogradFallbackMode kAutogradFallbackMode = AutogradFallbackMode::Nothing;
 
 } // namespace
 

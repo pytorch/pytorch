@@ -19,7 +19,7 @@ from torch.ao.quantization.pt2e.quantizer.utils import (
     get_weight_qspec,
     get_bias_qspec,
 )
-from .qnnpack_quantizer import (
+from .xnnpack_quantizer import (
     _is_annotated,
 )
 from torch.ao.quantization.observer import (
