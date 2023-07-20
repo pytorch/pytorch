@@ -166,7 +166,7 @@ def is_mm_compute_bound(M, K, N, dtype):
 
     denominator = M * K + N * K + M * N
     if denominator == 0:
-        return True
+        return False
     arithmetic_intensity = (M * N * K) / denominator
 
     # Fails with AMD
