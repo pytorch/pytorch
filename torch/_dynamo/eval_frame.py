@@ -852,7 +852,7 @@ def export(
 
         fake_mode (fake_tensor.FakeTensorMode): Use this fake_mode instead of creating an internal one.
         Useful during symbolic tracing, when user input is already fakefied. Implies free fake tensors
-        are allowed on `make_fx`.
+        are allowed on `make_fx`. `fake_mode` must contain a valid (not None) `shape_env` instance.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
