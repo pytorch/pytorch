@@ -265,8 +265,6 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
-        if left == right:
-            return True
         return self.is_expr_static_and_true(sympy.Eq(left, right))
 
     # See Note - [On Statically Known]
@@ -342,12 +340,10 @@ class SizeVarAllocator:
     def guard_static_shapes(self, left: List[Expr]) -> List[int]:
         return [self.guard_static_shape(x) for x in left]
 
-    def __getitem__(self, val: int) -> Expr:
-        return self.shape_env.duck_int(val)
-
     def size_hint(self, expr: Expr) -> int:
         if not isinstance(expr, Expr):
-            return int(expr)
+            assert isinstance(expr, int)
+            return expr
         free_symbols = expr.free_symbols
         if not free_symbols:
             return int(expr)

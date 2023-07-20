@@ -10,6 +10,15 @@ from typing import Any, Callable, Dict, List, Optional, Set
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
+from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
+from torch.ao.quantization.observer import (
+    HistogramObserver,
+    MinMaxObserver,
+    MovingAverageMinMaxObserver,
+    MovingAveragePerChannelMinMaxObserver,
+    PerChannelMinMaxObserver,
+    PlaceholderObserver,
+)
 
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 
@@ -22,15 +31,6 @@ from torch.ao.quantization.pt2e.quantizer.utils import (
     get_input_act_qspec,
     get_output_act_qspec,
     get_weight_qspec,
-)
-from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
-from torch.ao.quantization.observer import (
-    HistogramObserver,
-    MinMaxObserver,
-    MovingAverageMinMaxObserver,
-    MovingAveragePerChannelMinMaxObserver,
-    PerChannelMinMaxObserver,
-    PlaceholderObserver,
 )
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 
@@ -50,7 +50,7 @@ from .quantizer import (
 
 
 __all__ = [
-    "QNNPackQuantizer",
+    "XNNPACKQuantizer",
     "get_symmetric_quantization_config",
 ]
 
@@ -224,7 +224,7 @@ def _is_annotated(nodes: List[Node]):
     return annotated
 
 
-class QNNPackQuantizer(Quantizer):
+class XNNPACKQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
 
     def __init__(self):
@@ -259,13 +259,13 @@ class QNNPackQuantizer(Quantizer):
                 return ops
         return []
 
-    def set_global(self, quantization_config: QuantizationConfig) -> QNNPackQuantizer:
+    def set_global(self, quantization_config: QuantizationConfig) -> XNNPACKQuantizer:
         self.global_config = quantization_config
         return self
 
     def set_config_for_operator_type(
         self, operator_type: str, quantization_config: QuantizationConfig
-    ) -> QNNPackQuantizer:
+    ) -> XNNPACKQuantizer:
         self.operator_type_config[operator_type] = quantization_config
         return self
 
