@@ -10,6 +10,7 @@ from torch._functorch.compile_utils import fx_graph_cse
 
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
+from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from . import config
 
@@ -185,12 +186,15 @@ def freeze(
         aot_autograd_gm, params_flat, fw_metadata
     )
 
-    # TODO - further restrict cse ? right now needed to dedup aliasing ops
-    cse_graph = fx_graph_cse(aot_autograd_gm.graph)
-    aot_autograd_gm.graph = cse_graph
-    aot_autograd_gm.recompile()
-
     aot_example_inputs = [example_inputs[ind] for ind in preserved_arg_indices]
+    # For symbolic shape path, there may have TypeError: unhashable type: 'SymInt'.
+    # TODO: support symbolic shape path.
+    if not any(free_symbols(x) for x in aot_example_inputs):
+        # TODO - further restrict cse ? right now needed to dedup aliasing ops
+        cse_graph = fx_graph_cse(aot_autograd_gm.graph)
+        aot_autograd_gm.graph = cse_graph
+        aot_autograd_gm.recompile()
+
     freezing_passes(aot_autograd_gm, aot_example_inputs)
 
     # TODO - apply legalization in pattern matcher
