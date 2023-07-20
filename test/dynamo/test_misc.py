@@ -1282,6 +1282,21 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
 
     @requires_numpy_pytorch_interop
+    def test_numpy_ndarray_works_with_builtin_function(self):
+        def fn(x):
+            v = x.sum() / len(x)
+            return v
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        for _ in range(10):
+            x = np.random.randn(2, 3)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+
+    @requires_numpy_pytorch_interop
     def test_mandelbrot_numpy(self):
         def mandelbrot_numpy(max_iter):
             # Define the boundaries of the complex plane
