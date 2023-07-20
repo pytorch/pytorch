@@ -1176,7 +1176,8 @@ def _get_handle_to_prefetch(
     ):
         target_handle_candidate = eod.get_handle_to_backward_prefetch(current_handle)
         if (
-            target_handle_candidate._needs_pre_backward_unshard
+            target_handle_candidate
+            and target_handle_candidate._needs_pre_backward_unshard
             and not target_handle_candidate._prefetched
         ):
             target_handle = target_handle_candidate
@@ -1185,7 +1186,8 @@ def _get_handle_to_prefetch(
     elif training_state == HandleTrainingState.FORWARD and state.forward_prefetch:
         target_handle_candidate = eod.get_handle_to_forward_prefetch(current_handle)
         if (
-            target_handle_candidate._needs_pre_forward_unshard
+            target_handle_candidate
+            and target_handle_candidate._needs_pre_forward_unshard
             and not target_handle_candidate._prefetched
         ):
             target_handle = target_handle_candidate
