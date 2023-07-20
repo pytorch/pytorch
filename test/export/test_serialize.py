@@ -361,7 +361,7 @@ class TestDeserialize(TestCase):
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
-        name_fn=lambda name, case: "case_{}".format(name),
+        name_fn=lambda name, case: f"case_{name}",
     )
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model

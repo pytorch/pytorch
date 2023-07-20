@@ -46,10 +46,10 @@ class BinaryFoldingTemplate(TestCase):
                     super(ConvOp, self).__init__()
                     self.conv = module(
                         in_channels, out_channels, bias=use_bias, **kwargs
-                    )
+                    ).to(device)
                     self.conv2 = module(
                         in_channels, out_channels, bias=use_bias, **kwargs
-                    )
+                    ).to(device)
                     self.use_scalar = scalar
                     tensor_size = [1 for _ in range(self.conv.weight.ndim)]
                     tensor_size[1] = self.conv.weight.size(0)

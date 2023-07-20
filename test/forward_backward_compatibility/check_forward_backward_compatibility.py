@@ -501,7 +501,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     existing_schema_dict = {}
     slist = []
-    with open(args.existing_schemas, "r") as f:
+    with open(args.existing_schemas) as f:
         while True:
             line = f.readline()
             if not line:
