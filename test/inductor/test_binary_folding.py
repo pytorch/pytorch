@@ -107,7 +107,7 @@ class BinaryFoldingTemplate(TestCase):
             else:
                 self.assertTrue(n_binary_ops == 1)
 
-        conv_bias = [False]
+        conv_bias = [True, False]
         modules = [nn.Conv1d, nn.Conv2d, nn.Conv3d]
         use_scalar = [True, False]
         ops = [torch.add, torch.sub, torch.mul, torch.div]
