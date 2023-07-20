@@ -321,13 +321,11 @@ def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
 
             return False
 
-        assert min_val <= max_val, "min {} should be less than max {}".format(
-            min_val, max_val
-        )
+        assert min_val <= max_val, f"min {min_val} should be less than max {max_val}"
     else:
         assert torch.all(
             min_val <= max_val
-        ), "min {} should be less than max {}".format(min_val, max_val)
+        ), f"min {min_val} should be less than max {max_val}"
 
     return True
 
@@ -533,7 +531,7 @@ def determine_qparams(
     max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
 
     device = min_val_neg.device
-    scale = torch.ones(min_val_neg.size(), dtype=torch.float32, device=device)
+    scale = torch.ones(min_val_neg.size(), dtype=torch.double, device=device)
     zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
 
     if (
@@ -580,7 +578,7 @@ def determine_qparams(
                 [float(zero_point)], dtype=zero_point.dtype, device=device
             )
 
-    return scale, zero_point.to(torch.int64)
+    return scale.to(torch.double), zero_point.to(torch.int64)
 
 def _get_num_pos_args(f: Callable) -> int:
     """ Get number of positional args for a function

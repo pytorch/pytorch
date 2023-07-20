@@ -3,7 +3,6 @@ from torch import Tensor
 from .optimizer import (Optimizer, required, _use_grad_for_differentiable, _default_to_fused_or_foreach,
                         _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['SGD', 'sgd']
 
@@ -12,11 +11,11 @@ class SGD(Optimizer):
                  weight_decay=0, nesterov=False, *, maximize: bool = False, foreach: Optional[bool] = None,
                  differentiable: bool = False):
         if lr is not required and lr < 0.0:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if momentum < 0.0:
-            raise ValueError("Invalid momentum value: {}".format(momentum))
+            raise ValueError(f"Invalid momentum value: {momentum}")
         if weight_decay < 0.0:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov,
@@ -280,8 +279,8 @@ def _multi_tensor_sgd(params: List[Tensor],
     if len(params) == 0:
         return
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, momentum_buffer_list], with_indices=True)
-    for device_params, device_grads, device_momentum_buffer_list, indices in grouped_tensors.values():
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, momentum_buffer_list], with_indices=True)
+    for ((device_params, device_grads, device_momentum_buffer_list), indices) in grouped_tensors.values():
         device_has_sparse_grad = any(grad.is_sparse for grad in device_grads)
 
         if maximize:

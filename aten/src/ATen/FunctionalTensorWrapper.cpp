@@ -173,6 +173,8 @@ bool FunctionalTensorWrapper::is_up_to_date() const {
 // See Note [Functionalization Pass - Inplace View Ops]
 void FunctionalTensorWrapper::mutate_view_meta(at::functionalization::ViewMeta meta) {
   view_metas_.push_back(meta);
+  // Manually track the fact that this tensor recieved a metadata mutation!
+  has_metadata_mutation_ = true;
   // Note [Functionalization Pass - Inplace View Ops]
   // So, these ops are special - they're mutation AND view ops. They get special codegen.
   // An example is transpose_, e.g. `a.transpose_()`

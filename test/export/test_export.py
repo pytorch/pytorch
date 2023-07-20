@@ -8,6 +8,7 @@ from torch._export.trace import do_not_use_experimental_export
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
+from functorch.experimental.control_flow import map
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -68,7 +69,7 @@ class TestExperimentalExport(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
-    def test_export_constraints(self):
+    def test_export_inline_constraints(self):
 
         def f(x):
             b = x.item()
@@ -172,8 +173,9 @@ class TestExport(TestCase):
 
     def test_if_functional(self):
         def foo(x):
-            x.add_(4)
-            y = x.view(x.shape)
+            z = x + 4
+            z.add_(4)
+            y = z.view(x.shape)
             return x.cos() + y.cos()
 
         gm = export(foo, (torch.tensor([2, 3, 5]),), constraints=None)
@@ -192,6 +194,29 @@ class TestExport(TestCase):
 
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
+
+    def test_export_mod_constraints(self):
+        class BasicDynamiShapeModel(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x.view(x.shape[0] - 1, -1)
+
+        m = BasicDynamiShapeModel()
+        a = torch.randn(3, 4)
+        constraints = [3 <= dynamic_dim(a, 0), dynamic_dim(a, 1)]
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            (
+                "Some dynamic dimensions need to be specialized because "
+                "the constraints inferred for them are too complex to specify"
+                ".*\n.*\\[0\\], which was marked dynamic, must be specialized to 3"
+                ".*\n.*\\[1\\], which was marked dynamic, must be specialized to 4"
+            ),
+        ):
+            torch._export.export(m, (a,), constraints=constraints)
+        em = torch._export.export(m, (a,))
+        x = torch.randn(3, 5)
+        with self.assertRaisesRegex(RuntimeError, "\\[1\\] is specialized at 4"):
+            em(x)
 
     def test_export_constrain_static(self):
         def f(x, y):
@@ -212,6 +237,70 @@ class TestExport(TestCase):
         ):
             export(f, example_inputs, constraints)
 
+    def test_not_correct_dim(self):
+        def f(x):
+            return x.cos()
+
+        def g(x):
+            return x + 4
+
+        inp_for_f = torch.tensor(5)
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "Cannot mark 0-dimension tensors to be dynamic"):
+            constraints = [dynamic_dim(inp_for_f, 0)]
+
+        inp_for_f_mul_dim = torch.ones(5, 5)
+        with self.assertRaisesRegex(
+            torchdynamo.exc.UserError,
+            "Expected the dimension passed to dynamic_dim to be in the range \\[0:1\\]"
+        ):
+            constraints = [dynamic_dim(inp_for_f_mul_dim, 2)]
+
+        inp_for_g = 4
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "Expected tensor as input to dynamic_dim"):
+            constraints = [dynamic_dim(inp_for_g, 0)]
+
+    def test_map(self):
+        def list_tensor_map(xs, y, z):
+            def body(x, y, z):
+                return x + y + z
+
+            return map(body, xs, y, z)
+
+        inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
+        exported_program = export(list_tensor_map, inps)
+        self.assertTrue(torch.allclose(exported_program(*inps), list_tensor_map(*inps)))
+
+    def test_linear_conv(self):
+
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                x_conv = self.conv(x)
+                x_linear = self.linear(x_conv)
+                return x_linear.cos()
+
+        ep = export(Foo(), (torch.randn(20, 16, 50, 100),))
+        for node in ep.graph.nodes:
+            if (
+                node.op == "placeholder" and
+                node.name in ep.graph_signature.inputs_to_buffers or
+                node.name in ep.graph_signature.inputs_to_parameters
+            ):
+                self.assertTrue("source_fn" in node.meta)
+                self.assertTrue("nn_module_stack" in node.meta)
 
 if __name__ == '__main__':
     run_tests()

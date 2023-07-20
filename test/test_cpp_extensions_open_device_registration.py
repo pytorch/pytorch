@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 from typing import Union
+import tempfile
 import unittest
 
 import torch.testing._internal.common_utils as common
@@ -14,13 +15,7 @@ from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_CUDNN = False
 TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
-if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
-    CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
-    TEST_CUDNN = (
-        TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
-    )
 
 
 def remove_build_path():
@@ -32,7 +27,7 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
-class DummyModule(object):
+class DummyModule:
 
     @staticmethod
     def device_count() -> int:
@@ -51,6 +46,9 @@ class DummyModule(object):
     def is_available():
         return True
 
+    @staticmethod
+    def current_device():
+        return 0
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
 class TestCppExtensionOpenRgistration(common.TestCase):
@@ -148,6 +146,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                 torch.utils.rename_privateuse1_backend('xxx')
             # register foo module, torch.foo
             torch._register_device_module('foo', DummyModule)
+            self.assertTrue(torch.utils.backend_registration._get_custom_mod_func("device_count")() == 1)
+            with self.assertRaisesRegex(RuntimeError, "Try to call torch.foo"):
+                torch.utils.backend_registration._get_custom_mod_func("func_name_")
             # default set for_tensor and for_module are True, so only set for_storage is True
             torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
             # generator tensor and module can be registered only once
@@ -328,6 +329,28 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             cpu_storage = torch.empty(4, 4).storage()
             foo_storage = torch.serialization.default_restore_location(cpu_storage, 'foo:0')
             self.assertTrue(foo_storage.is_foo)
+            # test tensor MetaData serialization
+            x = torch.empty(4, 4).long()
+            y = x.foo()
+            self.assertFalse(self.module.check_backend_meta(y))
+            self.module.custom_set_backend_meta(y)
+            self.assertTrue(self.module.check_backend_meta(y))
+
+            self.module.custom_serialization_registry()
+            with tempfile.TemporaryDirectory() as tmpdir:
+                path = os.path.join(tmpdir, 'data.pt')
+                torch.save(y, path)
+                z1 = torch.load(path)
+                # loads correctly onto the foo backend device
+                self.assertTrue(z1.is_foo)
+                # loads BackendMeta data correctly
+                self.assertTrue(self.module.check_backend_meta(z1))
+                # cross-backend
+                z2 = torch.load(path, map_location='cpu')
+                # loads correctly onto the cpu backend device
+                self.assertFalse(z2.is_foo)
+                # loads BackendMeta data correctly
+                self.assertFalse(self.module.check_backend_meta(z2))
 
         def test_open_device_storage_resize():
             torch.utils.rename_privateuse1_backend('foo')
@@ -339,6 +362,50 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertTrue(foo_storage.size() == 8)
             with self.assertRaisesRegex(RuntimeError, 'Overflow'):
                 foo_storage.resize_(8**29)
+
+        def test_open_device_storage_type():
+            torch.utils.rename_privateuse1_backend('foo')
+            # test cpu float storage
+            cpu_tensor = torch.randn([8]).float()
+            cpu_storage = cpu_tensor.storage()
+            self.assertEqual(cpu_storage.type(), "torch.FloatStorage")
+
+            # test custom float storage before defining FloatStorage
+            foo_tensor = cpu_tensor.foo()
+            foo_storage = foo_tensor.storage()
+            self.assertEqual(foo_storage.type(), "torch.storage.TypedStorage")
+
+            class CustomFloatStorage:
+                @property
+                def __module__(self):
+                    return "torch." + torch._C._get_privateuse1_backend_name()
+
+                @property
+                def __name__(self):
+                    return "FloatStorage"
+
+            # test custom float storage after defining FloatStorage
+            try:
+                torch.foo.FloatStorage = CustomFloatStorage()
+                self.assertEqual(foo_storage.type(), "torch.foo.FloatStorage")
+
+                # test custom int storage after defining FloatStorage
+                foo_tensor2 = torch.randn([8]).int().foo()
+                foo_storage2 = foo_tensor2.storage()
+                self.assertEqual(foo_storage2.type(), "torch.storage.TypedStorage")
+            finally:
+                torch.foo.FloatStorage = None
+
+        def test_open_device_faketensor():
+            torch.utils.rename_privateuse1_backend('foo')
+            with torch._subclasses.fake_tensor.FakeTensorMode.push():
+                a = torch.empty(1, device="foo")
+                b = torch.empty(1, device="foo:0")
+                result = a + b
+
+        def test_open_device_named_tensor():
+            torch.utils.rename_privateuse1_backend('foo')
+            a = torch.empty([2, 3, 4, 5], device="foo", names=["N", "C", "H", "W"])
 
         test_base_device_registration()
         test_before_common_registration()
@@ -352,6 +419,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_pin_memory()
         test_open_device_serialization()
         test_open_device_storage_resize()
+        test_open_device_storage_type()
+        test_open_device_faketensor()
+        test_open_device_named_tensor()
 
 
 if __name__ == "__main__":

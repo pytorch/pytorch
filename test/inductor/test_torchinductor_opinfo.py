@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import torch
 
-import torch._dynamo
 from torch._dynamo.test_case import run_tests
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyNativeDeviceTypes,
@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
+    TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -150,6 +151,9 @@ inductor_skips["cuda"] = {
     "_native_batch_norm_legit": {f16, f32, f64},
 }
 
+if not SM80OrLater:
+    inductor_skips["cuda"]["bfloat16"] = {b8, f16, f32, f64, i32, i64}
+
 if TEST_WITH_ROCM:
     # Tensors are not alike
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
@@ -218,10 +222,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "stft": {f32, f64},
     "svd": {f32, f64},
     "svd_lowrank": {f32, f64},
-    "linalg.cond": {f32, f64},
-    "linalg.svd": {f32, f64},
-    "linalg.svdvals": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
     "pca_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
@@ -332,14 +332,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
-    # The following 3 tests fail on CUDA with AssertionError: expected size 5==5, stride 5==1 at dim=0
-    # linalg._svd's return value has different strides on CUDA vs CPU which causes this
-    # In test_meta.py there is a mechanism to skipping strides checks for some ops
-    # (including _linalg_svd), possibly we should have something similar here
-    "linalg.cond": {f32, f64},
-    "linalg.svdvals": {f32, f64},
-    "linalg.matrix_rank": {f32, f64},
-    "linalg.svd": {f32, f64},
     "pca_lowrank": {f32, f64},
     "svd_lowrank": {f32, f64},
     "svd": {f32, f64},
@@ -369,10 +361,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "chalf": {b8, i32, i64, f16, f32, f64},
     "complex": {f16, f32, f64},
 }
-
-if TEST_WITH_ROCM:
-    # AssertionError: expected size 5==5, stride 5==1 at dim=0
-    inductor_expected_failures_single_sample["cuda"][("norm", "nuc")] = {f32, f64}
 
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
@@ -489,12 +477,16 @@ inductor_override_kwargs = {
 # Always test with all sample for following ops
 inductor_all_samples = {
     "arange",
+    "diagonal",
+    "diagonal_copy",
+    "diagonal_scatter",
     "softmax.with_dtype",
     "index_add",
     "index_copy",
     "scatter_reduce.sum",
     "select_scatter",
     "squeeze",
+    "unfold",
     "unsqueeze",
     "sum",
     "amax",
@@ -524,6 +516,7 @@ class TestInductorOpInfo(TestCase):
     )  # inductor kernels failing this test intermittently
     @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
     @_ops(op_db[START:END])

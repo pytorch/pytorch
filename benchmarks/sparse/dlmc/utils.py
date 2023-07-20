@@ -21,7 +21,7 @@ def sparse_grad_output(a, b):
 
 
 def read_matrix_params(path):
-    with open(path, 'r') as file:
+    with open(path) as file:
         line = file.readline()
         nrows, ncols, nnz = (int(el) for el in line.split(', '))
         return (nrows, ncols), nnz
@@ -38,7 +38,7 @@ def csr_to_coo(indices, indptr, shape):
 
 
 def load_sparse_matrix(path, device):
-    with open(path, 'r') as file:
+    with open(path) as file:
         nrows, ncols, nnz = (int(el) for el in file.readline().split(', '))
         index_pointers = (int(el) for el in file.readline().split())
         indices = (int(el) for el in file.readline().split())
@@ -51,7 +51,7 @@ def load_sparse_matrix(path, device):
 
 
 def gen_vector(path, device):
-    with open(path, 'r') as file:
+    with open(path) as file:
         nrows, ncols, nnz = (int(el) for el in file.readline().split(', '))
         index_pointers = (int(el) for el in file.readline().split())
         indices = (int(el) for el in file.readline().split())
@@ -59,7 +59,7 @@ def gen_vector(path, device):
 
 
 def gen_matrix(path, device):
-    with open(path, 'r') as file:
+    with open(path) as file:
         nrows, ncols, nnz = (int(el) for el in file.readline().split(', '))
         index_pointers = (int(el) for el in file.readline().split())
         indices = (int(el) for el in file.readline().split())

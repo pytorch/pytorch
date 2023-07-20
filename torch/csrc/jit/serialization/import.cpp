@@ -51,7 +51,7 @@ using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
-void postSetStateValidate(const IValue& v) {
+static void postSetStateValidate(const IValue& v) {
   auto obj = v.toObject();
   const auto& objType = obj->type();
   for (const auto i : c10::irange(objType->numAttributes())) {

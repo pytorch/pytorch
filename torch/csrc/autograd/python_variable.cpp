@@ -26,7 +26,6 @@
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
-#include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -907,7 +906,7 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
 
   TORCH_CHECK_TYPE(
       THPVariable_Check(py_grad),
-      "assigned grad expected to be a Tensor or None but got grad of type",
+      "assigned grad expected to be a Tensor or None but got grad of type ",
       THPUtils_typename(py_grad));
   THPUtils_assertRet(
       -1,
@@ -1205,6 +1204,16 @@ PyObject* THPVariable_is_cuda(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPVariable_is_xla(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "is_xla");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_xla());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPVariable_is_ipu(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1471,6 +1480,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
     {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
     {"is_cpu", (getter)THPVariable_is_cpu, nullptr, nullptr, nullptr},
+    {"is_xla", (getter)THPVariable_is_xla, nullptr, nullptr, nullptr},
     {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
     {"is_ipu", (getter)THPVariable_is_ipu, nullptr, nullptr, nullptr},
     {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
@@ -1661,6 +1671,26 @@ PyObject* THPVariable_pynew(
       c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED,
       /*allow_preexisting_pyobj=*/true);
   END_HANDLE_TH_ERRORS
+}
+
+static void clear_slots(PyTypeObject* type, PyObject* self) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  Py_ssize_t i, n;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  PyMemberDef* mp;
+
+  n = Py_SIZE(type);
+  mp = type->tp_members;
+  for (i = 0; i < n; i++, mp++) {
+    if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
+      char* addr = (char*)self + mp->offset;
+      PyObject* obj = *(PyObject**)addr;
+      if (obj != nullptr) {
+        *(PyObject**)addr = nullptr;
+        Py_DECREF(obj);
+      }
+    }
+  }
 }
 
 // NB: this is not the tp_dealloc on THPVariable; instead, its the dealloc

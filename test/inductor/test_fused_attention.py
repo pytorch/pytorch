@@ -12,7 +12,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
     SM80OrLater,
 )
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -79,6 +79,7 @@ class TestSDPAPatternRewriter(TestCase):
                     ):
                         self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=1.3e-6)
 
+    @skipIfRocm
     def test_sdpa_rewriter_1(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -99,6 +100,7 @@ class TestSDPAPatternRewriter(TestCase):
         when an intermediate result is being used / returned downstream
         """
 
+        @skipIfRocm
         @torch.compile(fullgraph=True)
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -119,6 +121,7 @@ class TestSDPAPatternRewriter(TestCase):
         _, (source_code,) = run_and_get_code(dot_prod_attention, *args)
         self.assertNotIn("aten._scaled_dot_product_efficient_attention", source_code)
 
+    @skipIfRocm
     def test_sdpa_rewriter_2(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
@@ -186,6 +189,7 @@ class TestSDPAPatternRewriter(TestCase):
         self._check_common(sfdp_pattern_5_v1, contains=False)
         self._check_common(sfdp_pattern_5_v2, contains=False)
 
+    @skipIfRocm
     def test_sdpa_rewriter_6(self):
         def sfdp_pattern_6(query, key, value):
             attn_mask = torch.ones(
@@ -203,6 +207,7 @@ class TestSDPAPatternRewriter(TestCase):
 
         self._check_common(sfdp_pattern_6, contains=False, has_dropout=True)
 
+    @skipIfRocm
     def test_sdpa_rewriter_7(self):
         def sfdp_pattern_7(query, key, value):
             q = query.permute(0, 2, 1, 3)
@@ -224,6 +229,7 @@ class TestSDPAPatternRewriter(TestCase):
 
         self._check_common(sfdp_pattern_7, args, contains=SM80OrLater, atol=2e-3)
 
+    @skipIfRocm
     def test_sdpa_rewriter_8(self):
         def sfdp_pattern_8(query, key, value):
             q = query.permute(0, 2, 1, 3)
@@ -243,6 +249,7 @@ class TestSDPAPatternRewriter(TestCase):
 
         self._check_common(sfdp_pattern_8, args, atol=2e-3)
 
+    @skipIfRocm
     def test_sdpa_rewriter_9(self):
         def sfdp_pattern_9(query, key, value):
             q = query.permute(0, 2, 1, 3)
@@ -265,6 +272,7 @@ class TestSDPAPatternRewriter(TestCase):
 
         self._check_common(sfdp_pattern_9, args, contains=SM80OrLater, atol=2e-3)
 
+    @skipIfRocm
     def test_sdpa_rewriter_10(self):
         def sfdp_pattern_10(query, key, value):
             q = query.permute(0, 2, 1, 3)
@@ -289,7 +297,7 @@ class TestSDPAPatternRewriter(TestCase):
         # https://github.com/pytorch/pytorch/issues/99124
         class Model(torch.nn.Module):
             def __init__(self, is_inv_factor):
-                super(Model, self).__init__()
+                super().__init__()
                 self.is_inv_factor = is_inv_factor
 
             def forward(self, query, key, value, scale_factor) -> torch.Tensor:
@@ -320,7 +328,7 @@ class TestSDPAPatternRewriter(TestCase):
             def __init__(
                 self,
             ):
-                super(Model, self).__init__()
+                super().__init__()
 
             def forward(self, query, key, value, attn_mask) -> torch.Tensor:
                 attn_weight = torch.softmax(
@@ -351,5 +359,5 @@ class TestSDPAPatternRewriter(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and PLATFORM_SUPPORTS_FUSED_SDPA and not TEST_WITH_ROCM:
+    if IS_LINUX and HAS_CUDA and PLATFORM_SUPPORTS_FUSED_SDPA:
         run_tests()
