@@ -5698,6 +5698,7 @@ class TestNLLLoss(TestCaseMPS):
                 torch.tensor((10, 20, 30, 40, 50), device=device),
                 atol=0, rtol=0
             )
+
     def test_sort_strided_view(self):
         device = 'mps'
         x = torch.randn(5, 9, 7, 4, device=device)
