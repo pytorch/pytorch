@@ -28,7 +28,7 @@ from torch.ao.quantization.pt2e.quantizer import (  # noqa: F401
     SharedQuantizationSpec,
     DerivedQuantizationSpec,
     QuantizationAnnotation,
-    QNNPackQuantizer,
+    XNNPACKQuantizer,
     EmbeddingQuantizer,
     ComposableQuantizer,
 )
@@ -38,7 +38,7 @@ from torch.ao.quantization.pt2e.quantizer.utils import (  # noqa: F401
     get_output_act_qspec,
     get_weight_qspec,
 )
-from torch.ao.quantization.pt2e.quantizer.qnnpack_quantizer import (  # noqa: F401
+from torch.ao.quantization.pt2e.quantizer.xnnpack_quantizer import (  # noqa: F401
     get_symmetric_quantization_config,
 )
 from torch.ao.quantization.backend_config import BackendConfig
