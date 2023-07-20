@@ -398,7 +398,8 @@ def _single_tensor_adamw(
         step_t += 1
 
         # Perform stepweight decay
-        param.mul_(1 - lr * weight_decay)
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
         exp_avg.lerp_(grad, 1 - beta1)
@@ -512,8 +513,10 @@ def _multi_tensor_adamw(
         torch._foreach_add_(device_state_steps, 1)
 
         # Perform stepweight decay
-        if weight_decay != 0:
-            torch._foreach_mul_(device_params, 1 - lr * weight_decay)
+        if maximize:
+            torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+        else:
+            device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
         # Decay the first and second moment running average coefficient
         torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - beta1)
