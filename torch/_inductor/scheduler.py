@@ -1011,7 +1011,6 @@ class Scheduler:
             if len(self.nodes) == old_len:
                 break
 
-    @dynamo_timed
     def fuse_nodes_once(self):
         """
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.
