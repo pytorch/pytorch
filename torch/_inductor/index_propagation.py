@@ -21,7 +21,7 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 """
 import itertools
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Tuple, Union, Optional
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import sympy
 
@@ -47,7 +47,7 @@ class SymPyOps:
     """
 
     @staticmethod
-    def identity(value : Any) -> Any:
+    def identity(value: Any) -> Any:
         return value
 
     @staticmethod
@@ -61,7 +61,7 @@ class SymPyOps:
         return TypedExpr(expr, dtype)
 
     @staticmethod
-    def index_expr(value: sympy.Expr, dtype: torch.dtype) -> Union[int,TypedExpr]:
+    def index_expr(value: sympy.Expr, dtype: torch.dtype) -> Union[int, TypedExpr]:
         if isinstance(value, int):
             value = sympy.Integer(value)
         return TypedExpr(value, dtype)
@@ -77,30 +77,30 @@ class SymPyOps:
             return NotImplemented
 
     @staticmethod
-    def square(x : TypedExpr) -> TypedExpr:
+    def square(x: TypedExpr) -> TypedExpr:
         return TypedExpr(x.expr * x.expr, x.dtype)
 
     @staticmethod
-    def add(x : TypedExpr, y : TypedExpr) -> TypedExpr:
+    def add(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(x.expr + y.expr, result_type)
 
     @staticmethod
-    def sub(x : TypedExpr, y : TypedExpr) -> TypedExpr:
+    def sub(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(x.expr - y.expr, result_type)
 
     @staticmethod
-    def mul(x : TypedExpr, y : TypedExpr) -> TypedExpr:
+    def mul(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(x.expr * y.expr, result_type)
 
     @staticmethod
-    def neg(x : TypedExpr) -> TypedExpr:
+    def neg(x: TypedExpr) -> TypedExpr:
         return TypedExpr(-x.expr, x.dtype)
 
     @staticmethod
-    def floordiv(x : TypedExpr, y : TypedExpr) -> TypedExpr:
+    def floordiv(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
         if not is_integer_dtype(result_type):
             return NotImplemented
@@ -108,7 +108,7 @@ class SymPyOps:
         return TypedExpr(FloorDiv(x.expr, y.expr), result_type)
 
     @staticmethod
-    def remainder(x : TypedExpr, y : TypedExpr) -> Optional[TypedExpr]:
+    def remainder(x: TypedExpr, y: TypedExpr) -> Optional[TypedExpr]:
         result_type = torch.promote_types(x.dtype, y.dtype)
         if not is_integer_dtype(result_type):
             return NotImplemented
@@ -117,12 +117,12 @@ class SymPyOps:
         return TypedExpr(result_expr, result_type)
 
     @staticmethod
-    def minimum(x : TypedExpr, y : TypedExpr) -> TypedExpr:
+    def minimum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(sympy.Min(x.expr, y.expr), result_type)
 
     @staticmethod
-    def maximum(x : TypedExpr, y : TypedExpr) -> TypedExpr:
+    def maximum(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(sympy.Max(x.expr, y.expr), result_type)
 
@@ -177,7 +177,9 @@ class IndexPropagation:
         new_kwargs = {k: self.unwrap(v) for k, v in kwargs.items()}
         return IndexPropVar(getattr(self._inner, name)(*new_args, **new_kwargs))
 
-    def propagate_sympy(self, name: str, args: Tuple, kwargs: Dict[str, Any]) -> Union[TypedExpr, IndexPropVar]:
+    def propagate_sympy(
+        self, name: str, args: Tuple, kwargs: Dict[str, Any]
+    ) -> Union[TypedExpr, IndexPropVar]:
         # Build a new SymPy expression from this ops call
         def unwrap(a: Union[Any, IndexPropVar]) -> Any:
             if not isinstance(a, IndexPropVar):
@@ -208,7 +210,9 @@ class IndexPropagation:
 
         return inner
 
-    def indirect_indexing(self, index: Union[Any, IndexPropVar], size: Any, check: bool = True) -> Any:
+    def indirect_indexing(
+        self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
+    ) -> Any:
         # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             return index.value.expr
