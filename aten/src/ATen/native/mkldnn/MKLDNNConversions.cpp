@@ -342,7 +342,7 @@ static Tensor mkldnn_reorder_conv_transpose2d_weight(
                                  self.options().device_opt());
 }
 
-std::tuple<ideep::tensor, ideep::tensor> get_lstm_packed_weights(
+static std::tuple<ideep::tensor, ideep::tensor> get_lstm_packed_weights(
     const at::Tensor& weight_ih,
     const at::Tensor& weight_hh,
     const at::Tensor& weight2,
@@ -411,7 +411,7 @@ std::tuple<ideep::tensor, ideep::tensor> get_lstm_packed_weights(
   return std::make_tuple(cached_weight_ih, cached_weight_hh);
 }
 
-bool should_use_plain_format(ideep::tensor w) {
+static bool should_use_plain_format(ideep::tensor w) {
 #if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3
   return w.get_desc().is_opaque() || w.get_desc().is_plain();
 # else
@@ -419,7 +419,7 @@ bool should_use_plain_format(ideep::tensor w) {
 #endif
 }
 
-std::vector<Tensor> mkldnn_reorder_lstm_weight(
+static std::vector<Tensor> mkldnn_reorder_lstm_weight(
     TensorList weight,
     int64_t input_feature_size,
     int64_t hidden_size,
