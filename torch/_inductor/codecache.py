@@ -609,7 +609,7 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
+supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()] # This order matters for test_cpu_repro
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
