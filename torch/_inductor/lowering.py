@@ -3324,11 +3324,11 @@ def max_pool2d_with_indices_backward_impl(
         or config.max_autotune
         or config.max_autotune_pointwise
     )
-    # if any(d != 1 for d in dilation) or (is_channels_last and not autotune and not indices_are_offsets):
-    #     # don't codegen channels-last when autotune is not enabled, it's very slow
-    #     return fallback_max_pool2d_with_indices_backward(
-    #         grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
-    #     )
+    if any(d != 1 for d in dilation) or (is_channels_last and not autotune and not indices_are_offsets):
+        # don't codegen channels-last when autotune is not enabled, it's very slow
+        return fallback_max_pool2d_with_indices_backward(
+            grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
+        )
 
     *batch, height, width = x.get_size()
     *_, pooled_height, pooled_width = grad_output.get_size()
