@@ -1599,16 +1599,10 @@ def error_inputs_multilabel_margin_loss(op, device, **kwargs):
     # invalid target
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(4,),), kwargs={}),
                      error_type=RuntimeError,
-                     error_regex=(
-                         r'inconsistent target size: \[4\] for input of size: \[5, 4\]'
-                         if torch.device(device).type == 'cuda' else
-                         r'inconsistent size \[4\] for argument #2 \'target\''))
+                     error_regex=r'inconsistent target size: \[4\] for input of size: \[5, 4\]')
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input((),),), kwargs={}),
                      error_type=RuntimeError,
-                     error_regex=(
-                         r'inconsistent target size: \[\] for input of size: \[5, 4\]'
-                         if torch.device(device).type == 'cuda' else
-                         r'inconsistent size \[\] for argument #2 \'target\''))
+                     error_regex=r'inconsistent target size: \[\] for input of size: \[5, 4\]')
 
 
 def get_independent_tensor(tensor):
