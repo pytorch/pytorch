@@ -37,7 +37,13 @@ def range_expressable_in_32_bits(range: ValueRanges) -> bool:
     )
 
 
-def try_to_reduce_precision(node: Any, bounds: Dict[Any, Any], indirect_vars: List[Any], indices: Dict[Any, Any], replacement_vals: Dict[Any, Any]) -> None:
+def try_to_reduce_precision(
+    node: Any,
+    bounds: Dict[Any, Any],
+    indirect_vars: List[Any],
+    indices: Dict[Any, Any],
+    replacement_vals: Dict[Any, Any],
+) -> None:
     # if a downstream use of a node explicitly converts to int32, or float16/float32/float64,
     # then it's precision is set for that chain of uses, and we don't need to consider those
     # dominated values
