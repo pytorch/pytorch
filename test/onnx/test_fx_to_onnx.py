@@ -4,7 +4,6 @@ from __future__ import annotations
 import tempfile
 
 import onnx
-import pytest
 import pytorch_test_common
 import torch
 from torch import nn
@@ -326,28 +325,28 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             fake_x = torch.rand(5, 2, 2)
 
         # Scenario 1: Fake model and fake input WITHOUT fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
+        with self.assertRaises(torch.onnx.OnnxExporterError):
             export_options = ExportOptions(fake_context=None)
             _ = torch.onnx.dynamo_export(
                 fake_model, fake_x, export_options=export_options
             )
 
         # Scenario 2: Fake model and real input WITHOUT fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
+        with self.assertRaises(torch.onnx.OnnxExporterError):
             export_options = ExportOptions(fake_context=None)
             _ = torch.onnx.dynamo_export(
                 fake_model, real_x, export_options=export_options
             )
 
         # Scenario 3: Real model and real input WITH fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
+        with self.assertRaises(torch.onnx.OnnxExporterError):
             export_options = ExportOptions(fake_context=fake_context)
             _ = torch.onnx.dynamo_export(
                 real_model, real_x, export_options=export_options
             )
 
         # Scenario 4: Fake model and real input WITH fake_context
-        with pytest.raises(torch.onnx.OnnxExporterError):
+        with self.assertRaises(torch.onnx.OnnxExporterError):
             export_options = ExportOptions(fake_context=fake_context)
             _ = torch.onnx.dynamo_export(
                 fake_model, real_x, export_options=export_options
