@@ -19,7 +19,7 @@ __all__ = [
 _EQUIVALENT_TYPES: List[Set] = [
     {torch.nn.Conv2d, torch.nn.functional.conv2d},
     {torch.nn.AdaptiveAvgPool2d, torch.nn.functional.adaptive_avg_pool2d},
-    {torch.nn.ReLU, torch.nn.functional.relu, torch.nn.functional.relu_},
+    {torch.nn.ReLU, torch.nn.functional.relu, torch.nn.functional.relu_, "relu"},
     {torch.nn.BatchNorm2d, torch.nn.functional.batch_norm},
     {torch.nn.Hardtanh, torch.nn.functional.hardtanh, torch.nn.functional.hardtanh_},
     {torch.add, operator.add, operator.iadd, "add", "add_"},
