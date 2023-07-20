@@ -72,6 +72,7 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
 )
+from .distributed import DeviceMeshVariable, PlacementClassVariable
 from .functions import (
     CollectiveFunctionRewriteVariable,
     UserFunctionVariable,
@@ -274,12 +275,7 @@ class VariableBuilder:
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
             (
-                (
-                    torch.Tensor,
-                    torch.nn.Buffer,
-                    torch.nn.Parameter,
-                    torch._subclasses.FakeTensor,
-                ),
+                (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
                 cls.wrap_tensor,
             ),
             ((tuple, list, odict_values), cls.wrap_listlike),
@@ -379,12 +375,10 @@ class VariableBuilder:
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
-            (
-                ConstantVariable.is_literal(k)
-                or self.tensor_can_be_dict_key(k)
-                or isinstance(k, enum.Enum)
-                for k in value.keys()
-            )
+            ConstantVariable.is_literal(k)
+            or self.tensor_can_be_dict_key(k)
+            or isinstance(k, enum.Enum)
+            for k in value.keys()
         ):
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
@@ -580,14 +574,6 @@ class VariableBuilder:
             and value in config.traceable_tensor_subclasses
         ):
             return TensorSubclassVariable(value, source=self.source)
-        elif issubclass(type(value), type):
-            # TODO(whc) the following seems preferable but breaks some tests, debug
-            # elif inspect.isclass(value):
-            return UserDefinedClassVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
         elif isinstance(value, types.MethodType) and isinstance(
             value.__self__, torch.nn.Module
         ):
@@ -633,6 +619,30 @@ class VariableBuilder:
                 value,
                 source=self.source,
                 guards=self.make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif DeviceMeshVariable.is_device_mesh(value):
+            # TODO: see if we need to add custom guard instead
+            # of a simple ID_MATCH
+            return DeviceMeshVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif PlacementClassVariable.is_placement_type(value):
+            # TODO: see if we need to add custom guard instead
+            # of a simple ID_MATCH
+            return PlacementClassVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif issubclass(type(value), type):
+            # TODO(whc) the following seems preferable but breaks some tests, debug
+            # elif inspect.isclass(value):
+            return UserDefinedClassVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(
@@ -874,7 +884,6 @@ class VariableBuilder:
         else:
             assert type(value) in (
                 torch.Tensor,
-                torch.nn.Buffer,
                 torch.nn.Parameter,
                 torch._subclasses.fake_tensor.FakeTensor,
             ) or is_traceable_wrapper_subclass(value), type(value)
@@ -952,7 +961,7 @@ class VariableBuilder:
         assert isinstance(value, np.ndarray)
 
         source = self.get_source()
-        tensor_value = torch.from_numpy(value)
+        tensor_value = torch.as_tensor(value)
 
         proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value)
@@ -1473,10 +1482,8 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
-    if (
-        type(e) in (torch.Tensor, torch.nn.Buffer, torch.nn.Parameter)
-        or (ignore_subclass and isinstance(e, torch.Tensor))
-        or is_traceable_wrapper_subclass(e)
+    if type(e) in (torch.Tensor, torch.nn.Parameter) or (
+        ignore_subclass and isinstance(e, torch.Tensor)
     ):
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(

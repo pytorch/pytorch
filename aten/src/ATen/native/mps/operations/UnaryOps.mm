@@ -81,10 +81,10 @@ void unary_op(const Tensor& self,
       newCachedGraph->outputTensor_ = unaryBlock(mpsGraph, castTensor);
     });
 
-    // If self is densely mapped in storage, create a dense output-like representation
+    // If self is non-densely mapped in storage, create a dense output-like representation
     at::Tensor self_;
     if (!is_dense_in_storage(self)) {
-      self_ = at::empty_like(output);
+      self_ = at::empty_like(output, self.scalar_type());
       mps::mps_copy_(self_, self, false);
     } else {
       self_ = self;

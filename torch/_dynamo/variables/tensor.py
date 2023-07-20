@@ -591,6 +591,26 @@ class TensorVariable(VariableTracker):
             )
             result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
             return result.call_method(tx, "item", [], {})
+        elif name == "redistribute":
+            # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
+            # and rewrite args to have only proxyable args, then insert call_function
+            args_as_value = [x.as_python_constant() for x in args]
+
+            def redistribute_fn_with_prim_types(x):
+                return x.redistribute(*args_as_value)
+
+            # attach the same function name for better debugging
+            redistribute_fn_with_prim_types.__name__ = f"prim_{name}"
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    redistribute_fn_with_prim_types,
+                    *proxy_args_kwargs([self], {}),
+                ),
+                **options,
+            )
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
