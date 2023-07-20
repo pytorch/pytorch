@@ -1,10 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
-#include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/UnaryConstants.h>
-#include <torch/mps.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -128,7 +126,6 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
       getMPSProfiler().endProfileKernel(cplState);
     });
   }
-  torch::mps::synchronize();
   if (needs_output_copy) {
     output_.copy_(outputTensor);
   }
