@@ -569,7 +569,6 @@ class GraphLowering(torch.fx.Interpreter):
             # env = create_placeholder(name) for name in ["score", "b_1", "h_1", "m_1", "n_1"]]
             scalar_inps = ["score_1", "b_1", "h_1", "m_1", "n_1"]
             env = {}
-            output_buffer =
             for node in args[3].graph.nodes:
                 if node.op == "placeholder":
                     if node.target in scalar_inps:

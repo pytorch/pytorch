@@ -247,7 +247,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "sdpa":
             return SdpaHigherOrderVariable(value, source, **kwargs)
-            breakpoint()
         elif value.__name__ in (
             "wrap_activation_checkpoint",
             "tag_activation_checkpoint",
@@ -884,7 +883,6 @@ class SdpaHigherOrderVariable(TorchHigherOrderOperatorVariable):
             checkpoint,
             manually_set_subgraph_inputs=True,
         )
-        breakpoint()
 
         body_name = add_subgraph(
             tx,
@@ -915,13 +913,14 @@ class SdpaHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         p_args, p_kwargs, example_value = self.create_wrapped_node(tx, args, kwargs)
 
+        inp_args, _ = proxy_args_kwargs(args[:-1], kwargs)
         # Store the invocation as a call
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
                 self.value,
-                args=tuple(p_args),
+                args=inp_args + p_args,
                 kwargs=p_kwargs,
             ),
             example_value=example_value,

@@ -33,6 +33,7 @@ def sdpa_autograd(*args, **kwargs):
         return sdpa(*args, **kwargs)
 
 def trace_sdpa(proxy_mode, q, k, v, score_mod):
+    breakpoint()
     if score_mod is None:
         with proxy_mode:
             return F.scaled_dot_product_attention(q, k, v)
@@ -77,12 +78,16 @@ q = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 k = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 v = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 
-# @torch.compile
+def printing_eager(gm, inputs):
+    gm.print_readable()
+    return gm.forward
+
+@torch.compile(backend=printing_eager, fullgraph=True)
 def foo(q, k, v):
     return (sdpa(q, k, v, lambda score, b, h, m, n: score * 2),)
 
-# foo(q, k, v)
-# exit(0)
+foo(q, k, v)
+exit(0)
 fake_mode = FakeTensorMode()
 with fake_mode:
     q, k, v = [fake_mode.from_tensor(t) for t in (q, k, v)]
