@@ -134,8 +134,8 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    @parametrize("map_location", ["cpu", "cuda"])
-    def test_dtensor_sharded_model_load_state_dict(self, map_location):
+    @parametrize("offload_to_cpu", [True, False])
+    def test_dtensor_sharded_model_load_state_dict(self, offload_to_cpu):
         model = FSDP(TestDummyModel().cuda())
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
 
@@ -144,7 +144,7 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
             StateDictType.SHARDED_STATE_DICT,
             state_dict_config=ShardedStateDictConfig(
                 use_dtensor=True,
-                offload_to_cpu=False,
+                offload_to_cpu=offload_to_cpu,
             ),
         )
 
@@ -160,7 +160,7 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
         # Load ref_state_dict back.
         checkpoint.seek(0)
         # Test both parameters in state_dict are loaded to CPU and GPU.
-        load_ref_state_dict = torch.load(checkpoint, map_location=map_location)
+        load_ref_state_dict = torch.load(checkpoint)
         model.load_state_dict(load_ref_state_dict)
         new_state_dict = model.state_dict()
 

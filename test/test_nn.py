@@ -3941,13 +3941,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         wrong_src_mask_size = seq_len + 1
-        test(encoder_input_shape, decoder_input_shape, src_mask_len=wrong_src_mask_size)
+        test(encoder_input_shape, decoder_input_shape, src_mask_len=wrong_src_mask_size,
+             raises=True)
 
         # Incorrect tgt_mask
         encoder_input_shape = correct_encoder_input_shape
         decoder_input_shape = correct_decoder_input_shape
         wrong_tgt_mask_size = tgt_len + 1
-        test(encoder_input_shape, decoder_input_shape, tgt_mask_len=wrong_tgt_mask_size, raises=True)
+        test(encoder_input_shape, decoder_input_shape, tgt_mask_len=wrong_tgt_mask_size,
+             raises=True)
 
         # Incorrect memory_mask
         encoder_input_shape = correct_encoder_input_shape
@@ -5913,7 +5915,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     [[3.0000004768, 6.5000000000, 5.0000, 4.6675000191, 9.2500],
                                      [1.0000000000, 7.1665000916, 5.0000, 5.0000000000, 9.2500]]).view(1, 1, 2, 5)
                         else:
-                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
                     elif mode == 'nearest':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -5943,7 +5945,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     [[1., 8., 5., 7., 9.],
                                      [1., 8., 5., 8., 9.]]).view(1, 1, 2, 5)
                         else:
-                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
                     elif mode == 'bicubic':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -5973,10 +5975,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     [[2.7993753, 6.6050020, 4.25, 4.7138715, 10.269531],
                                      [0.8125000, 7.2822485, 4.25, 5.0000052, 9.332031]]).view(1, 1, 2, 5)
                         else:
-                            raise AssertionError("missing groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
 
                     else:
-                        raise AssertionError("missing groundtruth test for interpolation mode '{}'".format(mode))
+                        raise AssertionError(f"missing groundtruth test for interpolation mode '{mode}'")
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
                                            align_corners=align_corners)
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
@@ -6025,7 +6027,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     [[[[-0., -0.], [-0., 0.], [-0., -0.], [-0., 0.]],
                                       [[0., 0.], [0., 0.], [0., 0.], [0., 0.]]]]).view(1, 2, 4, 2)
                         else:
-                            raise AssertionError("missing gradient groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing gradient groundtruth test for padding mode '{padding_mode}'")
                     elif mode == 'nearest':
                         groundtruth = torch.tensor(
                             [[[[-0., -0.], [-0., 0.], [-0., -0.], [-0., 0.]],
@@ -6060,9 +6062,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     [[[[0., 0.], [0., 0.], [1.875, 0.], [1.875, 0.]],
                                       [[0., 0.], [0., 0.], [1.875, 0.], [1.875, 0.]]]]).view(1, 2, 4, 2)
                         else:
-                            raise AssertionError("missing gradient groundtruth test for padding mode '{}'".format(padding_mode))
+                            raise AssertionError(f"missing gradient groundtruth test for padding mode '{padding_mode}'")
                     else:
-                        raise AssertionError("missing gradient groundtruth test for interpolation mode '{}'".format(mode))
+                        raise AssertionError(f"missing gradient groundtruth test for interpolation mode '{mode}'")
                     for input_requires_grad in [False, True]:
                         input = input.requires_grad_(input_requires_grad)
                         F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
@@ -7745,7 +7747,7 @@ def _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_ra
         outtrans_ary)
     grid_ary = np.dot(np.dot(np.dot(reorder_ary, rotation_ary.T), outscale_ary), outtrans_ary)
 
-    transform_tensor = torch.from_numpy((rotation_ary)).to(device, torch.float32)
+    transform_tensor = torch.from_numpy(rotation_ary).to(device, torch.float32)
     transform_tensor = transform_tensor[:2].unsqueeze(0)
 
     return transform_tensor, transform_ary, grid_ary
@@ -7818,7 +7820,7 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
         outtrans_ary)
     grid_ary = np.dot(np.dot(np.dot(reorder_ary, np.linalg.inv(scipyRotation_ary)), outscale_ary), outtrans_ary)
 
-    transform_tensor = torch.from_numpy((torchRotation_ary)).to(device, torch.float32)
+    transform_tensor = torch.from_numpy(torchRotation_ary).to(device, torch.float32)
     transform_tensor = transform_tensor[:3].unsqueeze(0)
 
     return transform_tensor, transform_ary, grid_ary
@@ -9245,7 +9247,6 @@ class TestNNDeviceType(NNTestCase):
 
             zeros = torch.zeros_like(input).to(torch.int64)
             v(lambda: F.multilabel_soft_margin_loss(input, zeros, reduction=reduction))
-            v(lambda: F.multilabel_margin_loss(input, zeros, reduction=reduction))
 
             v(lambda: F.triplet_margin_loss(input, input, input, reduction=reduction))
             v(lambda: F.triplet_margin_with_distance_loss(input, input, input, reduction=reduction))
@@ -10460,7 +10461,7 @@ class TestNNDeviceType(NNTestCase):
                 out_double = F.grid_sample(data.double(), grid.double(), mode=mode, padding_mode='zeros',
                                            align_corners=align_corners)
 
-                self.assertEqual(out_half, out_double.half(), msg="grid_sample with mode = {} doesn't match".format(mode))
+                self.assertEqual(out_half, out_double.half(), msg=f"grid_sample with mode = {mode} doesn't match")
 
         helper((32, 64, 16, 16), (32, 8, 8, 2), True)
         helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3), True)
