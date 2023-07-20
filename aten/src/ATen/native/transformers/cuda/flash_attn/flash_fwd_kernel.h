@@ -305,6 +305,11 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
     }
 
     auto seeds = at::cuda::philox::unpack(params.philox_args);
+    if (params.philox_args.captured_) {
+        *params.seed = std::get<0>(seeds);
+        *params.extragraph_offset = std::get<1>(seeds);
+    }
+
     unsigned long long seed = std::get<0>(seeds);
     unsigned long long offset = std::get<1>(seeds) + (bidb * params.h + bidh) * 32 + tidx % 32;
 

@@ -1474,7 +1474,7 @@ class TestSDPAFailureModes(NNTestCase):
 def _get_block_size(device, head_dim, is_causal):
     # This should match the block sizes in the CUDA kernel
     # Mask is only interesting when we are setting dropout
-    is_dropout=True
+    is_dropout = True
     assert head_dim <= 256
     major, minor = torch.cuda.get_device_capability(device)
     is_sm8x = major == 8 and minor > 0  # Only include sm86 and sm89, exclude sm80 (A100)
@@ -1594,8 +1594,9 @@ class TestSDPACudaOnly(NNTestCase):
         S_flat = S_flat.reshape(b, h, nblocks_m, nblocks_n, (blocksize_m * blocksize_n))
         S_converted = S_flat.view(b, h, nblocks_m, nblocks_n, mmas_n, -1, warps_n, 8, 4, 2, 2, 2)
         S_converted = S_converted.permute(0, 1, 2, 5, 6, 10, 7, 3, 4, 9, 8, 11)
-        S_converted = S_converted.reshape(b, h, (nblocks_m * S_converted.size(3) * warps_n * 2 * 8), (nblocks_n * mmas_n * 2 * 4 * 2))
-        
+        S_converted = S_converted.reshape(b, h, (nblocks_m * S_converted.size(3) *
+                                          warps_n * 2 * 8), (nblocks_n * mmas_n * 2 * 4 * 2))
+
         if causal:
             causal_mask = torch.triu(torch.ones(seqlen_q, seqlen_k, dtype=torch.bool, device=S.device), 1)
             S_converted.masked_fill_(causal_mask, 0.0)
@@ -2381,11 +2382,12 @@ class TestSDPACudaOnly(NNTestCase):
                 return _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len,
                                               dropout_p, output_seed, output_offset, device=device)
             else:
-                dbug_mask = output[-1]
+                # Build dropout_mask
+                dbug_mask = output_tuple[-1]
                 query_padding_mask = torch.ones(
-                    1, seq_len_q, device="cuda", dtype=torch.bool)
+                    batch_size, seq_len_q, device=device, dtype=torch.bool)
                 key_padding_mask = torch.ones(
-                    1, seq_len_k, device="cuda", dtype=torch.bool)
+                    batch_size, seq_len_k, device=device, dtype=torch.bool)
 
                 softmax_mask = self.convert_flash_attn_S_to_softmax(
                     dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=is_causal)
@@ -2420,7 +2422,7 @@ class TestSDPACudaOnly(NNTestCase):
             kwargs["compute_log_sumexp"] = True
             kwargs["attn_bias"] = None
         if fused_kernel == SDPBackend.FLASH_ATTENTION:
-            kwargs['return_debug_mask'] = True
+            kwargs['return_debug_mask'] = dropout_p > 0.0
         with torch.cuda.stream(s):
             # Create real output
             output_tuple = fused_op(query, key, value, **kwargs)
