@@ -38,7 +38,7 @@ class _ExecOrderData:
         # and forward prefetching
         self.handles_pre_forward_order: List[FlatParamHandle] = []
         # Tracks the post-forward order for pre-backward prefetching
-        self.handles_post_forward_order: List[FlatParamHandle] = []
+        self.handles_post_forward_order: List[Optional[FlatParamHandle]] = []
         self._iter = 0
 
         # Gives the max number of backward/forward prefetched all-gathers by a

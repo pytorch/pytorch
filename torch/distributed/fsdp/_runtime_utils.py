@@ -1310,7 +1310,8 @@ def _register_pre_backward_hooks(
             t.register_hook(
                 functools.partial(_pre_backward_hook, state, module, handle)
             )
-            handle._needs_pre_backward_unshard = True
+            if handle:
+                handle._needs_pre_backward_unshard = True
         return t
 
     return _apply_to_tensors(_register_hook, outputs)

@@ -514,9 +514,9 @@ class FlatParamHandle:
         # same across ranks for the execution order validation to work
         self._handle_index = None
         # Index in handles_to_pre_forward_order
-        self._pre_forward_order_index = None
+        self._pre_forward_order_index: Optional[int] = None
         # Index in `handles_post_forward_order`
-        self._post_forward_index = None
+        self._post_forward_index: Optional[int] = None
         # Used for guarding against mistargeted forward prefetches
         self._needs_pre_forward_unshard = False
         # Used for guarding against mistargeted backward prefetches
