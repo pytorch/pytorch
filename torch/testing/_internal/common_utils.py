@@ -692,8 +692,8 @@ def wait_for_process(p, timeout=None):
                 return exit_status
             else:
                 p.kill()
-        # try to handle the case where p.wait() times out as well as otherwise
-        # the wait() call in the finally block can potentially hang
+        # try to handle the case where p.wait(timeout=5) times out as well as
+        # otherwise the wait() call in the finally block can potentially hang
         except subprocess.TimeoutExpired:
             p.kill()
         finally:
