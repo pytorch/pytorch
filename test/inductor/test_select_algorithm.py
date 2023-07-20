@@ -214,7 +214,7 @@ class TestSelectAlgorithm(TestCase):
         def foo(a):
             return torch.mm(a, a)
 
-        foo(torch.randn(32, 32, device='cuda'))
+        foo(torch.randn(32, 32, device="cuda"))
         self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
@@ -224,7 +224,8 @@ class TestSelectAlgorithm(TestCase):
             q = a[:32, :]
             k = a[32:, :]
             return torch.mm(q, k.transpose(0, 1))
-        foo(torch.randn(64, 64, device='cuda'))
+
+        foo(torch.randn(64, 64, device="cuda"))
         self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @skipIfRocm
