@@ -19,7 +19,6 @@ from torch.distributed.distributed_c10d import (
     is_initialized,
     new_group,
     ProcessGroup,
-    ReduceOp,
     scatter,
     Work,
 )
@@ -370,53 +369,6 @@ class DeviceMesh:
             src_for_dim = get_global_rank(dim_group, 0)
 
         return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
-
-    def reduce_scatter(
-        self,
-        input: torch.Tensor,
-        op: ReduceOp.RedOpType = ReduceOp.SUM,
-        mesh_dim: int = 0,
-        scatter_dim: int = 0,
-    ) -> torch.Tensor:
-        """
-        reduce the input on each rank on a device mesh dimension, and scatter
-        the results as output tensor on each rank.
-
-        Args:
-            input (torch.Tensor): tensor to be reduced and scattered
-                and scattered on each rank.
-            op (:class:`torch.distributed.distributed_c10d.ReduceOp, optional):
-                the reduction op of reduce_scatter (i.e. ReduceOp.SUM)
-            mesh_dim (int, optional): indicate which mesh dimension we want
-                to scatter on.
-
-        Returns:
-            A :class:`torch.Tensor` object
-        """
-
-        dim_group = self.get_dim_groups(mesh_dim)
-        assert isinstance(dim_group, ProcessGroup)
-        if self.device_type == "cpu":
-            # cpu::gloo backend does not have reduce_scatter we fallback to do all_reduce
-            # + local chunk
-            logger.warning(
-                "ProcessGroupGloo does not support reduce_scatter, falling back with all reduce!"
-            )
-            group_size = get_world_size(dim_group)
-            group_rank = get_rank(dim_group)
-            if scatter_dim != 0:
-                tensor_list = torch.chunk(input, group_size, dim=scatter_dim)
-                input = torch.cat(tensor_list)
-
-            flat_tensor = funcol.all_reduce(input, reduceOp=op.name, group=dim_group)
-            chunks = flat_tensor.chunk(group_size, dim=0)
-            scatter_tensor = chunks[group_rank]
-        else:
-            scatter_tensor = funcol.reduce_scatter_tensor(
-                input, reduceOp=op.name, scatter_dim=scatter_dim, group=dim_group
-            )
-
-        return scatter_tensor
 
     # TODO: test uneven split on GLOO and NCCL
     def all_to_all(
