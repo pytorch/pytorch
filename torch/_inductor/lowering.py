@@ -2446,6 +2446,10 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
+    if is_triton(values) and (
+        accumulate is True or torch.are_deterministic_algorithms_enabled()
+    ):
+        V.graph.disable_cudagraphs = True
     ir.IndexPutFallback(self, indices, values, accumulate)
     return self
 
@@ -2876,11 +2880,11 @@ def upsample_bicubic2d_default(
 
         iy = ops.to_dtype(in_y, get_int_dtype(iH + 1))
         ix = ops.to_dtype(in_x, get_int_dtype(iW + 1))
-        iys_ofs = tuple((ops.add(iy, ofs) for ofs in (-1, 0, 1, 2)))
-        ixs_ofs = tuple((ops.add(ix, ofs) for ofs in (-1, 0, 1, 2)))
+        iys_ofs = tuple(ops.add(iy, ofs) for ofs in (-1, 0, 1, 2))
+        ixs_ofs = tuple(ops.add(ix, ofs) for ofs in (-1, 0, 1, 2))
 
         def get_x_interp(y):
-            coeffs_x = tuple((load_bounded(y, x) for x in ixs_ofs))
+            coeffs_x = tuple(load_bounded(y, x) for x in ixs_ofs)
             return cubic_interp1d(coeffs_x, t_x)
 
         coeffs_y = tuple(get_x_interp(y) for y in iys_ofs)
