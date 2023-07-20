@@ -324,6 +324,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             fake_model = Model()
             fake_x = torch.rand(5, 2, 2)
 
+        # TODO: Split each scenario on its own test case
         # Scenario 1: Fake model and fake input WITHOUT fake_context
         with self.assertRaises(torch.onnx.OnnxExporterError):
             export_options = ExportOptions(fake_context=None)
