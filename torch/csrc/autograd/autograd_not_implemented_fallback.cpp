@@ -184,10 +184,13 @@ static void basicAutogradNotImplementedFallbackImpl(
             // the entire program).
             if (t.is_view() && is_mutable_output) {
               // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              const_cast<at::TensorBase&>(t._base()).register_hook(
-                  [op_name](const at::TensorBase& grad) {
-                    warnAutogradNotImplemented(op_name);
-                  });
+              auto& base = const_cast<at::TensorBase&>(t._base());
+              if (base.requires_grad()) {
+                // Can only register_hook on tensors that require grad.
+                base.register_hook([op_name](const at::TensorBase& grad) {
+                  warnAutogradNotImplemented(op_name);
+                });
+              }
             }
             return;
           }
