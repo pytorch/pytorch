@@ -53,7 +53,6 @@ from ..utils import (
     is_utils_checkpoint,
     istype,
     np,
-    numpy_method_wrapper,
     odict_values,
     preserve_rng_state,
     tensor_always_has_static_shape,
