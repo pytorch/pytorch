@@ -216,6 +216,9 @@ class GraphLowering(torch.fx.Interpreter):
         Decide if we should enable layout optimization for this graph based on
         heuristics.
         """
+        if not config.layout_optimization:
+            return False
+
         conv_nodes = [
             n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
         ]
@@ -235,9 +238,6 @@ class GraphLowering(torch.fx.Interpreter):
             and torch.backends.mkldnn.is_available()
         ):
             return True
-
-        if not config.layout_optimization:
-            return False
 
         # Followering models are skipped due to this:
         # jx_nest_base
