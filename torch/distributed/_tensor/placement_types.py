@@ -244,10 +244,10 @@ class Shard(Placement):
             local_tensor = self._pad_tensor(local_tensor, pad_size)
         local_tensor = local_tensor.contiguous()
 
-        result = mesh.all_gather(
-            tensor=local_tensor,
-            mesh_dim=mesh_dim,
+        result = funcol.all_gather_tensor(
+            local_tensor,
             gather_dim=self.dim,
+            group=(mesh, mesh_dim),
         )
 
         # Unpad the tensor if the input tensor was padded

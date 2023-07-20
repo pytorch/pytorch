@@ -137,7 +137,9 @@ class TraceDeviceMeshTestBase:
             ]
 
             def fn(tensor: torch.Tensor):
-                big_tensor = mesh.all_gather(tensor, mesh_dim=dim)
+                big_tensor = funcol.all_gather_tensor(
+                    tensor, gather_dim=0, group=(mesh, dim)
+                )
                 return list(torch.chunk(big_tensor, dim_group_size))
 
             # use a local_tensor + 1 for tracing to make sure that we are not
