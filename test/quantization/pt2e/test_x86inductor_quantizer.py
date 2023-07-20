@@ -419,7 +419,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             )
 
     @skipIfNoX86
-    def test_non_quantizable_op_after_force_int8_int8_op(self):
+    def test_maxpool2d_recipe(self):
         r"""
         Test pattern: int8_in_int8_out_ops(maxpool) - non_quantizable op(pow)
         Since maxpool is a int8_in_int8_out_op, there is obs between maxpool and pow.
