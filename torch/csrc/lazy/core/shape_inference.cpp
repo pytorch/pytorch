@@ -644,7 +644,7 @@ std::vector<Shape> compute_shape_native_layer_norm_backward(
       output_mask[1] && weight ? weight->sizes().vec()
                                : std::vector<int64_t>{});
   shapes.emplace_back(
-      bias && weight->defined() ? bias->scalar_type() : input.scalar_type(),
+      bias && bias->defined() ? bias->scalar_type() : input.scalar_type(),
       output_mask[2] && bias ? bias->sizes().vec() : std::vector<int64_t>{});
   return shapes;
 }
