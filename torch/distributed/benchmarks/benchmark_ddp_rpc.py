@@ -132,7 +132,7 @@ def _run_trainer(emb_rref_list, rank):
     # Retrieve parameters from all embedding tables for the current trainer.
     model_parameter_rrefs = []
     for ind, emb_rref in enumerate(emb_rref_list):
-        ps_name = "ps{}".format(ind)
+        ps_name = f"ps{ind}"
         model_parameter_rrefs.extend(
             rpc.rpc_sync(ps_name, _retrieve_embedding_parameters, args=(emb_rref,))
         )
@@ -222,7 +222,7 @@ def run_worker(rank, world_size):
         emb_rref_list = []
         index = 0
         while index < NUM_PS:
-            ps_name = "ps{}".format(index)
+            ps_name = f"ps{index}"
             emb_rref = rpc.remote(
                 ps_name,
                 torch.nn.EmbeddingBag,
@@ -235,7 +235,7 @@ def run_worker(rank, world_size):
         # Run training loop on the trainers.
         futs = []
         for trainer_rank in range(NUM_TRAINERS):
-            trainer_name = "trainer{}".format(trainer_rank)
+            trainer_name = f"trainer{trainer_rank}"
             fut = rpc.rpc_async(
                 trainer_name, _run_trainer, args=(emb_rref_list, trainer_rank)
             )
@@ -248,7 +248,7 @@ def run_worker(rank, world_size):
         # Wait for all training to finish.
         for fut in futs:
             rank, measurements, batch_size = fut.wait()
-            _print_benchmark("Trainer{}".format(rank), batch_size, measurements)
+            _print_benchmark(f"Trainer{rank}", batch_size, measurements)
             batch_size_all_trainers += batch_size
             measurements_all_trainers.append(measurements)
 
@@ -266,7 +266,7 @@ def run_worker(rank, world_size):
         )
 
         # Initialize RPC. Trainer just waits for RPCs from master.
-        trainer_name = "trainer{}".format(rank)
+        trainer_name = f"trainer{rank}"
         rpc.init_rpc(
             trainer_name,
             rank=rank,
@@ -276,7 +276,7 @@ def run_worker(rank, world_size):
 
     # Rank 8-15. Parameter Servers
     elif rank >= NUM_TRAINERS and rank < NUM_TRAINERS + NUM_PS:
-        ps_name = "ps{}".format(rank - NUM_TRAINERS)
+        ps_name = f"ps{rank - NUM_TRAINERS}"
         rpc.init_rpc(
             ps_name,
             rank=rank,
@@ -299,8 +299,8 @@ if __name__ == "__main__":
     print("                  Info                     ")
     print("-------------------------------------------")
     print("")
-    print("* PyTorch version: {}".format(torch.__version__))
-    print("* CUDA version: {}".format(torch.version.cuda))
+    print(f"* PyTorch version: {torch.__version__}")
+    print(f"* CUDA version: {torch.version.cuda}")
     print("")
     print("------------ nvidia-smi topo -m -----------")
     print("")
