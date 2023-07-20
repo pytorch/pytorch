@@ -7,6 +7,11 @@ from torch.distributed._composable.contract import contract
 from torch.distributed._composable_state import _get_module_state, _insert_module_state
 from torch.distributed.fsdp._common_utils import _FSDPState
 from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
+from torch.distributed.fsdp._fully_shard_utils import (
+    _register_post_forward_hook,
+    _register_pre_forward_hook,
+    _register_root_pre_forward_hook,
+)
 
 from torch.distributed.fsdp._init_utils import (
     _init_buffer_state,
@@ -19,11 +24,6 @@ from torch.distributed.fsdp._init_utils import (
     _init_runtime_state,
     _init_state_dict_state,
     HYBRID_SHARDING_STRATEGIES,
-)
-from torch.distributed.fsdp._runtime_utils import (
-    _register_post_forward_hook,
-    _register_pre_forward_hook,
-    _register_root_pre_forward_hook,
 )
 from torch.distributed.fsdp._state_dict_utils import _register_all_state_dict_hooks
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
