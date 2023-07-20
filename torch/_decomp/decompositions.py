@@ -1331,10 +1331,10 @@ def native_layer_norm_backward(
     input_shape = input.shape
     input_ndim = input.dim()
     computation_dtype = utils.get_computation_dtype(input.dtype)
-    grad_out_cast, input_cast, weight_cast, bias_cast = [
+    grad_out_cast, input_cast, weight_cast, bias_cast = (
         x.to(computation_dtype).contiguous() if x is not None else x
         for x in (grad_out, input, weight, bias)
-    ]
+    )
     assert grad_out_cast is not None
 
     axis = input_ndim - len(normalized_shape)
@@ -1745,7 +1745,7 @@ def native_batch_norm_backward(
         running_var_cast,
         save_mean_cast,
         save_invstd_cast,
-    ) = [
+    ) = (
         x.to(computation_dtype) if x is not None else x
         for x in (
             grad_out,
@@ -1756,7 +1756,7 @@ def native_batch_norm_backward(
             save_mean,
             save_invstd,
         )
-    ]
+    )
     input_shape = input.shape
     input_rank = input.dim()
     assert input_rank >= 2, "rank of the input must be at least 2"
@@ -3123,7 +3123,7 @@ def grid_sampler_2d(
             )
             return _upsample_cubic_interp1d(cs, tx.unsqueeze(1))
 
-        coeffs = tuple((get_coeff(ofs) for ofs in range(4)))
+        coeffs = tuple(get_coeff(ofs) for ofs in range(4))
         return _upsample_cubic_interp1d(coeffs, ty.unsqueeze(1))
 
 
@@ -3371,10 +3371,10 @@ def upsample_bicubic2d_default(
         return aten._unsafe_index(a, [N_idx, C_idx, y_idx, x_idx])
 
     def get_x_interp(y):
-        coeffs_x = tuple((load_bounded(y, x_ofs) for x_ofs in ixs_ofs))
+        coeffs_x = tuple(load_bounded(y, x_ofs) for x_ofs in ixs_ofs)
         return _upsample_cubic_interp1d(coeffs_x, t_x)
 
-    coeffs_y = tuple((get_x_interp(y_ofs) for y_ofs in iys_ofs))
+    coeffs_y = tuple(get_x_interp(y_ofs) for y_ofs in iys_ofs)
     result = _upsample_cubic_interp1d(coeffs_y, t_y)
 
     # convert output to correct memory format, if necessary

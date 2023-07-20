@@ -33,7 +33,7 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
-class DummyModule(object):
+class DummyModule:
 
     @staticmethod
     def device_count() -> int:
@@ -381,7 +381,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             foo_storage = foo_tensor.storage()
             self.assertEqual(foo_storage.type(), "torch.storage.TypedStorage")
 
-            class CustomFloatStorage():
+            class CustomFloatStorage:
                 @property
                 def __module__(self):
                     return "torch." + torch._C._get_privateuse1_backend_name()
