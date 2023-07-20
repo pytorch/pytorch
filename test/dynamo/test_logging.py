@@ -157,7 +157,7 @@ class LoggingTests(LoggingTestCase):
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):
             def __init__(self):
-                super(ToyModel, self).__init__()
+                super().__init__()
                 self.layers = torch.nn.Sequential(
                     torch.nn.Linear(1024, 1024),
                     torch.nn.Linear(1024, 1024),
