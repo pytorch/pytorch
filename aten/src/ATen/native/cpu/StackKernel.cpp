@@ -19,11 +19,6 @@ void stack_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
 
 } // anonymous namespace
 
-// This kernel is slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(stack_serial_stub, &stack_serial_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(stack_serial_stub);
-#endif
 
 } // namespace at::native

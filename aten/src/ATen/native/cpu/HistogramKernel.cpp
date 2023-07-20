@@ -308,15 +308,8 @@ static void histogram_select_outer_bin_edges_impl(const Tensor& input, const int
 
 } // namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel_impl);
 REGISTER_DISPATCH(histogramdd_linear_stub, &histogramdd_linear_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(histogramdd_stub);
-REGISTER_NO_AVX512_DISPATCH(histogramdd_linear_stub);
-#endif
-
-REGISTER_DISPATCH(histogram_select_outer_bin_edges_stub, &histogram_select_outer_bin_edges_impl);
+ALSO_REGISTER_AVX512_DISPATCH(histogram_select_outer_bin_edges_stub, &histogram_select_outer_bin_edges_impl);
 
 } // namespace at::native

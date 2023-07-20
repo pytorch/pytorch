@@ -71,13 +71,7 @@ static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, co
 
 } // anonymous namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(arange_stub, &arange_kernel);
 REGISTER_DISPATCH(linspace_stub, &linspace_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(arange_stub);
-REGISTER_NO_AVX512_DISPATCH(linspace_stub);
-#endif
 
 } // namespace at::native

@@ -129,14 +129,8 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
 
 } // anonymous namespace
 
-#ifdef CPU_CAPABILITY_AVX512
-// The following kernels are slower with AVX512 & faster with AVX2
-REGISTER_NO_AVX512_DISPATCH(lerp_kernel_scalar_weight);
-REGISTER_NO_AVX512_DISPATCH(lerp_kernel_tensor_weight);
-#else
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_kernel);
 REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_kernel);
-#endif
 
 } // namespace native
 } // namespace at

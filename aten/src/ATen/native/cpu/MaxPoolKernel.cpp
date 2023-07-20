@@ -505,13 +505,7 @@ void max_pool2d_backward_kernel_impl(
 
 } // anonymous namespace
 
-#ifndef CPU_CAPABILITY_AVX512
-// reflection padding
 REGISTER_DISPATCH(max_pool2d_kernel, &max_pool2d_kernel_impl);
 REGISTER_DISPATCH(max_pool2d_backward_kernel, &max_pool2d_backward_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(max_pool2d_kernel);
-REGISTER_NO_AVX512_DISPATCH(max_pool2d_backward_kernel);
-#endif
 
 } // at::native

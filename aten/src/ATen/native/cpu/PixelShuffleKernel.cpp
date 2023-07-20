@@ -247,13 +247,7 @@ void pixel_unshuffle_kernel_impl(
 
 } // anonymous namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(pixel_shuffle_kernel, &pixel_shuffle_kernel_impl);
 REGISTER_DISPATCH(pixel_unshuffle_kernel, &pixel_unshuffle_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(pixel_shuffle_kernel);
-REGISTER_NO_AVX512_DISPATCH(pixel_unshuffle_kernel);
-#endif
 
 } // at::native

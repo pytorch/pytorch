@@ -443,17 +443,9 @@ static void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const
 
 }  // anonymous namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl);
 REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
 REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
 REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(pdist_forward_stub);
-REGISTER_NO_AVX512_DISPATCH(pdist_backward_stub);
-REGISTER_NO_AVX512_DISPATCH(cdist_stub);
-REGISTER_NO_AVX512_DISPATCH(cdist_backward_stub);
-#endif
 
 }  // namespace at::native

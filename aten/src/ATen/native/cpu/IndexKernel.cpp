@@ -771,7 +771,6 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
 
 } // anonymous namespace
 
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(index_stub, &index_kernel);
 REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
 REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
@@ -783,18 +782,5 @@ REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
 REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
 REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
 REGISTER_DISPATCH(flip_stub, &flip_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(index_stub);
-REGISTER_NO_AVX512_DISPATCH(index_fill_stub);
-REGISTER_NO_AVX512_DISPATCH(index_copy_stub);
-REGISTER_NO_AVX512_DISPATCH(index_put_stub);
-REGISTER_NO_AVX512_DISPATCH(put_stub);
-REGISTER_NO_AVX512_DISPATCH(take_stub);
-REGISTER_NO_AVX512_DISPATCH(masked_fill_stub);
-REGISTER_NO_AVX512_DISPATCH(masked_select_serial_stub);
-REGISTER_NO_AVX512_DISPATCH(masked_select_stub);
-REGISTER_NO_AVX512_DISPATCH(masked_scatter_stub);
-REGISTER_NO_AVX512_DISPATCH(flip_stub);
-#endif
 
 } // namespace at::native

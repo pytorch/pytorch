@@ -618,12 +618,7 @@ void LayerNormBackwardKernelImpl(
 } // namespace
 
 // These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
 REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
-#else
-REGISTER_NO_AVX512_DISPATCH(LayerNormKernel);
-REGISTER_NO_AVX512_DISPATCH(LayerNormBackwardKernel);
-#endif
 
 } // namespace at::native

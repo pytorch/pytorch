@@ -220,15 +220,8 @@ static void aminmax_allreduce_kernel(
 
 } // namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
 REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
 REGISTER_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(min_all_stub);
-REGISTER_NO_AVX512_DISPATCH(max_all_stub);
-REGISTER_NO_AVX512_DISPATCH(aminmax_allreduce_stub);
-#endif
 
 } // namespace at::native

@@ -445,13 +445,7 @@ void unfolded2d_copy_kernel(
 
 } // namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(unfolded2d_copy_stub, &unfolded2d_copy_kernel);
 REGISTER_DISPATCH(unfolded2d_acc_stub, &unfolded2d_acc_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(unfolded2d_copy_stub);
-REGISTER_NO_AVX512_DISPATCH(unfolded2d_acc_stub);
-#endif
 
 } // namespace at::native

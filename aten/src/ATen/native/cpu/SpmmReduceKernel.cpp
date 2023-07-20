@@ -502,21 +502,11 @@ void spmm_reduce_backward_other_arg_kernel(
 
 } // anonymous namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(spmm_reduce_stub, &spmm_reduce_kernel);
 REGISTER_DISPATCH(spmm_reduce_arg_stub, &spmm_reduce_arg_kernel);
 REGISTER_DISPATCH(spmm_reduce_backward_input_stub, &spmm_reduce_backward_input_kernel);
 REGISTER_DISPATCH(spmm_reduce_backward_input_arg_stub, &spmm_reduce_backward_input_arg_kernel);
 REGISTER_DISPATCH(spmm_reduce_backward_other_stub, &spmm_reduce_backward_other_kernel);
 REGISTER_DISPATCH(spmm_reduce_backward_other_arg_stub, &spmm_reduce_backward_other_arg_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(spmm_reduce_stub);
-REGISTER_NO_AVX512_DISPATCH(spmm_reduce_arg_stub);
-REGISTER_NO_AVX512_DISPATCH(spmm_reduce_backward_input_stub);
-REGISTER_NO_AVX512_DISPATCH(spmm_reduce_backward_input_arg_stub);
-REGISTER_NO_AVX512_DISPATCH(spmm_reduce_backward_other_stub);
-REGISTER_NO_AVX512_DISPATCH(spmm_reduce_backward_other_arg_stub);
-#endif
 
 }} // at::native

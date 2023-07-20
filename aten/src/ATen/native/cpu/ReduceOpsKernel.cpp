@@ -448,8 +448,6 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 }  // anonymous namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
@@ -460,21 +458,9 @@ REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl);
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl);
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(std_var_stub);
-REGISTER_NO_AVX512_DISPATCH(prod_stub);
-REGISTER_NO_AVX512_DISPATCH(mean_stub);
-REGISTER_NO_AVX512_DISPATCH(norm_stub);
-REGISTER_NO_AVX512_DISPATCH(and_stub);
-REGISTER_NO_AVX512_DISPATCH(or_stub);
-REGISTER_NO_AVX512_DISPATCH(min_values_stub);
-REGISTER_NO_AVX512_DISPATCH(max_values_stub);
-REGISTER_NO_AVX512_DISPATCH(argmax_stub);
-REGISTER_NO_AVX512_DISPATCH(argmin_stub);
-#endif
 
-REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
-REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
-REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
 
 }  // namespace at::native

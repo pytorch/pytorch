@@ -1581,13 +1581,7 @@ void GroupNormBackwardKernelImpl(
 
 } // namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(GroupNormKernel, &GroupNormKernelImpl);
 REGISTER_DISPATCH(GroupNormBackwardKernel, &GroupNormBackwardKernelImpl);
-#else
-REGISTER_NO_AVX512_DISPATCH(GroupNormKernel);
-REGISTER_NO_AVX512_DISPATCH(GroupNormBackwardKernel);
-#endif
 
 } // namespace at::native

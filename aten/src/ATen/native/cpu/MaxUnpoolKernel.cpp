@@ -266,12 +266,7 @@ void max_unpool3d_kernel_impl(
 
 } // anonymous namespace
 
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(max_unpool2d_kernel, &max_unpool2d_kernel_impl);
 REGISTER_DISPATCH(max_unpool3d_kernel, &max_unpool3d_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(max_unpool2d_kernel);
-REGISTER_NO_AVX512_DISPATCH(max_unpool3d_kernel);
-#endif
 
 } // at::native

@@ -410,13 +410,7 @@ void adapative_avg_pool2d_backward_kernel_impl(
 
 } // anonymous namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(adaptive_avg_pool2d_kernel, &adaptive_avg_pool2d_kernel_impl);
 REGISTER_DISPATCH(adaptive_avg_pool2d_backward_kernel, &adapative_avg_pool2d_backward_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(adaptive_avg_pool2d_kernel);
-REGISTER_NO_AVX512_DISPATCH(adaptive_avg_pool2d_backward_kernel);
-#endif
 
 } // at::native

@@ -60,11 +60,6 @@ void _spdiags_kernel_cpu(
 
 } // namespace
 
-// This kernel is slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(spdiags_kernel_stub, &_spdiags_kernel_cpu)
-#else
-REGISTER_NO_AVX512_DISPATCH(spdiags_kernel_stub)
-#endif
 
 } // namespace at::native

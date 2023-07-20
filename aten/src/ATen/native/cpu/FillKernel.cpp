@@ -56,11 +56,6 @@ void fill_kernel(TensorIterator& iter, const Scalar& value_scalar) {
 
 } // namespace
 
-// This kernel is slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(fill_stub, &fill_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(fill_stub);
-#endif
 
 } // namespace at::native

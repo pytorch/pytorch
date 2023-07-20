@@ -85,10 +85,6 @@ void addr_kernel(TensorIterator &iter,
 
 } // anonymous namespace
 
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(addr_stub, &addr_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(addr_stub);
-#endif
 
 } // namespace at::native

@@ -63,11 +63,6 @@ void cat_serial_kernel(const Tensor& result, const MaterializedITensorListRef& t
 
 } // anonymous namespace
 
-// This kernel is slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(cat_serial_stub);
-#endif
 
 } // at::native

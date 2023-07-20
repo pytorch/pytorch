@@ -769,7 +769,6 @@ void upsample_trilinear3d_backward_kernel_impl(
 } // anonymous namespace
 
 // These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(upsample_nearest1d_backward_kernel, &upsample_nearest1d_backward_kernel_impl);
 REGISTER_DISPATCH(_upsample_nearest_exact1d_backward_kernel, &_upsample_nearest_exact1d_backward_kernel_impl);
 REGISTER_DISPATCH(upsample_nearest2d_backward_kernel, &upsample_nearest2d_backward_kernel_impl);
@@ -779,15 +778,5 @@ REGISTER_DISPATCH(_upsample_nearest_exact3d_backward_kernel, &_upsample_nearest_
 REGISTER_DISPATCH(upsample_linear1d_backward_kernel, &upsample_linear1d_backward_kernel_impl);
 REGISTER_DISPATCH(upsample_bilinear2d_backward_kernel, &upsample_bilinear2d_backward_kernel_impl);
 REGISTER_DISPATCH(upsample_trilinear3d_backward_kernel, &upsample_trilinear3d_backward_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(upsample_nearest1d_backward_kernel);
-REGISTER_NO_AVX512_DISPATCH(_upsample_nearest_exact1d_backward_kernel);
-REGISTER_NO_AVX512_DISPATCH(upsample_nearest2d_backward_kernel);
-REGISTER_NO_AVX512_DISPATCH(_upsample_nearest_exact2d_backward_kernel);
-REGISTER_NO_AVX512_DISPATCH(upsample_nearest3d_backward_kernel);
-REGISTER_NO_AVX512_DISPATCH(_upsample_nearest_exact3d_backward_kernel);
-REGISTER_NO_AVX512_DISPATCH(upsample_linear1d_backward_kernel);
-REGISTER_NO_AVX512_DISPATCH(upsample_bilinear2d_backward_kernel);
-REGISTER_NO_AVX512_DISPATCH(upsample_trilinear3d_backward_kernel);
-#endif
+
 } // namespace at::native

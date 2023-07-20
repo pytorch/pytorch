@@ -111,11 +111,6 @@ void channel_shuffle_kernel_impl(
 
 } // anonymous namespace
 
-// This kernel is slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(channel_shuffle_kernel, &channel_shuffle_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(channel_shuffle_kernel);
-#endif
 
 } // at::native

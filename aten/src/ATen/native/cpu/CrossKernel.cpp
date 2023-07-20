@@ -76,11 +76,6 @@ static void cross_kernel_impl(const Tensor& result, const Tensor& a, const Tenso
 
 } // anonymous namespace
 
-// This kernel is slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(cross_stub, &cross_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(cross_stub);
-#endif
 
 } // namespace at::native

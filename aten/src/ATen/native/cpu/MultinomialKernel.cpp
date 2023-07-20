@@ -237,14 +237,8 @@ static void multinomial_with_replacement_kernel_impl(
 }
 } // namespace
 
-// This kernel is slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(
     multinomial_with_replacement_stub,
     &multinomial_with_replacement_kernel_impl);
-#else
-REGISTER_NO_AVX512_DISPATCH(
-    multinomial_with_replacement_stub);
-#endif
 
 } // namespace at::native

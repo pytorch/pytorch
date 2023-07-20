@@ -444,12 +444,7 @@ void weight_norm_backward_kernel(
 } // anonymous namespace
 
 // These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(weight_norm_stub, &weight_norm_kernel);
 REGISTER_DISPATCH(weight_norm_backward_stub, &weight_norm_backward_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(weight_norm_stub);
-REGISTER_NO_AVX512_DISPATCH(weight_norm_backward_stub);
-#endif
 
 } // at::native

@@ -399,8 +399,6 @@ static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) 
 
 } // anonymous namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
 REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel);
@@ -413,19 +411,5 @@ REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
 REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu);
-#else
-REGISTER_NO_AVX512_DISPATCH(max_stub);
-REGISTER_NO_AVX512_DISPATCH(min_stub);
-REGISTER_NO_AVX512_DISPATCH(aminmax_stub);
-REGISTER_NO_AVX512_DISPATCH(where_kernel);
-REGISTER_NO_AVX512_DISPATCH(isposinf_stub);
-REGISTER_NO_AVX512_DISPATCH(isneginf_stub);
-REGISTER_NO_AVX512_DISPATCH(mode_stub);
-REGISTER_NO_AVX512_DISPATCH(clamp_stub);
-REGISTER_NO_AVX512_DISPATCH(clamp_scalar_stub);
-REGISTER_NO_AVX512_DISPATCH(clamp_min_scalar_stub);
-REGISTER_NO_AVX512_DISPATCH(clamp_max_scalar_stub);
-REGISTER_NO_AVX512_DISPATCH(isin_default_stub);
-#endif
 
 } // namespace at::native

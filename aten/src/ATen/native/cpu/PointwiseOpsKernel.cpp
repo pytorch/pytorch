@@ -236,18 +236,10 @@ static void mse_backward_cpu_kernel(TensorIterator& iter, const Scalar& value) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(addcmul_stub, &addcmul_cpu_kernel);
-REGISTER_DISPATCH(addcdiv_stub, &addcdiv_cpu_kernel);
-
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
+ALSO_REGISTER_AVX512_DISPATCH(addcmul_stub, &addcmul_cpu_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(addcdiv_stub, &addcdiv_cpu_kernel);
 REGISTER_DISPATCH(smooth_l1_backward_stub, &smooth_l1_backward_cpu_kernel);
 REGISTER_DISPATCH(huber_backward_stub, &huber_backward_cpu_kernel);
 REGISTER_DISPATCH(mse_backward_stub, &mse_backward_cpu_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(smooth_l1_backward_stub);
-REGISTER_NO_AVX512_DISPATCH(huber_backward_stub);
-REGISTER_NO_AVX512_DISPATCH(mse_backward_stub);
-#endif
 
 } // namespace at::native

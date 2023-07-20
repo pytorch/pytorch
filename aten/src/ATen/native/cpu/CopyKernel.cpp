@@ -268,10 +268,6 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
 
 } // namespace CPU_CAPABILITY
 
-// This kernel is slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(copy_stub, &copy_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(copy_stub);
-#endif
+
 } // namespace at::native

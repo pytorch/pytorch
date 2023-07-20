@@ -424,9 +424,6 @@ void replication_pad3d_backward_kernel_impl(
 
 } // anonymous namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
-// reflection padding
 REGISTER_DISPATCH(reflection_pad1d_kernel, &reflection_pad1d_kernel_impl);
 REGISTER_DISPATCH(reflection_pad1d_backward_kernel, &reflection_pad1d_backward_kernel_impl);
 REGISTER_DISPATCH(reflection_pad2d_kernel, &reflection_pad2d_kernel_impl);
@@ -441,22 +438,5 @@ REGISTER_DISPATCH(replication_pad2d_kernel, &replication_pad2d_kernel_impl);
 REGISTER_DISPATCH(replication_pad2d_backward_kernel, &replication_pad2d_backward_kernel_impl);
 REGISTER_DISPATCH(replication_pad3d_kernel, &replication_pad3d_kernel_impl);
 REGISTER_DISPATCH(replication_pad3d_backward_kernel, &replication_pad3d_backward_kernel_impl);
-#else
-// reflection padding
-REGISTER_NO_AVX512_DISPATCH(reflection_pad1d_kernel);
-REGISTER_NO_AVX512_DISPATCH(reflection_pad1d_backward_kernel);
-REGISTER_NO_AVX512_DISPATCH(reflection_pad2d_kernel);
-REGISTER_NO_AVX512_DISPATCH(reflection_pad2d_backward_kernel);
-REGISTER_NO_AVX512_DISPATCH(reflection_pad3d_kernel);
-REGISTER_NO_AVX512_DISPATCH(reflection_pad3d_backward_kernel);
-
-// replication padding
-REGISTER_NO_AVX512_DISPATCH(replication_pad1d_kernel);
-REGISTER_NO_AVX512_DISPATCH(replication_pad1d_backward_kernel);
-REGISTER_NO_AVX512_DISPATCH(replication_pad2d_kernel);
-REGISTER_NO_AVX512_DISPATCH(replication_pad2d_backward_kernel);
-REGISTER_NO_AVX512_DISPATCH(replication_pad3d_kernel);
-REGISTER_NO_AVX512_DISPATCH(replication_pad3d_backward_kernel);
-#endif
 
 } // at::native

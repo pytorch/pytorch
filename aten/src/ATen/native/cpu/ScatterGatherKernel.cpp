@@ -844,8 +844,6 @@ void scatter_scalar_reduce_cpu_kernel(const Tensor& self, const int64_t dim, con
 
 } // anonymous namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel);
 REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel);
 REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel);
@@ -858,17 +856,5 @@ REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cpu_kernel);
 REGISTER_DISPATCH(scatter_add_expanded_index_stub, &scatter_add_expanded_index_kernel);
 REGISTER_DISPATCH(scatter_reduce_expanded_index_stub, &scatter_reduce_expanded_index_kernel);
 REGISTER_DISPATCH(gather_expanded_index_stub, &gather_expanded_index_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(gather_stub);
-REGISTER_NO_AVX512_DISPATCH(scatter_stub);
-REGISTER_NO_AVX512_DISPATCH(scatter_fill_stub);
-REGISTER_NO_AVX512_DISPATCH(scatter_add_stub);
-REGISTER_NO_AVX512_DISPATCH(scatter_reduce_stub);
-REGISTER_NO_AVX512_DISPATCH(scatter_scalar_reduce_stub);
-REGISTER_NO_AVX512_DISPATCH(scatter_reduce_two_stub);
-REGISTER_NO_AVX512_DISPATCH(scatter_add_expanded_index_stub);
-REGISTER_NO_AVX512_DISPATCH(scatter_reduce_expanded_index_stub);
-REGISTER_NO_AVX512_DISPATCH(gather_expanded_index_stub);
-#endif
 
 } // namespace at::native

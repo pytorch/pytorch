@@ -20,5 +20,5 @@ inline namespace CPU_CAPABILITY {
     } // scaled_modified_bessel_k1_kernel(TensorIteratorBase& iterator)
 } // namespace CPU_CAPABILITY
 
-REGISTER_DISPATCH(special_scaled_modified_bessel_k1_stub, &CPU_CAPABILITY::scaled_modified_bessel_k1_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(special_scaled_modified_bessel_k1_stub, &CPU_CAPABILITY::scaled_modified_bessel_k1_kernel);
 } // namespace at::native

@@ -243,13 +243,7 @@ static void topk_kernel(
 
 } // anonymous namespace
 
-// These kernels are slower with AVX512 than with AVX2.
-#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(sort_stub, &sort_kernel);
 REGISTER_DISPATCH(topk_stub, &topk_kernel);
-#else
-REGISTER_NO_AVX512_DISPATCH(sort_stub);
-REGISTER_NO_AVX512_DISPATCH(topk_stub);
-#endif
 
 } //at::native
