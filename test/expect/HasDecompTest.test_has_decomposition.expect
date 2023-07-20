@@ -714,8 +714,6 @@ aten::dequantize.tensors_out
 aten::detach_
 aten::detach_copy
 aten::detach_copy.out
-aten::dist
-aten::dist.out
 aten::embedding_renorm
 aten::embedding_renorm.out
 aten::embedding_renorm_
