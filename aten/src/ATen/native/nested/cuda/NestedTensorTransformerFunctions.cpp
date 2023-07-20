@@ -679,64 +679,66 @@ inline auto sdpa_nested_preprocessing(
 
 } // namespace
 
-// std::tuple<
-//     Tensor,
-//     Tensor,
-//     Tensor,
-//     Tensor,
-//     int64_t,
-//     int64_t,
-//     Tensor,
-//     Tensor,
-//     Tensor>
-// _scaled_dot_product_flash_attention_nestedtensor_cuda(
-//     const Tensor& query,
-//     const Tensor& key,
-//     const Tensor& value,
-//     double dropout_p,
-//     bool is_causal,
-//     bool return_debug_mask,
-//     c10::optional<double> scale) {
-//   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
-//       cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
-//   int64_t max_seqlen_batch_q{0}, max_seqlen_batch_kv{0};
-//   std::tie(
-//       query_buffer_reshaped,
-//       key_buffer_reshaped,
-//       value_buffer_reshaped,
-//       cumulative_sequence_length_q,
-//       cumulative_sequence_length_kv,
-//       max_seqlen_batch_q,
-//       max_seqlen_batch_kv,
-//       output_shape) = sdpa_nested_preprocessing(query, key, value);
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor, Tensor>
+_scaled_dot_product_flash_attention_nestedtensor_cuda(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    c10::optional<double> scale) {
+  Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
+      cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
+  int64_t max_seqlen_batch_q{0}, max_seqlen_batch_kv{0};
+  std::tie(
+      query_buffer_reshaped,
+      key_buffer_reshaped,
+      value_buffer_reshaped,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_kv,
+      max_seqlen_batch_q,
+      max_seqlen_batch_kv,
+      output_shape) = sdpa_nested_preprocessing(query, key, value);
 
-//   Tensor attention, log_sumexp, debug_attn_mask, philox_seed, philox_offset;
-//   std::tie(attention, log_sumexp, philox_seed, philox_offset, debug_attn_mask) =
-//       at::_flash_attention_forward(
-//           query_buffer_reshaped,
-//           key_buffer_reshaped,
-//           value_buffer_reshaped,
-//           cumulative_sequence_length_q,
-//           cumulative_sequence_length_kv,
-//           max_seqlen_batch_q,
-//           max_seqlen_batch_kv,
-//           dropout_p,
-//           is_causal,
-//           return_debug_mask,
-//           scale);
-//   // Reshape output to convert nnz to batch_size and seq_len
-//   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
-//   return std::make_tuple(
-//       attention,
-//       log_sumexp,
-//       cumulative_sequence_length_q,
-//       cumulative_sequence_length_kv,
-//       max_seqlen_batch_q,
-//       max_seqlen_batch_kv,
-//       philox_seed,
-//       philox_offset,
-//       debug_attn_mask);
-// }
+  auto
+      [attention,
+       q_padded,
+       k_padded,
+       v_padded,
+       logsumexp,
+       philox_seed,
+       philox_offset,
+       debug_attn_mask] =
+      at::_flash_attention_forward(
+          query_buffer_reshaped,
+          key_buffer_reshaped,
+          value_buffer_reshaped,
+          cumulative_sequence_length_q,
+          cumulative_sequence_length_kv,
+          max_seqlen_batch_q,
+          max_seqlen_batch_kv,
+          dropout_p,
+          is_causal,
+          return_debug_mask,
+          scale);
+  // Reshape output to convert nnz to batch_size and seq_len
+  // Don't reshape {q,k,v}_padded since they are only used for backwards
+  attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
+  return std::make_tuple(
+      attention,
+      q_padded,
+      k_padded,
+      v_padded,
+      logsumexp,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_kv,
+      max_seqlen_batch_q,
+      max_seqlen_batch_kv,
+      philox_seed,
+      philox_offset,
+      debug_attn_mask);
+}
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _scaled_dot_product_efficient_attention_nestedtensor_cuda(
