@@ -5,7 +5,7 @@ import functools
 import weakref
 
 import torch
-from ..parameter import Parameter, Buffer
+from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
@@ -1745,16 +1745,16 @@ class Module:
                 modules[name] = value
             else:
                 buffers = self.__dict__.get('_buffers')
-                if isinstance(value, Buffer) or buffers is not None and name in buffers:
+                if buffers is not None and name in buffers:
                     if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError("cannot assign '{}' as buffer '{}' "
-                                        "(torch.nn.Buffer, torch.Tensor or None expected)"
+                                        "(torch.Tensor or None expected)"
                                         .format(torch.typename(value), name))
-                    if isinstance(value, Buffer):
-                        persistent = value.persistent
-                    else:
-                        persistent = name not in self._non_persistent_buffers_set
-                    self.register_buffer(name, value, persistent)
+                    for hook in _global_buffer_registration_hooks.values():
+                        output = hook(self, name, value)
+                        if output is not None:
+                            value = output
+                    buffers[name] = value
                 else:
                     super().__setattr__(name, value)
 
