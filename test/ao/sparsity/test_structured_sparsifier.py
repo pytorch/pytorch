@@ -10,6 +10,7 @@ from torch.ao.pruning._experimental.pruner import (
     LSTMSaliencyPruner,
     BaseStructuredSparsifier,
     FakeStructuredSparsity,
+    FPGMSparsifier
 )
 from torch.nn.utils import parametrize
 
@@ -916,3 +917,421 @@ class TestBaseStructuredSparsifier(TestCase):
         # also check that output of linear is the same shape, this means we've resized
         # linear columns correctly.
         assert out_expected.shape == out_pruned.shape
+
+class TestFPGMSparsifier(TestCase):
+    def _check_pruner_prepared(self, model, pruner, device):
+        for config in pruner.groups:
+            module = config["module"]
+            assert module.weight.device.type == device.type
+            # Check mask exists
+            assert config["tensor_fqn"] in pruner.state
+            # Check parametrization exists and is correct
+            assert parametrize.is_parametrized(module)
+            assert hasattr(module, "parametrizations")
+            # Assume that this is the 1st/only parametrization
+            assert type(module.parametrizations.weight[0]) == FakeStructuredSparsity
+
+    def _check_pruner_valid_before_step(self, model, pruner, device):
+        for config in pruner.groups:
+            modules = []
+            if type(config["module"]) is tuple:
+                for module in config["module"]:
+                    modules.append(module)
+            else:
+                module = config["module"]
+                modules.append(module)
+            for module in modules:
+                assert module.weight.device.type == device.type
+                assert module.parametrizations.weight[0].mask.dtype == torch.bool
+
+    def _check_pruner_valid_after_step(self, model, pruner, device):
+        for config in pruner.groups:
+            modules = []
+            if type(config["module"]) is tuple:
+                for module in config["module"]:
+                    modules.append(module)
+            else:
+                module = config["module"]
+                modules.append(module)
+            for module in modules:
+                assert module.weight.device.type == device.type
+                total = module.parametrizations.weight[0].mask.numel()
+                assert (
+                    module.parametrizations.weight[0].mask.count_nonzero()
+                    == round(total * config["sparsity_level"])
+                )
+
+    def _test_constructor_on_device(self, model, device):
+        # self.assertRaisesRegex(
+        #     TypeError,
+        #     "FPGMSparsifier.* update_mask",
+        #     FPGMSparsifier,
+        # )
+        model1 = copy.deepcopy(model).to(device)
+        pruner = FPGMSparsifier()
+        pruner.prepare(model1, None)
+        pruner.enable_mask_update = True
+        for g in pruner.groups:
+            module = g["module"]
+            assert module.weight.device.type == device.type
+        assert len(pruner.groups) == 4
+        pruner.step()
+        # Can instantiate the model with configs
+        model2 = copy.deepcopy(model).to(device)
+        pruner = FPGMSparsifier(0.7, 0, 1)
+        pruner.prepare(model2, [{"tensor_fqn": "seq.0.weight"}])
+        assert len(pruner.groups) == 1
+        assert pruner.groups[0]["module_fqn"] == "seq.0"
+        assert pruner.groups[0]["sparsity_level"] == 0.7
+        assert pruner.groups[0]["dim"] == 0
+
+    def test_constructor(self):
+        """
+        FPGM only supports pruning of convolutional layers
+        """
+        model = SimpleConv2d()
+        for device in DEVICES:
+            self._test_constructor_on_device(model, torch.device(device))
+
+    def _test_prepare_conv2d_on_device(self, model, expected_shape, config, device):
+        x = torch.ones((1, 1, 28, 28), device=device)
+        pruner = FPGMSparsifier()
+        pruner.prepare(model, config)
+        self._check_pruner_prepared(model, pruner, device)
+        assert model(x).shape == expected_shape
+
+    def test_prepare_conv2d(self):
+        models = [
+            SimpleConv2d(),
+            Conv2dBias(),
+            Conv2dActivation(),
+            Conv2dPadBias(),
+            Conv2dPool(),
+        ]
+        shapes = [
+            (1, 52, 20, 20),
+            (1, 52, 18, 18),
+            (1, 52, 18, 18),
+            (1, 52, 24, 24),
+            (1, 52, 3, 3),
+        ]
+        configs = [None, None, None, None, None]
+        for device in DEVICES:
+            for model, shape, config in zip(models, shapes, configs):
+                model = model.to(device)
+                self._test_prepare_conv2d_on_device(
+                    model, shape, config, torch.device(device)
+                )
+
+    def _test_step_conv2d_on_device(self, model, expected_shape, config, device):
+        model = model.to(device)
+        x = torch.ones((1, 1, 28, 28), device=device)
+        pruner = FPGMSparsifier()
+        pruner.prepare(model, config)
+        pruner.enable_mask_update = True
+        self._check_pruner_valid_before_step(model, pruner, device)
+        pruner.step()
+        self._check_pruner_valid_after_step(model, pruner, device)
+        assert model(x).shape == expected_shape
+
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
+    def test_step_conv2d(self):
+        models = [
+            SimpleConv2d(),
+            Conv2dBias(),
+            Conv2dActivation(),
+            Conv2dPadBias(),
+            Conv2dPool(),
+        ]
+        shapes = [
+            (1, 52, 20, 20),
+            (1, 52, 18, 18),
+            (1, 52, 18, 18),
+            (1, 52, 24, 24),
+            (1, 52, 3, 3),
+        ]
+        configs = [None, None, None, None, None]
+        for device in DEVICES:
+            for model, shape, config in zip(models, shapes, configs):
+                self._test_step_conv2d_on_device(
+                    model, shape, config, torch.device(device)
+                )
+
+    def _check_pruner_pruned(self, model, pruner, device):
+        for config in pruner.groups:
+            module = config["module"]
+            assert not hasattr(module, "parametrizations")
+            assert not hasattr(module, "mask")
+
+    def _test_conv2d_on_device(
+        self, model, config, x, expected_shape, device, also_prune_bias
+    ):
+        model = model.to(device)
+        num_original_params = sum(p.numel() for p in model.parameters())
+        model.eval()
+
+        pruner = FPGMSparsifier(0.5, 0, 2)
+        pruner.prepare(model, config)
+        pruner.enable_mask_update = True
+        pruner.step()
+
+        y_expected = model(x)
+        assert y_expected.shape == expected_shape
+
+        self._check_pruner_prepared(model, pruner, device)
+
+        # Fusion step
+        pruned = pruner.prune()
+        y_pruned = pruned(x)
+        num_pruned_params = sum(p.numel() for p in pruned.parameters())
+
+        assert y_pruned.shape == expected_shape
+        self._check_pruner_pruned(model, pruner, device)
+        if y_pruned.shape == y_expected.shape:
+            # TODO This rtol is a little high, need to double check if something specific is causing this to fail
+            assert torch.isclose(
+                y_expected,
+                y_pruned,
+                rtol=1e-3,
+                atol=1e-3,
+            ).all(), f"fail for {type(model)}"
+            # only time this should be equal is when all layers have padding and we can't prune
+            assert num_pruned_params <= num_original_params
+
+    def test_prune_conv2d_conv2d(self):
+        configs, shapes = [], []
+        # all within sequential blocks
+        configs.append(
+            [
+                {"tensor_fqn": "seq.0.weight"},
+            ]
+        )
+        shapes.append((1, 52, 20, 20))
+        # prune across sequential blocks
+        configs.append(
+            [
+                {"tensor_fqn": "seq.0.weight"},
+                {"tensor_fqn": "seq.1.weight"},
+                {"tensor_fqn": "conv2d1.weight"},
+            ]
+        )
+        shapes.append((1, 52, 20, 20))
+
+        for device in DEVICES:
+            x = torch.ones((1, 1, 28, 28), device=device)
+            for also_prune_bias in [True, False]:
+                for config, shape in zip(configs, shapes):
+                    model = SimpleConv2d()
+                    self._test_conv2d_on_device(
+                        model,
+                        config,
+                        x,
+                        shape,
+                        torch.device(device),
+                        also_prune_bias,
+                    )
+
+    def test_prune_conv2d_bias_conv2d(self):
+        # Conv2d with Bias and no Activation
+        configs, shapes = [], []
+        # conv2d(bias) -> conv2d(bias)
+        configs.append(
+            [
+                {"tensor_fqn": "seq.0.weight"},
+                {"tensor_fqn": "seq.1.weight"},
+            ]
+        )
+        shapes.append((1, 52, 18, 18))
+
+        # conv2d(no bias) -> conv2d(bias)
+        configs.append(
+            [
+                {"tensor_fqn": "seq.0.weight"},
+                {"tensor_fqn": "seq.1.weight"},
+                {"tensor_fqn": "conv2d1.weight"},
+            ]
+        )
+        shapes.append((1, 52, 18, 18))
+
+        # conv2d(bias) -> conv2d(no bias)
+        configs.append(
+            [
+                {"tensor_fqn": "seq.0.weight"},
+                {"tensor_fqn": "seq.1.weight"},
+                {"tensor_fqn": "seq.2.weight"},
+            ]
+        )
+        shapes.append((1, 52, 18, 18))
+
+        for device in DEVICES:
+            x = torch.ones((1, 1, 28, 28), device=device)
+            for also_prune_bias in [True, False]:
+                for config, shape in zip(configs, shapes):
+                    self._test_conv2d_on_device(
+                        Conv2dBias(),
+                        config,
+                        x,
+                        shape,
+                        torch.device(device),
+                        also_prune_bias,
+                    )
+
+    def test_prune_conv2d_activation_conv2d(self):
+        # Conv2d with Activation and no Bias
+        configs, shapes = [], []
+
+        # conv2d(no bias) -> activatation -> conv2d(no bias)
+        configs.append(
+            [
+                {"tensor_fqn": "seq.4.weight"},
+            ]
+        )
+        shapes.append((1, 52, 18, 18))
+
+        # conv2d(bias) -> activatation -> conv2d(bias)
+        configs.append(
+            [
+                {"tensor_fqn": "seq.0.weight"},
+                {"tensor_fqn": "seq.2.weight"},
+            ]
+        )
+        shapes.append((1, 52, 18, 18))
+
+        # conv2d(bias) -> activation -> conv2d(no bias)
+        configs.append(
+            [
+                {"tensor_fqn": "seq.2.weight"},
+                {"tensor_fqn": "seq.4.weight"},
+            ]
+        )
+        shapes.append((1, 52, 18, 18))
+
+        # conv2d(no bias) -> activation -> conv2d(bias)
+        configs.append(
+            [
+                {"tensor_fqn": "conv2d1.weight"},
+            ]
+        )
+        shapes.append((1, 52, 18, 18))
+
+        for device in DEVICES:
+            x = torch.ones((1, 1, 28, 28), device=device)
+            for also_prune_bias in [True, False]:
+                for config, shape in zip(configs, shapes):
+                    self._test_conv2d_on_device(
+                        Conv2dActivation(),
+                        config,
+                        x,
+                        shape,
+                        torch.device(device),
+                        also_prune_bias,
+                    )
+
+    def test_prune_conv2d_padding_conv2d(self):
+        # Conv2d with Padded layers after Bias layers
+        configs, shapes = [], []
+
+        # conv(padded, bias) -> conv(padded, bias)
+        configs.append(
+            [
+                {"tensor_fqn": "seq.4.weight"},
+            ]
+        )
+        shapes.append((1, 52, 24, 24))
+
+        # conv(no bias, no pad) -> conv(padded, bias)
+        configs.append(
+            [
+                {"tensor_fqn": "seq.2.weight"},
+            ]
+        )
+        shapes.append((1, 52, 24, 24))
+
+        # conv(padded, bias) -> conv ( no bias ,no pad)
+        configs.append(
+            [
+                {"tensor_fqn": "seq.0.weight"},
+            ]
+        )
+        shapes.append((1, 52, 24, 24))
+        # conv(pad, bias) -> conv(no pad, bias)
+        configs.append(
+            [
+                {"tensor_fqn": "seq.6.weight"},
+            ]
+        )
+        shapes.append((1, 52, 24, 24))
+        # conv(no pad, bias) -> conv(pad, bias)
+        configs.append(
+            [
+                {"tensor_fqn": "seq.8.weight"},
+            ]
+        )
+        shapes.append((1, 52, 24, 24))
+
+        for device in DEVICES:
+            x = torch.ones((1, 1, 28, 28), device=device)
+            for also_prune_bias in [True, False]:
+                for config, shape in zip(configs, shapes):
+                    self._test_conv2d_on_device(
+                        Conv2dPadBias(),
+                        config,
+                        x,
+                        shape,
+                        torch.device(device),
+                        also_prune_bias,
+                    )
+
+    def test_prune_conv2d_pool_conv2d(self):
+        # Conv2d with Pooling layers
+        config = [
+            {"tensor_fqn": "seq.0.weight"},
+            {"tensor_fqn": "seq.3.weight"},
+            {"tensor_fqn": "conv2d1.weight"},
+            {"tensor_fqn": "conv2d2.weight"},
+        ]
+        shape = (1, 52, 3, 3)
+
+        for device in DEVICES:
+            x = torch.ones((1, 1, 28, 28), device=device)
+            for also_prune_bias in [True, False]:
+                self._test_conv2d_on_device(
+                    Conv2dPool(),
+                    config,
+                    x,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
+
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
+    def test_complex_conv2d(self):
+        """Test fusion for models that contain Conv2d & Linear modules.
+        Currently supports: Conv2d-Pool2d-Flatten-Linear, Skip-add"""
+        config = [
+            {"tensor_fqn": "seq.0.weight"},
+            {"tensor_fqn": "seq.3.weight"},
+            {"tensor_fqn": "conv2d1.weight"},
+            {"tensor_fqn": "conv2d2.weight"},
+        ]
+        shape = (1, 13)
+
+        for device in DEVICES:
+            x = torch.ones((1, 1, 28, 28), device=device)
+            for also_prune_bias in [True, False]:
+                self._test_conv2d_on_device(
+                    Conv2dPoolFlattenFunctional(),
+                    config,
+                    x,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
+                self._test_conv2d_on_device(
+                    Conv2dPoolFlatten(),
+                    config,
+                    x,
+                    shape,
+                    torch.device(device),
+                    also_prune_bias,
+                )
