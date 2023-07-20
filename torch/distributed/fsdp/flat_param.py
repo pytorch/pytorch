@@ -87,6 +87,9 @@ _FSDP_USE_UNSAFE_SETATTR = "FSDP_USE_UNSAFE_SETATTR"
 # pre-backward each iteration.
 _FSDP_SKIP_WRITEBACK_CHECK = "FSDP_SKIP_WRITEBACK_CHECK"
 
+# Env var toggling whether when model is in .eval() mode, should we run in fp32
+# or the reduced precision.
+_FSDP_USE_FULL_PREC_IN_EVAL = "FSDP_USE_FULL_PREC_IN_EVAL"
 
 # Some value to set padding in tensors to for debuggability
 _FLAT_PARAM_PADDING_VALUE = 42
@@ -475,6 +478,9 @@ class FlatParamHandle:
         self._init_setattr_fns()
         self._skip_writeback_check = (
             os.environ.get(_FSDP_SKIP_WRITEBACK_CHECK, "") == "1"
+        )
+        self._use_full_prec_in_eval = (
+            os.environ.get(_FSDP_USE_FULL_PREC_IN_EVAL, "") == "1"
         )
         if self._skip_writeback_check:
             _warn_skip_writeback_check(
@@ -1499,7 +1505,7 @@ class FlatParamHandle:
         def cast_grad_to_param_dtype_if_needed(flat_param):
             # TODO (rohan-varma): test for full precision with keep_low_precision_grads
             if not self._force_full_precision and self._keep_low_precision_grads:
-                assert flat_param.grad is not None  # mypy
+                _p_assert(flat_param.grad is not None, "Unexpected None grad!")
                 if flat_param.grad.dtype != self._fwd_bwd_param_dtype:
                     flat_param.grad.data = flat_param.grad.to(self._fwd_bwd_param_dtype)
                     if self._use_orig_params:
@@ -1517,12 +1523,14 @@ class FlatParamHandle:
         elif hasattr(flat_param, "_saved_grad_shard"):
             self._check_sharded(flat_param)
             self._check_on_compute_device(flat_param)
-            self._check_on_compute_device(flat_param._saved_grad_shard)  # type: ignore[attr-defined]
+            if flat_param._saved_grad_shard is not None:
+                self._check_on_compute_device(flat_param._saved_grad_shard)  # type: ignore[attr-defined]
             # If no sharded gradient was computed this iteration, then there is
             # no need to forward `_saved_grad_shard` to `grad`
             if flat_param._post_backward_called:  # type: ignore[attr-defined]
                 flat_param.grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
-                cast_grad_to_param_dtype_if_needed(flat_param)
+                if flat_param.grad is not None:
+                    cast_grad_to_param_dtype_if_needed(flat_param)
         else:
             _p_assert(
                 not self.uses_sharded_strategy
@@ -2214,20 +2222,31 @@ class FlatParamHandle:
             assert self.flat_param._is_grad_none_mask is not None
             self.flat_param._is_grad_none_mask[tensor_index] = True
 
-    def _clear_grads_if_needed(self):
+    def _reset_flat_param_grad_info_if_needed(self):
         """
-        When ``use_orig_params=True``, sets the underlying ``flat_param.grad``
-        to ``None`` if *all* of the original parameters' ``.grad`` are
-        ``None``. This is targeting ``optim.zero_grad(set_to_none=True)``, in
+        When ``use_orig_params=True``:
+        (1) sets the underlying ``flat_param.grad`` to ``None`` if *all* of the
+        original parameters' ``.grad`` are ``None``, and
+        (2) sets ``flat_param.requires_grad=False`` if *none* of the original
+        parameters require gradient.
+        For (1), this is targeting ``optim.zero_grad(set_to_none=True)``, in
         which case we want to free the gradients as soon after the
         ``zero_grad()`` call as possible.
         """
         if not self._use_orig_params:
             return
         flat_param = self.flat_param
-        assert flat_param._params is not None
-        if all(param.grad is None for param in flat_param._params):
+        assert flat_param._params is not None  # mypy
+        all_grad_none = True
+        requires_grad = False
+        for param in flat_param._params:
+            all_grad_none &= param.grad is None
+            requires_grad |= param.requires_grad
+        if all_grad_none:
             flat_param.grad = None
+        # As long as one parameter requires gradient, then the flat parameter
+        # must require gradient
+        flat_param.requires_grad = requires_grad
 
     def _deregister_orig_params(self):
         for param_info in self.flat_param._param_infos:
@@ -2454,8 +2473,8 @@ class FlatParamHandle:
         ) and (
             self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
             or
-            # Also disable mixed precision in model eval mode
-            not self._fully_sharded_module.training
+            # Also disable mixed precision in model eval mode, if configured
+            (not self._fully_sharded_module.training and self._use_full_prec_in_eval)
         )
 
 
