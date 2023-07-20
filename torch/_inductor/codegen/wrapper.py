@@ -237,13 +237,22 @@ class AllocateLine(MemoryPlanningLine):
                     break
             if need_cuda_event:
                 event_name = f"event_allocate_{self.node.get_name()}"
-                code.writeline(f"{event_name} = torch.cuda.Event()")
-                code.writeline(line)
-                # TODO(yueming): need to double check
-                code.writeline(f"{event_name}.record(stream0_raw)")
-                for user_stream in self.user_streams:
-                    if user_stream != 0:
-                        code.writeline(f"stream{user_stream}_raw.wait_event({event_name})")
+                if V.graph.cpp_wrapper:
+                    code.writeline(f"cudaEvent_t {event_name};")
+                    code.writeline(f"cudaEventCreate(&{event_name});")
+                    code.writeline(line)
+                    code.writeline(f"cudaEventRecord({event_name}, stream0);")
+                    for user_stream in self.user_streams:
+                        if user_stream != 0:
+                            code.writeline(f"cudaStreamWaitEvent(stream{user_stream}, {event_name}, 0);")
+                else:
+                    code.writeline(f"{event_name} = torch.cuda.Event()")
+                    code.writeline(line)
+                    # TODO(yueming): need to double check
+                    code.writeline(f"{event_name}.record(stream0_raw)")
+                    for user_stream in self.user_streams:
+                        if user_stream != 0:
+                            code.writeline(f"stream{user_stream}_raw.wait_event({event_name})")
             else:
                 code.writeline(line)
         else:
