@@ -517,7 +517,7 @@ class Barrier:
             arrived = 0
             with _lock():
                 for f_name in os.listdir(barrier_dir):
-                    with open(os.path.join(barrier_dir, f_name), "r") as f:
+                    with open(os.path.join(barrier_dir, f_name)) as f:
                         data = f.read()
                         if int(data) >= cls.barrier_id:
                             arrived += 1
@@ -552,7 +552,7 @@ class TestDistBackend(MultiProcessTestCase):
 
     @property
     def init_method(self):
-        return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
+        return f"{FILE_SCHEMA}{self.file_name}"
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
@@ -654,7 +654,7 @@ class DistributedTest:
                 lines = out.getvalue().splitlines()
 
             def format_line(var):
-                return "env:%s=%s" % (
+                return "env:{}={}".format(
                     var,
                     os.environ[var] if var in os.environ else "N/A",
                 )
@@ -692,7 +692,7 @@ class DistributedTest:
 
             all_ranks = set()
             for f_name in os.listdir(test_dir):
-                with open(os.path.join(test_dir, f_name), "r") as f:
+                with open(os.path.join(test_dir, f_name)) as f:
                     all_ranks.add(int(f.read()))
             self.assertEqual(len(all_ranks), num_processes)
 
@@ -9640,7 +9640,7 @@ class DistributedTest:
 
             class MyModel(nn.Module):
                 def __init__(self, device):
-                    super(MyModel, self).__init__()
+                    super().__init__()
                     self.error = True
                     self.fc1 = nn.Linear(10, 10).cuda(device)
 
@@ -9683,12 +9683,12 @@ class DistributedTest:
         def test_ddp_has_finalized(self):
 
             @dataclass
-            class MyClass():
+            class MyClass:
                 obj: torch.Tensor
 
             class MyModel(nn.Module):
                 def __init__(self, rank):
-                    super(MyModel, self).__init__()
+                    super().__init__()
                     self.rank = rank
                     self.fc1 = nn.Linear(1024, 1024).cuda(rank)
                     self.fc2 = nn.Linear(1024, 2 * 1024).cuda(rank)
@@ -9724,6 +9724,47 @@ class DistributedTest:
             else:
                 ddp._check_reducer_finalized()
                 ddp(input)
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND != "nccl",
+            "TORCH_NCCL_USE_COMM_NONBLOCKING only applies to NCCL"
+        )
+        def test_nccl_init_abort(self):
+            """
+            Tests that we can abort a NCCL communicator during initialization and
+            recover appropriately.
+            """
+            # Reinitialize global process group with TORCH_NCCL_USE_COMM_NONBLOCKING=1
+            os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
+            dist.destroy_process_group()
+            timeout = timedelta(seconds=1)
+            dist.init_process_group(
+                init_method=INIT_METHOD,
+                backend=BACKEND,
+                world_size=int(os.environ["WORLD_SIZE"]),
+                rank=self.rank,
+                timeout=timeout,
+            )
+
+            # Abort pg in background thread.
+            running = True
+
+            def abort(device):
+                pg = _get_default_group()
+                while running:
+                    pg._get_backend(torch.device(device))._abort()
+                    time.sleep(1)
+
+            if self.rank != 1:
+                import threading
+                t = threading.Thread(target=abort, args=(self.rank,))
+                t.start()
+                with self.assertRaises(RuntimeError):
+                    # First collective triggers initialization via ncclCommInitRank.
+                    torch.distributed.barrier()
+                running = False
+                t.join()
 
 
 

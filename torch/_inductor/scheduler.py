@@ -1176,7 +1176,11 @@ class Scheduler:
         ):
             return False  # heuristic not needed for correctness
 
-        if len(node1.get_nodes()) + len(node2.get_nodes()) > config.max_fusion_size:
+        if (
+            not node1.is_foreach()
+            and not node2.is_foreach()
+            and len(node1.get_nodes()) + len(node2.get_nodes()) > config.max_fusion_size
+        ):
             return False  # heuristic not needed for correctness
 
         if node1.get_names() & node2.recursive_predecessors:
@@ -1323,6 +1327,8 @@ class Scheduler:
         for name in names_to_remove:
             if name in V.kernel.args.inplace_buffers:
                 buf = V.kernel.args.inplace_buffers[name]
+                if buf == "REMOVED":
+                    continue
                 remove = all(n in names_to_remove for n in buf.other_names)
                 if remove:
                     self.remove_inplace_buffer(name)

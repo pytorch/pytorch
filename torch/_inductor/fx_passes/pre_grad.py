@@ -94,6 +94,10 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         return gm
     gm = remove_identity(gm)
     gm = fuse_conv_bn(gm)
+    # TODO: lstm will be decomposed after AOTAutograd and we're not able to
+    # prepack it then. Add a temporary pass for lstm prepack before
+    # AOTAutograd to get the performance benifit and need to figure
+    # out a way to make this pass work after the AOTAutograd.
     gm = mkldnn_fuse_fx(gm, example_inputs)
     return gm
 

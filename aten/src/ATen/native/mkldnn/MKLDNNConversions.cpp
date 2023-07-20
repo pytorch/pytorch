@@ -139,7 +139,19 @@ Tensor mkldnn_reorder_conv2d_weight(
   const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
-  auto w = itensor_from_mkldnn(self);
+
+  ideep::dims src_dims = ideep::dims();
+  bool is_channels_last = false;
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (input_size.has_value()) {
+    src_dims = input_size.value().vec();
+    // if has input size, we always use channels last.
+    is_channels_last = true;
+    memory_format = at::MemoryFormat::ChannelsLast;
+  }
+
+  auto self_ = self.is_mkldnn() ? self : self.contiguous(memory_format);
+  auto w = itensor_from_tensor(self_);
 
   // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
   // dimension when groups > 1, having dimension [g, o/g, i, h, w] instead of
@@ -149,14 +161,6 @@ Tensor mkldnn_reorder_conv2d_weight(
   if (w.ndims() == 5) {
     auto wdims = w.get_dims();
     w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
-  }
-
-  ideep::dims src_dims = ideep::dims();
-  bool is_channels_last = false;
-  if (input_size.has_value()) {
-    src_dims = input_size.value().vec();
-    // if has input size, we always use channels last.
-    is_channels_last = true;
   }
 
   auto desc = ideep::convolution_forward::expected_weights_desc(
@@ -213,7 +217,7 @@ Tensor mkldnn_reorder_conv3d_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
-Tensor mkldnn_reorder_linear_weight(
+static Tensor mkldnn_reorder_linear_weight(
     const Tensor& self,
     c10::optional<int64_t> batch_size_opt) {
   if (self.scalar_type() == ScalarType::BFloat16) {
@@ -222,7 +226,8 @@ Tensor mkldnn_reorder_linear_weight(
   }
   auto out_features = self.size(0);
   auto in_features = self.size(1);
-  auto w = itensor_from_mkldnn(self);
+  auto self_ = self.contiguous();
+  auto w = itensor_from_tensor(self_);
   ideep::dims input_size;
   auto dtype = w.get_data_type();
   if (batch_size_opt.has_value()) {
@@ -239,7 +244,7 @@ Tensor mkldnn_reorder_linear_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
-ideep::tensor::desc get_conv_transpose_expected_weights_desc(
+static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
     const ideep::tensor::dims& weights_dims,
     ideep::tensor::data_type w_dtype,
     const ideep::tensor::dims& strides,
@@ -278,7 +283,7 @@ ideep::tensor::desc get_conv_transpose_expected_weights_desc(
   }
 }
 
-Tensor mkldnn_reorder_conv_transpose2d_weight(
+static Tensor mkldnn_reorder_conv_transpose2d_weight(
     const Tensor& self,
     IntArrayRef padding,
     IntArrayRef output_padding,
@@ -295,15 +300,19 @@ Tensor mkldnn_reorder_conv_transpose2d_weight(
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
   const auto output_padding_expanded = expand_param_if_needed(output_padding, "output_padding", 2);
-  ideep::tensor w = itensor_from_tensor(self);
 
   ideep::dims src_dims = ideep::dims();
   bool is_channels_last = false;
+  auto memory_format = at::MemoryFormat::Contiguous;
   if (input_size.has_value()) {
     src_dims = input_size.value().vec();
     // if has input size, we always use channels last.
     is_channels_last = true;
+    memory_format = at::MemoryFormat::ChannelsLast;
   }
+
+  auto self_ = self.contiguous(memory_format);
+  ideep::tensor w = itensor_from_tensor(self_);
 
   auto expected_desc = get_conv_transpose_expected_weights_desc(
       w.get_dims(),
@@ -507,16 +516,16 @@ std::vector<Tensor> mkldnn_reorder_lstm_weight(
   return result;
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_transpose_weight"),
       TORCH_FN(mkldnn_reorder_conv_transpose2d_weight));
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_linear_weight"),
       TORCH_FN(mkldnn_reorder_linear_weight));
-}
-
-TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_weight"),
+      TORCH_FN(mkldnn_reorder_conv2d_weight));
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_lstm_weight"),
       TORCH_FN(mkldnn_reorder_lstm_weight));
@@ -556,7 +565,7 @@ Tensor mkldnn_reorder_conv3d_weight(
 #if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
 #include <mkl.h>
 
-Tensor mkl_reorder_linear_weight(
+static Tensor mkl_reorder_linear_weight(
     const Tensor& weight,
     const int64_t batch_size) {
   TORCH_CHECK(
@@ -575,7 +584,8 @@ Tensor mkl_reorder_linear_weight(
       weight.options().device_opt(),
       weight.options().pinned_memory_opt());
   ideep::tensor& mkl_weight = itensor_from_mkldnn(packed_weight);
-  ideep::tensor& orig_w = itensor_from_mkldnn(weight);
+  auto weight_ = weight.contiguous();
+  const ideep::tensor orig_w = itensor_view_from_dense(weight_);
   cblas_sgemm_pack(
       CblasRowMajor,
       CblasBMatrix,
@@ -590,10 +600,10 @@ Tensor mkl_reorder_linear_weight(
   return packed_weight;
 }
 
-TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(mkl, CPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkl::_mkl_reorder_linear_weight"),
-      TORCH_FN(mkl_reorder_linear_weight));
+    TORCH_SELECTIVE_NAME("mkl::_mkl_reorder_linear_weight"),
+    TORCH_FN(mkl_reorder_linear_weight));
 }
 
 #endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED

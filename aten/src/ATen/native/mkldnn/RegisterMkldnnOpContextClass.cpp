@@ -13,7 +13,7 @@ namespace mkldnn {
 
 using namespace internal::convolution;
 
-bool is_mkldnn_bf16_supported() {
+static bool is_mkldnn_bf16_supported() {
 #if defined(__aarch64__)
   return mkldnn_bf16_device_check_arm();
 #else
@@ -59,6 +59,8 @@ TORCH_LIBRARY(mkldnn, m) {
       "mkldnn::_reorder_convolution_transpose_weight(Tensor self, int[2] padding=0, int[2] output_padding=0, int[2] stride=1, int[2] dilation=1, int groups=1, int[]? input_size=None) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
       "mkldnn::_reorder_linear_weight(Tensor self, int? batch_size=None) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "mkldnn::_reorder_convolution_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1, int[]? input_size=None) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
       "mkldnn::_reorder_lstm_weight(Tensor[] params, int input_feature_size, int hidden_size, bool has_biases, int num_layers, bool bidirectional, bool batch_first, int[]? input_size=None) -> Tensor[] Y"));
   m.def("_is_mkldnn_bf16_supported", &is_mkldnn_bf16_supported);

@@ -8,6 +8,7 @@ from torch._export.trace import do_not_use_experimental_export
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
+from functorch.experimental.control_flow import map
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -49,7 +50,7 @@ class TestExperimentalExport(TestCase):
         class Foo(torch.nn.Module):
             def __init__(self, float_val):
                 super().__init__()
-                self.register_buffer("buffer1", torch.ones(6, 1))
+                self.buffer1 = torch.nn.Buffer(torch.ones(6, 1))
 
             def forward(self, x):
                 self.buffer1.add_(2)
@@ -257,6 +258,49 @@ class TestExport(TestCase):
         inp_for_g = 4
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Expected tensor as input to dynamic_dim"):
             constraints = [dynamic_dim(inp_for_g, 0)]
+
+    def test_map(self):
+        def list_tensor_map(xs, y, z):
+            def body(x, y, z):
+                return x + y + z
+
+            return map(body, xs, y, z)
+
+        inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
+        exported_program = export(list_tensor_map, inps)
+        self.assertTrue(torch.allclose(exported_program(*inps), list_tensor_map(*inps)))
+
+    def test_linear_conv(self):
+
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(20, 98)
+                self.bias = torch.randn(20)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.weight, self.bias)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(16, 33, 3)
+                self.linear = MyLinear()
+
+            def forward(self, x):
+                x_conv = self.conv(x)
+                x_linear = self.linear(x_conv)
+                return x_linear.cos()
+
+        ep = export(Foo(), (torch.randn(20, 16, 50, 100),))
+        for node in ep.graph.nodes:
+            if (
+                node.op == "placeholder" and
+                node.name in ep.graph_signature.inputs_to_buffers or
+                node.name in ep.graph_signature.inputs_to_parameters
+            ):
+                self.assertTrue("source_fn" in node.meta)
+                self.assertTrue("nn_module_stack" in node.meta)
 
 if __name__ == '__main__':
     run_tests()
