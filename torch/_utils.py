@@ -387,17 +387,6 @@ def _rebuild_qtensor(
     return tensor
 
 
-def _rebuild_buffer(data, requires_grad, persistent):
-    buffer = torch.nn.Buffer(data, requires_grad, persistent)
-    return buffer
-
-
-def _rebuild_buffer_with_state(data, requires_grad, persistent, state):
-    buffer = torch.nn.Buffer(data, requires_grad, persistent)
-    buffer = _set_obj_state(buffer, state)
-    return buffer
-
-
 def _rebuild_parameter(data, requires_grad, backward_hooks):
     param = torch.nn.Parameter(data, requires_grad)
     # NB: This line exists only for backwards compatibility; the

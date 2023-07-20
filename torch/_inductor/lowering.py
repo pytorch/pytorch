@@ -779,11 +779,14 @@ def repeat(x, repeats):
 
     new_size = list(x.get_size())
 
+    zero_tensor = False
     for i in range(len(repeats)):
-        assert repeats[i] != 0
-        if repeats[i] != 1:
-            new_size[i] = new_size[i] * repeats[i]
+        if repeats[i] == 0:
+            zero_tensor = True
+        new_size[i] = new_size[i] * repeats[i]
 
+    if zero_tensor:
+        return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
         return expand(x, new_size)
 
@@ -1705,7 +1708,6 @@ make_fallback(aten.cumprod, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten.fractional_max_pool2d)
@@ -2446,6 +2448,10 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
+    if is_triton(values) and (
+        accumulate is True or torch.are_deterministic_algorithms_enabled()
+    ):
+        V.graph.disable_cudagraphs = True
     ir.IndexPutFallback(self, indices, values, accumulate)
     return self
 
