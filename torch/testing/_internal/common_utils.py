@@ -2525,16 +2525,22 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
 
     def run(self, result=None):
-        with contextlib.ExitStack() as stack:
-            if TEST_WITH_CROSSREF:
-                stack.enter_context(CrossRefMode())
-            num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
-            self._run_with_retry(
-                result=result,
-                num_runs_left=num_runs,
-                report_only=not OVERRIDE_FLAKY_SIGNAL,
-                num_red=0,
-                num_green=0)
+        import cProfile
+        with cProfile.Profile(builtins=False) as prof:
+            with contextlib.ExitStack() as stack:
+                if TEST_WITH_CROSSREF:
+                    stack.enter_context(CrossRefMode())
+                num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
+
+                self._run_with_retry(
+                    result=result,
+                    num_runs_left=num_runs,
+                    report_only=not OVERRIDE_FLAKY_SIGNAL,
+                    num_red=0,
+                    num_green=0)
+                prof.snapshot_stats()
+                for file in sorted(list(set(k[0] for k in prof.stats))):
+                    print(file)
 
     def setUp(self):
         check_if_enable(self)

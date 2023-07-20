@@ -972,6 +972,7 @@ def get_pytest_args(
         rerun_options = ["-x", "--reruns=2"]
 
     pytest_args = [
+        "-s",
         "-vv",
         "-rfEX",
     ]
