@@ -259,7 +259,7 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
   } else {
     _AT_DISPATCH_ALL_TYPES(dtype, "copy_", [&] {
       using dest_t = scalar_t;
-      AT_DISPATCH_ALL_TYPES(iter.dtype(1), "copy_", [&] {
+      _AT_DISPATCH_ALL_TYPES(iter.dtype(1), "copy_", [&] {
         if (iter.has_contiguous_first_dim()) {
           TORCH_INTERNAL_ASSERT(iter.ninputs() == 1);
           TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
