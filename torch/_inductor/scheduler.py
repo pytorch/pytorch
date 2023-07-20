@@ -510,13 +510,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
             set.union, [x.recursive_predecessors for x in snodes]
         )
 
-        all_writes = set.union(*[x.read_writes.writes for x in snodes])
-        all_reads = set.union(*[x.read_writes.reads - all_writes for x in snodes])
-        all_index_exprs = set.union(*[x.read_writes.index_exprs for x in snodes])
-
         self.set_read_writes(
-            dependencies.ReadWrites(all_reads, all_writes, all_index_exprs)
+            dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
         )
+
         names = set(self.get_names())
         self.unmet_dependencies = {
             dep
