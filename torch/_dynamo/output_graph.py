@@ -1148,13 +1148,13 @@ class SubgraphTracer(fx.Tracer):
         #   higher-order-op subgraph until we hit the subgraph where the free
         #   variable is bound
         if self.parent is not None:
-            flat_args, tree_spec = pytree.tree_flatten(args)
-            new_args = []
+            flat_args, tree_spec = pytree.tree_flatten((args, kwargs))
+            new_flat_args = []
             for arg in flat_args:
                 maybe_new_arg = self.maybe_lift_tracked_freevar_to_input(arg)
-                new_args.append(maybe_new_arg)
+                new_flat_args.append(maybe_new_arg)
 
-            args = pytree.tree_unflatten(new_args, tree_spec)
+            args, kwargs = pytree.tree_unflatten(new_flat_args, tree_spec)
 
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
