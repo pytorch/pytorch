@@ -211,25 +211,63 @@ class AllocateLine(MemoryPlanningLine):
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
         line = self.wrapper.make_buffer_allocation(self.node)
+        def insert_streamguard_for_cppwrapper(code, stream_id):
+            code.writeline(f"{{")
+            line = self.wrapper.make_buffer_allocation(self.node, need_declare=False)
+            with code.indent():
+                code.writeline(f"at::cuda::CUDAStreamGuard streamGuard(stream{stream_id});")
+                code.writeline(line)
+            code.writeline(f"}}")
         # if self has attribution named user_streams, it is used by multiple streams
         if hasattr(self, "user_streams"):
             need_cuda_event = False
+            # this buffer has to be allocated in stream0?
             if len(self.user_streams) > 1:
                 print(f"findhao-> buffer {self.node.get_name()} is used by multiple streams")
             elif len(self.user_streams) == 1:
                 if self.user_streams[0] != 0:
+                    ssnode = V.graph.stream_graph.name_mapping[self.node.get_name()]
                     if V.graph.cpp_wrapper:
                         code.writeline(f"at::Tensor {self.node.get_name()};")
-                        code.writeline(f"{{")
-                        line = self.wrapper.make_buffer_allocation(self.node, need_declare=False)
-                        with code.indent():
-                            code.writeline(f"at::cuda::CUDAStreamGuard streamGuard(stream{self.user_streams[0]});")
-                            code.writeline(line)
-                        code.writeline(f"}}")
+                        if not ssnode.stream_context_embrace:
+                            insert_streamguard_for_cppwrapper(code, self.user_streams[0])
+                        else:
+                            line = self.wrapper.make_buffer_allocation(self.node, need_declare=False)
+                            code_lines = V.graph.wrapper_code.lines
+                            current_index =code_lines.index(self)
+                            len_lines = len(code_lines)
+                            reg = re.compile(r"at::cuda::CUDAStreamGuard streamGuard\(stream(\d+)\);")
+                            for i in range(current_index, len_lines):
+                                if code_lines[i] == "{":
+                                    result = reg.search(code_lines[i+1])
+                                    if result:
+                                        assert int(result.group(1)) == self.user_streams[0]
+                                        code_lines.insert(i+2, line)
+                                    else:
+                                        # revert to `not ssnode.stream_context_embrace`
+                                        insert_streamguard_for_cppwrapper(code, self.user_streams[0])
+                                    break
+                            else:
+                                raise RuntimeError(f"cannot find stream context for buffer {self.node.get_name()}")
                     else:
-                        code.writeline(f"with torch.cuda.stream(stream{self.user_streams[0]}_raw):")
-                        with code.indent():
-                            code.writeline(line)
+                        if not ssnode.stream_context_embrace:
+                            code.writeline(f"with torch.cuda.stream(stream{self.user_streams[0]}_raw):")
+                            with code.indent():
+                                code.writeline(line)
+                        else:
+                            code_lines = V.graph.wrapper_code.lines
+                            current_index = code_lines.index(self)
+                            len_lines = len(code_lines)
+                            reg = re.compile(r"with torch.cuda.stream\(stream(\d+)_raw\):")
+                            for i in range(current_index, len_lines):
+                                if isinstance(code_lines[i], str):
+                                    result = reg.search(code_lines[i])
+                                    if result:
+                                        assert int(result.group(1)) == self.user_streams[0]
+                                        code_lines.insert(i+1, line)
+                                        break
+                            else:
+                                raise RuntimeError(f"cannot find stream context for buffer {self.node.get_name()}")
                     return
             for user_stream in self.user_streams:
                 if user_stream != 0:
@@ -237,13 +275,22 @@ class AllocateLine(MemoryPlanningLine):
                     break
             if need_cuda_event:
                 event_name = f"event_allocate_{self.node.get_name()}"
-                code.writeline(f"{event_name} = torch.cuda.Event()")
-                code.writeline(line)
-                # TODO(yueming): need to double check
-                code.writeline(f"{event_name}.record(stream0_raw)")
-                for user_stream in self.user_streams:
-                    if user_stream != 0:
-                        code.writeline(f"stream{user_stream}_raw.wait_event({event_name})")
+                if V.graph.cpp_wrapper:
+                    code.writeline(f"cudaEvent_t {event_name};")
+                    code.writeline(f"cudaEventCreate(&{event_name});")
+                    code.writeline(line)
+                    code.writeline(f"cudaEventRecord({event_name}, stream0);")
+                    for user_stream in self.user_streams:
+                        if user_stream != 0:
+                            code.writeline(f"cudaStreamWaitEvent(stream{user_stream}, {event_name}, 0);")
+                else:
+                    code.writeline(f"{event_name} = torch.cuda.Event()")
+                    code.writeline(line)
+                    # TODO(yueming): need to double check
+                    code.writeline(f"{event_name}.record(stream0_raw)")
+                    for user_stream in self.user_streams:
+                        if user_stream != 0:
+                            code.writeline(f"stream{user_stream}_raw.wait_event({event_name})")
             else:
                 code.writeline(line)
         else:
@@ -516,6 +563,7 @@ class WrapperCodeGen(CodeGen):
                 kernel_IndentedBuffer.writeline(f"{{")
             else:
                 kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
+            ssnode.stream_context_embrace = True
             with kernel_IndentedBuffer.indent():
                 if V.graph.cpp_wrapper:
                     kernel_IndentedBuffer.writeline(f"at::cuda::CUDAStreamGuard streamGuard(stream{stream_id});")
