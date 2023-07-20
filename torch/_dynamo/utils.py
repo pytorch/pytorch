@@ -1671,9 +1671,7 @@ def numpy_attr_wrapper(obj, name):
 
 
 class numpy_method_wrapper:
-    """Convert obj from torch.Tensor to torch_np.ndarray and call method. Then convert result back to torch.Tensor.
-    Uses a singleton pattern here because builder.py is looking for the same target instance.
-    """
+    """Convert obj from torch.Tensor to torch_np.ndarray and call method. Then convert result back to torch.Tensor."""
 
     def __init__(self, method: str):
         self.method = method
