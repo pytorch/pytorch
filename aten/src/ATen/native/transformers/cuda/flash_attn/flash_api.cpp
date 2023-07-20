@@ -289,10 +289,6 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         q_padded = at::pad(q, {0, 8 - head_size_og % 8});
         k_padded = at::pad(k, {0, 8 - head_size_og % 8});
         v_padded = at::pad(v, {0, 8 - head_size_og % 8});
-
-        // q_padded = torch::nn::functional::pad(q, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
-        // k_padded = torch::nn::functional::pad(k, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
-        // v_padded = torch::nn::functional::pad(v, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
     } else {
         q_padded = q;
         k_padded = k;
@@ -465,10 +461,6 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         q_padded = at::pad(q, {0, 8 - head_size_og % 8});
         k_padded = at::pad(k, {0, 8 - head_size_og % 8});
         v_padded = at::pad(v, {0, 8 - head_size_og % 8});
-
-        // q_padded = torch::nn::functional::pad(q, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
-        // k_padded = torch::nn::functional::pad(k, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
-        // v_padded = torch::nn::functional::pad(v, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
     } else {
         q_padded = q;
         k_padded = k;
@@ -711,7 +703,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     at::Tensor dout_padded;
     if (head_size_og % 8 != 0) {
         dout_padded = at::pad(dout, {0, 8 - head_size_og % 8});
-        // dout_padded = torch::nn::functional::pad(dout, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
     } else {
         dout_padded = dout;
     }
@@ -924,7 +915,6 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     at::Tensor dout_padded;
     if (head_size_og % 8 != 0) {
         dout_padded = at::pad(dout, {0, 8 - head_size_og % 8});
-        // dout_padded = torch::nn::functional::pad(dout, torch::nn::functional::PadFuncOptions({0, 8 - head_size_og % 8}));
     } else {
         dout_padded = dout;
     }
