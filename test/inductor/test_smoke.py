@@ -39,7 +39,6 @@ class SmokeTest(TestCase):
         # set back to defaults
         torch._logging.set_logs()
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_CUDA, "Triton is not available")
     def test_compile_decorator(self):
         @torch.compile

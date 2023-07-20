@@ -565,6 +565,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse(first_node.unaliased_in_all_paths[0])
             self.assertTrue(first_node.cached_tensor_outputs[0] is None)
 
+        @skipIfRocm
         def test_checkpointing_resets_persistent_refs(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -804,6 +805,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             del x
             self.assertEqual(all_live_block_count(), 0)
 
+        @skipIfRocm
         @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         def test_workspace_allocation_error(self):
@@ -1088,6 +1090,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
                 out2 + out2
 
+        @skipIfRocm
         @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
         def test_conv_benchmark(self):
             with torch.backends.cudnn.flags(
@@ -1246,5 +1249,5 @@ if __name__ == "__main__":
             sys.exit(0)
         raise unittest.SkipTest("cuda graph test is skipped")
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+    if (HAS_CPU or HAS_CUDA):
         run_tests(needs="filelock")
