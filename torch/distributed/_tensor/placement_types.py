@@ -199,8 +199,8 @@ class Shard(Placement):
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
 
-        output = mesh.reduce_scatter(
-            tensor, op=reduce_op, mesh_dim=mesh_dim, scatter_dim=self.dim
+        output = funcol.reduce_scatter_tensor(
+            tensor, reduce_op.name, scatter_dim=self.dim, group=(mesh, mesh_dim)
         )
 
         if is_padded:
