@@ -606,18 +606,19 @@ class WrapperCodeGen(CodeGen):
             self.header.writeline(f"stream0 = get_cuda_stream(0)")
     def generate_stream_creation_in_body(self):
         if V.graph.cpp_wrapper and config.multiple_streams:
-            for index, _ in enumerate(V.graph.stream_graph.stream_pool):
+            for index, num_used in enumerate(V.graph.stream_graph.stream_pool):
                 # must use this check
                 if index == 0:
                     continue
-                self.wrapper_call.splice(
-                    f"""
-                    if (cuda_stream{index} == nullptr){{
-                        cudaStreamCreate(&cuda_stream{index});
-                    }}
-                    at::cuda::CUDAStream stream{index} = at::cuda::getStreamFromExternal(cuda_stream{index}, 0);
-                    """
-                )
+                if num_used > 0:
+                    self.wrapper_call.splice(
+                        f"""
+                        if (cuda_stream{index} == nullptr){{
+                            cudaStreamCreate(&cuda_stream{index});
+                        }}
+                        at::cuda::CUDAStream stream{index} = at::cuda::getStreamFromExternal(cuda_stream{index}, 0);
+                        """
+                    )
             self.wrapper_call.splice(f"at::cuda::CUDAStream stream0 = at::cuda::getDefaultCUDAStream();")
 
 
