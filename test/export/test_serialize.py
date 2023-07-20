@@ -178,6 +178,8 @@ class TestDeserialize(TestCase):
         # TODO(angelayi): test better with some sort of wrapper
         constraints = [] if constraints is None else constraints
         ep = export(fn, inputs, {}, constraints)
+        ep.graph.eliminate_dead_code()
+
         serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
         deserialized_ep = deserialize(serialized_struct, state_dict, expected_opset_version={"aten": 0})
 
