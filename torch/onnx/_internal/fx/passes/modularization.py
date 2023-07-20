@@ -257,9 +257,9 @@ class _ModuleStackMeta:
         return f"ModuleStackMeta({self._module_stack})"
 
     @property
-    def module_name(self) -> str:
-        """Returns the module name of the top module."""
-        return self.top().module_name
+    def module_display_name(self) -> str:
+        """Returns the module display name of the top module."""
+        return self.top().module_display_name
 
     @property
     def qualified_module_class_name(self) -> str:
@@ -386,10 +386,10 @@ class _ModuleNode(_IRNode):
                 yield node.fx_node
 
     def module_inputs(self) -> Sequence[torch.fx.Node]:
-        """Extract module outputs from the sequence of fx nodes this instance holds.
+        """Extract module inputs from the sequence of fx nodes this instance holds.
 
-        All nodes that are used by nodes outside of the module are considered module
-        outputs. The order of returned module outputs is the same as the their creation order.
+        All node args that are produced by nodes outside of the module are considered module
+        inputs. The order of returned module inputs is the same as the their use order.
 
         Returns:
             Sequence of module inputs.
@@ -434,8 +434,8 @@ class _ModuleNode(_IRNode):
 
         Args:
             module_names: A dictionary of module names and their counts. This is used to
-                generate unique module names for submodules. When calling this on a
-                root module, this should be an empty dictionary.
+                generate unique module names for submodules. This should be an empty
+                dictionary when the method is called on a root module.
         """
         module_class_name = self._stack_meta.qualified_module_class_name
         fx_graph = torch.fx.Graph()
@@ -463,7 +463,7 @@ class _ModuleNode(_IRNode):
             ref_submodule_inputs = ir_node.module_inputs()
             ref_submodule_outputs = ir_node.module_outputs()
             unique_submodule_name = _get_unique_module_name(
-                module_names, ir_node.stack_meta.module_name
+                module_names, ir_node.stack_meta.module_display_name
             )
             # Link the newly generated sub fx.GraphModule with the root reference module.
             # This step is essential to meet the needs of the subsequent fx.GraphModule initialization
@@ -527,24 +527,30 @@ class _ModuleNode(_IRNode):
 
 
 class _LeafNode(_IRNode):
+    """Representing a single fx.Node."""
+
     def __init__(self, node: torch.fx.Node):
         self._node = node
         self._stack_meta = _module_stack_meta_from_node(node)
 
     @property
     def fx_op(self) -> str:
+        """Syntax sugar for self.fx_node.op."""
         return self._node.op
 
     @property
     def fx_node(self) -> torch.fx.Node:
+        """Returns the fx.Node this instance represents."""
         return self._node
 
     @property
     def stack_meta(self) -> _ModuleStackMeta:
+        """Returns the module stack meta data associated with this node."""
         return self._stack_meta
 
     @property
     def stack_trace(self) -> Optional[str]:
+        """Returns the stack trace associated with this node."""
         return self.fx_node.meta.get("stack_trace")
 
     def __str__(self) -> str:
@@ -590,6 +596,42 @@ class Modularize(_pass.Transform):
     ### Known constraints
     Two successive calls to the same module instance will be conflated. They are indistinguishable.
     This is due to limitations of the current fx metadata "nn_module_stack".
+
+    Example:
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
+        >>> import torch
+        >>> from torch.onnx._internal.fx import passes
+        >>> from torch.onnx._internal.diagnostics import infra
+        >>>
+        >>> class CustomModule(torch.nn.Module):
+        >>>     def __init__(self):
+        >>>         super().__init__()
+        >>>         self.embedding = torch.nn.Embedding(10, 32)
+        >>>         self.relu = torch.nn.ReLU()
+        >>>
+        >>>     def forward(self, x):
+        >>>         out = self.embedding(x)
+        >>>         out = self.relu(out)
+        >>>         return out
+        >>>
+        >>> class TestModule(torch.nn.Module):
+        >>>     def __init__(self):
+        >>>         super().__init__()
+        >>>         self.layer = CustomModule()
+        >>>         self.linear = torch.nn.Linear(32, 10)
+        >>>
+        >>>     def forward(self, x):
+        >>>         out = self.layer(x)
+        >>>         out = self.linear(out)
+        >>>         return out
+        >>>
+        >>> gm, _ = torch._dynamo.export(TestModule(), torch.tensor([0, 1, 2]), aten_graph=True)
+        >>> gm.print_readable()
+
+        >>> gm = passes.Modularize(infra.DiagnosticContext("test_context", "1.0"), gm).run()
+        >>> gm.print_readable()
+
     """
 
     @_beartype.beartype

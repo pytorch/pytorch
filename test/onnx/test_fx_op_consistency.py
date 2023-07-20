@@ -109,6 +109,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "fmod",
         "full",
         "full_like",
+        "gather",
         "hstack",  # aten::cat is invoked instead
         "index_put",
         "logit",
@@ -172,6 +173,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
     ),
     xfail(
+        "all",
+        reason="[PostInline][ORT][ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0"
+    ),
+    xfail(
         "allclose", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
     ),
@@ -183,6 +188,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "amin", dtypes=(torch.int16, *onnx_test_common.BOOL_TYPES),
         reason=onnx_test_common.reason_dynamo_does_not_support("ReduceMin", "bool, int16")
+    ),
+    xfail(
+        "any",
+        reason="[PostInline][ORT][ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0"
     ),
     xfail(
         "arange",
@@ -216,10 +225,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
             "ArgMin", "uint8, int8, int16, int64"
         ),
     ),
-    xfail(
+    skip(
         "as_strided",
         variant_name="partial_views",
-        reason="ONNX doesn't have partial view for tensor",
+        reason="ONNX doesn't have partial view for tensor; [PostInline][ORT] segfaults",
     ),
     xfail(
         "baddbmm",
@@ -590,6 +599,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                 inputs=repr(inputs),
                 kwargs=repr(cpu_sample.kwargs),
             ):
+                print("inputs: ", inputs, " kwargs: ", cpu_sample.kwargs)
                 test_behavior, reason = _should_skip_xfail_test_sample(
                     op.name, cpu_sample
                 )
