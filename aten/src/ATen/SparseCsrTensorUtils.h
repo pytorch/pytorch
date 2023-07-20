@@ -382,19 +382,32 @@ inline Tensor to_type(Tensor input, ScalarType dtype) {
       input.options().pinned_memory_opt());
 }
 
-template <typename acc_t>
-inline void create_acc_buffer(
-    Tensor& new_values,
-    Tensor& new_values_acc,
+template <typename acc_t, typename scalar_t>
+inline std::tuple<Tensor, Tensor> create_acc_buffer(
     TensorOptions option,
-    bool need_acc,
-    bool is_integral) {
-  if (need_acc) {
+    ScalarType type,
+    int64_t nnz = -1) {
+  Tensor new_values, new_values_acc;
+  constexpr bool need_acc = !std::is_same<scalar_t, acc_t>::value;
+  bool is_integral = at::isIntegralType(type, /*includeBool=*/true);
+  if constexpr (need_acc) {
     auto acc_dtype = CppTypeToScalarType<acc_t>::value;
     new_values_acc = at::empty({}, option.dtype(acc_dtype));
     new_values = is_integral ? new_values_acc : at::empty({}, option);
   } else {
     new_values = new_values_acc = at::empty({}, option);
+  }
+  if (nnz != -1) {
+    return std::make_tuple(
+        new_values.resize_(nnz), new_values_acc.resize_(nnz));
+  } else {
+    return std::make_tuple(new_values, new_values_acc);
+  }
+}
+
+inline void copy_from_acc_buffer(Tensor& new_values, Tensor& new_values_acc) {
+  if (!new_values_acc.is_same(new_values)) {
+    new_values.copy_(new_values_acc);
   }
 }
 

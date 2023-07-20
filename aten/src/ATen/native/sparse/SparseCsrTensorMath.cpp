@@ -1026,17 +1026,14 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   new_crow_indices[0] = 0;
   new_crow_indices[1] = nnz;
 
-  Tensor new_values, new_values_acc;
   // Set `is_cuda` = `true` in acc_type in CPU backend. Because the accumulate type
   // of float should be float in current scenario. In CUDA, float is the accumulate type
   // of float, while in CPU, double is the accumulate type of float.
   using acc_t = at::acc_type<scalar_t, true>;
-  constexpr bool need_acc = !std::is_same<scalar_t, acc_t>::value;
-  bool is_integral = at::isIntegralType(values.scalar_type(), /*includeBool=*/true);
-  at::sparse_csr::create_acc_buffer<acc_t>(
-      new_values, new_values_acc, values.options(), need_acc, is_integral);
-  new_values.resize_(nnz);
-  new_values_acc.resize_(nnz);
+  auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
+      values.options(), values.scalar_type(), nnz);
+  Tensor new_values = std::get<0>(acc_buffer);
+  Tensor new_values_acc = std::get<1>(acc_buffer);
   new_values_acc.fill_(rop.identity());
 
   int64_t* columns_map_ptr = columns_map.data_ptr<int64_t>();
@@ -1052,9 +1049,7 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
     scalar_t val = values_ptr[i];
     new_values_acc_ptr[col] = rop(new_values_acc_ptr[col], static_cast<acc_t>(val));
   }
-  if (!new_values_acc.is_same(new_values)) {
-    new_values.copy_(new_values_acc);
-  }
+  copy_from_acc_buffer(new_values, new_values_acc);
 
   return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
                                               {1, sparse.size(1)},
@@ -1117,18 +1112,16 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
 
   Tensor new_crow_indices = at::empty({crow_indices.numel()}, ioptions);
   Tensor new_col_indices = at::empty({}, ioptions);
-  Tensor new_values = at::empty({}, values.options());
   Tensor row_map = at::empty({nrows}, ioptions);
 
   // Set `is_cuda` = `true` in acc_type in CPU backend. Because the accumulate type
   // of float should be float in current scenario. In CUDA, float is the accumulate type
   // of float, while in CPU, double is the accumulate type of float.
   using acc_t = at::acc_type<scalar_t, true>;
-  constexpr bool need_acc = !std::is_same<scalar_t, acc_t>::value;
-  bool is_integral = at::isIntegralType(values.scalar_type(), /*includeBool=*/true);
-  Tensor new_values_acc;
-  at::sparse_csr::create_acc_buffer<acc_t>(
-      new_values, new_values_acc, values.options(), need_acc, is_integral);
+  auto acc_buffer = at::sparse_csr::create_acc_buffer<acc_t, scalar_t>(
+      values.options(), values.scalar_type());
+  Tensor new_values = std::get<0>(acc_buffer);
+  Tensor new_values_acc = std::get<1>(acc_buffer);
 
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "reduce_sparse_csr_dim1_cpu_indices",
                           [&]() {
@@ -1147,9 +1140,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
     new_col_indices.resize_(nnz);
     new_col_indices.fill_(index_t(0));
     new_values.resize_(nnz);
-    if (!new_values_acc.is_same(new_values)) {
-      new_values_acc.resize_(nnz);
-    }
+    new_values_acc.resize_(nnz);
 
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
     acc_t* new_values_acc_ptr = new_values_acc.data_ptr<acc_t>();
@@ -1174,9 +1165,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
         });
                           });
 
-  if (need_acc && !is_integral) {
-    new_values.copy_(new_values_acc);
-  }
+  copy_from_acc_buffer(new_values, new_values_acc);
 
   return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
                                                 {sparse.size(0), 1},
