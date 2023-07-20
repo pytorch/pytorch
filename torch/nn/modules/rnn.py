@@ -73,7 +73,7 @@ class RNNBase(Module):
                           "num_layers greater than 1, but got dropout={} and "
                           "num_layers={}".format(dropout, num_layers))
 
-        if isinstance(hidden_size, int):
+        if not isinstance(hidden_size, int):
             raise TypeError(f"hidden_size should be of type int, got: {type(hidden_size).__name__}")
         if hidden_size <= 0:
             raise ValueError("hidden_size must be greater than zero")
