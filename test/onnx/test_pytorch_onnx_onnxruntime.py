@@ -13059,6 +13059,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipScriptTest()  # Scale and Zero-point must be a scalar
     def test_qat_avg_pool2d(self):
         model = torch.nn.Sequential(
             torch.ao.quantization.QuantStub(),
