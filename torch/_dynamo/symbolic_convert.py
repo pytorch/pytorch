@@ -208,23 +208,19 @@ def _detect_and_normalize_assert_statement(
 
     current_instruction_pointer += 1
 
-    if current_instruction_pointer >= len(self.instructions):
-        return False
+    # Use dummy error message if its hard to extract
+    error_msg = "assertion error"
 
     inst = self.instructions[current_instruction_pointer]
-    has_error_msg = False
     # DETECT RAISE_VARARGS or LOAD CONST
     if inst.opname == "LOAD_CONST":
         if not isinstance(inst.argval, str):
             return False
-        self.LOAD_CONST(inst)
-        has_error_msg = True
+        error_msg = inst.argval
 
         # if it is LOAD_CONSTANT, it must be followed by CALL_FUNCTION
         # (PRECALL for Python 3.11+)
         current_instruction_pointer += 1
-        if current_instruction_pointer >= len(self.instructions):
-            return False
         inst = self.instructions[current_instruction_pointer]
         if inst.opname not in ("CALL_FUNCTION", "PRECALL"):
             return False
@@ -234,16 +230,12 @@ def _detect_and_normalize_assert_statement(
         current_instruction_pointer += 1
         if inst.opname == "PRECALL":
             current_instruction_pointer += 1
-        if current_instruction_pointer >= len(self.instructions):
-            return False
         inst = self.instructions[current_instruction_pointer]
 
     if inst.opname != "RAISE_VARARGS":
         return False
 
-    if not has_error_msg:
-        # Push dummy value instead of error message
-        self.push(ConstantVariable("assertion error"))
+    self.push(ConstantVariable(error_msg))
 
     return True
 
@@ -893,7 +885,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if len(bits) < level:
             raise ImportError("attempted relative import beyond top-level package")
         base = bits[0]
-        return "{}.{}".format(base, name) if name else base
+        return f"{base}.{name}" if name else base
 
     def calc_package(self):
         """
@@ -1845,7 +1837,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             additional_stack_frames = []
         return "".join(
             traceback.format_list(
-                ([self.frame_summary()] + list(reversed(additional_stack_frames)))
+                [self.frame_summary()] + list(reversed(additional_stack_frames))
             )
         )
 

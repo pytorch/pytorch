@@ -64,6 +64,7 @@ from .utils import (
     dynamo_timed,
     get_instruction_source_311,
     graph_break_reasons,
+    increment_op_count,
     lazy_format_graph_code,
     lazy_format_graph_tabular,
     LazyString,
@@ -947,7 +948,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 tot += 1
             if node.op == "placeholder":
                 placeholders.append(node)
-        torch._dynamo.utils.increment_op_count(tot)
+        increment_op_count(tot)
         for pl in placeholders:
             arg = pl.meta["grapharg"]
             # TODO: Why isn't this stored in meta :think:
@@ -1075,7 +1076,7 @@ class SubgraphTracer(fx.Tracer):
     """
 
     def __init__(self, output_graph, parent=None):
-        super(SubgraphTracer, self).__init__()
+        super().__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
         # Map from graph input name to its placeholder proxy object, where the

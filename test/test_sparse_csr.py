@@ -904,12 +904,14 @@ class TestSparseCompressed(TestCase):
 
         def is_view_of(base, other):
             # a shameless copy of TestViewOps.is_view_of
-            if ((not other._is_view() or
-                 other is base or
-                 other._base is not base or
-                 base.device != other.device)):
+            if (
+                not other._is_view() or
+                other is base or
+                other._base is not base or
+                base.device != other.device
+            ):
                 return False
-            if base.device.type == 'cpu' or base.device.type == 'cuda':
+            if base.device.type in ('cpu', 'cuda'):
                 if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                     return False
             return True
@@ -1815,8 +1817,8 @@ class TestSparseCSR(TestCase):
             yd = xd.transpose(-2, -1)
             zd = torch.rand(0, 0, device=device, dtype=dtype)
 
-            xls, yls, zls = [t.to_sparse(layout=lhs_layout) for t in (xd, yd, zd)]
-            xrs, yrs, zrs = [t.to_sparse(layout=rhs_layout) for t in (xd, yd, zd)]
+            xls, yls, zls = (t.to_sparse(layout=lhs_layout) for t in (xd, yd, zd))
+            xrs, yrs, zrs = (t.to_sparse(layout=rhs_layout) for t in (xd, yd, zd))
 
             for ls, rs, ld, rd in [(xls, yrs, xd, yd), (xls, zrs, xd, zd), (zls, yrs, zd, yd), (zls, zrs, zd, zd)]:
                 res_sparse = ls @ rs

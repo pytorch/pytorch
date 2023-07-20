@@ -47,6 +47,18 @@ except ModuleNotFoundError:
     torch_np = None
     HAS_NUMPY_TORCH_INTEROP = False
 
+if HAS_NUMPY:
+    # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TORCH_NP_MODULE` are in sync.
+    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
+
+if HAS_NUMPY_TORCH_INTEROP:
+    NP_TO_TORCH_NP_MODULE = {
+        np: torch_np,
+        np.fft: torch_np.fft,
+        np.linalg: torch_np.linalg,
+        np.random: torch_np.random,
+    }
+
 import importlib
 
 import torch
@@ -1998,3 +2010,10 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         )
         result += markers[i] + "\n"
     return result
+
+
+def is_guard_failure_reporting_enabled():
+    return (
+        config.report_guard_failures
+        or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
+    )

@@ -23,7 +23,7 @@ class ExampleTests(TestCase):
     @parametrize(
         "name,case",
         filter_examples_by_support_level(SupportLevel.SUPPORTED).items(),
-        name_fn=lambda name, case: "case_{}".format(name),
+        name_fn=lambda name, case: f"case_{name}",
     )
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
@@ -51,7 +51,7 @@ class ExampleTests(TestCase):
     @parametrize(
         "name,case",
         filter_examples_by_support_level(SupportLevel.NOT_SUPPORTED_YET).items(),
-        name_fn=lambda name, case: "case_{}".format(name),
+        name_fn=lambda name, case: f"case_{name}",
     )
     def test_exportdb_not_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
@@ -73,7 +73,7 @@ class ExampleTests(TestCase):
             ).items()
             for rewrite_case in get_rewrite_cases(case)
         ],
-        name_fn=lambda name, case: "case_{}_{}".format(name, case.name),
+        name_fn=lambda name, case: f"case_{name}_{case.name}",
     )
     def test_exportdb_not_supported_rewrite(
         self, name: str, rewrite_case: ExportCase

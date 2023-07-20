@@ -778,9 +778,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
         self.new_args = []
         for i in range(0, len(flat_args)):
-            arg = super(FlattenInputOutputSignature, self).placeholder(
-                f"arg{i}", (), {}
-            )
+            arg = super().placeholder(f"arg{i}", (), {})
             if i in matched_input_elements_to_fake:
                 arg.node.meta["val"] = matched_input_elements_to_fake[i]
             else:

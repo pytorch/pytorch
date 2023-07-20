@@ -36,8 +36,8 @@ from torch.ao.quantization.pt2e.quantizer.qnnpack_quantizer import (
 from torch.ao.quantization.quantize_pt2e import (
     _convert_to_reference_decomposed_fx,
     convert_pt2e,
-    prepare_pt2e_quantizer,
-    prepare_qat_pt2e_quantizer,
+    prepare_pt2e,
+    prepare_qat_pt2e,
 )
 from torch.ao.quantization.backend_config import (
     get_executorch_backend_config,
@@ -235,7 +235,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
                 tracing_mode="symbolic" if export_with_dynamic_shape else "real",
             )
 
-        m = prepare_pt2e_quantizer(m, quantizer)
+        m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m)
@@ -302,7 +302,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             *copy.deepcopy(example_inputs),
             aten_graph=True,
         )
-        model_pt2e = prepare_qat_pt2e_quantizer(model_pt2e, quantizer)
+        model_pt2e = prepare_qat_pt2e(model_pt2e, quantizer)
         torch.manual_seed(MANUAL_SEED)
         after_prepare_result_pt2e = model_pt2e(*example_inputs)
 
@@ -364,7 +364,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             aten_graph=True,
             tracing_mode="real",
         )
-        m = prepare_qat_pt2e_quantizer(m, quantizer)
+        m = prepare_qat_pt2e(m, quantizer)
         m(*example_inputs)
 
         # Verify: getitem output activation fake quantize
@@ -495,7 +495,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             aten_graph=True,
         )
 
-        model = prepare_pt2e_quantizer(model, quantizer)
+        model = prepare_pt2e(model, quantizer)
         # Calibrate
         model(*example_inputs)
         model = convert_pt2e(model, use_reference_representation=True)
@@ -505,7 +505,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
         # TODO: torchdynamo times out when we do this, we can enable numerical checking
         # after that is fixed
-        # model_copy = prepare_pt2e_quantizer(model_copy, quantizer)
+        # model_copy = prepare_pt2e(model_copy, quantizer)
         # # Calibrate
         # model_copy(*example_inputs)
         # model_copy = convert_pt2e(model_copy, use_reference_representation=False)
@@ -660,7 +660,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             *copy.deepcopy(example_inputs),
             aten_graph=True,
         )
-        m = prepare_pt2e_quantizer(m, BackendAQuantizer())
+        m = prepare_pt2e(m, BackendAQuantizer())
         m(*example_inputs)
         m = convert_pt2e(m)
         # Ensure the conv has no observer inserted at output
@@ -763,7 +763,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             *copy.deepcopy(example_inputs),
             aten_graph=True,
         )
-        m = prepare_pt2e_quantizer(m, BackendAQuantizer())
+        m = prepare_pt2e(m, BackendAQuantizer())
         m(*example_inputs)
         m = convert_pt2e(m)
         node_occurrence = {
@@ -869,7 +869,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             *copy.deepcopy(example_inputs),
             aten_graph=True,
         )
-        m = prepare_pt2e_quantizer(m, BackendAQuantizer())
+        m = prepare_pt2e(m, BackendAQuantizer())
         m(*example_inputs)
         m = convert_pt2e(m)
         node_occurrence = {
@@ -946,7 +946,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             *copy.deepcopy(example_inputs),
             aten_graph=True,
         )
-        m = prepare_pt2e_quantizer(m, BackendAQuantizer())
+        m = prepare_pt2e(m, BackendAQuantizer())
         m(*example_inputs)
         m = convert_pt2e(m)
         fixed_scale = 1.0 / 256.0
@@ -1170,7 +1170,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             aten_graph=True,
         )
 
-        m = prepare_pt2e_quantizer(m, quantizer)
+        m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
         self.assertEqual(
             id(m.activation_post_process_2), id(m.activation_post_process_3)
@@ -1709,7 +1709,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         quantizer.set_global(
             get_symmetric_quantization_config(is_per_channel=False, is_qat=True)
         )
-        m = prepare_qat_pt2e_quantizer(m, quantizer)
+        m = prepare_qat_pt2e(m, quantizer)
         (maxpool_getitem_node, conv_bn_getitem_node) = _get_getitem_nodes(m)
 
         # Verify that the metadata was copied from `conv_bn_getitem`, not `maxpool_getitem`
@@ -1885,7 +1885,7 @@ class TestQuantizePT2EOps(QuantizationTestCase):
                 is_per_channel=False, is_dynamic=False
             )
             quantizer.set_global(operator_config)
-            model_graph = prepare_pt2e_quantizer(model_graph, quantizer)
+            model_graph = prepare_pt2e(model_graph, quantizer)
             model_graph(*example_inputs)
             model_graph = convert_pt2e(model_graph)
             self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
@@ -1949,7 +1949,7 @@ class TestQuantizePT2EOps(QuantizationTestCase):
                 is_per_channel=False, is_dynamic=False
             )
             quantizer.set_global(operator_config)
-            model_graph = prepare_pt2e_quantizer(model_graph, quantizer)
+            model_graph = prepare_pt2e(model_graph, quantizer)
             model_graph(*example_inputs)
             model_graph = convert_pt2e(model_graph)
             self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
@@ -1975,7 +1975,7 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
             quantizer = QNNPackQuantizer()
             operator_config = get_symmetric_quantization_config(is_per_channel=True)
             quantizer.set_global(operator_config)
-            m = prepare_pt2e_quantizer(m, quantizer)
+            m = prepare_pt2e(m, quantizer)
             # checking that we inserted observers correctly for maxpool operator (input and
             # output share observer instance)
             self.assertEqual(
