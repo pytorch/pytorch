@@ -266,6 +266,7 @@ def _make_prim(
     impl_aten: Callable,
     doc: str,
     tags: Optional[Sequence[torch.Tag]] = None,
+    autograd_impl = None,
 ):
     """
     Creates a primitive operation.
@@ -285,8 +286,10 @@ def _make_prim(
     # argument that provides an implementation for backward here.)  Because we
     # don't have derivative formulas, we must setup a custom autograd function
     # that raises an error if backwards is invoked
-    def _autograd_impl(*args, **kwargs):
+    def no_autograd_impl(*args, **kwargs):
         return backwards_not_supported(_prim)(*args, **kwargs)
+
+    autograd_impl = autograd_impl if autograd_impl is not None else no_autograd_impl
 
     def _backend_select_impl(*args, **kwargs):
         if kwargs.get("device") and kwargs["device"].type == "meta":
@@ -296,7 +299,7 @@ def _make_prim(
 
     name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)
-    prim_autograd_impl.impl(name, _autograd_impl)
+    prim_autograd_impl.impl(name, autograd_impl)
     prim_meta_impl.impl(name, meta)
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
