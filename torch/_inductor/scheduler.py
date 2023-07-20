@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Set
 import sympy
 
 import torch
-from torch._dynamo.utils import dynamo_profiled, dynamo_timed
+from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
 from .dependencies import StarDep, WeakDep
@@ -681,7 +681,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
         return list(itertools.chain(*[x.get_nodes() for x in self.snodes]))
 
-    @dynamo_timed
     def can_fuse(self, other: SchedulerNode):
         if other.is_foreach():
             return len(self.snodes) == len(other.snodes) and all(
@@ -745,7 +744,7 @@ class NodeUser:
 
 
 class Scheduler:
-    @dynamo_profiled
+    @dynamo_timed
     def __init__(self, nodes):
         super().__init__()
         self.backends = {}
