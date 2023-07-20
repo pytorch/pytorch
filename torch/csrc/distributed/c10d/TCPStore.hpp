@@ -34,6 +34,11 @@ struct TCPStoreOptions {
   // A boolean value indicating whether multiple store instances can be
   // initialized with the same host:port pair.
   bool multiTenant = false;
+
+  // If specified, and if isServer is true, the underlying TCPServer will take
+  // over the bound socket associated to this fd. This option is useful to avoid
+  // port assignment races in certain scenarios.
+  c10::optional<int> masterListenFd = c10::nullopt;
 };
 
 class TORCH_API TCPStore : public Store {

@@ -22,7 +22,7 @@ class PointwisePostOp(NamedTuple):
 CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
 CONV_TRANSPOSE_MODULES = {2: torch.nn.ConvTranspose2d}
 
-@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+@unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMkldnnFusion(JitTestCase):
     def assertFused(self, graph, fused_patterns):
         for pat in fused_patterns:
@@ -366,7 +366,7 @@ class TestMkldnnFusion(JitTestCase):
 
                         if prepack_weight:
                             packed_weight = torch.ops.mkldnn._reorder_convolution_transpose_weight(
-                                mod.conv_transpose.weight.to_mkldnn(),
+                                mod.conv_transpose.weight,
                                 mod.conv_transpose.padding,
                                 mod.conv_transpose.output_padding,
                                 mod.conv_transpose.stride,

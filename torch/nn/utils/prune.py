@@ -1218,7 +1218,7 @@ def is_pruned(module):
         True
     """
     for _, submodule in module.named_modules():
-        for _, hook in submodule._forward_pre_hooks.items():
+        for hook in submodule._forward_pre_hooks.values():
             if isinstance(hook, BasePruningMethod):
                 return True
     return False

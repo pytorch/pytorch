@@ -17,6 +17,7 @@ from torch._prims_common import (
 )
 from torch._prims_common.wrappers import elementwise_type_promotion_wrapper, out_wrapper
 from torch._refs import (
+    _make_alias,
     _make_elementwise_binary_reference,
     _make_elementwise_unary_reference,
 )
@@ -84,7 +85,7 @@ def erfcx(a: TensorLikeType) -> TensorLikeType:
 
 
 # alias for sigmoid
-expit = torch.sigmoid
+expit = _make_alias(torch.sigmoid, "expit")
 
 
 @_make_elementwise_unary_reference(
@@ -147,7 +148,7 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def xlog1py(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]):
-    utils.check(
+    torch._check(
         isinstance(a, TensorLike) or isinstance(b, TensorLike),
         lambda: 'Expected either argument a or b to be a Tensor"',
     )

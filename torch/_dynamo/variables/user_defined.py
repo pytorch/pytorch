@@ -5,6 +5,7 @@ import importlib
 import inspect
 import itertools
 import random
+import threading
 import types
 from typing import Dict, List
 
@@ -17,15 +18,18 @@ from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     all_hook_names,
+    build_checkpoint_variable,
     check_constant_args,
     get_custom_getattr,
     is_namedtuple_cls,
+    is_utils_checkpoint,
     istype,
     namedtuple_fields,
     object_has_getattribute,
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
+from .dicts import ConstDictVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -102,6 +106,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
+        from .builder import variable_builder_no_source
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
@@ -120,11 +125,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
+            field_defaults = self.value._field_defaults
+
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
-            for name, value in kwargs.items():
+
+            var_tracker_kwargs = {}
+            for field_name, var_tracker in zip(fields, items):
+                if var_tracker is None:
+                    if field_name in kwargs:
+                        field_var = kwargs[field_name]
+                    else:
+                        assert field_name in field_defaults
+                        field_var = variable_builder_no_source(
+                            field_defaults[field_name]
+                        )
+                    var_tracker_kwargs[field_name] = field_var
+
+            for name, value in var_tracker_kwargs.items():
                 assert name in fields
                 items[fields.index(name)] = value
+
             assert all(x is not None for x in items)
             return variables.NamedTupleVariable(
                 items, self.value, **VariableTracker.propagate(self, items)
@@ -344,6 +365,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
             }
             partial_kwargs.update(kwargs)
+            if is_utils_checkpoint(self.value.func):
+                options["source"] = self.source
+                return build_checkpoint_variable(**options).call_function(
+                    tx, partial_args, partial_kwargs
+                )
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
@@ -364,6 +390,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if (
             isinstance(self.value, torch.nn.Module)
             or "__slots__" in self.value.__class__.__dict__
+            or type(self.value) == threading.local
         ):
             # getattr_static doesn't work on these
             subobj = getattr(self.value, name)
@@ -396,6 +423,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source, **options
             ).call_function(tx, [], {})
+        elif isinstance(subobj, torch.distributions.utils.lazy_property):
+            subobj_var = UserDefinedObjectVariable(subobj, source=source, **options)
+            return variables.UserMethodVariable(
+                subobj.__get__.__func__, subobj_var, source=source, **options
+            ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
             return variables.UserFunctionVariable(
                 subobj.__get__(self.value), source=source, **options
@@ -423,6 +455,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     func, self, source=source, **options
                 )
             elif inspect.isfunction(dynamic_subobj):
+                if is_utils_checkpoint(func):
+                    options["source"] = source
+                    return build_checkpoint_variable(**options)
+                elif is_allowed(func):
+                    return variables.TorchVariable(func, source=source, **options)
                 return variables.UserFunctionVariable(func, source=source, **options)
 
         if (
@@ -509,14 +546,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
 
+        index = (
+            key.source
+            if ConstDictVariable.is_valid_key(key) and key.source is not None
+            else key.as_python_constant()
+        )
+
         return VariableBuilder(
             tx,
-            ODictGetItemSource(self.source, key.as_python_constant()),
+            ODictGetItemSource(self.source, index),
         )(
             collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
-        ).add_options(
-            key, self
-        )
+        ).add_options(key, self)
 
 
 class ProcessGroupVariable(UserDefinedObjectVariable):
