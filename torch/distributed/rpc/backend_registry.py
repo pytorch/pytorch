@@ -146,7 +146,7 @@ def _tensorpipe_construct_rpc_backend_options_handler(
 
 def _tensorpipe_validate_devices(devices, device_count):
     return all(
-        d.type == "cpu" or (d.type == "cuda" and 0 <= d.index < device_count)
+        d.type == "cpu" or (0 <= d.index < device_count.get(d.type, 0))
         for d in devices
     )
 
@@ -260,13 +260,35 @@ def _create_reverse_mapping(my_name, all_names, all_device_maps):
             }
     return reverse_device_maps
 
+
+def _get_device_count_for_custom_device():
+    custom_device_count_func = torch.utils.backend_registration._get_custom_mod_func("device_count")
+    custom_device_count = custom_device_count_func() if custom_device_count_func else 0
+    return torch.utils.backend_registration._privateuse1_backend_name, custom_device_count
+
+
+def _init_for_custom_device():
+    # The most basic is_available and init functions will definitely be registered 
+    # when backend is registered, so they can be called directly
+    custom_device_is_available_func = torch.utils.backend_registration._get_custom_mod_func("is_available")
+    custom_device_init_func = torch.utils.backend_registration._get_custom_mod_func("init")
+    if custom_device_is_available_func():
+        custom_device_init_func()
+
+
 def _get_device_infos():
     from . import TensorPipeAgent
     agent = cast(TensorPipeAgent, api._get_current_rpc_agent())
     opts = agent._get_backend_options()
-    device_count = torch.cuda.device_count()
-    if torch.cuda.is_available() and opts.devices:
-        torch.cuda.init()
+    cuda_device_count = torch.cuda.device_count()
+    custom_device_name, custom_device_count = _get_device_count_for_custom_device()
+    device_count = device_count = {"cuda" : cuda_device_count, custom_device_name : custom_device_count}
+    if opts.devices:
+        if opts.devices[0].type == "cuda" and torch.cuda.is_available():
+            torch.cuda.init()
+        elif opts.devices[0].type == torch.utils.backend_registration._privateuse1_backend_name:
+            # It's necessary to initialize PyTorch custom device states here
+            _init_for_custom_device()
     return device_count, opts.device_maps, opts.devices
 
 def _set_devices_and_reverse_device_map(agent):
@@ -286,7 +308,10 @@ def _set_devices_and_reverse_device_map(agent):
             device_count, device_map, devices = api.rpc_sync(worker_name, _get_device_infos)
         else:
             opts = agent._get_backend_options()
-            device_count, device_map, devices = torch.cuda.device_count(), opts.device_maps, opts.devices
+            device_map, devices = opts.device_maps, opts.devices
+            cuda_device_count = torch.cuda.device_count()
+            custom_device_name, custom_device_count = _get_device_count_for_custom_device()
+            device_count = device_count = {"cuda" : cuda_device_count, custom_device_name : custom_device_count}
         all_device_counts[worker_name] = device_count
         all_device_maps[worker_name] = device_map
         all_devices[worker_name] = devices
@@ -317,7 +342,11 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
             )
         )
 
-    device_count = torch.cuda.device_count()
+    cuda_device_count = torch.cuda.device_count()
+    # Obtain the device information of the custom device
+    custom_device_name, custom_device_count = _get_device_count_for_custom_device()
+    # Combined into a dictionary, it is matched based on the device name at the time of validation
+    device_count = {"cuda" : cuda_device_count, custom_device_name : custom_device_count}
 
     is_static_group = True if world_size else False
     # world_size is specified so this is a static group (ranks cannot join and leave)
@@ -334,14 +363,18 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
             rpc_backend_options.devices,
             group,
         )
-
-        if torch.cuda.is_available() and devices:
-            # It's necessary to initialize PyTorch CUDA states here (e.g.,
-            # CUDACachingAllocator). If this is missing, we could hit errors like
-            # "allocator not initialized", because other processes might send
-            # CUDA-related RPC request to this process before user code in this
-            # process initializes its PyTorch CUDA states.
-            torch.cuda.init()
+        # The device object type is a list, not empty and needs to be initialized accordingly
+        if devices:
+            if devcies[0].type == "cuda" and torch.cuda.is_available():
+                # It's necessary to initialize PyTorch CUDA states here (e.g.,
+                # CUDACachingAllocator). If this is missing, we could hit errors like
+                # "allocator not initialized", because other processes might send
+                # CUDA-related RPC request to this process before user code in this
+                # process initializes its PyTorch CUDA states.
+                torch.cuda.init()
+            elif devices[0].type == torch.utils.backend_registration._privateuse1_backend_name:
+                # It's necessary to initialize PyTorch custom device states here
+                _init_for_custom_device()
 
         # TODO: add try-except and destroy _agent in all processes if any fails.
         agent = TensorPipeAgent(
