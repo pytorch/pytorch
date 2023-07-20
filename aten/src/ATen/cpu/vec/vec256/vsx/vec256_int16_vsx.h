@@ -348,6 +348,7 @@ Vectorized<int16_t> inline operator>>(const Vectorized<int16_t>& a, const Vector
          return Vectorized<int16_t>{vec_sr(a.vec0(), shift_vec0), vec_sr(a.vec1(), shift_vec1)};
 }
 
+template <>
 Vectorized<int16_t> inline maximum(
     const Vectorized<int16_t>& a,
     const Vectorized<int16_t>& b) {
