@@ -62,7 +62,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
 
-    TORCH_CHECK(
+  TORCH_CHECK(
       cumulative_sequence_length_q.has_value() ==
           cumulative_sequence_length_k.has_value(),
       "cumulative_sequence_length_q and cumulative_sequence_length_k must be both set or both not set");
@@ -71,56 +71,47 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
       "max_seqlen_batch_q and max_seqlen_batch_k must be both set or both not set");
 
   if (cumulative_sequence_length_q.value().defined()) {
-    TORCH_CHECK(max_seqlen_batch_q.has_value(), "max_seqlen_batch_q must be set when cumulative_sequence_length_q is set");
+    TORCH_CHECK(
+        max_seqlen_batch_q.has_value(),
+        "max_seqlen_batch_q must be set when cumulative_sequence_length_q is set");
     TORCH_CHECK(false, "dont go down this path yet");
-    // auto
-    //     [output,
-    //      q_padded,
-    //      k_padded,
-    //      v_padded,
-    //      logsumexp,
-    //      philox_seed,
-    //      philox_offset,
-    //      debug_attn_mask] =
-    //         pytorch_flash::mha_varlen_fwd(
-    //             query,
-    //             key,
-    //             value,
-    //             out,
-    //             cumulative_sequence_length_q.value(),
-    //             cumulative_sequence_length_k.value(),
-    //             max_seqlen_batch_q.value(),
-    //             max_seqlen_batch_k.value(),
-    //             dropout_p,
-    //             softmax_scale,
-    //             false /*zero_tensors*/,
-    //             is_causal,
-    //             return_debug_mask,
-    //             c10::nullopt /*gen_*/);
-    return std::make_tuple(Tensor(), Tensor(), Tensor());
+    auto [dQuery, dKey, dValue, d_softmax] = pytorch_flash::mha_varlen_bwd(
+        contiguous_grad_out,
+        query,
+        key,
+        value,
+        contiguous_out,
+        logsumexp,
+        dq,
+        dk,
+        dv,
+        cumulative_sequence_length_q.value(),
+        cumulative_sequence_length_k.value(),
+        max_seqlen_batch_q.value(),
+        max_seqlen_batch_k.value(),
+        dropout_p,
+        softmax_scale,
+        false /*zero_tensors*/,
+        is_causal,
+        philox_seed,
+        philox_offset);
+    return std::make_tuple(dQuery, dKey, dValue);
   } else {
-    std::cout<<"going down the right path"<<std::endl;
-    std::cout<<"contiguous_grad_out"<<contiguous_grad_out.sizes()<<std::endl;
-    std::cout<<"query"<<query.sizes()<<std::endl;
-    std::cout<<"key"<<key.sizes()<<std::endl;
-    std::cout<<"value"<<value.sizes()<<std::endl;
-    std::cout<<"contiguous_out"<<contiguous_out.sizes()<<std::endl;
-    auto [dQuery, dKey, dValue, d_softamx] = pytorch_flash::mha_bwd(
-            contiguous_grad_out,
-            query,
-            key,
-            value,
-            contiguous_out,
-            logsumexp,
-            dq,
-            dk,
-            dv,
-            dropout_p,
-            softmax_scale,
-            is_causal,
-            philox_seed,
-            philox_offset
-    );
+    auto [dQuery, dKey, dValue, d_softmax] = pytorch_flash::mha_bwd(
+        contiguous_grad_out,
+        query,
+        key,
+        value,
+        contiguous_out,
+        logsumexp,
+        dq,
+        dk,
+        dv,
+        dropout_p,
+        softmax_scale,
+        is_causal,
+        philox_seed,
+        philox_offset);
     return std::make_tuple(dQuery, dKey, dValue);
   }
 #endif

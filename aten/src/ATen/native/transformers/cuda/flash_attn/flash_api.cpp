@@ -798,7 +798,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     return { dq, dk, dv, softmax_d };
 }
 
-std::vector<at::Tensor>
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                const at::Tensor &q,   // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
                const at::Tensor &k,   // total_k x num_heads_k x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -816,8 +816,9 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                const float softmax_scale,
                const bool zero_tensors,
                const bool is_causal,
-               c10::optional<at::Generator> gen_
-) {
+               const at::Tensor philox_seed,
+               const at::Tensor philox_offset)
+{
     auto dprops = at::cuda::getCurrentDeviceProperties();
     // bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
     bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
@@ -983,17 +984,18 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     auto launch = &run_mha_bwd;
     // launch(params, stream, /*configure=*/true);
 
-    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        gen_, at::cuda::detail::getDefaultCUDAGenerator());
-
-    // We use a custom RNG that increases the offset by batch_size * nheads * 32.
-    int64_t counter_offset = params.b * params.h * 32;
-
+    at::PhiloxCudaState philox_args;
     if (is_dropout) {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(gen->mutex_);
-        params.philox_args = gen->philox_cuda_state(counter_offset);
+        if (at::cuda::currentStreamCaptureStatus() ==
+                at::cuda::CaptureStatus::None)
+        {
+            philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
+        } else { // dropout + capture
+            philox_args = at::PhiloxCudaState(
+                philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
+        }
     }
+    params.philox_args = philox_args;
 
     launch(params, stream, /*configure=*/false);
 
