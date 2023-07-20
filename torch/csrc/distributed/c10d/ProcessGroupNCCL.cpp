@@ -660,7 +660,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
   init();
   LOG(INFO) << "[Rank " << rank_
-            << "] ProcessGroupNCCL initialized with following options:"
+            << "] ProcessGroupNCCL initialization options:"
             << "NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", NCCL_BLOCKING_WAIT: " << blockingWait_
