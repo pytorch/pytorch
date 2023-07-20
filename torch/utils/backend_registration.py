@@ -27,8 +27,6 @@ def rename_privateuse1_backend(backend_name: str) -> None:
 
     Note: this API can only be called once per process. Attempting to change
     the external backend after it's already been set will result in an error.
-    ddd
-    ddd
 
     Note(AMP): If you want to support AMP on your device, you can register a custom backend module.
     The backend must register a custom backend module with ``torch._register_device_module("foo", BackendModule)``.
@@ -281,7 +279,7 @@ def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module
         for_tensor (bool): whether register related methods for torch.Tensor class.
         for_module (bool): whether register related methods for torch.nn.Module class.
         for_storage (bool): whether register related methods for torch.Storage class.
-        unsupported_dtype(List[torch.dtype]): takes effect only when the storage method needs to be generated,
+        unsupported_dtype (List[torch.dtype]): takes effect only when the storage method needs to be generated,
             indicating that the storage does not support the torch.dtype type.
 
     Example::
