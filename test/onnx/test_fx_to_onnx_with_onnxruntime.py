@@ -963,7 +963,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
     @pytorch_test_common.skip_op_level_debug_test(
-        "op_level_debug_test does not support FakeTensor yet."
+        "https://github.com/pytorch/pytorch/issues/105490"
     )
     def test_fake_tensor_mode_simple(self):
         def create_model() -> nn.Module:
@@ -994,7 +994,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_op_level_debug_test(
-        "op_level_debug_test does not support FakeTensor yet."
+        "https://github.com/pytorch/pytorch/issues/105490"
     )
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
@@ -1022,7 +1022,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_op_level_debug_test(
-        "op_level_debug_test does not support FakeTensor yet."
+        "https://github.com/pytorch/pytorch/issues/105490"
     )
     def test_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
