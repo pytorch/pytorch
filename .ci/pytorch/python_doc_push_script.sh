@@ -85,8 +85,7 @@ pushd docs
 
 # Build the docs
 if [ "$is_main_doc" = true ]; then
-  build_docs html
-  [ $? -eq 0 ] || exit $?
+  build_docs html || exit $?
 
   make coverage
   # Now we have the coverage report, we need to make sure it is empty.
@@ -110,8 +109,7 @@ if [ "$is_main_doc" = true ]; then
   fi
 else
   # skip coverage, format for stable or tags
-  build_docs html-stable
-  [ $? -eq 0 ] || exit $?
+  build_docs html-stable || exit $?
 fi
 
 # Move them into the docs repo
