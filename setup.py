@@ -25,6 +25,11 @@
 #
 # Environment variables for feature toggles:
 #
+#   DEBUG_CUDA=1
+#     if used in conjunction with DEBUG or REL_WITH_DEB_INFO, will also
+#     build CUDA kernels with -lineinfo --source-in-ptx.  Note that
+#     on CUDA 12 this may cause nvcc to OOM, so this is disabled by default.
+#
 #   USE_CUDNN=0
 #     disables the cuDNN build
 #
@@ -1155,6 +1160,7 @@ def main():
         'include/torch/csrc/distributed/autograd/functions/*.h',
         'include/torch/csrc/distributed/autograd/rpc_messages/*.h',
         'include/torch/csrc/dynamo/eval_frame.h',
+        'include/torch/csrc/inductor/*.h',
         'include/torch/csrc/jit/*.h',
         'include/torch/csrc/jit/backends/*.h',
         'include/torch/csrc/jit/generated/*.h',

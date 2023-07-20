@@ -144,10 +144,11 @@ class _KinetoProfile:
             if (
                 is_cuda11_or_lower
                 and hasattr(torch, '_inductor')
-                and torch._inductor.config.triton.cudagraphs
             ):
-                os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
-                self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
+                import torch._inductor.config as inductor_config
+                if inductor_config.triton.cudagraphs:
+                    os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+                    self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
 
     def stop_trace(self):
         assert self.profiler is not None
@@ -241,7 +242,7 @@ class _KinetoProfile:
         assert self.profiler is not None and self.profiler.kineto_results is not None
         return MemoryProfile(self.profiler.kineto_results)
 
-    def export_memory_timeline(self, path: str, device: str = None) -> None:
+    def export_memory_timeline(self, path: str, device: Optional[str] = None) -> None:
         """Extract the memory information from the memory profile collected
         tree for a given device, and export a timeline plot consisting of
         [times, [sizes by category]], where times are timestamps and sizes
