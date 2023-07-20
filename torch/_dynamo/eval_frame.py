@@ -885,6 +885,7 @@ def export(
     out_guards = None
     graph_captured_input = None
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
+    fake_mode = fake_mode or _guards.detect_fake_mode()
     _allow_fake_constant: bool = (
         fake_mode is not None
     )  # Allow fake constants during symbolic tracing

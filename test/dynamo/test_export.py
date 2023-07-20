@@ -2997,16 +2997,24 @@ def forward(self, x):
         )
 
     def test_capture_symbolic_tracing_simple_within_fake_mode(self):
+        from torch._dynamo.output_graph import config
         from torch._subclasses import fake_tensor
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         def f(x):
             y = torch.randn(3)
             return x + x * y
 
-        with fake_tensor.FakeTensorMode():
+        with fake_tensor.FakeTensorMode(
+            shape_env=ShapeEnv(
+                allow_scalar_outputs=config.capture_scalar_outputs,
+                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+                frame_id=0,
+            ),
+        ) as fake_mode:
             x = torch.randn(3)
 
-            for aten_graph in [True]:
+            for aten_graph in [True, False]:
                 gm, _ = torch._dynamo.export(f, x, aten_graph=aten_graph)
                 self.assertTrue(
                     isinstance(gm, torch.fx.GraphModule),
