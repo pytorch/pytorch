@@ -831,6 +831,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         create_model: Callable,
         create_args: Callable,
         create_kwargs: Callable,
+        load_checkpoint_during_init: bool,
     ):
         """Test helper for FakeTensorMode-enabled exporter.
 
@@ -839,6 +840,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_model: A function that creates a model.
             create_args: A function that creates positional inputs for the model.
             create_kwargs: A function that creates keyword inputs for ther model.
+            load_checkpoint_during_init: Whether to load a checkpoint during model initialization.
+                (after or during model creation, but before exporting starts)
 
         This test contains several steps.
 
@@ -860,12 +863,15 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         ) as tmp_checkpoint_file:
             # Dump state_dict to a file to simulate how HuggingFace model is initialized.
             # The file will be loaded via .load_state_dict(...)
-            torch.save(real_model.state_dict(), tmp_checkpoint_file.name)
+            state_dict = real_model.state_dict()
+            torch.save(state_dict, tmp_checkpoint_file.name)
 
             with torch.onnx.enable_fake_mode() as fake_context:
                 fake_args = create_args()
                 fake_kwargs = create_kwargs()
                 fake_model = create_model()
+                if load_checkpoint_during_init:
+                    fake_model.load_state_dict(torch.load(tmp_checkpoint_file.name))
 
             # Export the model with fake inputs and parameters
             export_options = torch.onnx.ExportOptions(
@@ -891,7 +897,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     real_model(*args, **kwargs)
                 )
                 # ORT outputs.
-                args_not_none = export_output.adapt_torch_inputs_to_onnx(*args)
+                args_not_none = export_output.adapt_torch_inputs_to_onnx(
+                    *args, **kwargs
+                )
 
                 ort_outputs = onnx_test_common.run_ort(
                     tmp_onnx_file.name,
@@ -904,7 +912,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
     @pytorch_test_common.skip_op_level_debug_test(
-        "op_level_debug_test does not support FakeTensor yet."
+        "https://github.com/pytorch/pytorch/issues/105490"
     )
     def test_fake_tensor_mode_simple(self):
         def create_model() -> nn.Module:
@@ -922,15 +930,85 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_args():
             return (torch.rand(5, 2, 2),)
 
-        def create_pytorch_only_extra_kwargs():
+        def create_kwargs():
             return {}
 
-        self._test_fake_tensor_mode_exporter(
-            "simple",
-            create_model,
-            create_args,
-            create_pytorch_only_extra_kwargs,
-        )
+        for load_checkpoint_during_init in (True, False):
+            self._test_fake_tensor_mode_exporter(
+                "simple",
+                create_model,
+                create_args,
+                create_kwargs,
+                load_checkpoint_during_init=load_checkpoint_during_init,
+            )
+
+    @pytorch_test_common.skip_op_level_debug_test(
+        "https://github.com/pytorch/pytorch/issues/105490"
+    )
+    def test_large_scale_exporter_with_tiny_gpt2(self):
+        model_name = "sshleifer/tiny-gpt2"
+
+        def create_model() -> nn.Module:
+            return transformers.AutoModel.from_pretrained(model_name)
+
+        def create_args():
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+            kwargs = tokenizer("Hello world!", return_tensors="pt")
+            input_ids = kwargs["input_ids"]
+            attention_mask = kwargs["attention_mask"]
+            return input_ids, None, attention_mask
+
+        def create_kwargs():
+            return {"return_dict": False}
+
+        for load_checkpoint_during_init in (True, False):
+            self._test_fake_tensor_mode_exporter(
+                "tiny_gpt2",
+                create_model,
+                create_args,
+                create_kwargs,
+                load_checkpoint_during_init=load_checkpoint_during_init,
+            )
+
+    @pytorch_test_common.skip_op_level_debug_test(
+        "https://github.com/pytorch/pytorch/issues/105490"
+    )
+    def test_large_scale_exporter_with_toy_mlp(self):
+        class MLPModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc0 = nn.Linear(8, 8, bias=True)
+                self.fc1 = nn.Linear(8, 4, bias=True)
+                self.fc2 = nn.Linear(4, 2, bias=True)
+                self.fc3 = nn.Linear(2, 2, bias=True)
+
+            def forward(self, tensor_x: torch.Tensor):
+                tensor_x = self.fc0(tensor_x)
+                tensor_x = torch.sigmoid(tensor_x)
+                tensor_x = self.fc1(tensor_x)
+                tensor_x = torch.sigmoid(tensor_x)
+                tensor_x = self.fc2(tensor_x)
+                tensor_x = torch.sigmoid(tensor_x)
+                output = self.fc3(tensor_x)
+                return output
+
+        def create_model() -> nn.Module:
+            return MLPModel()
+
+        def create_args():
+            return (torch.rand((97, 8), dtype=torch.float32),)
+
+        def create_kwargs():
+            return {}
+
+        for load_checkpoint_during_init in (True, False):
+            self._test_fake_tensor_mode_exporter(
+                "toy_mlp1",
+                create_model,
+                create_args,
+                create_kwargs,
+                load_checkpoint_during_init=load_checkpoint_during_init,
+            )
 
 
 if __name__ == "__main__":

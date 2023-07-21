@@ -2,10 +2,10 @@
 
 import torch
 from torch.testing._internal.common_utils import (
-    TestCase,
-    parametrize,
     instantiate_parametrized_tests,
+    parametrize,
     run_tests,
+    TestCase,
 )
 
 # Masks for float8 simulation
@@ -94,6 +94,7 @@ class TestFloat8Dtype(TestCase):
     """
     Sanity test for zeros comparison
     """
+
     @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
     def test_creation_with_zeros(self, dtype):
         x = torch.zeros(8, dtype=torch.float)
@@ -103,6 +104,7 @@ class TestFloat8Dtype(TestCase):
     """
         Numerical test of float8 conversion
     """
+
     @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
     def test_cast_to_float8(self, dtype):
         x = torch.rand((100, 100)) * FP8_MAX[dtype]
@@ -114,6 +116,7 @@ class TestFloat8Dtype(TestCase):
     """
         Test of mul implementation
     """
+
     @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
     def test_mul(self, dtype):
         shape = (10, 10)
@@ -130,6 +133,7 @@ class TestFloat8Dtype(TestCase):
     """
         Test special numbers
     """
+
     @parametrize("dtype", [torch.float8_e5m2, torch.float8_e4m3fn])
     def test_special_numbers(self, dtype):
         def compare_binary_with_decimal(binary, decimal, number_name, dtype):

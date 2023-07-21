@@ -668,7 +668,7 @@ class WrapperCodeGen(CodeGen):
         with output.indent():
             output.writelines(
                 [
-                    "from torch._inductor.utils import compiled_module_main",
+                    "from torch._inductor.wrapper_benchmark import compiled_module_main",
                     f"compiled_module_main('{get_benchmark_name()}', benchmark_compiled_module)",
                 ]
             )
@@ -891,8 +891,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def write_header(self):
         if V.graph.aot_mode:
             with open(
-                os.path.join(os.path.dirname(__file__), "aot_inductor_interface.cpp"),
-                "r",
+                os.path.join(os.path.dirname(__file__), "aot_inductor_interface.cpp")
             ) as f:
                 self.header.splice(f.read())
         else:
