@@ -2,9 +2,39 @@ import builtins
 
 import sympy
 
-from ..codecache import TritonFuture
+from ..codecache import PyCodeCache, TritonFuture
 from ..utils import do_bench
 from ..virtualized import V
+
+
+# TODO rename
+def get_kernel_call_args(kernel):
+    return kernel.args.python_argdefs()[0]  # TODO
+    _, call_args, _ = kernel.args.python_argdefs()
+    # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+    for i in range(len(call_args)):
+        if V.graph.is_unspec_arg(call_args[i]):
+            call_args[i] = call_args[i] + ".item()"
+    return call_args
+
+
+def get_all_kernel_call_args(kernels):
+    call_args_list = [get_kernel_call_args(kernel) for kernel in kernels]
+    all_call_args = {}  # use a dict rather than set to maintain insertion order
+    for call_args in call_args_list:
+        all_call_args.update({arg: None for arg in call_args})
+
+    return list(all_call_args.keys())
+
+
+def get_extra_arg_names(kernel):
+    extra_arg_names = []
+    for tree in kernel.range_trees:
+        if tree.prefix != "r" or kernel.inside_reduction:
+            extra_arg_names.append(f"{tree.prefix}numel")
+
+    # extra_arg_names.extend(["grid", "stream"])
+    return extra_arg_names
 
 
 class MultiKernelState:
@@ -22,22 +52,39 @@ class MultiKernelState:
         self.used_names = set()
 
     def define_kernel(self, kernels):
-        kernels = tuple(k.kernel_name for k in kernels)
-        if kernels in self.subkernel_to_kernel_name:
-            return self.subkernel_to_kernel_name[kernels]
+        kernel_names = tuple(k.kernel_name for k in kernels)
+        if kernel_names in self.subkernel_to_kernel_name:
+            return self.subkernel_to_kernel_name[kernel_names]
 
         # name the multi kernel based on the first kernel
-        multi_kernel_name = f"multi_kernel_{kernels[0]}"
+        multi_kernel_name = f"multi_kernel_{kernel_names[0]}"
         assert multi_kernel_name not in self.used_names
         self.used_names.add(multi_kernel_name)
-        self.subkernel_to_kernel_name[kernels] = multi_kernel_name
+        self.subkernel_to_kernel_name[kernel_names] = multi_kernel_name
 
         wrapper = V.graph.wrapper_code
+        all_call_args = get_all_kernel_call_args(kernels)
+        src_code = f"""
+def run(multi_kernel, {', '.join(get_all_kernel_call_args(kernels))}, {', '.join(get_extra_arg_names(kernels[0]))}, grid, stream):
+    def call0():
+        multi_kernel.kernels[0].run({', '.join(get_kernel_call_args(kernels[0]))}, {', '.join(get_extra_arg_names(kernels[0]))}, grid=grid, stream=stream)
+    def call1():
+        multi_kernel.kernels[1].run({', '.join(get_kernel_call_args(kernels[1]))}, {', '.join(get_extra_arg_names(kernels[1]))}, grid=grid, stream=stream)
+    call1()
+        """
         wrapper.header.splice(
             f"""
         {multi_kernel_name} = MultiKernelCall([
-            {", ".join(kernels)},
-        ])
+            {", ".join(kernel_names)},
+        ],
+            '''
+        """
+        )
+        wrapper.header.splice(src_code)
+        wrapper.header.splice(
+            """
+            '''
+        )
         """
         )
 
@@ -76,12 +123,13 @@ class MultiKernel:
         Collect the union of arguments from all subkernels as the arguments
         for the multi-kernel.
         """
+        # TODO: should use arg name rather than call arg?
         call_args_list = [self.get_call_args(kernel) for kernel in self.kernels]
-        call_args = call_args_list[0]
-        for other_call_args in call_args_list[1:]:
-            assert set(call_args) == set(
-                other_call_args
-            ), f"call_args: {call_args}, other call args: {other_call_args}"
+        all_call_args = {}  # use a dict rather than set to maintain insertion order
+        for call_args in call_args_list:
+            all_call_args.update({arg: None for arg in call_args})
+
+        all_call_args = list(all_call_args.keys())
 
         # TODO dedup the code with TritonKernel class
         grid = []
@@ -92,13 +140,13 @@ class MultiKernel:
                 expr = V.graph.wrapper_code.generate_numel_expr(name, tree)
 
             if tree.prefix != "r" or self.kernels[0].inside_reduction:
-                call_args.append(expr)
+                all_call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
 
         V.graph.wrapper_code.generate_kernel_call(
             self.kernel_name,
-            call_args,
+            all_call_args,
             grid,
             V.graph.scheduler.current_device.index,
         )
@@ -111,11 +159,13 @@ class MultiKernelCall:
     TODO: we could add cache for the choices piced by the MultiKernelCall
     """
 
-    def __init__(self, kernels):
+    def __init__(self, kernels, src_code):
         assert len(kernels) >= 2
         self._kernels = kernels
 
         self.picked_kernel = None
+
+        self._run = PyCodeCache.load(src_code).run
 
     @property
     def kernels(self):
@@ -140,6 +190,9 @@ class MultiKernelCall:
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
     def run(self, *args, **kwargs):
+        self._run(self, *args, **kwargs)
+
+    def old_run(self, *args, **kwargs):
         if self.picked_kernel is None:
             timings = {
                 kernel: self.bench(kernel, *args, **kwargs) for kernel in self.kernels
