@@ -247,5 +247,5 @@ def zeros(
         placements=placements,
     )
 
-
-import torch.distributed._tensor._dynamo_utils
+if not torch._running_with_deploy():
+    import torch.distributed._tensor._dynamo_utils
