@@ -32,6 +32,11 @@ static CPUCapability compute_cpu_capability() {
       return CPUCapability::AVX2;
     }
 #endif
+#ifdef HAVE_NEON_CPU_DEFINITION
+    if (strcmp(envar, "neon") == 0) {
+      return CPUCapability::NEON;
+    }
+#endif
 #endif
     if (strcmp(envar, "default") == 0) {
       return CPUCapability::DEFAULT;
@@ -56,6 +61,11 @@ static CPUCapability compute_cpu_capability() {
 #ifdef HAVE_AVX2_CPU_DEFINITION
     if (cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX2;
+    }
+#endif
+#ifdef HAVE_NEON_CPU_DEFINITION
+    if (cpuinfo_has_arm_neon()) {
+      return CPUCapability::NEON;
     }
 #endif
   }
@@ -83,6 +93,9 @@ void* DispatchStubImpl::get_call_ptr(
 #ifdef HAVE_AVX2_CPU_DEFINITION
   , void *AVX2
 #endif
+#ifdef HAVE_NEON_CPU_DEFINITION
+  , void *NEON
+#endif
 #ifdef HAVE_VSX_CPU_DEFINITION
   , void *VSX
 #endif
@@ -103,6 +116,9 @@ void* DispatchStubImpl::get_call_ptr(
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
           , AVX2
+#endif
+#ifdef HAVE_NEON_CPU_DEFINITION
+          , NEON
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
           , VSX
@@ -147,6 +163,9 @@ void* DispatchStubImpl::choose_cpu_impl(
 #ifdef HAVE_AVX2_CPU_DEFINITION
   , void *AVX2
 #endif
+#ifdef HAVE_NEON_CPU_DEFINITION
+  , void *NEON
+#endif
 #ifdef HAVE_VSX_CPU_DEFINITION
   , void *VSX
 #endif
@@ -174,6 +193,12 @@ void* DispatchStubImpl::choose_cpu_impl(
   if (capability >= static_cast<int>(CPUCapability::AVX2)) {
     TORCH_INTERNAL_ASSERT(AVX2, "DispatchStub: missing AVX2 kernel");
     return AVX2;
+  }
+#endif
+#ifdef HAVE_NEON_CPU_DEFINITION
+  if (capability >= static_cast<int>(CPUCapability::NEON)) {
+    TORCH_INTERNAL_ASSERT(NEON, "DispatchStub: missing NEON kernel");
+    return NEON;
   }
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
