@@ -506,21 +506,20 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.users = None
         self.inverse_users = []
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
-        self.recursive_predecessors = functools.reduce(
-            set.union, [x.recursive_predecessors for x in snodes]
+        self.recursive_predecessors = set.union(
+            *[x.recursive_predecessors for x in snodes]
         )
+
         self.set_read_writes(
             functools.reduce(
                 dependencies.ReadWrites.merge, [x.read_writes for x in snodes]
             )
         )
-        names = set(self.get_names())
+
         self.unmet_dependencies = {
             dep
-            for dep in functools.reduce(
-                set.union, [x.unmet_dependencies for x in snodes]
-            )
-            if dep.name not in names
+            for dep in set.union(*[x.unmet_dependencies for x in snodes])
+            if dep.name not in self.get_names()
         } - self.read_writes.writes
         self.min_order = min([x.min_order for x in self.snodes])
         self.max_order = max([x.max_order for x in self.snodes])
@@ -534,7 +533,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     @cache_on_self
     def get_names(self) -> Set[str]:
-        return functools.reduce(set.union, [x.get_names() for x in self.snodes])
+        return set.union(*[x.get_names() for x in self.snodes])
 
     def debug_str_extra(self):
         return (
@@ -556,13 +555,11 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     @cache_on_self
     def used_buffer_names(self) -> Set[str]:
-        return functools.reduce(set.union, [x.used_buffer_names() for x in self.snodes])
+        return set.union(*[x.used_buffer_names() for x in self.snodes])
 
     @cache_on_self
     def used_or_aliased_buffer_names(self) -> Set[str]:
-        return functools.reduce(
-            set.union, (x.used_or_aliased_buffer_names() for x in self.snodes)
-        )
+        return set.union(*[x.used_or_aliased_buffer_names() for x in self.snodes])
 
     def get_nodes(self) -> List[BaseSchedulerNode]:
         return self.snodes
@@ -1155,8 +1152,10 @@ class Scheduler:
             and not node2.is_template()
         ):
             return False
+
         if node2.get_names() & node1.recursive_predecessors:
             return False  # node2 must go before node1
+
         if node2.is_template():
             return False  # only epilogues
         if node1.is_template() and (
