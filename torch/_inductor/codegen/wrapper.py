@@ -146,11 +146,15 @@ class EnterCudaDeviceContextManagerLine:
 
     def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
         if V.graph.cpp_wrapper:
-            code.writeline("\n")
-            if self.first_time:
-                code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
-            else:
-                code.writeline(f"device_guard.set_index({self.device_idx});")
+            if not V.graph.aot_mode:
+                # Device is managed by runtime in the aot mode
+                code.writeline("\n")
+                if self.first_time:
+                    code.writeline(
+                        f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                    )
+                else:
+                    code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
@@ -873,6 +877,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
     """
 
     def __init__(self):
+        # abi_compatible only matters in the aot_mode
+        self.abi_compatible = V.graph.aot_mode and config.aot_inductor.abi_compatible
         super().__init__()
         self.declare = "auto "
         self.ending = ";"
@@ -914,16 +920,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
             )
 
-        if not config.aot_inductor_abi_compatible:
+        if not self.abi_compatible:
             self.header.splice(
                 """
                 #include <torch/csrc/inductor/inductor_ops.h>
-                """
-            )
-        else:
-            self.header.splice(
-                """
-                #include <torch/csrc/inductor/aot_inductor_tensor.h>
                 """
             )
 
@@ -948,7 +948,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
-            if config.aot_inductor_abi_compatible:
+            if self.abi_compatible:
                 self.prefix.splice(
                     """
                     void AOTInductorModel::run_impl(
@@ -987,7 +987,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         ), "Fails to get the dtype of the sympy.Expr"
                         cpp_dtype = DTYPE_TO_CPP[dtype]
                         assert (
-                            not config.aot_inductor_abi_compatible
+                            not self.abi_compatible
                         ), "Need to add .item support for AOTInductorTensor"
 
                         self.prefix.writeline(
@@ -1005,7 +1005,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
-            if not config.aot_inductor_abi_compatible:
+            if not self.abi_compatible:
                 self.wrapper_call.splice(
                     """
                     c10::optional<at::Scalar> optional_scalar;
@@ -1157,7 +1157,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             args.insert(0, f"{codegen_reference}")
 
-        if config.aot_inductor_abi_compatible:
+        if self.abi_compatible:
             kernel = "aot_inductor_" + kernel.split("::")[-1]
         self.writeline(self.wrap_kernel_call(kernel, args))
 
@@ -1199,13 +1199,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return f"{{{', '.join(parts)}}}"
 
     def make_buffer_free(self, buffer):
-        # TODO: Enable memory planning
-        return (
-            ""
-            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
-            or config.aot_inductor_abi_compatible
-            else f"{buffer.get_name()}.reset();"
-        )
+        if isinstance(buffer.get_layout(), ir.MultiOutputLayout):
+            return ""
+        else:
+            if self.abi_compatible:
+                return f"aot_inductor_tensor_free({buffer.get_name()});"
+            else:
+                return f"{buffer.get_name()}.reset();"
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
@@ -1215,7 +1215,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def codegen_device(self, device):
         from .cpp import DEVICE_TO_AOT, DEVICE_TO_ATEN
 
-        if config.aot_inductor_abi_compatible:
+        if self.abi_compatible:
             return (
                 f"{DEVICE_TO_AOT[device.type]}, {device.index if device.index else 0}"
             )
@@ -1229,7 +1229,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def codegen_dtype(self, dtype):
         from .cpp import DTYPE_TO_AOT, DTYPE_TO_ATEN
 
-        if config.aot_inductor_abi_compatible:
+        if self.abi_compatible:
             return DTYPE_TO_AOT[dtype]
         else:
             return DTYPE_TO_ATEN[dtype]
@@ -1250,7 +1250,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             dtype = self.codegen_dtype(buffer.get_dtype())
             size = self.codegen_shape_tuple(tuple(buffer.get_size()))
             stride = self.codegen_shape_tuple(tuple(buffer.get_stride()))
-            if config.aot_inductor_abi_compatible:
+            if self.abi_compatible:
                 size_var = f"var_{next(self.arg_var_id)}"
                 stride_var = f"var_{next(self.arg_var_id)}"
                 device_var = f"var_{next(self.arg_var_id)}"
@@ -1275,17 +1275,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
 
     def codegen_as_strided(self, name, size, stride, offset) -> str:
+        dim = str(len(size))
         size = self.codegen_shape_tuple(size)
         stride = self.codegen_shape_tuple(stride)
         offset = self.codegen_sizevar(offset)
 
-        if config.aot_inductor_abi_compatible:
+        if self.abi_compatible:
             size_var = f"var_{next(self.arg_var_id)}"
             stride_var = f"var_{next(self.arg_var_id)}"
-            args = [name, size_var, stride_var]
-            if offset != "0":
-                args.append(offset)
-
+            args = [name, dim, size_var, stride_var, offset]
             self.writeline(f"int64_t {size_var}[] = {size};")
             self.writeline(f"int64_t {stride_var}[] = {stride};")
             return f"aot_inductor_as_strided({', '.join(args)})"
@@ -1355,7 +1353,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
     def write_header(self):
         super().write_header()
-        if not config.aot_inductor_abi_compatible:
+        if not self.abi_compatible:
             self.header.splice(
                 """
                 #include <ATen/native/BinaryOps.h>
@@ -1367,14 +1365,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
         self.header.splice(
             """
-            #define CUDA_DRIVER_CHECK(EXPR)                         \\
-            do {                                                                \\
-                CUresult __err = EXPR;                                          \\
-                if (__err != CUDA_SUCCESS) {                                    \\
-                    AT_ERROR("CUDA driver error: ", static_cast<int>(__err));   \\
-                }                                                               \\
-            } while (0)
-
             static inline CUfunction loadKernel(const std::string &filePath,
                     const std::string &funcName) {
                 CUmodule mod;
@@ -1392,10 +1382,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                     int numWraps,
                     int sharedMemBytes,
                     void* args[],
-                    int device_index) {
+                    cudaStream_t stream) {
                 CUDA_DRIVER_CHECK(cuLaunchKernel(
                     func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
-                    at::cuda::getCurrentCUDAStream(device_index), args, nullptr));
+                    stream, args, nullptr));
             }
             """
         )
@@ -1447,9 +1437,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 self.writeline(f"float {var_name} = {arg};")
             else:
                 data_ptr = (
-                    f"{arg}.data_ptr"
-                    if config.aot_inductor_abi_compatible
-                    else f"{arg}.data_ptr()"
+                    f"{arg}.data_ptr" if self.abi_compatible else f"{arg}.data_ptr()"
                 )
                 self.writeline(
                     f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({data_ptr});"
@@ -1485,6 +1473,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 params["num_warps"],
                 params["shared_mem"],
                 kernel_args_var,
-                device_index,
+                "stream",
             )
         )

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <deque>
 #include <future>
 #include <mutex>
 #include <shared_mutex>
@@ -12,9 +14,11 @@ namespace aot_inductor {
 class AOTInductorModelContainer {
  public:
   AOTInductorModelContainer(size_t num_models) {
-    LOG(INFO) << "Constructing an AOTInductorModelContainer with " << num_models
-              << " model instances";
-    TORCH_CHECK(num_models > 0, "expected num_models to be larger than 0");
+    // LOG(INFO) << "Constructing an AOTInductorModelContainer with " <<
+    // num_models
+    //          << " model instances";
+    AOT_INDUCTOR_CHECK(
+        num_models > 0, "expected num_models to be larger than 0");
 
     models_.reserve(num_models);
     available_models_.reserve(num_models);
@@ -59,13 +63,13 @@ class AOTInductorModelContainer {
       AOT_VECTOR_SIZE_CHECK(outputs, num_outputs());
       model->run(inputs, outputs, stream);
     } catch (...) {
-      std::lock_guard lk(models_mutex_);
+      std::lock_guard<std::mutex> lk(models_mutex_);
       available_models_.push_back(model);
       throw;
     }
 
     {
-      std::lock_guard lk(models_mutex_);
+      std::lock_guard<std::mutex> lk(models_mutex_);
       pending_models_.push_back(model);
     }
     pending_models_available_.notify_one();
@@ -127,7 +131,7 @@ class AOTInductorModelContainer {
   std::condition_variable pending_models_available_;
 
   AOTInductorModel* get_available_model() {
-    std::unique_lock lk(models_mutex_);
+    std::unique_lock<std::mutex> lk(models_mutex_);
     if (available_models_.empty()) {
       reclaim_finished_models(lk);
     }

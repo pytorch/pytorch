@@ -139,7 +139,7 @@ class Interpreter:
             except Exception as e:
                 if self.extra_traceback:
                     msg = f"While executing {node.format_node()}"
-                    msg = '{}\n\n{}'.format(e.args[0], msg) if e.args else str(msg)
+                    msg = f'{e.args[0]}\n\n{msg}' if e.args else str(msg)
                     msg += f"\nOriginal traceback:\n{node.stack_trace}"
                     e.args = (msg,) + e.args[1:]
                     if isinstance(e, KeyError):

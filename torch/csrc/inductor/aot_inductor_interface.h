@@ -3,16 +3,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __GNUC__
-#define AOT_INDUCTOR_EXPORT __attribute__((__visibility__("default")))
-#else // !__GNUC__
-#ifdef _WIN32
-#define AOT_INDUCTOR_EXPORT __declspec(dllexport)
-#else // !_WIN32
-#define AOT_INDUCTOR_EXPORT
-#endif // _WIN32
-#endif // __GNUC__
-
 enum class AOTInductorError : int {
   Success = 0,
   Failure = 1,
