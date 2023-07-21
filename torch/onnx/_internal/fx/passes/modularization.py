@@ -343,6 +343,9 @@ class _IRNode(abc.ABC):
     Each `fx.Node` possesses an `nn_module_stack` meta data that contains information
     about the module call stack. See `_ModuleStackMeta` for examples.
 
+    Analysis step
+    -------------
+
     Each module call is identified by a set of base stack layers. For each module call,
     the pass creates a `_ModuleNode` and groups the sequence of nodes that shares the
     same base stack layers.
@@ -360,7 +363,7 @@ class _IRNode(abc.ABC):
     stack layers [GPT, block1]. And [node_2, node_3] for `GPT.block1.Attention1`, [node_0]
     for `GPT.block0`, and [node_4] for `GPT.block2` respectfully.
 
-    After the first step, a hierarchical representation is generated.
+    After the analysis step, a hierarchical representation is generated.
 
     For above example, the representation is:
 
@@ -376,6 +379,9 @@ class _IRNode(abc.ABC):
             _ModuleNode(block2)
                 _LeafNode(node_4)
 
+    Construction step
+    -----------------
+
     The second step is to build the actual `call_module` node and the sub `fx.GraphModule`.
     This is done recursively from the leaf `_ModuleNode` to the root.
 
@@ -386,7 +392,7 @@ class _IRNode(abc.ABC):
             graph:
                 node_2
 
-        new_mlp_node = call_module[GPT.block1.Attention1.MLP](...)
+        new_mlp_node = `call_module[GPT.block1.Attention1.MLP](...)`
 
     Next, the `GPT.block1.Attention1` submodule is built. Below is generated from
     `_ModuleNode(Attention1)`.
@@ -396,9 +402,32 @@ class _IRNode(abc.ABC):
                 new_mlp_node
                 node_3
 
-        new_attention1_node = call_module[GPT.block1.Attention1](...)
+        new_attention1_node = `call_module[GPT.block1.Attention1](...)`
 
     Until every submodule is built, the new modularized `fx.GraphModule` is generated.
+
+    Alternatives
+    ------------
+
+    The current algorithm adopts a top down approach. A bottom up approach is similar.
+    In contrast to these two, an alternative flat order approach is also possible, where
+    each node is traversed and copied to the corresponding submodule.
+
+    The advantage of the current approach lies in the encapsulation of the fx.GraphModule
+    construction for each individual submodule within a single `build_module` method, which
+    can be called separately once the analysis phase is completed, making debugging more
+    convenient.
+
+    Regarding construction step, an alternative implementation is to utilize `fx.Interpreter`
+    for traversing all the nodes under the flattened root module and copying the nodes
+    into their respective submodule under construction. This approach is not adopted because
+
+        1. It uses the flat order approach discussed above. This means one cannot individually
+    construct a submodule and examine it while debugging.
+
+        2. The graph execution functionality of `fx.Interpreter` is not necessary for the
+    purpose of this pass. Ignoring that, `fx.Interpreter.run` achieves the same effect
+    as a for loop over all the nodes.
     """
 
     @property
