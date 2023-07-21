@@ -72,20 +72,21 @@ Z = 1
 H = 4
 N_CTX = 512
 D_HEAD = 64
-dtype = torch.float
+dtype = torch.float16
 q = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 k = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 v = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 
 # @torch.compile
 def foo(q, k, v):
-    return (sdpa(q, k, v, lambda score, b, h, m, n: score * 2),)
+    return (sdpa(q, k, v, lambda score, b, h, m, n: score + (m - n)),)
 
 # foo(q, k, v)
 # exit(0)
 fake_mode = FakeTensorMode()
 with fake_mode:
-    q, k, v = [fake_mode.from_tensor(t) for t in (q, k, v)]
-    out_graph = make_fx(foo)(q, k, v)
+    q_, k_, v_ = [fake_mode.from_tensor(t) for t in (q, k, v)]
+    out_graph = make_fx(foo)(q_, k_, v_)
     out_graph.print_readable()
-    compile_fx_inner(out_graph, (q, k, v))
+    out_graph = compile_fx_inner(out_graph, (q_, k_, v_))
+breakpoint()

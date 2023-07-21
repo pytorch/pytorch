@@ -400,7 +400,6 @@ class SchedulerNode(BaseSchedulerNode):
             self._sizes,
             self._body,
         ) = node.simplify_and_reorder()
-
         self.group = (node.get_device(), group_fn(self._sizes))
 
         if self.is_template():

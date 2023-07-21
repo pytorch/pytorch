@@ -51,6 +51,9 @@ from .utils import (
     sympy_product,
 )
 from .virtualized import V
+from torch._prims_common import (
+    make_contiguous_strides_for,
+)
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -562,14 +565,13 @@ class GraphLowering(torch.fx.Interpreter):
             def create_placeholder(name):
                 return TensorBox.create(
                         InputBuffer(
-                            "score",
+                            name,
                             FixedLayout(args[0].get_device(), args[0].get_dtype(), (1,), (1,)),
                         )
                     )
             # env = create_placeholder(name) for name in ["score", "b_1", "h_1", "m_1", "n_1"]]
             scalar_inps = ["score_1", "b_1", "h_1", "m_1", "n_1"]
             env = {}
-            output_buffer =
             for node in args[3].graph.nodes:
                 if node.op == "placeholder":
                     if node.target in scalar_inps:
@@ -580,10 +582,27 @@ class GraphLowering(torch.fx.Interpreter):
                     from torch.utils._pytree import tree_map
                     env[node] = lowerings[node.target](*tree_map(lambda x: env[x] if x in env else x, node.args))
                 elif node.op == "output":
-                    breakpoint()
-
-
-            breakpoint()
+                    output_buffer = env[node.args[0]]
+                    output_buffer.realize(dont_register=True)
+                    from .kernel.mm import sdpa_template
+                    layout = FixedLayout(output_buffer.get_device(), output_buffer.get_dtype(), args[0].get_size(), make_contiguous_strides_for(args[0].get_size()))
+                    choices = []
+                    from .select_algorithm import (
+                        autotune_select_algorithm,
+                        ExternKernelChoice,
+                        TritonTemplate,
+                    )
+                    sdpa_template.maybe_append_choice(
+                        choices,
+                        (args[0], args[1], args[2]),
+                        layout,
+                        num_stages=2,
+                        num_warps=8,
+                        BLOCK_M=128,
+                        BLOCK_N=128,
+                        BLOCK_DMODEL=128,
+                    )
+                    return autotune_select_algorithm("sdpa", choices, [args[0], args[1], args[2]], layout)
             return lowerings[torch.ops.aten.scaled_dot_product_attention.default](args[0], args[1], args[2])
         try:
             out = lowerings[target](*args, **kwargs)
@@ -667,6 +686,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
     def finalize(self):
+        breakpoint()
         for buf in self.buffers:
             buf.decide_layout()
 

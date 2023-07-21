@@ -2368,6 +2368,7 @@ class TritonScheduling:
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         src_code = render()
+        # print(src_code)
         kernel_name = self.define_kernel(src_code, [template_node, *epilogue_nodes])
         kernel.call_kernel(kernel_name)
         self.scheduler.free_buffers()

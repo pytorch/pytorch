@@ -297,7 +297,7 @@ class IRNode:
     def get_numel(self):
         return sympy_product(self.get_size())
 
-    def realize(self):
+    def realize(self, dont_register=False):
         """
         If the IRNode refers to data which has not been materialized (e.g.,
         it is a Pointwise/Reduction that could potentially have more
@@ -1176,8 +1176,8 @@ class BaseView(IRNode):
     def has_exceeded_max_reads(self):
         return self.data.has_exceeded_max_reads()
 
-    def realize(self):
-        return self.data.realize()
+    def realize(self, dont_register):
+        return self.data.realize(dont_register)
 
     def realize_hint(self):
         return self.data.realize_hint()
@@ -2463,6 +2463,8 @@ class TemplateBuffer(Buffer):
             None,
         )
 
+# class SDPABuffer(TemplateBuffer):
+
 
 @dataclasses.dataclass
 class InputsKernel(Buffer):
@@ -3381,6 +3383,7 @@ class FallbackKernel(ExternKernelAlloc):
         context = (
             V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
         )
+        breakpoint()
         with context:
             (
                 example_output,
@@ -4279,8 +4282,8 @@ class MutableBox(IRNode):
             return fn
         raise AttributeError(f"{type(self.data).__name__}.{name} not callable")
 
-    def realize(self):
-        return self.data.realize()
+    def realize(self, dont_register=False):
+        return self.data.realize(dont_register)
 
     @property
     def layout(self):
@@ -4318,7 +4321,7 @@ class StorageBox(MutableBox):
             return self.data.get_name() in V.graph.graph_inputs
         return False
 
-    def realize(self):
+    def realize(self, dont_register=False):
         if isinstance(
             self.data,
             (
@@ -4342,7 +4345,8 @@ class StorageBox(MutableBox):
             ),
             data=self.data,
         )
-        self.data.name = V.graph.register_buffer(self.data)
+        if not dont_register:
+            self.data.name = V.graph.register_buffer(self.data)
         self.data.origins = self.origins
         self.data.origin_node = origin_node
         self.data.traceback = traceback
