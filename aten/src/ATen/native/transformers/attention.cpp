@@ -12,6 +12,7 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <type_traits>
 #include <utility>
+#include <algorithm>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Exception.h>
@@ -535,6 +536,19 @@ inline void validate_sdpa_input(
     TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == query_.dtype(),
       "Expected attn_mask dtype to be bool or to match query dtype, but got attn_mask.dtype: ",
       mask_dtype, " and  query.dtype: ", query_.dtype(), " instead.");
+  }
+  if (std::any_of(query_.sizes().begin(),query_.sizes().end(),[](int i) { return i == 0; }) ||
+      std::any_of(key.sizes().begin(),key.sizes().end(),[](int i) { return i == 0; }) ||
+      std::any_of(value.sizes().begin(), value.sizes().end(), [](int i) {return i == 0;})) {
+    TORCH_CHECK(
+        false,
+        "Expected non-empty query, key, and value tensors, but got query.sizes: ",
+        query_.sizes(),
+        " key.sizes: ",
+        key.sizes(),
+        " and value.sizes: ",
+        value.sizes(),
+        " instead.");
   }
   return;
 }

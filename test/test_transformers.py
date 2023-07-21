@@ -13,7 +13,9 @@ import math
 from torch.backends.cuda import sdp_kernel, SDPBackend
 import torch.optim as optim
 from torch.testing._internal.common_dtype import floating_types_and_half
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes
+)
 from typing import List, Tuple, Union, Optional
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -1229,6 +1231,16 @@ class TestSDPAFailureModes(NNTestCase):
             v = make_tensor(size, requires_grad=True)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
+
+    @dtypes(*floating_types_and_half())
+    def test_empty_tensor_input(self, device, dtype):
+        q = torch.randn((1, 2, 8, 8), device=device, dtype=dtype)
+        k = torch.randn((1, 2, 0, 8), device=device, dtype=dtype)
+        v = torch.randn((1, 2, 0, 8), device=device, dtype=dtype)
+        error_string = r"Expected non-empty query, key, and value tensors, but got query.sizes: " \
+                       r"\[1, 2, 8, 8\] key.sizes: \[1, 2, 0, 8\] and value.sizes: \[1, 2, 0, 8\] instead."
+        self.assertRaisesRegex(RuntimeError, error_string,
+                               lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
 
     @onlyCUDA
     def test_dispatch_fails_no_backend(self, device):
