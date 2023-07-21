@@ -342,7 +342,7 @@ def load_model_from_path(path_and_class_str):
 
 def output_csv(filename, headers, row):
     if os.path.exists(filename):
-        with open(filename, "r") as fd:
+        with open(filename) as fd:
             lines = list(csv.reader(fd)) or [[]]
             if headers and len(headers) > len(lines[0]):
                 # if prior results failed the header might not be filled in yet
@@ -658,7 +658,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     torch._dynamo.config.repro_tolerance = tolerance
 
     with maybe_profile(args.export_profiler_trace) as p:
-        if args.backend == "aot_inductor":
+        if args.export_aot_inductor:
             frozen_model_iter_fn = export_aot_inductor(model_iter_fn)
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
@@ -1094,7 +1094,12 @@ class AOTInductorModelCache:
             # so we need to explicitly allocate output tensors here.
             output_tensors = []
             # TODO: we should be able to do this by querying AOTInductorModel
-            example_outputs = eager_forward(model, example_inputs)
+            example_outputs = eager_forward(
+                copy.deepcopy(model), clone_inputs(example_inputs)
+            )
+            if isinstance(example_outputs, dict):
+                # Workaround Huggingface output type issue ModelOutput
+                example_outputs = dict(example_outputs)
             example_outputs, output_spec = pytree.tree_flatten(example_outputs)
             for output in example_outputs:
                 output_tensors.append(torch.empty_like(output))
@@ -1502,7 +1507,7 @@ def read_batch_size_from_file(args, filename, model_name):
     if os.path.exists("benchmarks"):
         filename = os.path.join("benchmarks", filename)
     assert os.path.exists(filename), filename
-    with open(filename, "r") as f:
+    with open(filename) as f:
         lines = f.readlines()
         lines = [i.split(",") for i in lines if len(i.strip()) > 0]
         for val in lines:
@@ -2784,6 +2789,11 @@ def parse_args(args=None):
         help="Measure pass rate with export",
     )
     group.add_argument(
+        "--export-aot-inductor",
+        action="store_true",
+        help="Measure pass rate with Export+AOTInductor",
+    )
+    group.add_argument(
         "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
     )
     group.add_argument(
@@ -2800,7 +2810,7 @@ def parse_args(args=None):
     )
     group.add_argument(
         "--backend",
-        choices=torch._dynamo.list_backends(exclude_tags=None) + ["aot_inductor"],
+        choices=torch._dynamo.list_backends(exclude_tags=None),
         help="measure speedup with a given backend",
     )
     group.add_argument("--nothing", action="store_true", help=help(null_experiment))
@@ -3077,15 +3087,6 @@ def run(runner, args, original_dir=None):
         output_filename = "overheads.csv"
     elif args.inductor:
         inductor_config.debug = args.verbose
-        if (
-            args.ci
-            and args.accuracy
-            and args.training
-            and args.only in {"dla102", "gernet_l"}
-        ):
-            # Log generated code for flaky tests, to check if there is any codegen difference
-            inductor_config.debug = True
-
         if args.threads:
             inductor_config.cpp.threads = args.threads
 
@@ -3146,8 +3147,8 @@ def run(runner, args, original_dir=None):
         optimize_ctx = nothing
         experiment = speedup_experiment
         output_filename = "nothing.csv"
-    elif args.backend:
-        if args.backend == "aot_inductor":
+    elif args.backend or args.export_aot_inductor:
+        if args.export_aot_inductor:
             assert not args.training, "AOTInductor only supports inference"
             assert args.devices == ["cuda"], "AOTInductor only tested for CUDA"
             optimize_ctx = export_aot_inductor
@@ -3170,7 +3171,7 @@ def run(runner, args, original_dir=None):
         experiment = coverage_experiment
         output_filename = "coverage.csv"
 
-    if args.inductor or args.backend == "inductor" or args.backend == "aot_inductor":
+    if args.inductor or args.backend == "inductor" or args.export_aot_inductor:
         inductor_config.triton.cudagraphs = not args.disable_cudagraphs
         inductor_config.triton.persistent_reductions = (
             not args.disable_persistent_reductions

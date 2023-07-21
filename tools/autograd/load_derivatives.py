@@ -98,7 +98,7 @@ def load_derivatives(
     global _GLOBAL_LOAD_DERIVATIVE_CACHE
     key = (derivatives_yaml_path, native_yaml_path)
     if key not in _GLOBAL_LOAD_DERIVATIVE_CACHE:
-        with open(derivatives_yaml_path, "r") as f:
+        with open(derivatives_yaml_path) as f:
             definitions = yaml.load(f, Loader=YamlLoader)
 
         funcs = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
