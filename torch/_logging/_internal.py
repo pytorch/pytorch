@@ -138,6 +138,7 @@ def set_logs(
     guards: bool = False,
     recompiles: bool = False,
     trace_source: bool = False,
+    trace_call: bool = False,
     output_code: bool = False,
     schedule: bool = False,
     perf_hints: bool = False,
@@ -237,6 +238,10 @@ def set_logs(
 
         trace_source (:class:`bool`):
             Whether to emit when TorchDynamo begins tracing a new line. Default: ``False``
+
+        trace_call (:class:`bool`):
+            Whether to emit detailed line location when TorchDynamo creates an FX node
+            corresponding to function call. Python 3.11+ only. Default: ``False``
 
         output_code (:class:`bool`):
             Whether to emit the TorchInductor output code. Default: ``False``
@@ -348,6 +353,7 @@ def set_logs(
         guards=guards,
         recompiles=recompiles,
         trace_source=trace_source,
+        trace_call=trace_call,
         output_code=output_code,
         schedule=schedule,
         perf_hints=perf_hints,
