@@ -488,12 +488,12 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         torchdynamo issue is resolved
         """
         # program capture
-        # model_copy = copy.deepcopy(model)
         model, guards = torchdynamo.export(
             model,
             *copy.deepcopy(example_inputs),
             aten_graph=True,
         )
+        # model_copy = copy.deepcopy(model)
 
         model = prepare_pt2e(model, quantizer)
         # Calibrate
@@ -514,7 +514,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
         # output_scale = None
         # idx = 0
-        # for n in m_copy.graph.nodes:
+        # for n in model_copy.graph.nodes:
         #     if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
         #         idx += 1
         #         if idx == 3:
@@ -523,7 +523,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
         # # make sure the result is off by one at most in the quantized integer representation
         # self.assertTrue(
-        #     torch.max(torch.abs(pt2_quant_output_copy - pt2_quant_output)) <= (2 * output_scale + 1e-5)
+        #     torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_scale + 1e-5)
         # )
 
 @skipIfNoQNNPACK
@@ -1773,6 +1773,31 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
             def forward(self, x, y):
                 return x + y
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m_eager = M().eval()
+
+        example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
+
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={}
+        )
+
+    def test_representation_add_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                out = x + y
+                out = torch.nn.functional.relu(out)
+                return out
 
         quantizer = XNNPACKQuantizer()
         operator_config = get_symmetric_quantization_config(is_per_channel=True)

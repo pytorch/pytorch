@@ -4,6 +4,7 @@ from ..utils import get_aten_graph_module
 from ..utils import remove_tensor_overload_for_qdq_ops
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
 from torch.fx.subgraph_rewriter import replace_pattern
+from torch._higher_order_ops.out_dtype import out_dtype
 
 __all__ = [
     "reference_representation_rewrite",
@@ -21,6 +22,37 @@ _QUANTIZED_ADD_EXAMPLE_INPUTS = (
     torch.tensor([-128], dtype=torch.int),
     torch.tensor([127], dtype=torch.int),
 )
+
+def _qdq_quantized_add_relu(x_i8, x_scale, x_zero_point, y_i8, y_scale, y_zero_point, out_scale, out_zero_point, quant_min, quant_max):
+    x_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(x_i8, x_scale, x_zero_point, quant_min, quant_max, torch.int8)
+    y_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(y_i8, y_scale, y_zero_point, quant_min, quant_max, torch.int8)
+    out_fp32 = x_fp32 + y_fp32
+    out_fp32 = torch.ops.aten.relu(out_fp32)
+    out_i8 = torch.ops.quantized_decomposed.quantize_per_tensor(
+        out_fp32, out_scale, out_zero_point, quant_min, quant_max, torch.int8
+    )
+    return out_i8
+
+def _reference_quantized_add_relu(
+    x_i8, x_scale, x_zero_point, y_i8, y_scale, y_zero_point,
+    out_scale, out_zero_point, quant_min, quant_max
+):
+    """
+    # See comments for `_reference_quantized_add` for more information on how to derive the formula for out_i8 based on x_i8 and y_i8
+    """
+    x_i32 = x_i8.to(torch.int32)
+    y_i32 = y_i8.to(torch.int32)
+    # TODO: use out_dtype op
+    # x_i32 = out_dtype(torch.ops.aten.mul, torch.int32, (x_i32 - x_zero_point), (x_scale / out_scale))
+    # y_i32 = out_dtype(torch.ops.aten.mul, torch.int32, (y_i32 - y_zero_point), (y_scale / out_scale))
+    x_i32 = torch.round((x_scale / out_scale) * (x_i32 - x_zero_point)).to(torch.int32)
+    y_i32 = torch.round((y_scale / out_scale) * (y_i32 - y_zero_point)).to(torch.int32)
+    out_i32 = x_i32 + y_i32 + out_zero_point
+    out_i32 = torch.ops.aten.clamp(out_i32, out_zero_point)
+    quant_min = -128
+    quant_max = 127
+    out_i8 = torch.ops.aten.clamp(out_i32, quant_min, quant_max).to(torch.int8)
+    return out_i8
 
 def _qdq_quantized_add(x_i8, x_scale, x_zero_point, y_i8, y_scale, y_zero_point, out_scale, out_zero_point, quant_min, quant_max):
     x_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(x_i8, x_scale, x_zero_point, quant_min, quant_max, torch.int8)
@@ -111,6 +143,7 @@ def _reference_dequantize_per_tensor_int8(x_i8, scale, zero_point, quant_min, qu
     return ((x_i8.to(torch.float32) - zero_point) * scale).to(dtype=torch.float32)
 
 _EXAMPLE_INPUTS_PATTERN_AND_REPLACEMENTS = [
+    (_QUANTIZED_ADD_EXAMPLE_INPUTS, _qdq_quantized_add_relu, _reference_quantized_add_relu),
     (_QUANTIZED_ADD_EXAMPLE_INPUTS, _qdq_quantized_add, _reference_quantized_add),
     (_QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS, _quantize_per_tensor_int8, _reference_quantize_per_tensor_int8),
     (_DEQUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS, _dequantize_per_tensor_int8, _reference_dequantize_per_tensor_int8),
