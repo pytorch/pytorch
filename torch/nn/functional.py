@@ -4676,8 +4676,8 @@ def triplet_margin_with_distance_loss(
     if not (a_dim == p_dim and p_dim == n_dim):
         raise RuntimeError(
             f"The anchor, positive, and negative tensors are expected to have "
-             f"the same number of dimensions, but got: anchor {a_dim}D, "
-             f"positive {p_dim}D, and negative {n_dim}D inputs")
+            f"the same number of dimensions, but got: anchor {a_dim}D, "
+            f"positive {p_dim}D, and negative {n_dim}D inputs")
 
     # Calculate loss
     if distance_function is None:
