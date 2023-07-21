@@ -1086,7 +1086,11 @@ class VariableBuilder:
                     example_value = unspec_var.proxy.node.meta["example_value"]
                 if is_fake(example_value):
                     fake_tensor_value = example_value
-                    assert fake_tensor_value.fake_mode is self.tx.fake_mode
+                    assert fake_tensor_value.fake_mode is self.tx.fake_mode, (
+                        f"fake mode ({fake_tensor_value.fake_mode}) from fake tensor metadata doesn't match mode"
+                        "({self.tx.fake_mode}) from InstructionTranslator"
+                    )
+
                 proxy.node.meta["grapharg"] = GraphArg(
                     self.get_source(),
                     wrapped_value,
