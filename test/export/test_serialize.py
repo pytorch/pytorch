@@ -69,10 +69,10 @@ class TestSerialize(TestCase):
         )
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[-7]
-        self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
+        node = serialized.graph_module.graph.nodes[-1]
+        self.assertEqual(node.target, "torch.ops.aten.native_layer_norm.default")
         # aten::native_layer_norm returns 3 tensnors
-        self.assertEqual(len(node.outputs), 2)
+        self.assertEqual(len(node.outputs), 3)
 
         # check the names are unique
         seen = set()
@@ -178,6 +178,8 @@ class TestDeserialize(TestCase):
         # TODO(angelayi): test better with some sort of wrapper
         constraints = [] if constraints is None else constraints
         ep = export(fn, inputs, {}, constraints)
+        ep.graph.eliminate_dead_code()
+
         serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
         deserialized_ep = deserialize(serialized_struct, state_dict, expected_opset_version={"aten": 0})
 
