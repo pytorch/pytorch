@@ -998,6 +998,11 @@
     "Tuple",
     "Union"
   ],
+  "torch.utils": [
+    "disable_minidumps",
+    "enable_minidumps",
+    "enable_minidumps_on_exceptions"
+  ],
   "torch.utils.benchmark.utils.compare": [
     "Colorize",
     "Table",
