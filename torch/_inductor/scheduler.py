@@ -1042,7 +1042,8 @@ class Scheduler:
 
         def check_all_pairs(nodes):
             for node1_index, node1 in enumerate(nodes):
-                for node2 in nodes[node1_index + 1 :]:
+                start = node1_index + 1
+                for node2 in nodes[start : (start + config.max_fusion_proximity)]:
                     key = (node1, node2)
                     if key in seen:
                         continue
@@ -1131,7 +1132,7 @@ class Scheduler:
             abs(node1.min_order - node2.max_order),
             abs(node2.min_order - node1.max_order),
         )
-        return proximity_score > 64
+        return proximity_score > config.max_fusion_proximity
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """

@@ -120,6 +120,9 @@ aggressive_fusion = False
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
+# node distance to allow for fusions
+max_fusion_proximity = 64
+
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
