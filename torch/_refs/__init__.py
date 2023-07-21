@@ -4609,6 +4609,13 @@ def logspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
+    # NB: NumPy doesn't have this cast
+    if prims.utils.is_integer_dtype(dtype):
+        if isinstance(start, FloatLike):
+            start = sym_int(start)
+        if isinstance(end, FloatLike):
+            end = sym_int(end)
+    
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
@@ -4622,13 +4629,6 @@ def logspace(
             )
     else:
         dtype = torch.float64
-
-    # NB: NumPy doesn't have this cast
-    if prims.utils.is_integer_dtype(dtype):
-        if isinstance(start, FloatLike):
-            start = sym_int(start)
-        if isinstance(end, FloatLike):
-            end = sym_int(end)
 
     assert not isinstance(base, complex)  # for mypy
     if base < 0:
