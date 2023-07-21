@@ -299,7 +299,7 @@ class BatchNorm1d(_BatchNorm):
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError(
-                f"expected 2D or 3D input (got {input.dim()}D input)"
+                "expected 2D or 3D input (got {}D input)".format(input.dim())
             )
 
 
@@ -334,7 +334,7 @@ class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
             raise ValueError(
-                f"expected 2D or 3D input (got {input.dim()}D input)"
+                "expected 2D or 3D input (got {}D input)".format(input.dim())
             )
 
 
@@ -410,7 +410,7 @@ class BatchNorm2d(_BatchNorm):
 
     def _check_input_dim(self, input):
         if input.dim() != 4:
-            raise ValueError(f"expected 4D input (got {input.dim()}D input)")
+            raise ValueError("expected 4D input (got {}D input)".format(input.dim()))
 
 
 class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
@@ -443,7 +443,7 @@ class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
 
     def _check_input_dim(self, input):
         if input.dim() != 4:
-            raise ValueError(f"expected 4D input (got {input.dim()}D input)")
+            raise ValueError("expected 4D input (got {}D input)".format(input.dim()))
 
 
 class BatchNorm3d(_BatchNorm):
@@ -516,7 +516,7 @@ class BatchNorm3d(_BatchNorm):
 
     def _check_input_dim(self, input):
         if input.dim() != 5:
-            raise ValueError(f"expected 5D input (got {input.dim()}D input)")
+            raise ValueError("expected 5D input (got {}D input)".format(input.dim()))
 
 
 class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
@@ -549,7 +549,7 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
 
     def _check_input_dim(self, input):
         if input.dim() != 5:
-            raise ValueError(f"expected 5D input (got {input.dim()}D input)")
+            raise ValueError("expected 5D input (got {}D input)".format(input.dim()))
 
 
 class SyncBatchNorm(_BatchNorm):
@@ -674,7 +674,7 @@ class SyncBatchNorm(_BatchNorm):
     def _check_input_dim(self, input):
         if input.dim() < 2:
             raise ValueError(
-                f"expected at least 2D input (got {input.dim()}D input)"
+                "expected at least 2D input (got {}D input)".format(input.dim())
             )
 
     def _check_non_zero_input_channels(self, input):

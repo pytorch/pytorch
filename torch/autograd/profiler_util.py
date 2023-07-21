@@ -206,13 +206,14 @@ class EventList(list):
                 if evt.trace_name is None:
                     continue
                 f.write(
-                    '{{"name": "{}", '
+                    '{"name": "%s", '
                     '"ph": "X", '
-                    '"ts": {}, '
-                    '"dur": {}, '
-                    '"tid": {}, '
+                    '"ts": %s, '
+                    '"dur": %s, '
+                    '"tid": %s, '
                     '"pid": "CPU functions", '
-                    '"args": {{}}}}, '.format(
+                    '"args": {}}, '
+                    % (
                         evt.trace_name,
                         evt.time_range.start,
                         evt.time_range.elapsed_us(),
@@ -224,15 +225,15 @@ class EventList(list):
                 for k in evt.kernels:
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
-                    f.write('{{"name": "{}", '
+                    f.write('{"name": "%s", '
                             '"ph": "s", '
-                            '"ts": {}, '
-                            '"tid": {}, '
+                            '"ts": %s, '
+                            '"tid": %s, '
                             '"pid": "CPU functions", '
-                            '"id": {}, '
+                            '"id": %s, '
                             '"cat": "cpu_to_cuda", '
-                            '"args": {{}}}}, '.format(evt.trace_name, evt.time_range.start,
-                                                      evt.thread, next_id))
+                            '"args": {}}, ' % (evt.trace_name, evt.time_range.start,
+                                               evt.thread, next_id))
                     # Note: use torch.profiler to get device kernel trace
                     next_id += 1
             if len(self) > 0:
@@ -318,15 +319,15 @@ def _format_time(time_us):
     US_IN_SECOND = 1000.0 * 1000.0
     US_IN_MS = 1000.0
     if time_us >= US_IN_SECOND:
-        return f'{time_us / US_IN_SECOND:.3f}s'
+        return '{:.3f}s'.format(time_us / US_IN_SECOND)
     if time_us >= US_IN_MS:
-        return f'{time_us / US_IN_MS:.3f}ms'
-    return f'{time_us:.3f}us'
+        return '{:.3f}ms'.format(time_us / US_IN_MS)
+    return '{:.3f}us'.format(time_us)
 
 def _format_time_share(time_us, total_time_us):
     """Defines how to format time in FunctionEvent"""
     if total_time_us == 0:
-        assert time_us == 0, f"Expected time_us == 0 but got {time_us}"
+        assert time_us == 0, "Expected time_us == 0 but got {}".format(time_us)
         return "NaN"
     return '{:.2f}%'.format(time_us * 100.0 / total_time_us)
 
@@ -803,7 +804,7 @@ def _build_table(
                 raw_flops.append(evt.flops)
         if len(raw_flops) != 0:
             (flops_scale, flops_header) = auto_scale_flops(min(raw_flops))
-            headers.append(f'Total {flops_header}')
+            headers.append('Total {}'.format(flops_header))
             add_column(flops_column_width)
         else:
             with_flops = False  # can't find any valid flops
@@ -906,7 +907,7 @@ def _build_table(
             if evt.flops <= 0:
                 row_values.append("--")
             else:
-                row_values.append('{:8.3f}'.format(evt.flops * flops_scale))
+                row_values.append('{0:8.3f}'.format(evt.flops * flops_scale))
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:
@@ -922,7 +923,7 @@ def _build_table(
             append(row_format.format(*empty_headers))
 
     append(header_sep)
-    append(f"Self CPU time total: {_format_time(sum_self_cpu_time_total)}")
+    append("Self CPU time total: {}".format(_format_time(sum_self_cpu_time_total)))
     if has_cuda_time:
-        append(f"Self CUDA time total: {_format_time(sum_self_cuda_time_total)}")
+        append("Self CUDA time total: {}".format(_format_time(sum_self_cuda_time_total)))
     return ''.join(result)

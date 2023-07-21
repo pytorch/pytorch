@@ -1,5 +1,3 @@
-import sympy
-
 from .. import config
 from ..utils import instance_descriptor
 from ..virtualized import V
@@ -37,9 +35,7 @@ def config_of(args):
             if x.name.startswith("load_seed_offset"):
                 return False
             else:
-                return V.graph.sizevars.statically_known_multiple_of(
-                    x.expr, ALIGNMENT
-                )
+                return V.graph.sizevars.statically_known_multiple_of(x.expr, ALIGNMENT)
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     if config.triton.divisible_by_16:

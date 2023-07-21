@@ -16,6 +16,8 @@ import platform
 import textwrap
 import ctypes
 import inspect
+if sys.version_info < (3,):
+    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -1737,7 +1739,7 @@ torch.backends.mps._init()
 if not _running_with_deploy():
     from torch import compiler as compiler
 
-    class _TritonLibrary:
+    class _TritonLibrary(object):
         lib = torch.library.Library("triton", "DEF")
         ops_table: Dict[Tuple[str, str], Callable] = {}
 

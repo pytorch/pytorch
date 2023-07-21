@@ -293,7 +293,7 @@ class PruningContainer(BasePruningMethod):
         # check that we're adding a pruning method to the container
         if not isinstance(method, BasePruningMethod) and method is not None:
             raise TypeError(
-                f"{type(method)} is not a BasePruningMethod subclass"
+                "{} is not a BasePruningMethod subclass".format(type(method))
             )
         elif method is not None and self._tensor_name != method._tensor_name:
             raise ValueError(
@@ -301,7 +301,7 @@ class PruningContainer(BasePruningMethod):
                 "the parameter named '{}' to PruningContainer {}.".format(
                     self._tensor_name, self
                 )
-                + f" Found '{method._tensor_name}'"
+                + " Found '{}'".format(method._tensor_name)
             )
         # if all checks passed, add to _pruning_methods tuple
         self._pruning_methods += (method,)  # type: ignore[operator]
@@ -400,7 +400,7 @@ class PruningContainer(BasePruningMethod):
 
             else:
                 raise ValueError(
-                    f"Unrecognized PRUNING_TYPE {method.PRUNING_TYPE}"
+                    "Unrecognized PRUNING_TYPE {}".format(method.PRUNING_TYPE)
                 )
 
             # compute the new mask on the unpruned slice of the tensor t
@@ -436,7 +436,7 @@ class Identity(BasePruningMethod):
             name (str): parameter name within ``module`` on which pruning
                 will act.
         """
-        return super().apply(module, name)
+        return super(Identity, cls).apply(module, name)
 
 
 class RandomUnstructured(BasePruningMethod):
@@ -493,7 +493,7 @@ class RandomUnstructured(BasePruningMethod):
                 fraction of parameters to prune. If ``int``, it represents the
                 absolute number of parameters to prune.
         """
-        return super().apply(module, name, amount=amount)
+        return super(RandomUnstructured, cls).apply(module, name, amount=amount)
 
 
 class L1Unstructured(BasePruningMethod):
@@ -556,7 +556,7 @@ class L1Unstructured(BasePruningMethod):
                 elements in the parameter being pruned.
                 If unspecified or None, the module parameter will be used in its place.
         """
-        return super().apply(
+        return super(L1Unstructured, cls).apply(
             module, name, amount=amount, importance_scores=importance_scores
         )
 
@@ -660,7 +660,7 @@ class RandomStructured(BasePruningMethod):
             dim (int, optional): index of the dim along which we define
                 channels to prune. Default: -1.
         """
-        return super().apply(module, name, amount=amount, dim=dim)
+        return super(RandomStructured, cls).apply(module, name, amount=amount, dim=dim)
 
 
 class LnStructured(BasePruningMethod):
@@ -780,7 +780,7 @@ class LnStructured(BasePruningMethod):
                 elements in the parameter being pruned.
                 If unspecified or None, the module parameter will be used in its place.
         """
-        return super().apply(
+        return super(LnStructured, cls).apply(
             module,
             name,
             amount=amount,
@@ -813,7 +813,7 @@ class CustomFromMask(BasePruningMethod):
             name (str): parameter name within ``module`` on which pruning
                 will act.
         """
-        return super().apply(module, name, mask=mask)
+        return super(CustomFromMask, cls).apply(module, name, mask=mask)
 
 
 def identity(module, name):
@@ -1331,7 +1331,7 @@ def _validate_pruning_dim(t, dim):
         dim (int): index of the dim along which we define channels to prune
     """
     if dim >= t.dim():
-        raise IndexError(f"Invalid index {dim} for tensor of size {t.shape}")
+        raise IndexError("Invalid index {} for tensor of size {}".format(dim, t.shape))
 
 
 def _compute_norm(t, n, dim):

@@ -27,9 +27,9 @@ def _get_device_index(device: Any, optional: bool = False,
     if isinstance(device, torch.device):
         if allow_cpu:
             if device.type not in ['cuda', 'cpu']:
-                raise ValueError(f'Expected a cuda or cpu device, but got: {device}')
+                raise ValueError('Expected a cuda or cpu device, but got: {}'.format(device))
         elif device.type != 'cuda':
-            raise ValueError(f'Expected a cuda device, but got: {device}')
+            raise ValueError('Expected a cuda device, but got: {}'.format(device))
     if not torch.jit.is_scripting():
         if isinstance(device, torch.cuda.device):
             return device.idx
@@ -44,6 +44,6 @@ def _dummy_type(name: str) -> type:
             else:
                 class_name = obj.__name__
             raise RuntimeError(
-                f"Tried to instantiate dummy base class {class_name}")
+                "Tried to instantiate dummy base class {}".format(class_name))
         return err_fn
     return type(name, (object,), {"__init__": get_err_fn(True), "__new__": get_err_fn(False)})
