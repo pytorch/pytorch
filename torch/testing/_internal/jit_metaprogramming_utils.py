@@ -639,7 +639,7 @@ def get_nn_mod_test_name(**kwargs):
     else:
         test_name = get_nn_module_name_from_kwargs(**kwargs)
         if 'desc' in kwargs:
-            test_name = "{}_{}".format(test_name, kwargs['desc'])
+            test_name = f"{test_name}_{kwargs['desc']}"
     return f'test_nn_{test_name}'
 
 def get_nn_module_class_from_kwargs(**kwargs):
@@ -659,7 +659,7 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
 
     test_name = name
     if 'desc' in kwargs:
-        test_name = "{}_{}".format(test_name, kwargs['desc'])
+        test_name = f"{test_name}_{kwargs['desc']}"
     test_name = get_nn_mod_test_name(**kwargs)
 
     if test_name in EXCLUDE_SCRIPT_MODULES:
