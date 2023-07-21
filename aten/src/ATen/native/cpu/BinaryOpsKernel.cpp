@@ -1315,8 +1315,9 @@ REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
 REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
 REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
 REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
+REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
+REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
 
-ALSO_REGISTER_AVX512_DISPATCH(remainder_stub, &remainder_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(huber_stub, &huber_kernel);
@@ -1324,7 +1325,6 @@ ALSO_REGISTER_AVX512_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(logit_backward_stub, &logit_backward_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(mse_stub, &mse_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(fmod_stub, &fmod_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(logaddexp_stub, &logaddexp_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(gcd_stub, &gcd_kernel);
