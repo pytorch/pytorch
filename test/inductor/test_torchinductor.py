@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
+from torch.testing._internal.common_cuda import TEST_CUDNN
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
@@ -3680,6 +3681,7 @@ class CommonTemplate:
                 ),
             )
 
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
