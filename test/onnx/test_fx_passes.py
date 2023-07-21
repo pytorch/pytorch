@@ -179,7 +179,9 @@ class TestModularizePass(common_utils.TestCase):
         function_proto_names = [function.name for function in model_proto.functions]
         self.assertIn("torch_nn_modules_activation_ReLU_inner_module_relu_1", function_proto_names)
         self.assertIn("torch_nn_modules_activation_ReLU_inner_module_relu_2", function_proto_names)
-        self.assertIn("test_fx_passes_InnerModule_inner_module_1", function_proto_names)
+        # local module qualified name is unstable in test environment depending on different test
+        # invocation methods.
+        self.assertTrue(any("InnerModule_inner_module_1" in name for name in function_proto_names))
 
 
 if __name__ == "__main__":
