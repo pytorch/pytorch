@@ -22,15 +22,15 @@ class RMSprop(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= momentum:
-            raise ValueError("Invalid momentum value: {}".format(momentum))
+            raise ValueError(f"Invalid momentum value: {momentum}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
         if not 0.0 <= alpha:
-            raise ValueError("Invalid alpha value: {}".format(alpha))
+            raise ValueError(f"Invalid alpha value: {alpha}")
 
         defaults = dict(
             lr=lr,
@@ -332,7 +332,11 @@ def _multi_tensor_rmsprop(
             grouped_grads = torch._foreach_neg(grouped_grads)
 
         if weight_decay != 0:
-            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+            # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+            if maximize:
+                torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
+            else:
+                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
         def _view_complex_as_real(tensor_list):
             return [

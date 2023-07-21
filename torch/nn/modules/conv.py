@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import math
 import warnings
 
@@ -51,7 +50,7 @@ class _ConvNd(Module):
                      'out_channels', 'kernel_size']
     __annotations__ = {'bias': Optional[torch.Tensor]}
 
-    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor:
+    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor:  # type: ignore[empty-body]
         ...
 
     in_channels: int
@@ -619,7 +618,7 @@ class _ConvTransposeNd(_ConvNd):
                  padding, dilation, transposed, output_padding,
                  groups, bias, padding_mode, device=None, dtype=None) -> None:
         if padding_mode != 'zeros':
-            raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
+            raise ValueError(f'Only "zeros" padding mode is supported for {self.__class__.__name__}')
 
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__(
