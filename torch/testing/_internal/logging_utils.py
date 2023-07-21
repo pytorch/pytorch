@@ -75,8 +75,12 @@ def make_logging_test(**kwargs):
             torch._dynamo.reset()
             records = []
             # run with env var
-            with log_settings(kwargs_to_settings(**kwargs)), self._handler_watcher(records):
-                fn(self, records)
+            if len(kwargs) == 0:
+                with self._handler_watcher(records):
+                    fn(self, records)
+            else:
+                with log_settings(kwargs_to_settings(**kwargs)), self._handler_watcher(records):
+                    fn(self, records)
 
             # run with API
             torch._dynamo.reset()

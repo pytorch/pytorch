@@ -1209,9 +1209,10 @@ torch.cuda.synchronize()
                 return torch.stack([col, col + 2], 1).view(2, 2, 2, 2)
 
         if adaptive:
-            cls_name = 'AdaptiveMaxPool{}d'.format(num_dim)
+            cls_name = 'AdaptiveMaxPool{}d'.format(num_dim)  # noqa: UP032
         else:
-            cls_name = 'MaxPool{}d'.format(num_dim)
+            # FIXME(#105716): Test fails when using f-string
+            cls_name = 'MaxPool{}d'.format(num_dim)  # noqa: UP032
         module_cls = getattr(nn, cls_name)
         module = module_cls(2, return_indices=True).to(device, dtype=dtype)
         numel = 4 ** (num_dim + 1)
