@@ -749,7 +749,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_logit(self):
         class Logit(torch.nn.Module):
             def __init__(self, eps):
-                super(Logit, self).__init__()
+                super().__init__()
                 self.eps = eps
 
             def forward(self, x):
@@ -4126,7 +4126,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_scatter_reduce(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
 
             def forward(self, x, index, input):
                 y_max = input.scatter_reduce(0, index, x, reduce="amax")
@@ -4148,7 +4148,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_scatter_reduce_self_rank_zero(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
 
             def forward(self, x, index, input):
                 y_max = input.scatter_reduce(0, index, x, reduce="amax")
