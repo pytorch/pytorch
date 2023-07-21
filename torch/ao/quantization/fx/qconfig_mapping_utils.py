@@ -217,7 +217,7 @@ def _compare_prepare_convert_qconfig_mappings(
     ]
     dict_names = [_OBJECT_TYPE_DICT_KEY, _MODULE_NAME_DICT_KEY, _MODULE_NAME_REGEX_DICT_KEY]
     for i in range(len(prepare_dicts)):
-        for name, qconfig in prepare_dicts[i].items():
+        for name in prepare_dicts[i].keys():
             assert name in convert_dicts[i], "Missing key {} {} in convert QConfigMapping \
                 when it was present in prepare".format(dict_names[i], name)
             assert convert_dicts[i][name] is None \
