@@ -111,7 +111,7 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
 
         checkpoint = io.BytesIO()
         torch.save(FSDP.optim_state_dict(model, optim), checkpoint)
-        # Deepcopy to save current optim_state_dict to compare with the loaded optim_state_dict below.
+        # Deepcopy to save current optim_state_dict to compare with the optim_state_dict loaded back below.
         ref_optim_state_dict = deepcopy(FSDP.optim_state_dict(model, optim))
 
         # Update the parameters so FSDP.optim_state_dict() will be different from ref_optim_state_dict.
@@ -151,6 +151,8 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_state_dict(self, offload_to_cpu):
+        # Compare the result of SHARDED_STATE_DICT using ShardedTensor and DTensor
+        # and check whether they are identical
         model = FSDP(TestDummyModel().cuda())
         model(model.get_input()).sum().backward()
 
@@ -204,7 +206,7 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
 
         checkpoint = io.BytesIO()
         torch.save(model.state_dict(), checkpoint)
-        # Deepcopy to save current state_dict to compare with the loaded state dict below.
+        # Deepcopy to save current state_dict to compare with the state_dict loaded back below.
         ref_state_dict = deepcopy(model.state_dict())
 
         # Update the parameters so model.state_dict() will be different from ref_dtensor_sd.
@@ -217,7 +219,7 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
         model.load_state_dict(load_ref_state_dict)
         new_state_dict = model.state_dict()
 
-        # Check whether new_state_dict is thgit use same as ref_state_dict.
+        # Check whether new_state_dict is the same as ref_state_dict.
         for (k1, v1), (k2, v2) in zip(ref_state_dict.items(), new_state_dict.items()):
             # check whether fqn are the same
             self.assertEqual(k1, k2)
