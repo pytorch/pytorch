@@ -2,7 +2,6 @@
 
 import torch
 import numpy as np
-import sys
 import unittest
 import itertools
 import warnings

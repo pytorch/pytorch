@@ -23,7 +23,6 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoMagma,
     skipCUDAIfNoMagmaAndNoCusolver,
     skipCUDAIfNoMagmaAndNoLinalgsolver,
-    skipCUDAIfRocm,
     tol,
     toleranceOverride,
 )

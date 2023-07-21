@@ -57,12 +57,12 @@ C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error);
   } while (0)
 
 #ifdef USE_ROCM
-#define TORCH_HIPBLAS_CHECK(EXPR)								\
-  do {															\
-	hipblasStatus_t __err = EXPR;								\
-	TORCH_CHECK(__err == HIPBLAS_STATUS_SUCCESS,				\
-				"CUDA error: ",									\
-				" when calling `" #EXPR "`");					\
+#define TORCH_HIPBLAS_CHECK(EXPR)                               \
+  do {                                                          \
+    hipblasStatus_t __err = EXPR;                               \
+    TORCH_CHECK(__err == HIPBLAS_STATUS_SUCCESS,                \
+                "CUDA error: ",                                 \
+                " when calling `" #EXPR "`");                   \
   } while (0)
 #endif
 

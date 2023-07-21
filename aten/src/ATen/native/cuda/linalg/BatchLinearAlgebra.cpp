@@ -1622,10 +1622,10 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
 #ifdef USE_CUSOLVER
     constexpr bool looped_correct = CUSOLVER_VERSION >= 11100;
 #else
-	bool looped_correct = true;
+    bool looped_correct = true;
 #endif
 
-	if (m != n || (looped_correct && (batch_size == 1 || m >= 512))) {
+    if (m != n || (looped_correct && (batch_size == 1 || m >= 512))) {
       lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
     } else {
       lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
@@ -1645,8 +1645,8 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
     // If magma batched is buggy, we use cusolver
     // otherwise, lu_factor just works for square matrices, for non-square matrices magma batched is the fastest
     // otherwise (i.e. for square matrices), we choose between cusolver and magma using a heuristic
-	// ROCm: magma_batched is buggy on rocm also. If we are here, we have access to hipSOLVER so always use 
-	// it instead of magma
+    // ROCm: magma_batched is buggy on rocm also. If we are here, we have access to hipSOLVER so always use
+    // it instead of magma
 #if defined(USE_ROCM)
     lu_factor_cusolver(input, pivots, infos, compute_pivots);
 #else
