@@ -29,6 +29,7 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(self, macOS13_3_plus, "sort_stable_out");
 
+  values.copy_(self);
   // issue #101878: MPS might give a wrong sorted tensor when dealing with a strided view tensor.
   Tensor values_contiguous = values;
   bool needsCopyToOutput = false;
