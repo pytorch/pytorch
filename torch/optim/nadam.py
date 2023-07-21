@@ -11,17 +11,17 @@ class NAdam(Optimizer):
                  weight_decay=0, momentum_decay=4e-3, *, foreach: Optional[bool] = None,
                  differentiable: bool = False):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
+            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
         if not 0.0 <= momentum_decay:
-            raise ValueError("Invalid momentum_decay value: {}".format(momentum_decay))
+            raise ValueError(f"Invalid momentum_decay value: {momentum_decay}")
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, momentum_decay=momentum_decay,
                         foreach=foreach, differentiable=differentiable)
@@ -317,12 +317,12 @@ def _multi_tensor_nadam(params: List[Tensor],
         exp_avg_sq_sqrt = torch._foreach_sqrt(grouped_exp_avg_sqs)
         bias_correction_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
         torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
-        denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
+        torch._foreach_add_(exp_avg_sq_sqrt, eps)
 
         step_size_grads = _stack_if_compiling([(lr * (1. - mu) / (1. - _get_value(mu_product))) * -1
                                                for mu_product, mu in zip(grouped_mu_products, mus)])
         step_size_expavg = _stack_if_compiling([(lr * mu_next / (1. - _get_value(mu_product) * mu_next)) * -1
                                                 for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)])
 
-        torch._foreach_addcdiv_(grouped_params, grouped_grads, denom, step_size_grads)
-        torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, denom, step_size_expavg)
+        torch._foreach_addcdiv_(grouped_params, grouped_grads, exp_avg_sq_sqrt, step_size_grads)
+        torch._foreach_addcdiv_(grouped_params, grouped_exp_avgs, exp_avg_sq_sqrt, step_size_expavg)

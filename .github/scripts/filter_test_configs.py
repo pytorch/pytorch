@@ -319,12 +319,12 @@ def process_jobs(
     try:
         # The job name from github is in the PLATFORM / JOB (CONFIG) format, so breaking
         # it into its two components first
-        current_platform, _ = [n.strip() for n in job_name.split(JOB_NAME_SEP, 1) if n]
+        current_platform, _ = (n.strip() for n in job_name.split(JOB_NAME_SEP, 1) if n)
     except ValueError as error:
         warnings.warn(f"Invalid job name {job_name}, returning")
         return test_matrix
 
-    for _, record in download_json(url=url, headers={}).items():
+    for record in download_json(url=url, headers={}).values():
         (
             author,
             _,

@@ -273,13 +273,15 @@ def enable_fake_mode():
     # Ideally we should keep them in sync to preserve the same default behavior
     # [1] `torch/_dynamo/output_graph.py::InstructionTranslator::OutputGraph.__init__`
     fake_mode = fake_tensor.FakeTensorMode(
-        allow_non_fake_inputs=False,
+        allow_non_fake_inputs=True,  # https://github.com/pytorch/pytorch/issues/105077
         shape_env=ShapeEnv(
             allow_scalar_outputs=False, allow_dynamic_output_shape_ops=False
         ),
     )
+    # The patcher is needed for when user calls `fake_model.load_state_dict(...)` within fake mode
+    patcher_context = patcher.ONNXTorchPatcher()
     fake_context = ONNXFakeContext(fake_mode=fake_mode)
-    with fake_mode:
+    with fake_mode, patcher_context:
         yield fake_context
 
 
@@ -340,7 +342,7 @@ class ProtobufExportOutputSerializer:
     ) -> None:
         import onnx
 
-        if not isinstance(export_output.model_proto, onnx.ModelProto):
+        if not isinstance(export_output.model_proto, onnx.ModelProto):  # type: ignore[attr-defined]
             raise ValueError("export_output.ModelProto is not an onnx.ModelProto")
         destination.write(export_output.model_proto.SerializeToString())
 
@@ -348,7 +350,7 @@ class ProtobufExportOutputSerializer:
 class ExportOutput:
     """An in-memory representation of a PyTorch model that has been exported to ONNX."""
 
-    _model_proto: Final[onnx.ModelProto]
+    _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined]
     _input_adapter: Final[io_adapter.InputAdapter]
     _output_adapter: Final[io_adapter.OutputAdapter]
     _diagnostic_context: Final[infra.DiagnosticContext]
@@ -356,7 +358,7 @@ class ExportOutput:
     @_beartype.beartype
     def __init__(
         self,
-        model_proto: onnx.ModelProto,
+        model_proto: onnx.ModelProto,  # type: ignore[name-defined]
         input_adapter: io_adapter.InputAdapter,
         output_adapter: io_adapter.OutputAdapter,
         diagnostic_context: infra.DiagnosticContext,
@@ -367,7 +369,7 @@ class ExportOutput:
         self._diagnostic_context = diagnostic_context
 
     @property
-    def model_proto(self) -> onnx.ModelProto:
+    def model_proto(self) -> onnx.ModelProto:  # type: ignore[name-defined]
         """The exported ONNX model as an ``onnx.ModelProto``."""
 
         return self._model_proto

@@ -305,7 +305,7 @@ class StreamWrapper:
         self.closed = False
         if parent_stream is not None:
             if not isinstance(parent_stream, StreamWrapper):
-                raise RuntimeError('Parent stream should be StreamWrapper, {} was given'.format(type(parent_stream)))
+                raise RuntimeError(f'Parent stream should be StreamWrapper, {type(parent_stream)} was given')
             parent_stream.child_counter += 1
             self.parent_stream = parent_stream
         if StreamWrapper.debug_unclosed_streams:

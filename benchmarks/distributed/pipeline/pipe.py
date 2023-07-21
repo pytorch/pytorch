@@ -16,7 +16,7 @@ from torch.optim import Adam
 def sizeof_fmt(num, suffix='B'):
     for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti']:
         if abs(num) < 1024.0:
-            return "%3.2f%sB" % (num, unit)
+            return f"{num:3.2f}{unit}B"
         num /= 1024.0
 
 
@@ -146,7 +146,7 @@ def train(lm_dataloader, model, criterion, optimizer, vocab_size, args):
             return torch.cuda.current_device()
 
 
-    print('Number of parameters for model: {}'.format(sum(p.numel() for p in model.parameters())))
+    print(f'Number of parameters for model: {sum(p.numel() for p in model.parameters())}')
     for i, batch in enumerate(lm_dataloader):
         bi = batch["input"]
         if args.max_batch and i > args.max_batch:
@@ -186,9 +186,7 @@ def train(lm_dataloader, model, criterion, optimizer, vocab_size, args):
 
     print('Peak memory usage for GPUs: ', end='')
     for i in range(len(model.devices)):
-        print("cuda:{}: {}, ".format(
-            i,
-            sizeof_fmt(torch.cuda.memory_stats(i)["allocated_bytes.all.peak"])), end='')
+        print(f"cuda:{i}: {sizeof_fmt(torch.cuda.memory_stats(i)['allocated_bytes.all.peak'])}, ", end='')
     print()
 
 
