@@ -104,7 +104,6 @@ static void basicAutogradNotImplementedFallbackImpl(
   const auto num_arguments = schema.arguments().size();
   const auto num_returns = schema.returns().size();
   const auto stack_start = stack->size() - num_arguments;
-  const bool grad_mode = GradMode::is_enabled();
 
   if (getAutogradFallbackMode() == AutogradFallbackMode::Nothing) {
     op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
@@ -114,16 +113,19 @@ static void basicAutogradNotImplementedFallbackImpl(
       getAutogradFallbackMode() == AutogradFallbackMode::Warn);
 
   bool any_input_requires_grad = false;
-  if (grad_mode) {
-    _foreach_tensor(
-        [&](size_t _, size_t idx_arg, const at::Tensor& t) {
-          if (t.requires_grad()) {
-            any_input_requires_grad = true;
-          }
-        },
-        stack,
-        stack_start,
-        num_arguments);
+  _foreach_tensor(
+      [&](size_t _, size_t idx_arg, const at::Tensor& t) {
+        if (t.requires_grad()) {
+          any_input_requires_grad = true;
+        }
+      },
+      stack,
+      stack_start,
+      num_arguments);
+  // TLS Access is very expensive on some edge platforms.
+  // So we check it only if necessary by putting it after the requires_grad check.
+  if (any_input_requires_grad && !GradMode::is_enabled()) {
+    any_input_requires_grad = false;
   }
 
   std::shared_ptr<WarnNotImplemented> grad_fn;
