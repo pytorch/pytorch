@@ -192,7 +192,9 @@ def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
         with config.patch(assume_static_by_default=False):
             yield
     else:
-        with config.patch(automatic_dynamic_shapes=False, assume_static_by_default=True):
+        with config.patch(
+            automatic_dynamic_shapes=False, assume_static_by_default=True
+        ):
             yield
 
 
