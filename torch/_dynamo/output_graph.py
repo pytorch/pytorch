@@ -28,9 +28,9 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
-from torch._utils_internal import signpost_event
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -983,10 +983,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "OutputGraph.call_user_compiler",
             {
                 **self.co_fields,
-                'op_count': tot,
-                'node_count': len(gm.graph.nodes),
-                'input_count': len(placeholders),
-            }
+                "op_count": tot,
+                "node_count": len(gm.graph.nodes),
+                "input_count": len(placeholders),
+            },
         )
 
         return compiled_fn
