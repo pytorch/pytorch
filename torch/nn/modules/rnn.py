@@ -72,6 +72,11 @@ class RNNBase(Module):
                           "recurrent layer, so non-zero dropout expects "
                           "num_layers greater than 1, but got dropout={} and "
                           "num_layers={}".format(dropout, num_layers))
+
+        if not isinstance(hidden_size, int):
+            raise TypeError(f"hidden_size should be of type int, got: {type(hidden_size).__name__}")
+        if hidden_size <= 0:
+            raise ValueError("hidden_size must be greater than zero")
         if proj_size < 0:
             raise ValueError("proj_size should be a positive integer or zero to disable projections")
         if proj_size >= hidden_size:
