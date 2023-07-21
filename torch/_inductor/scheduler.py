@@ -1153,9 +1153,8 @@ class Scheduler:
         ):
             return False
 
-        for name in node2.get_names():
-            if name in node1.recursive_predecessors:
-                return False
+        if node2.get_names() & node1.recursive_predecessors:
+            return False  # node2 must go before node1
 
         if node2.is_template():
             return False  # only epilogues
