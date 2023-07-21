@@ -10,10 +10,7 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
-from torch.testing._internal.common_utils import (
-    skipIfRocm,
-    TEST_CUDA_GRAPH,
-)
+from torch.testing._internal.common_utils import skipIfRocm, TEST_CUDA_GRAPH
 
 
 def composed(*decs):

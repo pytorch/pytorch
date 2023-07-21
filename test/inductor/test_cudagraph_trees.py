@@ -21,9 +21,9 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
     IS_WINDOWS,
+    skipIfRocm,
     TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
-    skipIfRocm,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -1249,5 +1249,5 @@ if __name__ == "__main__":
             sys.exit(0)
         raise unittest.SkipTest("cuda graph test is skipped")
 
-    if (HAS_CPU or HAS_CUDA):
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

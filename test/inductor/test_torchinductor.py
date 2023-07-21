@@ -5916,9 +5916,7 @@ class CommonTemplate:
         else:
             contexts = [
                 contextlib.nullcontext,
-                lambda: config.patch(
-                    {"triton.cudagraphs": True}
-                ),
+                lambda: config.patch({"triton.cudagraphs": True}),
             ]
 
         for context in contexts:
