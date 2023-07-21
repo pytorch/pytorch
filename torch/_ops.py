@@ -745,7 +745,7 @@ class _OpNamespace(types.ModuleType):
         # Get the op `my_namespace::my_op` if available. This will also check
         # for overloads and raise an exception if there are more than one.
         namespace_name = self.name
-        qualified_op_name = "{}::{}".format(namespace_name, op_name)
+        qualified_op_name = f"{namespace_name}::{op_name}"
         try:
             op, overload_names = torch._C._jit_get_operation(qualified_op_name)
         except RuntimeError as e:

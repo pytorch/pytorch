@@ -375,9 +375,7 @@ def _rebuild_qtensor(
             device=storage.device,
         )
     else:
-        raise RuntimeError(
-            "Can't deserialize quantized tensor with qscheme {}".format(qscheme)
-        )
+        raise RuntimeError(f"Can't deserialize quantized tensor with qscheme {qscheme}")
     tensor.set_(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
     # NB: This line exists only for backwards compatibility; the
@@ -385,17 +383,6 @@ def _rebuild_qtensor(
     # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
     return tensor
-
-
-def _rebuild_buffer(data, requires_grad, persistent):
-    buffer = torch.nn.Buffer(data, requires_grad, persistent)
-    return buffer
-
-
-def _rebuild_buffer_with_state(data, requires_grad, persistent, state):
-    buffer = torch.nn.Buffer(data, requires_grad, persistent)
-    buffer = _set_obj_state(buffer, state)
-    return buffer
 
 
 def _rebuild_parameter(data, requires_grad, backward_hooks):
@@ -782,7 +769,7 @@ def _get_device_index(
     device_idx: Optional[int] = None
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == "cpu":
-            raise ValueError("Expected a non cpu device, but got: {}".format(device))
+            raise ValueError(f"Expected a non cpu device, but got: {device}")
         device_idx = -1 if device.type == "cpu" else device.index
     if isinstance(device, int):
         device_idx = device

@@ -728,18 +728,18 @@ class LOBPCG:
 
     def __str__(self):
         lines = ["LOPBCG:"]
-        lines += ["  iparams={}".format(self.iparams)]
-        lines += ["  fparams={}".format(self.fparams)]
-        lines += ["  bparams={}".format(self.bparams)]
-        lines += ["  ivars={}".format(self.ivars)]
-        lines += ["  fvars={}".format(self.fvars)]
-        lines += ["  bvars={}".format(self.bvars)]
-        lines += ["  tvars={}".format(self.tvars)]
-        lines += ["  A={}".format(self.A)]
-        lines += ["  B={}".format(self.B)]
-        lines += ["  iK={}".format(self.iK)]
-        lines += ["  X={}".format(self.X)]
-        lines += ["  E={}".format(self.E)]
+        lines += [f"  iparams={self.iparams}"]
+        lines += [f"  fparams={self.fparams}"]
+        lines += [f"  bparams={self.bparams}"]
+        lines += [f"  ivars={self.ivars}"]
+        lines += [f"  fvars={self.fvars}"]
+        lines += [f"  bvars={self.bvars}"]
+        lines += [f"  tvars={self.tvars}"]
+        lines += [f"  A={self.A}"]
+        lines += [f"  B={self.B}"]
+        lines += [f"  iK={self.iK}"]
+        lines += [f"  X={self.X}"]
+        lines += [f"  E={self.E}"]
         r = ""
         for line in lines:
             r += line + "\n"
@@ -1133,7 +1133,7 @@ class LOBPCG:
                 R_norm = torch.norm(R)
                 # https://github.com/pytorch/pytorch/issues/33810 workaround:
                 rerr = float(R_norm) * float(BU_norm * U_norm) ** -1
-                vkey = "ortho_UBUmI_rerr[{}, {}]".format(i, j)
+                vkey = f"ortho_UBUmI_rerr[{i}, {j}]"
                 self.fvars[vkey] = rerr
                 if rerr < tau_ortho:
                     break
@@ -1141,7 +1141,7 @@ class LOBPCG:
             VBU_norm = torch.norm(VBU)
             U_norm = torch.norm(U)
             rerr = float(VBU_norm) * float(BV_norm * U_norm) ** -1
-            vkey = "ortho_VBU_rerr[{}]".format(i)
+            vkey = f"ortho_VBU_rerr[{i}]"
             self.fvars[vkey] = rerr
             if rerr < tau_ortho:
                 break
