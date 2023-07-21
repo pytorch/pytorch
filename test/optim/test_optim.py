@@ -1140,7 +1140,10 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
         self._test_complex_2d(optim.AdamW)
-        self._test_complex_2d(functools.partial(optim.AdamW, foreach=True))
+        self._test_complex_2d(functools.partial(optim.AdamW, foreach=False))
+        self._test_complex_2d(functools.partial(optim.AdamW, foreach=False, amsgrad=True))
+        self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2, amsgrad=True))
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.AdamW(None, lr=1e-2, weight_decay=-1)
 
