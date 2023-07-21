@@ -512,7 +512,7 @@ class FlatParamHandle:
         self._unsharded_flat_param_for_skipped_views: Optional[Tensor] = None
         # The index in the state's `all_handles`, which must be the
         # same across ranks for the execution order validation to work
-        self._handle_index = None
+        self._handle_index: Optional[int] = None
         # Index in handles_to_pre_forward_order
         self._pre_forward_order_index: Optional[int] = None
         # Index in `handles_post_forward_order`
