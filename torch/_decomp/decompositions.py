@@ -2285,7 +2285,7 @@ def one_layer_rnn_data(
     hh_bias = params[3] if has_biases else None
 
     step_output = []
-    hiddens: List["torch.Tensor"] = []
+    hiddens: List[torch.Tensor] = []
 
     last_batch_size = batch_sizes[-1] if reverse else batch_sizes[0]
     cur_hidden = hidden.narrow(0, 0, last_batch_size)
