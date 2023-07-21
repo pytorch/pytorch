@@ -928,8 +928,10 @@ def run_tests(argv=UNITTEST_ARGS):
         import pytest
         os.environ["NO_COLOR"] = "1"
         exit_code = pytest.main(args=pytest_args)
+        print("Profiling")
         for file in sorted(list(experiment)):
-            print(file)
+            if "torch" in file or "workspace" in file:
+                print(file)
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
 
