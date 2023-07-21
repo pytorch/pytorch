@@ -422,43 +422,52 @@ struct TraceState {
   bool accumulate_grad;
 };
 
+#define SWAP_SAVED_VARIABLES_SAVE(mapping, var, move) \
+  bool inserted = mapping.emplace(&var, move).second; \
+  TORCH_INTERNAL_ASSERT(inserted, "duplicate before()");
+#define SWAP_SAVED_VARIABLES_RESTORE(mapping, var)                 \
+  auto it = mapping.find(&var);                                    \
+  TORCH_INTERNAL_ASSERT(it != mapping.end(), "duplicate after()"); \
+  var = std::move(it->second);                                     \
+  mapping.erase(it);
+
 class SwapSavedVariables {
   // SwapSavedVariables is used during the tracing/compilation phase after a
   // cache-miss. It swaps any 'lifted' inputs (tensors, symints) to proxy nodes,
   // allows tracing to happen, then swaps them back afterwards.
  public:
   void before(at::Tensor& t) {
-    stashed_tensors.emplace_back(t);
+    SWAP_SAVED_VARIABLES_SAVE(stashed_tensors, t, t);
     if (t.defined()) {
       t = state.next_proxy_input();
     }
   }
   void after(at::Tensor& t) {
-    t = stashed_tensors[stashed_tensors_index++];
+    SWAP_SAVED_VARIABLES_RESTORE(stashed_tensors, t);
   }
 
   void before(SavedVariable& t) {
     torch::torch_dispatch_mode::StashTorchDispatchStackGuard
         no_modes; // for unpack
     bool defined = t.unpack(node).defined();
-    stashed_variables.emplace_back(std::move(t));
+    SWAP_SAVED_VARIABLES_SAVE(stashed_variables, t, std::move(t));
     if (defined) {
       t = SavedVariable(state.next_proxy_input(), false);
     }
   }
   void after(SavedVariable& t) {
-    t = std::move(stashed_variables[stashed_variables_index++]);
+    SWAP_SAVED_VARIABLES_RESTORE(stashed_variables, t);
   }
 
   void before(c10::SymInt& t) {
-    stashed_symints.emplace_back(t);
+    SWAP_SAVED_VARIABLES_SAVE(stashed_symints, t, t);
     auto opt_value = state.next_sym_size();
     if (opt_value.has_value()) {
       t = *opt_value; // dynamic shape
     }
   }
   void after(c10::SymInt& t) {
-    t = std::move(stashed_symints[stashed_symints_index++]);
+    SWAP_SAVED_VARIABLES_RESTORE(stashed_symints, t);
   }
 
   void before(Edge& t) {
@@ -574,30 +583,18 @@ class SwapSavedVariables {
       state.outputs.emplace_back(tensor);
   }
 
-  SwapSavedVariables(TraceState& s, const std::shared_ptr<Node> n)
-      : state(s),
-        node(n),
-        stashed_tensors_index(0),
-        stashed_variables_index(0),
-        stashed_symints_index(0) {}
+  SwapSavedVariables(
+      AutogradCompilerCall& c,
+      TraceState& s,
+      std::shared_ptr<Node> n)
+      : compiler(c), state(s), node(std::move(n)) {}
 
-  ~SwapSavedVariables() {
-    if (C10_UNLIKELY(
-            stashed_tensors_index != stashed_tensors.size() ||
-            stashed_variables_index != stashed_variables.size())) {
-      TORCH_WARN("not all stashed_tensors consumed")
-    }
-  }
-
+  AutogradCompilerCall& compiler;
   TraceState& state;
+  std::unordered_map<SavedVariable*, SavedVariable> stashed_variables;
+  std::unordered_map<at::Tensor*, at::Tensor> stashed_tensors;
+  std::unordered_map<c10::SymInt*, c10::SymInt> stashed_symints;
   std::shared_ptr<Node> node;
-
-  size_t stashed_tensors_index;
-  size_t stashed_variables_index;
-  size_t stashed_symints_index;
-  std::vector<at::Tensor> stashed_tensors;
-  std::vector<SavedVariable> stashed_variables;
-  std::vector<c10::SymInt> stashed_symints;
 };
 
 } // namespace autograd

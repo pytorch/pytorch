@@ -763,8 +763,7 @@ def _check_single_tensor(param, param_name):
     """
     if not isinstance(param, torch.Tensor):
         raise RuntimeError(
-            "Invalid function argument. Expected parameter `{}` "
-            "to be of type torch.Tensor.".format(param_name)
+            f"Invalid function argument. Expected parameter `{param_name}` to be of type torch.Tensor."
         )
 
 
@@ -776,8 +775,7 @@ def _check_tensor_list(param, param_name):
         isinstance(p, torch.Tensor) for p in param
     ):
         raise RuntimeError(
-            "Invalid function argument. Expected parameter `{}` "
-            "to be of type List[torch.Tensor].".format(param_name)
+            f"Invalid function argument. Expected parameter `{param_name}` to be of type List[torch.Tensor]."
         )
 
 def _as_iterable(obj) -> collections.abc.Iterable:

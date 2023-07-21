@@ -157,7 +157,7 @@ class TestCommon(TestCase):
             if isinstance(result, torch.Tensor):
                 self.assertTrue(result.device == cuda_device)
             elif is_iterable_of_tensors(result):
-                self.assertTrue(all((t.device == cuda_device for t in result)))
+                self.assertTrue(all(t.device == cuda_device for t in result))
             else:
                 self.skipTest(
                     "Skipped! Only supports single tensor or iterable of tensor outputs."
@@ -219,7 +219,7 @@ class TestCommon(TestCase):
             self.assertTrue(False)
 
         for file_name in files:
-            with open(os.path.join(pytorch_dir, file_name), "r") as f:
+            with open(os.path.join(pytorch_dir, file_name)) as f:
                 lines = f.read()
                 matches = regex.findall(lines)
                 for match in matches:
@@ -723,7 +723,7 @@ class TestCommon(TestCase):
                     return (out.stride(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.stride() for t in out))
+                return tuple(t.stride() for t in out)
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
             # NOTE: only extracts on the CPU and CUDA device types since some
@@ -736,7 +736,7 @@ class TestCommon(TestCase):
                     return (out.data_ptr(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.data_ptr() for t in out))
+                return tuple(t.data_ptr() for t in out)
 
             @suppress_warnings
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
@@ -751,7 +751,7 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {0} and strides are now {1}".format(
+                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
                         original_strides, final_strides
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
@@ -843,7 +843,7 @@ class TestCommon(TestCase):
                     return (out.stride(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.stride() for t in out))
+                return tuple(t.stride() for t in out)
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
             # NOTE: only extracts on the CPU and CUDA device types since some
@@ -856,7 +856,7 @@ class TestCommon(TestCase):
                     return (out.data_ptr(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple((t.data_ptr() for t in out))
+                return tuple(t.data_ptr() for t in out)
 
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
                 out = _apply_out_transform(transform, expected)
@@ -869,7 +869,7 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {0} and strides are now {1}".format(
+                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
                         original_strides, final_strides
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
@@ -1390,20 +1390,20 @@ class TestCommon(TestCase):
 
         # Partially supporting a dtype is not an error, but we print a warning
         if (len(partially_supported_forward) + len(partially_supported_backward)) > 0:
-            msg = "Some dtypes for {0} on device type {1} are only partially supported!\n".format(
+            msg = "Some dtypes for {} on device type {} are only partially supported!\n".format(
                 op.name, device_type
             )
             if len(partially_supported_forward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during forward: {0}.\n".format(
+                    + "The following dtypes only worked on some samples during forward: {}.\n".format(
                         partially_supported_forward
                     )
                 )
             if len(partially_supported_backward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during backward: {0}.\n".format(
+                    + "The following dtypes only worked on some samples during backward: {}.\n".format(
                         partially_supported_backward
                     )
                 )
@@ -1426,34 +1426,34 @@ class TestCommon(TestCase):
                 return
 
         # Generates error msg
-        msg = "The supported dtypes for {0} on device type {1} are incorrect!\n".format(
+        msg = "The supported dtypes for {} on device type {} are incorrect!\n".format(
             op.name, device_type
         )
         if len(supported_but_unclaimed_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in forward but are not listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes worked in forward but are not listed by the OpInfo: {}.\n".format(
                     supported_but_unclaimed_forward
                 )
             )
         if len(supported_but_unclaimed_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in backward but are not listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes worked in backward but are not listed by the OpInfo: {}.\n".format(
                     supported_but_unclaimed_backward
                 )
             )
         if len(claimed_but_unsupported_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in forward but are listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes did not work in forward but are listed by the OpInfo: {}.\n".format(
                     claimed_but_unsupported_forward
                 )
             )
         if len(claimed_but_unsupported_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in backward but are listed by the OpInfo: {0}.\n".format(
+                + "The following dtypes did not work in backward but are listed by the OpInfo: {}.\n".format(
                     claimed_but_unsupported_backward
                 )
             )

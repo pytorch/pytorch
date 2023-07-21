@@ -286,10 +286,8 @@ variable_list compiled_autograd(
   static std::mutex lock;
   std::lock_guard<std::mutex> lock_guard(lock);
   pybind11::gil_scoped_acquire gil;
-  std::unordered_map<Node*, int> dependencies =
-      std::move(graph_task.dependencies_);
+  std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
-  worklist.reserve(dependencies.size());
   AutogradCompilerCall compiler_call(accumulate_grad);
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls.lookup(output_edges[i].function)
@@ -393,7 +391,7 @@ variable_list compiled_autograd(
         inputs = THPVariable_UnpackList(pyinputs);
       }
 
-      SwapSavedVariables saved(state, call.node);
+      SwapSavedVariables saved(compiler_call, state, call.node);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
       saved.before(call.node->next_edges());
       validate_outputs(

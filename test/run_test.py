@@ -1272,7 +1272,7 @@ def exclude_tests(
                 not exact_match and test.startswith(exclude_test)
             ) or test == exclude_test:
                 if exclude_message is not None:
-                    print_to_stderr("Excluding {} {}".format(test, exclude_message))
+                    print_to_stderr(f"Excluding {test} {exclude_message}")
                 selected_tests.remove(test)
     return selected_tests
 
@@ -1424,7 +1424,7 @@ def get_selected_tests(options) -> List[ShardedTest]:
     # Download previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
     if os.path.exists(path):
-        with open(path, "r") as f:
+        with open(path) as f:
             test_file_times = cast(Dict[str, Any], json.load(f))
     else:
         test_file_times = {}
