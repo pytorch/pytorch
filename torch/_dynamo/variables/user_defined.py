@@ -106,6 +106,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from ..side_effects import SideEffects
+        from .builder import variable_builder_no_source
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
@@ -124,11 +125,27 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
+            field_defaults = self.value._field_defaults
+
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
-            for name, value in kwargs.items():
+
+            var_tracker_kwargs = {}
+            for field_name, var_tracker in zip(fields, items):
+                if var_tracker is None:
+                    if field_name in kwargs:
+                        field_var = kwargs[field_name]
+                    else:
+                        assert field_name in field_defaults
+                        field_var = variable_builder_no_source(
+                            field_defaults[field_name]
+                        )
+                    var_tracker_kwargs[field_name] = field_var
+
+            for name, value in var_tracker_kwargs.items():
                 assert name in fields
                 items[fields.index(name)] = value
+
             assert all(x is not None for x in items)
             return variables.NamedTupleVariable(
                 items, self.value, **VariableTracker.propagate(self, items)

@@ -23,6 +23,7 @@ inductor_decompositions = get_decompositions(
         aten.bitwise_and_,
         aten.bitwise_or_,
         aten.clamp_min_,
+        aten.dist,
         aten.empty_like,
         aten.flip,
         aten.lcm,

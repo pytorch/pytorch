@@ -465,9 +465,9 @@ class BooleanPair(Pair):
         self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
     ) -> Tuple[bool, bool]:
         self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
-        actual, expected = [
+        actual, expected = (
             self._to_bool(bool_like, id=id) for bool_like in (actual, expected)
-        ]
+        )
         return actual, expected
 
     def _to_bool(self, bool_like: Any, *, id: Tuple[Any, ...]) -> bool:
@@ -559,9 +559,9 @@ class NumberPair(Pair):
         self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
     ) -> Tuple[Union[int, float, complex], Union[int, float, complex]]:
         self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
-        actual, expected = [
+        actual, expected = (
             self._to_number(number_like, id=id) for number_like in (actual, expected)
-        ]
+        )
         return actual, expected
 
     def _to_number(
@@ -675,7 +675,7 @@ class TensorLikePair(Pair):
         if not allow_subclasses and type(actual) is not type(expected):
             self._inputs_not_supported()
 
-        actual, expected = [self._to_tensor(input) for input in (actual, expected)]
+        actual, expected = (self._to_tensor(input) for input in (actual, expected))
         for tensor in (actual, expected):
             self._check_supported(tensor, id=id)
         return actual, expected
