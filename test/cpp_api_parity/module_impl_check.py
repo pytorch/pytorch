@@ -146,7 +146,7 @@ def test_forward_backward(unit_test_class, test_params):
     script_module.save(module_file_path)
     serialize_arg_dict_as_script_module(test_params.arg_dict).save(arg_dict_file_path)
 
-    cpp_test_name = '{}_test_forward_backward'.format(test_params.module_variant_name)
+    cpp_test_name = f'{test_params.module_variant_name}_test_forward_backward'
     cpp_test_fn = getattr(unit_test_class.module_impl_check_cpp_module, cpp_test_name)
 
     def run_cpp_test_fn_and_check_output():
@@ -177,12 +177,12 @@ def test_forward_backward(unit_test_class, test_params):
             unit_test_class.assertTrue(
                 key in cpp_grad_dict,
                 msg=generate_error_msg(
-                    "\"Does module have a parameter named `{}` with {} gradient?\"".format(param_name, sparsity_str),
+                    f"\"Does module have a parameter named `{param_name}` with {sparsity_str} gradient?\"",
                     False, True))
             unit_test_class.assertEqual(
                 python_grad_dict[key], cpp_grad_dict[key],
                 msg=generate_error_msg(
-                    "`{}`'s {} gradient (`{}`)".format(param_name, sparsity_str, key),
+                    f"`{param_name}`'s {sparsity_str} gradient (`{key}`)",
                     cpp_grad_dict[key], python_grad_dict[key]))
 
     run_cpp_test_fn_and_check_output()
@@ -251,7 +251,7 @@ def write_test_to_test_class(
             test_instance_class=test_instance_class,
         )
         try_remove_folder(test_params.cpp_tmp_folder)
-        unit_test_name = 'test_torch_nn_{}'.format(test_params.module_variant_name)
+        unit_test_name = f'test_torch_nn_{test_params.module_variant_name}'
         unit_test_class.module_test_params_map[unit_test_name] = test_params
 
         def test_fn(self):
@@ -272,14 +272,14 @@ def generate_test_cpp_sources(test_params, template):
 
     cpp_constructor_args = test_params.cpp_constructor_args
     if cpp_constructor_args != '':
-        cpp_constructor_args = '({})'.format(cpp_constructor_args)
+        cpp_constructor_args = f'({cpp_constructor_args})'
 
     cpp_args_construction_stmts, cpp_forward_args_symbols = \
         compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params)
 
     test_cpp_sources = template.substitute(
         module_variant_name=test_params.module_variant_name,
-        module_qualified_name='torch::nn::{}'.format(test_params.module_name),
+        module_qualified_name=f'torch::nn::{test_params.module_name}',
         cpp_args_construction_stmts=";\n  ".join(cpp_args_construction_stmts),
         cpp_constructor_args=cpp_constructor_args,
         cpp_forward_args_symbols=", ".join(cpp_forward_args_symbols),
@@ -295,7 +295,7 @@ def build_cpp_tests(unit_test_class, print_cpp_source=False):
     for test_name, test_params in unit_test_class.module_test_params_map.items():
         cpp_sources += generate_test_cpp_sources(
             test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD_BACKWARD)
-        functions.append('{}_test_forward_backward'.format(test_params.module_variant_name))
+        functions.append(f'{test_params.module_variant_name}_test_forward_backward')
     if print_cpp_source:
         print(cpp_sources)
 

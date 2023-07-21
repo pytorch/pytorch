@@ -597,9 +597,7 @@ def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
 
     python_type = utils.dtype_to_type(a.dtype)
     if not utils.is_weakly_lesser_type(type(value), python_type):
-        msg = "value argument of type {0} cannot be safely cast to type {1}!".format(
-            type(value), python_type
-        )
+        msg = f"value argument of type {type(value)} cannot be safely cast to type {python_type}!"
         raise ValueError(msg)
 
     return prims.fill(a, value)
@@ -997,11 +995,7 @@ def add(
         if python_type != bool and not utils.is_weakly_lesser_type(
             type(alpha), python_type
         ):
-            msg = (
-                "alpha argument of type {0} cannot be safely cast to type {1}!".format(
-                    type(alpha), python_type
-                )
-            )
+            msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
         b = prims.mul(b, alpha)
 
@@ -1069,7 +1063,7 @@ def copysign(
     if isinstance(b, Number) and isinstance(a, Tensor):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
-        msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
+        msg = "Expected divisor (b) to be on the same device ({}) as dividend (a), but it is found on {}!".format(
             a.device, b.device
         )
         raise RuntimeError(msg)
@@ -1098,10 +1092,7 @@ def div(
     elif rounding_mode == "floor":
         return floor_divide(a, b)
     else:
-        msg = (
-            "div expected rounding_mode to be one of None, 'trunc', or 'floor' "
-            "but found {0}.".format(rounding_mode)
-        )
+        msg = f"div expected rounding_mode to be one of None, 'trunc', or 'floor' but found {rounding_mode}."
         raise ValueError(msg)
 
 
@@ -1218,7 +1209,7 @@ def floor_divide(
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
         if a.device == torch.device("cpu"):
-            msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
+            msg = "Expected divisor (b) to be on the same device ({}) as dividend (a), but it is found on {}!".format(
                 a.device, b.device
             )
             raise RuntimeError(msg)
@@ -1378,21 +1369,15 @@ def _check_close_args(
 ) -> None:
     torch._check_value(
         a.dtype == b.dtype,
-        lambda: "{0}: Attempting to compare tensors of different dtypes {1} and {2}!".format(
-            name, a.dtype, b.dtype
-        ),
+        lambda: f"{name}: Attempting to compare tensors of different dtypes {a.dtype} and {b.dtype}!",
     )
     torch._check(
         rtol >= 0,
-        lambda: "{0}: rtol must be greater than or equal to zero, but got {1}!".format(
-            name, rtol
-        ),
+        lambda: f"{name}: rtol must be greater than or equal to zero, but got {rtol}!",
     )
     torch._check(
         atol >= 0,
-        lambda: "{0}: atol must be greater than or equal to zero, but got {1}!".format(
-            name, atol
-        ),
+        lambda: f"{name}: atol must be greater than or equal to zero, but got {atol}!",
     )
 
 
@@ -1664,11 +1649,7 @@ def sub(
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
-            msg = (
-                "alpha argument of type {0} cannot be safely cast to type {1}!".format(
-                    type(alpha), python_type
-                )
-            )
+            msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
             raise ValueError(msg)
         if isinstance(b, torch.Tensor):
             b = prims.mul(b, alpha)
@@ -1759,9 +1740,7 @@ def addcdiv(
         python_type = utils.dtype_to_type(dtype)
         torch._check_value(
             utils.is_weakly_lesser_type(type(value), python_type),
-            lambda: "value argument of type {0} cannot be safely cast to type {1}!".format(
-                type(value), python_type
-            ),
+            lambda: f"value argument of type {type(value)} cannot be safely cast to type {python_type}!",
         )
 
     return self + value * tensor1 / tensor2
@@ -1788,9 +1767,7 @@ def addcmul(
         python_type = utils.dtype_to_type(dtype)
         torch._check_value(
             utils.is_weakly_lesser_type(type(value), python_type),
-            lambda: "value argument of type {0} cannot be safely cast to type {1}!".format(
-                type(value), python_type
-            ),
+            lambda: f"value argument of type {type(value)} cannot be safely cast to type {python_type}!",
         )
 
     return self + value * tensor1 * tensor2
@@ -1892,7 +1869,7 @@ def clone(
 
 def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
     if not allow_cross_device and a.device != b.device:
-        msg = "Attempting to copy from device {0} to device {1}, but cross-device copies are not allowed!".format(
+        msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
             b.device, a.device
         )
         raise RuntimeError(msg)
@@ -2098,9 +2075,7 @@ def _reduction(
     assert isinstance(a, TensorLike)
     if a.ndim > 64:
         raise RuntimeError(
-            "Received a tensor with {0} dimensions, but only tensors with up to 64 dims are supported!".format(
-                a.ndim
-            )
+            f"Received a tensor with {a.ndim} dimensions, but only tensors with up to 64 dims are supported!"
         )
 
     if out is not None:
@@ -2864,7 +2839,7 @@ def expand_as(a: Tensor, b: Tensor) -> Tensor:
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
-        msg = "Expected at least one chunk, but got {0}!".format(chunks)
+        msg = f"Expected at least one chunk, but got {chunks}!"
         raise ValueError(msg)
 
     dim = utils.canonicalize_dim(a.ndim, dim)
@@ -3346,7 +3321,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
                 if allow_copy:
                     return prims.reshape(a, shape)
 
-                msg = "Cannot view a tensor with shape {0} and strides {1} as a tensor with shape {2}!".format(
+                msg = "Cannot view a tensor with shape {} and strides {} as a tensor with shape {}!".format(
                     a.shape, a.stride(), shape
                 )
                 raise ValueError(msg)
@@ -3704,13 +3679,13 @@ def tensor_split(
     # If indices_or_sections is a tensor, it must be a CPU Long tensor
     if isinstance(indices_or_sections, TensorLike):
         if not indices_or_sections.device.type == "cpu":
-            msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {0}".format(
+            msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {}".format(
                 indices_or_sections.device
             )
             raise ValueError(msg)
         if indices_or_sections.dtype != torch.long:
             msg = "tensor_split: if indices_or_sections is a tensor it must have long dtype, "
-            " but received one with dtype {0}".format(indices_or_sections.dtype)
+            f" but received one with dtype {indices_or_sections.dtype}"
             raise ValueError(msg)
 
     # Case 0 -- indices_or_sections is an integer or a scalar tensor n and a is split along dim into n parts of equal-ish length
@@ -3724,9 +3699,7 @@ def tensor_split(
         )
 
         if sections <= 0:
-            msg = "tensor_split: number of sections must be greater than 0, but was {0}".format(
-                sections
-            )
+            msg = f"tensor_split: number of sections must be greater than 0, but was {sections}"
             raise ValueError(msg)
 
         splits = []
@@ -3751,9 +3724,7 @@ def tensor_split(
         if isinstance(indices_or_sections, TensorLike):
             if indices_or_sections.ndim != 1:
                 msg = "tensor_split: non-scalar indices_or_sections tensors must have only one dimension, "
-                "but received a tensor with {0} dimensions".format(
-                    indices_or_sections.ndim
-                )
+                f"but received a tensor with {indices_or_sections.ndim} dimensions"
                 raise ValueError(msg)
 
             indices = indices_or_sections.tolist()

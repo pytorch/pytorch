@@ -355,14 +355,14 @@ def run_benchmark(rank, args, data):
     rpc.shutdown()
 
 
-def get_json_config(file_name, id):
+def get_json_config(file_name: str, id: str):
     r"""
     A function that loads a json configuration from a file.
     Args:
         file_name (str): name of configuration file to load
         id (str): configuration that will be loaded
     """
-    with open(os.path.join(Path(__file__).parent, file_name), "r") as f:
+    with open(Path(__file__).parent / file_name) as f:
         json_config = json.load(f)[id]
     return json_config
 
