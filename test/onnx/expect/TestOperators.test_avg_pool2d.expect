@@ -1,6 +1,6 @@
 ir_version: 7
 producer_name: "pytorch"
-producer_version: "2.0.0"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "onnx::AveragePool_0"
