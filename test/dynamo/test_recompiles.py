@@ -13,12 +13,12 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         def foo(x, y):
             return x * y
 
-        def run_foo_6_times_and_count_recompiles():
+        def run_foo_6_times_and_count_recompiles(dynamic=None):
             cnt = torch._dynamo.testing.CompileCounter()
 
             x = torch.randn([2])
             y = torch.randn([2])
-            opt = torch._dynamo.optimize(cnt)(foo)
+            opt = torch._dynamo.optimize(cnt, dynamic=dynamic)(foo)
             opt(x, y)
             x = torch.randn([3])
             y = torch.randn([3])
@@ -51,9 +51,21 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(without.frame_count, 5)
         self.assertEqual(without.op_count, 5)
         torch._dynamo.reset()
+        without = run_foo_6_times_and_count_recompiles(dynamic=False)
+        self.assertEqual(without.frame_count, 5)
+        self.assertEqual(without.op_count, 5)
+        torch._dynamo.reset()
         with_automatic = run_with_automatic()
         self.assertEqual(with_automatic.frame_count, 2)
         self.assertEqual(with_automatic.op_count, 2)
+        torch._dynamo.reset()
+        with_automatic = run_foo_6_times_and_count_recompiles(dynamic=None)
+        self.assertEqual(with_automatic.frame_count, 2)
+        self.assertEqual(with_automatic.op_count, 2)
+        torch._dynamo.reset()
+        with_dynamic = run_foo_6_times_and_count_recompiles(dynamic=True)
+        self.assertEqual(with_dynamic.frame_count, 1)
+        self.assertEqual(with_dynamic.op_count, 1)
 
     @patch.object(torch._dynamo.config, "assume_static_by_default", True)
     def test_recompiles_true_false_flop(self):
@@ -210,3 +222,9 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cmp_result, eager_result)
         # Recompile, alias changed
         self.assertEqual(cnt.frame_count, 2)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
