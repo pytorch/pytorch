@@ -10,7 +10,6 @@ from torch._dynamo.testing import rand_strided
 
 from torch._inductor import ir
 from torch._inductor.codecache import PyCodeCache
-from torch._inductor.select_algorithm import ChoiceCaller
 
 from .utils import do_bench
 from .virtualized import V
@@ -216,7 +215,7 @@ class BenchmarkRequest:
 
 
 def benchmark_in_sub_process(
-    choice: "ChoiceCaller",
+    choice: "ChoiceCaller",  # type: ignore[name-defined]
 ) -> float:
     """
     Do benchmarking in subprocess and return the perf number (latency).
