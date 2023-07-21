@@ -213,8 +213,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str, encoding: O
 
     for pathname in pathnames:
         if not isinstance(pathname, str):
-            raise TypeError("Expected string type for pathname, but got {}"
-                            .format(type(pathname)))
+            raise TypeError(f"Expected string type for pathname, but got {type(pathname)}")
         yield pathname, StreamWrapper(open(pathname, mode, encoding=encoding))
 
 

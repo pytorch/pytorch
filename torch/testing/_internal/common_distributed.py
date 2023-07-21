@@ -808,9 +808,7 @@ class MultiProcessTestCase(TestCase):
         for i, p in enumerate(self.processes):
             if p.exitcode is None:
                 raise RuntimeError(
-                    "Process {} terminated or timed out after {} seconds".format(
-                        i, elapsed_time
-                    )
+                    f"Process {i} terminated or timed out after {elapsed_time} seconds"
                 )
             self.assertEqual(
                 p.exitcode,
@@ -835,9 +833,7 @@ class MultiProcessTestCase(TestCase):
         self.assertEqual(
             first_process.exitcode,
             0,
-            msg="Expected zero exit code but got {} for pid: {}".format(
-                first_process.exitcode, first_process.pid
-            ),
+            msg=f"Expected zero exit code but got {first_process.exitcode} for pid: {first_process.pid}",
         )
 
     @property
@@ -1091,9 +1087,7 @@ class MultiThreadedTestCase(TestCase):
                 if skip_code < 0:
                     skip_code = TEST_SKIPS["generic"].exit_code
             elif isinstance(exc, TimeoutError):
-                msg = "Thread {} terminated or timed out after {} seconds\n".format(
-                    rank, timeout
-                )
+                msg = f"Thread {rank} terminated or timed out after {timeout} seconds\n"
                 logger.error(msg)
                 raise RuntimeError(msg)
             elif isinstance(exc, Exception):
