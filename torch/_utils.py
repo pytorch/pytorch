@@ -375,7 +375,9 @@ def _rebuild_qtensor(
             device=storage.device,
         )
     else:
-        raise RuntimeError(f"Can't deserialize quantized tensor with qscheme {qscheme}")
+        raise RuntimeError(
+            "Can't deserialize quantized tensor with qscheme {}".format(qscheme)
+        )
     tensor.set_(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
     # NB: This line exists only for backwards compatibility; the
@@ -769,7 +771,7 @@ def _get_device_index(
     device_idx: Optional[int] = None
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == "cpu":
-            raise ValueError(f"Expected a non cpu device, but got: {device}")
+            raise ValueError("Expected a non cpu device, but got: {}".format(device))
         device_idx = -1 if device.type == "cpu" else device.index
     if isinstance(device, int):
         device_idx = device

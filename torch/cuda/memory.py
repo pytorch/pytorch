@@ -474,7 +474,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
             prefix = new_prefix
             sz //= 1024
             pref_sz /= 1024
-        return f"{sz:6d} {prefix}"
+        return "{:6d} {}".format(sz, prefix)
 
     def _format_count(cnt, pref_cnt):
         prefixes = [" ", "K", "M"]
@@ -485,7 +485,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
             prefix = new_prefix
             cnt //= 1000
             pref_cnt /= 1000
-        return f"{cnt:7d} {prefix} "
+        return "{:7d} {} ".format(cnt, prefix)
 
     metrics_to_display = [
         ("allocated_bytes", "Allocated memory", _format_size),

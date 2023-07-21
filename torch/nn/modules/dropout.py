@@ -19,7 +19,7 @@ class _DropoutNd(Module):
         self.inplace = inplace
 
     def extra_repr(self) -> str:
-        return f'p={self.p}, inplace={self.inplace}'
+        return 'p={}, inplace={}'.format(self.p, self.inplace)
 
 
 class Dropout(_DropoutNd):
