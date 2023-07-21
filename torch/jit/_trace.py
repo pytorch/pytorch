@@ -183,7 +183,7 @@ def _time(trace_name, name, time=True):
     finally:
         stream.record_event(end)
         end.synchronize()
-        print("{} {} time: {} ms".format(trace_name, name, start.elapsed_time(end)))
+        print(f"{trace_name} {name} time: {start.elapsed_time(end)} ms")
 
 
 def verify(model, args, loss_fn=torch.sum, devices=None):
@@ -1197,7 +1197,7 @@ class TracedModule(ScriptModule):
         return self._name
 
     def extra_repr(self):
-        return "original_name={}".format(self._name)
+        return f"original_name={self._name}"
 
 
 class TopLevelTracedModule(TracedModule):

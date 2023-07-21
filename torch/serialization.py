@@ -202,9 +202,9 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
 
     except Exception as e:
         message = (
-            "'%s' module version string is malformed '%s' and cannot be compared"
-            " with tuple %s"
-        ) % (
+            "'{}' module version string is malformed '{}' and cannot be compared"
+            " with tuple {}"
+        ).format(
             module.__name__, module.__version__, str(req_version_tuple)
         )
         if error_if_malformed:
@@ -549,9 +549,9 @@ def _check_dill_version(pickle_module) -> None:
         required_dill_version = (0, 3, 1)
         if not check_module_version_greater_or_equal(pickle_module, required_dill_version, False):
             raise ValueError((
-                "'torch' supports dill >= %s, but you have dill %s."
+                "'torch' supports dill >= {}, but you have dill {}."
                 " Please upgrade dill or switch to 'pickle'"
-            ) % (
+            ).format(
                 '.'.join([str(num) for num in required_dill_version]),
                 pickle_module.__version__
             ))
@@ -559,9 +559,9 @@ def _check_dill_version(pickle_module) -> None:
 
 def _check_save_filelike(f):
     if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
-        raise AttributeError((
+        raise AttributeError(
             "expected 'f' to be string, path, or a file-like object with "
-            "a 'write' attribute"))
+            "a 'write' attribute")
 
 
 def save(
@@ -1085,11 +1085,11 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                         if file_size == 0:
                             f.write(lines)
                         elif file_size != len(lines) or f.read() != lines:
-                            raise IOError
+                            raise OSError
                     msg = ("Saved a reverse patch to " + file_name + ". "
                            "Run `patch -p0 < " + file_name + "` to revert your "
                            "changes.")
-                except IOError:
+                except OSError:
                     msg = ("Tried to save a patch, but couldn't create a "
                            "writable file " + file_name + ". Make sure it "
                            "doesn't exist and your working directory is "
@@ -1308,7 +1308,7 @@ def _get_restore_location(map_location):
     return restore_location
 
 
-class StorageType():
+class StorageType:
     def __init__(self, name):
         self.dtype = _get_dtype_from_pickle_storage_type(name)
 
