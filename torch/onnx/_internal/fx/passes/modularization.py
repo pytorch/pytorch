@@ -131,7 +131,7 @@ class _ModuleMeta:
         return f"ModuleMeta(name={self._module_name}, class={self._module_class})"
 
     @classmethod
-    def root(cls) -> _ModuleMeta:
+    def create_root(cls) -> _ModuleMeta:
         """Create an empty module meta representing root module."""
         return _ModuleMeta("", None, ("", None))
 
@@ -176,9 +176,9 @@ class _ModuleMeta:
 
 
 class _ModuleStackMeta:
-    """Meta information about the module stack.
+    """Meta information about the module call stack.
 
-    This class is used to represent the module stack information in a more
+    This class is used to represent the module call stack information in a more
     structured way. It parses raw module stack information from `node.meta["nn_module_stack"]`.
 
     Example of raw module stack information:
@@ -246,7 +246,7 @@ class _ModuleStackMeta:
             stack.top() == MLP
         """
         if self.is_empty_or_root():
-            return _ModuleMeta.root()
+            return _ModuleMeta.create_root()
         return self._module_stack[-1]
 
     @_beartype.beartype

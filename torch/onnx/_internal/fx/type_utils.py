@@ -100,7 +100,7 @@ _COMPLEX_TO_FLOAT: Dict[torch.dtype, torch.dtype] = {
 _SYM_TYPE_TO_TORCH_DTYPE = {
     torch.SymInt: torch.int64,
     torch.SymFloat: torch.float32,
-    # torch.SymBool: torch.bool,
+    torch.SymBool: torch.bool,
 }
 
 SYM_VALUE_TYPE = Union[torch.SymInt, torch.SymFloat, torch.SymBool]

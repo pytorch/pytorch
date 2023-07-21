@@ -324,6 +324,7 @@ def run_ort(
         if isinstance(ort_model, bytes):
             buffer = io.BytesIO(ort_model)
         else:
+            assert isinstance(ort_model, str)
             buffer = ort_model
 
         model_proto = onnx.load(buffer)
