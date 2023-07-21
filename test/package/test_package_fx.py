@@ -29,7 +29,7 @@ class TestPackageFX(PackageTestCase):
         class SimpleTest(torch.nn.Module):
             def forward(self, x):
                 return torch.relu(x + 3.0)
-
+        assert(False)
         st = SimpleTest()
         traced = symbolic_trace(st)
 
