@@ -32,7 +32,7 @@ from torch.fx.node import Node  # noqa: F401
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.utils import _python_dispatch, _pytree
-from torch._dispatch.python import enable_python_dispatcher
+
 logger = logging.getLogger(__name__)
 
 # TODO(bowbao): move to type utils.

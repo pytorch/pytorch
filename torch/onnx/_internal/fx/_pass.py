@@ -8,7 +8,7 @@ import difflib
 import io
 import sys
 
-from typing import Any, Callable, Sequence, Optional
+from typing import Any, Callable, Optional, Tuple
 
 import torch
 import torch.fx
@@ -178,6 +178,17 @@ class Transform(abc.ABC):
             except RuntimeError:
                 continue
         return torch._dynamo.utils.detect_fake_mode(fake_tensors)
+
+    def _maybe_fakefy_args(
+        self, fake_mode: Optional[fake_tensor.FakeTensorMode], *args: Any
+    ) -> Tuple[Any, ...]:
+        if fake_mode is None:
+            return args
+        # NB: This should hit the cache if tensors were fakefied before.
+        # E.g., when the fx graph is produced by Dynamo.
+        return tuple(
+            fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t for t in args
+        )
 
     @abc.abstractmethod
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
