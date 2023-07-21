@@ -4549,13 +4549,6 @@ def linspace(
         dtype = dtype or torch.get_default_dtype()
     assert isinstance(dtype, torch.dtype)
 
-    # NB: NumPy doesn't have this cast
-    if prims.utils.is_integer_dtype(dtype):
-        if isinstance(start, FloatLike):
-            start = sym_int(start)
-        if isinstance(end, FloatLike):
-            end = sym_int(end)
-
     # steps does not participate in the computation of the dtype
     torch._check_type(
         isinstance(steps, IntLike),
@@ -4616,10 +4609,31 @@ def logspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
+    if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
+        default_complex_dtype = utils.corresponding_complex_dtype(
+            torch.get_default_dtype()
+        )
+        if dtype is None:
+            dtype = default_complex_dtype
+        else:
+            torch._check(
+                utils.is_complex_dtype(dtype),
+                lambda: f"linspace(): inferred dtype {default_complex_dtype} can't be safely cast to passed dtype {dtype}",
+            )
+    else:
+        dtype = torch.float64
+
+    # NB: NumPy doesn't have this cast
+    if prims.utils.is_integer_dtype(dtype):
+        if isinstance(start, FloatLike):
+            start = sym_int(start)
+        if isinstance(end, FloatLike):
+            end = sym_int(end)
+
     assert not isinstance(base, complex)  # for mypy
     if base < 0:
         raise NotImplementedError
-    ret = torch.linspace(
+    ret = torch.linspace(  # type: ignore[misc]
         start,
         end,
         steps,  # type: ignore[arg-type]
