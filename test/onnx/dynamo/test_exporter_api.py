@@ -29,11 +29,11 @@ class SampleModel(torch.nn.Module):
 class TestExportOptionsAPI(common_utils.TestCase):
     def test_opset_version_default(self):
         options = ResolvedExportOptions(None)
-        self.assertEquals(options.opset_version, _DEFAULT_OPSET_VERSION)
+        self.assertEqual(options.opset_version, _DEFAULT_OPSET_VERSION)
 
     def test_opset_version_explicit(self):
         options = ResolvedExportOptions(ExportOptions(opset_version=3000))
-        self.assertEquals(options.opset_version, 3000)
+        self.assertEqual(options.opset_version, 3000)
 
     def test_raise_on_invalid_argument_type(self):
         expected_exception_type = roar.BeartypeException
@@ -60,12 +60,12 @@ class TestExportOptionsAPI(common_utils.TestCase):
 
     def test_logger_default(self):
         options = ResolvedExportOptions(None)
-        self.assertEquals(options.logger, logging.getLogger().getChild("torch.onnx"))
+        self.assertEqual(options.logger, logging.getLogger().getChild("torch.onnx"))
 
     def test_logger_explicit(self):
         options = ResolvedExportOptions(ExportOptions(logger=logging.getLogger()))
-        self.assertEquals(options.logger, logging.getLogger())
-        self.assertNotEquals(options.logger, logging.getLogger().getChild("torch.onnx"))
+        self.assertEqual(options.logger, logging.getLogger())
+        self.assertNotEqual(options.logger, logging.getLogger().getChild("torch.onnx"))
 
 
 class TestDynamoExportAPI(common_utils.TestCase):
@@ -111,8 +111,8 @@ class TestDynamoExportAPI(common_utils.TestCase):
             dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save(
                 path, serializer=CustomSerializer()
             )
-            with open(path, "r") as fp:
-                self.assertEquals(fp.read(), expected_buffer)
+            with open(path) as fp:
+                self.assertEqual(fp.read(), expected_buffer)
 
     def test_save_to_file_using_specified_serializer_without_inheritance(self):
         expected_buffer = "I am not actually ONNX"
@@ -130,8 +130,8 @@ class TestDynamoExportAPI(common_utils.TestCase):
             dynamo_export(SampleModel(), torch.randn(1, 1, 2)).save(
                 path, serializer=CustomSerializer()
             )
-            with open(path, "r") as fp:
-                self.assertEquals(fp.read(), expected_buffer)
+            with open(path) as fp:
+                self.assertEqual(fp.read(), expected_buffer)
 
     def test_save_sarif_log_to_file_with_successful_export(self):
         with common_utils.TemporaryFileName() as path:
