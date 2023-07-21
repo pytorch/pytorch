@@ -24,13 +24,13 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_report_path,
     IS_CI,
-    is_slow_gradcheck_env,
     parser as common_parser,
     retry_shell,
     set_cwd,
     shell,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
+    TEST_WITH_SLOW_GRADCHECK,
 )
 from torch.utils import cpp_extension
 
@@ -1272,7 +1272,7 @@ def exclude_tests(
                 not exact_match and test.startswith(exclude_test)
             ) or test == exclude_test:
                 if exclude_message is not None:
-                    print_to_stderr("Excluding {} {}".format(test, exclude_message))
+                    print_to_stderr(f"Excluding {test} {exclude_message}")
                 selected_tests.remove(test)
     return selected_tests
 
@@ -1397,7 +1397,7 @@ def get_selected_tests(options) -> List[ShardedTest]:
             "PyTorch is built without LAPACK support.",
         )
 
-    if is_slow_gradcheck_env():
+    if TEST_WITH_SLOW_GRADCHECK:
         selected_tests = exclude_tests(
             TESTS_NOT_USING_GRADCHECK,
             selected_tests,
@@ -1424,7 +1424,7 @@ def get_selected_tests(options) -> List[ShardedTest]:
     # Download previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
     if os.path.exists(path):
-        with open(path, "r") as f:
+        with open(path) as f:
             test_file_times = cast(Dict[str, Any], json.load(f))
     else:
         test_file_times = {}

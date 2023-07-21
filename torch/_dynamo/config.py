@@ -129,6 +129,7 @@ skipfiles_inline_module_allowlist = {
     torch._decomp,
     torch.utils._contextlib,
     torch.utils._pytree,
+    torch.sparse,
 }
 
 # If a string representing a PyTorch module is in this ignorelist,
@@ -237,10 +238,12 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 numpy_ndarray_as_tensor = False
 
 # Uses z3 for validating the guard optimizations transformations.
-translation_validation = os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATOR", "0") == "1"
+translation_validation = (
+    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION", "0") == "1"
+)
 # Timeout (in milliseconds) for z3 finding a solution.
 translation_validation_timeout = int(
-    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATOR_TIMEOUT", "600000")
+    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
 )
 
 

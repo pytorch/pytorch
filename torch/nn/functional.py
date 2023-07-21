@@ -2446,7 +2446,7 @@ def _verify_batch_size(size: List[int]) -> None:
     for i in range(len(size) - 2):
         size_prods *= size[i + 2]
     if size_prods == 1:
-        raise ValueError("Expected more than 1 value per channel when training, got input size {}".format(size))
+        raise ValueError(f"Expected more than 1 value per channel when training, got input size {size}")
 
 
 def batch_norm(
@@ -2491,7 +2491,7 @@ def _verify_spatial_size(size: List[int]) -> None:
     for i in range(2, len(size)):
         size_prods *= size[i]
     if size_prods == 1:
-        raise ValueError("Expected more than 1 spatial element when training, got input size {}".format(size))
+        raise ValueError(f"Expected more than 1 spatial element when training, got input size {size}")
 
 
 def instance_norm(
@@ -3198,7 +3198,7 @@ def binary_cross_entropy_with_logits(
         reduction_enum = _Reduction.get_enum(reduction)
 
     if not (target.size() == input.size()):
-        raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
+        raise ValueError(f"Target size ({target.size()}) must be the same as input size ({input.size()})")
 
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
@@ -3368,10 +3368,8 @@ def margin_ranking_loss(
         reduction_enum = _Reduction.get_enum(reduction)
     if (input1.dim() != input2.dim() or input1.dim() != target.dim()):
         raise RuntimeError(
-            (
-                "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
-                "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())
-            )
+            "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
+            f"input1: {input1.size()}, input2: {input2.size()}, target: {target.size()} "
         )
     return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
@@ -4376,7 +4374,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
 
     # enforce floating point dtype on theta
     if not theta.is_floating_point():
-        raise ValueError("Expected theta to have floating point type, but got {}".format(theta.dtype))
+        raise ValueError(f"Expected theta to have floating point type, but got {theta.dtype}")
     # check that shapes and sizes match
     if len(size) == 4:
         if theta.dim() != 3 or theta.shape[-2] != 2 or theta.shape[-1] != 3:
@@ -4407,7 +4405,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
             "See the documentation of affine_grid for details."
         )
     elif min(size) <= 0:
-        raise ValueError("Expected non-zero, positive output size. Got {}".format(size))
+        raise ValueError(f"Expected non-zero, positive output size. Got {size}")
 
     return torch.affine_grid_generator(theta, size, align_corners)
 
@@ -4677,9 +4675,9 @@ def triplet_margin_with_distance_loss(
     n_dim = negative.ndim
     if not (a_dim == p_dim and p_dim == n_dim):
         raise RuntimeError(
-            (f"The anchor, positive, and negative tensors are expected to have "
-             f"the same number of dimensions, but got: anchor {a_dim}D, "
-             f"positive {p_dim}D, and negative {n_dim}D inputs"))
+            f"The anchor, positive, and negative tensors are expected to have "
+            f"the same number of dimensions, but got: anchor {a_dim}D, "
+            f"positive {p_dim}D, and negative {n_dim}D inputs")
 
     # Calculate loss
     if distance_function is None:
