@@ -310,6 +310,8 @@ class SchemaMatcher:
             # Note that record_function annotations also go through this path,
             # so it is expected that some names will not correspond to PyTorch
             # operators.
+            if "::" not in name:
+                return None
             return tuple(torch._C._jit_get_schemas_for_operator(name))
         except RuntimeError:
             return None
@@ -738,11 +740,11 @@ class MemoryProfile:
 
         for node in self._data_flow_graph.flow_nodes:
             all_tensor_versions.update(((k, v) for k, (_, v) in node.inputs.items()))
-            all_tensor_versions.update(((key, 0) for key in node.intermediates))
+            all_tensor_versions.update((key, 0) for key in node.intermediates)
             all_tensor_versions.update(node.outputs.items())
 
         for i in self._categories._values.values():
-            all_tensor_versions.update(((key, 0) for key in i._by_id_keyset))
+            all_tensor_versions.update((key, 0) for key in i._by_id_keyset)
 
         return {
             (key, version): self._categories.get(key, version)

@@ -84,6 +84,7 @@ from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    SetVariable,
     SliceVariable,
     TupleVariable,
 )
@@ -205,23 +206,19 @@ def _detect_and_normalize_assert_statement(
 
     current_instruction_pointer += 1
 
-    if current_instruction_pointer >= len(self.instructions):
-        return False
+    # Use dummy error message if its hard to extract
+    error_msg = "assertion error"
 
     inst = self.instructions[current_instruction_pointer]
-    has_error_msg = False
     # DETECT RAISE_VARARGS or LOAD CONST
     if inst.opname == "LOAD_CONST":
         if not isinstance(inst.argval, str):
             return False
-        self.LOAD_CONST(inst)
-        has_error_msg = True
+        error_msg = inst.argval
 
         # if it is LOAD_CONSTANT, it must be followed by CALL_FUNCTION
         # (PRECALL for Python 3.11+)
         current_instruction_pointer += 1
-        if current_instruction_pointer >= len(self.instructions):
-            return False
         inst = self.instructions[current_instruction_pointer]
         if inst.opname not in ("CALL_FUNCTION", "PRECALL"):
             return False
@@ -231,16 +228,12 @@ def _detect_and_normalize_assert_statement(
         current_instruction_pointer += 1
         if inst.opname == "PRECALL":
             current_instruction_pointer += 1
-        if current_instruction_pointer >= len(self.instructions):
-            return False
         inst = self.instructions[current_instruction_pointer]
 
     if inst.opname != "RAISE_VARARGS":
         return False
 
-    if not has_error_msg:
-        # Push dummy value instead of error message
-        self.push(ConstantVariable("assertion error"))
+    self.push(ConstantVariable(error_msg))
 
     return True
 
@@ -887,7 +880,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if len(bits) < level:
             raise ImportError("attempted relative import beyond top-level package")
         base = bits[0]
-        return "{}.{}".format(base, name) if name else base
+        return f"{base}.{name}" if name else base
 
     def calc_package(self):
         """
@@ -1277,6 +1270,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         self.push(ListVariable(items, mutable_local=MutableLocal(), **options))
 
+    def BUILD_SET(self, inst):
+        items = self.popn(inst.argval)
+        options = VariableTracker.propagate(items)
+        new_set = SetVariable(self, items, mutable_local=MutableLocal(), **options)
+        self.push(new_set)
+
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
         seqs = self.popn(inst.argval)
         options = VariableTracker.propagate(seqs)
@@ -1360,6 +1359,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 **VariableTracker.propagate([obj, k, v]),
             ),
         )
+
+    def SET_ADD(self, inst):
+        v = self.pop()
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, SetVariable)
+        assert obj.mutable_local
+        return obj.call_method(self, "add", [v], {})
 
     def LIST_APPEND(self, inst):
         v = self.pop()
@@ -1825,7 +1832,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             additional_stack_frames = []
         return "".join(
             traceback.format_list(
-                ([self.frame_summary()] + list(reversed(additional_stack_frames)))
+                [self.frame_summary()] + list(reversed(additional_stack_frames))
             )
         )
 

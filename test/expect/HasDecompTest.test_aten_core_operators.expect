@@ -171,6 +171,8 @@ aten::diagonal_scatter.out
 aten::digamma
 aten::digamma.out
 aten::digamma_
+aten::dist
+aten::dist.out
 aten::div.Scalar
 aten::div.Scalar_mode
 aten::div.Scalar_mode_out
