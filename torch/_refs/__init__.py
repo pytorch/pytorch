@@ -4610,12 +4610,12 @@ def logspace(
     requires_grad: bool = False,
 ) -> TensorLikeType:
     # NB: NumPy doesn't have this cast
-    if prims.utils.is_integer_dtype(dtype):
+    if prims.utils.is_integer_dtype(dtype or torch.get_default_dtype()):
         if isinstance(start, FloatLike):
             start = sym_int(start)
         if isinstance(end, FloatLike):
             end = sym_int(end)
-    
+
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
