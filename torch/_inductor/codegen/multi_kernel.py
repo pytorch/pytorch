@@ -67,10 +67,11 @@ class MultiKernelState:
         src_code = f"""
 def run(multi_kernel, {', '.join(get_all_kernel_call_args(kernels))}, {', '.join(get_extra_arg_names(kernels[0]))}, grid, stream):
     def call0():
+        # TODO: clone the args if doing the benchmarking
         multi_kernel.kernels[0].run({', '.join(get_kernel_call_args(kernels[0]))}, {', '.join(get_extra_arg_names(kernels[0]))}, grid=grid, stream=stream)
     def call1():
         multi_kernel.kernels[1].run({', '.join(get_kernel_call_args(kernels[1]))}, {', '.join(get_extra_arg_names(kernels[1]))}, grid=grid, stream=stream)
-    call1()
+    multi_kernel.run_with_argless_kernels([call0, call1])
         """
         wrapper.header.splice(
             f"""
@@ -191,6 +192,14 @@ class MultiKernelCall:
 
     def run(self, *args, **kwargs):
         self._run(self, *args, **kwargs)
+
+    def run_with_argless_kernels(self, kernel_calls):
+        if self.picked_kernel is None:
+            timings = [
+                do_bench(kernel_call, rep=40, fast_flush=True) for kernel_call in kernel_calls 
+            ]
+            self.picked_kernel = timings.index(min(timings))
+        kernel_calls[self.picked_kernel]()
 
     def old_run(self, *args, **kwargs):
         if self.picked_kernel is None:
