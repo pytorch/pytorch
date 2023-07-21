@@ -33,7 +33,7 @@ void autograd_fallback(
     c10::DispatchKeySet dispatch_keys,
     torch::jit::Stack* stack);
 
-#define AUTOGRAD_FALLBACK torch::CppFunction::makeFromBoxedFunction<&autograd_fallback>()
+#define AUTOGRAD_FALLBACK torch::CppFunction::makeFallthrough()
 
 TORCH_LIBRARY_IMPL(_, AutogradOther, m) {
   m.fallback(AUTOGRAD_FALLBACK);

@@ -10,6 +10,7 @@ from torch.testing._internal.common_utils import (
 )
 import contextlib
 import numpy as np
+import unittest
 import warnings
 
 @contextlib.contextmanager
@@ -21,6 +22,7 @@ def autograd_fallback_mode(mode):
     finally:
         torch._C._set_autograd_fallback_mode(prev)
 
+@unittest.skip
 class TestAutogradFallback(TestCase):
     test_ns = '_test_autograd_fallback'
 
