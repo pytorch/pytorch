@@ -34,7 +34,7 @@ class _Faketqdm:  # type: ignore[no-redef]
         if self.total is None:
             sys.stderr.write(f"\r{self.n:.1f} bytes")
         else:
-            sys.stderr.write("\r{:.1f}%".format(100 * self.n / float(self.total)))
+            sys.stderr.write(f"\r{100 * self.n / float(self.total):.1f}%")
         sys.stderr.flush()
 
     # Don't bother implementing; use real tqdm if you want
@@ -328,7 +328,7 @@ def _check_dependencies(m):
     if dependencies is not None:
         missing_deps = [pkg for pkg in dependencies if not _check_module_exists(pkg)]
         if len(missing_deps):
-            raise RuntimeError('Missing dependencies: {}'.format(', '.join(missing_deps)))
+            raise RuntimeError(f"Missing dependencies: {', '.join(missing_deps)}")
 
 
 def _load_entry_from_hubconf(m, model):
@@ -650,8 +650,7 @@ def download_url_to_file(url: str, dst: str, hash_prefix: Optional[str] = None,
         if hash_prefix is not None:
             digest = sha256.hexdigest()
             if digest[:len(hash_prefix)] != hash_prefix:
-                raise RuntimeError('invalid hash value (expected "{}", got "{}")'
-                                   .format(hash_prefix, digest))
+                raise RuntimeError(f'invalid hash value (expected "{hash_prefix}", got "{digest}")')
         shutil.move(f.name, dst)
     finally:
         f.close()

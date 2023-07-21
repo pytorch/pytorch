@@ -1129,12 +1129,12 @@ class MemoryProfileTimeline:
 
         with open(tmpfile.name, 'rb') as tmp:
             encoded = b64encode(tmp.read()).decode('utf-8')
-            html = """<html>
+            html = f"""<html>
 <head><meta charset="utf-8" /><title>GPU Memory Timeline HTML</title></head>
 <body>
-  <img src=\'data:image/png;base64,{}\'>
+  <img src='data:image/png;base64,{encoded}'>
 </body>
-</html>""".format(encoded)
+</html>"""
 
             with open(path, 'w') as f:
                 f.write(html)
