@@ -645,9 +645,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         class CustomModule(nn.Module):
             def forward(self, x):
                 # Assuming x is a tensor on the CPU, move it to the desired device using device_put()
-                x = torch.ops.prims.device_put(
-                    x, "cuda" if torch.cuda.is_available() else "cpu"
-                )
+                x = torch.ops.prims.device_put(x, "cpu")
                 return x
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
