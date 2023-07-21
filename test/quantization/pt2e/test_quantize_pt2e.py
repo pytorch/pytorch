@@ -1814,6 +1814,22 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             non_ref_node_occurrence={}
         )
 
+    def test_representation_maxpool2d(self):
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m_eager = TestHelperModules.ConvMaxPool2d().eval()
+
+        example_inputs = (torch.randn(1, 2, 2, 2),)
+
+        self._test_representation(
+            m_eager,
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={}
+        )
+
     def test_representation_quantize_dequantize(self):
         class M(torch.nn.Module):
             def __init__(self):

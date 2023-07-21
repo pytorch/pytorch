@@ -290,3 +290,37 @@ def _replace_dropout_for_eval(m: GraphModule):
         ignore_literals=True,
     )
     m.recompile()
+
+
+from torch.fx.node import map_arg
+from torch.utils._pytree import LeafSpec
+
+def replace_literals_with_placeholders(gm):
+    last_ph = None
+
+    def _is_literal(arg):
+        if isinstance(arg, (int, float)):
+            return True
+        if isinstance(arg, (tuple, list)):
+            return all(map(_is_literal, arg))
+        return False
+
+    cnt = 0
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            last_ph = node
+            cnt += 1
+            continue
+        with gm.graph.inserting_after(last_ph):
+            new_args = []
+            for arg in node.args:
+                if _is_literal(arg):
+                    new_args.append(gm.graph.placeholder("arg" + str(cnt)))
+                    gm._in_spec.children_specs[0].children_specs.append(LeafSpec())
+                    cnt += 1
+                else:
+                    new_args.append(arg)
+            new_args = tuple(new_args)
+
+        node.args = new_args
+    return gm
