@@ -1085,8 +1085,10 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
         self._test_complex_2d(optim.Adam)
-        self._test_complex_2d(functools.partial(optim.Adam, foreach=True))
-        self._test_complex_2d(functools.partial(optim.Adam, foreach=True, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=False))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=False, amsgrad=True))
+        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2, amsgrad=True))
 
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
