@@ -680,7 +680,7 @@ class WrapperCodeGen(CodeGen):
         with output.indent():
             output.writelines(
                 [
-                    "from torch._inductor.utils import compiled_module_main",
+                    "from torch._inductor.wrapper_benchmark import compiled_module_main",
                     f"compiled_module_main('{get_benchmark_name()}', benchmark_compiled_module)",
                 ]
             )
@@ -1087,6 +1087,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def generate_return(self, output_refs):
         # Output tensors are allocated by the AOT runtime.
         if V.graph.aot_mode:
+            for idx, output in enumerate(V.graph.graph_outputs):
+                if output.get_name() in self.reuses:
+                    # buffer was reused, so we need to explicitly copy it to the output tensor
+                    self.wrapper_call.writeline(
+                        f"outputs[{idx}].copy_({output.get_name()});"
+                    )
             self.wrapper_call.writeline("\n}")
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
@@ -1234,45 +1240,51 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             return DTYPE_TO_ATEN[dtype]
 
+    def codegen_allocation(self, buffer):
+        name = buffer.get_name()
+        # outputs are passed-in in the AOT mode
+        if V.graph.aot_mode and name in set(V.graph.get_output_names()):
+            output_idx = None
+            for idx, output in enumerate(V.graph.graph_outputs):
+                if hasattr(output, "get_name") and name == output.get_name():
+                    output_idx = idx
+                    break
+
+            assert output_idx is not None, "Unkown output index"
+            self.writeline(f"auto {name} = outputs[{output_idx}];")
+            return
+
+        super().codegen_allocation(buffer)
+
     def make_buffer_allocation(self, buffer):
-        output_idx = None
-        for idx, output in enumerate(V.graph.graph_outputs):
-            if isinstance(output, (ir.NoneAsConstantBuffer, ir.ShapeAsConstantBuffer)):
-                continue
-            if buffer == output.data:
-                output_idx = idx
-                break
-        if output_idx is not None and V.graph.aot_mode:
-            # In aot_mode, output buffers are managed by the AOT runtime.
-            return f"auto {buffer.get_name()} = outputs[{output_idx}]{self.ending}"
+        device = self.codegen_device(buffer.get_device())
+        dtype = self.codegen_dtype(buffer.get_dtype())
+        size = self.codegen_shape_tuple(tuple(buffer.get_size()))
+        stride = self.codegen_shape_tuple(tuple(buffer.get_stride()))
+        if self.abi_compatible:
+            size_var = f"var_{next(self.arg_var_id)}"
+            stride_var = f"var_{next(self.arg_var_id)}"
+            device_var = f"var_{next(self.arg_var_id)}"
+            args = [
+                str(len(buffer.get_size())),
+                size_var,
+                stride_var,
+                device_var,
+                dtype,
+            ]
+            return f"""
+                int64_t {size_var}[] = {size};
+                int64_t {stride_var}[] = {stride};
+                AotInductorDevice {device_var} = {{{device}}};
+                AotInductorTensor {buffer.get_name()} = aot_inductor_empty_strided({', '.join(args)});
+            """
         else:
-            device = self.codegen_device(buffer.get_device())
-            dtype = self.codegen_dtype(buffer.get_dtype())
-            size = self.codegen_shape_tuple(tuple(buffer.get_size()))
-            stride = self.codegen_shape_tuple(tuple(buffer.get_stride()))
-            if self.abi_compatible:
-                size_var = f"var_{next(self.arg_var_id)}"
-                stride_var = f"var_{next(self.arg_var_id)}"
-                device_var = f"var_{next(self.arg_var_id)}"
-                args = [
-                    str(len(buffer.get_size())),
-                    size_var,
-                    stride_var,
-                    device_var,
-                    dtype,
-                ]
-                return f"""
-                    int64_t {size_var}[] = {size};
-                    int64_t {stride_var}[] = {stride};
-                    AotInductorDevice {device_var} = {{{device}}};
-                    AotInductorTensor {buffer.get_name()} = aot_inductor_empty_strided({', '.join(args)});
-                """
-            else:
-                # TODO: map layout here.
-                return (
-                    f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
-                    f"{size}, {stride}, {device}.dtype({dtype})); "
-                )
+            # TODO: map layout here.
+            return (
+                f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
+                f"{size}, {stride}, {device}.dtype({dtype})); "
+            )
+
 
     def codegen_as_strided(self, name, size, stride, offset) -> str:
         dim = str(len(size))
