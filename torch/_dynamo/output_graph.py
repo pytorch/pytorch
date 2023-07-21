@@ -28,6 +28,7 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
 
@@ -239,6 +240,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # This map ensures that the only tensors in graph inputs, and the only tensors in guards are unique.
         self.real_value_tensor_positive_aliases = WeakTensorKeyDictionary()
 
+        # TODO: maybe should just pass the entire f_code in here?  Not
+        # sure...
+        self.co_fields = {
+            "co_name": f_code.co_name,
+            "co_filename": f_code.co_filename,
+            "co_firstlineno": f_code.co_firstlineno,
+        }
+
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(
@@ -246,13 +255,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 frame_id=frame_state["_id"],
-                # TODO: maybe should just pass the entire f_code in here?  Not
-                # sure...
-                co_fields={
-                    "co_name": f_code.co_name,
-                    "co_filename": f_code.co_filename,
-                    "co_firstlineno": f_code.co_firstlineno,
-                },
+                co_fields=self.co_fields,
             ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
@@ -974,6 +977,18 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__
             ) from None
+
+        signpost_event(
+            "dynamo",
+            "OutputGraph.call_user_compiler",
+            {
+                **self.co_fields,
+                "op_count": tot,
+                "node_count": len(gm.graph.nodes),
+                "input_count": len(placeholders),
+            },
+        )
+
         return compiled_fn
 
     def example_inputs(self) -> List[torch.Tensor]:
