@@ -43,7 +43,7 @@ __all__ = [
     'all_reduce_coalesced', 'all_reduce_multigpu', 'all_to_all',
     'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast',
     'broadcast_multigpu', 'broadcast_object_list', 'destroy_process_group',
-    'dist_backend', 'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
+    'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
     'get_world_size', 'group', 'init_process_group', 'irecv',
     'is_gloo_available', 'is_initialized', 'is_mpi_available', 'is_backend_available',
     'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available',
@@ -312,13 +312,6 @@ class BackendConfig:
 
     def get_device_backend_map(self):
         return self.device_backend_map
-
-# `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
-# compatibility with pre-c10d distributed package.
-# TODO: remove them when users are ready to take a hard dependency on PyTorch 1.
-_backend: str = Backend.UNDEFINED
-dist_backend = Backend
-
 
 class _reduce_op:
     r"""
