@@ -123,7 +123,7 @@ class MemoryPlanningState:
     def __init__(self):
         super().__init__()
         self.reuse_pool: Dict[
-            Any, List["FreeIfNotReusedLine"]
+            Any, List[FreeIfNotReusedLine]
         ] = collections.defaultdict(list)
 
     def __contains__(self, key):
