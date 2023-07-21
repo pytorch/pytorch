@@ -511,9 +511,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         )
 
         self.set_read_writes(
-            functools.reduce(
-                dependencies.ReadWrites.merge, [x.read_writes for x in snodes]
-            )
+            dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
         )
 
         self.unmet_dependencies = {
