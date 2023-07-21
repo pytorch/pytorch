@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 import torch
 import torch._ops
 import torch.func
 import torch.fx
-
+from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
 from torch.utils import _pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
+import contextlib
 
 
 class Functionalize(_pass.Transform):
@@ -102,15 +104,29 @@ class Functionalize(_pass.Transform):
         module = _utils.wrap_graph_module_for_node_meta_preservation(self.module)
 
         functionalized_callable = self._functionalize(module)
-        fx_mode = "symbolic" if self.enable_dynamic_axes else "fake"
 
-        graph_module = proxy_tensor.make_fx(
-            functionalized_callable,
-            decomposition_table={},
-            tracing_mode=fx_mode,
-            _allow_non_fake_inputs=True,
-            _allow_fake_constant=self.allow_fake_constant,
-        )(*args)
+        fake_mode = self.fake_mode
+        if fake_mode is not None:
+            # Using existing fake mode as context, signal `make_fx` that it does not need
+            # to create a new fake mode by passing tracing_mode as "real".
+            tracing_mode = "real"
+            # NB: This should hit the cache if tensors were fakefied before.
+            # E.g., when the fx graph is produced by Dynamo.
+            maybe_fake_args = [fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t for t in args]
+        else:
+            # Existing fake mode not found, signal `make_fx` to create one.
+            fake_mode = contextlib.nullcontext()
+            tracing_mode = "symbolic" if self.enable_dynamic_axes else "fake"
+            maybe_fake_args = args
+
+        with fake_mode:
+            graph_module = proxy_tensor.make_fx(
+                functionalized_callable,
+                decomposition_table={},
+                tracing_mode=tracing_mode,
+                _allow_non_fake_inputs=True,
+                _allow_fake_constant=self.allow_fake_constant,
+            )(*maybe_fake_args)
 
         # Rename placeholder targets to match the original module's signature since
         # We don't want to map forward(x, y, z) to forward(arg0, arg1, arg2).

@@ -8,10 +8,11 @@ import difflib
 import io
 import sys
 
-from typing import Any, Callable
+from typing import Any, Callable, Sequence, Optional
 
 import torch
 import torch.fx
+from torch._subclasses import fake_tensor
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher
 
@@ -163,6 +164,20 @@ class Transform(abc.ABC):
         """
         self.module = module
         self.diagnostic_context = diagnostic_context
+        self.fake_mode = self._detect_fake_mode()
+
+    def _detect_fake_mode(self) -> Optional[fake_tensor.FakeTensorMode]:
+        """Detect fake mode from the graph.
+
+        Scan through all nodes in graph and their meta['val'] to detect fake mode.
+        """
+        fake_tensors = []
+        for node in self.module.graph.nodes:
+            try:
+                fake_tensors.append(node.meta.get("val"))
+            except RuntimeError:
+                continue
+        return torch._dynamo.utils.detect_fake_mode(fake_tensors)
 
     @abc.abstractmethod
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
