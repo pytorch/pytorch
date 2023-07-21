@@ -159,6 +159,12 @@ def _retrieve_or_adapt_input_to_graph_set(
         onnx_tensor = int(
             jit_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type()
         )
+    # NOTE: if device is specified in kwargs (not consumed), it's free to ignored. But
+    # if it's in args, we need to set it to string for dispatcher to match schema.
+    if isinstance(onnx_tensor, torch.device):
+        # torch.device is not supported by onnxscript (no op). We turn it into
+        # a string.
+        return str(onnx_tensor)
 
     # all other cases, we do nothing.
     return onnx_tensor
@@ -170,6 +176,7 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
     for key, value in kwargs.items():
         if key in {
             "layout",
+            "device",
             "requires_grad",
             "pin_memory",
             "memory_format",
@@ -183,10 +190,6 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
                 continue
             else:
                 value = int(jit_type_utils.JitScalarType.from_dtype(value).onnx_type())
-        if key == "device":
-            # torch.device is not supported by onnxscript (no op). We turn it into
-            # a string.
-            value = str(value)
         filtered[key] = value
     return filtered
 
