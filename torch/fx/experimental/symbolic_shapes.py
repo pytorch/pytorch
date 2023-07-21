@@ -3291,6 +3291,9 @@ Target Guards:
                 {
                     **self.co_fields,
                     "ignored_guard": f"{expr} == {concrete_val}",
+                    # no version = original state (this signpost is expected)
+                    # version 2 = dynamic backwards is eagerly compiled
+                    "version": 2,
                 },
             )
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
