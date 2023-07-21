@@ -1071,6 +1071,7 @@
   tags: nondeterministic_seeded
   dispatch:
     CompositeExplicitAutogradNonFunctional: bernoulli
+  autogen: bernoulli.p_out
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias=None) -> Tensor
 
