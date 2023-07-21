@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: tests"]
 
 import torch
@@ -4882,26 +4881,26 @@ else:
                 x_c_clone = x_c.clone() if is_inplace else x_c
                 result_c = fn(x_c_clone, y_c)
                 result = fn(x_clone, y)
-                self.assertEqual(result, result_c, "Failed for '{}'".format(inspect.getsource(fn).strip()))
+                self.assertEqual(result, result_c, f"Failed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
-                    "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
+                    f"result of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
 
             for fn in bias_fns:
                 result_c = fn(x_c, b_c)
                 result = fn(x, bias)
-                self.assertEqual(result, result_c, "Failed for '{}'".format(inspect.getsource(fn).strip()))
+                self.assertEqual(result, result_c, f"Failed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
-                    "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
+                    f"result of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
 
             for fn in return_contig_fns:
                 result_c = fn(x_c, y_c)
                 result = fn(x, y)
-                self.assertEqual(result, result_c, "Failed for '{}'".format(inspect.getsource(fn).strip()))
+                self.assertEqual(result, result_c, f"Failed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=torch.contiguous_format),
-                    "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), torch.contiguous_format))
+                    f"result of the '{inspect.getsource(fn).strip()}' is not in '{torch.contiguous_format}' format")
 
         _test_helper(
             torch.randn((4, 3, 8, 8), device=device).contiguous(memory_format=torch.channels_last),
@@ -6415,11 +6414,11 @@ class TestTorch(TestCase):
 
         self.assertRaisesRegex(
             RuntimeError,
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(str),
+            f"Tensor.__contains__ only supports Tensor or scalar, but you passed in a {str}.",
             lambda: "foo" in x)
         self.assertRaisesRegex(
             RuntimeError,
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type([1, 2])),
+            f"Tensor.__contains__ only supports Tensor or scalar, but you passed in a {type([1, 2])}.",
             lambda: [1, 2] in x)
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
@@ -6705,9 +6704,9 @@ class TestTorch(TestCase):
 
         # fail parse with > 1 element variables
         self.assertRaises(TypeError, lambda: torch.ones(torch.tensor(3, 3)))
-        self.assertRaises(TypeError, lambda: torch.ones((torch.tensor(3, 3))))
+        self.assertRaises(TypeError, lambda: torch.ones(torch.tensor(3, 3)))
         self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
-        self.assertRaises(TypeError, lambda: torch.ones((np.array(3, 3))))
+        self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
 
         # fail parse with additional positional args after intlist arg
         self.assertRaisesRegex(TypeError,
@@ -8220,7 +8219,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         for seed, expected_initial_seed in test_cases:
             torch.manual_seed(seed)
             actual_initial_seed = torch.initial_seed()
-            msg = "expected initial_seed() = %x after calling manual_seed(%x), but got %x instead" % (
+            msg = "expected initial_seed() = {:x} after calling manual_seed({:x}), but got {:x} instead".format(
                 expected_initial_seed, seed, actual_initial_seed)
             self.assertEqual(expected_initial_seed, actual_initial_seed, msg=msg)
         for invalid_seed in [min_int64 - 1, max_uint64 + 1]:
@@ -8328,7 +8327,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             devices = [t.device]
             if t.device.type == 'cuda':
                 if t.device.index == -1:
-                    devices.append('cuda:{}'.format(torch.cuda.current_device()))
+                    devices.append(f'cuda:{torch.cuda.current_device()}')
                 elif t.device.index == torch.cuda.current_device():
                     devices.append('cuda')
             for device in devices:
@@ -8445,7 +8444,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(t.grad is not None)
 
         # Make sure invalid subclasses raise nice errors
-        class BadSubTensor():
+        class BadSubTensor:
             member_var = object()
 
         err_msg = "Creating a Tensor subclass from a class that does not inherit from Tensor"
@@ -8593,7 +8592,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 return "device(type='{type}', index={index})".format(
                     type=device.type, index=device.index)
 
-            return "device(type='{type}')".format(type=device.type)
+            return f"device(type='{device.type}')"
 
         for device in device_set:
             dev = torch.device(device)
@@ -8683,7 +8682,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         from torch._torch_docs import __file__ as doc_file
         from torch._torch_docs import multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args
 
-        with open(doc_file, "r", encoding="utf-8") as f:
+        with open(doc_file, encoding="utf-8") as f:
             doc_strs = f.read()
 
         matches = re.findall(
@@ -8714,7 +8713,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             skip_regexes = []
             for r in skips:
                 if isinstance(r, str):
-                    skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
+                    skip_regexes.append(re.compile(f'^{re.escape(r)}$'))
                 else:
                     skip_regexes.append(r)
 
@@ -8739,7 +8738,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                                      'New docs have been added for {}, please remove '
                                      'it from the skipped list in TestTorch.test_doc'.format(full_name))
                 else:
-                    self.assertTrue(has_doc, '{} is missing documentation'.format(full_name))
+                    self.assertTrue(has_doc, f'{full_name} is missing documentation')
 
             # FIXME: All of the following should be marked as expected failures
             # so that it is easier to tell when missing has been added.
