@@ -5,7 +5,9 @@ from torch._C._distributed_c10d import (
     AllgatherOptions,
     AllreduceOptions,
     BarrierOptions,
-    ReduceScatterOptions
+    BroadcastOptions,
+    ReduceScatterOptions,
+    ScatterOptions
 )
 from torch.futures import Future
 
@@ -45,8 +47,14 @@ class FakeProcessGroup(dist.ProcessGroup):
             chunk.copy_(input_tensor[0])
         return ret_work(output_tensors)
 
+    def broadcast(self, tensor_list, opts=BroadcastOptions()):
+        return ret_work(tensor_list)
+
     def reduce_scatter(self, output_tensor, scatter_list, opts=ReduceScatterOptions()):
         return ret_work(output_tensor)
+
+    def scatter(self, output_tensors, input_tensors, opts=ScatterOptions()):
+        return ret_work(output_tensors)
 
     def _allgather_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
         # assume each rank have the same input tensor so we just copy to the results

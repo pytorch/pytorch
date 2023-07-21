@@ -2,6 +2,7 @@
 from collections import OrderedDict
 
 import torch
+import torch.distributed as dist
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.api import (
@@ -23,6 +24,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPModule,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class TensorParallelAPITests(DTensorTestBase):
@@ -270,6 +272,39 @@ class TensorParallelAPITests(DTensorTestBase):
         model_tp = _parallelize_linear(model_tp, device_mesh, colwise)
 
         self._compare_module(model, model_tp, inp_size)
+
+
+class TestTensorParallelCompileTest(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        fake_store = FakeStore()
+        dist.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=self.world_size
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    @property
+    def device_type(self) -> str:
+        return "cuda" if torch.cuda.is_available() else "cpu"
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def test_dynamo_parallelize_mlp(self):
+        model_tp = MLPModule(self.device_type)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        model_tp = _parallelize_mlp(model_tp, device_mesh, PairwiseParallel())
+
+        opt_model = torch.compile(model_tp, backend="eager", fullgraph=True)
+        inp_size = [12, 10]
+        inp = torch.rand(*inp_size, device=self.device_type)
+        opt_model(inp)
+
+
 
 
 if __name__ == "__main__":
