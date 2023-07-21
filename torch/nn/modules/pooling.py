@@ -1001,7 +1001,7 @@ class _AdaptiveMaxPoolNd(Module):
         self.return_indices = return_indices
 
     def extra_repr(self) -> str:
-        return 'output_size={}'.format(self.output_size)
+        return f'output_size={self.output_size}'
 
 # FIXME (by @ssnl): Improve adaptive pooling docs: specify what the input and
 #   output shapes are, and how the operation computes output.
@@ -1130,7 +1130,7 @@ class _AdaptiveAvgPoolNd(Module):
         self.output_size = output_size
 
     def extra_repr(self) -> str:
-        return 'output_size={}'.format(self.output_size)
+        return f'output_size={self.output_size}'
 
 
 class AdaptiveAvgPool1d(_AdaptiveAvgPoolNd):

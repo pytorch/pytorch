@@ -130,7 +130,7 @@ class _Formatter:
 
         if not self.floating_dtype:
             for value in tensor_view:
-                value_str = "{}".format(value)
+                value_str = f"{value}"
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
@@ -161,13 +161,11 @@ class _Formatter:
                 ):
                     self.sci_mode = True
                     for value in nonzero_finite_vals:
-                        value_str = (
-                            ("{{:.{}e}}").format(PRINT_OPTS.precision).format(value)
-                        )
+                        value_str = f"{{:.{PRINT_OPTS.precision}e}}".format(value)
                         self.max_width = max(self.max_width, len(value_str))
                 else:
                     for value in nonzero_finite_vals:
-                        value_str = ("{:.0f}").format(value)
+                        value_str = f"{value:.0f}"
                         self.max_width = max(self.max_width, len(value_str) + 1)
             else:
                 # Check if scientific representation should be used.
@@ -178,15 +176,11 @@ class _Formatter:
                 ):
                     self.sci_mode = True
                     for value in nonzero_finite_vals:
-                        value_str = (
-                            ("{{:.{}e}}").format(PRINT_OPTS.precision).format(value)
-                        )
+                        value_str = f"{{:.{PRINT_OPTS.precision}e}}".format(value)
                         self.max_width = max(self.max_width, len(value_str))
                 else:
                     for value in nonzero_finite_vals:
-                        value_str = (
-                            ("{{:.{}f}}").format(PRINT_OPTS.precision).format(value)
-                        )
+                        value_str = f"{{:.{PRINT_OPTS.precision}f}}".format(value)
                         self.max_width = max(self.max_width, len(value_str))
 
         if PRINT_OPTS.sci_mode is not None:
@@ -204,13 +198,13 @@ class _Formatter:
                     .format(value)
                 )
             elif self.int_mode:
-                ret = "{:.0f}".format(value)
+                ret = f"{value:.0f}"
                 if not (math.isinf(value) or math.isnan(value)):
                     ret += "."
             else:
-                ret = ("{{:.{}f}}").format(PRINT_OPTS.precision).format(value)
+                ret = f"{{:.{PRINT_OPTS.precision}f}}".format(value)
         else:
-            ret = "{}".format(value)
+            ret = f"{value}"
         return (self.max_width - len(ret)) * " " + ret
 
 
@@ -613,15 +607,15 @@ def _str_intern(inp, *, tensor_contents=None):
         name = type(inp.grad_fn).__name__
         if name == "CppFunction":
             name = inp.grad_fn.name().rsplit("::", 1)[-1]
-        suffixes.append("grad_fn=<{}>".format(name))
+        suffixes.append(f"grad_fn=<{name}>")
     elif inp.requires_grad:
         suffixes.append("requires_grad=True")
 
     if self.has_names():
-        suffixes.append("names={}".format(self.names))
+        suffixes.append(f"names={self.names}")
 
     if tangent is not None:
-        suffixes.append("tangent={}".format(tangent))
+        suffixes.append(f"tangent={tangent}")
 
     string_repr = _add_suffixes(
         prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse
