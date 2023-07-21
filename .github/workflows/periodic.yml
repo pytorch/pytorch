@@ -1,4 +1,7 @@
-edule:
+name: periodic
+
+on:
+  schedule:
     # We have several schedules so jobs can check github.event.schedule to activate only for a fraction of the runs.
     # Also run less frequently on weekends.
     - cron: 45 0,8,16 * * 1-5
