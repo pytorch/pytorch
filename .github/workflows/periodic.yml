@@ -1,7 +1,4 @@
-name: periodic
-
-on:
-  schedule:
+edule:
     # We have several schedules so jobs can check github.event.schedule to activate only for a fraction of the runs.
     # Also run less frequently on weekends.
     - cron: 45 0,8,16 * * 1-5
@@ -47,6 +44,7 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.8-py3.9-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
+      cuda-arch-list: 8.6
       test-matrix: |
         { include: [
           { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
