@@ -1437,7 +1437,7 @@ def expand_dims(
     else:
         dims = sorted(utils.canonicalize_dims(a.ndim, dimensions))  # type: ignore[arg-type]
     if len(set(dims)) != len(dims):
-        msg = "Received duplicate dimensions to expand in {0}".format(str(dimensions))
+        msg = f"Received duplicate dimensions to expand in {str(dimensions)}"
         raise ValueError(msg)
 
     new_shape = list(a.shape)
@@ -1463,35 +1463,33 @@ def _slice_meta(
     _strides = strides if strides is not None else [1] * len(start_indices)
 
     if a.ndim != len(start_indices):
-        msg = "Attempting to slice tensor of rank {0} with start_indices of length {1}!".format(
+        msg = "Attempting to slice tensor of rank {} with start_indices of length {}!".format(
             a.ndim, len(start_indices)
         )
         raise ValueError(msg)
 
     if a.ndim != len(limit_indices):
-        msg = "Attempting to slice tensor of rank {0} with limit_indices of length {1}!".format(
+        msg = "Attempting to slice tensor of rank {} with limit_indices of length {}!".format(
             a.ndim, len(limit_indices)
         )
         raise ValueError(msg)
 
     if a.ndim != len(_strides):
-        msg = (
-            "Attempting to slice tensor of rank {0} with strides of length {1}!".format(
-                a.ndim, len(limit_indices)
-            )
+        msg = "Attempting to slice tensor of rank {} with strides of length {}!".format(
+            a.ndim, len(limit_indices)
         )
         raise ValueError(msg)
 
     for x, y in zip(start_indices, a.shape):
         if x < 0:
-            msg = "Attempting to slice a tensor with a negative start index of {0}!".format(
+            msg = "Attempting to slice a tensor with a negative start index of {}!".format(
                 x
             )
             raise ValueError(msg)
         if x > y:
             msg = (
-                "Attempting to slice a tensor but a start index in {0} is greater than"
-                " the length of its corresponding dimension in shape {1}".format(
+                "Attempting to slice a tensor but a start index in {} is greater than"
+                " the length of its corresponding dimension in shape {}".format(
                     start_indices, a.shape
                 )
             )
@@ -1499,30 +1497,30 @@ def _slice_meta(
 
     for x, y, z in zip(limit_indices, a.shape, start_indices):
         if x < 0:
-            msg = "Attempting to slice a tensor with a negative stop index of {0}!".format(
-                x
+            msg = (
+                "Attempting to slice a tensor with a negative stop index of {}!".format(
+                    x
+                )
             )
             raise ValueError(msg)
         if x > y:
             msg = (
-                "Attempting to slice a tensor but a stop index in {0} is greater than the length of "
-                " its corresponding dimension in shape {1}".format(
+                "Attempting to slice a tensor but a stop index in {} is greater than the length of "
+                " its corresponding dimension in shape {}".format(
                     limit_indices, a.shape
                 )
             )
             raise ValueError(msg)
         if x < z:
             msg = (
-                "Attempting to slice a tensor but a start index in {0} is greater than "
-                " its corresponding stop index {1}".format(x, z)
+                "Attempting to slice a tensor but a start index in {} is greater than "
+                " its corresponding stop index {}".format(x, z)
             )
 
     for x in _strides:
         if x <= 0:
-            msg = (
-                "Attempting to slice a tensor with a non-positive step of {0}!".format(
-                    x
-                )
+            msg = "Attempting to slice a tensor with a non-positive step of {}!".format(
+                x
             )
             raise ValueError(msg)
 
@@ -1581,38 +1579,38 @@ def _slice_in_dim_meta(
     axis: int = 0,
 ) -> TensorLikeType:
     if axis < 0:
-        msg = "slice_in_dim: received a negative axis {0}".format(axis)
+        msg = f"slice_in_dim: received a negative axis {axis}"
         raise ValueError(msg)
     if axis >= a.ndim:
-        msg = "slice_in_dim: axis {0} is greater or equal to the rank {1} of the tensor".format(
+        msg = "slice_in_dim: axis {} is greater or equal to the rank {} of the tensor".format(
             axis, a.ndim
         )
         raise ValueError(msg)
 
     if start_index < 0:
-        msg = "slice_in_dim: received a negative start_index {0}".format(start_index)
+        msg = f"slice_in_dim: received a negative start_index {start_index}"
         raise ValueError(msg)
 
     if start_index > a.shape[axis]:
-        msg = "slice_in_dim: start_index is greater than the length {0} of dimension {1}".format(
+        msg = "slice_in_dim: start_index is greater than the length {} of dimension {}".format(
             start_index, axis
         )
         raise ValueError(msg)
 
     if limit_index > a.shape[axis]:
-        msg = "slice_in_dim: limit_index is greater than the length {0} of dimension {1}".format(
+        msg = "slice_in_dim: limit_index is greater than the length {} of dimension {}".format(
             limit_index, axis
         )
         raise ValueError(msg)
 
     if limit_index < start_index:
-        msg = "slice_in_dim: received a limit_index {0} less than the start_index {1}".format(
+        msg = "slice_in_dim: received a limit_index {} less than the start_index {}".format(
             limit_index, start_index
         )
         raise ValueError(msg)
 
     if stride < 0:
-        msg = "slice_in_dim: received a non-positive stride of {0}!".format(stride)
+        msg = f"slice_in_dim: received a non-positive stride of {stride}!"
         raise ValueError(msg)
 
     start_indices = [0] * a.ndim
@@ -1667,7 +1665,7 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
     inner_length = a.shape[dim] // outer_length
 
     if (a.shape[dim] % outer_length) != 0:
-        msg = "Attempting to split dimension of length {0}, but outer length of {1} divides it with a remainder!".format(
+        msg = "Attempting to split dimension of length {}, but outer length of {} divides it with a remainder!".format(
             a.shape[dim], outer_length
         )
         raise ValueError(msg)
@@ -1746,13 +1744,13 @@ squeeze = _make_prim(
 
 def _transpose_meta(a: TensorLikeType, permutation: DimsSequenceType) -> TensorLikeType:
     if a.ndim != len(permutation):
-        msg = "Attempting to permute a tensor of rank {0}, but received a permutation of length {1}!".format(
+        msg = "Attempting to permute a tensor of rank {}, but received a permutation of length {}!".format(
             a.ndim, len(permutation)
         )
         raise ValueError(msg)
 
     if not utils.is_valid_permutation(a.ndim, permutation):
-        msg = "Received an invalid permutation, {0}!".format(permutation)
+        msg = f"Received an invalid permutation, {permutation}!"
         raise ValueError(msg)
 
     new_shape = [0] * a.ndim
@@ -1938,7 +1936,7 @@ def _reshape_meta(a: TensorLikeType, shape: ShapeType):
     # same number of elements
     numel = reduce(operator.mul, shape)
     if numel != a.numel():
-        msg = "Attempting to reshape a tensor with {0} elements to a shape with {1} elements!".format(
+        msg = "Attempting to reshape a tensor with {} elements to a shape with {} elements!".format(
             a.numel(), numel
         )
         raise ValueError(msg)
@@ -2190,7 +2188,7 @@ def _copy_to_meta(a: TensorLikeType, b: TensorLikeType):
 
     # Validates the tensors have the same number of elements
     if a.numel() != b.numel():
-        msg = "Attempting to copy {0} elements to a tensor with {1} elements!".format(
+        msg = "Attempting to copy {} elements to a tensor with {} elements!".format(
             b.numel(), a.numel()
         )
         raise RuntimeError(msg)

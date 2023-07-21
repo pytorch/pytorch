@@ -46,10 +46,10 @@ FUNCTION_DECLARATION = CodeTemplate(
     """\
 #ifdef _WIN32
 struct ${op} : public ${superclass} {
+  TORCH_API ${op}() = default;
 #else
 struct TORCH_API ${op} : public ${superclass} {
 #endif
-  TORCH_API ${op}() = default;
   using ${superclass}::${superclass};
   variable_list apply(variable_list&& grads) override;
   std::string name() const override { return "${op}"; }
@@ -58,6 +58,8 @@ struct TORCH_API ${op} : public ${superclass} {
     ${release_variables}
   }
   ${will_release_variables}
+  void compiled_args(CompiledNodeArgs& args) override;
+  variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
   ${saved_variables}
   ${saved_list_sizes}
 };
@@ -83,6 +85,15 @@ variable_list ${op}::apply(variable_list&& grads) {
   variable_list grad_inputs(gen.size());
   ${body}
   return grad_inputs;
+}
+void ${op}::compiled_args(CompiledNodeArgs& args) {
+    ${compiled_args}
+}
+variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {
+    ${apply_with_saved_before}
+    variable_list result = apply(variable_list(grads));
+    ${apply_with_saved_after}
+    return result;
 }
 """
 )
@@ -532,6 +543,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     compute_index_ranges: List[str] = []
     getter_definitions: List[str] = []
     py_getsetdef_structs: List[str] = []
+    compiled_args: List[str] = []
+    apply_with_saved_before: List[str] = []
+    apply_with_saved_after: List[str] = []
 
     for arg in info.args_with_derivatives:
         if arg.type in TENSOR_LIST_LIKE_CTYPES:
@@ -546,6 +560,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         type = var.nctype.type
         should_append_getsetdef = True
         should_append_raw_getsetdef = False
+        visit_name = name
 
         if (
             type == BaseCType(tensorT)
@@ -568,6 +583,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
             should_append_raw_getsetdef = True
+            visit_name = f"{name}_"
         elif type == BaseCType(tensorListT) or type == BaseCType(iTensorListRefT):
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
@@ -588,6 +604,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
             should_append_raw_getsetdef = True
+            visit_name = f"{name}_"
         elif type == ListCType(OptionalCType(BaseCType(tensorT))):
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
@@ -608,6 +625,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
             should_append_raw_getsetdef = True
+            visit_name = f"{name}_"
         elif type == BaseCType(intArrayRefT):
             saved_variables.append(f"std::vector<int64_t> {name};")
             getter_definitions.append(
@@ -750,6 +768,10 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
                 PY_RAW_GETSETDEF_STRUCT.substitute(op=info.op, name=name)
             )
 
+        compiled_args.append(f"args.collect({visit_name});")
+        apply_with_saved_before.append(f"saved.before({visit_name});")
+        apply_with_saved_after.append(f"saved.after({visit_name});")
+
     for var in sorted(info.all_saved_inputs, key=lambda sa: str(sa.nctype.name)):
         save_var(var, is_output=False)
     for var in sorted(info.all_saved_outputs, key=lambda sa: str(sa.nctype.name)):
@@ -866,4 +888,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         superclass=superclass,
         all_getter_definitions=all_getter_definitions,
         all_getsetdef_structs=all_getsetdef_structs,
+        compiled_args=compiled_args,
+        apply_with_saved_before=apply_with_saved_before,
+        apply_with_saved_after=apply_with_saved_after,
     )

@@ -348,7 +348,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.tril_,
             aten.triu,
             aten.triu_,
-            aten.unfold,
             aten.unfold_backward,
             aten.unfold_copy,
             aten.upsample_bilinear2d,
