@@ -232,7 +232,7 @@ class EventList(list):
                             '"id": {}, '
                             '"cat": "cpu_to_cuda", '
                             '"args": {{}}}}, '.format(evt.trace_name, evt.time_range.start,
-                                               evt.thread, next_id))
+                                                      evt.thread, next_id))
                     # Note: use torch.profiler to get device kernel trace
                     next_id += 1
             if len(self) > 0:
