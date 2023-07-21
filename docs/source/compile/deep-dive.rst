@@ -37,15 +37,19 @@ not in dynamic shape mode.
 What is Dynamo doing?
 ---------------------
 
-If you want to understand better what TorchDynamo is doing, you can set:
+If you want to understand better what TorchDynamo is doing, you can set :ref:`logging<_torch_logging>` levels.
+
+For example:
+
 
 .. code-block:: python
 
    import torch._dynamo.config
    import logging
 
-   torch._dynamo.config.log_level = logging.INFO
-   torch._dynamo.config.output_code = True
+   torch._logging.set_logs(dynamo=logging.INFO, aot=logging.INFO, inductor=logging.INFO)
+
+For errors see :ref:`here:_torchdynamo_errors>`.
 
 This code triggers useful (but spammy) printouts.
 
