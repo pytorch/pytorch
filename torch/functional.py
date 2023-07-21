@@ -117,8 +117,7 @@ def broadcast_shapes(*shapes):
             if isinstance(shape, (tuple, list)):
                 for i in range(-1, -1 - len(shape), -1):
                     if shape[i] < 0:
-                        raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
-                                           .format(shape[i], shape[i]))
+                        raise RuntimeError(f"Trying to create tensor with negative dimension ({shape[i]}): ({shape[i]})")
                     if shape[i] == 1 or shape[i] == result[i]:
                         continue
                     if result[i] != 1:

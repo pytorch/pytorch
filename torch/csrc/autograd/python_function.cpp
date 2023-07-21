@@ -216,7 +216,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   auto size = PyTuple_GET_SIZE(pykey.get());
   TORCH_INTERNAL_ASSERT(size > 0);
   // first value is unique ID of the AotAutograd graph
-  ssize_t key = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
+  auto key = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
   if (C10_UNLIKELY(key < 0)) {
     TORCH_CHECK(PyErr_Occurred(), "key must be positive");
     throw_python_error();
