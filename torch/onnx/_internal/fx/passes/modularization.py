@@ -343,9 +343,9 @@ class _IRNode(abc.ABC):
     Each `fx.Node` possesses an `nn_module_stack` meta data that contains information
     about the module call stack. See `_ModuleStackMeta` for examples.
 
-    This pass first groups sequence of nodes that share the same base stack layers (same layers
-    starting from the bottom) into a `_ModuleNode` representing the top module from the shared
-    layers.
+    Each module call is identified by a set of base stack layers. For each module call,
+    the pass creates a `_ModuleNode` and groups the sequence of nodes that shares the
+    same base stack layers.
 
     For example,
 
@@ -355,9 +355,10 @@ class _IRNode(abc.ABC):
         stack_of_node_3 = [GPT, block1, Attention1]
         stack_of_node_4 = [GPT, block2]
 
-    [node_1, node_2, node_3] are grouped for `GPT.block1`, since they share the base
-    stack layers [GPT, block1]. [node_2, node_3] are also grouped for `GPT.block1.Attention1`,
-    since they also share the base stack layers [GPT, block1, Attention1].
+    All nodes belong to the `GPT` module call, since they share the base stack layers [GPT].
+    [node_1, node_2, node_3] are grouped for `GPT.block1`, because they share the base
+    stack layers [GPT, block1]. And [node_2, node_3] for `GPT.block1.Attention1`, [node_0]
+    for `GPT.block0`, and [node_4] for `GPT.block2` respectfully.
 
     After the first step, a hierarchical representation is generated.
 
@@ -365,25 +366,25 @@ class _IRNode(abc.ABC):
 
         _ModuleNode(GPT)
             _ModuleNode(block0)
-                _LeafNode(node0)
+                _LeafNode(node_0)
             _ModuleNode(block1)
-                _LeafNode(node1)
+                _LeafNode(node_1)
                 _ModuleNode(Attention1)
                     _ModuleNode(MLP)
-                        _LeafNode(node2)
-                _LeafNode(node3)
+                        _LeafNode(node_2)
+                _LeafNode(node_3)
             _ModuleNode(block2)
-                _LeafNode(node4)
+                _LeafNode(node_4)
 
     The second step is to build the actual `call_module` node and the sub `fx.GraphModule`.
-    This is done recursively from the leaf `_ModuleNote` to the root.
+    This is done recursively from the leaf `_ModuleNode` to the root.
 
     For example, the first submodule to be built is `GPT.block1.Attention1.MLP`. Below pair
     is generated from `_ModuleNode(MLP)`.
 
         fx.GraphModule(GPT.block1.Attention1.MLP)
             graph:
-                node2
+                node_2
 
         new_mlp_node = call_module[GPT.block1.Attention1.MLP](...)
 
@@ -393,7 +394,7 @@ class _IRNode(abc.ABC):
         fx.GraphModule(GPT.block1.Attention1)
             graph:
                 new_mlp_node
-                node3
+                node_3
 
         new_attention1_node = call_module[GPT.block1.Attention1](...)
 
@@ -685,13 +686,13 @@ class _LeafNode(_IRNode):
 class Modularize(_pass.Transform):
     """Transforms a flattened `fx.GraphModule` into a modular structure.
 
-    In the flattened `fx.GraphModule`, each `nn.Module` forward call is being traced as
+    In the flattened `fx.GraphModule`, each `nn.Module` forward call has been traced as
     a sequence of `fx.Node`s. All these `fx.Node`s are flattened and reside in the same
     `fx.GraphModule`.
 
     This pass generates a new `fx.GraphModule`. It groups the flattened `fx.Node`s that belong
     to the same `nn.Module` forward call into a sub `fx.GraphModule`. It then replaces the
-    sequence of flattened `fx.Node`s with a single `call_module` node, that is linked with
+    sequence of flattened `fx.Node`s with a single `call_module` node, which is linked with
     the sub `fx.GraphModule` by `node.target`. The sub `fx.GraphModule` is registered as a
     submodule of the new `fx.GraphModule`.
 
@@ -735,8 +736,9 @@ class Modularize(_pass.Transform):
     [NOTE: Modularize pass ordering]
     This pass groups fx nodes into subgraphs that reside within the `call_module` fx node.
     Other fx passes (including some outside the exporter) might not recognize `call_module`.
-    They may assume that all nodes are flattened. If not for this consideration, this operation
-    could potentially be relocated anywhere earlier in the pipeline.
+    They may assume that all nodes are flattened. Hence it is recommended to invoke this pass
+    as the last pre onnx export fx pass. If not for this consideration, this operation could
+    potentially be relocated anywhere earlier in the pipeline.
 
     Example:
 
