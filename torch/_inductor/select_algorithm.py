@@ -469,21 +469,12 @@ class TritonTemplate:
             mod = PyCodeCache.load(code, extra)
             _, call_args, _ = kernel.args.python_argdefs()
 
-<<<<<<< HEAD
         expected_args = list(unique(x.get_name() for x in input_nodes))
         expected_args.extend([fake_out.get_name()])
-        assert list(call_args) == expected_args, (call_args, expected_args)
-=======
-        expected_args = [x.get_name() for x in input_nodes] + [fake_out.get_name()]
-<<<<<<< HEAD
-        assert list(call_args)[:len(expected_args)] == expected_args, (call_args, expected_args)
->>>>>>> ef095fb7011 (Support dynamic shapes in TritonTemplates.)
-=======
         assert list(call_args)[: len(expected_args)] == expected_args, (
             call_args,
             expected_args,
         )
->>>>>>> 002be17eb79 (lint and comments)
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
@@ -722,7 +713,11 @@ class AlgorithmSelectorCache(PersistentCache):
     def __call__(self, name, choices: List[ChoiceCaller], input_nodes, layout):
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
-        assert len(choices) > 0, "no choices to select"
+        if len(choices) == 0:
+            raise RuntimeError(
+                "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
+                "config (defined in torch/_inductor/config.py) to allow at least one choice. "
+            )
 
         if len(choices) == 1:
             return choices[0].output_node()

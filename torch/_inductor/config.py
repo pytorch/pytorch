@@ -76,7 +76,9 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 # Possible choices are combinations of: ATen, Triton.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor.
-max_autotune_gemm_backends = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON").upper()
+max_autotune_gemm_backends = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
+).upper()
 
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
