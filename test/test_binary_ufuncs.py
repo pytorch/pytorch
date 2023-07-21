@@ -4449,9 +4449,7 @@ def generate_not_implemented_tests(cls):
 
     for op in tensor_binary_ops:
         test_name = f"test_{op}_not_implemented"
-        assert not hasattr(cls, test_name), "{} already in {}".format(
-            test_name, cls.__name__
-        )
+        assert not hasattr(cls, test_name), f"{test_name} already in {cls.__name__}"
 
         setattr(cls, test_name, create_test_func(op))
 
