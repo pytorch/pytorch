@@ -99,8 +99,7 @@ class _ConvNd(Module):
 
         valid_padding_modes = {'zeros', 'reflect', 'replicate', 'circular'}
         if padding_mode not in valid_padding_modes:
-            raise ValueError("padding_mode must be one of {}, but got padding_mode='{}'".format(
-                valid_padding_modes, padding_mode))
+            raise ValueError(f"padding_mode must be one of {valid_padding_modes}, but got padding_mode='{padding_mode}'")
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size

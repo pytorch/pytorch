@@ -310,6 +310,8 @@ class SchemaMatcher:
             # Note that record_function annotations also go through this path,
             # so it is expected that some names will not correspond to PyTorch
             # operators.
+            if "::" not in name:
+                return None
             return tuple(torch._C._jit_get_schemas_for_operator(name))
         except RuntimeError:
             return None
