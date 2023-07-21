@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
-     setLinalgBackendsToDefaultFinally, skipIfRocm)
+     setLinalgBackendsToDefaultFinally)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -3626,10 +3626,7 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @dtypesIfCUDA(*floating_types_and(
-                  *[torch.cfloat, torch.cdouble] if not TEST_WITH_ROCM else []))
     def test_qr_batched(self, device, dtype):
-        torch.backends.cuda.preferred_linalg_library("cusolver")
         """
         test torch.linalg.qr vs numpy.linalg.qr. We need some special logic
         because numpy does not support batched qr
@@ -4487,8 +4484,6 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
-    @dtypesIfCUDA(*floating_types_and(
-                  *[torch.cfloat, torch.cdouble] if not TEST_WITH_ROCM else []))
     @dtypes(*floating_and_complex_types())
     def test_ormqr(self, device, dtype):
 
@@ -4745,8 +4740,6 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
-    @dtypesIfCUDA(*floating_types_and(
-                  *[torch.cfloat, torch.cdouble] if not TEST_WITH_ROCM else []))
     @dtypes(*floating_and_complex_types())
     def test_householder_product(self, device, dtype):
         def generate_reflectors_and_tau(A):
@@ -7318,8 +7311,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
-    @dtypesIfCUDA(*floating_types_and(
-                  *[torch.cfloat, torch.cdouble] if not TEST_WITH_ROCM else []))
     @dtypes(*floating_and_complex_types())
     def test_geqrf(self, device, dtype):
 
