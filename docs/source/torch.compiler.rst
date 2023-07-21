@@ -77,7 +77,7 @@ Read More
 
 .. toctree::
    :caption: Getting Started for PyTorch Users
-   :maxdepth: 2
+   :maxdepth: 1
 
    torch.compiler_get_started
    torch.compiler_api
@@ -95,7 +95,7 @@ Read More
 
 .. toctree::
    :caption: Deep Dive for PyTorch Developers
-   :maxdepth: 2
+   :maxdepth: 1
 
    torch.compiler_deepdive
    torch.compiler_guards_overview
@@ -107,7 +107,7 @@ Read More
 
 .. toctree::
    :caption: HowTo for PyTorch Backend Vendors
-   :maxdepth: 2
+   :maxdepth: 1
 
    torch.compiler_custom_backends
    torch.compiler_transformations
