@@ -92,8 +92,6 @@ order and only try the next step if the previous step succeeded.
    forward graph, and then AOTAutograd to trace the backward graph with the
    TorchInductor compiler. If this fails then there’s an issue with TorchInductor
 
-.. :_torchdynamo_errors
-
 TorchDynamo Errors
 ~~~~~~~~~~~~~~~~~~
 
