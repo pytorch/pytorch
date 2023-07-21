@@ -170,7 +170,6 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
     for key, value in kwargs.items():
         if key in {
             "layout",
-            "device",
             "requires_grad",
             "pin_memory",
             "memory_format",
@@ -184,6 +183,10 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
                 continue
             else:
                 value = int(jit_type_utils.JitScalarType.from_dtype(value).onnx_type())
+        if key == "device":
+            # torch.device is not supported by onnxscript (no op). We turn it into
+            # a string.
+            value = str(value)
         filtered[key] = value
     return filtered
 
