@@ -885,7 +885,7 @@ def roll(a, shifts, dims=tuple()):
 
     (dim,) = dims
     # TODO: Avoid guarding on shape here
-    size = V.graph.sizevars.guard_static_shape(a.get_size()[dim])
+    size = V.graph.sizevars.evaluate_static_shape(a.get_size()[dim])
     start = (size - shifts[0]) % size
     a_loader = a.make_loader()
 
@@ -1017,11 +1017,11 @@ def select(x, dim, idx):
 @register_lowering(aten.split, type_promotion_kind=None)
 def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
-    x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
+    x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
     if isinstance(sizes, sympy.Expr):
         # TODO: We don't have to guard on sizes per se, but the number
         # of splits must stay constant
-        sizes = V.graph.sizevars.guard_static_shape(sizes)
+        sizes = V.graph.sizevars.evaluate_static_shape(sizes)
     if isinstance(sizes, (int, sympy.Integer)):
         sizes = [sizes] * ((x_size + sizes - 1) // sizes)
     result = []
@@ -1041,7 +1041,7 @@ def split_with_sizes(x, sizes, dim=0):
 @register_lowering(aten.unbind, type_promotion_kind=None)
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)
-    x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
+    x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
     result = []
     for i in range(x_size):
         result.append(select(x, dim, i))
@@ -1103,7 +1103,7 @@ def _validate_dim(x, dim, offset=0):
 def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
     # TODO: don't guard on static shape here
-    new_len = V.graph.sizevars.guard_static_shape(x.get_size()[dim]) // 2
+    new_len = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim]) // 2
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
@@ -2732,7 +2732,7 @@ def upsample_nearestnd(
     x_loader = x.make_loader()
     i_sizes = x.get_size()[-n:]
     batch = x.get_size()[:-n]
-    i_sizes = [V.graph.sizevars.guard_static_shape(i) for i in i_sizes]
+    i_sizes = [V.graph.sizevars.evaluate_static_shape(i) for i in i_sizes]
 
     assert len(scales_x) == n
     o_sizes = output_size
@@ -2804,8 +2804,8 @@ def upsample_bicubic2d_default(
     N, C, iH, iW = x.get_size()
     oH, oW = output_size
 
-    iH = V.graph.sizevars.guard_static_shape(iH)
-    iW = V.graph.sizevars.guard_static_shape(iW)
+    iH = V.graph.sizevars.evaluate_static_shape(iH)
+    iW = V.graph.sizevars.evaluate_static_shape(iW)
 
     def get_int_dtype(maxval):
         if maxval > torch.iinfo(torch.int32).max:
@@ -2906,8 +2906,8 @@ def reflection_pad2d(x, padding):
 
     x_loader = x.make_loader()
     *batch, h, w = x.get_size()
-    h = V.graph.sizevars.guard_static_shape(h)
-    w = V.graph.sizevars.guard_static_shape(w)
+    h = V.graph.sizevars.evaluate_static_shape(h)
+    w = V.graph.sizevars.evaluate_static_shape(w)
 
     def reflect(x, size, offset):
         size_num = size
@@ -2937,8 +2937,8 @@ def reflection_pad2d_backward(grad_output, x, padding):
     left, right, top, bot = padding
 
     *_, h, w = x.get_size()
-    h = V.graph.sizevars.guard_static_shape(h) - 1
-    w = V.graph.sizevars.guard_static_shape(w) - 1
+    h = V.graph.sizevars.evaluate_static_shape(h) - 1
+    w = V.graph.sizevars.evaluate_static_shape(w) - 1
     grad_loader = grad_output.make_loader()
     *_, h_grad, w_grad = grad_output.get_size()
 
@@ -3481,8 +3481,8 @@ def _adaptive_avg_pool2d(x, output_size):
 
     *batch, h_in, w_in = x.get_size()
 
-    h_in = V.graph.sizevars.guard_static_shape(h_in)
-    w_in = V.graph.sizevars.guard_static_shape(w_in)
+    h_in = V.graph.sizevars.evaluate_static_shape(h_in)
+    w_in = V.graph.sizevars.evaluate_static_shape(w_in)
 
     h_out, w_out = output_size
 
@@ -3548,8 +3548,8 @@ def upsample_nearest2d_backward(
     x.realize_hint()
 
     *batch, inp_h, inp_w = x.get_size()
-    inp_h = V.graph.sizevars.guard_static_shape(inp_h)
-    inp_w = V.graph.sizevars.guard_static_shape(inp_w)
+    inp_h = V.graph.sizevars.evaluate_static_shape(inp_h)
+    inp_w = V.graph.sizevars.evaluate_static_shape(inp_w)
 
     *batch, out_h, out_w = input_size
 
