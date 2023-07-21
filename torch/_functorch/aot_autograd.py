@@ -714,7 +714,8 @@ def _get_hints(exprs):
 def run_functionalized_fw_and_collect_metadata(
     f,
     *,
-    keep_input_mutations: bool
+    keep_input_mutations: bool,
+    aot_config: AOTConfig,
 ) -> ViewAndMutationMeta:
     memo = {}
 
