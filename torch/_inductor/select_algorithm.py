@@ -26,7 +26,7 @@ from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 
 from .codegen.triton_utils import config_of, signature_of
 
-from .utils import do_bench, is_size_var, sympy_dot, sympy_product, sympy_subs, unique
+from .utils import do_bench, sympy_dot, sympy_product, unique
 from .virtualized import V
 
 log = logging.getLogger(__name__)
