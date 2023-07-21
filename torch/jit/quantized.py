@@ -203,7 +203,7 @@ class QuantizedRNNCell(QuantizedRNNCellBase):
         else:
             ret = input  # TODO: remove when jit supports exception flow
             raise RuntimeError(
-                "Unknown nonlinearity: {}".format(self.nonlinearity))
+                f"Unknown nonlinearity: {self.nonlinearity}")
         return ret
 
 
@@ -284,7 +284,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
             raise RuntimeError('Only LSTM or GRU is supported for QuantizedRNN')
 
         if dtype != torch.int8 and dtype != torch.float16:
-            raise RuntimeError('Unsupported dtype: {}'.format(dtype))
+            raise RuntimeError(f'Unsupported dtype: {dtype}')
 
         self.all_weights = []
         for layer in range(self.num_layers):
@@ -294,8 +294,8 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                 suffix = '_reverse' if direction == 1 else ''
 
                 def get_weight_bias(ihhh):
-                    weight_name = 'weight_{}_l{}{}'.format(ihhh, layer, suffix)
-                    bias_name = 'bias_{}_l{}{}'.format(ihhh, layer, suffix)
+                    weight_name = f'weight_{ihhh}_l{layer}{suffix}'
+                    bias_name = f'bias_{ihhh}_l{layer}{suffix}'
 
                     weight = getattr(other, weight_name)
                     bias = getattr(other, bias_name)
@@ -316,7 +316,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
                     cell_params = torch.ops.quantized.make_quantized_cell_params_fp16(
                         packed_ih, packed_hh)
 
-                setattr(self, 'cell_params_{}_{}'.format(layer, suffix), cell_params)
+                setattr(self, f'cell_params_{layer}_{suffix}', cell_params)
                 self.all_weights.append(cell_params)
 
     @torch.jit.script_method
@@ -551,7 +551,7 @@ def quantize_linear_modules(module, dtype=torch.int8):
             return QuantizedLinearFP16(module)
         else:
             raise RuntimeError(
-                "Unsupported dtype: {}".format(dtype))
+                f"Unsupported dtype: {dtype}")
     return module
 
 
@@ -570,7 +570,7 @@ def quantize_rnn_modules(module, dtype=torch.int8):
         setattr(module, name, mod)
     if isinstance(module, torch.nn.LSTM):
         if dtype != torch.int8 and dtype != torch.float16:
-            raise RuntimeError("Unsupported dtype: {}".format(dtype))
+            raise RuntimeError(f"Unsupported dtype: {dtype}")
         return QuantizedLSTM(module, dtype)
     if isinstance(module, torch.nn.GRU):
         return QuantizedGRU(module)

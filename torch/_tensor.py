@@ -878,8 +878,7 @@ class Tensor(torch._C._TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other):
-        dtype = torch.result_type(other, self)
-        return torch.tensor(other, dtype=dtype, device=self.device) ** self
+        return torch.pow(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __floordiv__(self, other):
@@ -1381,9 +1380,7 @@ class Tensor(torch._C._TensorBase):
         elif self.device.type == "xpu":
             device_type = DLDeviceType.kDLOneAPI
         else:
-            raise ValueError(
-                "Unknown device type {} for Dlpack".format(torch_device_type)
-            )
+            raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)
 
     __module__ = "torch"

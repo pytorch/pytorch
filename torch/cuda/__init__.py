@@ -298,7 +298,7 @@ class cudaStatus:
 class CudaError(RuntimeError):
     def __init__(self, code: int) -> None:
         msg = _cudart.cudaGetErrorString(_cudart.cudaError(code))
-        super().__init__('{0} ({1})'.format(msg, code))
+        super().__init__(f'{msg} ({code})')
 
 
 def check_error(res: int) -> None:
@@ -1140,7 +1140,7 @@ torch._storage_classes.add(ComplexDoubleStorage)
 torch._storage_classes.add(ComplexFloatStorage)
 
 
-class _WrappedTritonKernel(object):
+class _WrappedTritonKernel:
     """ Just a simple wrapper to store some metadata for testing purposes.
     """
 

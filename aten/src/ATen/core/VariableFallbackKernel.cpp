@@ -1,7 +1,7 @@
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/VariableHooksInterface.h>
 #include <torch/library.h>
-#include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 
 /*
  * This file implements a variable fallback kernel for custom operators.
@@ -28,7 +28,12 @@ namespace {
 // NB: But not the private use ones; maybe the extension wants
 // to override it themselves!
 
-#define AUTOGRAD_FALLBACK torch::autograd::basicAutogradNotImplementedFallback()
+void autograd_fallback(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet dispatch_keys,
+    torch::jit::Stack* stack);
+
+#define AUTOGRAD_FALLBACK torch::CppFunction::makeFromBoxedFunction<&autograd_fallback>()
 
 TORCH_LIBRARY_IMPL(_, AutogradOther, m) {
   m.fallback(AUTOGRAD_FALLBACK);
@@ -64,7 +69,7 @@ TORCH_LIBRARY_IMPL(_, AutogradMeta, m) {
 
 // see Note [ADInplaceOrView key]
 TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
-      m.fallback(torch::CppFunction::makeFallthrough());
+  m.fallback(torch::CppFunction::makeFallthrough());
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradHPU, m) {
@@ -73,4 +78,19 @@ TORCH_LIBRARY_IMPL(_, AutogradHPU, m) {
 
 #undef AUTOGRAD_FALLBACK
 
+void autograd_fallback(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet dispatch_keys,
+    torch::jit::Stack* stack) {
+  // PyTorch has separate builds, some of which don't include autograd.
+  // So we define some behavior for when autograd isn't included and
+  // go through a layer of indirection (VariableHooksInterface) when it is.
+  // See aten/src/ATen/core/VariableHooksInterface.h for more details.
+  if (!at::impl::HasVariableHooks()) {
+    op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
+    return;
+  }
+  at::impl::GetVariableHooks()->basic_autograd_not_implemented_fallback(op, dispatch_keys, stack);
 }
+
+} // namespace
