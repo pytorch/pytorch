@@ -7,8 +7,8 @@ from typing import Any, Callable, Mapping, Optional
 import torch
 import torch._ops
 import torch.fx
+from torch._dispatch import python as python_dispatch
 from torch.fx.experimental import proxy_tensor
-
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
@@ -61,7 +61,7 @@ class Decompose(_pass.Transform):
             tracing_mode = "symbolic" if self.enable_dynamic_axes else "fake"
 
         # Apply decomposition table to the input graph.
-        with fake_mode:
+        with python_dispatch.enable_python_dispatcher(), fake_mode:
             decomposed_module = proxy_tensor.make_fx(
                 module,
                 decomposition_table=self.decomposition_table,

@@ -148,8 +148,14 @@ class Transform(abc.ABC):
     Example: TODO(bowbao): Fill example once more overrideable methods are added.
     """
 
-    """The module to be transformed."""
+    diagnostic_context: diagnostics.DiagnosticContext
+    """The diagnostic context for recording diagnostics."""
+
     module: torch.fx.GraphModule
+    """The module to be transformed."""
+
+    fake_mode: Optional[fake_tensor.FakeTensorMode]
+    """The existing fake mode detected from `self.module`."""
 
     def __init__(
         self,
@@ -162,8 +168,8 @@ class Transform(abc.ABC):
             diagnostic_context: The diagnostic context for recording diagnostics.
             module: The module to be transformed.
         """
-        self.module = module
         self.diagnostic_context = diagnostic_context
+        self.module = module
         self.fake_mode = self._detect_fake_mode()
 
     def _detect_fake_mode(self) -> Optional[fake_tensor.FakeTensorMode]:
