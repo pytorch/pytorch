@@ -636,6 +636,22 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model, [], inputs, additional_test_inputs=[((), another_inputs)]
         )
 
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
+    def test_prims_device_put(self):
+        class CustomModule(nn.Module):
+            def forward(self, x):
+                # Assuming x is a tensor on the CPU, move it to the desired device using device_put()
+                x = torch.ops.prims.device_put(x, "cpu")
+                return x
+
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            CustomModule(), (torch.randn(1, 2, 3),)
+        )
+
     @_beartype.beartype
     def _test_fx_symbolic_tracer_large_scale_exporter(
         self,
