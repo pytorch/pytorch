@@ -148,13 +148,20 @@ class TestDynamismExpression(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
+
+    def _test_export_same_as_eager(self, f, args, kwargs=None):
+        kwargs = kwargs or {}
+        exported_program = export(f, args, kwargs)
+        reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
+        self.assertEqual(exported_program(*args, **kwargs), f(*args, **kwargs))
+        self.assertEqual(exported_program(*args, **reversed_kwargs), f(*args, **reversed_kwargs))
+
     def test_basic(self):
         def f(x, y):
             return x[0] + y
 
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
-        exported_program = export(f, inp)
-        self.assertTrue(torch.allclose(exported_program(*inp), f(*inp)))
+        self._test_export_same_as_eager(f, inp)
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         def fn_ddo(x):
@@ -235,7 +242,7 @@ class TestExport(TestCase):
             torchdynamo.exc.UserError, "It appears that you're trying to set a constraint " +
             "on a value which we evaluated to have a static value of 3. "
         ):
-            export(f, example_inputs, constraints)
+            export(f, example_inputs, {}, constraints)
 
     def test_not_correct_dim(self):
         def f(x):
@@ -267,8 +274,71 @@ class TestExport(TestCase):
             return map(body, xs, y, z)
 
         inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
-        exported_program = export(list_tensor_map, inps)
-        self.assertTrue(torch.allclose(exported_program(*inps), list_tensor_map(*inps)))
+        self._test_export_same_as_eager(list_tensor_map, inps)
+
+    def test_export_func_with_kwargs(self):
+        def kw_func(arg1, arg2, kw1, kw2):
+            return arg1 + arg2, kw1 + kw2
+
+        args = (torch.ones(6, 4), torch.ones(1, 1))
+        kwargs = {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}
+        self._test_export_same_as_eager(kw_func, args, kwargs)
+
+    def test_export_func_with_pytree_kwargs(self):
+        def kw_func(arg1, arg2, a, b):
+            return arg1 + a["kw1"] + b[0], arg2 + a["kw2"] + b[1]
+
+        args = (torch.ones(2, 3), torch.ones(3, 4))
+        kwargs = {"a": {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}, "b": [torch.ones(2, 3), torch.ones(3, 4)]}
+        self._test_export_same_as_eager(kw_func, args, kwargs)
+
+    def test_export_func_with_default_kwargs(self):
+        def kw_func(arg1, arg2, a, b=1):
+            return arg1 + arg2, a["kw1"] + a["kw2"] + b
+
+        def kw_func2(arg1, arg2, a=1, b=2):
+            return arg1 + a, arg2 + b
+
+
+        args = (torch.ones(6, 4), torch.ones(1, 1))
+        kwargs1 = {"a": {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}}
+        kwargs2 = {"a": {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}, "b": 2}
+        self._test_export_same_as_eager(kw_func, args, kwargs1)
+        self._test_export_same_as_eager(kw_func, args, kwargs2)
+        kwargs3 = {"b": 1}
+        self._test_export_same_as_eager(kw_func2, args, kwargs3)
+
+    def test_export_func_with_var_postional_args(self):
+        def kw_func(arg1, arg2, *args):
+            return arg1 + args[0], arg2 + args[1]
+
+        args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
+        self._test_export_same_as_eager(kw_func, args)
+
+    def test_export_func_with_keyword_only_args(self):
+        def kw_func(arg1, arg2, *args, kw1, kw2):
+            return arg1 + args[0] + kw1, arg2 + args[1] + kw2
+
+        args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
+        kwargs = {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}
+        self._test_export_same_as_eager(kw_func, args, kwargs)
+
+    def test_export_func_with_var_keyword_args(self):
+        def kw_func(arg1, arg2, *args, kw1, kw2, **kwargs):
+            return arg1 + args[0] + kw1 + kwargs["kw3"], arg2 + args[1] + kw2 + kwargs["kw4"]
+
+        args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
+        kwargs = {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4), "kw3": torch.ones(2, 3), "kw4": torch.ones(3, 4)}
+        self._test_export_same_as_eager(kw_func, args, kwargs)
+
+    def test_export_func_with_var_keyword_pytree_args(self):
+        def kw_func(arg1, arg2, *args, kw1, kw2, **kwargs):
+            return arg1 + arg2[0][0] + args[0] + kw1[0] + kwargs["kw3"][0], arg2[1] + args[1] + kw2 + kwargs["kw4"]
+
+        args = (torch.ones(2, 3), [(torch.ones(2, 3), ), torch.ones(3, 4)], torch.ones(2, 3), torch.ones(3, 4))
+        kwargs = {"kw1": (torch.ones(2, 3), ), "kw2": torch.ones(3, 4),
+                  "kw3": (torch.ones(2, 3), torch.ones(3, 4)), "kw4": torch.ones(3, 4)}
+        self._test_export_same_as_eager(kw_func, args, kwargs)
 
     def test_linear_conv(self):
 
