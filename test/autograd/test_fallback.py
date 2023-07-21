@@ -316,6 +316,44 @@ class TestAutogradFallback(TestCase):
                 z.sum().backward()
 
     @parametrize("mode", ("nothing", "warn"))
+    def test_undefined_inputs_outputs(self, mode):
+        with autograd_fallback_mode(mode):
+            lib = self.get_lib()
+            lib.define("foo(Tensor a, Tensor b) -> (Tensor, Tensor)")
+            op = self.get_op("foo")
+
+            def foo_impl(a, b):
+                return None, b.clone()
+
+            lib.impl("foo", foo_impl, "CPU")
+
+            x = torch.randn(3, requires_grad=True)
+            # NB: PyTorch dispatcher treats "None" as undefined Tensor.
+            y, z = op(None, x)
+            with self._check_ctx(mode):
+                z.sum().backward()
+
+    @parametrize("mode", ("nothing", "warn"))
+    def test_undefined_grads(self, mode):
+        with autograd_fallback_mode(mode):
+            lib = self.get_lib()
+            lib.define("foo(Tensor a, Tensor b) -> (Tensor, Tensor)")
+            op = self.get_op("foo")
+
+            def foo_impl(a, b):
+                return a.sin(), b.cos()
+
+            lib.impl("foo", foo_impl, "CPU")
+
+            x = torch.randn(3, requires_grad=True)
+            y = torch.randn(3)
+            w, z = op(x, y)
+            w = torch._C._functions.UndefinedGrad()(w)
+            z = torch._C._functions.UndefinedGrad()(z)
+            with self._check_ctx(mode):
+                (z + w).sum().backward()
+
+    @parametrize("mode", ("nothing", "warn"))
     def test_post_autograd_returns_mix_of_requires_grad_tensors(self, mode):
         with autograd_fallback_mode(mode):
             lib = self.get_lib()

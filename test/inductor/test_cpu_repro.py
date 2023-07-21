@@ -518,7 +518,7 @@ class CPUReproTests(TestCase):
 
         numerical_testsuit = [4.4, 4.5, 4.6, 5.5]
         for numerical_number in numerical_testsuit:
-            x = torch.ones((17)) * numerical_number
+            x = torch.ones(17) * numerical_number
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
