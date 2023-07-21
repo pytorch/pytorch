@@ -4,7 +4,6 @@ import abc
 
 import collections
 import copy
-import functools
 import operator
 
 from typing import (
@@ -18,7 +17,6 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    Type,
     Union,
 )
 
@@ -29,18 +27,26 @@ from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass
 from torch.utils import _pytree as pytree
 
+_FX_TRACER_NN_MODULE_META_TYPE = Tuple[str, type]
+"""Legacy type of item from `node.meta["nn_module_stack"].items()` produced by FX symbolic tracer."""
 _FX_TRACER_NN_MODULE_STACK_META_TYPE = collections.OrderedDict
-"""Legacy type produced by FX symbolic tracer."""
+"""Legacy type of `node.meta["nn_module_stack"]` produced by FX symbolic tracer."""
 
-_DYNAMO_NN_MODULE_STACK_META_TYPE = Dict[str, Tuple[str, type]]
-"""Type produced by FX dynamo tracer."""
+_DYNAMO_NN_MODULE_META_TYPE = Tuple[str, Tuple[str, type]]
+"""Type of item from `node.meta["nn_module_stack"].items()` produced by FX dynamo tracer."""
+_DYNAMO_NN_MODULE_STACK_META_TYPE = Dict[str, _DYNAMO_NN_MODULE_META_TYPE]
+"""Type of `node.meta["nn_module_stack"]` produced by FX dynamo tracer."""
 
 
 class _ModuleMeta:
     """Meta information about a module.
 
     This class is used to represent the module information in a more structured way.
-    It parses raw module information from node.meta.
+    It parses raw module information from a single item from
+    `node.meta["nn_module_stack"].items()`.
+
+    See the uses of `from_raw_meta`, `from_fx_tracer_produced_raw_meta`, and
+    `from_dynamo_produced_raw_meta` for how to create an instance.
 
     Attributes:
         _module_class: The class of the module. E.g. `torch.nn.module.sparse.Embedding`.
@@ -131,7 +137,7 @@ class _ModuleMeta:
 
     @classmethod
     def from_fx_tracer_produced_raw_meta(
-        cls, raw_meta: Tuple[str, Type]
+        cls, raw_meta: _FX_TRACER_NN_MODULE_META_TYPE
     ) -> _ModuleMeta:
         """Create a module meta from raw meta produced by FX symbolic tracer."""
         module_name, module_class = raw_meta
@@ -139,18 +145,63 @@ class _ModuleMeta:
 
     @classmethod
     def from_dynamo_produced_raw_meta(
-        cls, raw_meta: Tuple[str, Tuple[str, Type]]
+        cls, raw_meta: _DYNAMO_NN_MODULE_META_TYPE
     ) -> _ModuleMeta:
         """Create a module meta from raw meta produced by FX dynamo tracer."""
         module_name, (qualified_name, module_class) = raw_meta
         return _ModuleMeta(module_name, module_class, raw_meta)
+
+    @classmethod
+    def from_raw_meta(
+        cls,
+        raw_meta: Union[_FX_TRACER_NN_MODULE_META_TYPE, _DYNAMO_NN_MODULE_META_TYPE],
+    ) -> _ModuleMeta:
+        if (
+            isinstance(raw_meta, tuple)
+            and len(raw_meta) == 2
+            and isinstance(raw_meta[1], type)
+        ):
+            # Trying to do `instance(raw_meta, _FX_TRACER_NN_MODULE_META_TYPE)`
+            return _ModuleMeta.from_fx_tracer_produced_raw_meta(raw_meta)
+        if (
+            isinstance(raw_meta, tuple)
+            and len(raw_meta) == 2
+            and isinstance(raw_meta[1], tuple)
+        ):
+            # Trying to do `instance(raw_meta, _DYNAMO_NN_MODULE_META_TYPE)`
+            return _ModuleMeta.from_dynamo_produced_raw_meta(raw_meta)
+        raise TypeError(
+            f"Unknown type of raw meta item from node.meta['nn_module_stack'].items(): {type(raw_meta)}"
+        )
 
 
 class _ModuleStackMeta:
     """Meta information about the module stack.
 
     This class is used to represent the module stack information in a more
-    structured way. It parses raw module stack information from node.meta.
+    structured way. It parses raw module stack information from `node.meta["nn_module_stack"]`.
+
+    Example of raw module stack information:
+
+        If produced by dynamo:
+
+            {
+                'L__self___h_1': (
+                    "L['self'].h[1]",
+                    <class 'transformers.models.gpt2.modeling_gpt2.GPT2Block'>
+                ),
+                'L__self___h_1_attn': (
+                    "L['self'].h[1].attn",
+                    <class 'transformers.models.gpt2.modeling_gpt2.GPT2Attention'>
+                )
+            }
+
+        If produced by fx.symbolic_trace:
+
+            {
+                'h.1': <class 'transformers.models.gpt2.modeling_gpt2.GPT2Block'>,
+                'h.1.attn': <class 'transformers.models.gpt2.modeling_gpt2.GPT2Attention'>
+            }
     """
 
     _module_stack: Final[List[_ModuleMeta]]
@@ -168,21 +219,8 @@ class _ModuleStackMeta:
         if nn_module_stack_meta is None:
             return
         raw_meta = copy.copy(nn_module_stack_meta)
-        is_fx_tracer_produced_raw_meta = isinstance(
-            raw_meta, _FX_TRACER_NN_MODULE_STACK_META_TYPE
-        )
-        is_dynamo_produced_raw_meta = (
-            isinstance(raw_meta, dict) and not is_fx_tracer_produced_raw_meta
-        )
         for item in raw_meta.items():
-            if is_fx_tracer_produced_raw_meta:
-                self.push(_ModuleMeta.from_fx_tracer_produced_raw_meta(item))
-            elif is_dynamo_produced_raw_meta:
-                self.push(_ModuleMeta.from_dynamo_produced_raw_meta(item))
-            else:
-                raise AssertionError(
-                    f"Unknown type of nn_module_stack_meta: {type(raw_meta)}"
-                )
+            self.push(_ModuleMeta.from_raw_meta(item))
 
     def __len__(self) -> int:
         return len(self._module_stack)
@@ -197,7 +235,16 @@ class _ModuleStackMeta:
         return len(self._module_stack) == 0
 
     def top(self) -> _ModuleMeta:
-        """Returns the top module meta in the stack. I.e., the meta for leaf module."""
+        """Returns the top module meta in the stack. I.e., the meta for leaf module.
+
+        Example:
+
+            Consider the following module stack:
+
+            stack = [GPT, block1, Attention_1, MLP]
+
+            stack.top() == MLP
+        """
         if self.is_empty_or_root():
             return _ModuleMeta.root()
         return self._module_stack[-1]
@@ -210,7 +257,22 @@ class _ModuleStackMeta:
         """Determines if self is a superset of the provided module stack.
 
         I.e., If self includes all elements from the provided module stack, plus additional
-        elements op top. If self is empty or root, this method always return False.
+        elements on top. If self is empty or root, this method always return False.
+
+        Example:
+
+            Consider the following module stack:
+
+            stack_1 = [GPT, block1, Attention_1, MLP]
+            stack_2 = [GPT, block1]
+
+            stack_1.is_superset_of(stack_2) == True
+            stack_2.is_superset_of(stack_1) == False
+
+            stack_3 = [GPT, block2, Attention_1]
+
+            stack_1.is_superset_of(stack_3) == False
+            stack_3.is_superset_of(stack_1) == False
         """
         if self.is_empty_or_root():
             return False
@@ -232,18 +294,10 @@ class _ModuleStackMeta:
         self._module_stack.append(module_meta)
 
     @_beartype.beartype
-    def is_same(
-        self,
-        module_stack: _ModuleStackMeta,
-    ) -> bool:
-        """Determines if self is the same as the provided module stack."""
-        return self._module_stack == module_stack._module_stack
-
-    @_beartype.beartype
     def __eq__(self, __value: object) -> bool:
         if not isinstance(__value, _ModuleStackMeta):
             return False
-        return self.is_same(__value)
+        return self._module_stack == __value._module_stack
 
     @property
     def raw_meta(self) -> Optional[Dict[str, Tuple[str, type]]]:
@@ -267,7 +321,6 @@ class _ModuleStackMeta:
         return self.top().qualified_module_class_name
 
 
-@functools.lru_cache()
 def _module_stack_meta_from_node(node: torch.fx.Node) -> _ModuleStackMeta:
     return _ModuleStackMeta(node.meta.get("nn_module_stack"))
 
@@ -281,8 +334,70 @@ def _get_unique_module_name(module_names: Dict[str, int], module_name: str) -> s
 class _IRNode(abc.ABC):
     """Base class for IR nodes.
 
-    IR nodes are used for modularization. They add a layer of abstraction on top of
+    IR nodes are used for Modularize pass only. They add a layer of abstraction on top of
     torch.fx.Node.
+
+    [NOTE: Modularize Pass Implementation]
+    The main job of the pass is to group `fx.Node`s that belong to the same `nn.Module`
+    forward call, and then create `call_module` node and sub `fx.GraphModule` from them.
+    Each `fx.Node` possesses an `nn_module_stack` meta data that contains information
+    about the module call stack. See `_ModuleStackMeta` for examples.
+
+    This pass first groups sequence of nodes that share the same base stack layers (same layers
+    starting from the bottom) into a `_ModuleNode` representing the top module from the shared
+    layers.
+
+    For example,
+
+        stack_of_node_0 = [GPT, block0]
+        stack_of_node_1 = [GPT, block1]
+        stack_of_node_2 = [GPT, block1, Attention1, MLP]
+        stack_of_node_3 = [GPT, block1, Attention1]
+        stack_of_node_4 = [GPT, block2]
+
+    [node_1, node_2, node_3] are grouped for `GPT.block1`, since they share the base
+    stack layers [GPT, block1]. [node_2, node_3] are also grouped for `GPT.block1.Attention1`,
+    since they also share the base stack layers [GPT, block1, Attention1].
+
+    After the first step, a hierarchical representation is generated.
+
+    For above example, the representation is:
+
+        _ModuleNode(GPT)
+            _ModuleNode(block0)
+                _LeafNode(node0)
+            _ModuleNode(block1)
+                _LeafNode(node1)
+                _ModuleNode(Attention1)
+                    _ModuleNode(MLP)
+                        _LeafNode(node2)
+                _LeafNode(node3)
+            _ModuleNode(block2)
+                _LeafNode(node4)
+
+    The second step is to build the actual `call_module` node and the sub `fx.GraphModule`.
+    This is done recursively from the leaf `_ModuleNote` to the root.
+
+    For example, the first submodule to be built is `GPT.block1.Attention1.MLP`. Below pair
+    is generated from `_ModuleNode(MLP)`.
+
+        fx.GraphModule(GPT.block1.Attention1.MLP)
+            graph:
+                node2
+
+        new_mlp_node = call_module[GPT.block1.Attention1.MLP](...)
+
+    Next, the `GPT.block1.Attention1` submodule is built. Below is generated from
+    `_ModuleNode(Attention1)`.
+
+        fx.GraphModule(GPT.block1.Attention1)
+            graph:
+                new_mlp_node
+                node3
+
+        new_attention1_node = call_module[GPT.block1.Attention1](...)
+
+    Until every submodule is built, the new modularized `fx.GraphModule` is generated.
     """
 
     @property
@@ -331,7 +446,7 @@ class _ModuleNode(_IRNode):
 
     def is_same_module_as(self, node: _IRNode) -> bool:
         """Determines if the provided node pertains to the same module as this node."""
-        return self.stack_meta.is_same(node.stack_meta)
+        return self.stack_meta == node.stack_meta
 
     def is_parent_module_of(self, node: _IRNode) -> bool:
         """Determines if this node represents a parent module of the provided node."""
@@ -391,6 +506,11 @@ class _ModuleNode(_IRNode):
         All node args that are produced by nodes outside of the module are considered module
         inputs. The order of returned module inputs is the same as the their use order.
 
+        ### Known limitations
+
+        The original ordering of module inputs is not preserved. There is no meta information
+        to be found from the `fx.GraphModule` that can be used to recover the original ordering.
+
         Returns:
             Sequence of module inputs.
         """
@@ -413,6 +533,11 @@ class _ModuleNode(_IRNode):
 
         All nodes that are used by nodes outside of the module are considered module
         outputs. The order of returned module outputs is the same as the their creation order.
+
+        ### Known limitations
+
+        The original ordering of module outputs is not preserved. There is no meta information
+        to be found from the `fx.GraphModule` that can be used to recover the original ordering.
 
         Returns:
             Sequence of module outputs.
@@ -558,12 +683,22 @@ class _LeafNode(_IRNode):
 
 
 class Modularize(_pass.Transform):
-    """Transforms a flattened fx.GraphModule into a modular structure.
+    """Transforms a flattened `fx.GraphModule` into a modular structure.
 
-    This method generates a new fx.GraphModule by creating fx submodules for all nodes
-    that were part of a previous sub nn.Module.
+    In the flattened `fx.GraphModule`, each `nn.Module` forward call is being traced as
+    a sequence of `fx.Node`s. All these `fx.Node`s are flattened and reside in the same
+    `fx.GraphModule`.
 
-    An fx submodule under this context can typically be understood in three ways:
+    This pass generates a new `fx.GraphModule`. It groups the flattened `fx.Node`s that belong
+    to the same `nn.Module` forward call into a sub `fx.GraphModule`. It then replaces the
+    sequence of flattened `fx.Node`s with a single `call_module` node, that is linked with
+    the sub `fx.GraphModule` by `node.target`. The sub `fx.GraphModule` is registered as a
+    submodule of the new `fx.GraphModule`.
+
+    The process is done based on information from the `nn_module_stack` metadata of each node, i.e.
+    `node.meta["nn_module_stack"]`. For more implementation details, see [NOTE: Modularize Pass Implementation].
+
+    An fx submodule under this context can typically be interpreted in three different ways:
 
         1. As an embodiment of an nn.Module class, which is considered stateless.
         Its execution path can vary depending on the configuration of module initialization,
@@ -575,8 +710,8 @@ class Modularize(_pass.Transform):
         3. As a captured call of an nn.Module instance, where the execution path
         is set.
 
-    The generality decreases along this list. Within the scope of this function, fx
-    submodules are created according to the third interpretation.
+    The generality decreases along this list. Within the scope of this function, the pass
+    creates fx submodules according to the third interpretation.
 
     The first interpretation is the most general case. It requires complex analysis and additional
     metadata and code information to construct its general form. Consider an example nn.Module
@@ -596,6 +731,12 @@ class Modularize(_pass.Transform):
     ### Known constraints
     Two successive calls to the same module instance will be conflated. They are indistinguishable.
     This is due to limitations of the current fx metadata "nn_module_stack".
+
+    [NOTE: Modularize pass ordering]
+    This pass groups fx nodes into subgraphs that reside within the `call_module` fx node.
+    Other fx passes (including some outside the exporter) might not recognize `call_module`.
+    They may assume that all nodes are flattened. If not for this consideration, this operation
+    could potentially be relocated anywhere earlier in the pipeline.
 
     Example:
 

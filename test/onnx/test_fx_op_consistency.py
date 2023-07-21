@@ -599,7 +599,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                 inputs=repr(inputs),
                 kwargs=repr(cpu_sample.kwargs),
             ):
-                print("inputs: ", inputs, " kwargs: ", cpu_sample.kwargs)
                 test_behavior, reason = _should_skip_xfail_test_sample(
                     op.name, cpu_sample
                 )

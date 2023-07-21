@@ -876,11 +876,7 @@ def pre_export_passes(
         ).run()
 
     # This operation should be invoked as the last pre export pass.
-    # It groups fx nodes into subgraphs that reside within the `call_module` fx node.
-    # Note: The reason for placing it as the last operation is because other fx passes
-    # (including some outside the exporter) might not recognize `call_module`. They may
-    # assume that all nodes are flattened. If not for this consideration, this operation
-    # could potentially be relocated anywhere earlier in the pipeline.
+    # See [NOTE: Modularize pass ordering]
     module = passes.Modularize(diagnostic_context, module).run()
 
     # ONNX does not support None inputs. During graph building, all None inputs

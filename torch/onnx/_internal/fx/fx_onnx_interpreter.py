@@ -13,7 +13,6 @@ from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
 
 import torch
 import torch.fx
-from torch._subclasses import fake_tensor
 from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import (
@@ -189,16 +188,6 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
     return filtered
 
 
-_META_VALUE_TYPE = Union[
-    fake_tensor.FakeTensor, torch.SymInt, torch.SymFloat, torch.SymBool
-]
-_META_SYM_VALUE_TYPE_MAP = {
-    torch.SymInt: torch.int64,
-    torch.SymFloat: torch.float32,
-    torch.SymBool: torch.bool,
-}
-
-
 @_beartype.beartype
 def _fill_tensor_shape_type(
     onnxscript_values: Union[
@@ -207,9 +196,9 @@ def _fill_tensor_shape_type(
     ],
     name: str,
     expected_values: Union[
-        _META_VALUE_TYPE,
-        List[_META_VALUE_TYPE],
-        Tuple[_META_VALUE_TYPE, ...],
+        fx_type_utils.META_VALUE_TYPE,
+        List[fx_type_utils.META_VALUE_TYPE],
+        Tuple[fx_type_utils.META_VALUE_TYPE, ...],
     ],
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
@@ -229,12 +218,10 @@ def _fill_tensor_shape_type(
         # aten::sym_size output is a int, not a tensor, which stands
         # for the size of one dim. We treat it as 0-D tensor.
         # TODO(titaiwang): set shape?
-        if isinstance(expected_value, torch.SymInt):
-            onnxscript_value.dtype = torch.int64
-        elif isinstance(expected_value, torch.SymFloat):
-            onnxscript_value.dtype = torch.float32
-        elif isinstance(expected_value, torch.SymBool):
-            onnxscript_value.dtype = torch.bool
+        if isinstance(expected_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            onnxscript_value.dtype = fx_type_utils.from_sym_value_to_torch_dtype(
+                expected_value
+            )
         else:
             # We set node output sizes to be dynamic to continue the model conversion,
             # and inputs are also set to be dynamic in add_input().
@@ -519,15 +506,10 @@ class FxOnnxInterpreter:
                 dtype=fake_tensor.dtype,
             )
         elif isinstance(fake_tensor, (torch.SymBool, torch.SymInt, torch.SymFloat)):
-            sym_type_to_tensor_type = {
-                torch.SymBool: torch.bool,
-                torch.SymInt: torch.int64,
-                torch.SymFloat: torch.float64,
-            }
             output = onnxscript_graph.add_input(
                 input_name=node.name,
                 shape=[],
-                dtype=sym_type_to_tensor_type[type(fake_tensor)],
+                dtype=fx_type_utils.from_sym_value_to_torch_dtype(fake_tensor),
             )
         else:
             raise RuntimeError(
