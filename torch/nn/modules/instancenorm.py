@@ -58,7 +58,7 @@ class _InstanceNorm(_NormBase):
                     'the running stats are actually needed, instead set '
                     'track_running_stats=True in {klass} to enable them. See '
                     'the documentation of {klass} for details.'
-                    .format(names=" and ".join('"{}"'.format(k) for k in running_stats_keys),
+                    .format(names=" and ".join(f'"{k}"' for k in running_stats_keys),
                             klass=self.__class__.__name__))
                 for key in running_stats_keys:
                     state_dict.pop(key)

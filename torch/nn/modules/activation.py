@@ -170,7 +170,7 @@ class RReLU(Module):
 
     def extra_repr(self):
         inplace_str = ', inplace=True' if self.inplace else ''
-        return 'lower={}, upper={}{}'.format(self.lower, self.upper, inplace_str)
+        return f'lower={self.lower}, upper={self.upper}{inplace_str}'
 
 
 class Hardtanh(Module):
@@ -519,7 +519,7 @@ class ELU(Module):
 
     def extra_repr(self) -> str:
         inplace_str = ', inplace=True' if self.inplace else ''
-        return 'alpha={}{}'.format(self.alpha, inplace_str)
+        return f'alpha={self.alpha}{inplace_str}'
 
 
 class CELU(Module):
@@ -563,7 +563,7 @@ class CELU(Module):
 
     def extra_repr(self) -> str:
         inplace_str = ', inplace=True' if self.inplace else ''
-        return 'alpha={}{}'.format(self.alpha, inplace_str)
+        return f'alpha={self.alpha}{inplace_str}'
 
 
 class SELU(Module):
@@ -645,7 +645,7 @@ class GLU(Module):
         return F.glu(input, self.dim)
 
     def extra_repr(self) -> str:
-        return 'dim={}'.format(self.dim)
+        return f'dim={self.dim}'
 
 
 class GELU(Module):
@@ -686,7 +686,7 @@ class GELU(Module):
         return F.gelu(input, approximate=self.approximate)
 
     def extra_repr(self) -> str:
-        return 'approximate={}'.format(repr(self.approximate))
+        return f'approximate={repr(self.approximate)}'
 
 
 class Hardshrink(Module):
@@ -728,7 +728,7 @@ class Hardshrink(Module):
         return F.hardshrink(input, self.lambd)
 
     def extra_repr(self) -> str:
-        return '{}'.format(self.lambd)
+        return f'{self.lambd}'
 
 
 class LeakyReLU(Module):
@@ -779,7 +779,7 @@ class LeakyReLU(Module):
 
     def extra_repr(self) -> str:
         inplace_str = ', inplace=True' if self.inplace else ''
-        return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
+        return f'negative_slope={self.negative_slope}{inplace_str}'
 
 
 class LogSigmoid(Module):
@@ -844,7 +844,7 @@ class Softplus(Module):
         return F.softplus(input, self.beta, self.threshold)
 
     def extra_repr(self) -> str:
-        return 'beta={}, threshold={}'.format(self.beta, self.threshold)
+        return f'beta={self.beta}, threshold={self.threshold}'
 
 
 class Softshrink(Module):
@@ -1209,10 +1209,10 @@ class MultiheadAttention(Module):
                 if query is key:
                     query = key = value = query.transpose(1, 0)
                 else:
-                    query, key = [x.transpose(1, 0) for x in (query, key)]
+                    query, key = (x.transpose(1, 0) for x in (query, key))
                     value = key
             else:
-                query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
+                query, key, value = (x.transpose(1, 0) for x in (query, key, value))
 
         if not self._qkv_same_embed_dim:
             attn_output, attn_output_weights = F.multi_head_attention_forward(
@@ -1350,7 +1350,7 @@ class PReLU(Module):
         return F.prelu(input, self.weight)
 
     def extra_repr(self) -> str:
-        return 'num_parameters={}'.format(self.num_parameters)
+        return f'num_parameters={self.num_parameters}'
 
 
 class Softsign(Module):
@@ -1444,7 +1444,7 @@ class Softmin(Module):
         return F.softmin(input, self.dim, _stacklevel=5)
 
     def extra_repr(self):
-        return 'dim={dim}'.format(dim=self.dim)
+        return f'dim={self.dim}'
 
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
@@ -1500,7 +1500,7 @@ class Softmax(Module):
         return F.softmax(input, self.dim, _stacklevel=5)
 
     def extra_repr(self) -> str:
-        return 'dim={dim}'.format(dim=self.dim)
+        return f'dim={self.dim}'
 
 
 class Softmax2d(Module):
@@ -1528,7 +1528,7 @@ class Softmax2d(Module):
     def forward(self, input: Tensor) -> Tensor:
         if input.dim() not in (3, 4):
             raise ValueError(
-                "Softmax2d: expected input to be 3D or 4D, got {}D instead".format(input.dim())
+                f"Softmax2d: expected input to be 3D or 4D, got {input.dim()}D instead"
             )
         return F.softmax(input, -3, _stacklevel=5)
 
@@ -1574,4 +1574,4 @@ class LogSoftmax(Module):
         return F.log_softmax(input, self.dim, _stacklevel=5)
 
     def extra_repr(self):
-        return 'dim={dim}'.format(dim=self.dim)
+        return f'dim={self.dim}'

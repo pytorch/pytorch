@@ -32,9 +32,9 @@ class _Faketqdm:  # type: ignore[no-redef]
 
         self.n += n
         if self.total is None:
-            sys.stderr.write("\r{0:.1f} bytes".format(self.n))
+            sys.stderr.write(f"\r{self.n:.1f} bytes")
         else:
-            sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
+            sys.stderr.write("\r{:.1f}%".format(100 * self.n / float(self.total)))
         sys.stderr.flush()
 
     # Don't bother implementing; use real tqdm if you want
@@ -222,7 +222,7 @@ def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=T
 
     if use_cache:
         if verbose:
-            sys.stderr.write('Using cache found in {}\n'.format(repo_dir))
+            sys.stderr.write(f'Using cache found in {repo_dir}\n')
     else:
         # Validate the tag/branch is from the original repo instead of a forked repo
         if not skip_validation:
@@ -233,7 +233,7 @@ def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=T
 
         try:
             url = _git_archive_link(repo_owner, repo_name, ref)
-            sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, cached_file))
+            sys.stderr.write(f'Downloading: \"{url}\" to {cached_file}\n')
             download_url_to_file(url, cached_file, progress=False)
         except HTTPError as err:
             if err.code == 300:
@@ -273,7 +273,7 @@ def _check_repo_is_trusted(repo_owner, repo_name, owner_name_branch, trust_repo,
 
     if not os.path.exists(filepath):
         Path(filepath).touch()
-    with open(filepath, 'r') as file:
+    with open(filepath) as file:
         trusted_repos = tuple(line.strip() for line in file)
 
     # To minimize friction of introducing the new trust_repo mechanism, we consider that
@@ -344,7 +344,7 @@ def _load_entry_from_hubconf(m, model):
     func = _load_attr_from_module(m, model)
 
     if func is None or not callable(func):
-        raise RuntimeError('Cannot find callable {} in hubconf'.format(model))
+        raise RuntimeError(f'Cannot find callable {model} in hubconf')
 
     return func
 
@@ -749,7 +749,7 @@ def load_state_dict_from_url(
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
-        sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
+        sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
         hash_prefix = None
         if check_hash:
             r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]
