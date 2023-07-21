@@ -71,17 +71,17 @@ class MixtureSameFamily(Distribution):
         cdbs = self._component_distribution.batch_shape[:-1]
         for size1, size2 in zip(reversed(mdbs), reversed(cdbs)):
             if size1 != 1 and size2 != 1 and size1 != size2:
-                raise ValueError("`mixture_distribution.batch_shape` ({0}) is not "
+                raise ValueError(f"`mixture_distribution.batch_shape` ({mdbs}) is not "
                                  "compatible with `component_distribution."
-                                 "batch_shape`({1})".format(mdbs, cdbs))
+                                 f"batch_shape`({cdbs})")
 
         # Check that the number of mixture component matches
         km = self._mixture_distribution.logits.shape[-1]
         kc = self._component_distribution.batch_shape[-1]
         if km is not None and kc is not None and km != kc:
-            raise ValueError("`mixture_distribution component` ({0}) does not"
+            raise ValueError(f"`mixture_distribution component` ({km}) does not"
                              " equal `component_distribution.batch_shape[-1]`"
-                             " ({1})".format(km, kc))
+                             f" ({kc})")
         self._num_component = km
 
         event_shape = self._component_distribution.event_shape

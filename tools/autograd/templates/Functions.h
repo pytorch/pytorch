@@ -43,18 +43,7 @@ inline c10::List<c10::optional<Tensor>> unpack_opt_list(at::ArrayRef<SavedVariab
   return result;
 }
 
-struct TypeAndSize {
-  TypeAndSize() : options(at::TensorOptions()) {}
-  /* implicit */
-  TypeAndSize(const Tensor & t)
-    : sym_sizes(t.sym_sizes().vec())
-    , options(t.options()) {}
-
-  Tensor zeros() { return at::zeros_symint(sym_sizes, options); }
-
-  std::vector<c10::SymInt> sym_sizes;
-  at::TensorOptions options;
-};
+using torch::autograd::TypeAndSize;
 
 ${autograd_function_declarations}
 

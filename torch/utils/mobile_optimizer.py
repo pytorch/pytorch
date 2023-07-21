@@ -31,7 +31,7 @@ def optimize_for_mobile(
     """
     if not isinstance(script_module, torch.jit.ScriptModule):
         raise TypeError(
-            'Got {}, but ScriptModule is expected.'.format(type(script_module)))
+            f'Got {type(script_module)}, but ScriptModule is expected.')
 
     if optimization_blocklist is None:
         optimization_blocklist = set()
@@ -86,7 +86,7 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
     """
     if not isinstance(script_module, torch.jit.ScriptModule):
         raise TypeError(
-            'Got {}, but ScriptModule is expected.'.format(type(script_module)))
+            f'Got {type(script_module)}, but ScriptModule is expected.')
 
     lint_list = []
 

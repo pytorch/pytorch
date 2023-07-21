@@ -581,6 +581,17 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(17),))
 
+    def test_angle(self):
+        def fn(a, b, c):
+            return torch.angle(a), torch.angle(b), torch.angle(c)
+
+        complex_input = torch.tensor(
+            [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1, float("nan")]
+        )
+        real_input = torch.tensor([-1.0, 0.0, 1.0, float("nan")])
+        interger_real_input = torch.tensor([-1, 0, 1])
+        self.common(fn, (complex_input, real_input, interger_real_input))
+
     def test_sgn(self):
         def fn(a):
             return torch.sgn(a), torch.sgn(a + 1) - 1
@@ -975,6 +986,16 @@ class CommonTemplate:
             return a.clamp(min=b, max=c)
 
         self.common(fn, (torch.randint(4, (4,)),))
+
+    def test_dist(self):
+        def fn(a, b):
+            return (
+                torch.dist(a, b),
+                torch.dist(a, b, p=1.2),
+                torch.dist(a.to(torch.bfloat16), b.to(torch.bfloat16)),
+            )
+
+        self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
 
     def test_arange1(self):
         def fn(x):
@@ -2014,6 +2035,19 @@ class CommonTemplate:
         with self.assertRaisesRegex(RuntimeError, ""):
             fn(torch.randn(1, 5))
 
+    def test_softshrink_backward(self):
+        grad_output = torch.randn(1)
+        lambd = 0.5
+
+        def fn(a, grad_output, lambd):
+            a = a.cos()
+            return torch.ops.aten.softshrink_backward(grad_output, a, lambd)
+
+        self.common(
+            fn,
+            (torch.randn(10), grad_output, lambd),
+        )
+
     def test_inductor_assert(self):
         @torch._dynamo.optimize("inductor", dynamic=True)
         def fn(a):
@@ -2354,7 +2388,7 @@ class CommonTemplate:
     def test_adaptive_avg_pool2d_low_prec(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
 
             def forward(self, x):
@@ -2653,6 +2687,7 @@ class CommonTemplate:
     def test_repeat(self):
         def fn(x):
             return (
+                x.repeat(0, 1, 1, 1),
                 x.repeat(2, 2, 3, 1),
                 x.repeat(8, 1, 1, 1),
                 x.repeat(2, 1, 1, 1, 1, 1),
@@ -2828,7 +2863,8 @@ class CommonTemplate:
             torch.nn.ReLU(),
         )
         m.eval()
-        self.common(m, (torch.randn([16, 32]),), check_lowp=False)
+        with torch.no_grad():
+            self.common(m, (torch.randn([16, 32]),), check_lowp=False)
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
@@ -2909,6 +2945,15 @@ class CommonTemplate:
         o2 = torch.compile(mod)(inp)
 
         self.assertEqual(o1, o2)
+
+    def test_view_as_real(self):
+        def fn(x):
+            y = torch.view_as_real(x)
+            return y + 1
+
+        x = torch.randn(4, dtype=torch.complex64)
+
+        self.common(fn, (x,))
 
     def test_cauchy(self):
         def fn(x, y):
@@ -5994,7 +6039,7 @@ class CommonTemplate:
 
         self.common(
             fn,
-            [torch.randn((4, 2)), torch.randn((4))],
+            [torch.randn((4, 2)), torch.randn(4)],
         )
 
     # Shape padding causes the inputs to all get specialized, so the codegen
@@ -6046,7 +6091,7 @@ class CommonTemplate:
 
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 B, N, C = x.shape
@@ -6231,6 +6276,36 @@ class CommonTemplate:
         self.common(
             fn_or,
             (torch.randn(32), torch.randn(32)),
+        )
+
+    def test_conv_with_as_strided(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.kv = torch.nn.Conv2d(
+                    256, 384, kernel_size=(1, 1), stride=(1, 1), bias=False
+                )
+
+            def forward(self, x):
+                convolution = self.kv(x)
+                constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
+                    convolution, [2, 2, 2, 2], 0.0
+                )
+                # as_strided inputs are depend on input's size and stide.
+                as_strided = torch.ops.aten.as_strided.default(
+                    constant_pad_nd, [8, 384, 2, 20, 12], [153600, 400, 160, 1, 20]
+                )
+                as_strided_1 = torch.ops.aten.as_strided.default(
+                    as_strided, [8, 384, 2, 2, 12, 12], [153600, 400, 160, 8, 20, 1]
+                )
+                clone = torch.ops.aten.clone.default(
+                    as_strided_1, memory_format=torch.contiguous_format
+                )
+                return clone
+
+        self.common(
+            Model(),
+            (torch.randn(8, 256, 16, 16),),
         )
 
     def test_inplace_where_pointwise(self):
@@ -6630,6 +6705,69 @@ class CommonTemplate:
             return c
 
         self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
+
+    def test_buffer_use_after_remove(self):
+        # https://github.com/pytorch/pytorch/issues/102857
+
+        def rotvec_to_rotmat(rotvec) -> torch.Tensor:
+            """Simplified rotvec to rotmat code from RoMa
+            (https://github.com/naver/roma/blob/06e4b0cdc1c802a60a012bb19c581d6600c63358/roma/mappings.py#L371)
+            """
+            theta = torch.norm(rotvec, dim=-1)
+            axis = rotvec / theta[..., None]
+            kx, ky, kz = axis[:, 0], axis[:, 1], axis[:, 2]
+            sin_theta = torch.sin(theta)
+            cos_theta = torch.cos(theta)
+            one_minus_cos_theta = 1 - cos_theta
+            xs = kx * sin_theta
+            ys = ky * sin_theta
+            zs = kz * sin_theta
+            xyc = kx * ky * one_minus_cos_theta
+            xzc = kx * kz * one_minus_cos_theta
+            yzc = ky * kz * one_minus_cos_theta
+            xxc = kx**2 * one_minus_cos_theta
+            yyc = ky**2 * one_minus_cos_theta
+            zzc = kz**2 * one_minus_cos_theta
+            R_rodrigues = torch.stack(
+                [
+                    1 - yyc - zzc,
+                    xyc - zs,
+                    xzc + ys,
+                    xyc + zs,
+                    1 - xxc - zzc,
+                    -xs + yzc,
+                    xzc - ys,
+                    xs + yzc,
+                    1 - xxc - yyc,
+                ],
+                dim=-1,
+            ).reshape(-1, 3, 3)
+            R = R_rodrigues
+            return R
+
+        def f(coord, rot, trans):
+            rot_mat = rotvec_to_rotmat(rot)
+            coord = torch.einsum("...ij,...bj->...bi", rot_mat, coord) + trans
+            return coord.sum()
+
+        foo_c = torch.compile(f, dynamic=True)
+
+        def run(fn):
+            coord = torch.ones((2, 3), device=self.device)
+            rot = nn.Parameter(torch.ones((2, 3), device=self.device))
+            trans = nn.Parameter(torch.ones((2, 3), device=self.device))
+
+            U = fn(coord, rot, trans)
+            U.backward()
+
+            return U, rot, trans
+
+        U_e, rot_e, trans_e = run(f)
+        U, rot, trans = run(foo_c)
+
+        self.assertEqual(U, U_e)
+        self.assertEqual(rot.grad, rot_e.grad)
+        self.assertEqual(trans.grad, trans_e.grad)
 
 
 @dataclasses.dataclass
