@@ -715,7 +715,7 @@ def run_functionalized_fw_and_collect_metadata(
     f,
     *,
     keep_input_mutations: bool,
-    aot_config: AOTConfig,
+    aot_config: 'AOTConfig',
 ) -> ViewAndMutationMeta:
     memo = {}
 
