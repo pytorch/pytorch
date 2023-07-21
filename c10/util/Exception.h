@@ -295,7 +295,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // very useful, but hard to fix in a macro so suppressing the warning.
 #define C10_THROW_ERROR(err_type, msg) \
   throw ::c10::err_type(               \
-      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
+      {__func__, __FILE_NAME__, static_cast<uint32_t>(__LINE__)}, msg)
 
 // Private helper macro for workaround MSVC misexpansion of nested macro
 // invocations involving __VA_ARGS__.  See
@@ -361,9 +361,9 @@ C10_API std::string GetExceptionString(const std::exception& e);
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
     ::c10::detail::torchCheckFail(                                    \
         __func__,                                                     \
-        __FILE__,                                                     \
+        __FILE_NAME__,                                                     \
         static_cast<uint32_t>(__LINE__),                              \
-        #cond " INTERNAL ASSERT FAILED at " C10_STRINGIZE(__FILE__)); \
+        #cond " INTERNAL ASSERT FAILED at " C10_STRINGIZE(__FILE_NAME__)); \
   }
 #else
 // It would be nice if we could build a combined string literal out of
@@ -375,10 +375,10 @@ C10_API std::string GetExceptionString(const std::exception& e);
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                                          \
     ::c10::detail::torchInternalAssertFail(                                      \
         __func__,                                                                \
-        __FILE__,                                                                \
+        __FILE_NAME__,                                                                \
         static_cast<uint32_t>(__LINE__),                                         \
         #cond                                                                    \
-        " INTERNAL ASSERT FAILED at " C10_STRINGIZE(__FILE__) ":" C10_STRINGIZE( \
+        " INTERNAL ASSERT FAILED at " C10_STRINGIZE(__FILE_NAME__) ":" C10_STRINGIZE( \
             __LINE__) ", please report a bug to PyTorch. ",                      \
         c10::str(__VA_ARGS__));                                                  \
   }
@@ -409,7 +409,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK_MSG(cond, type, ...) \
-  (#cond #type " CHECK FAILED at " C10_STRINGIZE(__FILE__))
+  (#cond #type " CHECK FAILED at " C10_STRINGIZE(__FILE_NAME__))
 #define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
     C10_THROW_ERROR(Error, TORCH_CHECK_MSG(cond, type, __VA_ARGS__)); \
@@ -494,7 +494,7 @@ namespace detail {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {          \
     ::c10::detail::torchCheckFail(               \
         __func__,                                \
-        __FILE__,                                \
+        __FILE_NAME__,                                \
         static_cast<uint32_t>(__LINE__),         \
         TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
   }
@@ -503,7 +503,7 @@ namespace detail {
   if (C10_UNLIKELY_OR_CONST(!(cond))) {            \
     ::c10::detail::torchCheckFail(                 \
         __func__,                                  \
-        __FILE__,                                  \
+        __FILE_NAME__,                                  \
         static_cast<uint32_t>(__LINE__),           \
         TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
   }
@@ -571,7 +571,7 @@ namespace detail {
 #define _TORCH_WARN_WITH(warning_t, ...)                     \
   ::c10::warn(::c10::Warning(                                \
       warning_t(),                                           \
-      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, \
+      {__func__, __FILE_NAME__, static_cast<uint32_t>(__LINE__)}, \
       WARNING_MESSAGE_STRING(__VA_ARGS__),                   \
       false));
 #endif
