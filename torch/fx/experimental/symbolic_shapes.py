@@ -3284,6 +3284,7 @@ Target Guards:
             expr = new_expr
 
         if self.frozen:
+            assert False
             self.counter["ignored_backward_guard"] += 1
             signpost_event(
                 "dynamic",
