@@ -49,7 +49,7 @@ jobs:
       docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
       test-matrix: |
         { include: [
-          { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.16xlarge.nvidia.gpu" },
+          { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
         ]}
       build-with-debug: false
 
