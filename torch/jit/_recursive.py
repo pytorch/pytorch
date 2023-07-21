@@ -703,8 +703,7 @@ def make_stubs_for_overloads(overload_info):
 def check_module_initialized(mod):
     assert isinstance(mod, torch.nn.Module)
     if not hasattr(mod, '_parameters'):
-        raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
-                           .format(torch.typename(type(mod))))
+        raise RuntimeError(f"'{torch.typename(type(mod))}' has not been initialized, did you forget to call 'super()'?")
 
     # This is to avoid importing torch.distributed.nn
     if not hasattr(mod, 'remote_parameters'):

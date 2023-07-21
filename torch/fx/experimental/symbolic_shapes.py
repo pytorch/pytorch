@@ -1887,7 +1887,7 @@ TLS = threading.local()
 class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
         # TODO: Maybe suppress the envid if not DEBUG?
-        return '{}: {}'.format(self.extra['envid'], msg), kwargs
+        return f"{self.extra['envid']}: {msg}", kwargs
 
 
 ENV_COUNTER = collections.Counter()

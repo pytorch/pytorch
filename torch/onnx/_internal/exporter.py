@@ -273,13 +273,15 @@ def enable_fake_mode():
     # Ideally we should keep them in sync to preserve the same default behavior
     # [1] `torch/_dynamo/output_graph.py::InstructionTranslator::OutputGraph.__init__`
     fake_mode = fake_tensor.FakeTensorMode(
-        allow_non_fake_inputs=False,
+        allow_non_fake_inputs=True,  # https://github.com/pytorch/pytorch/issues/105077
         shape_env=ShapeEnv(
             allow_scalar_outputs=False, allow_dynamic_output_shape_ops=False
         ),
     )
+    # The patcher is needed for when user calls `fake_model.load_state_dict(...)` within fake mode
+    patcher_context = patcher.ONNXTorchPatcher()
     fake_context = ONNXFakeContext(fake_mode=fake_mode)
-    with fake_mode:
+    with fake_mode, patcher_context:
         yield fake_context
 
 
