@@ -19,7 +19,7 @@ from torch.ao.quantization.pt2e.quantizer.utils import (
     get_weight_qspec,
     get_bias_qspec,
 )
-from .qnnpack_quantizer import (
+from .xnnpack_quantizer import (
     _is_annotated,
 )
 from torch.ao.quantization.observer import (
@@ -58,13 +58,13 @@ def _supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
     for conv_op, add_op, relu_op in conv_add_relu_options:
         if add_op is None:
             # Append Conv ReLU
-            supported_operators["conv2d"].append([conv_op, relu_op])
+            supported_operators["conv2d"].append([conv_op, relu_op])  # type: ignore[list-item]
         elif relu_op is None:
             # Append Conv Add
-            supported_operators["conv2d"].append([conv_op, add_op])
+            supported_operators["conv2d"].append([conv_op, add_op])  # type: ignore[list-item]
         else:
             # Append Conv Add ReLU
-            supported_operators["conv2d"].append([conv_op, add_op, relu_op])
+            supported_operators["conv2d"].append([conv_op, add_op, relu_op])  # type: ignore[list-item]
 
     return copy.deepcopy(supported_operators)
 
@@ -222,17 +222,17 @@ class X86InductorQuantizer(Quantizer):
         """
         conv_gemm_node_idx = None
         extra_input_node_idx = None
-        if (binary_node.args[0].op == "call_function") and (
+        if (binary_node.args[0].op == "call_function") and (  # type: ignore[union-attr]
             binary_node.args[0] == conv_gemm_node
         ):
             conv_gemm_node_idx = 0
             extra_input_node_idx = 1
-        elif (binary_node.args[1].op == "call_function") and (
+        elif (binary_node.args[1].op == "call_function") and (  # type: ignore[union-attr]
             binary_node.args[1] == conv_gemm_node
         ):
             conv_gemm_node_idx = 1
             extra_input_node_idx = 0
-        extra_input_node = binary_node.args[extra_input_node_idx]
+        extra_input_node = binary_node.args[extra_input_node_idx]  # type: ignore[index]
         assert isinstance(extra_input_node, Node)
         return conv_gemm_node_idx, extra_input_node_idx
 

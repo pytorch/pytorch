@@ -850,6 +850,14 @@ class TestOptim(TestCase):
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),
             ),
+            (
+                optim.SGD,
+                dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True, maximize=True),
+            ),
+            (
+                optim.SGD,
+                dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False, maximize=True),
+            ),
             (optim.RAdam, dict(weight_decay=0, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=0)),
             (optim.RAdam, dict(weight_decay=1, eps=1e-6)),
@@ -900,7 +908,7 @@ class TestOptim(TestCase):
         configs = [
             (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
                 "Adadelta", "Adagrad", "Adamax", "Adam", "AdamW", "ASGD", "NAdam",
-                "RAdam", "RMSprop"
+                "RAdam", "RMSprop", "SGD"
             ]
         ]
         self._test_foreach_memory(configs)
@@ -1701,8 +1709,8 @@ class TestOptim(TestCase):
 
         num_tensors = 5
         for functional_optim, amsgrad, no_grad_scale in itertools.product((adam.adam, adamw.adamw), (False, True), (False, True)):
-            params, grads, exp_avgs, exp_avg_sqs = [
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
+            params, grads, exp_avgs, exp_avg_sqs = (
+                [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4))
             prev_params = [t.clone().detach() for t in params]
             max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
             state_steps = [torch.ones((), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]

@@ -482,9 +482,7 @@ def hash_configs(configs: List[Config]):
     hasher = hashlib.sha256()
     for cfg in configs:
         hasher.update(
-            f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode(
-                "utf-8"
-            )
+            f"{sorted(cfg.kwargs.items())} {cfg.num_warps} {cfg.num_stages}\n".encode()
         )
     return hasher.hexdigest()
 
@@ -498,7 +496,7 @@ def load_cached_autotuning(
     if not os.path.exists(cache_filename):
         return None
 
-    with open(cache_filename, "r") as fd:
+    with open(cache_filename) as fd:
         best_config = json.loads(fd.read())
     if best_config.pop("configs_hash", None) != configs_hash:
         return None
