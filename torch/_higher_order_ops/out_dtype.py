@@ -24,6 +24,7 @@ from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_K
 ALLOWABLE_OPS = [
     torch.ops.aten.mm.default,
     torch.ops.aten.conv2d.default,
+    torch.ops.aten.convolution.default,
     torch.ops.aten.mul.Tensor,
     torch.ops.aten.mul.Scalar,
 ]
