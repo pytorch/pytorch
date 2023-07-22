@@ -1,6 +1,3 @@
-import abc
-import dataclasses
-import enum
 import functools
 import inspect
 import itertools
@@ -12,7 +9,13 @@ import torch
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented
-from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
+from ..source import (
+    AttrSource,
+    ConstantSource,
+    DefaultsSource,
+    GetItemSource,
+    GlobalSource,
+)
 from ..utils import make_cell
 from .base import typestr, VariableTracker
 
@@ -22,6 +25,7 @@ def wrap_bound_arg(tx, val, options, source=None):
     assert (
         "source" not in options
     ), "Source needs to be separate from options due to recursive calls for lists/dicts"
+    print("VAL", val, source)
     if isinstance(val, VariableTracker):
         return val
     elif not source:
@@ -235,9 +239,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     result[name] = out
 
                 else:
-                    from .builder import variable_builder_no_source
+                    from .builder import SourcelessBuilder
 
-                    result[name] = variable_builder_no_source(cell.cell_contents)
+                    result[name] = SourcelessBuilder()(
+                        tx, cell.cell_contents
+                    ).add_options(options)
 
         return result, closure_cells
 
@@ -528,6 +534,23 @@ def _traceable_collective_remaps():
     return {}
 
 
+def _traceable_collectives_source(fn):
+    assert torch.distributed.is_available(), "Illegal invocation."
+    from torch.distributed._functional_collectives import (
+        all_gather_tensor_inplace,
+        reduce_scatter_tensor_inplace,
+    )
+
+    valid_values = {all_gather_tensor_inplace, reduce_scatter_tensor_inplace}
+    assert fn in valid_values
+    inner_name = all_gather_tensor_inplace.__name__
+    path_source = AttrSource(
+        base=AttrSource(base=GlobalSource(global_name="torch"), member="distributed"),
+        member="_functional_collectives",
+    )
+    return AttrSource(path_source, inner_name)
+
+
 class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     """
     Some of the torch.distributed.* collective APIs are possible to rewrite to 'traceable' collectives.
@@ -554,7 +577,8 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
     @staticmethod
     def rewrite(fn):
-        return _traceable_collective_remaps()[fn]
+        new_fn = _traceable_collective_remaps()[fn]
+        return new_fn, _traceable_collectives_source(new_fn)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
