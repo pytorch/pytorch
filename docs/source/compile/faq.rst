@@ -146,7 +146,7 @@ that directory. You can then run ``python repro.py`` and confirm that
 you are getting the same error.
 
 .. note::
-   For other compilers such as nvfuser, the process is similar but
+   For other compilers, the process is similar but
    instead you would leverage ``env TORCHDYNAMO_REPRO_AFTER="dynamo" python your_model.py``.
 
 Why is compilation slow?
