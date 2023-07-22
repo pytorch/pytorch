@@ -143,7 +143,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 
         return callback
 
-    def get_prehook(stack_, seq_nr):
+    def get_prehook(stack_, seq_nr, thread_id):
         def prehook(grad_output):
             global callback_set
 
@@ -154,26 +154,30 @@ def setup_stacktrace_preservation_hooks(roots: List):
                 callback_set = True
 
             fx_traceback.set_stack_trace(stack_)
-            fx_traceback.set_seq_nr(seq_nr, bwd=True)
+            fx_traceback.set_seq_nr(seq_nr, thread_id, bwd=True)
 
         return prehook
 
-    def get_posthook(special_stack_):
+    def get_posthook(special_stack_, seq_nr, thread_id):
         def posthook(grad_input, grad_output):
             fx_traceback.set_stack_trace(special_stack_)
+            fx_traceback.set_seq_nr(-1, thread_id, bwd=True)
 
         return posthook
 
     for node in iter_graph(roots):
         forward_node_stack = node.metadata.get("traceback_", [])
         node.register_prehook(get_prehook(forward_node_stack,
-                              node._sequence_nr()))
+                              node._sequence_nr(),
+                              node._thread_id()))
 
         special_stack = forward_node_stack.copy()
         special_stack.append(
             "Gradient addition node due to multiple use of tensor around:"
         )
-        node.register_hook(get_posthook(special_stack))
+        node.register_hook(get_posthook(special_stack,
+                           node._sequence_nr(),
+                           node._thread_id()))
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

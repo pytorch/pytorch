@@ -375,6 +375,7 @@ from torch._C._autograd import (
     _supported_activities,
     DeviceType,
     get_sequence_nr,
+    get_thread_id,
     kineto_available,
     ProfilerEvent,
     SavedTensor,
