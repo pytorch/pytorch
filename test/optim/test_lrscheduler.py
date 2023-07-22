@@ -1989,9 +1989,7 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(
                     target,
                     result,
-                    msg="LR is wrong in epoch {}: expected {}, got {}".format(
-                        epoch, t, r
-                    ),
+                    msg=f"LR is wrong in epoch {epoch}: expected {t}, got {r}",
                     atol=1e-5,
                     rtol=0,
                 )

@@ -41,8 +41,7 @@ class TestAutocastCPU(TestCase):
                 output = getattr(module, op)(*args, **add_kwargs)
                 if isinstance(output, torch.Tensor):
                     self.assertTrue(out_type == output.dtype,
-                                    "autocast for torch.{} produced {}, should produce {}"
-                                    .format(op, output.dtype, out_type))
+                                    f"autocast for torch.{op} produced {output.dtype}, should produce {out_type}")
             # Try Tensor.* variant:
             if hasattr(torch.Tensor, op):
                 output_method = getattr(args[0], op)(*args[1:], **add_kwargs)
@@ -52,8 +51,7 @@ class TestAutocastCPU(TestCase):
                                     .format(op, output_method.dtype, out_type))
 
             self.assertTrue((output is not None) or (output_method is not None),
-                            "{} not found as an attribute on either Tensor or the requested module {}".format(
-                            op, module))
+                            f"{op} not found as an attribute on either Tensor or the requested module {module}")
 
             # Accounts for ops that return Tensors, iterables, and other non-Tensors.
             # For example, lstm_cell returns a tuple and equal returns bool.
