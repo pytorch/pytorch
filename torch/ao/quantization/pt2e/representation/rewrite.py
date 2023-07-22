@@ -42,11 +42,9 @@ def _reference_quantized_add_relu(
     """
     x_i32 = x_i8.to(torch.int32)
     y_i32 = y_i8.to(torch.int32)
-    # TODO: use out_dtype op
-    # x_i32 = out_dtype(torch.ops.aten.mul, torch.int32, (x_i32 - x_zero_point), (x_scale / out_scale))
-    # y_i32 = out_dtype(torch.ops.aten.mul, torch.int32, (y_i32 - y_zero_point), (y_scale / out_scale))
-    x_i32 = torch.round((x_scale / out_scale) * (x_i32 - x_zero_point)).to(torch.int32)
-    y_i32 = torch.round((y_scale / out_scale) * (y_i32 - y_zero_point)).to(torch.int32)
+    # TODO: change this to mul.Scalar?
+    x_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, (x_i32 - x_zero_point), (x_scale / out_scale))
+    y_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, (y_i32 - y_zero_point), (y_scale / out_scale))
     out_i32 = x_i32 + y_i32 + out_zero_point
     out_i32 = torch.ops.aten.clamp(out_i32, out_zero_point)
     quant_min = -128
