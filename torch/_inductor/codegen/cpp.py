@@ -18,11 +18,11 @@ from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 from torch.utils._sympy.functions import FloorDiv
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..optimize_indexing import get_expr_range, range_expressable_in_32_bits
+from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import SchedulerNode
 from ..utils import (
     cache_on_self,
@@ -278,7 +278,7 @@ def parallel_num_threads():
     return threads
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def stride_at(var: sympy.Symbol, index: sympy.Expr):
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)
@@ -345,6 +345,24 @@ class CppPrinter(ExprPrinter):
         assert len(expr.args) == 1
         r = f"std::ceil({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_Min(self, expr):
+        args = [self._print(a) for a in expr.args]
+        if len(args) == 2:
+            return f"std::min({args[0]}, {args[1]})"
+        else:
+            # Initializer list overload
+            il = "{" + ", ".join(args) + "}"
+            return f"std::min({il})"
+
+    def _print_Max(self, expr):
+        args = [self._print(a) for a in expr.args]
+        if len(args) == 2:
+            return f"std::max({args[0]}, {args[1]})"
+        else:
+            # Initializer list overload
+            il = "{" + ", ".join(args) + "}"
+            return f"std::max({il})"
 
 
 cexpr = CppPrinter().doprint
@@ -1152,6 +1170,7 @@ class CppKernel(Kernel):
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
+        self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
@@ -1213,6 +1232,22 @@ class CppKernel(Kernel):
             )
         else:
             acc_type = reduction_acc_type(reduction_type, dtype)
+
+            if (reduction_type, acc_type) not in self.reduction_omp_dec:
+                if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
+                    # Scalar reduction for other reductions are declared by default
+                    self.reduction_prefix.splice(
+                        f"""\
+    #pragma omp declare reduction(\
+    {RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
+    omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
+    initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
+                """
+                    )
+                self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
+                    reduction_type
+                ]
+
             self.reduction_prefix.writeline(
                 f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
             )
@@ -1394,7 +1429,6 @@ class CppVecKernel(CppKernel):
             tiling_factor = codecache.pick_vec_isa().nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
-        self.reduction_omp_dec: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
     def load(self, name: str, index: sympy.Expr):
@@ -1505,7 +1539,7 @@ class CppVecKernel(CppKernel):
         acc_type = reduction_acc_type(reduction_type, dtype)
         acc_type_vec = reduction_acc_type_vec(reduction_type, dtype)
 
-        if reduction_type not in self.reduction_omp_dec:
+        if (reduction_type, acc_type) not in self.reduction_omp_dec:
             if RTYPE_TO_CPP[reduction_type] not in NATIVE_OMP_RTYPES:
                 # Scalar reduction for other reductions are declared by default
                 self.reduction_prefix.splice(
@@ -1516,6 +1550,11 @@ omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
 initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
             """
                 )
+            self.reduction_omp_dec[reduction_type, acc_type] = RTYPE_TO_CPP[
+                reduction_type
+            ]
+
+        if (reduction_type, acc_type_vec) not in self.reduction_omp_dec:
             self.reduction_prefix.splice(
                 f"""\
 #pragma omp declare reduction(\
@@ -1524,7 +1563,9 @@ omp_out = {reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
 initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             """
             )
-            self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
+            self.reduction_omp_dec[reduction_type, acc_type_vec] = RTYPE_TO_CPP[
+                reduction_type
+            ]
 
         reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
@@ -1949,6 +1990,8 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"store mode: {mode}")
                 return self.simd_vec
 
+            if len(index.free_symbols) == 0:
+                self.disable_vec(f"constant store index: {index}")
             if self.simd_vec and not self.could_vec(name, index):
                 self.disable_vec(f"not a loop: {index}")
             return self.simd_vec
@@ -2097,11 +2140,16 @@ class CppVecKernelChecker(CppVecKernel):
 
                 def can_use_int32():
                     free_symbols = list(expr.free_symbols)
-                    vars_ranges = {
-                        k: ValueRanges(0, v)
+                    sizes = {
+                        k: v
                         for k, v in zip(self.itervars, self.ranges)
                         if k in free_symbols
                     }
+                    # Trivial case: Range empty
+                    if any(v == 0 for v in sizes.values()):
+                        return True
+
+                    vars_ranges = {k: ValueRanges(0, v - 1) for k, v in sizes.items()}
                     if not vars_ranges or len(vars_ranges) != len(free_symbols):
                         i32_iinfo = numpy.iinfo(numpy.int32)
                         return (
@@ -2109,11 +2157,14 @@ class CppVecKernelChecker(CppVecKernel):
                             and expr <= i32_iinfo.max
                             and expr >= i32_iinfo.min
                         )
-                    expr_ranges = get_expr_range(expr, vars_ranges)
+                    expr_ranges = bound_sympy(expr, vars_ranges)
                     if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):
                         return False
+                    # If something takes the values 0..7, we will compare in the loop
+                    # x < 8. As such, for the loop not to overflow in the last iteration, we want
+                    # to check that expr_ranges.upper + 1 is representable as well
                     return range_expressable_in_32_bits(
-                        ValueRanges(int(expr_ranges.lower), int(expr_ranges.upper))
+                        ValueRanges(int(expr_ranges.lower), int(expr_ranges.upper) + 1)
                     )
 
                 with RecordOptimizationContext(__name__) as node_ctx:

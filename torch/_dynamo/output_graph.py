@@ -29,7 +29,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
-from torch.utils.weak import WeakIdKeyDictionary
+from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -47,9 +47,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
     ConstantSource,
-    DefaultDeviceSource,
-    DeterministicAlgorithmsSource,
-    GradModeSource,
+    GlobalStateSource,
     is_constant_source,
     LocalSource,
     ParamBufferSource,
@@ -64,9 +62,12 @@ from .utils import (
     count_calls,
     counters,
     dynamo_timed,
+    get_instruction_source_311,
     graph_break_reasons,
+    increment_op_count,
     lazy_format_graph_code,
     lazy_format_graph_tabular,
+    LazyString,
     nnmodule_doc_url_msg,
     nnmodule_has_hooks,
     same,
@@ -85,6 +86,7 @@ log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
+trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
 
 class OutputGraphState(NamedTuple):
@@ -232,6 +234,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export_constraints = export_constraints
         self.frame_state = frame_state
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
+
+        # Used to maintain an alias between real values variable tracker for tensors we have seen.
+        # This map ensures that the only tensors in graph inputs, and the only tensors in guards are unique.
+        self.real_value_tensor_positive_aliases = WeakTensorKeyDictionary()
+
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(
@@ -256,14 +263,16 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
 
         self.guards.add(
-            DeterministicAlgorithmsSource().make_guard(
-                GuardBuilder.DETERMINISTIC_ALGORITHMS
-            )
+            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
         )
 
-        self.guards.add(GradModeSource().make_guard(GuardBuilder.GRAD_MODE))
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
 
-        self.guards.add(DefaultDeviceSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
+        )
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -300,6 +309,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.should_exit = False
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
+        self.torch_function_enabled = torch._C._is_torch_function_enabled()
 
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
@@ -386,6 +396,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def save_global_state(self):
         global_state = self.tracing_context.global_context.global_state
+
+        global_state["torch_function_enabled"] = (
+            self.set_torch_function_state,
+            self.torch_function_enabled,
+        )
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
         global_state["autocast_enabled"] = (
             torch.set_autocast_enabled,
@@ -685,7 +700,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         """
         assert reason is not None
 
-        from .eval_frame import disable
+        from .decorators import disable
 
         self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
@@ -839,7 +854,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
 
-    def log_graph_sizes(self, name):
+    def get_graph_sizes_log_str(self, name):
         graph_sizes_str = "TRACED GRAPH TENSOR SIZES\n"
         graph_sizes_str += f"===== {name} =====\n"
         for node in self.graph.nodes:
@@ -862,7 +877,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         graph_sizes_str += (
                             f"{node.name} (concrete): {tuple(concrete_size)}\n"
                         )
-        graph_sizes_log.debug(graph_sizes_str)
+        return graph_sizes_str
 
     @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
@@ -870,7 +885,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
         """
-        from .eval_frame import disable
+        from .decorators import disable
 
         assert isinstance(rv, list)
         assert isinstance(root, FakeRootModule)
@@ -896,8 +911,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
-        if torch._logging._internal.log_state.is_artifact_enabled("graph_sizes"):
-            self.log_graph_sizes(name)
+        graph_sizes_log.debug(
+            "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
+        )
 
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
@@ -932,7 +948,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 tot += 1
             if node.op == "placeholder":
                 placeholders.append(node)
-        torch._dynamo.utils.increment_op_count(tot)
+        increment_op_count(tot)
         for pl in placeholders:
             arg = pl.meta["grapharg"]
             # TODO: Why isn't this stored in meta :think:
@@ -1047,6 +1063,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
 
+    def set_torch_function_state(self, enabled: bool) -> None:
+        self.torch_function_enabled = enabled
+
 
 class SubgraphTracer(fx.Tracer):
     """
@@ -1057,7 +1076,7 @@ class SubgraphTracer(fx.Tracer):
     """
 
     def __init__(self, output_graph, parent=None):
-        super(SubgraphTracer, self).__init__()
+        super().__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
         # Map from graph input name to its placeholder proxy object, where the
@@ -1083,6 +1102,7 @@ class SubgraphTracer(fx.Tracer):
         # This is a OrderedDict so that we can
         # maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = collections.OrderedDict()
+        self.prev_inst = None
 
     def create_proxy(
         self,
@@ -1105,7 +1125,7 @@ class SubgraphTracer(fx.Tracer):
         # 1. We see a free variable that is already tracked by Dynamo.
         # 2. We see a free variable that has not been tracked by Dynamo
         #
-        # In case 1, we call `lift_tracked_freevar_to_input` (below)
+        # In case 1, we call `maybe_lift_tracked_freevar_to_input` (below)
         # which will lift the freevar to be an input of this subgraph
         # and also recursively lift it to be an input on the parent(s).
         #
@@ -1128,24 +1148,13 @@ class SubgraphTracer(fx.Tracer):
         #   higher-order-op subgraph until we hit the subgraph where the free
         #   variable is bound
         if self.parent is not None:
-            flat_args, tree_spec = pytree.tree_flatten(args)
-            new_args = []
+            flat_args, tree_spec = pytree.tree_flatten((args, kwargs))
+            new_flat_args = []
             for arg in flat_args:
-                if not isinstance(arg, torch.fx.Proxy):
-                    new_args.append(arg)
-                elif arg.tracer == self:
-                    new_args.append(arg)
-                elif not hasattr(arg, "node"):
-                    new_args.append(arg)
-                elif "saved_tensor_marked" in arg.node.meta:
-                    new_args.append(arg)
-                else:
-                    # Create a new input for this arg, and replace the current arg
-                    # with the new arg
-                    new_arg = self.lift_tracked_freevar_to_input(arg)
-                    new_args.append(new_arg)
+                maybe_new_arg = self.maybe_lift_tracked_freevar_to_input(arg)
+                new_flat_args.append(maybe_new_arg)
 
-            args = pytree.tree_unflatten(new_args, tree_spec)
+            args, kwargs = pytree.tree_unflatten(new_flat_args, tree_spec)
 
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
@@ -1153,6 +1162,24 @@ class SubgraphTracer(fx.Tracer):
 
         # append stack trace to fx node
         tx = self.output_graph.current_tx
+
+        # log detailed location of line of code in 3.11
+        if sys.version_info >= (3, 11) and kind in (
+            "call_function",
+            "call_method",
+            "call_module",
+        ):
+            cur_inst = tx.current_instruction
+            if cur_inst is not self.prev_inst and cur_inst.positions.lineno is not None:
+                tx_code = tx.f_code
+                header = tx.get_line_of_code_header(lineno=cur_inst.positions.lineno)
+
+                def get_trace_call_log_str():
+                    line = get_instruction_source_311(tx_code, cur_inst).rstrip()
+                    return f"TRACE FX call {rv.node.name} from {header}\n{line}"
+
+                trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
+                self.prev_inst = cur_inst
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
@@ -1182,8 +1209,22 @@ class SubgraphTracer(fx.Tracer):
 
         return rv
 
-    def create_node(self, *args, **kwargs):
-        node = super().create_node(*args, **kwargs)
+    def create_node(
+        self, op, target, args=None, kwargs=None, name=None, type_expr=None
+    ):
+        if self.parent is not None:
+            flat_args, _ = pytree.tree_flatten((args, kwargs))
+            for arg in flat_args:
+                if not isinstance(arg, torch.fx.Node):
+                    continue
+                # Special case for autograd.Function tracing
+                if "saved_tensor_marked" in arg.meta:
+                    continue
+                assert (
+                    arg.graph == self.graph
+                ), "create_node using arg not from this SubgraphTracer"
+
+        node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
         return node
 
@@ -1257,6 +1298,21 @@ class SubgraphTracer(fx.Tracer):
         if self.parent is not None and proxy.tracer != self.parent:
             self.parent.lift_tracked_freevar_to_input(proxy)
         return new_proxy
+
+    def maybe_lift_tracked_freevar_to_input(self, arg):
+        """
+        If arg is a free variable, then lift it to be an input.
+        Returns the new lifted arg (if arg was a freevar), else the
+        original arg.
+        """
+        if not isinstance(arg, torch.fx.Proxy):
+            return arg
+        elif arg.tracer == self:
+            return arg
+        # Special case for autograd.Function tracing
+        elif "saved_tensor_marked" in arg.node.meta:
+            return arg
+        return self.lift_tracked_freevar_to_input(arg)
 
 
 # NOTE: [HigherOrderOperator tracing design]

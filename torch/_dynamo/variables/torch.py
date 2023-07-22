@@ -30,7 +30,12 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import VariableTracker
-from .ctx_manager import AutocastModeVariable, NullContextVariable
+from .ctx_manager import (
+    AutocastModeVariable,
+    NullContextVariable,
+    TorchFunctionDisableVariable,
+)
+from .distributed import is_from_local
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
 from .tensor import TensorWithTFOverrideVariable
@@ -324,6 +329,14 @@ class TorchVariable(VariableTracker):
             return ConstantVariable(
                 torch.are_deterministic_algorithms_enabled(), **options
             ).add_guards(DeterministicAlgorithmsVariable._guards_singleton)
+        elif self.value is torch._C._is_torch_function_enabled:
+            assert not (args or kwargs)
+            return ConstantVariable(
+                tx.output.torch_function_enabled, **options
+            ).add_guards(TorchFunctionDisableVariable._guards_singleton)
+        elif self.value is torch._C.DisableTorchFunctionSubclass:
+            assert not (args or kwargs)
+            return TorchFunctionDisableVariable.create(tx, **options)
         elif self.value is torch.cuda.stream:
             log.warning(
                 "torch.cuda.stream() not fully supported, streams may be ignored"
@@ -411,7 +424,7 @@ class TorchVariable(VariableTracker):
             torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
         ):
-            log.warning("Profiler will be ignored")
+            log.warning("Profiler function %s will be ignored", self.value)
             return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
@@ -538,6 +551,26 @@ class TorchVariable(VariableTracker):
             assert len(args) == 1, "Expected one arg (pg)"
             assert isinstance(args[0], ProcessGroupVariable)
             return ConstantVariable(self.value(args[0].as_python_constant()))
+        elif is_from_local(self.value):
+            # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
+            # and rewrite args to have only proxyable args, then insert call_function
+            args_as_value = [x.as_python_constant() for x in args[1:]]
+
+            def fn_with_prim_types(x, **kwargs):
+                return self.value(x, *args_as_value, **kwargs)
+
+            # attach the same function name for better debugging
+            fn_with_prim_types.__name__ = "prim " + self.value.__name__
+
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    fn_with_prim_types,
+                    *proxy_args_kwargs([args[0]], kwargs),
+                ),
+                **options,
+            )
         elif self.value == torch.nn.init._calculate_correct_fan:
             return UserFunctionVariable(
                 torch.nn.init._calculate_correct_fan, **options
@@ -555,6 +588,21 @@ class TorchVariable(VariableTracker):
                 unimplemented("Unsupported unflatten with len(args) != 2")
 
             return torch.utils._pytree.tree_unflatten(args[0], args[1].value)
+        elif self.value == torch.utils._pytree.tree_map_only:
+            if len(args) != 3:
+                unimplemented("Unsupported tree_map_only with len(args) != 3")
+
+            ty = args[0].value  # type
+            fn = args[1]  # map fn
+            tree = args[2]  # tree
+
+            def map_fn(v):
+                if ty == v.python_type():
+                    return fn.call_function(tx, [v], {})
+                else:
+                    return v
+
+            return torch.utils._pytree.tree_map(map_fn, tree)
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
