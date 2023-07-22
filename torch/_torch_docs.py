@@ -14051,7 +14051,7 @@ for unary_base_func_name in (
     if hasattr(torch, unary_foreach_func_name):
         add_docstr(
             getattr(torch, unary_foreach_func_name),
-            fr"""
+            rf"""
 {unary_foreach_func_name}(self: List[Tensor]) -> List[Tensor]
 
 Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
@@ -14061,7 +14061,7 @@ Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
     if hasattr(torch, unary_inplace_foreach_func_name):
         add_docstr(
             getattr(torch, unary_inplace_foreach_func_name),
-            fr"""
+            rf"""
 {unary_inplace_foreach_func_name}(self: List[Tensor]) -> None
 
 Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
