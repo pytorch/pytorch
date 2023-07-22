@@ -2190,7 +2190,9 @@ for details.
           // Note: NCCL calls free on the netName pointer
           // when destroying the communicator. So memory
           // shouldn't leak because of allocation in strdup.
-          [](ncclConfig_t& self, const char* tmp) { self.netName = strdup(tmp); });
+          [](ncclConfig_t& self, const char* tmp) {
+            self.netName = strdup(tmp);
+          });
 #endif
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
