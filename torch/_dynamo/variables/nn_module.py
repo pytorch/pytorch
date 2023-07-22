@@ -536,6 +536,7 @@ class NNModuleVariable(VariableTracker):
             builtin_supported = (
                 torch.nn.ModuleDict.__getitem__,
                 torch.nn.ModuleList.__getitem__,
+                torch.nn.ParameterDict.__getitem__,
                 torch.nn.ParameterList.__getitem__,
                 torch.nn.Sequential.__getitem__,
             )

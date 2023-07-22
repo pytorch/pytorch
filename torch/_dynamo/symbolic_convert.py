@@ -7,6 +7,7 @@ import functools
 import importlib
 import inspect
 import itertools
+import linecache
 import logging
 import operator
 import sys
@@ -58,8 +59,10 @@ from .source import (
 from .utils import (
     counters,
     get_fake_value,
+    get_instruction_source_311,
     graph_break_dup_warning_checker,
     istype,
+    LazyString,
     proxy_args_kwargs,
 )
 from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
@@ -82,6 +85,7 @@ from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    SetVariable,
     SliceVariable,
     TupleVariable,
 )
@@ -105,6 +109,8 @@ from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariab
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
+trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
+trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 
 
 @functools.lru_cache(None)
@@ -202,23 +208,19 @@ def _detect_and_normalize_assert_statement(
 
     current_instruction_pointer += 1
 
-    if current_instruction_pointer >= len(self.instructions):
-        return False
+    # Use dummy error message if its hard to extract
+    error_msg = "assertion error"
 
     inst = self.instructions[current_instruction_pointer]
-    has_error_msg = False
     # DETECT RAISE_VARARGS or LOAD CONST
     if inst.opname == "LOAD_CONST":
         if not isinstance(inst.argval, str):
             return False
-        self.LOAD_CONST(inst)
-        has_error_msg = True
+        error_msg = inst.argval
 
         # if it is LOAD_CONSTANT, it must be followed by CALL_FUNCTION
         # (PRECALL for Python 3.11+)
         current_instruction_pointer += 1
-        if current_instruction_pointer >= len(self.instructions):
-            return False
         inst = self.instructions[current_instruction_pointer]
         if inst.opname not in ("CALL_FUNCTION", "PRECALL"):
             return False
@@ -228,16 +230,12 @@ def _detect_and_normalize_assert_statement(
         current_instruction_pointer += 1
         if inst.opname == "PRECALL":
             current_instruction_pointer += 1
-        if current_instruction_pointer >= len(self.instructions):
-            return False
         inst = self.instructions[current_instruction_pointer]
 
     if inst.opname != "RAISE_VARARGS":
         return False
 
-    if not has_error_msg:
-        # Push dummy value instead of error message
-        self.push(ConstantVariable("assertion error"))
+    self.push(ConstantVariable(error_msg))
 
     return True
 
@@ -497,6 +495,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     kw_names: Optional[ConstantVariable]
     accept_prefix_inst: bool
     prefix_insts: List[Instruction]
+    inline_depth: int
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
@@ -599,6 +598,23 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.restore_graphstate(state)
             raise
 
+    def get_line_of_code_header(self, lineno=None):
+        if lineno is None:
+            lineno = self.lineno
+        inline_depth_str = (
+            f" (inline depth: {self.inline_depth})" if self.inline_depth > 0 else ""
+        )
+        return f"{self.f_code.co_name} {self.f_code.co_filename}:{lineno}{inline_depth_str}"
+
+    def get_log_starts_line_log_str(self):
+        log_str = f"TRACE starts_line {self.get_line_of_code_header()}\n"
+        line = linecache.getline(self.f_code.co_filename, self.lineno).rstrip()
+        log_str += f"    {line}"
+        return log_str
+
+    def log_starts_line(self):
+        trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
+
     def step(self):
         """Process exactly one instruction, return False we should exit"""
         assert isinstance(self.instruction_pointer, int)
@@ -612,7 +628,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.next_instruction = None
         if inst.starts_line and self.lineno != inst.starts_line:
             self.lineno = inst.starts_line
-            log.debug("TRACE starts_line %s:%s", self.f_code.co_filename, self.lineno)
+            self.log_starts_line()
 
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
@@ -869,7 +885,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if len(bits) < level:
             raise ImportError("attempted relative import beyond top-level package")
         base = bits[0]
-        return "{}.{}".format(base, name) if name else base
+        return f"{base}.{name}" if name else base
 
     def calc_package(self):
         """
@@ -1259,6 +1275,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         self.push(ListVariable(items, mutable_local=MutableLocal(), **options))
 
+    def BUILD_SET(self, inst):
+        items = self.popn(inst.argval)
+        options = VariableTracker.propagate(items)
+        new_set = SetVariable(self, items, mutable_local=MutableLocal(), **options)
+        self.push(new_set)
+
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
         seqs = self.popn(inst.argval)
         options = VariableTracker.propagate(seqs)
@@ -1342,6 +1364,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 **VariableTracker.propagate([obj, k, v]),
             ),
         )
+
+    def SET_ADD(self, inst):
+        v = self.pop()
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, SetVariable)
+        assert obj.mutable_local
+        return obj.call_method(self, "add", [v], {})
 
     def LIST_APPEND(self, inst):
         v = self.pop()
@@ -1807,7 +1837,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             additional_stack_frames = []
         return "".join(
             traceback.format_list(
-                ([self.frame_summary()] + list(reversed(additional_stack_frames)))
+                [self.frame_summary()] + list(reversed(additional_stack_frames))
             )
         )
 
@@ -1856,6 +1886,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         symbolic_globals: Dict[str, VariableTracker],
         f_code: types.CodeType,
         export: bool,
+        inline_depth: int,
     ):
         super().__init__()
 
@@ -1915,6 +1946,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ):
                 self.push(BuiltinVariable(None))
 
+        self.inline_depth = inline_depth
+        linecache.lazycache(f_code.co_filename, f_globals)
+        self.log_starts_line()
+
 
 class InstructionTranslator(InstructionTranslatorBase):
     mutated_closure_cell_contents: Set[str]
@@ -1960,6 +1995,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_globals=collections.OrderedDict(),
             f_code=f_code,
             export=export,
+            inline_depth=0,
         )
 
         # as soon as we create the tracing context we should keep it active, so any calls
@@ -2211,6 +2247,16 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # with a single alias
         if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
+        if sys.version_info >= (3, 11):
+            cur_inst = parent.current_instruction
+            parent_code = parent.f_code
+            header = parent.get_line_of_code_header(lineno=cur_inst.positions.lineno)
+
+            def get_trace_call_log_str():
+                line = get_instruction_source_311(parent_code, cur_inst).rstrip()
+                return f"TRACE inlined call {code.co_name} from {header}\n{line}"
+
+            trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s", code, suffix)
 
         tracer: InliningInstructionTranslator
@@ -2280,6 +2326,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             code_options={k: getattr(code, k) for k in dir(code)},
             f_code=code,
             export=parent.export,
+            inline_depth=parent.inline_depth + 1,
         )
         self.parent = parent
         self.symbolic_result = None

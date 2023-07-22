@@ -214,6 +214,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         instead of reacquiring the references each iteration, then it will not
         see FSDP's newly created views, and autograd will not work correctly.
 
+    .. note::
+        With ``limit_all_gathers=True``, you may see a gap in the FSDP
+        pre-forward where the CPU thread is not issuing any kernels. This is
+        intentional and shows the rate limiter in effect. Synchronizing the CPU
+        thread in that way prevents over-allocating memory for subsequent
+        all-gathers, and it should not actually delay GPU kernel execution.
+
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.
@@ -334,12 +341,16 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             bound workloads. This should only be used for static graph models
             since the forward order is fixed based on the first iteration's
             execution. (Default: ``False``)
-        limit_all_gathers (bool): If ``False``, then FSDP allows the CPU
-            thread to schedule all-gathers without any extra synchronization.
-            If ``True``, then FSDP explicitly synchronizes the CPU thread to
-            prevent too many in-flight all-gathers. This ``bool`` only affects
-            the sharded strategies that schedule all-gathers. Enabling this can
-            help lower the number of CUDA malloc retries.
+        limit_all_gathers (bool): If ``True``, then FSDP explicitly
+            synchronizes the CPU thread to ensure GPU memory usage from only
+            *two* consecutive FSDP instances (the current instance running
+            computation and the next instance whose all-gather is prefetched).
+            If ``False``, then FSDP allows the CPU thread to issue all-gathers
+            without any extra synchronization. (Default: ``True``) We often
+            refer to this feature as the "rate limiter". This flag should only
+            be set to ``False`` for specific CPU-bound workloads with low
+            memory pressure in which case the CPU thread can aggressively issue
+            all kernels without concern for the GPU memory usage.
         use_orig_params (bool): Setting this to ``True`` has FSDP use
             ``module`` 's original parameters. FSDP exposes those original
             parameters to the user via :meth:`nn.Module.named_parameters`
@@ -382,7 +393,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
         forward_prefetch: bool = False,
-        limit_all_gathers: bool = False,
+        limit_all_gathers: bool = True,
         use_orig_params: bool = False,
         ignored_states: Union[
             Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
@@ -405,14 +416,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             self, process_group, sharding_strategy, auto_wrap_policy
         )
         if auto_wrap_policy is not None:
-            auto_wrap_kwargs = {
-                "module": module,
-                "auto_wrap_policy": auto_wrap_policy,
-                "wrapper_cls": FullyShardedDataParallel,
-                "ignored_modules": self._ignored_modules,
-                "ignored_params": self._ignored_params,
-                "only_wrap_children": True,  # avoid double wrapping the root
-            }
             fsdp_kwargs = {
                 "process_group": process_group,
                 "sharding_strategy": sharding_strategy,
@@ -425,6 +428,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 "forward_prefetch": forward_prefetch,
                 "limit_all_gathers": limit_all_gathers,
                 "use_orig_params": use_orig_params,
+                "ignored_states": self._ignored_params,
             }
             if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
                 # Share root process groups with children to maintain
@@ -432,7 +436,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 # process groups.
                 fsdp_kwargs["process_group"] = (self.process_group, self._inter_node_pg)
 
-            _auto_wrap(auto_wrap_kwargs, fsdp_kwargs, FullyShardedDataParallel)
+            _auto_wrap(
+                module,
+                auto_wrap_policy,
+                self._ignored_modules,
+                self._ignored_params,
+                fsdp_kwargs,
+                FullyShardedDataParallel,
+            )
 
         backward_prefetch_limit = 1
         forward_prefetch_limit = 1
@@ -455,7 +466,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             device_id,
             param_init_fn,
             sync_module_states,
-            FullyShardedDataParallel,
         )
         self._fsdp_wrapped_module = module
         if not use_orig_params:
@@ -481,11 +491,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     @property
     def _has_params(self) -> bool:
         """Returns whether this FSDP instance manages any parameters."""
-        return hasattr(self, "_handles") and len(self._handles) > 0
+        return hasattr(self, "_handle") and self._handle is not None
 
     @property
     def _flat_param(self) -> Optional[FlatParameter]:
-        return self._handles[0].flat_param if self._handles else None
+        return self._handle.flat_param if self._handle else None
 
     def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to the wrapped module."""
@@ -785,24 +795,30 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Runs the forward pass for the wrapped module, inserting FSDP-specific
         pre- and post-forward sharding logic.
         """
+        handle = self._handle
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel.forward"
         ):
             args, kwargs = _root_pre_forward(self, self, args, kwargs)
             unused = None
-            unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
-            reshard_fn = functools.partial(_post_forward_reshard, self, self._handles)
             args, kwargs = _pre_forward(
-                self, self._handles, unshard_fn, self._fsdp_wrapped_module, args, kwargs
+                self,
+                handle,
+                _pre_forward_unshard,
+                self._fsdp_wrapped_module,
+                args,
+                kwargs,
             )
-            for handle in self._handles:
+            if handle:
                 _p_assert(
                     handle.flat_param.device == self.compute_device,
                     "Expected `FlatParameter` to be on the compute device "
                     f"{self.compute_device} but got {handle.flat_param.device}",
                 )
             output = self._fsdp_wrapped_module(*args, **kwargs)
-            return _post_forward(self, self._handles, reshard_fn, self, unused, output)
+            return _post_forward(
+                self, handle, _post_forward_reshard, self, unused, output
+            )
 
     @staticmethod
     @contextlib.contextmanager
