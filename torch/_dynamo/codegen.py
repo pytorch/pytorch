@@ -3,7 +3,7 @@ import dataclasses
 import re
 import sys
 import types
-from typing import List
+from typing import List, Optional
 
 import torch.nn
 from . import utils
@@ -49,7 +49,7 @@ class PyCodegen:
         self,
         tx=None,
         root: torch.nn.Module = None,
-        graph_output_var: str = None,
+        graph_output_var: Optional[str] = None,
         tempvars=None,
     ):
         self.root = root

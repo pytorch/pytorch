@@ -170,7 +170,7 @@ class TracerBase:
     @compatibility(is_backward_compatible=True)
     def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
                      name: Optional[str] = None, type_expr : Optional[Any] = None,
-                     proxy_factory_fn: Callable[[Node], 'Proxy'] = None):
+                     proxy_factory_fn: Optional[Callable[[Node], 'Proxy']] = None):
         '''
         Create a Node from the given arguments, then return the Node
         wrapped in a Proxy object.

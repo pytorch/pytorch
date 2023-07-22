@@ -1,6 +1,6 @@
 # Owner(s): ["module: fx"]
 
-from typing import Set, Type
+from typing import Set, Type, Optional
 import torch
 import torch.fx
 
@@ -27,7 +27,7 @@ class TestDCE(TestCase):
         self,
         m: torch.nn.Module,
         expect_dce_changes: bool,
-        modules_to_be_leafs: Set[Type] = None,
+        modules_to_be_leafs: Optional[Set[Type]] = None,
     ):
         class TestTracer(torch.fx.Tracer):
             def is_leaf_module(self, m, qualname):

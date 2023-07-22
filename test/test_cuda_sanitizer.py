@@ -3,7 +3,7 @@
 import sys
 import textwrap
 import traceback
-from typing import List
+from typing import List, Optional
 
 import torch
 import torch.cuda._sanitizer as csan
@@ -140,8 +140,8 @@ class TestEventHandler(TestCase):
     def kernel_launch(
         self,
         stream: StreamId,
-        read_only: List[DataPtr] = None,
-        read_write: List[DataPtr] = None,
+        read_only: Optional[List[DataPtr]] = None,
+        read_write: Optional[List[DataPtr]] = None,
     ) -> List[csan.SynchronizationError]:
         if read_only is None:
             read_only = []
@@ -159,8 +159,8 @@ class TestEventHandler(TestCase):
     def assert_good_kernel_launch(
         self,
         stream: StreamId,
-        read_only: List[DataPtr] = None,
-        read_write: List[DataPtr] = None,
+        read_only: Optional[List[DataPtr]] = None,
+        read_write: Optional[List[DataPtr]] = None,
     ) -> None:
         self.assertEqual(self.kernel_launch(stream, read_only, read_write), [])
 
@@ -168,8 +168,8 @@ class TestEventHandler(TestCase):
         self,
         number_of_errors: int,
         stream: StreamId,
-        read_only: List[DataPtr] = None,
-        read_write: List[DataPtr] = None,
+        read_only: Optional[List[DataPtr]] = None,
+        read_write: Optional[List[DataPtr]] = None,
     ) -> None:
         errors = self.kernel_launch(stream, read_only, read_write)
         self.assertEqual(len(errors), number_of_errors)

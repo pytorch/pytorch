@@ -76,6 +76,7 @@ select = [
     "PLE",
     "RUF017",
     "TRY302",
+    "RUF013",
 ]
 
 [tool.ruff.per-file-ignores]

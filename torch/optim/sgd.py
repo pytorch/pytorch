@@ -187,7 +187,7 @@ def sgd(params: List[Tensor],
         momentum_buffer_list: List[Optional[Tensor]],
         # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
         # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-        has_sparse_grad: bool = None,
+        has_sparse_grad: Optional[bool] = None,
         foreach: Optional[bool] = None,
         *,
         weight_decay: float,

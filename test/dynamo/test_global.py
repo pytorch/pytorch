@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+from typing import Optional
+
 import torch
 
 import torch._dynamo.test_case
@@ -183,7 +185,7 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
     def test_store_global_inline_1(self):
         # Borrowed from test_python_autograd.py
         class Variable:
-            def __init__(self, value: torch.Tensor, name: str = None):
+            def __init__(self, value: torch.Tensor, name: Optional[str] = None):
                 self.value = value
                 self.name = name or fresh_name()
 
@@ -203,12 +205,12 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
     def test_store_global_inline_2(self):
         # Borrowed from test_python_autograd.py
         class Variable:
-            def __init__(self, value: torch.Tensor, name: str = None):
+            def __init__(self, value: torch.Tensor, name: Optional[str] = None):
                 self.value = value
                 self.name = name or fresh_name()
 
             @staticmethod
-            def constant(value: torch.Tensor, name: str = None):
+            def constant(value: torch.Tensor, name: Optional[str] = None):
                 return Variable(value, name)
 
         def fn(a, b):

@@ -602,7 +602,7 @@ class Optimizer:
         value: torch.Tensor,
         param_id: int,
         param_groups: List[Dict[Any, Any]],
-        key: Hashable = None,
+        key: Optional[Hashable] = None,
     ) -> torch.Tensor:
         # Floating-point types are a bit special here. They are the only ones
         # that are assumed to always match the type of params.

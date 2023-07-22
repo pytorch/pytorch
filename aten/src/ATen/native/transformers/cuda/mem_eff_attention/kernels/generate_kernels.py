@@ -307,7 +307,7 @@ def write_decl_impl(
     family_name: str,
     impl_file: str,
     autogen_dir: Path,
-    disable_def: str = None,
+    disable_def: Optional[str] = None,
 ) -> None:
     cpp_file_header = """/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.

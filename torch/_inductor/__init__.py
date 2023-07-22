@@ -54,7 +54,9 @@ def aot_compile(
     return lib_path
 
 
-def list_mode_options(mode: str = None, dynamic: bool = None) -> Dict[str, Any]:
+def list_mode_options(
+    mode: Optional[str] = None, dynamic: Optional[bool] = None
+) -> Dict[str, Any]:
     r"""Returns a dictionary describing the optimizations that each of the available
     modes passed to `torch.compile()` performs.
 

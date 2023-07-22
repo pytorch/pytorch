@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Callable, Dict, List, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 
@@ -76,7 +76,9 @@ def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...]) -
 
 
 # Utilities to read/write markdown table-like content.
-def to_markdown_table(res: TimingResultType, header: Tuple[str, ...] = None) -> str:
+def to_markdown_table(
+    res: TimingResultType, header: Optional[Tuple[str, ...]] = None
+) -> str:
     if header is None:
         header = ("model", "task", "mean", "var")
     out = ""
