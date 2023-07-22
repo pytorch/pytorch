@@ -787,6 +787,10 @@ class WrapperCodeGen(CodeGen):
             )
         )
 
+    def use_preallocated_ouput(self, name):
+        # outputs are passed-in in the AOT mode
+        return V.graph.aot_mode and name in set(V.graph.get_output_names())
+
     def codegen_allocation(self, buffer):
         name = buffer.get_name()
 
@@ -816,7 +820,7 @@ class WrapperCodeGen(CodeGen):
             AllocateLine(
                 self,
                 buffer,
-                not (V.graph.aot_mode and name in set(V.graph.get_output_names())),
+                not self.use_preallocated_ouput(name),
             )
         )
 
@@ -849,11 +853,10 @@ class WrapperCodeGen(CodeGen):
         ):
             return False
 
-        # outputs are passed-in in the AOT mode
         if (
             V.graph.aot_mode
             and output_buffer
-            and output_buffer.get_name() in set(V.graph.get_output_names())
+            and self.use_preallocated_ouput(output_buffer.get_name())
         ):
             return False
 
@@ -1223,7 +1226,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def make_buffer_allocation(self, buffer):
         name = buffer.get_name()
         # outputs are passed-in in the AOT mode
-        if V.graph.aot_mode and name in set(V.graph.get_output_names()):
+        if self.use_preallocated_ouput(name):
             output_idx = None
             output_buffer = None
             for idx, output in enumerate(V.graph.graph_outputs):
