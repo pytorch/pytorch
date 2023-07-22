@@ -650,83 +650,83 @@ python_ref_db: List[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.fft",
         torch_opinfo_name="fft.fft",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifft",
         torch_opinfo_name="fft.ifft",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfft",
         torch_opinfo_name="fft.rfft",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfft",
         torch_opinfo_name="fft.irfft",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfft",
         torch_opinfo_name="fft.hfft",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfft",
         torch_opinfo_name="fft.ihfft",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.fftn",
         torch_opinfo_name="fft.fftn",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifftn",
         torch_opinfo_name="fft.ifftn",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfftn",
         torch_opinfo_name="fft.rfftn",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfftn",
         torch_opinfo_name="fft.irfftn",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfftn",
         torch_opinfo_name="fft.hfftn",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfftn",
         torch_opinfo_name="fft.ihfftn",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.fft2",
         torch_opinfo_name="fft.fft2",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifft2",
         torch_opinfo_name="fft.ifft2",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfft2",
         torch_opinfo_name="fft.rfft2",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfft2",
         torch_opinfo_name="fft.irfft2",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfft2",
         torch_opinfo_name="fft.hfft2",
-            ),
+    ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfft2",
         torch_opinfo_name="fft.ihfft2",
-            ),
+    ),
     PythonRefInfo(
         "_refs.fft.fftshift",
         op_db=op_db,
         torch_opinfo_name="fft.fftshift",
-            ),
+    ),
     PythonRefInfo(
         "_refs.fft.ifftshift",
         op_db=op_db,
         torch_opinfo_name="fft.ifftshift",
-            ),
+    ),
 ]
