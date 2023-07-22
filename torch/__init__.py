@@ -1623,7 +1623,7 @@ def compile(model: Optional[Callable] = None, *,
         - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
         - To register an out-of-tree custom backend: https://pytorch.org/docs/main/compile/custom-backends.html
-       mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
+       mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
         - "default" is the default mode, which is a good balance between performance and overhead
 
         - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs,
@@ -1635,6 +1635,9 @@ def compile(model: Optional[Callable] = None, *,
           to debug.
 
         - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+          It enables CUDA graphs by default.
+
+        - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
 
         - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
 
