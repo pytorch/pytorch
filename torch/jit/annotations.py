@@ -133,7 +133,7 @@ def check_fn(fn, loc):
     # Make sure the function definition is not a class instantiation
     try:
         source = dedent(''.join(get_source_lines_and_file(fn)[0]))
-    except (TypeError, IOError):
+    except (OSError, TypeError):
         return
     if source is None:
         return

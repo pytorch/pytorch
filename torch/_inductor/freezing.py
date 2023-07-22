@@ -13,7 +13,7 @@ from torch._functorch.compile_utils import fx_graph_cse
 from torch._inductor.compile_fx import fake_tensor_prop
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
-from torch.ao.quantization._pt2e.utils import _fuse_conv_bn_
+from torch.ao.quantization.pt2e.utils import _fuse_conv_bn_
 from torch.fx.experimental.proxy_tensor import make_fx
 from . import config
 from .decomposition import select_decomp_table
@@ -203,6 +203,11 @@ def freeze(
         Tuple[torch.fx.GraphModule, List[int]]: A tuple containing the frozen GraphModule and a list of indices
         of the inputs that were preserved (not turned into constants).
     """
+    # We have convert conv's weight to channels last which may meet error for .view
+    # when doing fake_tensor_prop. So we need to convert view to reshape first.
+    # See the details in fx_codegen_and_compile of compile_fx.py.
+    view_to_reshape(aot_autograd_gm)
+
     fw_metadata = torch._guards.TracingContext.get().fw_metadata
     params_flat = torch._guards.TracingContext.get().params_flat
     assert fw_metadata is not None and params_flat is not None
@@ -223,10 +228,6 @@ def freeze(
     aot_autograd_gm.graph = cse_graph
     aot_autograd_gm.recompile()
 
-    # We have convert conv's weight to channels last which may meet error for .view
-    # when doing fake_tensor_prop. So we need to convert view to reshape first.
-    # See the details in fx_codegen_and_compile of compile_fx.py.
-    view_to_reshape(aot_autograd_gm)
     # Make sure meta['val'] is properly setup(weight conversion
     # or decompose_unfused_batchnorms lost meta['val']).
     aot_example_inputs = [example_inputs[ind] for ind in preserved_arg_indices]
@@ -334,6 +335,31 @@ def enforce_output_layout(gm):
     gm.recompile()
 
 
+def enforce_as_strided_input_layout(gm):
+    """
+    Make sure the as_strided node's input's layout does not change due to compiler
+    optimizations, because the as_strided strides info depends on input tensor stride info.
+    """
+
+    as_strided_ops = [
+        torch.ops.aten.as_strided.default,
+        torch.ops.aten.as_strided_.default,
+        torch.ops.aten.as_strided_scatter.default,
+    ]
+    strided_nodes = [n for n in gm.graph.nodes if n.target in as_strided_ops]
+    for n in strided_nodes:
+        with gm.graph.inserting_before(n):
+            # add a node to enforce eager layout
+            ft = n.args[0].meta["val"]
+            new_node = gm.graph.call_function(
+                prims.inductor_force_stride_order.default, (n.args[0], ft.stride())
+            )
+            n.replace_input_with(n.args[0], new_node)
+
+    gm.graph.lint()
+    gm.recompile()
+
+
 @dynamo_timed
 def convert_conv_weights_to_channels_last(gm):
     """
@@ -359,4 +385,5 @@ def convert_conv_weights_to_channels_last(gm):
             )
             conv.replace_input_with(weight_node, new_node)
 
+    enforce_as_strided_input_layout(gm)
     enforce_output_layout(gm)
