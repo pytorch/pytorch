@@ -676,6 +676,7 @@ def use_triton_template(layout, *, enable_int32=False):
         and is_big_gpu(layout.device.index or 0)
     )
 
+
 def use_aten_gemm_kernels():
     return "ATEN" in config.max_autotune_gemm_backends.upper().split(",")
 

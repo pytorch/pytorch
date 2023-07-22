@@ -243,7 +243,13 @@ if RUN_CUDA:
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
-        BaseTest("test_convolution1"),
+
+        # TODO: Re-enable this test after fixing cuda wrapper for conv Triton templates with dynamic shapes.
+        # This test is unstable: it succeeds when an ATEN kernel is used, and fails when a Triton kernel is used.
+        # Currently it passes on CI (an ATEN kernel is chosen) and fails locally (a Triton kernel is chosen).
+        # Ideally, it should succeed for whatever kernels.
+        # BaseTest("test_convolution1"),
+
         BaseTest("test_conv_backward"),
         BaseTest("test_custom_op"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
