@@ -54,13 +54,13 @@ if TEST_WITH_ROCM:
         ("cpu", "cuda"), is_skip=True
     )
     test_failures["test_convolution3_dynamic_shapes"] = TestFailure(
-        "cuda", is_skip=True
+        ("cuda",), is_skip=True
     )
     test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
-        "cuda", is_skip=True
+        ("cuda",), is_skip=True
     )
     test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(
-        "cuda", is_skip=True
+        ("cuda",), is_skip=True
     )
 
 
