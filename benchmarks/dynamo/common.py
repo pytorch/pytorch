@@ -2471,6 +2471,9 @@ def parse_args(args=None):
         "--cpp-wrapper", action="store_true", help="turn on cpp/cuda wrapper codegen"
     )
     parser.add_argument(
+        "--freezing", action="store_true", help="turn on freezing", default=False
+    )
+    parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
     )
     parser.add_argument(
@@ -3179,6 +3182,8 @@ def run(runner, args, original_dir=None):
         inductor_config.split_reductions = not args.disable_split_reductions
         inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
         inductor_config.cpp_wrapper = args.cpp_wrapper
+        if args.inference:
+            inductor_config.freezing = args.freezing
 
     runner.setup_amp()
 
