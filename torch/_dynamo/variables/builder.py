@@ -179,16 +179,6 @@ class FrameStateSizeEntry:
     size: Optional[List[int]]
 
 
-def variable_builder_no_source(value):
-    if isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
-        return UserDefinedObjectVariable(value)
-    elif is_builtin_callable(value):
-        return BuiltinVariable(value)
-    elif ConstantVariable.is_literal(value):
-        return ConstantVariable(value)
-    unimplemented(f"{type(value)} is not supported")
-
-
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -488,10 +478,12 @@ class VariableBuilder:
             )
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
+            new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(value)
+            self.source = new_source
             return CollectiveFunctionRewriteVariable(
-                CollectiveFunctionRewriteVariable.rewrite(value),
+                new_fn,
                 orig_fn=value,
-                source=self.source,
+                source=new_source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
@@ -1555,6 +1547,8 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
+        if isinstance(val, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+            return variables.UserDefinedObjectVariable(val)
         if ConstantVariable.is_literal(value):
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
