@@ -2963,6 +2963,5 @@ fft_c2r = _make_prim(
     doc=_fft_c2r_doc,
 )
 
-register_nvprims()
 register_rng_prims()
 register_debug_prims()
