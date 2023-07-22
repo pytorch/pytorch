@@ -1221,7 +1221,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 res = typed_storage
             return res
         else:
-            raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
+            raise RuntimeError(f"Unknown saved id type: {saved_id[0]}")
 
     _check_seekable(f)
     f_should_read_directly = _should_read_directly(f)
@@ -1250,7 +1250,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         raise RuntimeError("Invalid magic number; corrupt file?")
     protocol_version = pickle_module.load(f, **pickle_load_args)
     if protocol_version != PROTOCOL_VERSION:
-        raise RuntimeError("Invalid protocol version: %s" % protocol_version)
+        raise RuntimeError(f"Invalid protocol version: {protocol_version}")
 
     _sys_info = pickle_module.load(f, **pickle_load_args)
     unpickler = UnpicklerWrapper(f, **pickle_load_args)

@@ -157,6 +157,7 @@ class TestDynamoExportAPI(common_utils.TestCase):
             io_adapter.InputAdapter(),
             io_adapter.OutputAdapter(),
             infra.DiagnosticContext("test", "1.0"),
+            fake_context=None,
         )
         with self.assertRaises(roar.BeartypeException):
             export_output.save(None)  # type: ignore[arg-type]

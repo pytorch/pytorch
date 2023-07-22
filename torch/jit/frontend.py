@@ -124,7 +124,7 @@ class UnsupportedNodeError(NotSupportedError):
                                       offending_node.col_offset,
                                       offending_node.col_offset + range_len)
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
-        msg = "{} {}aren't supported".format(feature_name, reason + ' ' if reason else '')
+        msg = f"{feature_name} {reason + ' ' if reason else ''}aren't supported"
         super().__init__(source_range, msg)
 
 
@@ -889,8 +889,7 @@ class ExprBuilder(Builder):
                     sub_exprs.append(Dots(base.range()))
                 else:
                     raise NotSupportedError(base.range(),
-                                            "slicing multiple dimensions with "
-                                            "{} not supported".format(sub_type))
+                                            f"slicing multiple dimensions with {sub_type} not supported")
             return sub_exprs
         base = build_expr(ctx, expr.value)
         sub_type = type(expr.slice)

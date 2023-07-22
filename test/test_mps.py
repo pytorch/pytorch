@@ -10471,7 +10471,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.huber_loss',
         'true_divide', 'kron',
         'gradient', 'var', 'std', 'ldexp',
-        'linalg.vector_norm',
+        'linalg.vector_norm', 'lerp',
         'addr', 'var_mean',
         'var_mean_unbiased',
         'acosh', 'asinh', 'asin',
