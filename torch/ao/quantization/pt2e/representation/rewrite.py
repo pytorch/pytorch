@@ -3,7 +3,8 @@ from torch.fx import GraphModule
 from ..utils import (
     get_aten_graph_module,
     remove_tensor_overload_for_qdq_ops,
-    replace_literals_with_placeholders,
+    replace_literals_with_new_placeholders,
+    replace_literals_with_existing_placeholders,
 )
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
 from torch.fx.subgraph_rewriter import replace_pattern
@@ -184,7 +185,7 @@ def _reference_quantize_per_tensor_int8(x_fp32, scale, zero_point, quant_min, qu
     return x
 
 _DEQUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS = (
-    torch.randint(-128, 127, (1, 3, 3, 3)).to(dtype=torch.int8),
+    torch.randint(-128, 127, (1, 3, 3, 3), dtype=torch.int8),
     torch.randn(1, dtype=torch.float),
     torch.zeros(1, dtype=torch.int),
     torch.tensor([-128], dtype=torch.int),
@@ -205,30 +206,81 @@ def _reference_dequantize_per_tensor_int8(x_i8, scale, zero_point, quant_min, qu
     # TODO: debug the implementation later when torchdynamo time out issue is resolved
     return ((x_i8.to(torch.float32) - zero_point) * scale).to(dtype=torch.float32)
 
-# boolean flag to indicate if we want to replace literals to be placeholder nodes for pattern and replacement
-_REPLACE_LITERAL = True
-_DONT_REPLACE_LITERAL = False
+_QUANTIZE_PER_CHANNEL_INT8_EXAMPLE_INPUTS = (
+    torch.randn(1, 3, 3, 3, dtype=torch.float),
+    torch.randn(3, dtype=torch.float),
+    torch.zeros(3, dtype=torch.int),
+    1,
+    -128,
+    127,
+)
 
+def _quantize_per_channel_int8(x_fp32, scales, zero_points, ch_axis, quant_min, quant_max):
+    out_i8 = torch.ops.quantized_decomposed.quantize_per_channel(x_fp32, scales, zero_points, ch_axis, quant_min, quant_max, torch.int8)
+    return out_i8
+
+def _reference_quantize_per_channel_int8(x_fp32, scales, zero_points, ch_axis, quant_min, quant_max):
+    x_fp32 = torch.transpose(x_fp32, ch_axis, -1)
+    out_i32 = torch.ops.aten.clamp(torch.round(x_fp32 / scales).to(torch.int32) + zero_points, quant_min, quant_max)
+    out_i32 = torch.transpose(out_i32, ch_axis, -1)
+    return out_i32.to(torch.int8)
+
+_DEQUANTIZE_PER_CHANNEL_INT8_EXAMPLE_INPUTS = (
+    torch.randint(-128, 127, (1, 3, 3, 3), dtype=torch.int8),
+    torch.randn(3, dtype=torch.float),
+    torch.zeros(3, dtype=torch.int),
+    1,
+    -128,
+    127,
+)
+
+def _dequantize_per_channel_int8(x_i8, scales, zero_points, ch_axis, quant_min, quant_max):
+    # the following will be replaced as placeholders
+    out_fp32 = torch.ops.quantized_decomposed.dequantize_per_channel(x_i8, scales, zero_points, ch_axis, quant_min, quant_max, torch.int8)
+    return out_fp32
+
+def _reference_dequantize_per_channel_int8(x_i8, scales, zero_points, ch_axis, quant_min, quant_max):
+    # the following will be replaced as placeholders
+    # in order to preserve the quant_min/quant_max args for pattern matching (e.g. matching for int4 quantized ops)
+    # we call a torch.ops.aten.clamp here
+    x_i8 = torch.ops.aten.clamp(x_i8, quant_min, quant_max)
+    x_i8 = torch.transpose(x_i8, ch_axis, -1)
+    x_i32 = x_i8.to(torch.int32)
+    out_fp32 = (x_i32 - zero_points) * scales
+    out_fp32 = torch.transpose(out_fp32, ch_axis, -1)
+    return out_fp32
+
+def _replace_ph_qdq_per_channel_replacement(gm: torch.fx.GraphModule):
+    return replace_literals_with_existing_placeholders(
+        gm,
+        exclude_literals=[-1],
+        literal_to_ph_idx={1: 3, -128: 4, 127:5}
+    )
+
+# (example inputs, pattern, replacement, post_transformation_pattern, post_transformation_replacement)
 _EXAMPLE_INPUTS_PATTERN_AND_REPLACEMENTS = [
-    (_QUANTIZED_ADD_EXAMPLE_INPUTS, _qdq_quantized_add_relu, _reference_quantized_add_relu, _DONT_REPLACE_LITERAL),
-    (_QUANTIZED_ADD_EXAMPLE_INPUTS, _qdq_quantized_add, _reference_quantized_add, _DONT_REPLACE_LITERAL),
-    (_QUANTIZED_MAX_POOL2D_EXAMPLE_INPUTS, _qdq_quantized_max_pool2d, _reference_quantized_max_pool2d, _REPLACE_LITERAL),
-    (_QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS, _qdq_quantized_adaptive_avg_pool2d, _reference_quantized_adaptive_avg_pool2d, _REPLACE_LITERAL),
-    (_QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS, _quantize_per_tensor_int8, _reference_quantize_per_tensor_int8, _DONT_REPLACE_LITERAL),
-    (_DEQUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS, _dequantize_per_tensor_int8, _reference_dequantize_per_tensor_int8, _REPLACE_LITERAL),
+    (_QUANTIZED_ADD_EXAMPLE_INPUTS, _qdq_quantized_add_relu, _reference_quantized_add_relu, None, None),
+    (_QUANTIZED_ADD_EXAMPLE_INPUTS, _qdq_quantized_add, _reference_quantized_add, None, None),
+    (_QUANTIZED_MAX_POOL2D_EXAMPLE_INPUTS, _qdq_quantized_max_pool2d, _reference_quantized_max_pool2d, replace_literals_with_new_placeholders, replace_literals_with_new_placeholders),
+    (_QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS, _qdq_quantized_adaptive_avg_pool2d, _reference_quantized_adaptive_avg_pool2d, replace_literals_with_new_placeholders, replace_literals_with_new_placeholders),
+    (_QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS, _quantize_per_tensor_int8, _reference_quantize_per_tensor_int8, None, None),
+    (_DEQUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS, _dequantize_per_tensor_int8, _reference_dequantize_per_tensor_int8, None, None),
+    (_QUANTIZE_PER_CHANNEL_INT8_EXAMPLE_INPUTS, _quantize_per_channel_int8, _reference_quantize_per_channel_int8, _replace_ph_qdq_per_channel_replacement, _replace_ph_qdq_per_channel_replacement),
+    (_DEQUANTIZE_PER_CHANNEL_INT8_EXAMPLE_INPUTS, _dequantize_per_channel_int8, _reference_dequantize_per_channel_int8, _replace_ph_qdq_per_channel_replacement, _replace_ph_qdq_per_channel_replacement),
 ]
 
 def reference_representation_rewrite(model: GraphModule) -> GraphModule:
     remove_tensor_overload_for_qdq_ops(model)
-    for example_inputs, pattern, replacement, replace_literals in _EXAMPLE_INPUTS_PATTERN_AND_REPLACEMENTS:
+    for example_inputs, pattern, replacement, post_trans_pattern, post_trans_replacement in _EXAMPLE_INPUTS_PATTERN_AND_REPLACEMENTS:
         pattern = get_aten_graph_module(pattern, example_inputs)  # type: ignore[arg-type, assignment]
         remove_tensor_overload_for_qdq_ops(pattern)  # type: ignore[arg-type]
         replacement = get_aten_graph_module(replacement, example_inputs)  # type: ignore[arg-type, assignment]
         remove_tensor_overload_for_qdq_ops(replacement)  # type: ignore[arg-type]
-        if replace_literals:
-            pattern = replace_literals_with_placeholders(pattern)
-            replacement = replace_literals_with_placeholders(replacement)
-            pattern.recompile()
-            replacement.recompile()
+        if post_trans_pattern:
+            pattern = post_trans_pattern(pattern)
+        if post_trans_replacement:
+            replacement = post_trans_replacement(replacement)
+        pattern.recompile()
+        replacement.recompile()
         matches = replace_pattern(model, pattern, replacement)
     return model

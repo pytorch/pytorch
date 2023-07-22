@@ -242,17 +242,20 @@ def _replace_dropout_for_eval(m: GraphModule):
 from torch.fx.node import map_arg
 from torch.utils._pytree import LeafSpec
 
-def replace_literals_with_placeholders(gm):
+def _is_literal(arg):
+    if isinstance(arg, (int, float)):
+        return True
+    if isinstance(arg, (tuple, list)):
+        return all(map(_is_literal, arg))
+    return False
+
+def replace_literals_with_new_placeholders(gm, merge_dup=False, exclude_literals=None):
     last_ph = None
-
-    def _is_literal(arg):
-        if isinstance(arg, (int, float)):
-            return True
-        if isinstance(arg, (tuple, list)):
-            return all(map(_is_literal, arg))
-        return False
-
     cnt = 0
+    literal_to_ph = {}
+    if exclude_literals is None:
+        exclude_literals = []
+
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             last_ph = node
@@ -261,13 +264,41 @@ def replace_literals_with_placeholders(gm):
         with gm.graph.inserting_after(last_ph):
             new_args = []
             for arg in node.args:
-                if _is_literal(arg):
-                    new_args.append(gm.graph.placeholder("arg" + str(cnt)))
-                    gm._in_spec.children_specs[0].children_specs.append(LeafSpec())
-                    cnt += 1
+                if _is_literal(arg) and not arg in exclude_literals:
+                    if merge_dup and arg in literal_to_ph:
+                        new_args.append(literal_to_ph[arg])
+                    else:
+                        ph_node = gm.graph.placeholder("arg" + str(cnt))
+                        new_args.append(ph_node)
+                        gm._in_spec.children_specs[0].children_specs.append(LeafSpec())
+                        cnt += 1
+                        if merge_dup:
+                            literal_to_ph[arg] = ph_node
                 else:
                     new_args.append(arg)
             new_args = tuple(new_args)
 
+        node.args = new_args
+    return gm
+
+
+def replace_literals_with_existing_placeholders(gm, exclude_literals, literal_to_ph_idx):
+    if exclude_literals is None:
+        exclude_literals = []
+
+    phs = [node for node in gm.graph.nodes if node.op == "placeholder"]
+
+    for node in gm.graph.nodes:
+        if node.op != "call_function":
+            continue
+        new_args = []
+        for arg in node.args:
+            if _is_literal(arg) and not arg in exclude_literals and arg in literal_to_ph_idx:
+                ph_idx = literal_to_ph_idx[arg]
+                ph_node = phs[ph_idx]
+                new_args.append(ph_node)
+            else:
+                new_args.append(arg)
+        new_args = tuple(new_args)
         node.args = new_args
     return gm

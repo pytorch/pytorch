@@ -1857,6 +1857,46 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             non_ref_node_occurrence={}
         )
 
+    def test_representation_quantize_dequantize_per_channel(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        quantizer = XNNPACKQuantizer()
+        # use per channel quantization for weight
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m_eager = M().eval()
+
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+        ref_node_occurrence = {
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor
+            ): 0,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor
+            ): 0,
+        }
+        non_ref_node_occurrence = {
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ): 3,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ): 3,
+        }
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence,
+            non_ref_node_occurrence
+        )
+
     def test_representation_quantize_dequantize(self):
         class M(torch.nn.Module):
             def __init__(self):
