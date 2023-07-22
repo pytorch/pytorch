@@ -44,8 +44,13 @@ PyObject* CppFunction_pynew(
        METH_O,                                                                 \
        nullptr},                                                               \
       {(char*)"name", THPCppFunction_name, METH_NOARGS, nullptr},              \
-  {(char*)"_sequence_nr", THPCppFunction_sequence_nr, METH_NOARGS, nullptr},   \
-  {(char*)"_thread_id", THPCppFunction_thread_id, METH_NOARGS, nullptr}
+      {(char*)"_sequence_nr",                                                  \
+       THPCppFunction_sequence_nr,                                             \
+       METH_NOARGS,                                                            \
+       nullptr},                                                               \
+  {                                                                            \
+    (char*)"_thread_id", THPCppFunction_thread_id, METH_NOARGS, nullptr}       \
+  }
 
 #define THP_FUNCTION_DEFAULT_PROPERTIES                                   \
   {(char*)"next_functions",                                               \

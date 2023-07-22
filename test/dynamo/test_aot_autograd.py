@@ -725,7 +725,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_aot_sequence_nr(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels=16,
                     out_channels=16,
@@ -852,7 +852,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_inductor_sequence_nr(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels=16,
                     out_channels=16,
@@ -910,7 +910,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_eager_sequence_nr(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(
                     in_channels=16,
                     out_channels=16,
