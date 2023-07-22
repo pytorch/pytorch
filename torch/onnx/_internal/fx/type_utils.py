@@ -66,8 +66,8 @@ def from_python_type_to_onnx_attribute_type(
     return _PYTHON_TYPE_TO_ONNX_ATTRIBUTE_TYPE.get(dtype)
 
 
-def is_torch_symbolic_type(t: Any) -> bool:
-    return isinstance(t, (torch.SymBool, torch.SymInt, torch.SymFloat))
+def is_torch_symbolic_type(value: Any) -> bool:
+    return isinstance(value, (torch.SymBool, torch.SymInt, torch.SymFloat))
 
 
 def from_torch_dtype_to_abbr(dtype: Optional[torch.dtype]) -> str:

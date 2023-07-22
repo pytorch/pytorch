@@ -231,6 +231,8 @@ def _fx_args_to_torch_args(
             wrapped_args.append(_fx_args_to_torch_args(arg))
         elif isinstance(arg, (int, float, torch.dtype)) or arg is None:
             wrapped_args.append(arg)
+        elif isinstance(arg, torch.device):
+            wrapped_args.append(str(arg))
         else:
             raise ValueError(
                 f"Unexpected input argument type is found in node arguments. arg: {arg}; "

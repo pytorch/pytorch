@@ -81,14 +81,22 @@ def _torch_fx_node(obj: torch.fx.Node) -> str:
     node_string = f"fx.Node({obj.target})[{obj.op}]:"
     if "val" not in obj.meta:
         return node_string + "None"
-    return node_string + _format_nested_argument_by_dtype(obj.meta["val"])
+    return node_string + format_argument(obj.meta["val"])
 
 
 @_format_argument.register
-def _torch_fx_symbolic_value(
-    obj,  # NOTE: functools.singledispatch does not support Union until 3.11, so we use Any here.
-) -> str:
-    return f"Sym({obj})"
+def _torch_fx_symbolic_bool(obj: torch.SymBool) -> str:
+    return f"SymBool({obj})"
+
+
+@_format_argument.register
+def _torch_fx_symbolic_int(obj: torch.SymInt) -> str:
+    return f"SymInt({obj})"
+
+
+@_format_argument.register
+def _torch_fx_symbolic_float(obj: torch.SymFloat) -> str:
+    return f"SymFloat({obj})"
 
 
 @_format_argument.register
@@ -102,7 +110,7 @@ def _list(obj: list) -> str:
     if not obj:
         return list_string + "None)"
     for item in obj:
-        list_string += f"{_format_nested_argument_by_dtype(item)},\n"
+        list_string += f"{format_argument(item)},\n"
     return list_string + ")"
 
 
@@ -112,7 +120,7 @@ def _tuple(obj: tuple) -> str:
     if not obj:
         return tuple_string + "None)"
     for item in obj:
-        tuple_string += f"{_format_nested_argument_by_dtype(item)},\n"
+        tuple_string += f"{format_argument(item)},\n"
     return tuple_string + ")"
 
 
@@ -122,7 +130,7 @@ def _dict(obj: dict) -> str:
     if not obj:
         return dict_string + "None)"
     for key, value in obj.items():
-        dict_string += f"{key}: {_format_nested_argument_by_dtype(value)},\n"
+        dict_string += f"{key}: {format_argument(value)},\n"
     return dict_string + ")"
 
 
@@ -151,31 +159,6 @@ def _stringify_shape(shape: Optional[torch.Size]) -> str:
     if shape is None:
         return ""
     return f"[{', '.join(str(x) for x in shape)}]"
-
-
-def _format_nested_argument_by_dtype(obj: Any) -> str:
-    """Dispatch to the correct formatter based on the type of the argument."""
-    if isinstance(obj, torch.Tensor):
-        return _torch_tensor(obj)
-    if isinstance(obj, torch.nn.Parameter):
-        return _torch_nn_parameter(obj)
-    if isinstance(obj, torch.fx.Node):
-        return _torch_fx_node(obj)
-    if fx_type_utils.is_torch_symbolic_type(obj):
-        return _torch_fx_symbolic_value(obj)
-    if isinstance(obj, graph_building.TorchScriptTensor):
-        return _onnxscript_torch_script_tensor(obj)
-    if isinstance(obj, onnxscript.OnnxFunction):
-        return _onnxscript_onnx_function(obj)
-    if isinstance(obj, onnxscript.TracedOnnxFunction):
-        return _onnxscript_traced_onnx_function(obj)
-    if isinstance(obj, list):
-        return _list(obj)
-    if isinstance(obj, tuple):
-        return _tuple(obj)
-    if isinstance(obj, dict):
-        return _dict(obj)
-    return format_argument(obj)
 
 
 diagnose_call = functools.partial(

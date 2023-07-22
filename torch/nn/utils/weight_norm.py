@@ -31,8 +31,7 @@ class WeightNorm:
 
         for k, hook in module._forward_pre_hooks.items():
             if isinstance(hook, WeightNorm) and hook.name == name:
-                raise RuntimeError("Cannot register two weight_norm hooks on "
-                                   "the same parameter {}".format(name))
+                raise RuntimeError(f"Cannot register two weight_norm hooks on the same parameter {name}")
 
         if dim is None:
             dim = -1
@@ -151,5 +150,4 @@ def remove_weight_norm(module: T_module, name: str = 'weight') -> T_module:
             del module._forward_pre_hooks[k]
             return module
 
-    raise ValueError("weight_norm of '{}' not found in {}"
-                     .format(name, module))
+    raise ValueError(f"weight_norm of '{name}' not found in {module}")
