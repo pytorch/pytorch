@@ -1,6 +1,8 @@
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, TYPE_CHECKING
 
-from torch._inductor.scheduler import NopKernelSchedulerNode, SchedulerNode, ExternKernelSchedulerNode
+# Prevent circular import
+if TYPE_CHECKING:
+    from torch._inductor.scheduler import NopKernelSchedulerNode, SchedulerNode, ExternKernelSchedulerNode
 
 # counter for tracking how many kernels have been generated
 generated_kernel_count = 0
