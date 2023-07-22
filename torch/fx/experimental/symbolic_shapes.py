@@ -1887,7 +1887,7 @@ TLS = threading.local()
 class ShapeEnvLoggerAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
         # TODO: Maybe suppress the envid if not DEBUG?
-        return '{}: {}'.format(self.extra['envid'], msg), kwargs
+        return f"{self.extra['envid']}: {msg}", kwargs
 
 
 ENV_COUNTER = collections.Counter()
@@ -3413,10 +3413,6 @@ Target Guards:
                 and isinstance(expr.lhs, sympy.Symbol)
                 and expr.lhs in self.var_to_range
             ):
-                continue
-
-            # Use only univariate functions.
-            if len(expr.rhs.free_symbols) > 0:
                 continue
 
             # Update the value range of the left-hand side, if the
