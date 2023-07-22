@@ -73,7 +73,7 @@ def _get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
     supported_config_and_operators: List[OperatorConfig] = []
     for quantization_config in [get_default_x86_inductor_quantization_config(), ]:
         ops = _supported_quantized_operators()
-        for op_string, pattern_list in ops.items():
+        for pattern_list in ops.values():
             supported_config_and_operators.append(
                 OperatorConfig(quantization_config, pattern_list)
             )
