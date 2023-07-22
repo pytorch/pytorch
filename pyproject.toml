@@ -70,6 +70,7 @@ select = [
     # Not included in flake8
     "UP",
     "PERF",
+    "PGH004",
     "PLE",
     "TRY302",
 ]
