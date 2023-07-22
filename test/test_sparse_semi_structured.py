@@ -33,10 +33,15 @@ from torch._inductor.utils import has_triton
 
 
 SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG.keys()
+SEMI_STRUCTURED_SUPPORTED_BACKENDS = ["cusparselt"]
 
 _IS_SM8X = False
 if torch.cuda.is_available():
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
+    SEMI_STRUCTURED_SUPPORTED_BACKENDS.append("cutlass")
+
+if torch._cslt_available():
+    SEMI_STRUCTURED_SUPPORTED_BACKENDS.append("cusparselt")
 
 def rand_sparse_semi_structured_mask(
     r, c, dtype=torch.float16, device="cuda", choice=None
@@ -111,9 +116,9 @@ class TestSparseSemiStructured(TestCase):
 
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    @parametrize("force_cutlass", [subtest(False), subtest(True)])
-    def test_to_sparse_semi_structured(self, dtype, force_cutlass):
-        SparseSemiStructuredTensor._FORCE_CUTLASS = force_cutlass
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_to_sparse_semi_structured(self, dtype, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
 
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         A_sparse = to_sparse_semi_structured(A)
@@ -127,13 +132,13 @@ class TestSparseSemiStructured(TestCase):
 
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    @parametrize("force_cutlass", [subtest(False), subtest(True)])
-    def test_mm_sparse_first_NT(self, dtype, device, force_cutlass):
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_mm_sparse_first_NT(self, dtype, device, backend):
         """
         Ensure torch.mm(A_sparse, B) is correct for float16 and will throw error for int8
         Ensure torch.mm(A_sparse, B.t()) is correct
         """
-        SparseSemiStructuredTensor._FORCE_CUTLASS = force_cutlass
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
 
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         A_sparse = to_sparse_semi_structured(A)
@@ -143,7 +148,7 @@ class TestSparseSemiStructured(TestCase):
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
         if dtype is torch.int8:
             # This should fail
-            if force_cutlass:
+            if backend == "cutlass":
                 with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_cutlass_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B)
             else:
@@ -153,7 +158,7 @@ class TestSparseSemiStructured(TestCase):
             # test transpose
             # NOTE: CUTLASS and cuSPARSELt have slightly different int8 behavior.
             # CUTLASS will output to an int32 tensor while cuSPARSELt will output to a int8 tensor
-            dense_result = torch.mm(A.cpu(), B.t().cpu()).to(device, dtype=torch.int32 if force_cutlass else torch.int8)
+            dense_result = torch.mm(A.cpu(), B.t().cpu()).to(device, dtype=torch.int32 if backend == "cutlass" else torch.int8)
             sparse_result = torch.mm(A_sparse, B.t())
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
         else:
@@ -166,12 +171,12 @@ class TestSparseSemiStructured(TestCase):
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    @parametrize("force_cutlass", [subtest(False), subtest(True)])
-    def test_mm_sparse_first_T(self, dtype, device, force_cutlass):
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_mm_sparse_first_T(self, dtype, device, backend):
         """
         Ensure torch.mm(A_sparse.t(), B) throws error
         """
-        SparseSemiStructuredTensor._FORCE_CUTLASS = force_cutlass
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         A_sparse = to_sparse_semi_structured(A)
 
@@ -184,12 +189,12 @@ class TestSparseSemiStructured(TestCase):
             torch.mm(A_sparse.t(), B)
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    @parametrize("force_cutlass", [subtest(False), subtest(True)])
-    def test_mm_sparse_second_T(self, dtype, device, force_cutlass):
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_mm_sparse_second_T(self, dtype, device, backend):
         """
         Ensure torch.mm(A, B_sparse.t()) is correct
         """
-        SparseSemiStructuredTensor._FORCE_CUTLASS = force_cutlass
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         B = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         B_sparse = to_sparse_semi_structured(B)
 
@@ -197,7 +202,7 @@ class TestSparseSemiStructured(TestCase):
 
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
         if dtype is torch.int8:
-            dense_result = torch.mm(A.cpu(), B.t().cpu()).to(device, dtype=torch.int32 if force_cutlass else torch.int8)
+            dense_result = torch.mm(A.cpu(), B.t().cpu()).to(device, dtype=torch.int32 if backend == "cutlass" else torch.int8)
             sparse_result = torch.mm(A, B_sparse.t())
         else:
             dense_result = torch.mm(A, B.t())
@@ -206,12 +211,12 @@ class TestSparseSemiStructured(TestCase):
         assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    @parametrize("force_cutlass", [subtest(False), subtest(True)])
-    def test_mm_sparse_second_NT(self, dtype, device, force_cutlass):
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_mm_sparse_second_NT(self, dtype, device, backend):
         """
         Ensure torch.mm(A, B_sparse) throws error
         """
-        SparseSemiStructuredTensor._FORCE_CUTLASS = force_cutlass
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         B = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         B_sparse = to_sparse_semi_structured(B)
 
@@ -223,13 +228,13 @@ class TestSparseSemiStructured(TestCase):
         ):
             sparse_result = torch.mm(A, B_sparse)
 
-    @parametrize("inference_mode", [subtest(False), subtest(True)])
-    @parametrize("force_cutlass", [subtest(False), subtest(True)])
-    def test_linear(self, inference_mode, device, force_cutlass):
+    @parametrize("inference_mode", [subtest(True), subtest(False)])
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_linear(self, inference_mode, device, backend):
         """
         Test nn.Linear has the same numerics
         """
-        SparseSemiStructuredTensor._FORCE_CUTLASS = force_cutlass
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         input = torch.rand(8, 128, 128, device=device).half()
         model = nn.Linear(128, 128).to(device).half()
         m, n = model.weight.shape
@@ -249,33 +254,32 @@ class TestSparseSemiStructured(TestCase):
 
         assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
-    @parametrize("force_cutlass", [subtest(False), subtest(True)])
-    def test_values(self, force_cutlass):
-        SparseSemiStructuredTensor._FORCE_CUTLASS = force_cutlass
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_values(self, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A)
         assert A_sparse.values().shape == (128, 64)
         assert (A_sparse.values() == 1).all()
 
-    @parametrize("force_cutlass", [subtest(False), subtest(True)])
-    def test_indices(self, force_cutlass):
-        SparseSemiStructuredTensor._FORCE_CUTLASS = force_cutlass
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_indices(self, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A)
         assert A_sparse.indices().shape == (128, 8)
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
-    @parametrize("force_cutlass", [subtest(False), subtest(True)])
-    def test_unsupported_shape(self, dtype, device, force_cutlass):
-        SparseSemiStructuredTensor._FORCE_CUTLASS = force_cutlass
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_unsupported_shape(self, dtype, device, backend):
+        SparseSemiStructuredTensor._FORCE_CUTLASS = (backend == "cutlass")
         A = rand_sparse_semi_structured_mask(4, 4, dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.shape"):
             A_sparse = to_sparse_semi_structured(A)
 
     @dtypes(*all_types_and_complex())
-    @parametrize("force_cutlass", [subtest(False), subtest(True)])
-    def test_unsupported_dtype(self, dtype, device, force_cutlass):
-        SparseSemiStructuredTensor._FORCE_CUTLASS = force_cutlass
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_unsupported_dtype(self, dtype, device, backend):
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype, device=device)
 
         if dtype not in SEMI_STRUCTURED_SUPPORTED_DTYPES:
@@ -284,9 +288,8 @@ class TestSparseSemiStructured(TestCase):
         else:
             A_sparse = to_sparse_semi_structured(A)
 
-    @parametrize("force_cutlass", [subtest(False), subtest(True)])
-    def test_unsupported_dim(self, device, force_cutlass):
-        SparseSemiStructuredTensor._FORCE_CUTLASS = force_cutlass
+    @parametrize("backend", SEMI_STRUCTURED_SUPPORTED_BACKENDS)
+    def test_unsupported_dim(self, device, backend):
         A = torch.rand(128, 128, 128, device=device, dtype=torch.float16)
 
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.dim"):

@@ -1,91 +1,104 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDASparse.h>
+#include <ATen/cuda/CUDAConfig.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <c10/core/ScalarType.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Half.h>
 #include <cusparse.h>
-#include <cusparseLt.h>
-#include <ATen/core/Tensor.h>
-#include <ATen/cuda/CUDAUtils.h>
-#include <ATen/Dispatch.h>
 #include <cstdint>
+
+
+#if defined(USE_CUSPARSELT)
+#include <cusparseLt.h>
+#endif
 
 namespace at {
 namespace native {
 
+#if defined(USE_CUSPARSELT)
 cusparseLtHandle_t handle;
+#endif
 
 at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
-  // Is there a better way to do this?
-  TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
+#if defined(USE_CUSPARSELT)
+    // is there a better way to do this?
+    TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
 
-  cusparseLtMatDescriptor_t sparse_input_descriptor;
-  cudaDataType type;
-  auto compression_factor = 9;
+    // create sparse descriptor, dtype
+    cusparseLtMatDescriptor_t sparse_input_descriptor;
+    cudaDataType type;
+    auto compression_factor = 9;
 
-  switch(
-    sparse_input.scalar_type()
-  )
-  {
-    case at::ScalarType::Char:
-        type = CUDA_R_8I;
-        compression_factor = 10;
-        break;
-    case at::ScalarType::Half:
-        type = CUDA_R_16F;
-        break;
-    case at::ScalarType::BFloat16:
-        type = CUDA_R_16BF;
-        break;
-    case at::ScalarType::Float:
-        type = CUDA_R_32F;
-        break;
-    default:
-        break;
-  }
+    switch(
+        sparse_input.scalar_type()
+    )
+    {
+        case at::ScalarType::Char:
+            type = CUDA_R_8I;
+            compression_factor = 10;
+            break;
+        case at::ScalarType::Half:
+            type = CUDA_R_16F;
+            break;
+        case at::ScalarType::BFloat16:
+            type = CUDA_R_16BF;
+            break;
+        case at::ScalarType::Float:
+            type = CUDA_R_32F;
+            break;
+        default:
+            break;
+    }
 
-  // We create the tensor to store the compressed sparse matrix (non-pruned
-  // elements + mask) in python with the same dtype as the sparse input tensor
-  // so we know this wil be correct.
-  auto compressed_tensor = sparse_input.new_empty(sparse_input.numel() * compression_factor / 16);
+    // We create the tensor to store the compressed sparse matrix (non-pruned
+    // elements + mask) in python with the same dtype as the sparse input tensor
+    // so we know this wil be correct.
+    auto compressed_tensor = sparse_input.new_empty(sparse_input.numel() * compression_factor / 16);
 
-  TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
-      &handle,
-      &sparse_input_descriptor,
-      sparse_input.size(0),
-      sparse_input.size(1),
-      sparse_input.size(1),
-      16,
-      type,
-      CUSPARSE_ORDER_ROW,
-      CUSPARSELT_SPARSITY_50_PERCENT));
+    TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
+        &handle,
+        &sparse_input_descriptor,
+        sparse_input.size(0),
+        sparse_input.size(1),
+        sparse_input.size(1),
+        16,
+        type,
+        CUSPARSE_ORDER_ROW,
+        CUSPARSELT_SPARSITY_50_PERCENT));
 
-  // compress input
-  //--------------------------------------------------------------------------
-  size_t compressed_size, compressed_buffer_size;
-  TORCH_CUDASPARSE_CHECK(cusparseLtSpMMACompressedSize2(
-      &handle,
-      &sparse_input_descriptor,
-      &compressed_size,
-      &compressed_buffer_size));
+    // compress input
+    //--------------------------------------------------------------------------
+    size_t compressed_size, compressed_buffer_size;
+    TORCH_CUDASPARSE_CHECK(cusparseLtSpMMACompressedSize2(
+        &handle,
+        &sparse_input_descriptor,
+        &compressed_size,
+        &compressed_buffer_size));
 
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto compressedBufferPtr = allocator.allocate(compressed_buffer_size);
+    auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+    auto compressedBufferPtr = allocator.allocate(compressed_buffer_size);
 
-  TORCH_CUDASPARSE_CHECK(cusparseLtSpMMACompress2(
-      &handle,
-      &sparse_input_descriptor,
-      true,
-      CUSPARSE_OPERATION_NON_TRANSPOSE,
-      sparse_input.data_ptr(),
-      compressed_tensor.data_ptr(),
-      compressedBufferPtr.get(),
-      nullptr));
+    TORCH_CUDASPARSE_CHECK(cusparseLtSpMMACompress2(
+        &handle,
+        &sparse_input_descriptor,
+        true,
+        CUSPARSE_OPERATION_NON_TRANSPOSE,
+        sparse_input.data_ptr(),
+        compressed_tensor.data_ptr(),
+        compressedBufferPtr.get(),
+        nullptr));
 
-  return compressed_tensor;
+    return compressed_tensor;
+#else
+    TORCH_CHECK(false, "PyTorch ust be compiled with cuSPARSELt suppport to use _cslt_compress");
+#endif
 }
+
 
 at::Tensor _cslt_sparse_mm(
     const Tensor& compressed_A,
@@ -94,8 +107,8 @@ at::Tensor _cslt_sparse_mm(
     bool transpose_result
 )
 {
+#if CUSPARSELT_FOUND
   // cupsarselt constructs
-
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
@@ -230,6 +243,9 @@ at::Tensor _cslt_sparse_mm(
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanDestroy(&plan));
 
   return res;
+#else
+        TORCH_CHECK(false, "PyTorch ust be compiled with cuSPARSELt suppport to use _cslt_compress");
+#endif
 }
 
 } // namespace native
