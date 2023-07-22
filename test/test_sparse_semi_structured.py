@@ -33,7 +33,7 @@ from torch._inductor.utils import has_triton
 
 
 SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG.keys()
-SEMI_STRUCTURED_SUPPORTED_BACKENDS = ["cusparselt"]
+SEMI_STRUCTURED_SUPPORTED_BACKENDS = []
 
 _IS_SM8X = False
 if torch.cuda.is_available():

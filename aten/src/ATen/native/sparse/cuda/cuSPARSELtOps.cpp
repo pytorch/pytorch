@@ -12,20 +12,20 @@
 #include <cstdint>
 
 
-#if defined(USE_CUSPARSELT)
+#if AT_CUSPARSELT_ENABLED()
 #include <cusparseLt.h>
 #endif
 
 namespace at {
 namespace native {
 
-#if defined(USE_CUSPARSELT)
+#if AT_CUSPARSELT_ENABLED()
 cusparseLtHandle_t handle;
 #endif
 
 at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
-#if defined(USE_CUSPARSELT)
+#if AT_CUSPARSELT_ENABLED()
     // is there a better way to do this?
     TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
 
@@ -95,7 +95,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
 
     return compressed_tensor;
 #else
-    TORCH_CHECK(false, "PyTorch ust be compiled with cuSPARSELt suppport to use _cslt_compress");
+    TORCH_CHECK(false, "PyTorch must be compiled with cuSPARSELt to use _cslt_compress");
 #endif
 }
 
@@ -107,7 +107,7 @@ at::Tensor _cslt_sparse_mm(
     bool transpose_result
 )
 {
-#if CUSPARSELT_FOUND
+#if AT_CUSPARSELT_ENABLED()
   // cupsarselt constructs
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
@@ -244,7 +244,7 @@ at::Tensor _cslt_sparse_mm(
 
   return res;
 #else
-        TORCH_CHECK(false, "PyTorch ust be compiled with cuSPARSELt suppport to use _cslt_compress");
+        TORCH_CHECK(false, "PyTorch ust be compiled with cuSPARSELt to use _cslt_sparse_mm");
 #endif
 }
 
