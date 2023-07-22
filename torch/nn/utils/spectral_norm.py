@@ -117,8 +117,7 @@ class SpectralNorm:
     def apply(module: Module, name: str, n_power_iterations: int, dim: int, eps: float) -> 'SpectralNorm':
         for k, hook in module._forward_pre_hooks.items():
             if isinstance(hook, SpectralNorm) and hook.name == name:
-                raise RuntimeError("Cannot register two spectral_norm hooks on "
-                                   "the same parameter {}".format(name))
+                raise RuntimeError(f"Cannot register two spectral_norm hooks on the same parameter {name}")
 
         fn = SpectralNorm(name, n_power_iterations, dim, eps)
         weight = module._parameters[name]
@@ -300,8 +299,7 @@ def remove_spectral_norm(module: T_module, name: str = 'weight') -> T_module:
             del module._forward_pre_hooks[k]
             break
     else:
-        raise ValueError("spectral_norm of '{}' not found in {}".format(
-            name, module))
+        raise ValueError(f"spectral_norm of '{name}' not found in {module}")
 
     for k, hook in module._state_dict_hooks.items():
         if isinstance(hook, SpectralNormStateDictHook) and hook.fn.name == name:

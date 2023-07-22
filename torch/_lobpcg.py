@@ -796,10 +796,9 @@ class LOBPCG:
                 # strict ordering of eigenpairs
                 break
             count += 1
-        assert count >= prev_count, (
-            "the number of converged eigenpairs "
-            "(was {}, got {}) cannot decrease".format(prev_count, count)
-        )
+        assert (
+            count >= prev_count
+        ), f"the number of converged eigenpairs (was {prev_count}, got {count}) cannot decrease"
         self.ivars["converged_count"] = count
         self.tvars["rerr"] = rerr
         return count
