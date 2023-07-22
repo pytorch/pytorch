@@ -132,9 +132,7 @@ class ATenDialectVerifier(Verifier):
             # NOTE(qihan): whether view_copy operators are marked as canonical is still under
             #            discussion.
             raise SpecViolationError(
-                "Operator {}.{} is not Aten Canonical.".format(
-                    op.__module__, op.__name__
-                )
+                f"Operator {op.__module__}.{op.__name__} is not Aten Canonical."
             )
 
     @compatibility(is_backward_compatible=False)

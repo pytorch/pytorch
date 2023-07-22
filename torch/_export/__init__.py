@@ -33,6 +33,7 @@ from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
 from .exported_program import (
     _process_constraints,
+    combine_args_kwargs,
     CallSpec,
     ExportBackwardSignature,
     ExportedProgram,
@@ -124,6 +125,7 @@ DECOMP_TABLE = core_aten_decompositions()
 def export(
     f: Callable,
     args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
     *,
     _add_runtime_assertions=True,
@@ -136,21 +138,18 @@ def export(
     Args:
         m: the `nn.Module` or callable to trace.
 
-        args: Tracing example inputs.
+        args: example positional inputs.
 
-        constraints: A list of constraints on the dynamic arguments specifying
+        kwargs: optional example keyword inputs.
+
+        constraints: A optional list of constraints on the dynamic arguments specifying
             their possible range of their shapes
 
     Returns:
         An ExportedProgram containing the traced method.
     """
-    if constraints is None:
-        constraints = []
-
-    if not isinstance(f, torch.nn.Module):
-        for parameter in inspect.signature(f).parameters.values():
-            if parameter.kind == parameter.VAR_KEYWORD:
-                raise UserError(UserErrorType.INVALID_INPUT, "Kwargs to torch.export is not supported")
+    constraints = constraints or []
+    kwargs = kwargs or {}
 
     with torch._dynamo.config.patch(dataclasses.asdict(ExportDynamoConfig())):  # type: ignore[attr-defined]
         try:
@@ -160,6 +159,7 @@ def export(
                 constraints=constraints,
                 assume_static_by_default=True,
                 tracing_mode="symbolic",
+                **kwargs,
             )
 
             params_buffers: "OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]]" = OrderedDict()
@@ -210,11 +210,11 @@ def export(
                 fake_mode = detected_fake_mode
 
             fake_args = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args)
+            fake_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, kwargs)
 
             # Fix the graph output signature to be tuple if scalar
             # because aot_export expects a tuple as return type
-            return_val = f(*args)
-            flat_args, in_spec = pytree.tree_flatten(args)
+            return_val = f(*args, **kwargs)
             out_spec = orig_out_spec = gm_torch_level._out_spec
             # this means it is scalar return value, so will make it tuple
             if not isinstance(return_val, (list, tuple)):
@@ -251,7 +251,14 @@ def export(
                         if n.op == "get_attr":
                             params_buffers_to_node_meta[n.target] = meta
 
-            gm, graph_signature = aot_export_module(gm_torch_level, fake_args, decompositions=DECOMP_TABLE, trace_joint=False)
+            # Note: aot_export_module doesn't accept kwargs, we'd like to reorder the kwargs as an OrderedDict
+            # to follow the order in orig_args and correctly call gm_torch_level
+            gm, graph_signature = aot_export_module(
+                gm_torch_level,
+                (*fake_args, *_reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs).values()),
+                decompositions=DECOMP_TABLE,
+                trace_joint=False
+            )
 
             export_backward_signature = ExportBackwardSignature(
                 gradients_to_parameters=graph_signature.backward_signature.gradients_to_parameters,
@@ -300,6 +307,7 @@ def export(
                             for k, v in params_buffers_to_node_meta[buffer_name].items():
                                 node.meta[k] = v
 
+            flat_args, in_spec = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
             range_constraints, equality_constraints = _process_constraints(
                 gm,
                 export_graph_signature,
@@ -329,3 +337,10 @@ def export(
             raise UserError(
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using constrain_as_*(). {str(e)}")
+
+def _reorder_kwargs_by_names(arg_names: List[str], args: Tuple[Any], kwargs: Dict[str, Any]):
+    assert len(arg_names) == len(args) + len(kwargs), (
+        f"Total number of arg names is expected to be {len(arg_names)} "
+        f"but got {len(args)} positional args, {len(kwargs)} kwargs."
+    )
+    return OrderedDict({kw_name: kwargs[kw_name] for kw_name in arg_names[len(args):]})

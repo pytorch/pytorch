@@ -160,7 +160,7 @@ def remove_from_cache(f):
     elif hasattr(getattr(f, "forward", None), "__code__"):
         reset_code(f.forward.__code__)
     else:
-        from . import reset
+        from . import reset  # type: ignore[attr-defined]
 
         reset()
         log.warning("could not determine __code__ for %s", f)
@@ -591,7 +591,7 @@ def optimize(
 @patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
     # TODO(voz): Do we want a decorator for this?
-    from . import reset
+    from . import reset  # type: ignore[attr-defined]
 
     reset()
 
@@ -1236,15 +1236,9 @@ class TorchPatcher:
         }
 
         disabled_multi_tensor_opts = {
-            adadelta,
-            adagrad,
             adamax,
-            adamw,
-            asgd,
             nadam,
-            rmsprop,
-            rprop,
-            sgd,
+            sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
         }
 
         for opt_mod in all_opts:

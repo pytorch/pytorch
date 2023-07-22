@@ -2900,6 +2900,163 @@ TEST_F(VulkanAPITest, mul_to_scalar_wrapped) {
   ASSERT_TRUE(check);
 }
 
+void test_pow(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto other_cpu = at::rand(other_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto other_vulkan = other_cpu.vulkan();
+
+  const auto out_cpu = at::pow(in_cpu, other_cpu);
+  const auto out_vulkan = at::pow(in_vulkan, other_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "pow test failed with input shape: "
+              << input_shape << " and other shape: " << other_shape << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, pow) {
+  test_pow({4}, {4});
+  test_pow({4, 2}, {4, 2});
+  test_pow({11, 7, 9}, {11, 7, 9});
+  test_pow({3, 11, 9, 7}, {3, 11, 9, 7});
+}
+
+TEST_F(VulkanAPITest, pow_broadcast) {
+  // broadcast input
+  test_pow({1}, {3});
+  test_pow({1, 1}, {3, 2});
+  test_pow({2, 1, 3}, {2, 2, 5, 3});
+  test_pow({1, 1, 4}, {4, 8, 5, 4}); // mul4ch
+  test_pow({3, 7, 1, 4}, {3, 7, 9, 4});
+
+  // broadcast other
+  test_pow({3}, {1});
+  test_pow({3, 2}, {1, 2});
+  test_pow({2, 2, 5, 3}, {2, 1, 3});
+  test_pow({3, 7, 9, 4}, {3, 7, 1, 4});
+  test_pow({3, 8, 2, 5}, {1, 1, 2, 5}); // mul4ch
+
+  // broadcast both
+  test_pow({2, 1, 2}, {1, 5, 1});
+  test_pow({5, 1, 4}, {7, 1, 2, 1});
+  test_pow({2, 1, 7, 1}, {1, 5, 1, 4});
+  test_pow({1, 15, 5, 4}, {21, 1, 5, 4});
+  test_pow({1, 1, 5, 5}, {8, 8, 1, 1}); // mul4ch
+}
+
+void test_pow_(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
+  const auto cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto other_cpu = at::rand(other_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto vulkan = cpu.vulkan();
+  const auto other_vulkan = other_cpu.vulkan();
+
+  cpu.pow_(other_cpu);
+  vulkan.pow_(other_vulkan);
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+    std::cout << "pow_ test failed with input shape: "
+              << input_shape << " and other shape: " << other_shape << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, pow_) {
+  test_pow_({4}, {4});
+  test_pow_({4, 2}, {4, 2});
+  test_pow_({11, 7, 9}, {11, 7, 9});
+  test_pow_({3, 11, 9, 7}, {3, 11, 9, 7});
+}
+
+TEST_F(VulkanAPITest, pow_broadcast_other_) {
+  test_pow_({3}, {1});
+  test_pow_({3, 2}, {1, 2});
+  test_pow_({2, 2, 5, 3}, {2, 1, 3});
+  test_pow_({3, 7, 9, 4}, {3, 7, 1, 4});
+}
+
+void test_pow_tensor_scalar(const at::IntArrayRef input_shape, const float exp) {
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::pow(in_cpu, exp);
+  const auto out_vulkan = at::pow(in_vulkan, exp);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "pow_tensor_scalar test failed with input shape: "
+              << input_shape << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, pow_tensor_scalar) {
+  test_pow_tensor_scalar({4}, 2.5);             // 1d
+  test_pow_tensor_scalar({4, 2}, -1);           // 2d
+  test_pow_tensor_scalar({11, 7, 9}, 7.7);      // 3d
+  test_pow_tensor_scalar({3, 11, 9, 7}, -0.03); // 4d
+}
+
+void test_pow_tensor_scalar_(const at::IntArrayRef input_shape, const float exp) {
+  // Make sure inputs are not 0, cannot compare
+  const auto cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto vulkan = cpu.vulkan();
+
+  cpu.pow_(exp);
+  vulkan.pow_(exp);
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+    std::cout << "pow_scalar_ test failed with input shape: "
+              << input_shape << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, pow_tensor_scalar_) {
+  test_pow_tensor_scalar_({4}, 2.5);             // 1d
+  test_pow_tensor_scalar_({4, 2}, -1);           // 2d
+  test_pow_tensor_scalar_({11, 7, 9}, 7.7);      // 3d
+  test_pow_tensor_scalar_({3, 11, 9, 7}, -0.03); // 4d
+}
+
+void test_pow_scalar_tensor(const float base, const at::IntArrayRef other) {
+  const auto other_cpu = at::rand(other, at::device(at::kCPU).dtype(at::kFloat));
+  const auto other_vulkan = other_cpu.vulkan();
+
+  const auto out_cpu = at::pow(base, other_cpu);
+  const auto out_vulkan = at::pow(base, other_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "pow_scalar_tensor test failed with other shape: "
+              << other << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, pow_scalar_tensor) {
+  test_pow_scalar_tensor(2.5, {4});             // 1d
+  test_pow_scalar_tensor(2, {4, 2});            // 2d
+  test_pow_scalar_tensor(7.7, {11, 7, 9});      // 3d
+  test_pow_scalar_tensor(3, {3, 11, 9, 7});     // 4d
+}
+
 TEST_F(VulkanAPITest, relu) {
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
