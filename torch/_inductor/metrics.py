@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 generated_kernel_count = 0
 generated_cpp_vec_kernel_count = 0
 num_bytes_accessed = 0
-nodes_num_elem: List[Tuple[Union[NopKernelSchedulerNode, SchedulerNode, ExternKernelSchedulerNode], int]] = []
+nodes_num_elem: List[Tuple[Union["NopKernelSchedulerNode", "SchedulerNode", "ExternKernelSchedulerNode"], int]] = []
 
 # counters for tracking fusions
 ir_nodes_pre_fusion = 0
