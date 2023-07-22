@@ -123,21 +123,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_cudagraphs(self):
         self._check_backend_works("cudagraphs")
 
-    @skipIfRocm
-    @requires_cuda()
-    def test_aot_ts_nvfuser(self):
-        self._check_backend_works("aot_ts_nvfuser")
-
-    @requires_cuda()
-    @unittest.skipIf(IS_FBCODE, "BackendCompilerError")
-    def test_nvprims_nvfuser(self):
-        self._check_backend_works("nvprims_nvfuser")
-
-    @requires_cuda()
-    @unittest.skipIf(IS_FBCODE, "BackendCompilerError")
-    def test_nvprims_aten(self):
-        self._check_backend_works("nvprims_aten")
-
     @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
     def test_onnxrt(self):
         self._check_backend_works("onnxrt")
