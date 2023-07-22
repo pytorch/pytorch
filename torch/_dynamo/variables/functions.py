@@ -25,7 +25,6 @@ def wrap_bound_arg(tx, val, options, source=None):
     assert (
         "source" not in options
     ), "Source needs to be separate from options due to recursive calls for lists/dicts"
-    print("VAL", val, source)
     if isinstance(val, VariableTracker):
         return val
     elif not source:
