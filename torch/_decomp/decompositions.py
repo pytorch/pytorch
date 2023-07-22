@@ -3526,7 +3526,7 @@ def multilabel_margin_loss_forward(
     )
     torch._check(
         len(orig_target_shape) <= 2 and orig_target_shape == orig_input_shape,
-        lambda: f"inconsistent size {orig_target_shape} for argument #2 'target'",
+        lambda: f"inconsistent target size: {orig_target_shape} for input of size: {orig_input_shape}",
     )
     # ignores labels after the first -1, detects when -1 is not present
     idx = torch.arange(dim, device=target.device)
