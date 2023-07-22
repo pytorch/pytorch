@@ -68,15 +68,15 @@ select = [
     "SIM1",
     "W",
     # Not included in flake8
-    "UP",
     "PERF",
     "PGH004",
     "PIE807",
     "PIE810",
     "PLE",
+    "RUF013",
     "RUF017",
     "TRY302",
-    "RUF013",
+    "UP",
 ]
 
 [tool.ruff.per-file-ignores]
