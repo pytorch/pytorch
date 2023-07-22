@@ -1325,7 +1325,7 @@ class TestCommon(TestCase):
                 # one or more tensors requiring grad
                 def _tensor_requires_grad(x):
                     if isinstance(x, dict):
-                        for k, v in x.items():
+                        for v in x.values():
                             if _tensor_requires_grad(v):
                                 return True
                     if isinstance(x, (list, tuple)):
