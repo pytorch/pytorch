@@ -1,9 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 
-import torch
-
 import copy
+
+import torch
 import torch._export
 import torch._inductor
 

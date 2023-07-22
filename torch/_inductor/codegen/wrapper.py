@@ -849,7 +849,7 @@ class WrapperCodeGen(CodeGen):
         ):
             return False
 
-        # outputs are passed-in in the aot mode
+        # outputs are passed-in in the AOT mode
         if (
             V.graph.aot_mode
             and output_buffer
@@ -1076,9 +1076,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # Output tensors are allocated by the AOT runtime.
         if V.graph.aot_mode:
             for idx, output in enumerate(V.graph.graph_outputs):
-                if (
-                    isinstance(output, ir.ReinterpretView)
-                    or idx in self.outputs_need_copy
+                if isinstance(output, ir.ReinterpretView) or (
+                    hasattr(output, "get_name")
+                    and output.get_name() in self.outputs_need_copy
                 ):
                     output_as_strided = output.codegen_reference()
                     self.wrapper_call.writeline(
