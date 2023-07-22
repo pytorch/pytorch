@@ -32,6 +32,7 @@ import torch._dynamo
 import torch._dynamo.utils
 import torch._export
 import torch.distributed
+import torch.fx._pytree as fx_pytree
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
@@ -82,7 +83,6 @@ class CI(NamedTuple):
 
 
 CI_SKIP = collections.defaultdict(list)
-CI_TV_OFF = collections.defaultdict(list)
 
 
 # Skips for dynamic=False
@@ -303,39 +303,9 @@ CI_SKIP_OPTIMIZER = {
     "PegasusForConditionalGeneration",  # OOM
 }
 
-# Turning translation validation (TV) off for a few benchmarks
-# due to timeout.
-
-CI_TV_OFF[CI("aot_eager", training=True, dynamic=True, device="cuda")] = [
-    # TIMM
-    "eca_halonext26ts",
-    "swin_base_patch4_window7_224",
-    "mobilevit_s",
-    # TorchBench
-    "attention_is_all_you_need_pytorch",
-    "hf_GPT2",
-    "yolov3",
-]
-
-
-CI_TV_OFF[CI("inductor", training=False, dynamic=False, device="cuda")] = [
-    # TorchBench
-    "hf_T5_generate",
-]
-
-CI_TV_OFF[CI("inductor", training=True, dynamic=True, device="cuda")] = [
-    # TIMM
-    "eca_halonext26ts",
-    "swin_base_patch4_window7_224",
-    # TorchBench
-    "yolov3",
-]
-
-CI_TV_OFF[CI("inductor", training=False, dynamic=True, device="cpu")] = [
-    # TIMM
-    "eca_halonext26ts",
-    "swin_base_patch4_window7_224",
-]
+CI_SKIP_DYNAMIC_BATCH_ONLY = {
+    "sam",
+}
 
 
 def model_specified_by_path(path_and_class_str):
@@ -376,7 +346,7 @@ def load_model_from_path(path_and_class_str):
 
 def output_csv(filename, headers, row):
     if os.path.exists(filename):
-        with open(filename, "r") as fd:
+        with open(filename) as fd:
             lines = list(csv.reader(fd)) or [[]]
             if headers and len(headers) > len(lines[0]):
                 # if prior results failed the header might not be filled in yet
@@ -692,7 +662,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     torch._dynamo.config.repro_tolerance = tolerance
 
     with maybe_profile(args.export_profiler_trace) as p:
-        frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+        if args.export_aot_inductor:
+            frozen_model_iter_fn = export_aot_inductor(model_iter_fn)
+        else:
+            frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+
         for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
                 randomize_input(copy.deepcopy(example_inputs))
@@ -1113,6 +1087,91 @@ def try_script(model, example_inputs):
         return None
 
 
+class AOTInductorModelCache:
+    cache = dict()
+
+    @classmethod
+    def load(cls, model, example_inputs, eager_forward):
+        key = id(model)
+        if key not in cls.cache:
+            # AOTInductorModel relies on the caller to pass in output_tensors,
+            # so we need to explicitly allocate output tensors here.
+            output_tensors = []
+            # TODO: we should be able to do this by querying AOTInductorModel
+            example_outputs = eager_forward(
+                copy.deepcopy(model), clone_inputs(example_inputs)
+            )
+            if isinstance(example_outputs, dict):
+                # Workaround Huggingface output type issue ModelOutput
+                example_outputs = dict(example_outputs)
+            example_outputs, output_spec = pytree.tree_flatten(example_outputs)
+            for output in example_outputs:
+                output_tensors.append(torch.empty_like(output))
+
+            # The exact API is subject to change
+            exported = torch._export.export(model, example_inputs)
+            param_buffer_values = list(exported.state_dict.values())
+            flat_example_inputs = fx_pytree.tree_flatten_spec(
+                example_inputs, exported.call_spec.in_spec
+            )
+            all_args = (*param_buffer_values, *flat_example_inputs)
+            # AOT compile into a .so
+            so_path = torch._inductor.aot_compile(exported.graph_module, all_args)
+
+            # Use a utility function for easier benchmarking
+            source = """
+            #include <torch/csrc/inductor/aot_inductor_model.h>
+
+            torch::aot_inductor::AOTInductorModel model;
+
+            void run(
+                    const std::vector<at::Tensor>& input_tensors,
+                    std::vector<at::Tensor>& output_tensors) {
+                model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream());
+            }
+            """
+            module = torch.utils.cpp_extension.load_inline(
+                name="aot_inductor",
+                cpp_sources=[source],
+                functions=["run"],
+                extra_ldflags=[so_path],
+                with_cuda=True,
+            )
+
+            value = {
+                "module": module,
+                "exported": exported,
+                "output_tensors": output_tensors,
+                "output_spec": output_spec,
+            }
+            cls.cache[key] = value
+
+        return (
+            cls.cache[key]["module"],
+            cls.cache[key]["exported"],
+            cls.cache[key]["output_tensors"],
+            cls.cache[key]["output_spec"],
+        )
+
+
+def export_aot_inductor(forward: Callable):
+    eager_forward = forward
+
+    def opt_aot_inductor(model, example_inputs, collect_outputs=False):
+        module, exported, output_tensors, output_spec = AOTInductorModelCache.load(
+            model, example_inputs, eager_forward
+        )
+        param_buffer_values = list(exported.state_dict.values())
+        flat_example_inputs = fx_pytree.tree_flatten_spec(
+            example_inputs, exported.call_spec.in_spec
+        )
+        all_args = (*param_buffer_values, *flat_example_inputs)
+        module.run(all_args, output_tensors)
+        return pytree.tree_unflatten(output_tensors, output_spec)
+
+    return opt_aot_inductor
+
+
 def download_retry_decorator(download_fn):
     """
     Decorator function for applying retry logic to a download function.
@@ -1452,7 +1511,7 @@ def read_batch_size_from_file(args, filename, model_name):
     if os.path.exists("benchmarks"):
         filename = os.path.join("benchmarks", filename)
     assert os.path.exists(filename), filename
-    with open(filename, "r") as f:
+    with open(filename) as f:
         lines = f.readlines()
         lines = [i.split(",") for i in lines if len(i.strip()) > 0]
         for val in lines:
@@ -1654,7 +1713,7 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            self.optimizer = torch.optim.SGD(params, lr=0.01)
+            self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
         else:
             self.optimizer = None
 
@@ -2189,7 +2248,6 @@ class BenchmarkRunner:
             if tag is not None:
                 experiment_kwargs["tag"] = tag
             results = []
-
             eager_latency, eager_peak_mem, _ = warmup(
                 self.model_iter_fn, model, example_inputs, "eager"
             )
@@ -2415,6 +2473,9 @@ def parse_args(args=None):
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--cpp-wrapper", action="store_true", help="turn on cpp/cuda wrapper codegen"
+    )
+    parser.add_argument(
+        "--freezing", action="store_true", help="turn on freezing", default=False
     )
     parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
@@ -2664,6 +2725,13 @@ def parse_args(args=None):
         default=1,
         help="Set per-process GPU memory fraction (limit) for reducing usable size and reproducing OOMs",
     )
+
+    parser.add_argument(
+        "--no-translation-validation",
+        action="store_true",
+        help="Disable translation validation for accuracy builds.",
+    )
+
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -2726,6 +2794,11 @@ def parse_args(args=None):
         "--export",
         action="store_true",
         help="Measure pass rate with export",
+    )
+    group.add_argument(
+        "--export-aot-inductor",
+        action="store_true",
+        help="Measure pass rate with Export+AOTInductor",
     )
     group.add_argument(
         "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
@@ -2849,6 +2922,10 @@ def run(runner, args, original_dir=None):
         if args.accuracy:
             # Run fewer iterations when checking accuracy
             args.repeat = 2
+
+            # Set translation validation on by default on CI accuracy runs.
+            torch._dynamo.config.translation_validation = True
+
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
             # caused solely by turning on dynamic shapes
@@ -2910,25 +2987,17 @@ def run(runner, args, original_dir=None):
             # https://github.com/pytorch/pytorch/issues/96724
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
+            "sam",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         if args.only in {"hf_T5_generate"}:
             torch._dynamo.config.automatic_dynamic_shapes = True
-        if args.only is not None and args.only.endswith("_generate"):
-            log.warning(
-                "Disabling cudagraphs for autoregressive generation (reenable if selective cudagraphs implemented)"
-            )
-            args.disable_cudagraphs = True
-            torch._inductor.config.triton.cudagraphs = False
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
-
-        # Set translation validation on by default on accuracy runs.
-        torch._dynamo.config.translation_validation = True
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
@@ -3026,15 +3095,6 @@ def run(runner, args, original_dir=None):
         output_filename = "overheads.csv"
     elif args.inductor:
         inductor_config.debug = args.verbose
-        if (
-            args.ci
-            and args.accuracy
-            and args.training
-            and args.only in {"dla102", "gernet_l"}
-        ):
-            # Log generated code for flaky tests, to check if there is any codegen difference
-            inductor_config.debug = True
-
         if args.threads:
             inductor_config.cpp.threads = args.threads
 
@@ -3095,8 +3155,13 @@ def run(runner, args, original_dir=None):
         optimize_ctx = nothing
         experiment = speedup_experiment
         output_filename = "nothing.csv"
-    elif args.backend:
-        optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
+    elif args.backend or args.export_aot_inductor:
+        if args.export_aot_inductor:
+            assert not args.training, "AOTInductor only supports inference"
+            assert args.devices == ["cuda"], "AOTInductor only tested for CUDA"
+            optimize_ctx = export_aot_inductor
+        else:
+            optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"
@@ -3114,16 +3179,16 @@ def run(runner, args, original_dir=None):
         experiment = coverage_experiment
         output_filename = "coverage.csv"
 
-    if args.inductor or args.backend == "inductor":
-        inductor_config.triton.cudagraphs = (
-            not args.disable_cudagraphs and not args.dynamic_shapes
-        )
+    if args.inductor or args.backend == "inductor" or args.export_aot_inductor:
+        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
         inductor_config.triton.persistent_reductions = (
             not args.disable_persistent_reductions
         )
         inductor_config.split_reductions = not args.disable_split_reductions
         inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
         inductor_config.cpp_wrapper = args.cpp_wrapper
+        if args.inference:
+            inductor_config.freezing = args.freezing
 
     runner.setup_amp()
 
@@ -3155,6 +3220,10 @@ def run(runner, args, original_dir=None):
                 args.profiler_trace_name = "profile"
         else:
             args.profiler_trace_name = args.profiler_trace_name
+
+    if args.no_translation_validation:
+        # Overwrite 'translation_validation' config, if specified.
+        torch._dynamo.config.translation_validation = False
 
     experiment = functools.partial(experiment, args, runner.model_iter_fn)
 
@@ -3253,7 +3322,11 @@ def run(runner, args, original_dir=None):
                         marked = True
                         break
 
-            if args.dynamic_batch_only and batch_size > 1:
+            if (
+                args.dynamic_batch_only
+                and batch_size > 1
+                and model_name not in CI_SKIP_DYNAMIC_BATCH_ONLY
+            ):
                 tree_map_only(torch.Tensor, detect_and_mark_batch, example_inputs)
                 assert marked, f"nothing in example_inputs had a dim with {batch_size}"
 
@@ -3268,28 +3341,16 @@ def run(runner, args, original_dir=None):
                     args.per_process_memory_fraction
                 )
 
-            # Set translation validation on by default on CI accuracy runs.
-            ci = CI(
-                args.backend,
-                training=args.training,
-                dynamic=args.dynamic_shapes,
-                device=device,
+            model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            runner.run_one_model(
+                name,
+                model,
+                example_inputs,
+                optimize_ctx,
+                experiment,
+                explain=args.explain,
+                tag=args.tag,
             )
-            translation_validation = args.only not in CI_TV_OFF[ci]
-
-            with torch._dynamo.config.patch(
-                translation_validation=translation_validation
-            ):
-                model, example_inputs = runner.cast_based_on_args(model, example_inputs)
-                runner.run_one_model(
-                    name,
-                    model,
-                    example_inputs,
-                    optimize_ctx,
-                    experiment,
-                    explain=args.explain,
-                    tag=args.tag,
-                )
         if args.generate_aot_autograd_stats:
             stats_file = output_filename.split(".csv")[0] + "_stats.csv"
             output_csv(
