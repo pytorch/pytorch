@@ -269,6 +269,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.mse_loss,
             aten.mse_loss_backward,
             aten.multi_margin_loss,
+            aten.multilabel_margin_loss_forward,
             aten.mv,
             aten.mvlgamma,
             aten.mvlgamma_,
