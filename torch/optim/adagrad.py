@@ -30,9 +30,7 @@ class Adagrad(Optimizer):
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
         if not 0.0 <= initial_accumulator_value:
             raise ValueError(
-                "Invalid initial_accumulator_value value: {}".format(
-                    initial_accumulator_value
-                )
+                f"Invalid initial_accumulator_value value: {initial_accumulator_value}"
             )
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps}")

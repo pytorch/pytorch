@@ -224,7 +224,7 @@ import platform
 python_min_version = (3, 8, 0)
 python_min_version_str = '.'.join(map(str, python_min_version))
 if sys.version_info < python_min_version:
-    print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
+    print("You are using Python {}. Python >={} is required.".format(platform.python_version(),  # noqa: UP032
                                                                      python_min_version_str))
     sys.exit(-1)
 
@@ -1237,6 +1237,21 @@ def main():
             'include/caffe2/**/*.h',
             'include/caffe2/utils/*.h',
             'include/caffe2/utils/**/*.h',
+        ])
+    if get_cmake_cache_vars()['USE_TENSORPIPE']:
+        torch_package_data.extend([
+            'include/tensorpipe/*.h',
+            'include/tensorpipe/channel/*.h',
+            'include/tensorpipe/channel/basic/*.h',
+            'include/tensorpipe/channel/cma/*.h',
+            'include/tensorpipe/channel/mpt/*.h',
+            'include/tensorpipe/channel/xth/*.h',
+            'include/tensorpipe/common/*.h',
+            'include/tensorpipe/core/*.h',
+            'include/tensorpipe/transport/*.h',
+            'include/tensorpipe/transport/ibv/*.h',
+            'include/tensorpipe/transport/shm/*.h',
+            'include/tensorpipe/transport/uv/*.h',
         ])
     torchgen_package_data = [
         # Recursive glob doesn't work in setup.py,

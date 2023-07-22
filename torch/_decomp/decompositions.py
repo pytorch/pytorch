@@ -630,6 +630,11 @@ def soft_margin_loss_backward(
     return grad_input
 
 
+@register_decomposition(aten.dist)
+def dist(input: Tensor, other: Tensor, p: float = 2):
+    return aten.norm(input - other, p=p)
+
+
 @register_decomposition(aten._euclidean_dist)
 def _euclidean_dist(x1: Tensor, x2: Tensor) -> Tensor:
     x1_norm = x1.pow(2).sum(-1, True)
@@ -3532,16 +3537,15 @@ def multilabel_margin_loss_forward(
     # masks target to be able to use gather, which doesn't allow -1
     tidx0 = torch.where(target_mask, target, 0)
     u = torch.gather(input, dim=-1, index=tidx0)
-    # input indices (not in target)
+    # is_target
     tidx1 = torch.where(target_mask, target, -1)
-    input_mask = torch.all(idx != tidx1.unsqueeze(dim=-1), dim=1)
+    is_target = torch.any(idx == tidx1.unsqueeze(dim=-1), dim=1)
     # loss
     z = 1.0 - u.T.unsqueeze(dim=-1) + input
     z = z.clamp_min(0)
     z = z / dim
     # masks loss
-    mask = target_mask.T.unsqueeze(dim=-1) & input_mask
-    z = torch.where(mask, z, 0)
+    z = torch.where(is_target, 0, z)
     # reduction
     if reduction == Reduction.MEAN.value:
         z = z.sum(dim=(0, -1)).mean()
@@ -3550,7 +3554,7 @@ def multilabel_margin_loss_forward(
     else:
         z = z.sum(dim=(0, -1))
     # result
-    is_target = (~input_mask).to(input.dtype).reshape(orig_target_shape)
+    is_target = is_target.to(input.dtype).reshape(orig_target_shape)
     return z, is_target
 
 
