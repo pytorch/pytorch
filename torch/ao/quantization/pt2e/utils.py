@@ -7,10 +7,6 @@ from torch.fx import (
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-# TODO[jerryzh168]: move this to a more general util function
-from torch.ao.quantization.fx.prepare import (
-    _is_activation_post_process_node,
-)
 import copy
 import operator
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -120,55 +116,6 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
 
     m.graph.eliminate_dead_code()
     m.recompile()
-
-# TODO: remove hack when we have better support for pattern matching
-# move around the observer for addmm
-def _rearrange_weight_observer_for_decomposed_linear(
-    model: GraphModule,
-) -> None:
-    """
-    Linear is decomposed to `t - addmm` (w/ bias) or `t - mm` (w/o bias)
-    before:
-         weight - t - observer \
-           input - observer - addmm/mm
-    after:
-         weight - observer - t \
-           input - observer - addmm/mm
-    """
-    aten = torch.ops.aten
-    op_to_weight_obs_index = {
-        aten.addmm.default : 2,
-        aten.mm.default : 1,
-    }
-    named_modules = dict(model.named_modules(remove_duplicate=False))
-    for node in model.graph.nodes:
-        if node.target not in (aten.addmm.default, aten.mm.default):
-            continue
-        root_node = node
-        maybe_weight_obs = root_node.args[op_to_weight_obs_index[root_node.target]]
-        if not _is_activation_post_process_node(maybe_weight_obs, named_modules):
-            continue
-        transpose_node = maybe_weight_obs.args[0]
-        if transpose_node.target != torch.ops.aten.t.default:
-            continue
-        # swap the order of transpose and observation
-
-        maybe_weight_obs.replace_input_with(transpose_node, transpose_node.args[0])
-        # remove the transpose node
-        with model.graph.inserting_after(maybe_weight_obs):
-            args = list(transpose_node.args)
-            args[0] = maybe_weight_obs
-            new_transpose_node = model.graph.create_node(
-                "call_function",
-                torch.ops.aten.t.default,
-                tuple(args),
-                transpose_node.kwargs
-            )
-        root_node.replace_input_with(maybe_weight_obs, new_transpose_node)
-
-    model.graph.eliminate_dead_code()
-    model.graph.lint()
-    model.recompile()
 
 def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
     # TODO: move this information to fx node itself

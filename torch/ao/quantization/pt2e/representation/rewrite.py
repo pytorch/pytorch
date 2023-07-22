@@ -45,11 +45,9 @@ def _reference_quantized_add_relu(
     """
     x_i32 = x_i8.to(torch.int32)
     y_i32 = y_i8.to(torch.int32)
-    # TODO: use out_dtype op
-    # x_i32 = out_dtype(torch.ops.aten.mul, torch.int32, (x_i32 - x_zero_point), (x_scale / out_scale))
-    # y_i32 = out_dtype(torch.ops.aten.mul, torch.int32, (y_i32 - y_zero_point), (y_scale / out_scale))
-    x_i32 = torch.round((x_scale / out_scale) * (x_i32 - x_zero_point)).to(torch.int32)
-    y_i32 = torch.round((y_scale / out_scale) * (y_i32 - y_zero_point)).to(torch.int32)
+    # TODO: change this to mul.Scalar?
+    x_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, (x_i32 - x_zero_point), (x_scale / out_scale))
+    y_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, (y_i32 - y_zero_point), (y_scale / out_scale))
     out_i32 = x_i32 + y_i32 + out_zero_point
     out_i32 = torch.ops.aten.clamp(out_i32, out_zero_point)
     quant_min = -128
@@ -127,7 +125,8 @@ def _reference_quantized_max_pool2d(x_i8, x_scale, x_zero_point, out_scale, out_
     ceil_mode = False
     acc_i8, _ = torch.ops.aten.max_pool2d_with_indices.default(x_i8, kernel_size, stride, padding, dilation, ceil_mode)
     acc_i32 = acc_i8.to(torch.int32)
-    output_i32 = torch.ops.aten.mul(acc_i32, (x_scale / out_scale))
+    # TODO: use mul.Scalar, need to change how we handle literal args
+    output_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, acc_i32, (x_scale / out_scale))
     output_i8 = output_i32 - (x_zero_point * x_scale / out_scale + out_zero_point)
     output_i8 = output_i8.to(torch.int8)
     return output_i8
@@ -152,9 +151,9 @@ def _qdq_quantized_adaptive_avg_pool2d(x_i8, x_scale, x_zero_point, out_scale, o
 def _reference_quantized_adaptive_avg_pool2d(x_i8, x_scale, x_zero_point, out_scale, out_zero_point, quant_min, quant_max):
     output_size = (1, 1)
     x_i32 = x_i8.to(torch.int32)
-    # TODO: use out_dtype
-    x_i32 = x_i32 * (x_scale / out_scale)
-    acc_i32 = torch.ops.aten.adaptive_avg_pool2d(x_i32, output_size)
+    # TODO: use mul.Scalar, need to change how literal args are handled
+    x_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, x_i32, (x_scale / out_scale))
+    acc_i32 = torch.ops.aten._adaptive_avg_pool2d(x_i32, output_size)
     acc_i32 = acc_i32 - x_zero_point * x_scale / out_scale + out_zero_point # int32 constant
     out_i8 = torch.ops.aten.clamp(acc_i32, quant_min, quant_max).to(torch.int8)
     return out_i8
