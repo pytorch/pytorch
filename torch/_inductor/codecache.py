@@ -168,7 +168,7 @@ class CacheBase:
     def get_local_cache(self):
         if not self.local_cache_path.is_file():
             return {}
-        with open(self.local_cache_path, "r") as local_cache_fp:
+        with open(self.local_cache_path) as local_cache_fp:
             local_cache = json.load(local_cache_fp)
         return local_cache["cache"]
 
@@ -211,7 +211,7 @@ class PersistentCache(CacheBase):
     def get_global_cache(self):
         if self.global_cache_path is None or not self.global_cache_path.is_file():
             return {}
-        with open(self.global_cache_path, "r") as global_cache_fp:
+        with open(self.global_cache_path) as global_cache_fp:
             global_cache = json.load(global_cache_fp)
         return global_cache["cache"]
 
@@ -881,7 +881,7 @@ class AotCodeCache:
 # - valid_vec_isa_list()
 # - VecISA.__bool__() <-- takes out a lock
 # - compile_file() <-- imports cpp_prefix_path from cpp, which causes us to try to take out the same lock.
-@functools.lru_cache()
+@functools.lru_cache
 def cpp_prefix_path():
     path = Path(__file__).parent / "codegen/cpp_prefix.h"
     with path.open() as f:

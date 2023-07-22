@@ -779,11 +779,14 @@ def repeat(x, repeats):
 
     new_size = list(x.get_size())
 
+    zero_tensor = False
     for i in range(len(repeats)):
-        assert repeats[i] != 0
-        if repeats[i] != 1:
-            new_size[i] = new_size[i] * repeats[i]
+        if repeats[i] == 0:
+            zero_tensor = True
+        new_size[i] = new_size[i] * repeats[i]
 
+    if zero_tensor:
+        return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
         return expand(x, new_size)
 
@@ -882,7 +885,7 @@ def roll(a, shifts, dims=tuple()):
 
     (dim,) = dims
     # TODO: Avoid guarding on shape here
-    size = V.graph.sizevars.guard_static_shape(a.get_size()[dim])
+    size = V.graph.sizevars.evaluate_static_shape(a.get_size()[dim])
     start = (size - shifts[0]) % size
     a_loader = a.make_loader()
 
@@ -1014,11 +1017,11 @@ def select(x, dim, idx):
 @register_lowering(aten.split, type_promotion_kind=None)
 def split(x, sizes, dim=0):
     dim = _validate_dim(x, dim, 0)
-    x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
+    x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
     if isinstance(sizes, sympy.Expr):
         # TODO: We don't have to guard on sizes per se, but the number
         # of splits must stay constant
-        sizes = V.graph.sizevars.guard_static_shape(sizes)
+        sizes = V.graph.sizevars.evaluate_static_shape(sizes)
     if isinstance(sizes, (int, sympy.Integer)):
         sizes = [sizes] * ((x_size + sizes - 1) // sizes)
     result = []
@@ -1038,7 +1041,7 @@ def split_with_sizes(x, sizes, dim=0):
 @register_lowering(aten.unbind, type_promotion_kind=None)
 def unbind(x, dim=0):
     dim = _validate_dim(x, dim, 0)
-    x_size = V.graph.sizevars.guard_static_shape(x.get_size()[dim])
+    x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
     result = []
     for i in range(x_size):
         result.append(select(x, dim, i))
@@ -1100,7 +1103,7 @@ def _validate_dim(x, dim, offset=0):
 def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
     # TODO: don't guard on static shape here
-    new_len = V.graph.sizevars.guard_static_shape(x.get_size()[dim]) // 2
+    new_len = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim]) // 2
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
@@ -1705,7 +1708,6 @@ make_fallback(aten.cumprod, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten.fractional_max_pool2d)
@@ -1799,7 +1801,6 @@ make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
-make_fallback(aten.softshrink_backward, warn=False)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten.segment_reduce.default)
 make_fallback(aten._segment_reduce_backward.default)
@@ -2446,6 +2447,10 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
+    if is_triton(values) and (
+        accumulate is True or torch.are_deterministic_algorithms_enabled()
+    ):
+        V.graph.disable_cudagraphs = True
     ir.IndexPutFallback(self, indices, values, accumulate)
     return self
 
@@ -2727,7 +2732,7 @@ def upsample_nearestnd(
     x_loader = x.make_loader()
     i_sizes = x.get_size()[-n:]
     batch = x.get_size()[:-n]
-    i_sizes = [V.graph.sizevars.guard_static_shape(i) for i in i_sizes]
+    i_sizes = [V.graph.sizevars.evaluate_static_shape(i) for i in i_sizes]
 
     assert len(scales_x) == n
     o_sizes = output_size
@@ -2799,8 +2804,8 @@ def upsample_bicubic2d_default(
     N, C, iH, iW = x.get_size()
     oH, oW = output_size
 
-    iH = V.graph.sizevars.guard_static_shape(iH)
-    iW = V.graph.sizevars.guard_static_shape(iW)
+    iH = V.graph.sizevars.evaluate_static_shape(iH)
+    iW = V.graph.sizevars.evaluate_static_shape(iW)
 
     def get_int_dtype(maxval):
         if maxval > torch.iinfo(torch.int32).max:
@@ -2876,11 +2881,11 @@ def upsample_bicubic2d_default(
 
         iy = ops.to_dtype(in_y, get_int_dtype(iH + 1))
         ix = ops.to_dtype(in_x, get_int_dtype(iW + 1))
-        iys_ofs = tuple((ops.add(iy, ofs) for ofs in (-1, 0, 1, 2)))
-        ixs_ofs = tuple((ops.add(ix, ofs) for ofs in (-1, 0, 1, 2)))
+        iys_ofs = tuple(ops.add(iy, ofs) for ofs in (-1, 0, 1, 2))
+        ixs_ofs = tuple(ops.add(ix, ofs) for ofs in (-1, 0, 1, 2))
 
         def get_x_interp(y):
-            coeffs_x = tuple((load_bounded(y, x) for x in ixs_ofs))
+            coeffs_x = tuple(load_bounded(y, x) for x in ixs_ofs)
             return cubic_interp1d(coeffs_x, t_x)
 
         coeffs_y = tuple(get_x_interp(y) for y in iys_ofs)
@@ -2901,8 +2906,8 @@ def reflection_pad2d(x, padding):
 
     x_loader = x.make_loader()
     *batch, h, w = x.get_size()
-    h = V.graph.sizevars.guard_static_shape(h)
-    w = V.graph.sizevars.guard_static_shape(w)
+    h = V.graph.sizevars.evaluate_static_shape(h)
+    w = V.graph.sizevars.evaluate_static_shape(w)
 
     def reflect(x, size, offset):
         size_num = size
@@ -2932,8 +2937,8 @@ def reflection_pad2d_backward(grad_output, x, padding):
     left, right, top, bot = padding
 
     *_, h, w = x.get_size()
-    h = V.graph.sizevars.guard_static_shape(h) - 1
-    w = V.graph.sizevars.guard_static_shape(w) - 1
+    h = V.graph.sizevars.evaluate_static_shape(h) - 1
+    w = V.graph.sizevars.evaluate_static_shape(w) - 1
     grad_loader = grad_output.make_loader()
     *_, h_grad, w_grad = grad_output.get_size()
 
@@ -3476,8 +3481,8 @@ def _adaptive_avg_pool2d(x, output_size):
 
     *batch, h_in, w_in = x.get_size()
 
-    h_in = V.graph.sizevars.guard_static_shape(h_in)
-    w_in = V.graph.sizevars.guard_static_shape(w_in)
+    h_in = V.graph.sizevars.evaluate_static_shape(h_in)
+    w_in = V.graph.sizevars.evaluate_static_shape(w_in)
 
     h_out, w_out = output_size
 
@@ -3543,8 +3548,8 @@ def upsample_nearest2d_backward(
     x.realize_hint()
 
     *batch, inp_h, inp_w = x.get_size()
-    inp_h = V.graph.sizevars.guard_static_shape(inp_h)
-    inp_w = V.graph.sizevars.guard_static_shape(inp_w)
+    inp_h = V.graph.sizevars.evaluate_static_shape(inp_h)
+    inp_w = V.graph.sizevars.evaluate_static_shape(inp_w)
 
     *batch, out_h, out_w = input_size
 
