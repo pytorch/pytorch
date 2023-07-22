@@ -53,6 +53,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    get_kernel_metadata,
     pad_listlike,
     sympy_dot,
     sympy_product,
@@ -773,7 +774,7 @@ class Reduction(Loops):
     def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type, src_dtype):
         """Convert inner_fn from a reduction to an pointwise"""
         reduction_ranges = [
-            V.graph.sizevars.guard_static_shape(x) for x in reduction_ranges
+            V.graph.sizevars.evaluate_static_shape(x) for x in reduction_ranges
         ]
 
         combine_fn = get_reduction_combine_fn(reduction_type, src_dtype)
@@ -991,11 +992,11 @@ class Reduction(Loops):
         # TODO(jansel): convert this to dynamic shapes
         # TODO(jansel): realize the reduction so we can do dynamic indexing
         reduction_ranges = [
-            sympy.Integer(V.graph.sizevars.guard_static_shape(s))
+            sympy.Integer(V.graph.sizevars.evaluate_static_shape(s))
             for s in reduction_ranges
         ]
         reduction_numel = sympy.Integer(
-            V.graph.sizevars.guard_static_shape(reduction_numel)
+            V.graph.sizevars.evaluate_static_shape(reduction_numel)
         )
 
         if V.graph.sizevars.size_hint(reduction_numel) % split == 0:
@@ -1614,8 +1615,8 @@ class SliceView(View):
         start = cls.handle_negative_index(start, new_size[dim])
         end = cls.handle_negative_index(end, new_size[dim])
 
-        end = sizevars.guard_min(end, new_size[dim])
-        start = sizevars.guard_min(sizevars.guard_min(start, new_size[dim]), end)
+        end = sizevars.evaluate_min(end, new_size[dim])
+        start = sizevars.evaluate_min(sizevars.evaluate_min(start, new_size[dim]), end)
         if start == 0 and sizevars.size_hint(end - new_size[dim]) == 0 and step == 1:
             sizevars.guard_equals(end, new_size[dim])
             return x
@@ -2615,6 +2616,11 @@ class ExternKernel(InputsKernel):
             self.apply_constraint()
             self.freeze_layout()
 
+    def codegen_comment(self, wrapper):
+        origin_str, detailed_origin_str = get_kernel_metadata(self, wrapper)
+        if origin_str:
+            wrapper.writeline(origin_str)
+
     def codegen(self, wrapper):
         raise NotImplementedError()
 
@@ -2954,6 +2960,7 @@ class ExternKernelOut(ExternKernel):
     output_view: Optional[ReinterpretView] = None
 
     def codegen(self, wrapper):
+        self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs()]
         wrapper.generate_extern_kernel_out(
             self.output_view,
@@ -3003,6 +3010,7 @@ class RandomSeeds(ExternKernelOut):
 
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
+        self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs()]
         V.graph.wrapper_code.generate_extern_kernel_alloc(
             self.get_name(), self.kernel, args, self.get_origin_node()

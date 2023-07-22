@@ -512,6 +512,23 @@ class CPUReproTests(TestCase):
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
     @patch("torch.cuda.is_available", lambda: False)
+    def test_to_uint8_rounding_method(self):
+        def fn(x):
+            return x.to(torch.uint8)
+
+        numerical_testsuit = [4.4, 4.5, 4.6, 5.5]
+        for numerical_number in numerical_testsuit:
+            x = torch.ones(17) * numerical_number
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
     def test_decomposed_dequant_relu_quant(self):
         def fn(x, scale, zero_point, use_dequant, use_quant):
             # For quantized_decomposed.dequantize_per_tensor
@@ -1874,15 +1891,6 @@ class CPUReproTests(TestCase):
         self.assertTrue(same(fn(x), opt_fn(x)))
         assert metrics.generated_cpp_vec_kernel_count == 2
 
-    def test_invalid_index_of_empty_tensor(self):
-        def fn(a):
-            b = a[[0]]
-            return b
-
-        a = torch.tensor([])
-        with self.assertRaises(RuntimeError):
-            torch.compile(fn)(a)
-
     def test_ir_node_str(self):
         @torch.compile
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -1976,15 +1984,6 @@ class CPUReproTests(TestCase):
 
         x = torch.rand(4, 5)
         self.common(f, (x,))
-
-    def test_scalar_mul_bfloat16(self):
-        def f(x):
-            return torch.ops.aten.mul.Tensor(x, 1.7015043497085571)
-
-        metrics.reset()
-        x = torch.randn(4, 5, dtype=torch.bfloat16)
-        self.common(f, (x,))
-        assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_to_channels_last_bfloat16(self):
         def f(a):

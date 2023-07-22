@@ -138,7 +138,7 @@ format_str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logging.basicConfig(level=logging.INFO, format=format_str)
 logger = logging.getLogger(__name__)
 
-class _CPUinfo():
+class _CPUinfo:
     """
     Get CPU information, such as cores list and NUMA information.
     """
@@ -239,7 +239,7 @@ instance. Alternatively, please use --skip-cross-node-cores knob.", str(core_lis
             raise RuntimeError("invalid number of NUMA nodes; please make sure numa_ids >= 1")
         return numa_ids
 
-class _Launcher():
+class _Launcher:
     r"""
      Class for launcher
     """
