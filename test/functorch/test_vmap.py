@@ -481,8 +481,8 @@ class TestVmapAPI(TestCase):
 
         # None in_dim for a Tensor means we don't map over it
         output = vmap(torch.mul, (0, None))(x, y)
-        self.assertEqual(output, x.view(2, 1, 3) * y)
         self.assertEqual(output.shape, (2, 2, 3))
+        self.assertEqual(output, x.view(2, 1, 3) * y)
 
         # None in_dim for non-tensor arguments
         output = vmap(torch.mul, (0, None))(x, 2)
@@ -498,8 +498,8 @@ class TestVmapAPI(TestCase):
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
         output = vmap(torch.mul, (-1, -1))(x, y)
-        self.assertEqual(output, (x * y).permute(1, 0))
         self.assertEqual(output.shape, (3, 2))
+        self.assertEqual(output, (x * y).permute(1, 0))
 
     def test_non_default_in_dims_out_dims(self):
         x = torch.randn(2, 3, 5)
@@ -4393,8 +4393,7 @@ class TestRandomness(TestCase):
     def _assert_all_slices_unique(self, tensor):
         B0 = tensor.shape[0]
         slices_equal = vmap(vmap(lambda x, y: (x == y).all(), (0, None)), (None, 0))(tensor, tensor)
-        if not TEST_WITH_TORCHDYNAMO:
-            assert slices_equal.shape == (B0, B0)
+        assert slices_equal.shape == (B0, B0)
         slices_equal.diagonal().zero_()
         self.assertEqual(slices_equal, torch.zeros_like(slices_equal))
 
