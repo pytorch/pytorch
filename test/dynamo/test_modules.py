@@ -1835,6 +1835,44 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         model = ToyModel()
         self._forward_hook_test_helper(model)
 
+    def test_hooks_allowed_modules_compiles(self):
+        # this test shouldn't care whether hook guards are enabled or not
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = torch.nn.Sequential(
+                    *[torch.nn.Linear(10, 10000), torch.nn.ReLU()]
+                    + [torch.nn.Linear(10000, 5), torch.nn.ReLU()]
+                )
+
+            def forward(self, x):
+                return self.net(x)
+
+        model = ToyModel()
+        forward_handles = {}
+        activations = []
+
+        def save_activations(name, mod, inp, out):
+            activations.append((name, inp))
+
+        for name, module in model.named_modules():
+            forward_handles[name] = module.register_forward_hook(
+                partial(save_activations, name)
+            )
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        model = torch._dynamo.optimize(cnt)(model)
+        for i in range(2):
+            # second iteration is key, hooks would have fired during aot trace
+            # on first iter
+            activations.clear()
+            x = torch.randn((20, 10))
+            pred = model(x)
+            loss = pred.sum()
+            loss.backward()
+        self.assertEqual(cnt.frame_count, 1)
+        breakpoint()
+
     def test_dunder_call_explicitly(self):
         # hooks should be triggered if explicit calling `__call__`
         class ToyModel(torch.nn.Module):
