@@ -2,7 +2,7 @@ import dataclasses
 import queue
 import time
 import warnings
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch import multiprocessing
@@ -116,8 +116,7 @@ class TensorMeta:
 
     @classmethod
     def from_irnodes(
-        cls,
-        irnodes: Union[Tuple[TensorMeta, ...], List[TensorMeta], ir.Layout],
+        cls, irnodes: torch.Tensor,
     ) -> torch.Tensor:
         if isinstance(irnodes, (tuple, list)):
             return [cls.from_irnodes(x) for x in irnodes]
