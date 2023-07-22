@@ -3,13 +3,14 @@
 
 import torch
 
+import copy
 import torch._export
 import torch._inductor
 
 import torch.fx._pytree as fx_pytree
+from torch._dynamo.testing import same
 
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
-
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
@@ -75,6 +76,20 @@ class AOTInductorModelCache:
             cls.cache[key]["output_spec"],
         )
 
+    @classmethod
+    def run(cls, model, example_inputs, example_outputs):
+        example_outputs = copy.deepcopy(example_outputs)
+        optimized, exported, output_tensors, output_spec = AOTInductorModelCache.load(
+            model, example_inputs, example_outputs
+        )
+        param_buffer_values = list(exported.state_dict.values())
+        flat_example_inputs = fx_pytree.tree_flatten_spec(
+            example_inputs, exported.call_spec.in_spec
+        )
+        all_args = (*param_buffer_values, *flat_example_inputs)
+        optimized(all_args, output_tensors)
+        return pytree.tree_unflatten(output_tensors, output_spec)
+
 
 class AotInductorTests(TestCase):
     def test_missing_output(self):
@@ -94,19 +109,31 @@ class AotInductorTests(TestCase):
             torch.randn(10, 10, device="cuda"),
         ]
         expected = model(*example_inputs)
+        actual = AOTInductorModelCache.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
 
-        optimized, exported, output_tensors, output_spec = AOTInductorModelCache.load(
-            model, example_inputs, expected
-        )
-        param_buffer_values = list(exported.state_dict.values())
-        flat_example_inputs = fx_pytree.tree_flatten_spec(
-            example_inputs, exported.call_spec.in_spec
-        )
-        all_args = (*param_buffer_values, *flat_example_inputs)
-        optimized(all_args, output_tensors)
-        actual = pytree.tree_unflatten(output_tensors, output_spec)
+    def test_output_misaligned(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
 
-        self.assertTrue(torch.allclose(actual, expected))
+            def forward(self, x, y):
+                x_unsqueeze = torch.unsqueeze(x, dim=0)
+                y_unsqueeze = torch.unsqueeze(y, dim=0)
+                cat = torch.cat([x_unsqueeze, y_unsqueeze], dim=0)
+                x_getitem = cat[0]
+                y_getitem = cat[1]
+                x_sigmoid = torch.sigmoid(x_getitem)
+                return x_sigmoid, y_getitem
+
+        model = Repro()
+        example_inputs = [
+            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device="cuda"),
+        ]
+        expected = model(*example_inputs)
+        actual = AOTInductorModelCache.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
 
 
 if __name__ == "__main__":
