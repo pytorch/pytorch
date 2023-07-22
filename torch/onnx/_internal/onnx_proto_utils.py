@@ -12,7 +12,7 @@ from typing import Any, List, Mapping, Set, Tuple, Union
 import torch
 import torch.jit._trace
 import torch.serialization
-from torch.onnx import _constants, _exporter_states, _type_utils, errors
+from torch.onnx import _constants, _exporter_states, errors
 from torch.onnx._internal import _beartype, jit_utils, registration
 
 
@@ -62,7 +62,7 @@ def export_as_test_case(
         shutil.rmtree(data_set_dir)
     os.makedirs(data_set_dir)
 
-    proto = onnx.load_model_from_string(model_bytes)
+    proto = onnx.load_model_from_string(model_bytes)  # type: ignore[attr-defined]
 
     for i, (input_proto, input) in enumerate(zip(proto.graph.input, inputs_data)):
         export_data(input, input_proto, os.path.join(data_set_dir, f"input_{i}.pb"))
@@ -112,12 +112,12 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     inputs = {}
     input_files = glob.glob(os.path.join(test_data_dir, "input_*.pb"))
     for input_file in input_files:
-        tensor = onnx.load_tensor(input_file)
+        tensor = onnx.load_tensor(input_file)  # type: ignore[attr-defined]
         inputs[tensor.name] = numpy_helper.to_array(tensor)
     outputs = {}
     output_files = glob.glob(os.path.join(test_data_dir, "output_*.pb"))
     for output_file in output_files:
-        tensor = onnx.load_tensor(output_file)
+        tensor = onnx.load_tensor(output_file)  # type: ignore[attr-defined]
         outputs[tensor.name] = numpy_helper.to_array(tensor)
 
     return model_bytes, inputs, outputs
@@ -227,7 +227,7 @@ def _add_onnxscript_fn(
     # size > 2GB, and if it for some reason did not, the model would fail on
     # serialization anyway in terms of the protobuf limitation. So we don't
     # need to worry about > 2GB model getting here.
-    model_proto = onnx.load_model_from_string(model_bytes)
+    model_proto = onnx.load_model_from_string(model_bytes)  # type: ignore[attr-defined]
 
     # Iterate graph nodes to insert only the included custom
     # function_proto into model_proto
@@ -292,29 +292,3 @@ def _find_onnxscript_op(
                 else None,
             )
     return onnx_function_list, included_node_func
-
-
-def _convert_tensor_to_numpy(input: Any) -> Any:
-    try:
-        import numpy as np
-    except ImportError:
-        raise ImportError(f"{__name__} needs numpy, but it's not installed.")
-
-    if isinstance(input, torch.Tensor):
-        return input.detach().cpu().numpy()
-    if isinstance(input, torch.dtype):
-        return int(_type_utils.JitScalarType.from_dtype(input).onnx_type())
-    if isinstance(input, (tuple, list)):
-        if len(input) == 0:
-            return np.array((), dtype=np.int64)
-        if isinstance(input[0], torch.Tensor):
-            return [_convert_tensor_to_numpy(x) for x in input]
-        if isinstance(input[0], bool):
-            return np.array(input, dtype=np.bool_)
-
-        # Just a sequence of numbers
-        if isinstance(input[0], int):
-            return np.array(input, dtype=np.int64)
-        if isinstance(input[0], float):
-            return np.array(input)
-    return input
