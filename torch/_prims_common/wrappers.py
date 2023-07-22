@@ -57,9 +57,7 @@ def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
         msg = f"Found unknown type {type(a)} when trying to convert scalars!"
         raise ValueError(msg)
     if not utils.is_weakly_lesser_type(type(a), typ):
-        msg = "Scalar {} of type {} cannot be safely cast to type {}!".format(
-            a, type(a), typ
-        )
+        msg = f"Scalar {a} of type {type(a)} cannot be safely cast to type {typ}!"
         raise ValueError(msg)
 
     return typ(a)
