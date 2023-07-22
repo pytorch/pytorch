@@ -33,6 +33,7 @@ from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
     format_error_msg,
+    format_error_msg_verbose,
     InternalTorchDynamoError,
     TorchRuntimeError,
     unimplemented,
@@ -215,7 +216,19 @@ def exception_handler(e, code, frame=None):
     # Only log the exception if we are going to suppress it
     # if aren't suppressing it, a higher level except block will handle it
     if config.suppress_errors:
-        log.error(format_error_msg(e, code, record_filename, frame))
+        if config.is_fbcode():
+            from torch._dynamo.fb.logging import (  # type: ignore[import]
+                log_dynamo_suppress_errors,
+            )
+
+            error_msg = format_error_msg_verbose(e, code, record_filename, frame)
+            log_dynamo_suppress_errors(
+                code.co_name, code.co_filename, code.co_firstlineno, error_msg
+            )
+        else:
+            error_msg = format_error_msg(e, code, record_filename, frame)
+
+        log.warning(error_msg)
 
 
 FRAME_COUNTER = 0
@@ -251,12 +264,12 @@ def convert_frame_assert(
                 )
             else:
                 message = (
-                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}",
                     "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further",
                 )
 
             if recompiles_log.isEnabledFor(logging.DEBUG):
-                recompiles_log.debug(message)
+                recompiles_log.debug(message, stack_info=True)
 
             if config.error_on_recompile:
                 raise exc.RecompileError(message)
@@ -551,7 +564,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
         except Exception:
             if not config.suppress_errors:
                 raise
-            log.info("converting frame raised error, suppressing error")
+            log.warning("converting frame raised error, suppressing error")
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]

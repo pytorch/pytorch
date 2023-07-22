@@ -1341,7 +1341,7 @@ class OpInfo:
             if self.variant_test_name
             else ""
         )
-        return "{}{}".format(self.name.replace(".", "_"), variant)
+        return f"{self.name.replace('.', '_')}{variant}"
 
 
 def _generate_reduction_inputs(device, dtype, requires_grad, **kwargs):
