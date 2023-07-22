@@ -48,7 +48,11 @@ void BatchedTensorImpl::refreshTensorMetadata() {
       new_sizes.push_back(value_sizes.at(actual_dim));
       new_strides.push_back(value_strides.at(actual_dim));
     }
+
+    // `set_sizes_and_strides` takes care of calling `refresh_numel` and
+    // `refresh_contiguous`
     set_sizes_and_strides(new_sizes, new_strides, value_.sym_storage_offset());
+    return;
   } else {
     // for tensor with regular size and strides
     const auto value_sizes = value_.sizes();
@@ -109,9 +113,6 @@ void BatchedTensorImpl::set_size(int64_t dim, int64_t new_size) {
 }
 void BatchedTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
   TORCH_INTERNAL_ASSERT(false, "Can't set_stride for BatchedTensorImpl");
-}
-void BatchedTensorImpl::set_storage_offset(int64_t storage_offset) {
-  TORCH_INTERNAL_ASSERT(false, "Can't set_storage_offset for BatchedTensorImpl");
 }
 #ifdef DEBUG
 bool BatchedTensorImpl::has_storage() const {

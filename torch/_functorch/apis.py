@@ -359,6 +359,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
 
     """
     import torch._functorch.eager_transforms as eager_transforms
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         return eager_transforms.grad_impl(func, argnums, has_aux, args, kwargs)

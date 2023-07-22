@@ -1,6 +1,5 @@
 import torch._functorch.apis as apis
 import torch._functorch.eager_transforms as _impl
-import torch._functorch.apis as apis
 import torch._functorch.make_functional as _nn_impl
 from torch._functorch.vmap import in_dims_t, out_dims_t
 from torch._functorch.eager_transforms import argnums_t
