@@ -7,6 +7,7 @@ import re
 import sys
 import types
 import unittest
+from typing import Sequence, Union
 from unittest.mock import patch
 
 import torch
@@ -315,7 +316,13 @@ def requires_numpy(fn):
     return _fn
 
 
-def rand_strided(size, stride, dtype=torch.float32, device="cpu", extra_size=0):
+def rand_strided(
+    size: Sequence[int],
+    stride: Sequence[int],
+    dtype: torch.dtype = torch.float32,
+    device: Union[str, torch.device] = "cpu",
+    extra_size: int = 0,
+):
     needed_size = (
         sum((shape - 1) * stride for shape, stride in zip(size, stride))
         + 1
