@@ -1547,7 +1547,7 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        if isinstance(val, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
+        if isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
             return variables.UserDefinedObjectVariable(val)
         if ConstantVariable.is_literal(value):
             return SourcelessBuilder.wrap_constant_literal(value)
