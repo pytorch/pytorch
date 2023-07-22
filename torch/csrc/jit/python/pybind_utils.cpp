@@ -594,7 +594,7 @@ py::object toPyObject(IValue ivalue) {
     for (const auto i : c10::irange(list.size())) {
       t[i] = toPyObject(IValue{list.get(i)});
     }
-    return std::move(t);
+    return py::object(std::move(t));
   } else if (ivalue.isTuple()) {
     auto tuple = std::move(ivalue).toTuple();
     const auto& elements = tuple->elements();
@@ -629,7 +629,7 @@ py::object toPyObject(IValue ivalue) {
           .attr("_create_named_tuple")(
               t, unqualName, fieldNames, py::make_tuple(defaults));
     } else {
-      return std::move(t);
+      return py::object(std::move(t));
     }
   } else if (ivalue.isDevice()) {
     return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
@@ -642,7 +642,7 @@ py::object toPyObject(IValue ivalue) {
       py_dict[toPyObject(IValue{pair.key()})] =
           toPyObject(IValue{pair.value()});
     }
-    return std::move(py_dict);
+    return py::object(std::move(py_dict));
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
     auto RRefPtr =
