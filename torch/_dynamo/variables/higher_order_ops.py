@@ -741,6 +741,11 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         chunk_size = args[4]
         batch_input_args = args[5:]
 
+        if kwargs:
+            unimplemented(
+                "NYI - torch.func.vmap: kwargs arguments are currently unsupported."
+            )
+
         # chunk_size is a keyword only args which is currently not supported.
         if chunk_size.value is not None:
             unimplemented(
@@ -749,7 +754,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         flat_args, arg_spec = torch.utils._pytree.tree_flatten(batch_input_args)
         in_dims_v = in_dims.as_python_constant()
-        in_dims_v = in_dims_v if isinstance(in_dims_v, int) else in_dims_v
+        in_dims_v = in_dims_v if isinstance(in_dims_v, int) else list(in_dims_v)
         broadcasted_in_dims = torch._functorch.vmap._broadcast_to_and_flatten(
             in_dims_v, arg_spec
         )
@@ -814,6 +819,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
         gm = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+        # Doesn't work well with dynamic shapes.
         example_value = torch._functorch.vmap.vmap_impl(
             gm,
             actual_in_dims,
