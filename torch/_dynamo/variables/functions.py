@@ -561,9 +561,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     than status-quo as we currently graph-break on all distributed.* collectives.
     """
 
-    def __init__(self, fn, *, orig_fn, **kwargs):
+    def __init__(self, fn, *, orig_fn, orig_source, **kwargs):
         # orig_fn lets us implement any fn-specific args/kwargs restrictions inside call_function
         self.orig_fn = orig_fn
+        self.orig_source = orig_source
 
         # remapped_fn gets stuffed in self.fn and used in super().call_function
         super().__init__(fn, **kwargs)
@@ -586,6 +587,9 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
         if kwargs.get("async_op", False):
+            # Put the old source back, this function will always graph break, but this ensures
+            # we produce the correct guards.
+            self.source = self.orig_source
             unimplemented(
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.orig_fn}"
             )
