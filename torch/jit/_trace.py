@@ -1040,8 +1040,8 @@ def trace_module(
                 for key in example_inputs:
                     if key not in argument_names:
                         valid_arguments = "[" + ','.join(argument_names) + "]"
-                        raise NameError("""'{}' is not in forward() method's arguments,
-                         valid arguments name are {}""".format(key, valid_arguments))
+                        raise NameError(f"""'{key}' is not in forward() method's arguments,
+                         valid arguments name are {valid_arguments}""")
                 module._c._create_method_from_trace_with_dict(
                     method_name,
                     func,

@@ -122,9 +122,9 @@ class SymbolicCallArg:
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: Dict[
-            Any, List["FreeIfNotReusedLine"]
-        ] = collections.defaultdict(list)
+        self.reuse_pool: Dict[Any, List[FreeIfNotReusedLine]] = collections.defaultdict(
+            list
+        )
 
     def __contains__(self, key):
         return bool(self.reuse_pool.get(key, None))
@@ -787,9 +787,13 @@ class WrapperCodeGen(CodeGen):
             )
         )
 
-    def use_preallocated_ouput(self, name):
+    def use_preallocated_ouput(self, buffer):
         # outputs are passed-in in the AOT mode
-        return V.graph.aot_mode and name in set(V.graph.get_output_names())
+        return (
+            V.graph.aot_mode
+            and buffer
+            and buffer.get_name() in set(V.graph.get_output_names())
+        )
 
     def codegen_allocation(self, buffer):
         name = buffer.get_name()
@@ -820,7 +824,7 @@ class WrapperCodeGen(CodeGen):
             AllocateLine(
                 self,
                 buffer,
-                not self.use_preallocated_ouput(name),
+                not self.use_preallocated_ouput(buffer),
             )
         )
 
@@ -850,13 +854,7 @@ class WrapperCodeGen(CodeGen):
             or name in V.graph.graph_inputs
             or name in V.graph.constants
             or name in self.freed
-        ):
-            return False
-
-        if (
-            V.graph.aot_mode
-            and output_buffer
-            and self.use_preallocated_ouput(output_buffer.get_name())
+            or self.use_preallocated_ouput(output_buffer)
         ):
             return False
 
@@ -1226,7 +1224,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def make_buffer_allocation(self, buffer):
         name = buffer.get_name()
         # outputs are passed-in in the AOT mode
-        if self.use_preallocated_ouput(name):
+        if self.use_preallocated_ouput(buffer):
             output_idx = None
             output_buffer = None
             for idx, output in enumerate(V.graph.graph_outputs):

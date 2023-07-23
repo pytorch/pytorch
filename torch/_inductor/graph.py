@@ -452,7 +452,7 @@ class GraphLowering(torch.fx.Interpreter):
                     value.realize()
             return value
 
-        for key, value in self.env.items():
+        for value in self.env.values():
             try:
                 visit(value)
             except Exception:
