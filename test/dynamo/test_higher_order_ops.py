@@ -1696,9 +1696,7 @@ class GraphModule(torch.nn.Module):
         # There are two graphs, first for generating `y` and
         # second for application of `grad`.
         # We are interested in the second graph.
-        wrapped_gm = self._compile_check(
-            wrapper_fn, (x,), fullgraph=False, graph_idx=1
-        )
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False, graph_idx=1)
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
