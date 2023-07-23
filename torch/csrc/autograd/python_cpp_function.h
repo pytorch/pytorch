@@ -49,7 +49,7 @@ PyObject* CppFunction_pynew(
        METH_NOARGS,                                                            \
        nullptr},                                                               \
   {                                                                            \
-    (char*)"_thread_id", THPCppFunction_thread_id, METH_NOARGS, nullptr}       \
+    (char*)"_thread_id", THPCppFunction_thread_id, METH_NOARGS, nullptr        \
   }
 
 #define THP_FUNCTION_DEFAULT_PROPERTIES                                   \
