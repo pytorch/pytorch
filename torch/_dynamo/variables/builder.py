@@ -479,10 +479,12 @@ class VariableBuilder:
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
             new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(value)
+            old_source = self.source
             self.source = new_source
             return CollectiveFunctionRewriteVariable(
                 new_fn,
                 orig_fn=value,
+                orig_source=old_source,
                 source=new_source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
@@ -1548,7 +1550,7 @@ class SourcelessBuilder:
             # This is always valid to call, and useful for recursive calls.
             return value
         if isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
-            return variables.UserDefinedObjectVariable(val)
+            return UserDefinedObjectVariable(value)
         if ConstantVariable.is_literal(value):
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
