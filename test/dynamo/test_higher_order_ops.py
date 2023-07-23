@@ -1590,7 +1590,7 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
+        wrapped_gm = self._compile_check(wrapper_fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1647,7 +1647,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
+        wrapped_gm = self._compile_check(wrapper_fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1696,7 +1696,7 @@ class GraphModule(torch.nn.Module):
         # There are two graphs, first for generating `y` and
         # second for application of `grad`.
         # We are interested in the second graph.
-        wrapped_gm = self._grad_compile_check(
+        wrapped_gm = self._compile_check(
             wrapper_fn, (x,), fullgraph=False, graph_idx=1
         )
 
@@ -1747,7 +1747,7 @@ class GraphModule(torch.nn.Module):
 
         # Graph break because dynamo is unable to get source `fn` and
         # functools.wraps in `grad` leads to graph-break
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False)
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1790,7 +1790,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.grad(fn, has_aux=True)(x)
 
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
+        wrapped_gm = self._compile_check(wrapper_fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1835,7 +1835,7 @@ class GraphModule(torch.nn.Module):
 
         y = torch.randn(3, 3, 3)
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
+        wrapped_gm = self._compile_check(wrapper_fn, (x, y))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1881,7 +1881,7 @@ class GraphModule(torch.nn.Module):
 
         y = torch.randn(3, 3, 3)
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
+        wrapped_gm = self._compile_check(wrapper_fn, (x, y))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1929,7 +1929,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.grad(torch.func.grad(fn))(x)
 
         x = torch.randn(())
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False)
 
         if check_dynamic_shape_capture():
             return
@@ -2044,7 +2044,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
         y = 3.0
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
+        wrapped_gm = self._compile_check(wrapper_fn, (x, y))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -2131,7 +2131,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.vmap(lambda x: x.sum(0) + x.sum(1))(x)
 
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(fn, (x,))
+        wrapped_gm = self._compile_check(fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -2167,7 +2167,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.vmap(lambda x: x.sum(0) + x.sum(1) + y)(x)
 
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(fn, (x,))
+        wrapped_gm = self._compile_check(fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -2208,7 +2208,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.vmap(lambda x: x.sum(0) + x.sum(1) + y)(x)
 
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(fn, (x,))
+        wrapped_gm = self._compile_check(fn, (x,))
 
         expected = """\
 class GraphModule(torch.nn.Module):
@@ -2243,7 +2243,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
         y = torch.randn(3, 3)
-        wrapped_gm = self._grad_compile_check(fn, (x, y))
+        wrapped_gm = self._compile_check(fn, (x, y))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -2281,7 +2281,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
         y = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(fn, (x, y))
+        wrapped_gm = self._compile_check(fn, (x, y))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -2331,7 +2331,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return torch.func.vmap(torch.func.vmap(lambda y: x * y))(y)
 
-        wrapped_gm = self._grad_compile_check(fn, (x,))
+        wrapped_gm = self._compile_check(fn, (x,))
 
         expected = """\
 class GraphModule(torch.nn.Module):
