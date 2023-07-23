@@ -136,20 +136,17 @@ class QuantizedRNNCellBase(torch.jit.ScriptModule):
     def check_forward_input(self, input):
         if input.size(1) != self.input_size:
             raise RuntimeError(
-                "input has inconsistent input_size: got {}, expected {}".format(
-                    input.size(1), self.input_size))
+                f"input has inconsistent input_size: got {input.size(1)}, expected {self.input_size}")
 
     @torch.jit.script_method
     def check_forward_hidden(self, input: Tensor, hx: Tensor, hidden_label: str = '') -> None:
         if input.size(0) != hx.size(0):
             raise RuntimeError(
-                "Input batch size {} doesn't match hidden{} batch size {}".format(
-                    input.size(0), hidden_label, hx.size(0)))
+                f"Input batch size {input.size(0)} doesn't match hidden{hidden_label} batch size {hx.size(0)}")
 
         if hx.size(1) != self.hidden_size:
             raise RuntimeError(
-                "hidden{} has inconsistent hidden_size: got {}, expected {}".format(
-                    hidden_label, hx.size(1), self.hidden_size))
+                f"hidden{hidden_label} has inconsistent hidden_size: got {hx.size(1)}, expected {self.hidden_size}")
 
     # TODO: for some reason weak_script_method causes a destruction of the
     # module to occur, which in turn frees the packed_ih object via its DataPtr
@@ -324,12 +321,10 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
             raise RuntimeError(
-                'input must have {} dimensions, got {}'.format(
-                    expected_input_dim, input.dim()))
+                f'input must have {expected_input_dim} dimensions, got {input.dim()}')
         if self.input_size != input.size(-1):
             raise RuntimeError(
-                'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
-                    self.input_size, input.size(-1)))
+                f'input.size(-1) must be equal to input_size. Expected {self.input_size}, got {input.size(-1)}')
 
     @torch.jit.script_method
     def get_expected_hidden_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:

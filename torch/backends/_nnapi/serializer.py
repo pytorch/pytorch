@@ -351,7 +351,7 @@ class _NnapiSerializer:
     def add_tensor_operand(self, jitval, oper):
         assert isinstance(oper, Operand)
         if jitval in self.jitval_operand_map:
-            raise Exception("Duplicate tensor: %r" % jitval)
+            raise Exception(f"Duplicate tensor: {jitval!r}")
 
         operand_id = self.get_next_operand_id()
         self.operands.append(oper)
@@ -918,8 +918,7 @@ class _NnapiSerializer:
             self.add_tensor_sequence(output, tensors)
         if const_vals is None and tensors is None:
             raise Exception(
-                "Unable to handle ListConstruct node."
-                "  Neither all constants nor all tensors. %r" % node)
+                f"Unable to handle ListConstruct node.  Neither all constants nor all tensors. {node!r}")
 
     def add_tuple_construct(self, node):
         assert node.outputsSize() == 1
@@ -1974,8 +1973,7 @@ class _NnapiSerializer:
             assert bias_oper.zero_point == 0
         else:
             raise Exception(
-                "Unsupported input type for conv2d: {}"
-                .format(image_oper.op_type))
+                f"Unsupported input type for conv2d: {image_oper.op_type}")
 
         assert len(image_oper.shape) == 4
         assert len(weight_oper.shape) == 4

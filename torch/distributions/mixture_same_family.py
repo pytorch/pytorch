@@ -189,6 +189,5 @@ class MixtureSameFamily(Distribution):
         return x
 
     def __repr__(self):
-        args_string = '\n  {},\n  {}'.format(self.mixture_distribution,
-                                             self.component_distribution)
+        args_string = f'\n  {self.mixture_distribution},\n  {self.component_distribution}'
         return 'MixtureSameFamily' + '(' + args_string + ')'
