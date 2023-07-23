@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/native/mps/OperationUtils.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -48,10 +48,12 @@ static id<MTLLibrary> compileLerpTensorLibrary(id<MTLDevice> device) {
   NSError* error = nil;
   MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
   [options setLanguageVersion:MTLLanguageVersion2_3];
-  lerpTensorLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_LERP_TENSOR encoding:NSASCIIStringEncoding]
-    options:options
-      error:&error];
-  TORCH_CHECK(lerpTensorLibrary, "Failed to create metal lerp tensor library, error: ", [[error description] UTF8String]);
+  lerpTensorLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_LERP_TENSOR
+                                                                      encoding:NSASCIIStringEncoding]
+                                           options:options
+                                             error:&error];
+  TORCH_CHECK(
+      lerpTensorLibrary, "Failed to create metal lerp tensor library, error: ", [[error description] UTF8String]);
   return lerpTensorLibrary;
 }
 
