@@ -372,5 +372,21 @@ class TestExport(TestCase):
                 self.assertTrue("source_fn" in node.meta)
                 self.assertTrue("nn_module_stack" in node.meta)
 
+    def test_error_does_not_reference_eager_fallback(self):
+        def fn_ddo(x):
+            y = x.nonzero()
+            z = y.shape[0]
+            if z > 2:
+                return x.cos()
+            else:
+                return x.sin()
+
+        with self.assertRaisesRegex(
+            torchdynamo.exc.UserError,
+            r"^(?!.*fall back to eager).*"
+        ):
+            _ = export(fn_ddo, (torch.tensor([2, 3, 5]),), constraints=None)
+
+
 if __name__ == '__main__':
     run_tests()

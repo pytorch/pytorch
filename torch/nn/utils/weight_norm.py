@@ -29,7 +29,7 @@ class WeightNorm:
     def apply(module, name: str, dim: int) -> 'WeightNorm':
         warnings.warn("torch.nn.utils.weight_norm is deprecated in favor of torch.nn.utils.parametrizations.weight_norm.")
 
-        for k, hook in module._forward_pre_hooks.items():
+        for hook in module._forward_pre_hooks.values():
             if isinstance(hook, WeightNorm) and hook.name == name:
                 raise RuntimeError(f"Cannot register two weight_norm hooks on the same parameter {name}")
 
