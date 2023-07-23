@@ -4,7 +4,7 @@ import warnings
 import torch
 import torch.nn as nn
 from torch import Tensor  # noqa: F401
-from torch._jit_internal import Tuple, Optional, List, Union, Dict  # noqa: F401
+from typing import Tuple, Optional, List, Union, Dict  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 from torch.ao.nn.quantized.modules.utils import _quantize_weight
 

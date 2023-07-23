@@ -1,10 +1,9 @@
 import warnings
-from typing import Iterable, List, NamedTuple, Tuple, Union
+from typing import Iterable, List, NamedTuple, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
 from ... import _VF
-from ..._jit_internal import Optional
 
 
 __all__ = ['PackedSequence', 'invert_permutation', 'pack_padded_sequence', 'pad_packed_sequence', 'pad_sequence',
