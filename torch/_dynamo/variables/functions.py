@@ -542,7 +542,7 @@ def _traceable_collectives_source(fn):
 
     valid_values = {all_gather_tensor_inplace, reduce_scatter_tensor_inplace}
     assert fn in valid_values
-    inner_name = all_gather_tensor_inplace.__name__
+    inner_name = fn.__name__
     path_source = AttrSource(
         base=AttrSource(base=GlobalSource(global_name="torch"), member="distributed"),
         member="_functional_collectives",
