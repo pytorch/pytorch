@@ -238,6 +238,7 @@ coverage_ignore_classes = [
     "StringType",
     "SymIntType",
     "SymBoolType",
+    "ThroughputBenchmark",
     "TracingState",
     "TupleType",
     "Type",

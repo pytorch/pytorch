@@ -1390,9 +1390,7 @@ class TestCommon(TestCase):
 
         # Partially supporting a dtype is not an error, but we print a warning
         if (len(partially_supported_forward) + len(partially_supported_backward)) > 0:
-            msg = "Some dtypes for {} on device type {} are only partially supported!\n".format(
-                op.name, device_type
-            )
+            msg = f"Some dtypes for {op.name} on device type {device_type} are only partially supported!\n"
             if len(partially_supported_forward) > 0:
                 msg = (
                     msg
@@ -1426,9 +1424,7 @@ class TestCommon(TestCase):
                 return
 
         # Generates error msg
-        msg = "The supported dtypes for {} on device type {} are incorrect!\n".format(
-            op.name, device_type
-        )
+        msg = f"The supported dtypes for {op.name} on device type {device_type} are incorrect!\n"
         if len(supported_but_unclaimed_forward) > 0:
             msg = (
                 msg
