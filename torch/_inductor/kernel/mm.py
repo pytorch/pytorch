@@ -170,7 +170,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 beta=beta,
             )
         ]
-        if use_aten_gemm_kernels
+        if use_aten_gemm_kernels()
         else []
     )
     if (
