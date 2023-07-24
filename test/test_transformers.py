@@ -1142,7 +1142,7 @@ class TestTransformers(NNTestCase):
         ).to(torch.bool)
 
         mock_layer = MagicMock(torch.nn.MultiheadAttention(E, H), return_value=inputs)
-        encoder.layers[0] = mock_layer
+        encoder.layers[1] = mock_layer
         outputs = encoder(inputs, mask=causal_mask)
         mock_layer.assert_called_with(ANY, src_mask=ANY, is_causal=True, src_key_padding_mask=ANY)
 
