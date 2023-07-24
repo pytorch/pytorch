@@ -122,9 +122,9 @@ class SymbolicCallArg:
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
-        self.reuse_pool: Dict[
-            Any, List["FreeIfNotReusedLine"]
-        ] = collections.defaultdict(list)
+        self.reuse_pool: Dict[Any, List[FreeIfNotReusedLine]] = collections.defaultdict(
+            list
+        )
 
     def __contains__(self, key):
         return bool(self.reuse_pool.get(key, None))

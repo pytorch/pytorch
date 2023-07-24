@@ -3497,12 +3497,12 @@ class TestScript(JitTestCase):
         ]
         for exp, result in tests:
             cu = torch.jit.CompilationUnit()
-            full = """
+            full = f"""
 def bar(x, y):
     return x + y
 def foo(x):
-    {}
-            """.format(exp)
+    {exp}
+            """
             if isinstance(result, str):
                 with self.assertRaisesRegex(RuntimeError, result):
                     cu.define(full)
@@ -4006,7 +4006,7 @@ def foo(x):
                 return e.getattr('name')
 
             return e
-        for k, v in result.items():
+        for v in result.values():
             for i in range(len(v)):
                 if isinstance(v[i], tuple):
                     n, v2 = v[i]
@@ -13065,10 +13065,10 @@ dedent """
         ]
 
         for cast_type in cast_types:
-            cu = torch.jit.CompilationUnit('''
+            cu = torch.jit.CompilationUnit(f'''
             def cast_to(x):
                 return x.{cast_type}()
-            '''.format(cast_type=cast_type))
+            ''')
 
             x = torch.rand(3, 4, 5) * 128
             cu_result = cu.cast_to(x)

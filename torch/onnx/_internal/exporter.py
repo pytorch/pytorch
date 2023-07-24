@@ -275,10 +275,12 @@ def enable_fake_mode():
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     # This overrides the internal `FakeTensorMode` instance created by `torch._dynamo.export`[1].
-    # Ideally we should keep them in sync to preserve the same default behavior
+    # It is a good idea to keep them in sync (constructor args) to maintain the same default behavior
     # [1] `torch/_dynamo/output_graph.py::InstructionTranslator::OutputGraph.__init__`
+    # Mixed fake/real tensors are only allowed when `torch.onnx.dynamo_export` is not called within `FakeTensorMode`
+    # This is needed because models can create new parameters during `forward(self, *args, **kwargs)` run
     fake_mode = fake_tensor.FakeTensorMode(
-        allow_non_fake_inputs=True,  # https://github.com/pytorch/pytorch/issues/105077
+        allow_non_fake_inputs=not torch._guards.detect_fake_mode(),
         shape_env=ShapeEnv(
             allow_scalar_outputs=False, allow_dynamic_output_shape_ops=False
         ),
