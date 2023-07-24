@@ -3237,7 +3237,7 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
     return add_2""",
         )
 
-    def test_fx_pytree(self):
+    def test_retracibility(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3274,7 +3274,7 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
         self.assertTrue(torch.allclose(gm(inp_test)[0], gm2(inp_test)[0]))
         self.assertTrue(torch.allclose(gm(inp_test)[1], gm2(inp_test)[1]))
 
-    def test_fx_pytree_dict_container_inp_out(self):
+    def test_retracibility_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3319,6 +3319,19 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
 
         self.assertTrue(torch.allclose(gm(inp_test)["a"], gm2(inp_test)["a"]))
         self.assertTrue(torch.allclose(gm(inp_test)["b"], gm2(inp_test)["b"]))
+
+    def test_fx_pytree(self):
+        def foo(args):
+            flat_args, spec = torch.utils._pytree.tree_flatten(args)
+            flat_args_fx = torch.fx._pytree.tree_flatten_spec(args, spec)
+            return flat_args_fx[0] + flat_args[0]
+
+        inp_container = (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50, 100))
+        print(foo(inp_container))
+
+        gm, _ = torch._dynamo.export(foo, inp_container, aten_graph=True)
+
+        self.assertTrue(torch.allclose(foo(inp_container), gm(inp_container)))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
