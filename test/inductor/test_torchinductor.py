@@ -76,7 +76,7 @@ requires_multigpu = functools.partial(
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
-vec_dtypes = [torch.float, torch.bfloat16]
+vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libfoo = None
 
