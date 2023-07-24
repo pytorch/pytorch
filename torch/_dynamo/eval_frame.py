@@ -948,7 +948,8 @@ def export(
 
             graph_captured_input = graph_inputs
             assert graph is not None
-            graph_captured_result = graph(*graph_inputs)
+            with fake_mode:
+                graph_captured_result = graph(*graph_inputs)
             return graph_captured_result
 
         return result_capturing_wrapper
