@@ -23,7 +23,7 @@ def gen_data(special_op_lists, analysis_name):
     composite_ops = get_ops_for_key('CompositeImplicitAutograd')
     noncomposite_ops = all_ops - composite_ops
 
-    ops = yaml.load(open('../../aten/src/ATen/native/native_functions.yaml', 'r').read(), Loader=yaml.CLoader)
+    ops = yaml.load(open('../../aten/src/ATen/native/native_functions.yaml').read(), Loader=yaml.CLoader)
 
     annotated_ops = {a.strip(): b.strip() for a, b in list(csv.reader(open('annotated_ops')))}
     from collections import defaultdict
@@ -132,19 +132,19 @@ def remove_prefix(input_string, prefix):
 
 
 if True:
-    with open('run_ops.txt', 'r') as f:
+    with open('run_ops.txt') as f:
         opinfo_ops = [remove_suffix(i.strip(), '.default') for i in f.readlines()]
-    with open('count_ops.txt', 'r') as f:
+    with open('count_ops.txt') as f:
         opinfo_counts = [i.strip() for i in f.readlines()]
         opinfo_counts = defaultdict(int, dict(zip(opinfo_ops, opinfo_counts)))
 
     def count_fn(x):
         return opinfo_counts[x['full_name']]
 
-    with open('run_decompositions.txt', 'r') as f:
+    with open('run_decompositions.txt') as f:
         decomposed_ops = [remove_suffix(i.strip(), '.default') for i in f.readlines()]
 
-    with open('public_api', 'r') as f:
+    with open('public_api') as f:
         ref_api = [i.strip() for i in f.readlines()]
 
     def has_ref_impl(x):

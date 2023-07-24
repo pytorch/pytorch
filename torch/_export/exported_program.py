@@ -108,12 +108,13 @@ class ExportedProgram:
         self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
         self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
 
-    def __call__(self, *args: Any) -> Any:
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if self.call_spec.in_spec is not None:
             try:
-                args = fx_pytree.tree_flatten_spec(args, self.call_spec.in_spec)  # type: ignore[assignment]
+                user_args = combine_args_kwargs(args, kwargs)
+                args = fx_pytree.tree_flatten_spec(user_args, self.call_spec.in_spec)  # type: ignore[assignment]
             except Exception:
-                _, received_spec = pytree.tree_flatten(args)
+                _, received_spec = pytree.tree_flatten(user_args)
                 raise error.InternalError(
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
@@ -380,3 +381,6 @@ def _process_constraints(
         range_constraints[symbol] = RangeConstraint(min_val, max_val)
 
     return range_constraints, equality_constraints
+
+def combine_args_kwargs(args, kwargs):
+    return (args, kwargs) if kwargs else args
