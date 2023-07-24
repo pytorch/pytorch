@@ -41,7 +41,7 @@ def is_avx512_supported():
 IS_AVX512_UNSUPPORTED = not is_avx512_supported()
 
 LLGA_FUSION_GROUP = 'prim::oneDNNFusionGroup'
-LLGA_NOT_ENABLED = not torch._C.has_mkldnn or IS_WINDOWS or IS_MACOS
+LLGA_NOT_ENABLED = not torch.backends.mkldnn.is_available() or IS_WINDOWS or IS_MACOS
 
 def warmup_forward(f, *args, profiling_count=3):
     for i in range(profiling_count):
@@ -847,7 +847,7 @@ for model_name, enabled in [
         return test
 
     for dtype in [torch.bfloat16, torch.float32]:
-        setattr(TestModel, 'test_vision_%s_%s' % (model_name, str(dtype).split("torch.")[1]), _wrapper(model_name, dtype))
+        setattr(TestModel, 'test_vision_{}_{}'.format(model_name, str(dtype).split("torch.")[1]), _wrapper(model_name, dtype))
 
 
 instantiate_device_type_tests(TestFusionPattern, globals())

@@ -2,7 +2,7 @@ import contextlib
 from typing import Sequence
 
 import torch
-from torch._custom_op import custom_op
+from torch._custom_op.impl import custom_op
 from torch.utils._content_store import ContentStoreReader
 
 LOAD_TENSOR_READER = None
@@ -27,7 +27,7 @@ def load_tensor_reader(loc):
 
 def register_debug_prims():
     @custom_op("debugprims::load_tensor")
-    def load_tensor(
+    def load_tensor(  # type: ignore[empty-body]
         name: str,
         size: Sequence[int],
         stride: Sequence[int],

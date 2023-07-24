@@ -33,7 +33,6 @@ if IS_WINDOWS and IS_CI:
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from inductor.test_cpp_wrapper import CppWrapperTemplate
 from inductor.test_torchinductor import (
     check_model,
     check_model_cuda,
@@ -47,7 +46,6 @@ importlib.import_module("filelock")
 # xfail by default, set is_skip=True to skip
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
-    "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
 }
 
 if TEST_WITH_ROCM:
@@ -61,22 +59,22 @@ if TEST_WITH_ROCM:
     test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
         ("cuda"), is_skip=True
     )
-    # aten.miopen_batch_norm is not registered for lowering
-    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
+    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(
+        ("cuda"), is_skip=True
+    )
 
 
-def make_dynamic_cls(cls):
+def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
     return make_test_cls_with_patches(
         cls,
         "DynamicShapes",
         "_dynamic_shapes",
-        (torch._dynamo.config, "dynamic_shapes", True),
         (torch._dynamo.config, "assume_static_by_default", False),
+        xfail_prop=xfail_prop,
     )
 
 
 DynamicShapesCommonTemplate = make_dynamic_cls(CommonTemplate)
-DynamicShapesCppWrapperTemplate = make_dynamic_cls(CppWrapperTemplate)
 
 
 if HAS_CPU:
@@ -85,15 +83,7 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
-    class DynamicShapesCppWrapperCpuTests(TestCase):
-        device = "cpu"
-
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
-    copy_tests(
-        DynamicShapesCppWrapperTemplate,
-        DynamicShapesCppWrapperCpuTests,
-        "cpp_wrapper",
-    )
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
@@ -209,6 +199,26 @@ class TestInductorDynamic(TestCase):
         res = opt(x, (5, 5), (2, 2))
         ref = pad_same(x, (5, 5), (2, 2))
         self.assertEqual(res, ref, atol=0, rtol=0)
+
+    def test_slice_index_changing_sign(self, device):
+        def fn(x, y):
+            y0, y1 = y.shape
+            return x[: (y0 - y1)].clone()
+
+        a = torch.randn(32, 32, device=device)
+        cfn = self.compile_fn(fn)
+
+        # y0 > y1 -> y0 - y1 is positive
+        b = torch.randn(16, 2, device=device)
+        expect = fn(a, b)
+        actual = cfn(a, b)
+        self.assertEqual(expect, actual)
+
+        # y0 < y1 -> y0 - y1 is negative
+        b = torch.randn(2, 16, device=device)
+        expect = fn(a, b)
+        actual = cfn(a, b)
+        self.assertEqual(expect, actual)
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals())

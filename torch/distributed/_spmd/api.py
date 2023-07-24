@@ -16,6 +16,7 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 
 from torch import fx
+from torch._decomp.decompositions import native_layer_norm_backward
 
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._spmd.data_parallel import gradients_tagging
@@ -156,7 +157,7 @@ def _rematerialize_optimizer(
         yield
     finally:
         param_group["params"] = orig_params
-        opt.state.update(orig_states)
+        opt.state = orig_states
 
 
 aten = torch.ops.aten  # pyre-ignore
@@ -253,7 +254,7 @@ def _fused_adam_decomp(
             o.copy_(u)
 
 
-FOREACH_DECOMP_TABLE = {
+SPMD_DECOMP_TABLE = {
     aten._foreach_add_.List: _foreach_add_decomp,
     aten._foreach_add_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_add.Scalar
@@ -270,16 +271,23 @@ FOREACH_DECOMP_TABLE = {
     aten._foreach_mul_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_mul.Scalar
     ),
+    aten._foreach_div_.Scalar: partial(
+        _foreach_binop_scalar_decomp, aten._foreach_div.Scalar
+    ),
     aten._foreach_neg_.default: partial(
         _foreach_unaop_decomp, aten._foreach_neg.default
     ),
     aten._foreach_reciprocal_.default: partial(
         _foreach_unaop_decomp, aten._foreach_reciprocal.default
     ),
+    aten._foreach_sqrt_.default: partial(
+        _foreach_unaop_decomp, aten._foreach_sqrt.default
+    ),
     aten._foreach_sub_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_sub.Scalar
     ),
     aten._fused_adam_.default: _fused_adam_decomp,
+    aten.native_layer_norm_backward.default: native_layer_norm_backward,
 }
 
 
@@ -381,7 +389,7 @@ def _compile(
     # can trace operations applied to them.
     def stateless_func(func, params, buffers, named_states, args, kwargs):
         with stateless._reparametrize_module(
-            cast(nn.Module, mod), {**params, **buffers}
+            mod, {**params, **buffers}
         ), _rematerialize_optimizer(
             opt, named_states, params
         ) if opt else nullcontext():
@@ -400,6 +408,7 @@ def _compile(
 
     if is_data_parallel_mode:
         fake_mode = FakeTensorMode()
+        data_parallel_mode = cast(DataParallel, parallel_mode)
 
         def _get_full_batch_arg(arg: torch.Tensor) -> torch.Tensor:
             # since compilation happens in the first iteration and we
@@ -408,8 +417,8 @@ def _compile(
             # propagations
             fake_arg = fake_mode.from_tensor(arg)
             arg_dims = [1] * arg.ndim
-            # we assume the first dim is batch dim in data parallel
-            arg_dims[0] *= dist.get_world_size()
+            # expand the tensor to full batch size on its batch dim
+            arg_dims[data_parallel_mode.input_batch_dim] *= dist.get_world_size()
             return fake_arg.repeat(arg_dims)
 
         args = pytree.tree_map_only(
@@ -417,8 +426,13 @@ def _compile(
             _get_full_batch_arg,
             args,
         )
+        kwargs = pytree.tree_map_only(
+            torch.Tensor,
+            _get_full_batch_arg,
+            kwargs,
+        )
 
-    with _enable_compile():
+    with _enable_compile(), torch.autograd.detect_anomaly(check_nan=False):
         # FIXME(@mrshenli): functionalization does not work for our use
         # case yet. Use explicit decompositions for foreach ops.
         # Remove this when the following issue is addressed.
@@ -426,7 +440,7 @@ def _compile(
         gm = make_fx(
             partial(stateless_func, func),
             tracing_mode=tracing_mode,
-            decomposition_table=FOREACH_DECOMP_TABLE,
+            decomposition_table=SPMD_DECOMP_TABLE,
             _allow_non_fake_inputs=False,
         )(params, buffers, named_states, args, kwargs)
 

@@ -4,6 +4,8 @@
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha_fwd_launch_template.h>
 
+namespace pytorch_fmha {
+
 void run_fmha_fwd_hdim32(Launch_params<FMHA_fprop_params> &launch_params) {
     FP16_SWITCH(launch_params.params.is_bf16, ([&] {
         if (launch_params.params.seqlen_k == 128) {
@@ -15,3 +17,5 @@ void run_fmha_fwd_hdim32(Launch_params<FMHA_fprop_params> &launch_params) {
         }
     }));
 }
+
+}; // namespace pytorch_fmha

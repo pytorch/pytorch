@@ -89,6 +89,10 @@ _SKIP_PYTHON_BINDINGS = [
     "is_sparse_csr",
     "size",
     "stride",
+    "sym_size",
+    "sym_stride",
+    "sym_storage_offset",
+    "sym_numel",
     ".*_backward",
     ".*_backward_(out|input|weight|bias)",
     ".*_forward",
@@ -549,7 +553,7 @@ def load_deprecated_signatures(
     # find matching original signatures for each deprecated signature
     results: List[PythonSignatureNativeFunctionPair] = []
 
-    with open(deprecated_yaml_path, "r") as f:
+    with open(deprecated_yaml_path) as f:
         deprecated_defs = yaml.load(f, Loader=YamlLoader)
 
     for deprecated in deprecated_defs:
@@ -869,7 +873,7 @@ def method_impl(
         name=name,
         pycname=pycname,
         method_header=method_header,
-        max_args=max((o.signature.arguments_count() for o in overloads)),
+        max_args=max(o.signature.arguments_count() for o in overloads),
         signatures=signatures,
         traceable=traceable,
         check_has_torch_function=gen_has_torch_function_check(
@@ -1251,10 +1255,7 @@ def emit_single_dispatch(
         # dispatch lambda signature
         name = cpp.name(f.func)
         lambda_formals = ", ".join(
-            (
-                f"{a.type_str} {a.name}"
-                for a in dispatch_lambda_args(ps, f, symint=symint)
-            )
+            f"{a.type_str} {a.name}" for a in dispatch_lambda_args(ps, f, symint=symint)
         )
         lambda_return = dispatch_lambda_return_str(f)
 

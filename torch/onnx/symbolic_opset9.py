@@ -52,6 +52,7 @@ __all__ = [
     "bitwise_or",
     "bmm",
     "broadcast_tensors",
+    "broadcast_to",
     "bucketize",
     "cat",
     "cdist",
@@ -144,6 +145,7 @@ __all__ = [
     "logical_not",
     "logical_or",
     "logical_xor",
+    "logit",
     "logsumexp",
     "lstm_cell",
     "lstm",
@@ -212,6 +214,8 @@ __all__ = [
     "prim_uninitialized",
     "rand_like",
     "rand",
+    "randint_like",
+    "randint",
     "randn_like",
     "randn",
     "reciprocal",
@@ -965,6 +969,27 @@ def expand(g: jit_utils.GraphContext, self, size, implicit):
     return g.op("Expand", self, size)
 
 
+@_onnx_symbolic("aten::broadcast_to")
+@symbolic_helper.quantized_args(True)
+@_beartype.beartype
+def broadcast_to(g: jit_utils.GraphContext, self, size):
+    size = symbolic_helper._maybe_get_const(size, "is")
+    if not symbolic_helper._is_value(size):
+        size = g.op("Constant", value_t=torch.LongTensor(size))
+    elif symbolic_helper._is_packed_list(size):
+        # Expand with -1 dim value means dim is unchanged.
+        # Since onnx::expand supports two-way broadcasting,
+        # -1 dim value can be exported to onnx as 1
+        size = symbolic_helper._reshape_helper(
+            g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1]))
+        )
+    dtype = _type_utils.JitScalarType.INT64
+    ones = ones_like(g, size, dtype)
+    neg_ones = mul(g, ones, g.op("Constant", value_t=torch.tensor(-1)))
+    size = where(g, g.op("Equal", size, neg_ones), ones, size)
+    return g.op("Expand", self, size)
+
+
 @_onnx_symbolic("aten::expand_as")
 @symbolic_helper.quantized_args(True, True)
 @_beartype.beartype
@@ -1649,8 +1674,8 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
                 g,
                 flattened_indices,
                 axes=[2 + i for i in range(ndims)],
-                starts=tuple_fn(0),
-                ends=tuple_fn(1),
+                starts=list(tuple_fn(0)),
+                ends=list(tuple_fn(1)),
             )
             indices = sub(g, indices, s)
             return r, indices
@@ -3842,7 +3867,9 @@ def zeros_like(
 ):
     shape = g.op("Shape", input)
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.from_value(
+            input, _type_utils.JitScalarType.FLOAT
+        )
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
@@ -3902,7 +3929,9 @@ def ones_like(
 ):
     shape = g.op("Shape", input)
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.from_value(
+            input, _type_utils.JitScalarType.FLOAT
+        )
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
@@ -3964,7 +3993,9 @@ def full_like(
     fill_value = symbolic_helper._maybe_get_const(fill_value, "f")
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.from_value(
+            input, _type_utils.JitScalarType.FLOAT
+        )
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     if symbolic_helper._is_value(fill_value):
@@ -5095,6 +5126,80 @@ def _pad_packed_sequence(
     return data, lengths
 
 
+@_onnx_symbolic("aten::randint")
+@_beartype.beartype
+def randint(g: jit_utils.GraphContext, low, high, shapes, dtype, *options):
+    dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+    low_i = symbolic_helper._get_const(low, "i", "low")
+    high_i = symbolic_helper._get_const(high, "i", "high")
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.INT64
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
+    if low_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", low)
+    if high_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", high)
+
+    shape = symbolic_helper._maybe_get_const(shapes, "is")
+    if symbolic_helper._is_value(shape):
+        shape_const = g.op(
+            "ConstantOfShape",
+            shapes,
+            value_t=torch.tensor([0], dtype=torch.float),
+        )
+        randn = g.op(
+            "RandomUniformLike",
+            shape_const,
+            low_f=low_i,
+            high_f=high_i,
+        )
+    else:
+        randn = g.op(
+            "RandomUniform",
+            shape_i=shape,
+            low_f=low_i,
+            high_f=high_i,
+        )
+
+    # cast to integer type
+    int_dtype = _type_utils.JitScalarType.INT64
+    randint = g.op("Cast", randn, to_i=int_dtype.onnx_type())
+    if int_dtype != scalar_type:
+        randint = g.op("Cast", randint, to_i=scalar_type.onnx_type())
+    return randint
+
+
+@_onnx_symbolic("aten::randint_like")
+@_beartype.beartype
+def randint_like(g: jit_utils.GraphContext, self, low, high, dtype, *options):
+    dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+    low_i = symbolic_helper._get_const(low, "i", "low")
+    high_i = symbolic_helper._get_const(high, "i", "high")
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.INT64
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
+    if low_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", low)
+    if high_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", high)
+
+    randn = g.op(
+        "RandomUniformLike",
+        self,
+        low_f=low_i,
+        high_f=high_i,
+    )
+
+    # cast to integer type
+    int_dtype = _type_utils.JitScalarType.INT64
+    randint = g.op("Cast", randn, to_i=int_dtype.onnx_type())
+    if int_dtype != scalar_type:
+        randint = g.op("Cast", randint, to_i=scalar_type.onnx_type())
+    return randint
+
+
 @_onnx_symbolic("aten::randn")
 @_beartype.beartype
 def randn(g: jit_utils.GraphContext, shapes, dtype, *options):
@@ -5162,7 +5267,9 @@ def randn_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.from_value(
+            self, _type_utils.JitScalarType.FLOAT
+        )
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op("RandomNormalLike", self, dtype_i=scalar_type.onnx_type())
@@ -5181,7 +5288,9 @@ def rand_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = _type_utils.JitScalarType.FLOAT
+        dtype = _type_utils.JitScalarType.from_value(
+            self, _type_utils.JitScalarType.FLOAT
+        )
     return g.op(
         "RandomUniformLike", self, dtype_i=_type_utils.JitScalarType(dtype).onnx_type()
     )
@@ -5259,6 +5368,10 @@ def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
             input,
         )
 
+    if dim == 0:
+        return symbolic_helper._reshape_helper(g, input, [1])
+    if dim == 1:
+        return g.op("Identity", input)
     # TODO: remove this as onnx opset 11 spec allows negative axes
     if end_dim < 0:
         end_dim = dim + end_dim
@@ -7057,3 +7170,26 @@ def unsupported_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
 
     # they can safely be implemented as no-op for real numbers only
     return noop_complex_operators(g, input)
+
+
+@_onnx_symbolic("aten::logit")
+@_beartype.beartype
+def logit(g: jit_utils.GraphContext, self: torch._C.Value, eps: torch._C.Value):
+    one = g.op("Constant", value_t=torch.tensor(1.0))
+
+    if not symbolic_helper._is_none(eps):
+        eps = g.op(
+            "Cast", eps, to_i=_type_utils.JitScalarType.from_value(self).onnx_type()
+        )
+        one_sub_eps = g.op("Sub", one, eps)
+        self_less_equal_one_sub_eps = g.op("Greater", one_sub_eps, self)
+        temporary_self = g.op("Where", self_less_equal_one_sub_eps, self, one_sub_eps)
+
+        temporary_self_less_eps = g.op("Less", temporary_self, eps)
+        z = g.op("Where", temporary_self_less_eps, eps, temporary_self)
+    else:
+        z = self
+
+    sub = g.op("Sub", one, z)
+    div = g.op("Div", z, sub)
+    return g.op("Log", div)

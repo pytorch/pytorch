@@ -452,9 +452,9 @@ def _add_fixed_qparams_to_dtype_configs(
             if orig_constraints.dtype != constraints.dtype:
                 continue
             if orig_constraints.scale_min_lower_bound is not None:
-                raise ValueError("scale_min_lower_bound is invalid for fixed qparams ops: %s" % dtype_config)
+                raise ValueError(f"scale_min_lower_bound is invalid for fixed qparams ops: {dtype_config}")
             if orig_constraints.scale_max_upper_bound is not None:
-                raise ValueError("scale_max_upper_bound is invalid for fixed qparams ops: %s" % dtype_config)
+                raise ValueError(f"scale_max_upper_bound is invalid for fixed qparams ops: {dtype_config}")
             orig_constraints.quant_min_lower_bound = constraints.quant_min_lower_bound
             orig_constraints.quant_max_upper_bound = constraints.quant_max_upper_bound
             orig_constraints.scale_exact_match = constraints.scale_exact_match
@@ -498,6 +498,8 @@ def _get_share_qparams_op_configs(dtype_configs):
         torch.nn.MaxPool1d,
         torch.nn.MaxPool2d,
         torch.nn.MaxPool3d,
+        torch.nn.PixelShuffle,
+        torch.nn.PixelUnshuffle,
         torch.nn.ReLU,
         torch.nn.ReLU6,
         torch.adaptive_avg_pool1d,

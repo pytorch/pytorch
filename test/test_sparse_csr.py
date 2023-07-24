@@ -8,11 +8,12 @@ import functools
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
-    (TEST_WITH_ROCM, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase, run_tests,
+    (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase, run_tests,
      load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo, skipIfRocm, IS_FBCODE, IS_REMOTE_GPU)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan)
+     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan,
+     largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUDA
@@ -514,6 +515,14 @@ class TestSparseCompressed(TestCase):
         if len(samples) == 0:
             raise ValueError("Expected at least one 2 or higher D tensor in samples.")
 
+        # Re-define atol and rtol for operations that result values
+        # are random (and hence, non-comparable) be we still want to
+        # check the shape, dtype, etc attributes of the results:
+        atol = rtol = None
+        if op.name == 'randn_like':
+            atol = 1e300
+            rtol = 1
+
         for sample, sparse_sample in samples:
             expected = op(sample.input, *sample.args, **sample.kwargs)
             assert torch.is_tensor(expected)
@@ -523,7 +532,7 @@ class TestSparseCompressed(TestCase):
             if require_mask and sample.kwargs.get('mask') is not None:
                 output_mask = torch.masked._output_mask(op.op, sample.input, *sample.args, **sample.kwargs)
                 expected.masked_fill_(~output_mask, 0)
-            self.assertEqual(strided_output, expected)
+            self.assertEqual(strided_output, expected, atol=atol, rtol=rtol)
 
     @skipMeta
     @all_sparse_compressed_layouts()
@@ -821,6 +830,37 @@ class TestSparseCompressed(TestCase):
 
     @skipMeta
     @onlyCPU
+    @largeTensorTest("30GB", "cpu")
+    def test_invalid_input_csr_large(self):
+        rows = 2 ** 31
+        with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in row dimension'):
+            torch.sparse_csr_tensor(torch.arange(rows + 1, dtype=torch.int32) // rows,
+                                    torch.tensor([0], dtype=torch.int32),
+                                    torch.tensor([1]), (rows, 1))
+        torch.sparse_csr_tensor(torch.arange(rows + 1, dtype=torch.int64) // rows,
+                                torch.tensor([0], dtype=torch.int64),
+                                torch.tensor([1]), (rows, 1))
+
+        cols = 2 ** 31
+        with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in column dimension'):
+            torch.sparse_csr_tensor(torch.arange(2, dtype=torch.int32),
+                                    torch.tensor([0], dtype=torch.int32),
+                                    torch.tensor([1]), (1, cols))
+        torch.sparse_csr_tensor(torch.arange(2, dtype=torch.int64),
+                                torch.tensor([0], dtype=torch.int64),
+                                torch.tensor([1]), (1, cols))
+
+        nnz = 2 ** 31
+        with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in nnz'):
+            torch.sparse_csr_tensor(torch.tensor([0, nnz // 2, nnz], dtype=torch.int32),
+                                    torch.arange(nnz // 2, dtype=torch.int32).repeat(2),
+                                    torch.ones(nnz, dtype=torch.int8), (2, nnz // 2))
+        torch.sparse_csr_tensor(torch.tensor([0, nnz // 2, nnz], dtype=torch.int64),
+                                torch.arange(nnz // 2, dtype=torch.int64).repeat(2),
+                                torch.ones(nnz, dtype=torch.int8), (2, nnz // 2))
+
+    @skipMeta
+    @onlyCPU
     @all_sparse_compressed_layouts()
     def test_dim(self, layout):
         for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(layout, output_tensor=False):
@@ -864,12 +904,14 @@ class TestSparseCompressed(TestCase):
 
         def is_view_of(base, other):
             # a shameless copy of TestViewOps.is_view_of
-            if ((not other._is_view() or
-                 other is base or
-                 other._base is not base or
-                 base.device != other.device)):
+            if (
+                not other._is_view() or
+                other is base or
+                other._base is not base or
+                base.device != other.device
+            ):
                 return False
-            if base.device.type == 'cpu' or base.device.type == 'cuda':
+            if base.device.type in ('cpu', 'cuda'):
                 if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                     return False
             return True
@@ -893,7 +935,7 @@ class TestSparseCompressed(TestCase):
                 elif n_batchdim and dim >= n_batchdim and dim < n_batchdim + 2:
                     with self.assertRaisesRegex(
                             RuntimeError,
-                            "selecting sparse dimensions is not implemented for batched sparse compressed tensors"):
+                            "selecting sparse dimensions is not supported for batched sparse compressed tensors"):
                         torch.select_copy(sparse, dim, 0)
                 else:
                     for index in {0, sparse.shape[dim] // 2, sparse.shape[dim] - 1}:
@@ -929,6 +971,18 @@ class TestSparseCSR(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Sparse CSR tensors do not have is_contiguous"):
             a.is_contiguous()
+
+    @onlyCPU
+    @largeTensorTest("20GB", "cpu")
+    def test_csr_nnz(self):
+        # Tests the limits of the number of specified elements in CSR tensors, see gh-102520.
+        for nnz in [0, 2**31]:
+            rows, cols = 1, max(nnz, 1)
+            crow_indices = torch.tensor([0, nnz], dtype=torch.int64)
+            col_indices = torch.arange(nnz, dtype=torch.int64)
+            values = torch.ones(nnz, dtype=torch.int8)
+            a = torch.sparse_csr_tensor(crow_indices, col_indices, values, (rows, cols))
+            self.assertEqual(a._nnz(), nnz)
 
     def test_csr_double_to_sparse_csr(self):
         a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
@@ -991,7 +1045,7 @@ class TestSparseCSR(TestCase):
             sparse[0, 0, 0, 0] = 99.0
 
         # select from sparse dimensions without removing batch dims
-        msg = "selecting sparse dimensions is not implemented for batched sparse compressed tensors."
+        msg = "selecting sparse dimensions is not supported for batched sparse compressed tensors."
         with self.assertRaisesRegex(RuntimeError, msg):
             sparse.select(-2, 0)
 
@@ -1316,7 +1370,8 @@ class TestSparseCSR(TestCase):
             t = self.genSparseCSRTensor((16, 16), nnz, dtype=dtype,
                                         device=device, index_dtype=index_dtype)
 
-            with self.assertRaisesRegex(RuntimeError, r"size \(16, 16\) with block size \(5, 5\)"):
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"tensor sparse size \(.*,.*\) must be divisible by given blocksize \(.*,.*\)"):
                 block_t = t.to_sparse_bsr((5, 5))
 
     # TODO: Support auto generation of device check for sparse tensors
@@ -1762,8 +1817,8 @@ class TestSparseCSR(TestCase):
             yd = xd.transpose(-2, -1)
             zd = torch.rand(0, 0, device=device, dtype=dtype)
 
-            xls, yls, zls = [t.to_sparse(layout=lhs_layout) for t in (xd, yd, zd)]
-            xrs, yrs, zrs = [t.to_sparse(layout=rhs_layout) for t in (xd, yd, zd)]
+            xls, yls, zls = (t.to_sparse(layout=lhs_layout) for t in (xd, yd, zd))
+            xrs, yrs, zrs = (t.to_sparse(layout=rhs_layout) for t in (xd, yd, zd))
 
             for ls, rs, ld, rd in [(xls, yrs, xd, yd), (xls, zrs, xd, zd), (zls, yrs, zd, yd), (zls, zrs, zd, zd)]:
                 res_sparse = ls @ rs
@@ -2464,6 +2519,7 @@ class TestSparseCSR(TestCase):
 
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @precisionOverride({torch.bfloat16: 0.01})
     def test_sparse_mm_reduce(self, device, dtype):
         def run_test(m, n, k, nnz, reduce_type, index_dtype, train):
             csr = self.genSparseCSRTensor((m, n), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
@@ -3053,7 +3109,8 @@ class TestSparseCSR(TestCase):
                 # change of blocksize upon conversion is not yet supported.
                 if b.layout in block_layouts:
                     for block_layout in block_layouts:
-                        with self.assertRaisesRegex(RuntimeError, "conversion from.*to.*is not implemented"):
+                        with self.assertRaisesRegex(RuntimeError,
+                                                    "conversion from.*to.*with blocksize changed from.*to.*is not supported"):
                             b.to_sparse(layout=block_layout, blocksize=(3, 3))
 
         batch_dims = [(), (2,), (2, 2), (2, 2, 2)]
@@ -3312,29 +3369,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
 
-class _TritonLibrary(object):
-    lib = torch.library.Library("triton", "DEF")
-    ops = {}
-
-    @classmethod
-    def probablyRegisterOp(cls, op_key, full_schema, op_impl, dispatch_key):
-        if op_key not in cls.ops:
-            cls.lib.define(full_schema)
-            cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
-            cls.ops[op_key] = op_impl
-
-        return cls.ops[op_key]
-
-class _WrappedKernel(object):
-    def __init__(self, kernel):
-        self.kernel = kernel
-        self.kernel_invoked = False
-
-    def __call__(self, *args, **kwargs):
-        res = self.kernel(*args, **kwargs)
-        self.kernel_invoked = True
-        return res
-
 def skipIfNoTriton(cls):
     from torch._inductor.utils import has_triton
 
@@ -3353,29 +3387,90 @@ def skipIfNoTriton(cls):
 @skipIfNoTriton
 class TestSparseCompressedTritonKernels(TestCase):
 
+    def _to_block_triangular_inplace(self, d, row_block, col_block):
+        """
+        This function modifies `d` to become (upper/lower) block-triangular in-place.
+        It is assumed that `d.shape[-2]` is divisible by `row_block` and
+        `d.shape[-1]` is divisible by `col_block`.
+        """
+
+        from torch.sparse._triton_ops import tile_to_blocksize
+
+        m, n = d.shape[-2:]
+        d_tiled = tile_to_blocksize(d, (row_block, col_block))
+        d_tiled = d_tiled.moveaxis(-4, -1).moveaxis(-4, -1)
+        if m // row_block > n // col_block:
+            d_tiled.tril_()
+        else:
+            d_tiled.triu_()
+
+        return d
+
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    def test_triton_bsr_softmax(self, device, dtype):
+        from functools import partial
+        from torch.sparse._triton_ops import bsr_softmax
+
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=1.0, high=3.0)
+
+        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
+        batches = [(), (2,), (2, 2)]
+        size = [6, 12, 0]
+        block_size = [2, 3]
+
+        # General correctness
+        for row_block, col_block, b, m, n in itertools.product(block_size, block_size, batches, size, size):
+            input = tensor(b + (m, n))
+            input.diagonal(dim1=-2, dim2=-1).fill_(m * n)
+            input = self._to_block_triangular_inplace(input, row_block, col_block)
+
+            bsr = input.to_sparse_bsr((row_block, col_block))
+            coo = input.to_sparse().to(torch.float)
+
+            res_tri = bsr_softmax(bsr)
+            res_coo = torch.sparse.softmax(coo, -1)
+            self.assertEqual(res_tri, res_coo.to(input.dtype))
+
+        # Test long rows which exceed Triton's max numel limit set to 2 ** 17
+        input = tensor(b + (1, 150000))
+        bsr = input.to_sparse_bsr(1)
+        self.assertEqual(input.softmax(-1), bsr_softmax(bsr))
+
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @unittest.skipIf((not TEST_WITH_TORCHINDUCTOR) or (IS_FBCODE and IS_REMOTE_GPU) or torch._running_with_deploy(),
+                     "Skipped for deploy and internal with remote GPUs")
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
         from functools import partial
         from torch.sparse._triton_ops import bsr_dense_mm
 
-        kernel = _TritonLibrary.probablyRegisterOp(
+        def kernel_impl(*args, **kwargs):
+            return bsr_dense_mm(*args, skip_checks=True, **kwargs)
+
+        kernel = torch._TritonLibrary.registerOp(
             "_triton_bsr_dense_mm_out",
             "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
-            _WrappedKernel(lambda *args, **kwargs: bsr_dense_mm(*args, skip_checks=True, **kwargs)),
+            kernel_impl,
             "SparseCsrCUDA"
         )
+
+        # kernel != kernel_impl means dispatch was already registered.
+        # This is exactly what we need!
+        self.assertTrue(kernel is not kernel_impl)
 
         # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
 
         # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
-        batches = [(), (2,)]
+        batches = [(), (2,), (2, 2)]
         size = [128, 256, 0]
 
         # Whether to make inputs orthogonal so that the product is zero
@@ -3395,8 +3490,9 @@ class TestSparseCompressedTritonKernels(TestCase):
             if bsr.dim() == 2 and dtype != torch.float:
                 # Test against linear to check dispatch
                 # which takes place for torch.half and torch.bfloat16.
-                res_tri = torch.nn.functional.linear(dense, bsr)
                 res_dense = torch.nn.functional.linear(dense, bsr.to_dense())
+                res_tri_out = torch.empty_like(res_dense)
+                res_tri = torch.nn.functional.linear(dense, bsr, out=res_tri_out)
 
                 # Check dispatch worked with non-trivial outputs
                 if m > 0 and n > 0 and k > 0:
@@ -3408,7 +3504,8 @@ class TestSparseCompressedTritonKernels(TestCase):
                 res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
                 res_tri_out = torch.empty_like(res_dense)
                 res_tri = kernel(bsr, dense.transpose(-2, -1), out=res_tri_out)
-                self.assertTrue(res_tri is res_tri_out)
+
+            self.assertTrue(res_tri is res_tri_out)
             self.assertEqual(res_tri, res_dense)
 
             res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
@@ -3427,7 +3524,8 @@ class TestSparseCompressedTritonKernels(TestCase):
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half)
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU or torch._running_with_deploy(),
+                     "Skipped for deploy and internal with remote GPUs")
     def test_triton_bsr_dense_bmm_error_messages(self, device, dtype):
         from torch.sparse._triton_ops import bsr_dense_mm
 
@@ -3444,9 +3542,10 @@ class TestSparseCompressedTritonKernels(TestCase):
             bsr_dense_mm(lhs, rhs.to(torch.float))
         with self.assertRaisesRegex(ValueError, r"and one of \(half, bfloat16, float32\)"):
             bsr_dense_mm(lhs.to(torch.double), rhs.to(torch.double))
-        with self.assertRaisesRegex(ValueError, "all inputs are expected to be at least 2D"):
+        with self.assertRaisesRegex(ValueError, "all inputs involved in the matrix product are expected to be at least 2D"):
             bsr_dense_mm(lhs, torch.rand(1, dtype=dtype, device=device))
-        with self.assertRaisesRegex(ValueError, "sizes are not compatible for matrix multiplication"):
+        with self.assertRaisesRegex(ValueError,
+                                    "sizes involved in the matrix product are not compatible for matrix multiplication"):
             bsr_dense_mm(lhs, torch.rand(1, 1, dtype=dtype, device=device))
         with self.assertRaisesRegex(ValueError,
                                     r"dense.size\(-1\) == 15 should be divisible by blocksize\[0\] == 16"):
@@ -3467,6 +3566,123 @@ class TestSparseCompressedTritonKernels(TestCase):
         with self.assertRaisesRegex(ValueError, r"only row-major/col-major `out`"):
             out = torch.rand(32, 32, 2, dtype=dtype, device=device).transpose(0, -1)
             bsr_dense_mm(lhs, rhs, out=out)
+
+    @parametrize("block_size", [16, 32, 64])
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @precisionOverride({torch.float16: 1e-3})
+    def test_triton_scaled_dot_product_attention(self, device, dtype, block_size):
+        from functools import partial
+        from torch.sparse._triton_ops import _scaled_dot_product_attention
+
+        # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.3, high=1.2)
+
+        def broadcast_input(*ts):
+            batch_dims = torch.broadcast_shapes(*(t.shape[:-2] for t in ts))
+            yield from (torch.broadcast_to(t, batch_dims + t.shape[-2:]) for t in ts)
+
+        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
+        batches = [(), (2,), (2, 2)]
+        size = [128, 256, 0]
+
+        for bam, bq, bk, bv, m, n, k in itertools.product(batches, batches, batches, batches, size, size, size):
+            query = tensor(bq + (m, k))
+            key = tensor(bk + (n, k))
+            value = tensor(bv + (n, k))
+
+            # We make attn_mask block lower/upper triangular so that BSR and Strided
+            # function variants are directly comparable.
+            attn_mask = torch.ones(bam + (m, n), device=device, dtype=torch.bool)
+            attn_mask = self._to_block_triangular_inplace(attn_mask, block_size, block_size)
+            attn_mask_bsr = attn_mask.to_sparse_bsr(block_size)
+
+            # NOTE: only boolean mask is directly compatible with the Strided version
+            # without any pre-/post-processing. Hence we test against a boolean mask.
+            for scale in (None, 1. / 16):
+                if scale is None and query.size(-1) == 0:
+                    scale = 1
+                expected = torch.nn.functional.scaled_dot_product_attention(
+                    *broadcast_input(query, key, value, attn_mask), scale=scale
+                )
+
+                for mask_dtype in (torch.bool, dtype):
+                    res = _scaled_dot_product_attention(query, key, value, attn_mask_bsr.to(mask_dtype), scale=scale)
+                    self.assertEqual(res, expected)
+
+
+    @parametrize("block_size", [16, 32, 64])
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    def test_triton_sampled_addmm(self, device, dtype, block_size):
+        from functools import partial
+        from torch.sparse._triton_ops import sampled_addmm, broadcast_batch_dims_bsr
+
+        # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.3, high=1.2)
+
+        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
+        batches = [(), (2,), (2, 2)]
+        size = [128, 256, 0]
+
+        delta_k = (-3,)
+        for bi, bm1, bm2, m, n, k, dk in itertools.product(batches, batches, batches, size, size, size, delta_k):
+            # Test not powers of 2 ks as well.
+            k = max(0, k + dk)
+            # Non-trivial sparsity pattern.
+            # Plus with tril inputs the result is also tril,
+            # so we can compare BSR and CSR implementations.
+            input = tensor(bi + (m, n)).tril_()
+            bsr = input.to_sparse_bsr(block_size)
+            mat1 = tensor(bm1 + (m, k)).tril_()
+            mat2 = tensor(bm2 + (k, n)).tril_()
+
+            batch_dim = torch.broadcast_shapes(input.shape[:-2], mat1.shape[:-2], mat2.shape[:-2])
+
+            csr = input.broadcast_to(batch_dim + input.shape[-2:]).to_sparse_csr().to(torch.float)
+            mat1csr = mat1.broadcast_to(batch_dim + mat1.shape[-2:]).to(torch.float)
+            mat2csr = mat2.broadcast_to(batch_dim + mat2.shape[-2:]).to(torch.float)
+
+            input_broadcasted_clone = broadcast_batch_dims_bsr(
+                "test_triton_sampled_addmm",
+                bsr, mat1, mat2
+            ).clone()
+            input_broadcasted_clone = torch.sparse_compressed_tensor(
+                input_broadcasted_clone.crow_indices(),
+                input_broadcasted_clone.col_indices(),
+                # For testing `out=` let's make values to have "weird" strides
+                # so that if the kernel modifies values to it's needs, the result
+                # is being compied into out.values.
+                input_broadcasted_clone.values().transpose(-3, -2).contiguous().transpose(-3, -2),
+                layout=input_broadcasted_clone.layout,
+                size=input_broadcasted_clone.shape
+            )
+
+            scalars = (0.0, 2.0)
+            for alpha, beta, out in itertools.product(scalars, scalars, (None, input_broadcasted_clone)):
+                res_tri = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta, out=out)
+                if out is not None:
+                    self.assertTrue(res_tri is out)
+
+                batch_broadcasted_shape = torch.broadcast_shapes(*(t.shape[:-2] for t in (input, mat1, mat2)))
+                self.assertTrue(res_tri.shape == batch_broadcasted_shape + (m, n))
+
+                res_csr = torch.sparse.sampled_addmm(csr, mat1csr, mat2csr, alpha=alpha, beta=beta).to(input.dtype)
+                self.assertEqual(res_tri.to_dense(), res_csr.to_dense())
+
+                # Check different grid sizes to make sure that input slicing works
+                # if this input is larger than the grid.
+                grid_size = (3, None)
+                grid_gen = itertools.product(grid_size, repeat=2)
+                for grid in grid_gen:
+                    res_tri_grid = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta, max_grid=grid)
+                    self.assertEqual(res_tri, res_tri_grid)
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA

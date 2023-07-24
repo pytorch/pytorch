@@ -10,7 +10,7 @@ from torch._prims_common import (
 import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-from typing import Callable, Sequence, Tuple, NamedTuple, overload
+from typing import Callable, Sequence, Tuple, NamedTuple, Optional, overload
 import inspect
 from functools import wraps
 import warnings
@@ -48,16 +48,16 @@ def _maybe_convert_to_dtype(a, dtype):
         return None
 
     raise ValueError(
-        "Received type {0} that is neither a tensor or a number!".format(type(a))
+        f"Received type {type(a)} that is neither a tensor or a number!"
     )
 
 
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
     if not isinstance(a, Number):
-        msg = "Found unknown type {0} when trying to convert scalars!".format(type(a))
+        msg = f"Found unknown type {type(a)} when trying to convert scalars!"
         raise ValueError(msg)
     if not utils.is_weakly_lesser_type(type(a), typ):
-        msg = "Scalar {0} of type {1} cannot be safely cast to type {2}!".format(
+        msg = "Scalar {} of type {} cannot be safely cast to type {}!".format(
             a, type(a), typ
         )
         raise ValueError(msg)
@@ -97,7 +97,7 @@ class elementwise_type_promotion_wrapper:
         self,
         *,
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
-        type_promoting_args: Sequence[str] = None,
+        type_promoting_args: Optional[Sequence[str]] = None,
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind
@@ -169,20 +169,20 @@ def _safe_copy_out(
 ):
     # Checks same device
     if copy_from.device != copy_to.device:
-        msg = "Attempting to copy from device {0} to device {1}, but cross-device copies are not allowed!".format(
+        msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
             copy_from.device, copy_to.device
         )
         raise RuntimeError(msg)
 
     # Checks safe cast
     if exact_dtype:
-        utils.check(
+        torch._check(
             copy_from.dtype == copy_to.dtype,
             lambda: f"Expected out tensor to have dtype {copy_from.dtype} "
             f"but got {copy_to.dtype} instead",
         )
     else:
-        utils.check(
+        torch._check(
             utils.can_safe_cast_to(cast_from=copy_from.dtype, cast_to=copy_to.dtype),
             lambda: f"Attempting to cast from {copy_from.dtype} to out tensor with dtype {copy_to.dtype}, "
             "but this can't be cast because it is not safe!",
@@ -255,10 +255,9 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
-                    utils.check(
+                    torch._check_type(
                         len(out) == len(result),
                         lambda: f"expected tuple of {len(result)} elements but got {len(out)}",
-                        TypeError,
                     )
                     for r, o in zip(result, out):
                         # These two operations are done in-place
@@ -291,12 +290,9 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
 
 def backwards_not_supported(prim):
     def redispatch_prim(args, kwargs):
-        g = torch._C._AutoDispatchBelowAutograd()
-        try:
+        with torch._C._AutoDispatchBelowAutograd():
             old = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
             return prim(*args, **kwargs)
-        finally:
-            del g
 
     class BackwardsNotSupported(torch.autograd.Function):
         @staticmethod
