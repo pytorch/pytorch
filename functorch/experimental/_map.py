@@ -1,8 +1,6 @@
-from functools import partial
-
 import torch
 import torch.utils._pytree as pytree
-from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
+from torch._C import DispatchKey, DispatchKeySet, _ExcludeDispatchKeyGuard
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
 from torch._functorch.aot_autograd import create_joint, AOTConfig
 from torch._ops import HigherOrderOperator
@@ -13,7 +11,6 @@ from torch.fx.experimental.proxy_tensor import (
     make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
-    unwrap_proxy,
 )
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
@@ -29,8 +26,8 @@ class MapWrapper(HigherOrderOperator):
     def __call__(self, xs, *args):
         return map_wrapper(xs, *args)
 
-map = MapWrapper("map")
-map_impl = HigherOrderOperator("map_impl")
+map = MapWrapper("map", _deprecated_global_ns=True)
+map_impl = HigherOrderOperator("map_impl", _deprecated_global_ns=True)
 
 dummy_aot_config = AOTConfig(fw_compiler=None,
                              bw_compiler=None,
@@ -142,11 +139,8 @@ class MapAutogradOp(torch.autograd.Function):
         ctx.save_for_backward(*flat_args)
         ctx._joint_graph = joint_graph
         ctx._num_mapped_args = num_mapped_args
-        try:
-            guard = torch._C._AutoDispatchBelowAutograd()
+        with torch._C._AutoDispatchBelowAutograd():
             return (*map_impl(fw_graph, num_mapped_args, *flat_args), )
-        finally:
-            del guard
 
     @staticmethod
     def backward(ctx, *flat_grads):
@@ -187,7 +181,7 @@ def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
 
     proxy_mode.tracer.root.register_module(next_name, body_graph)
     node_args = (body_graph, num_mapped, *args)
-    proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), node_args)
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
                                                name="map_impl")
     return track_tensor_tree(expanded_outs, out_proxy, constant=None, tracer=proxy_mode.tracer)
@@ -268,8 +262,7 @@ def map_func(f, num_mapped, *args):
     unwrapped_args = _unwrap_all_tensors_from_functional(pos_args, reapply_views=reapply_views)
     mode = 'mutations_and_views' if reapply_views else 'mutations'
 
-    guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize))
-    try:
+    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
         functional_map_fn = functionalize(f, remove=mode)
         with disable_proxy_modes_tracing():
             example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
@@ -286,8 +279,6 @@ def map_func(f, num_mapped, *args):
 
         map_return = map_impl(functional_map_fn, num_mapped, *unwrapped_xs, *unwrapped_args)
         return _wrap_all_tensors_to_functional(map_return, level=0)
-    finally:
-        del guard
 
 @map_impl.py_impl(torch._C._functorch.TransformType.Functionalize)
 def map_functionalize(interpreter, f, num_mapped, *args):

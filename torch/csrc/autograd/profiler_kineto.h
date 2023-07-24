@@ -57,11 +57,12 @@ struct TORCH_API KinetoEvent {
   std::string backend() const;
   bool isPythonFunction() const;
   int64_t cudaElapsedUs() const;
+  int64_t privateuse1ElapsedUs() const;
   void getPerfEventCounters(torch::profiler::perf_counters_t&) const;
 
  private:
-  torch::profiler::impl::ProfilerEventStub fallbackStart() const;
-  torch::profiler::impl::ProfilerEventStub fallbackEnd() const;
+  torch::profiler::impl::ProfilerVoidEventStub fallbackStart() const;
+  torch::profiler::impl::ProfilerVoidEventStub fallbackEnd() const;
 
   std::shared_ptr<const torch::profiler::impl::Result> result_;
   std::vector<std::string> python_stack_;

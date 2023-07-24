@@ -80,17 +80,6 @@ static PyObject* THPStorage_copy_(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_isPinned(PyObject* self, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-#if defined(USE_CUDA)
-  return PyBool_FromLong(
-      at::globalContext().isPinnedPtr(THPStorage_Unpack(self).data()));
-#else
-  Py_RETURN_FALSE;
-#endif
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* THPStorage_elementSize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(sizeof(uint8_t));
@@ -134,7 +123,9 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
     const auto size_bytes = static_cast<size_t>(size_bytes_i);
     at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), size_bytes);
 #endif
-  } else if (device_type == at::kPrivateUse1) {
+  } else if (device_type == at::kMeta) {
+    at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
+  } else if (device_type == at::kXPU || device_type == at::kPrivateUse1) {
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
         !c10::overflows<int64_t>(size_bytes_i),
@@ -222,15 +213,18 @@ static PyObject* THPStorage_fromBuffer(
   auto dtype = reinterpret_cast<THPDtype*>(dtype_obj);
   scalar_type = dtype->scalar_type;
 
+  const bool is_endian_independent = (scalar_type == at::kByte) ||
+      (scalar_type == at::kChar) || (scalar_type == at::kFloat8_e5m2) ||
+      (scalar_type == at::kFloat8_e4m3fn);
+
   TORCH_CHECK(
-      (scalar_type == at::kByte) || (scalar_type == at::kChar) ||
-          (byte_order_str != nullptr),
+      is_endian_independent || (byte_order_str != nullptr),
       "function missing required argument 'byte_order' (pos 2)");
   size_t element_size = c10::elementSize(scalar_type);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool do_byte_swap;
-  if (scalar_type != at::kByte && scalar_type != at::kChar) {
+  if (!is_endian_independent) {
     if (strcmp(byte_order_str, "native") == 0) {
       do_byte_swap = false;
     } else if (strcmp(byte_order_str, "big") == 0) {
@@ -301,7 +295,7 @@ static PyObject* THPStorage_fromBuffer(
       c10::GetDefaultCPUAllocator(),
       /*resizable=*/true);
 
-  if (scalar_type == at::kByte || scalar_type == at::kChar) {
+  if (is_endian_independent) {
     memcpy(storage->mutable_data(), src + offset, count);
   } else if (scalar_type == at::kBool) {
     // Because of ASAN checks, that are failing whenever
@@ -549,6 +543,50 @@ PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 1, "tuple of 1 item expected");
+  PyObject* _elem_size = PyTuple_GET_ITEM(args, 0);
+  THPUtils_assert(
+      THPUtils_checkLong(_elem_size), "_byteswap(): arg must be an 'int'");
+  auto elem_size = THPUtils_unpackLong(_elem_size);
+  THPUtils_assert(
+      elem_size == 1 || elem_size == 2 || elem_size == 4 || elem_size == 8,
+      "elem_size must be 1, 2, 4, or 8");
+
+  const auto& storage = THPStorage_Unpack(self);
+  const auto nbytes = static_cast<uint64_t>(storage.nbytes());
+  const uint64_t count = nbytes / elem_size;
+
+  if (elem_size == 1) {
+    Py_RETURN_NONE;
+  }
+  THPUtils_assert(
+      nbytes % elem_size == 0,
+      "the length of data is not a multiple of %ld",
+      elem_size);
+
+  if (elem_size == 2) {
+    auto buffer = static_cast<uint16_t*>(storage.mutable_data());
+    for (uint64_t i = 0; i < count; i++, buffer++) {
+      *buffer = thp_bswap16(*buffer);
+    }
+  } else if (elem_size == 4) {
+    auto buffer = static_cast<uint32_t*>(storage.mutable_data());
+    for (uint64_t i = 0; i < count; i++, buffer++) {
+      *buffer = thp_bswap32(*buffer);
+    }
+  } else if (elem_size == 8) {
+    auto buffer = static_cast<uint64_t*>(storage.mutable_data());
+    for (uint64_t i = 0; i < count; i++, buffer++) {
+      *buffer = thp_bswap64(*buffer);
+    }
+  }
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_methods[] = {
     {"copy_",
@@ -561,7 +599,6 @@ static PyMethodDef THPStorage_methods[] = {
     {"resize_", THPStorage_resize_, METH_O, nullptr},
     {"nbytes", THPStorage_nbytes, METH_NOARGS, nullptr},
     {"data_ptr", THPStorage_dataPtr, METH_NOARGS, nullptr},
-    {"is_pinned", THPStorage_isPinned, METH_NOARGS, nullptr},
     {"_write_file", THPStorage_writeFile, METH_VARARGS, nullptr},
     {"_new_with_file",
      THPStorage_newWithFile,
@@ -577,6 +614,7 @@ static PyMethodDef THPStorage_methods[] = {
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},
+    {"_byteswap", THPStorage_byteswap, METH_VARARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THPStorage_getMethods() {

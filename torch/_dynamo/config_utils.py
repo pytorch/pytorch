@@ -1,5 +1,6 @@
 import contextlib
 
+import copy
 import pickle
 import unittest
 from types import FunctionType, ModuleType
@@ -112,6 +113,9 @@ class ConfigModule(ModuleType):
     def to_dict(self):
         return self._config
 
+    def get_config_copy(self):
+        return copy.deepcopy(self._config)
+
     def patch(self, arg1=None, arg2=None, **kwargs):
         """
         Decorator and/or context manager to make temporary changes to a config.
@@ -187,6 +191,9 @@ class ContextDecorator(contextlib.ContextDecorator):
                         self.__exit__(None, None, None)
 
             _TestCase.__name__ = func.__name__
+            _TestCase.__qualname__ = func.__qualname__
+            _TestCase.__module__ = func.__module__
+
             return _TestCase
 
         return super().__call__(func)

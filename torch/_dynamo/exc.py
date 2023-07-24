@@ -91,6 +91,11 @@ class ArgsMismatchError(Unsupported):
         super().__init__(msg)
 
 
+class AttributeMutationError(Unsupported):
+    def __init__(self, msg):
+        super().__init__(msg)
+
+
 class CondOpArgsMismatchError(ArgsMismatchError):
     """
     Internal error from cond() due to arguments mismatch.
@@ -105,6 +110,8 @@ class UserErrorType(Enum):
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
     CONSTRAIN_VIOLATION = auto()
+    DYNAMIC_DIM = auto()
+    INVALID_INPUT = auto()
 
 
 class UserError(Unsupported):
@@ -167,7 +174,7 @@ def augment_exc_message(exc, msg="\n"):
  torch._dynamo.replay('{exc.record_filename}').\n"
 
     if not config.verbose and hasattr(exc, "real_stack"):
-        msg += "\nSet torch._dynamo.config.verbose=True or TORCHDYNAMO_VERBOSE=1 for more information\n"
+        msg += '\nSet TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information\n'
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"

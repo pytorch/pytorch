@@ -147,6 +147,38 @@ class GradModeVariable(ContextWrappingVariable):
         return "set_grad_enabled"
 
 
+class TorchFunctionDisableVariable(ContextWrappingVariable):
+    """represents whether torch function overrides are enabled or not"""
+
+    _guards_singleton = {
+        Guard("", GuardSource.GLOBAL, GuardBuilder.TORCH_FUNCTION_STATE)
+    }
+
+    @staticmethod
+    def create(tx, **kwargs):
+        var = TorchFunctionDisableVariable(
+            target_values=[False],
+            initial_values=[torch._C._is_torch_function_enabled()],
+            **kwargs,
+        )
+        # mlazos: I think this is here to make sure we don't reinvoke on clone()
+        var._call_func(tx, [False])
+        return var
+
+    def __init__(self, target_values, initial_values=None, **kwargs):
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.guards = self.guards | self._guards_singleton
+
+    def enter(self, tx):
+        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+
+    def _call_func(self, tx, values):
+        assert len(values) == 1
+        tx.output.set_torch_function_state(values[0])
+
+
 class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     """represents torch.{are_deterministic_algorithms_enabled,use_deterministic_algorithms}()"""
 
@@ -231,17 +263,17 @@ class AutocastModeVariable(ContextWrappingVariable):
 
     def exit(self, tx, *args):
         self.mode = (
-            exit_functional_autocast(self.mode[0]),
+            torch.amp._exit_autocast(self.mode[0]),
             tx.output.create_node(
-                "call_function", exit_functional_autocast, (self.mode[1],), {}
+                "call_function", torch.amp._exit_autocast, (self.mode[1],), {}
             ),
         )
 
     def enter(self, tx):
         self.mode = (
-            enter_functional_autocast(*self.target_values),
+            torch.amp._enter_autocast(*self.target_values),
             tx.output.create_node(
-                "call_function", enter_functional_autocast, (*self.target_values,), {}
+                "call_function", torch.amp._enter_autocast, (*self.target_values,), {}
             ),
         )
 
@@ -250,16 +282,6 @@ class AutocastModeVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "autocast"
-
-
-def enter_functional_autocast(*vals):
-    mode = torch.amp.autocast(*vals)
-    mode.__enter__()
-    return mode
-
-
-def exit_functional_autocast(mode):
-    mode.__exit__(None, None, None)
 
 
 class NullContextVariable(ContextWrappingVariable):

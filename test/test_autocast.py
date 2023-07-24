@@ -83,7 +83,7 @@ class TestAutocastCPU(TestCase):
                     control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
-                self.assertTrue(comparison, "torch.{} result did not match control".format(op))
+                self.assertTrue(comparison, f"torch.{op} result did not match control")
             self.assertTrue(torch.is_autocast_cpu_enabled())
         self.assertFalse(torch.is_autocast_cpu_enabled())
 
@@ -127,7 +127,7 @@ class TestAutocastCPU(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_autocast_rnn(self):
-        if torch._C.has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_bf16_supported():
             x = torch.randn(1, 2, 1)
             hx = torch.randn(2, 2, 1)
             cx = torch.randn(2, 2, 1)
@@ -231,6 +231,13 @@ class TestTorchAutocast(TestCase):
         cpu_fast_dtype = torch.get_autocast_cpu_dtype()
         self.assertEqual(gpu_fast_dtype, torch.half)
         self.assertEqual(cpu_fast_dtype, torch.bfloat16)
+
+    def test_invalid_device(self):
+        dev = 'not a real device'
+        msg = f'unsupported autocast device_type \'{dev}\''
+        with self.assertRaisesRegex(RuntimeError, msg):
+            with torch.autocast(device_type=dev):
+                _ = torch.tensor(1)
 
 
 if __name__ == '__main__':

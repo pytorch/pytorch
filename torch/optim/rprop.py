@@ -3,7 +3,6 @@ from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
                         _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ["Rprop", "rprop"]
 
@@ -21,9 +20,9 @@ class Rprop(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 < etas[0] < 1.0 < etas[1]:
-            raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
+            raise ValueError(f"Invalid eta values: {etas[0]}, {etas[1]}")
 
         defaults = dict(
             lr=lr,
@@ -281,8 +280,8 @@ def _multi_tensor_rprop(
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, prevs, step_sizes])
-    for grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes in grouped_tensors.values():
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, prevs, step_sizes])
+    for ((grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes), _) in grouped_tensors.values():
         # Handle complex params
         def _view_complex_as_real(tensor_list):
             return [

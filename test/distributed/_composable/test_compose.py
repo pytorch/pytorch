@@ -146,6 +146,36 @@ class TestFSDPCheckpoint(FSDPTest):
         self._test_checkpoint_fsdp_submodules(False)
 
     @skip_if_lt_x_gpu(2)
+    def test_fully_shard_replicate_correct_replicate_params(self):
+        model = CompositeParamModel(device=torch.device("cuda"))
+        # Shard Linears within UnitModule
+        fully_shard(model.u1, policy=ModuleWrapPolicy({nn.Linear}))
+        fully_shard(model.u2, policy=ModuleWrapPolicy({nn.Linear}))
+        # replicate the rest
+        replicate(model)
+        # Run fwd + bwd to initialize DDP
+        inp = torch.randn(2, 100, device="cuda")
+        model(inp).sum().backward()
+        # Ensure replicate param names are as expected, i.e.
+        # immediate parameters of model and parameters of model's non-UnitModule
+        # submodules are replicated
+        param_names = replicate.state(model)._replicate_param_names
+        replicated_modules = [
+            (name, mod)
+            for (name, mod) in model.named_children()
+            if mod not in [model.u1, model.u2]
+        ]
+        replicated_param_names = [
+            f"{module_name}.{n}"
+            for module_name, mod in replicated_modules
+            for n, _ in mod.named_parameters()
+        ]
+        replicated_param_names.extend(
+            [n for n, _ in model.named_parameters(recurse=False)]
+        )
+        self.assertEqual(set(param_names), set(replicated_param_names))
+
+    @skip_if_lt_x_gpu(2)
     def test_checkpoint_fsdp_submodules_with_param(self):
         model = CompositeParamModel(device=torch.device("cuda"))
 
