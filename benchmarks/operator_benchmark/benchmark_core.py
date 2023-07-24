@@ -197,7 +197,7 @@ class BenchmarkRunner:
             print("# List of Operators to run:")
             self.printed_ops_list = set()
             if self.args.operators:
-                print("# {}".format(self.args.operators))
+                print(f"# {self.args.operators}")
 
     def _print_perf_result(self, reported_run_time_us, test_case):
         if self.args.report_aibench:
@@ -206,7 +206,7 @@ class BenchmarkRunner:
             return
             test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
             for run in range(self.num_runs):
-                print("{}Observer ".format(test_case.framework) + json.dumps(
+                print(f"{test_case.framework}Observer " + json.dumps(
                     {
                         "type": test_name,
                         "metric": "latency",
@@ -216,23 +216,17 @@ class BenchmarkRunner:
                 ))
         else:
             if test_case.framework == "PyTorch":
-                print("# Mode: {}".format("JIT" if self.use_jit else "Eager"))
+                print(f"# Mode: {'JIT' if self.use_jit else 'Eager'}")
 
-            print("# Name: {}\n"
-                  "# Input: {}".format(
-                      test_case.test_config.test_name,
-                      test_case.test_config.input_config))
+            print(f"# Name: {test_case.test_config.test_name}\n# Input: {test_case.test_config.input_config}")
 
             mode = "Backward" if test_case.test_config.run_backward else "Forward"
             if self.num_runs > 1:
                 for run in range(self.num_runs):
-                    print("Run: {}, {} Execution Time (us) : {:.3f}".format(
-                        run,
-                        mode, reported_run_time_us[run]))
+                    print(f"Run: {run}, {mode} Execution Time (us) : {reported_run_time_us[run]:.3f}")
                 print()
             else:
-                print("{} Execution Time (us) : {:.3f}\n".format(
-                    mode, reported_run_time_us[0]))
+                print(f"{mode} Execution Time (us) : {reported_run_time_us[0]:.3f}\n")
 
     def _predict_num_iter_needed(self, i):
         return (i * self.multiplier)
@@ -349,14 +343,14 @@ class BenchmarkRunner:
     def _print_test_case_info(self, test_case):
         # Print out the test name and skip the real execution
         if self.args.list_tests:
-            print("# {}".format(test_case.test_config.test_name))
+            print(f"# {test_case.test_config.test_name}")
             return True
         elif self.args.list_ops:
             if self.args.operators is None:
                 op_name = test_case.op_bench.module_name()
 
                 if op_name not in self.printed_ops_list:
-                    print("# {}".format(op_name))
+                    print(f"# {op_name}")
                     self.printed_ops_list.add(op_name)
             return True
 
@@ -383,9 +377,7 @@ class BenchmarkRunner:
                 # requirement.
                 np.random.seed(seed=hash(full_test_id) & ((1 << 32) - 1))
 
-                print("# Benchmarking {}: {}".format(
-                    test_case.framework,
-                    test_case.op_bench.module_name()))
+                print(f"# Benchmarking {test_case.framework}: {test_case.op_bench.module_name()}")
 
                 if op_test_config.run_backward:
                     launch_func = self._launch_backward

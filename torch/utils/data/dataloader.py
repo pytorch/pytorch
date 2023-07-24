@@ -305,14 +305,12 @@ class DataLoader(Generic[T_co]):
             # We cannot check `shuffle is not None` here, since previously `shuffle=False` was the default.
             elif shuffle not in {False, None}:
                 raise ValueError(
-                    "DataLoader with IterableDataset: expected unspecified "
-                    "shuffle option, but got shuffle={}".format(shuffle))
+                    f"DataLoader with IterableDataset: expected unspecified shuffle option, but got shuffle={shuffle}")
 
             if sampler is not None:
                 # See NOTE [ Custom Samplers and IterableDataset ]
                 raise ValueError(
-                    "DataLoader with IterableDataset: expected unspecified "
-                    "sampler option, but got sampler={}".format(sampler))
+                    f"DataLoader with IterableDataset: expected unspecified sampler option, but got sampler={sampler}")
             elif batch_sampler is not None:
                 # See NOTE [ Custom Samplers and IterableDataset ]
                 raise ValueError(
@@ -418,8 +416,7 @@ class DataLoader(Generic[T_co]):
     def __setattr__(self, attr, val):
         if self.__initialized and attr in (
                 'batch_size', 'batch_sampler', 'sampler', 'drop_last', 'dataset', 'persistent_workers'):
-            raise ValueError('{} attribute should not be set after {} is '
-                             'initialized'.format(attr, self.__class__.__name__))
+            raise ValueError(f'{attr} attribute should not be set after {self.__class__.__name__} is initialized')
 
         super().__setattr__(attr, val)
 
@@ -604,7 +601,7 @@ class _BaseDataLoaderIter:
         self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
         self._persistent_workers = loader.persistent_workers
         self._num_yielded = 0
-        self._profile_name = "enumerate(DataLoader)#{}.__next__".format(self.__class__.__name__)
+        self._profile_name = f"enumerate(DataLoader)#{self.__class__.__name__}.__next__"
 
     def __iter__(self) -> '_BaseDataLoaderIter':
         return self
@@ -1066,7 +1063,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # pin_memory_thread once it is started.
             self._pin_memory_thread = pin_memory_thread
         else:
-            self._data_queue = self._worker_result_queue
+            self._data_queue = self._worker_result_queue  # type: ignore[assignment]
 
         # In some rare cases, persistent workers (daemonic processes)
         # would be terminated before `__del__` of iterator is invoked
@@ -1145,7 +1142,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._mark_worker_as_unavailable(worker_id)
             if len(failed_workers) > 0:
                 pids_str = ', '.join(str(w.pid) for w in failed_workers)
-                raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str)) from e
+                raise RuntimeError(f'DataLoader worker (pid(s) {pids_str}) exited unexpectedly') from e
             if isinstance(e, queue.Empty):
                 return (False, None)
             import tempfile
@@ -1281,7 +1278,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             if success:
                 return data
             else:
-                raise RuntimeError('DataLoader timed out after {} seconds'.format(self._timeout))
+                raise RuntimeError(f'DataLoader timed out after {self._timeout} seconds')
         elif self._pin_memory:
             while self._pin_memory_thread.is_alive():
                 success, data = self._try_get_data()

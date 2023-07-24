@@ -10,7 +10,6 @@ from torch._decomp import (
     global_decomposition_table,
     meta_table,
 )
-from torch._decomp.decompositions import Reduction
 from torch._ops import OpOverload
 from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
@@ -322,78 +321,6 @@ def meta_index_select(self, dim, index):
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
-
-
-def _multilabel_margin_loss_shape_check(ndims, target_arg, input, target):
-    valid_inputs = (
-        (ndims == 2 and input.size(1) != 0)
-        or (ndims == 1 and input.size(0) != 0)
-        or ndims == 0
-    )
-    torch._check(
-        valid_inputs,
-        lambda: f"Expected non-empty vector or matrix with optional 0-dim batch size, but got: {input.shape}",
-    )
-    if ndims <= 1:
-        nframe = 1
-        dim = 1 if ndims == 0 else input.size(0)
-        torch._check(
-            valid_inputs and target.ndim <= 1 and target.numel() == dim,
-            lambda: f"inconsistent size {target.shape} for {target_arg}",
-        )
-    else:
-        nframe = input.size(0)
-        dim = input.size(1)
-        torch._check(
-            valid_inputs
-            and target.ndim == 2
-            and target.size(0) == nframe
-            and target.size(1) == dim,
-            lambda: f"inconsistent size {target.shape} for {target_arg}",
-        )
-    return nframe, dim
-
-
-@register_meta(aten.multilabel_margin_loss_forward)
-@out_wrapper("output", "is_target")
-def meta_multilabel_margin_loss_forward(
-    input: Tensor,
-    target: Tensor,
-    reduction: int,
-) -> Tuple[Tensor, Tensor]:
-    target_arg = "argument #2 'target'"
-    ndims = input.ndim
-    nframe, _ = _multilabel_margin_loss_shape_check(ndims, target_arg, input, target)
-    if reduction != Reduction.NONE.value or target.ndim <= 1:
-        output = input.new_empty(())
-    else:
-        output = input.new_empty(nframe)
-    is_target = input.new_empty(target.shape)
-    return output, is_target
-
-
-@register_meta(aten.multilabel_margin_loss_backward)
-@out_wrapper()
-def meta_multilabel_margin_loss_backward(
-    grad_output: Tensor,
-    input: Tensor,
-    target: Tensor,
-    reduction: int,
-    is_target: Tensor,
-) -> Tensor:
-    target_arg = "argument #3 'target'"
-    is_target_arg = "argument #5 'is_target'"
-    ndims = input.ndim
-    _multilabel_margin_loss_shape_check(ndims, target_arg, input, target)
-    torch._check(
-        target.shape == is_target.shape,
-        lambda: (
-            f"Expected tensor for {target_arg} to have same size as tensor for {is_target_arg}"
-            f"; but {target.shape} does not equal {is_target.shape}"
-            f" (while checking arguments for multilabel_margin_loss_backward)"
-        ),
-    )
-    return input.new_empty(input.shape)
 
 
 @register_meta([aten.max.default, aten.max.unary_out])
@@ -1004,7 +931,7 @@ def _linalg_svd_meta(
     A: Tensor,
     full_matrices: bool = False,
     compute_uv: bool = True,
-    driver: str = None,
+    driver: Optional[str] = None,
 ):
     checkIsMatrix(A, "linalg.svd")
     checkFloatingOrComplex(A, "linalg.svd")
@@ -1147,7 +1074,7 @@ def linalg_solve_triangular_meta(
     upper: bool,
     left: bool = True,
     unitriangular: bool = False,
-    out: Tensor = None,
+    out: Optional[Tensor] = None,
 ) -> Tensor:
     if out is None:
         out = A.new_empty([0])
@@ -4695,8 +4622,8 @@ def upsample_nearest2d_backward(
     grad_output: Tensor,
     output_size: Sequence[Union[int, torch.types.SymInt]],
     input_size: Sequence[Union[int, torch.types.SymInt]],
-    scales_h: float = None,
-    scales_w: float = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
 ):
     full_output_size = upsample_common_check(
         input_size, output_size, num_spatial_dims=2

@@ -10,11 +10,11 @@ def main():
     parser.add_argument("--output", type=str, default="", help="Text file where to write the output")
     args = parser.parse_args()
 
-    with open(args.before, "r") as f:
+    with open(args.before) as f:
         content = f.read()
     res_before = from_markdown_table(content)
 
-    with open(args.after, "r") as f:
+    with open(args.after) as f:
         content = f.read()
     res_after = from_markdown_table(content)
 
