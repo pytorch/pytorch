@@ -58,7 +58,7 @@ class _InstanceNorm(_NormBase):
                     'the running stats are actually needed, instead set '
                     'track_running_stats=True in {klass} to enable them. See '
                     'the documentation of {klass} for details.'
-                    .format(names=" and ".join('"{}"'.format(k) for k in running_stats_keys),
+                    .format(names=" and ".join(f'"{k}"' for k in running_stats_keys),
                             klass=self.__class__.__name__))
                 for key in running_stats_keys:
                     state_dict.pop(key)
@@ -159,8 +159,7 @@ class InstanceNorm1d(_InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (2, 3):
-            raise ValueError('expected 2D or 3D input (got {}D input)'
-                             .format(input.dim()))
+            raise ValueError(f'expected 2D or 3D input (got {input.dim()}D input)')
 
 
 class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
@@ -198,8 +197,7 @@ class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (2, 3):
-            raise ValueError('expected 2D or 3D input (got {}D input)'
-                             .format(input.dim()))
+            raise ValueError(f'expected 2D or 3D input (got {input.dim()}D input)')
 
 
 class InstanceNorm2d(_InstanceNorm):
@@ -275,8 +273,7 @@ class InstanceNorm2d(_InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (3, 4):
-            raise ValueError('expected 3D or 4D input (got {}D input)'
-                             .format(input.dim()))
+            raise ValueError(f'expected 3D or 4D input (got {input.dim()}D input)')
 
 
 class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
@@ -314,8 +311,7 @@ class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (3, 4):
-            raise ValueError('expected 3D or 4D input (got {}D input)'
-                             .format(input.dim()))
+            raise ValueError(f'expected 3D or 4D input (got {input.dim()}D input)')
 
 
 class InstanceNorm3d(_InstanceNorm):
@@ -391,8 +387,7 @@ class InstanceNorm3d(_InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (4, 5):
-            raise ValueError('expected 4D or 5D input (got {}D input)'
-                             .format(input.dim()))
+            raise ValueError(f'expected 4D or 5D input (got {input.dim()}D input)')
 
 
 class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
@@ -430,5 +425,4 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (4, 5):
-            raise ValueError('expected 4D or 5D input (got {}D input)'
-                             .format(input.dim()))
+            raise ValueError(f'expected 4D or 5D input (got {input.dim()}D input)')
