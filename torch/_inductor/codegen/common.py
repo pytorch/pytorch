@@ -12,6 +12,8 @@ import sympy
 from sympy.printing.printer import Printer
 
 import torch
+import torch.fx
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import metrics
 from ..utils import (
@@ -44,111 +46,137 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
-def _data_type_propagation(sub_graph: torch.fx.Graph):
-    def propagate_node(node: torch.fx.Node):
-        _node: torch.fx.Node = node
-        ops_to_bool = [
-            "is_inf",
-            "is_nan",
-            "bitwise_xor",
-            "logical_not",
-            "signbit",
-            "le",
-            "lt",
-            "ge",
-            "gt",
-            "eq",
-            "ne",
-        ]
-        ops_with_dtype_arg = ["constant", "to_dtype"]
-        reduction_to_dtype = {
-            "any": torch.bool,
-            "argmin": torch.int64,
-            "argmax": torch.int64,
-        }
-        ops_without_dtype = ["ops", "get_index"]
-        if _node.target in ops_without_dtype:
-            return False
-        if OptimizationContext.key in _node.meta:
-            opt_ctx = _node.meta[OptimizationContext.key]
-        else:
-            opt_ctx = OptimizationContext()
-        if opt_ctx.dtype is not None:
-            return False
-        if _node.target in ops_to_bool:
-            opt_ctx.dtype = torch.bool
-        elif _node.target in ("rand", "randn"):
-            opt_ctx.dtype = torch.float32
-        elif _node.target in ("randint64",):
-            opt_ctx.dtype = torch.int64
-        elif _node.target in ops_with_dtype_arg:
-            opt_ctx.dtype = _node.args[-1]
-        elif _node.target == "reduction":
-            reduction_type = _node.args[4]
-            if reduction_type in reduction_to_dtype:
-                opt_ctx.dtype = reduction_to_dtype[reduction_type]
-        elif _node.target == "load":
-            opt_ctx.dtype = V.graph.get_dtype(_node.args[1])
-        if opt_ctx.dtype is not None:
-            data_type_logger(
-                f"for node.target = {_node.target}, dtype is propagated to {opt_ctx.dtype}"
-            )
-            _node.meta[OptimizationContext.key] = opt_ctx
-            return True
+@functools.lru_cache(None)
+def boolean_ops():
+    return (
+        "is_inf",
+        "is_nan",
+        "bitwise_xor",
+        "logical_not",
+        "signbit",
+        "le",
+        "lt",
+        "ge",
+        "gt",
+        "eq",
+        "ne",
+    )
 
-        # node.target not belong to any ops which can directly get the dtype
-        # need propogate dtype with it's input node
+
+class DataTypePropagation:
+    def __init__(self, body) -> None:
+        self.body = body
+        self.graphs = {"root": body.root_block.graph}
+        for k, v in body.subblocks.items():
+            self.graphs[k] = v.graph
+
+    def deduce_node_dtype_by_inputs(self, node: torch.fx.Node):
         inputs = node.all_input_nodes
         input_nodes = [
-            n
-            for n in inputs
-            if isinstance(n, torch.fx.node.Node) and n.target not in ops_without_dtype
+            n for n in inputs if isinstance(n, torch.fx.Node) and n.op != "placeholder"
         ]
         if len(input_nodes) == 0:
-            return False
+            return None
+
         all_input_nodes_propogated = all(
             OptimizationContext.key in n.meta
             and n.meta[OptimizationContext.key].dtype is not None
             for n in input_nodes
         )
         if not all_input_nodes_propogated:
-            return False
-        # all input nodes have propogated dtype, we will promot to dtype with highest precision
-        dtype = functools.reduce(
+            return None
+
+        return functools.reduce(
             torch.promote_types,
             [n.meta[OptimizationContext.key].dtype for n in input_nodes],
         )
-        opt_ctx.dtype = dtype
-        msg = f"for node.target = {_node.target}, dtype is propagated to {opt_ctx.dtype}, "
-        input_msg = "inputs dtypes: "
-        for n in input_nodes:
-            input_msg += (
-                f"input {n.name}.dtype = {n.meta[OptimizationContext.key].dtype}"
-            )
-        data_type_logger(msg + input_msg)
-        _node.meta[OptimizationContext.key] = opt_ctx
-        return True
 
-    new_node_propogated = False
-    for node in sub_graph.nodes:
-        new_node_propogated = propagate_node(node) or new_node_propogated
+    def deduce_node_dtype_by_subgraph(self, node: torch.fx.Node):
+        sub_graph = self.graphs[node.target]
+        dtype = self.propagate_graph(sub_graph)
+        assert dtype
+        return dtype
 
-    if new_node_propogated:
-        _data_type_propagation(sub_graph)
+    def deduce_node_dtype(self, node: torch.fx.Node):
+        if node.target in boolean_ops():
+            return torch.bool
 
+        if node.op == "placeholder":
+            return None
 
-def data_type_propagation(node):
-    from ..ir import LoopBody
-    from ..scheduler import SchedulerNode
+        if node.target == "output":
+            # we can infer output node if it only have 1 arg
+            if len(node.args) != 1:
+                return None
 
-    assert isinstance(node, SchedulerNode)
-    _node: SchedulerNode = node
-    if isinstance(_node._body, LoopBody):
-        body: LoopBody = node._body
-        sub_blocks = [body.root_block] + list(body.subblocks.values())
-        for sub_block in sub_blocks:
-            _sub_graph: torch.fx.Graph = sub_block.graph
-            _data_type_propagation(_sub_graph)
+        if node.target in (
+            "constant",
+            "to_dtype",
+            "index_expr",
+        ):
+            return node.args[-1]
+
+        if node.target in (
+            "rand",
+            "randn",
+        ):
+            return torch.float
+
+        if node.target in (
+            "get_index",
+            "index_expr",
+        ):
+            return torch.int64
+
+        if node.target in (
+            "load",
+            "store",
+            "store_reduction",
+        ):
+            buf_name = node.args[1]
+            return V.graph.get_dtype(buf_name)
+
+        if node.target == "reduction":
+            return node.args[1]
+
+        if node.target.startswith("masked_subblock"):
+            return self.deduce_node_dtype_by_subgraph(node)
+
+        return self.deduce_node_dtype_by_inputs(node)
+
+    def propagate_graph(self, graph: torch.fx.Graph):
+        assert graph.nodes
+        graph_dtype = None
+        # For masked_subblock, we use output's dtype to represent
+        # the dtype of this subgraph. For other cases, graph_dtype
+        # might be None
+        for node in graph.nodes:
+            if OptimizationContext.key in node.meta:
+                opt_ctx = node.meta[OptimizationContext.key]
+            else:
+                opt_ctx = OptimizationContext()
+
+            opt_ctx.dtype = self.deduce_node_dtype(node)
+            node.meta[OptimizationContext.key] = opt_ctx
+            if node.target == "output":
+                graph_dtype = opt_ctx.dtype
+        return graph_dtype
+
+    def propagate(self):
+        self.propagate_graph(self.graphs["root"])
+
+    @classmethod
+    def propagate_loopbody(cls, body):
+        return cls(body).propagate()
+
+    @classmethod
+    def propagate_scheduler_node(cls, node):
+        from ..ir import LoopBody
+        from ..scheduler import SchedulerNode
+
+        assert isinstance(node, SchedulerNode)
+        assert isinstance(node._body, LoopBody)
+        DataTypePropagation.propagate_loopbody(node._body)
 
 
 class ExprPrinter(Printer):
@@ -183,14 +211,16 @@ class ExprPrinter(Printer):
     def _print_Pow(self, expr):
         # Pow() confuses triton
         base, exp = expr.args
-        base = self._print(base)
         # NB: Remember this is sizevar computation!  You don't typically
         # expect to have to do floating point computation including exponents
         # in sizevar compute.  Instead of adding support for floating
         # point pow, you should make upstream retranslate the Sympy expression
         # into Tensor expressions earlier and do that instead.
         if exp == 0.5:
-            return f"math.sqrt({base})"
+            return self._helper_sqrt(base)
+        elif exp == -0.5:
+            return "1/" + self._helper_sqrt(base)
+        base = self._print(base)
         assert exp == int(exp), exp
         exp = int(exp)
         if exp > 0:
@@ -199,6 +229,9 @@ class ExprPrinter(Printer):
             return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
         else:  # exp == 0
             return "1"
+
+    def _print_Unequality(self, expr):
+        return " != ".join(map(self.paren, map(self._print, expr.args)))
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
@@ -228,6 +261,9 @@ class PythonPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         return f"({x} // {div})"
+
+    def _helper_sqrt(self, expr):
+        return f"math.sqrt({self._print(expr)})"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
@@ -411,6 +447,16 @@ class KernelArgs:
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
 
+    def seed_offset(self, name, value):
+        if value in self.sizevars:
+            return self.sizevars[value]
+        if name in self.sizevars.values():
+            name = (
+                f"{name}{sum(1 for v in self.sizevars.values() if v.startswith(name))}"
+            )
+        self.sizevars[value] = name
+        return name
+
     def size(self, name):
         if str(name) == "seed":
             self.sizevars["seed"] = "seed"
@@ -446,6 +492,8 @@ class KernelArgs:
         arg_defs = []
         arg_types = []
         for inplaced in unique(self.inplace_buffers.values()):
+            if inplaced == "REMOVED":
+                continue
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
             dtype = buffer_types[outer]
@@ -480,6 +528,8 @@ class KernelArgs:
         call_args = []
         precompile_args = []
         for inplaced in unique(self.inplace_buffers.values()):
+            if inplaced == "REMOVED":
+                continue
             arg_defs.append(inplaced.inner_name)
             call_args.append(inplaced.other_names[-1])
             precompile_args.append(
@@ -506,6 +556,8 @@ class KernelArgs:
 
     def aliases(self):
         for inplaced in unique(self.inplace_buffers.values()):
+            if inplaced == "REMOVED":
+                continue
             for other in inplaced.other_names:
                 if other in V.graph.inplaced_to_remove:
                     continue
@@ -528,6 +580,8 @@ class KernelArgs:
     def live_output_buffers(self):
         live_outs = set()
         for inplaced in unique(self.inplace_buffers.values()):
+            if inplaced == "REMOVED":
+                continue
             live_outs.add(inplaced.other_names[-1])
         for outer, inner in self.output_buffers.items():
             if outer in self.inplace_buffers or inner == "REMOVED":
@@ -538,12 +592,15 @@ class KernelArgs:
 
 class CSEVariable:
     """A CSEVariable is just a name for an expression but it is useful to be able to annotate them on a backend dependent basis.
-    The backends can inherit from this class and overload the "create_cse_var" Kernel to do that.
-    The "update_on_args" method gives you a hook for annotations, see example of TritonCSEVariable in triton.py.
+    To do so, the backends can simply overload `Kernel.create_cse_var`
+    The "CSEVariable.update_on_args" method gives you a hook for annotations
+    See example of TritonCSEVariable in triton.py
     """
 
-    def __init__(self, name):
+    def __init__(self, name, bounds: ValueRanges):
+        assert isinstance(bounds, ValueRanges)
         self.name = name
+        self.bounds = bounds
 
     def __str__(self):
         return self.name
@@ -613,6 +670,8 @@ class CSE:
         self,
         buffer: IndentedBuffer,
         expr: typing.Union[str, CSEVariable, OpsValue],
+        *,
+        bounds: ValueRanges = ValueRanges.unknown(),
         write=True,
         assignment=True,
     ) -> CSEVariable:
@@ -622,10 +681,15 @@ class CSE:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         assert write or assignment
         if isinstance(expr, CSEVariable):
+            # If the expressions were always created with all the information, we could
+            # assert expr.bounds == bounds, but sometimes the expression is created
+            # with the loose ValueRanges.unknown(), so we need to tighten the bounds
+            expr.bounds = expr.bounds.tighten(bounds)
             return expr
         cache_key = expr
-        if cache_key not in self.cache:
-            var = self.newvar() if assignment else None
+        var = self.cache.get(cache_key, None)
+        if not var:
+            var = self.newvar(bounds) if assignment else None
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
@@ -637,12 +701,14 @@ class CSE:
                 else:
                     line = f"{expr}{self.suffix}"
                 buffer.writeline(line)
+        else:
+            var.bounds = var.bounds.tighten(bounds)
 
-        return self.cache[cache_key]
+        return var
 
-    def newvar(self) -> CSEVariable:
+    def newvar(self, bounds: ValueRanges = ValueRanges.unknown()) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name)
+        var = V.kernel.create_cse_var(var_name, bounds)
         self.varname_map[var_name] = var
         return var
 
@@ -676,13 +742,16 @@ class Kernel(CodeGen):
         self.stores = IndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
-        self.current_node = None
         self.store_buffer_names = set()
+        # set in set_current_node
+        self.current_node = None
+        self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
 
     @contextlib.contextmanager
     def set_current_node(self, node):
         prior = self.current_node
         self.current_node = node
+        self.node_to_bounds = node._body.bounds().get_bounds()
         try:
             yield
         finally:
@@ -721,10 +790,26 @@ class Kernel(CodeGen):
         finally:
             self.loads = prior
 
+    def store_reduction(self, name, index, value):
+        raise NotImplementedError()
+
     def store(self, name, index, value, mode=None):
         raise NotImplementedError()
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
+        raise NotImplementedError()
+
+    def bucketize(
+        self,
+        values,
+        offsets_name: str,
+        offsets_size: sympy.Expr,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ):
+        """
+        See [Note: Inductor bucketize op]
+        """
         raise NotImplementedError()
 
     def __enter__(self):
@@ -734,8 +819,18 @@ class Kernel(CodeGen):
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):
+                    # TritonTemplateKernel has no current_node
+                    buf_bounds = ValueRanges.unknown()
+                    if hasattr(V.interpreter, "current_node"):
+                        fx_node = V.interpreter.current_node
+                        buf_bounds = self.node_to_bounds.get(
+                            fx_node, ValueRanges.unknown()
+                        )
+
                     csevar = self.cse.generate(
-                        self.compute, getattr(parent_handler, name)(*args, **kwargs)
+                        self.compute,
+                        getattr(parent_handler, name)(*args, **kwargs),
+                        bounds=buf_bounds,
                     )
                     csevar.update_on_args(name, args, kwargs)
                     return csevar
@@ -772,10 +867,44 @@ class Kernel(CodeGen):
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(name, dtype, src_dtype, reduction_type, index, value):
+            def store_reduction(name, index, value):
                 self.store_buffer_names.add(name)
-                return self.reduction(
-                    name, dtype, src_dtype, reduction_type, index, value
+                self.cse.store_cache[name] = value
+                if self.current_node:
+                    for other_name in self.current_node.get_mutations():
+                        self.cse.store_cache[other_name] = value
+
+                if name not in V.graph.removed_buffers:
+                    return self.store_reduction(name, index, value)
+
+            @staticmethod
+            def reduction(dtype, src_dtype, reduction_type, value):
+                return self.reduction(dtype, src_dtype, reduction_type, value)
+
+            @staticmethod
+            def bucketize(
+                values,
+                offsets_name: str,
+                offsets_size: sympy.Expr,
+                indexing_dtype: torch.dtype,
+                right: bool,
+            ):
+                """
+                [Note: Inductor bucketize op]
+
+                Given values (tensor) and offsets_name (reference to the name of a 1D
+                tensor), calculate the bucket that each value belongs to.
+
+                e.g. for values [-1, 0, 1, 2, 3, 4, 5, 9], offsets [0, 4, 4, 8], right=True
+                return =        [ 0, 1, 1, 1, 1, 3, 3, 4].
+
+                When right == False, bucket i refers to range (offsets[i], offsets[i+1]].
+                When right == True,  bucket i refers to range [offsets[i], offsets[i+1]).
+
+                Offsets must be non-decreasing or the result is undefined.
+                """
+                return self.bucketize(
+                    values, offsets_name, offsets_size, indexing_dtype, right
                 )
 
         super().__enter__()
@@ -813,13 +942,6 @@ class OptimizationContext:
 
     # Load value as mask
     is_load_as_mask: bool = False
-    # Load bfloat16 value as float32
-    is_load_bf16_as_fp32: bool = False
-    # Store float32 value as bfloat16
-    is_store_fp32_as_bf16: bool = False
-    # do not  need type cast for
-    # for mem copy only node bf16 load -> bf16 store,
-    is_bf16_mem_copy: bool = False
 
     dtype: torch.dtype = None
     ops_name: str = ""
@@ -827,5 +949,3 @@ class OptimizationContext:
 
     # Load uint8 value as float32
     is_load_uint8_as_float: bool = False
-    # Store float32 value as uint8
-    is_store_float_as_uint8: bool = False

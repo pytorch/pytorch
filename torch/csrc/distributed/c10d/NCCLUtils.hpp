@@ -52,6 +52,12 @@
 #define ENABLE_NCCL_PREMUL_SUM_SUPPORT
 #endif
 
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 17)
+#define NCCL_HAS_COMM_CTA_CGA
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define NCCL_HAS_COMM_CTA_CGA
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                                  \
   do {                                                                        \
@@ -179,21 +185,33 @@ class NCCLComm {
       int rank,
       ncclUniqueId commId) {
     auto comm = std::make_shared<NCCLComm>();
-#ifndef NCCL_HAS_COMM_NONBLOCKING
     C10D_NCCL_CHECK(
         ncclCommInitRank(&(comm->ncclComm_), numRanks, commId, rank), c10::nullopt);
-#else
-   ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-   if (nccl_use_nonblocking()) {
-     config.blocking = 0;
-   }
-   C10D_NCCL_CHECK_TIMEOUT(
-     ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), comm->ncclComm_, c10::nullopt);
-#endif
     comm->ncclId_ = commId;
     comm->rank_ = rank;
     return comm;
   }
+
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+  static std::shared_ptr<NCCLComm> create(
+      int numRanks,
+      int rank,
+      ncclUniqueId commId,
+      ncclConfig_t& config) {
+    auto comm = std::make_shared<NCCLComm>();
+    if (nccl_use_nonblocking()) {
+      config.blocking = 0;
+      C10D_NCCL_CHECK_TIMEOUT(
+        ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), comm->ncclComm_, c10::nullopt);
+    } else {
+      C10D_NCCL_CHECK(
+        ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), c10::nullopt);
+    }
+    comm->ncclId_ = commId;
+    comm->rank_ = rank;
+    return comm;
+  }
+#endif
 
   ncclUniqueId getNcclId() {
     return ncclId_;

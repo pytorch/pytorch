@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from functools import partial
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -14,7 +13,6 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     make_fx,
     track_tensor_tree,
-    unwrap_proxy,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import (
@@ -94,7 +92,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
     args = (pred, true_graph, false_graph, operands)
 
-    proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), args)
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
                                                name="conditional")
@@ -125,11 +123,34 @@ def cond_dense(pred, true_fn, false_fn, operands):
 def cond_autograd(pred, true_fn, false_fn, *operands):
     # TODO: support autograd
     flat_operands, _ = tree_flatten([true_fn, false_fn] + [operands])
-    assert all(not f.requires_grad for f in flat_operands
-               if isinstance(f, torch.Tensor))
+
+    requires_grad = any(
+        isinstance(arg, torch.Tensor) and arg.requires_grad
+        for arg in flat_operands
+    )
 
     with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.AutogradCPU)):
-        return cond(pred, true_fn, false_fn, *operands)
+        result = cond(pred, true_fn, false_fn, *operands)
+
+        # If there is requires_grad, we delay the error until backward pass
+        if requires_grad:
+            # cond can only return one value
+            err_fn = torch._C._functions.DelayedError(
+                b"NYI: torch.cond doesn't support autograd",
+                1,
+            )
+            # Create aliases of the output that has requires_grad=True. We need
+            # at least one of the inputs to err_fn to require grad so that the
+            # output will have a grad_fn.
+
+            def fake_requires_grad(var):
+                if var is not None:
+                    var = var.detach()
+                    var.requires_grad = True
+                return var
+            return err_fn(fake_requires_grad(result))
+
+        return result
 
 
 @cond.py_impl(ProxyTorchDispatchMode)

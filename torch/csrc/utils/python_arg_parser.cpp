@@ -704,6 +704,20 @@ static bool is_int_list(
       return true;
     }
 
+    // in dynamo, FakeTensor is qualified for INT_LIST
+    if (is_dynamo_compiling && THPVariable_Check(item.ptr())) {
+      auto& var = THPVariable_Unpack(item.ptr());
+      if (var.numel() != 1 || !var.sizes().empty() ||
+          !at::isIntegralType(
+              var.dtype().toScalarType(), /*include_bool*/ true)) {
+        if (failed_idx != nullptr) {
+          *failed_idx = 0;
+        }
+        return false;
+      }
+      return true;
+    }
+
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
@@ -724,7 +738,23 @@ static bool is_int_or_symint(PyObject* obj) {
   // which may have side effects if obj is a symint node
   // so we do `is_symint` check first
   // TODO: maybe we should be using checkLong here?
-  return torch::is_symint(py::handle(obj)) || THPUtils_checkIndex(obj);
+  if (torch::is_symint(py::handle(obj))) {
+    return true;
+  }
+
+  if (THPUtils_checkIndex(obj)) {
+    return true;
+  }
+
+  // FakeTensor(..., size=()) is qualified for SymInt param
+  if (is_dynamo_compiling && THPVariable_Check(obj)) {
+    auto& var = THPVariable_Unpack(obj);
+    if (var.numel() == 1 && var.sizes().empty() &&
+        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 static bool is_int_or_symint_list(
@@ -740,6 +770,7 @@ static bool is_int_or_symint_list(
     if (is_int_or_symint(item.ptr())) {
       return true;
     }
+
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
@@ -750,6 +781,7 @@ static bool is_int_or_symint_list(
     }
     return r;
   }
+
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
   // int
   return broadcast_size > 0 && is_int_or_symint(obj);
@@ -775,12 +807,12 @@ auto FunctionParameter::check(
       if (THPUtils_checkScalar(obj)) {
         return true;
       }
-      // fallthrough
+      [[fallthrough]];
     case ParameterType::COMPLEX:
       if (PyComplex_Check(obj)) {
         return true;
       }
-      // fallthrough
+      [[fallthrough]];
     case ParameterType::DOUBLE: {
       if (THPUtils_checkDouble(obj)) {
         return true;
