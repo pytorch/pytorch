@@ -157,7 +157,7 @@ Works only with Python3.\n A few examples:
         torch._C._jit_set_nvfuser_enabled(True)
         torch._C._get_graph_executor_optimize(True)
     else :
-        raise ValueError("Undefined fuser: {}".format(args.cuda_fuser))
+        raise ValueError(f"Undefined fuser: {args.cuda_fuser}")
 
     if args.cpu_fusion:
         import torch
@@ -207,7 +207,7 @@ Works only with Python3.\n A few examples:
     for index, dtype in enumerate(datatypes):
         datatypes[index] = getattr(torch, dtype)
         if not datatypes[index] :
-            raise AttributeError("DataType: {} is not valid!".format(dtype))
+            raise AttributeError(f"DataType: {dtype} is not valid!")
 
     tensor_engine.set_engine_mode(args.engine)
 
@@ -223,7 +223,7 @@ Works only with Python3.\n A few examples:
                     continue
                 else:
                     raise ValueError(
-                        "attempted to run an unsupported benchmark: %s" % (bench.desc())
+                        f"attempted to run an unsupported benchmark: {bench.desc()}"
                     )
             bench.run(args)
 
@@ -262,7 +262,7 @@ Works only with Python3.\n A few examples:
                     continue
                 else:
                     raise ValueError(
-                        "attempted to run an unsupported benchmark: %s" % (bench.desc())
+                        f"attempted to run an unsupported benchmark: {bench.desc()}"
                     )
             bench.run(args)
 
@@ -282,7 +282,7 @@ Works only with Python3.\n A few examples:
                         run_with_input_iter(bench_cls, args.input_iter, allow_skip=True)
                     else :
                         if args.input_iter is not None :
-                            print("WARNING: Incompatible benchmark class called with input_iter arg: {}".format(name))
+                            print(f"WARNING: Incompatible benchmark class called with input_iter arg: {name}")
                         run_default_configs(bench_cls, allow_skip=True)
 
             if match_class_name:
@@ -295,15 +295,15 @@ Works only with Python3.\n A few examples:
                 if name.startswith(cls_module):
                     match_class_name = True
                     if name[len(cls_module)] != "_":
-                        raise ValueError("invalid name: %s" % (name))
+                        raise ValueError(f"invalid name: {name}")
                     config_str = name[(len(cls_module) + 1) :]
                     config = config_str.split("_")
                     if len(config) < 2:
-                        raise ValueError("invalid config: %s" % config)
+                        raise ValueError(f"invalid config: {config}")
                     mode, device = config[0:2]
                     # TODO: make sure virtual devices such as 'cpu1' and 'cpu4' are supported.
                     if mode not in ["fwd", "both"]:
-                        raise ValueError("invalid mode: %s" % (mode))
+                        raise ValueError(f"invalid mode: {mode}")
                     for i, entry in enumerate(config):
                         try:
                             value = int(entry)
@@ -321,8 +321,7 @@ Works only with Python3.\n A few examples:
                     [bench_cls.module() for bench_cls in benchmark_classes]
                 )
                 raise ValueError(
-                    "invalid name: %s\nAvailable benchmark classes:\n%s"
-                    % (name, available_classes)
+                    f"invalid name: {name}\nAvailable benchmark classes:\n{available_classes}"
                 )
 
 
