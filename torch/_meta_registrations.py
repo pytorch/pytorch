@@ -548,6 +548,33 @@ def meta__linalg_eigh(
     return vals, vecs
 
 
+def cloneBatchedColumnMajor(src: Tensor) -> Tensor:
+    return src.mT.clone(memory_format=torch.contiguous_format).transpose(-2, -1)
+
+
+@register_meta(aten._cholesky_solve_helper)
+@out_wrapper()
+def _cholesky_solve_helper(self: Tensor, A: Tensor, upper: bool) -> Tensor:
+    return cloneBatchedColumnMajor(self)
+
+
+@register_meta(aten.cholesky_solve)
+@out_wrapper()
+def cholesky_solve(self: Tensor, A: Tensor, upper: bool = False) -> Tensor:
+    torch._check(
+        self.ndim >= 2,
+        lambda: f"b should have at least 2 dimensions, but has {self.ndim} dimensions instead",
+    )
+    torch._check(
+        A.ndim >= 2,
+        lambda: f"u should have at least 2 dimensions, but has {A.ndim} dimensions instead",
+    )
+    self_broadcasted, A_broadcasted = _linalg_broadcast_batch_dims_name(
+        self, A, "cholesky_solve"
+    )
+    return _cholesky_solve_helper(self_broadcasted, A_broadcasted, upper)
+
+
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten.linalg_cholesky_ex.default)
 def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
