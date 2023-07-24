@@ -13,7 +13,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization.pt2e.quantizer import X86InductorQuantizer
-from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e_quantizer
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
@@ -98,7 +98,7 @@ class TestPatternMatcherBase(TestCase):
                 )
                 quantizer = X86InductorQuantizer()
                 quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
-                prepare_model = prepare_pt2e_quantizer(export_model, quantizer)
+                prepare_model = prepare_pt2e(export_model, quantizer)
                 prepare_model(*inputs)
                 convert_model = convert_pt2e(prepare_model).eval()
                 _ = torch.compile(convert_model)(*inputs)
@@ -443,7 +443,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_conv2d_add_scalar(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
                 )
@@ -545,7 +545,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         # we can't do the fusion when add's inputs are same tensor.
         class Model2(torch.nn.Module):
             def __init__(self):
-                super(Model2, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
                 )
@@ -559,7 +559,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         # we can't do the fusion when add's inputs are mixed dtype.
         class Model3(torch.nn.Module):
             def __init__(self):
-                super(Model3, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
                 )
@@ -595,7 +595,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_reproduce_99842_issue(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
 
             def forward(self, input_tensor):
