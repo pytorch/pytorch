@@ -3430,6 +3430,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         make_fn(None)()
 
+    def test_string_format(self):
+        s = "temp{i}"
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            if s.format(i=4) == "temp4":
+                return torch.sin(x)
+            return torch.cos(x)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), torch.sin(x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

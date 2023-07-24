@@ -1906,9 +1906,7 @@ class DistributedDataParallelTest(
             ):
                 with first_bucket_size(bucketsize):
                     model_msg = (
-                        "rank = {} formats = {} dtypes = {} bucketsize = {} ".format(
-                            self.rank, formats, dtypes, bucketsize
-                        )
+                        f"rank = {self.rank} formats = {formats} dtypes = {dtypes} bucketsize = {bucketsize} "
                     )
                     try:
                         m = ConvNet(layer_devs, formats, dtypes)
@@ -2387,9 +2385,7 @@ class DistributedDataParallelTest(
                         "mismatch at "
                         + name
                         + ".grad for "
-                        + "set_to_none = {}, use_bucket_view = {}".format(
-                            try_set_to_none, use_bucket_view
-                        ),
+                        + f"set_to_none = {try_set_to_none}, use_bucket_view = {use_bucket_view}",
                     )
 
     @requires_nccl()
