@@ -2590,43 +2590,33 @@ def _check_foreach_binop_tensor_lists(self, other):
     )
 
 
-@register_meta([aten._foreach_add.List])
-def meta__foreach_add(self, other, alpha=1):
-    _check_foreach_binop_tensor_lists(self, other)
-    return [torch.empty_like(s) for s in self]
-
-
-@register_meta([aten._foreach_sub.List])
-def meta__foreach_sub(self, other, alpha=1):
-    _check_foreach_binop_tensor_lists(self, other)
-    return [torch.empty_like(s) for s in self]
-
-
-@register_meta([aten._foreach_add_.List])
-def meta__foreach_add__list(self, other, alpha=1):
-    _check_foreach_binop_tensor_lists(self, other)
-
-
-@register_meta([aten._foreach_mul_.List, aten._foreach_div_.List])
-def meta__foreach_binop__list(self, other):
-    _check_foreach_binop_tensor_lists(self, other)
-
-
-@register_meta([aten._foreach_maximum.List])
-def meta__foreach_maximum__list(self, other, alpha=1):
+@register_meta(
+    [
+        aten._foreach_add.List,
+        aten._foreach_sub.List,
+        aten._foreach_mul.List,
+        aten._foreach_div.List,
+        aten._foreach_maximum.List,
+        aten._foreach_minimum.List,
+    ]
+)
+def meta__foreach_binop_list(self, other, alpha=1):
     _check_foreach_binop_tensor_lists(self, other)
     return [torch.empty_like(s) for s in self]
 
 
 @register_meta(
     [
-        aten._foreach_div.List,
-        aten._foreach_mul.List,
+        aten._foreach_add_.List,
+        aten._foreach_sub_.List,
+        aten._foreach_mul_.List,
+        aten._foreach_div_.List,
+        aten._foreach_maximum_.List,
+        aten._foreach_minimum_.List,
     ]
 )
-def meta__foreach_binop_list(self, other):
+def meta__foreach_binop__list(self, other, alpha=1):
     _check_foreach_binop_tensor_lists(self, other)
-    return [torch.empty_like(s) for s in self]
 
 
 @register_meta(
