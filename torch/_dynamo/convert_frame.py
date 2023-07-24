@@ -205,14 +205,14 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def exception_handler(e, code, frame=None):
+def exception_handler(e, code, frame=None, export=False):
     record_filename = None
     if hasattr(e, "exec_record"):
         record_filename = gen_record_file_name(e, code)
         write_record_to_file(record_filename, e.exec_record)
         e.record_filename = record_filename
 
-    augment_exc_message(e)
+    augment_exc_message(e, export=export)
     # Only log the exception if we are going to suppress it
     # if aren't suppressing it, a higher level except block will handle it
     if config.suppress_errors:
@@ -540,10 +540,10 @@ def _compile(
         ConstraintViolationError,
         GuardOnDataDependentSymNode,
     ) as e:
-        exception_handler(e, code, frame)
+        exception_handler(e, code, frame, export=export)
         raise
     except Exception as e:
-        exception_handler(e, code, frame)
+        exception_handler(e, code, frame, export=export)
         raise InternalTorchDynamoError(str(e)).with_traceback(e.__traceback__) from None
 
 
