@@ -4,13 +4,6 @@ from typing import cast, Dict, List, Optional, Sequence, Tuple
 import torch
 
 from torch.distributed._tensor._utils import compute_local_shape
-from torch.distributed._tensor.api import (
-    _Partial,
-    DTensorSpec,
-    Placement,
-    Replicate,
-    Shard,
-)
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
     OpSchema,
@@ -27,6 +20,13 @@ from torch.distributed._tensor.ops.utils import (
     prod,
     register_op_strategy,
     register_prop_rule,
+)
+from torch.distributed._tensor.placement_types import (
+    _Partial,
+    DTensorSpec,
+    Placement,
+    Replicate,
+    Shard,
 )
 from torch.fx import Node
 

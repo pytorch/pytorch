@@ -5,16 +5,12 @@ namespace impl {
 
 PyObjectSlot::PyObjectSlot() : pyobj_interpreter_(nullptr), pyobj_(nullptr) {}
 
-PyObjectSlot::~PyObjectSlot() {
-  maybe_destroy_pyobj();
-}
-
-void PyObjectSlot::maybe_destroy_pyobj() {
+void PyObjectSlot::destroy_pyobj_if_needed() {
   if (owns_pyobj()) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
     (*pyobj_interpreter_.load(std::memory_order_acquire))
-        ->decref(_unchecked_untagged_pyobj(), /*has_pyobj_slot*/ true);
+        ->decref(_unchecked_untagged_pyobj(), /*is_tensor*/ true);
     // NB: this destructor can only be entered when there are no
     // references to this C++ object (obviously), NOR any references
     // to the PyObject (if there are references to the PyObject,
@@ -49,14 +45,6 @@ PyInterpreter& PyObjectSlot::load_pyobj_interpreter() const {
       false,
       "cannot access PyObject for Tensor on interpreter ",
       (*pyobj_interpreter_.load())->name());
-}
-
-bool PyObjectSlot::check_interpreter(PyInterpreter* interpreter) {
-  return interpreter == pyobj_interpreter();
-}
-
-bool PyObjectSlot::has_pyobj() {
-  return check_pyobj(pyobj_interpreter()).has_value();
 }
 
 bool PyObjectSlot::owns_pyobj() {

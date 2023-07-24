@@ -102,7 +102,7 @@ def sweep(benchmark):
     benchmarks = []
 
     def append_benchmark(prefix, ranks, opts=None):
-        prefix = "%4d GPUs -- %s" % (len(ranks), prefix)
+        prefix = f"{len(ranks):4} GPUs -- {prefix}"
         benchmarks.append((prefix, ranks, opts))
 
     def local_print(msg):
@@ -181,7 +181,7 @@ class TorchvisionBenchmark(Benchmark):
         self.model = model
 
     def __str__(self):
-        return "{} with batch size {}".format(self.model, self.batch_size)
+        return f"{self.model} with batch size {self.batch_size}"
 
     def create_model(self):
         return torchvision.models.__dict__[self.model]().to(self.device)
@@ -212,7 +212,7 @@ def main():
     # metadata, like measurements. Not for benchmarking itself.
     dist.init_process_group(
         backend="gloo",
-        init_method="tcp://{}:{}".format(args.master_addr, args.master_port),
+        init_method=f"tcp://{args.master_addr}:{args.master_port}",
         rank=args.rank,
         world_size=args.world_size,
     )
@@ -227,10 +227,10 @@ def main():
         print("PyTorch distributed benchmark suite")
         print("-----------------------------------")
         print("")
-        print("* PyTorch version: {}".format(torch.__version__))
-        print("* CUDA version: {}".format(torch.version.cuda))
-        print("* Distributed backend: {}".format(args.distributed_backend))
-        print("* Maximum bucket size: {}MB".format(args.bucket_size))
+        print(f"* PyTorch version: {torch.__version__}")
+        print(f"* CUDA version: {torch.version.cuda}")
+        print(f"* Distributed backend: {args.distributed_backend}")
+        print(f"* Maximum bucket size: {args.bucket_size}MB")
         print("")
         print("--- nvidia-smi topo -m ---")
         print("")
@@ -261,7 +261,7 @@ def main():
     benchmark_results = []
     for benchmark in benchmarks:
         if args.rank == 0:
-            print("\nBenchmark: {}".format(str(benchmark)))
+            print(f"\nBenchmark: {str(benchmark)}")
         result = sweep(benchmark)
         benchmark_results.append({
             "model": benchmark.model,

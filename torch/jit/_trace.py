@@ -110,9 +110,10 @@ class ONNXTracedModule(torch.nn.Module):
 
             trace_inputs = _unflatten(in_args, in_desc)
 
-            ret_inputs.append(
-                tuple(x.clone(memory_format=torch.preserve_format) for x in args)
-            )
+            if self._return_inputs:
+                ret_inputs.append(
+                    tuple(x.clone(memory_format=torch.preserve_format) for x in args)
+                )
             if self._return_inputs_states:
                 inputs_states.append(_unflatten(in_args, in_desc))
             outs.append(self.inner(*trace_inputs))
@@ -182,7 +183,7 @@ def _time(trace_name, name, time=True):
     finally:
         stream.record_event(end)
         end.synchronize()
-        print("{} {} time: {} ms".format(trace_name, name, start.elapsed_time(end)))
+        print(f"{trace_name} {name} time: {start.elapsed_time(end)} ms")
 
 
 def verify(model, args, loss_fn=torch.sum, devices=None):
@@ -1039,8 +1040,8 @@ def trace_module(
                 for key in example_inputs:
                     if key not in argument_names:
                         valid_arguments = "[" + ','.join(argument_names) + "]"
-                        raise NameError("""'{}' is not in forward() method's arguments,
-                         valid arguments name are {}""".format(key, valid_arguments))
+                        raise NameError(f"""'{key}' is not in forward() method's arguments,
+                         valid arguments name are {valid_arguments}""")
                 module._c._create_method_from_trace_with_dict(
                     method_name,
                     func,
@@ -1196,7 +1197,7 @@ class TracedModule(ScriptModule):
         return self._name
 
     def extra_repr(self):
-        return "original_name={}".format(self._name)
+        return f"original_name={self._name}"
 
 
 class TopLevelTracedModule(TracedModule):

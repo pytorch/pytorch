@@ -673,18 +673,18 @@ void gemm_and_bias(
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
-  if (std::is_same<Dtype, double>::value) {
+  if constexpr (std::is_same_v<Dtype, double>) {
     abcType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
-  } else if (std::is_same<Dtype, float>::value) {
+  } else if constexpr (std::is_same_v<Dtype, float>) {
     if (at::globalContext().allowTF32CuBLAS()) {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
     abcType = CUDA_R_32F;
-  } else if (std::is_same<Dtype, at::Half>::value) {
+  } else if constexpr (std::is_same_v<Dtype, at::Half>) {
     abcType = CUDA_R_16F;
-  } else if (std::is_same<Dtype, at::BFloat16>::value) {
+  } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abcType = CUDA_R_16BF;
   }
 

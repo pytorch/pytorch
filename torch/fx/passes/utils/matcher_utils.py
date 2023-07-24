@@ -30,7 +30,7 @@ logger = _init_logger()
 
 @compatibility(is_backward_compatible=False)
 @dataclass
-class InternalMatch():
+class InternalMatch:
     # Nodes from which the match was found
     anchors: List[Node]
     # Maps nodes in the pattern subgraph to nodes in the larger graph

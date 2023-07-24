@@ -3,6 +3,11 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/LegacyVmapTransforms.h>
 
+#ifdef AT_PER_OPERATOR_HEADERS
+#include <ATen/ops/_add_batch_dim_native.h>
+#include <ATen/ops/_remove_batch_dim_native.h>
+#endif
+
 namespace at { namespace native {
 
 // Adds a batch dimension to the tensor `self` out-of-place

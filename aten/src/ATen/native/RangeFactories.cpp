@@ -178,8 +178,7 @@ Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, T
     // we dont want.
     // the corner-case we do want to take into account is int64_t, which has higher precision than double
     double size_d;
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (std::is_same<scalar_t, int64_t>::value) {
+    if constexpr (std::is_same_v<scalar_t, int64_t>) {
       int64_t sgn = (xstep > 0) - (xstep < 0);
       size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
     } else {
