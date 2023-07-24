@@ -20,7 +20,7 @@ from torch.ao.quantization.pt2e.quantizer.utils import (
     get_weight_qspec,
     get_bias_qspec,
 )
-from .qnnpack_quantizer import (
+from .xnnpack_quantizer import (
     _is_annotated,
 )
 from torch.ao.quantization.observer import (
@@ -43,7 +43,7 @@ __all__ = [
 ]
 
 @dataclass
-class X86InductorQuantizationAnnotation(QuantizationAnnotation):
+class _X86InductorQuantizationAnnotation(QuantizationAnnotation):
     # _is_output_of_fusion_pattern:
     #  * Node as output node of a fusion pattern.
     _is_output_of_fusion_pattern: bool = False
@@ -97,7 +97,7 @@ def _is_all_annotated(nodes: List[Node]):
     return (len(nodes) != 0) and all(_is_node_annotated(node) for node in nodes)
 
 
-def is_quantized_op_pt2e(node: torch.fx.Node):
+def _is_quantized_op_pt2e(node: torch.fx.Node):
     """
     Used for pt2e flow to check if the node is a quantized node:
     Case1: the node has been annotated as output node of a fusion pattern.
@@ -107,7 +107,7 @@ def is_quantized_op_pt2e(node: torch.fx.Node):
     if (not _is_any_annotated([node])) or (not quantization_annotation):
         # The node has not been annotated, directly return False
         return False
-    assert isinstance(quantization_annotation, X86InductorQuantizationAnnotation)
+    assert isinstance(quantization_annotation, _X86InductorQuantizationAnnotation)
     if quantization_annotation._is_output_of_fusion_pattern:
         # Case1: the node has been annotated as output node of a fusion pattern.
         return True
@@ -150,7 +150,7 @@ def _get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
     supported_config_and_operators: List[OperatorConfig] = []
     for quantization_config in [get_default_x86_inductor_quantization_config(), ]:
         ops = _supported_quantized_operators()
-        for op_string, pattern_list in ops.items():
+        for pattern_list in ops.values():
             supported_config_and_operators.append(
                 OperatorConfig(quantization_config, pattern_list)
             )
@@ -260,7 +260,7 @@ class X86InductorQuantizer(Quantizer):
         if isinstance(bias_node, Node):
             input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
         if annotate_output:
-            conv_node.meta["quantization_annotation"] = X86InductorQuantizationAnnotation(
+            conv_node.meta["quantization_annotation"] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
                 # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),
@@ -268,7 +268,7 @@ class X86InductorQuantizer(Quantizer):
                 _is_output_of_fusion_pattern=True,
             )
         else:
-            conv_node.meta["quantization_annotation"] = X86InductorQuantizationAnnotation(
+            conv_node.meta["quantization_annotation"] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
                 _annotated=True,
             )
@@ -382,11 +382,11 @@ class X86InductorQuantizer(Quantizer):
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             binary_node_input_qspec_map = {}
             binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(quantization_config)
-            binary_node.meta["quantization_annotation"] = X86InductorQuantizationAnnotation(
+            binary_node.meta["quantization_annotation"] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=binary_node_input_qspec_map,
                 _annotated=True
             )
-            unary_node.meta["quantization_annotation"] = X86InductorQuantizationAnnotation(
+            unary_node.meta["quantization_annotation"] = _X86InductorQuantizationAnnotation(
                 # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
@@ -420,7 +420,7 @@ class X86InductorQuantizer(Quantizer):
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             binary_node_input_qspec_map = {}
             binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(quantization_config)
-            binary_node.meta["quantization_annotation"] = X86InductorQuantizationAnnotation(
+            binary_node.meta["quantization_annotation"] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=binary_node_input_qspec_map,
                 # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
@@ -444,7 +444,7 @@ class X86InductorQuantizer(Quantizer):
             if _is_annotated([unary_node, conv_node]):
                 continue
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
-            unary_node.meta["quantization_annotation"] = X86InductorQuantizationAnnotation(
+            unary_node.meta["quantization_annotation"] = _X86InductorQuantizationAnnotation(
                 # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
@@ -491,13 +491,13 @@ class X86InductorQuantizer(Quantizer):
         assert isinstance(input_node, Node)
         input_qspec_map = {}
         input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
-        maxpool_node.meta["quantization_annotation"] = X86InductorQuantizationAnnotation(
+        maxpool_node.meta["quantization_annotation"] = _X86InductorQuantizationAnnotation(
             input_qspec_map=input_qspec_map,
             _annotated=True,
         )
         # Since single maxpool2d decomposed into torch.ops.aten.max_pool2d_with_indices.default - operator.getitem
         # We annotate it as a fusion pattern.
-        getitem_node.meta["quantization_annotation"] = X86InductorQuantizationAnnotation(
+        getitem_node.meta["quantization_annotation"] = _X86InductorQuantizationAnnotation(
             _annotated=True,
             _is_output_of_fusion_pattern=True,
         )
@@ -514,7 +514,7 @@ class X86InductorQuantizer(Quantizer):
             def is_all_inputs_connected_to_quantized_op(input_nodes):
                 # Ensure all the inputs connect to fusion pattern or quantized node
                 for input_node in input_nodes:
-                    if not is_quantized_op_pt2e(input_node):
+                    if not _is_quantized_op_pt2e(input_node):
                         return False
                 return True
 
