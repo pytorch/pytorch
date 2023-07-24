@@ -810,11 +810,15 @@ class TestOptim(TestCase):
             st_max_mem, mt_max_mem = max_mems
             intermediate_size = nparams * param.nelement() * param.element_size()
             nintermediates = 1  # we expect a budget of 1 intermediate most of the time
-            if 'capturable' in kwargs_with_flags and kwargs_with_flags['capturable']:
-                # with capturable in Adam, we have 2 extra intermediates for the bias_corrections
+            if (('capturable' in kwargs_with_flags and kwargs_with_flags['capturable']) or
+                    optimizer_constructor.__name__ == "Adadelta"):
+                # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
+                # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 nintermediates = 3
-            elif optimizer_constructor.__name__ == "NAdam":
-                # NAdam uses two intermediates at the same time (grouped_grads & exp_avg_sq_sqrt)
+            elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
+                # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
+                # Adagrad uses std and grads at the same time
+                # RMSprop uses avg and grads
                 nintermediates = 2
 
             self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
@@ -846,6 +850,14 @@ class TestOptim(TestCase):
                 optim.SGD,
                 dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),
             ),
+            (
+                optim.SGD,
+                dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True, maximize=True),
+            ),
+            (
+                optim.SGD,
+                dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False, maximize=True),
+            ),
             (optim.RAdam, dict(weight_decay=0, eps=1e-6)),
             (optim.RAdam, dict(weight_decay=0)),
             (optim.RAdam, dict(weight_decay=1, eps=1e-6)),
@@ -857,12 +869,20 @@ class TestOptim(TestCase):
             (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
             (optim.ASGD, dict(weight_decay=0)),
             (optim.ASGD, dict(weight_decay=1)),
+            (optim.ASGD, dict(weight_decay=0, maximize=True)),
+            (optim.ASGD, dict(weight_decay=1, maximize=True)),
             (optim.Adamax, dict(weight_decay=0)),
             (optim.Adamax, dict(weight_decay=1)),
+            (optim.Adamax, dict(weight_decay=0, maximize=True)),
+            (optim.Adamax, dict(weight_decay=1, maximize=True)),
             (optim.Adadelta, dict(weight_decay=0)),
             (optim.Adadelta, dict(weight_decay=1)),
+            (optim.Adadelta, dict(weight_decay=0, maximize=True)),
+            (optim.Adadelta, dict(weight_decay=1, maximize=True)),
             (optim.Adagrad, dict(weight_decay=0)),
             (optim.Adagrad, dict(weight_decay=1)),
+            (optim.Adagrad, dict(weight_decay=0, maximize=True)),
+            (optim.Adagrad, dict(weight_decay=1, maximize=True)),
         ]
 
     def test_multi_tensor_optimizers(self):
@@ -887,7 +907,8 @@ class TestOptim(TestCase):
     def test_peak_mem_multi_tensor_optimizers(self):
         configs = [
             (o, d) for (o, d) in self._multi_tensor_optimizer_configs if o.__name__ in [
-                "Adam", "AdamW", "RAdam", "NAdam"
+                "Adadelta", "Adagrad", "Adamax", "Adam", "AdamW", "ASGD", "NAdam",
+                "RAdam", "RMSprop", "SGD"
             ]
         ]
         self._test_foreach_memory(configs)
@@ -1064,8 +1085,10 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
         self._test_complex_2d(optim.Adam)
-        self._test_complex_2d(functools.partial(optim.Adam, foreach=True))
-        self._test_complex_2d(functools.partial(optim.Adam, foreach=True, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=False))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=False, amsgrad=True))
+        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.Adam, weight_decay=0.2, amsgrad=True))
 
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
@@ -1117,7 +1140,10 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
         self._test_complex_2d(optim.AdamW)
-        self._test_complex_2d(functools.partial(optim.AdamW, foreach=True))
+        self._test_complex_2d(functools.partial(optim.AdamW, foreach=False))
+        self._test_complex_2d(functools.partial(optim.AdamW, foreach=False, amsgrad=True))
+        self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2))
+        self._test_complex_2d(functools.partial(optim.AdamW, weight_decay=0.2, amsgrad=True))
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.AdamW(None, lr=1e-2, weight_decay=-1)
 
@@ -1688,8 +1714,8 @@ class TestOptim(TestCase):
 
         num_tensors = 5
         for functional_optim, amsgrad, no_grad_scale in itertools.product((adam.adam, adamw.adamw), (False, True), (False, True)):
-            params, grads, exp_avgs, exp_avg_sqs = [
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
+            params, grads, exp_avgs, exp_avg_sqs = (
+                [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4))
             prev_params = [t.clone().detach() for t in params]
             max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
             state_steps = [torch.ones((), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
