@@ -91,6 +91,11 @@ class ArgsMismatchError(Unsupported):
         super().__init__(msg)
 
 
+class AttributeMutationError(Unsupported):
+    def __init__(self, msg):
+        super().__init__(msg)
+
+
 class CondOpArgsMismatchError(ArgsMismatchError):
     """
     Internal error from cond() due to arguments mismatch.
@@ -105,6 +110,8 @@ class UserErrorType(Enum):
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
     CONSTRAIN_VIOLATION = auto()
+    DYNAMIC_DIM = auto()
+    INVALID_INPUT = auto()
 
 
 class UserError(Unsupported):
@@ -152,7 +159,7 @@ class KeyErrorMsg:
         return self.__str__()
 
 
-def augment_exc_message(exc, msg="\n"):
+def augment_exc_message(exc, msg="\n", export=False):
     import traceback
 
     if (
@@ -167,7 +174,7 @@ def augment_exc_message(exc, msg="\n"):
  torch._dynamo.replay('{exc.record_filename}').\n"
 
     if not config.verbose and hasattr(exc, "real_stack"):
-        msg += "\nSet torch._dynamo.config.verbose=True or TORCHDYNAMO_VERBOSE=1 for more information\n"
+        msg += '\nSet TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information\n'
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
@@ -184,7 +191,7 @@ def augment_exc_message(exc, msg="\n"):
                 "this script to find the smallest traced graph which reproduces this error.\n"
             )
 
-    if not config.suppress_errors:
+    if not config.suppress_errors and not export:
         msg += (
             "\n\n"
             "You can suppress this exception and fall back to eager by setting:\n"
@@ -219,39 +226,44 @@ def filter_stack(stack):
     return user_stack
 
 
+def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
+    msg = str(
+        format_bytecode(
+            "WON'T CONVERT",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            code,
+        )
+    )
+    msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+    msg += format_exc()
+    if hasattr(exc, "real_stack"):
+        msg += (
+            "\n"
+            + "=" * 10
+            + " The above exception occurred while processing the following code "
+            + "=" * 10
+            + "\n\n"
+        )
+        stack_above_dynamo = []
+        if frame is not None:
+            stack_above_dynamo = filter_stack(extract_stack(frame))
+
+        msg += "".join(
+            format_list(stack_above_dynamo + list(reversed(get_real_stack(exc))))
+        )
+        msg += "\n"
+        msg += "=" * 10
+
+    return msg
+
+
 def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = str(
-            format_bytecode(
-                "WON'T CONVERT",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                code,
-            )
-        )
-        msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
-        msg += format_exc()
-        if hasattr(exc, "real_stack"):
-            msg += (
-                "\n"
-                + "=" * 10
-                + " The above exception occurred while processing the following code "
-                + "=" * 10
-                + "\n\n"
-            )
-            stack_above_dynamo = []
-            if frame is not None:
-                stack_above_dynamo = filter_stack(extract_stack(frame))
-
-            msg += "".join(
-                format_list(stack_above_dynamo + list(reversed(get_real_stack(exc))))
-            )
-            msg += "\n"
-            msg += "=" * 10
-
+        msg = format_error_msg_verbose(exec, code, record_filename, frame)
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
  line {code.co_firstlineno} \ndue to: \n{format_exc(limit=-1)}"

@@ -63,7 +63,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
 
-  std::tie(dq, dk, dv, grad_softmax) = fmha::mha_bwd(
+  std::tie(dq, dk, dv, grad_softmax) = pytorch_fmha::mha_bwd(
           contiguous_grad_out,
           query,
           key,
@@ -112,21 +112,17 @@ _efficient_attention_backward(
     int64_t max_seqlen_k,
     const at::Tensor& logsumexp,
     double dropout_p, // dropout probability
-    const at::Tensor& rng_seed_tensor, // seed using for generating random numbers for dropout
-    const at::Tensor& rng_offset_tensor, // offset into random number sequence
+    const at::Tensor& philox_seed, // seed using for generating random numbers for dropout
+    const at::Tensor& philox_offset, // offset into random number sequence
     int64_t custom_mask_type,
-    const c10::optional<double> scale) {
+    const c10::optional<double> scale,
+    c10::optional <int64_t> num_splits_key) {
   #if defined(USE_FLASH_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
-  // TODO_DRISS utilize these tensor correctly
-  // Appease the compilier for now.e These values
-  // will never be used Until we wire up dropout
-  int64_t rng_seed = *rng_seed_tensor.data_ptr<int64_t>();
-  int64_t rng_offset = *rng_offset_tensor.data_ptr<int64_t>();
 
-  // ndim
+    // ndim
   TORCH_CHECK(query.dim() == grad_out_.dim());
   TORCH_CHECK(query.dim() == key.dim());
   TORCH_CHECK(query.dim() == value.dim());
@@ -210,7 +206,22 @@ _efficient_attention_backward(
   at::Tensor workspace;
 
   const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
-  at::PhiloxCudaState rng_engine_inputs(rng_seed, rng_offset);
+
+  // See Note [Seed and Offset Device]
+  at::PhiloxCudaState rng_engine_inputs;
+  if (use_dropout) {
+    if (at::cuda::currentStreamCaptureStatus() ==
+        at::cuda::CaptureStatus::None) {
+      rng_engine_inputs = at::PhiloxCudaState(
+          *philox_seed.data_ptr<int64_t>(),
+          *philox_offset.data_ptr<int64_t>());
+    } else { // dropout + capture
+      rng_engine_inputs = at::PhiloxCudaState(
+          philox_seed.data_ptr<int64_t>(),
+          philox_offset.data_ptr<int64_t>(),
+          0);
+    }
+  }
 
   cudaDeviceProp* p = at::cuda::getDeviceProperties(query.device().index());
   const int computeCapability = p->major * 10 + p->minor;
@@ -361,11 +372,51 @@ _efficient_attention_backward(
       p.dropout_prob = dropout_p;
     }
 
+    // Heuristic for finding optimal number of splits
+    auto parallelism_without_split_key =
+        p.getBlocksGrid().x * p.getBlocksGrid().y * p.getBlocksGrid().z;
+    p.num_splits_key = cutlass::ceil_div(p.num_keys, Kernel::kBlockSizeJ);
+    if (num_splits_key.has_value()) { // Skip heuristic, if user provided an explicit value
+      p.num_splits_key = std::max<int64_t>(p.num_splits_key, num_splits_key.value());
+      // If we already have enough parallelism, split-keys can help
+      // better use L2 cache.
+      // This is negligible when the seqlen is too small tho
+      if (parallelism_without_split_key >= 256 &&
+          p.num_keys <= 2 * Kernel::kBlockSizeJ) {
+        p.num_splits_key = 1;
+      }
+      // Increasing `split_keys` leads to using more gmem for temporary storage
+      // when we need a staging area for gK/gV. let's avoid that
+      if (Kernel::kNeedsAccumGradK || Kernel::kNeedsAccumGradV) {
+        p.num_splits_key = std::min(
+            int(p.num_splits_key), 200 / (p.num_batches * p.num_heads));
+      }
+    }
+    if (!Kernel::kEnableSplitKeys || p.num_splits_key < 1) {
+      p.num_splits_key = 1;
+    }
+
+    auto& ctx = at::globalContext();
+    if (ctx.deterministicAlgorithms()) {
+      if (ctx.deterministicAlgorithmsWarnOnly()) {
+        TORCH_WARN_ONCE(
+            "Memory Efficient attention defaults to a non-deterministic algorithm. ",
+            "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
+      } else {
+        TORCH_CHECK(
+            num_splits_key.value_or(1) <= 1,
+            "Using `num_splits_key > 1` makes the algorithm non-deterministic, and pytorch's deterministic mode is enabled");
+        p.num_splits_key = 1;
+      }
+    }
     int64_t size_bytes = p.workspace_size();
     if (size_bytes) {
       workspace =
           at::empty({size_bytes}, query.options().dtype(at::ScalarType::Byte));
       p.workspace = (float*)workspace.data_ptr();
+      if (p.should_zero_workspace()) {
+        workspace.zero_();
+      }
     }
     Kernel::check_supported(p);
 
@@ -443,7 +494,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
 
-
   int64_t Nnz_q{batch_size * max_seqlen_batch_q};
   int64_t Nnz_kv{batch_size * max_seqlen_batch_k};
 
@@ -480,6 +530,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   return std::make_tuple(grad_q, grad_k, grad_v);
 }
 
+
 std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cuda(
     const at::Tensor& grad_out_,
     const at::Tensor& query,
@@ -487,8 +538,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
     const at::Tensor& value,
     const at::Tensor& out,
     const at::Tensor& logsumexp,
+    const at::Tensor& philox_seed,
+    const at::Tensor& philox_offset,
+    double dropout_p,
     bool causal,
-    bool chunk_grad_outputs,
     c10::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
@@ -502,17 +555,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
   Tensor grad_q, grad_k, grad_v, grad_bias;
 
   // TODO_DRISS
-  // These are place holders unitl we add support for dropout and bias
+  // These are place holders unitl we add support for bias
   auto bias = c10::nullopt;
-  Tensor seed_t = at::empty({}, at::dtype(at::kLong));
-  Tensor offset_t = at::empty({}, at::dtype(at::kLong));
 
   // Will add with signauter changes for dropout and bias
   // We are only handiling Dense inputs, but this should be passed
   // from forward to backward
   int64_t max_seqlen_q = q_t.size(1);
   int64_t max_seqlen_k = k_t.size(1);
-  double dropout_p = 0.0;
 
   sdp::CustomMaskType custom_mask_type = causal
     ? sdp::CustomMaskType::CausalFromTopLeft
@@ -532,10 +582,11 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
           max_seqlen_k,
           logsumexp,
           dropout_p,
-          seed_t,
-          offset_t,
+          philox_seed,
+          philox_offset,
           static_cast<int64_t>(custom_mask_type),
-          scale);
+          scale,
+          c10::nullopt);  // num_split_keys
   return std::make_tuple(
       grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
 }

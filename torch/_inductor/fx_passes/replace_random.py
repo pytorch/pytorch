@@ -2,6 +2,8 @@ import collections
 import logging
 
 import torch
+
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from .. import config, inductor_prims
 from ..pattern_matcher import (
     CallFunctionVarArgs,
@@ -55,6 +57,9 @@ def fuse_seed_creation_pass(graph: torch.fx.Graph):
             with V.fake_mode:
                 combined.meta["val"] = torch.empty(
                     [len(seeds)], device=device, dtype=torch.int64
+                )
+                combined.meta["tensor_meta"] = _extract_tensor_metadata(
+                    combined.meta["val"]
                 )
 
         for idx, seed in enumerate(seeds):

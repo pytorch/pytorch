@@ -1,5 +1,6 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/logging.h>
 
 #include <fcntl.h>
 #include <algorithm>
@@ -29,8 +30,8 @@ namespace c10d {
 namespace detail {
 namespace {
 
-// Abstract base class to handle thread state for TCPStoreMasterDaemon and
-// TCPStoreWorkerDaemon. Contains the windows/unix implementations to signal a
+// Abstract base class to handle thread state for TCPStoreMasterDaemon.
+// Contains the windows/unix implementations to signal a
 // shutdown sequence for the thread
 class BackgroundThread {
  public:
@@ -144,24 +145,16 @@ enum class QueryType : uint8_t {
   CHECK,
   WAIT,
   GETNUMKEYS,
-  WATCH_KEY,
   DELETE_KEY,
   APPEND,
   MULTI_GET,
   MULTI_SET,
+  CANCEL_WAIT,
 };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
-enum class WaitResponseType : uint8_t { STOP_WAITING };
-
-enum class WatchResponseType : uint8_t {
-  KEY_UPDATED,
-  KEY_CREATED,
-  KEY_DELETED,
-  KEY_CALLBACK_REGISTERED,
-  KEY_APPENDED,
-};
+enum class WaitResponseType : uint8_t { STOP_WAITING, WAIT_CANCELED };
 
 // Separate thread that is only launched on master
 class TCPStoreMasterDaemon : public BackgroundThread {
@@ -174,6 +167,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   void run();
   void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
+  void clearSocketWaitState(int socket);
 
   // The master runs on a single thread so only
   // one handler can be executed at a time
@@ -185,21 +179,14 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   void getNumKeysHandler(int socket) const;
   void deleteHandler(int socket);
   void waitHandler(int socket);
-  void watchHandler(int socket);
   void appendHandler(int socket);
   void multiGetHandler(int socket);
   void multiSetHandler(int socket);
+  void cancelWaitHandler(int socket);
 
   bool checkKeys(const std::vector<std::string>& keys) const;
   // Helper function to alerts waiting workers, used in setHandler, getHandler
   void wakeupWaitingClients(const std::string& key);
-  // Helper function used when the key is changed
-  // used in setHandler, addHandler, getHandler, deleteHandler
-  void sendKeyUpdatesToClients(
-      const std::string& key,
-      const enum WatchResponseType& type,
-      const std::vector<uint8_t>& oldData,
-      const std::vector<uint8_t>& newData);
   void doSet(const std::string& key, const std::vector<uint8_t>& newData);
 
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
@@ -207,8 +194,6 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   std::unordered_map<std::string, std::vector<int>> waitingSockets_;
   // From socket -> number of keys awaited
   std::unordered_map<int, size_t> keysAwaited_;
-  // From key -> the list of sockets watching the key
-  std::unordered_map<std::string, std::vector<int>> watchedSockets_;
 };
 
 // Simply start the daemon thread
@@ -241,33 +226,37 @@ void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
       // exception, other connections will get an exception once they try to
       // use the store. We will go ahead and close this connection whenever
       // we hit an exception here.
+      clearSocketWaitState(fds[fdIdx].fd);
 
-      // Remove all the tracking state of the close FD
-      for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
-        for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
-          if (*vecIt == fds[fdIdx].fd) {
-            vecIt = it->second.erase(vecIt);
-          } else {
-            ++vecIt;
-          }
-        }
-        if (it->second.empty()) {
-          it = waitingSockets_.erase(it);
-        } else {
-          ++it;
-        }
-      }
-      for (auto it = keysAwaited_.begin(); it != keysAwaited_.end();) {
-        if (it->first == fds[fdIdx].fd) {
-          it = keysAwaited_.erase(it);
-        } else {
-          ++it;
-        }
-      }
       fds.erase(fds.begin() + fdIdx);
       sockets_.erase(sockets_.begin() + fdIdx - CONNECT_SOCKET_OFFSET);
       --fdIdx;
       continue;
+    }
+  }
+}
+
+void TCPStoreMasterDaemon::clearSocketWaitState(int socket) {
+  // Remove all the tracking state of the close FD
+  for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
+    for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
+      if (*vecIt == socket) {
+        vecIt = it->second.erase(vecIt);
+      } else {
+        ++vecIt;
+      }
+    }
+    if (it->second.empty()) {
+      it = waitingSockets_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  for (auto it = keysAwaited_.begin(); it != keysAwaited_.end();) {
+    if (it->first == socket) {
+      it = keysAwaited_.erase(it);
+    } else {
+      ++it;
     }
   }
 }
@@ -303,15 +292,14 @@ void TCPStoreMasterDaemon::query(int socket) {
 
   } else if (qt == QueryType::DELETE_KEY) {
     deleteHandler(socket);
-
-  } else if (qt == QueryType::WATCH_KEY) {
-    watchHandler(socket);
   } else if (qt == QueryType::APPEND) {
     appendHandler(socket);
   } else if (qt == QueryType::MULTI_GET) {
     multiGetHandler(socket);
   } else if (qt == QueryType::MULTI_SET) {
     multiSetHandler(socket);
+  } else if (qt == QueryType::CANCEL_WAIT) {
+    cancelWaitHandler(socket);
   } else {
     TORCH_CHECK(false, "Unexpected query type");
   }
@@ -330,37 +318,12 @@ void TCPStoreMasterDaemon::wakeupWaitingClients(const std::string& key) {
   }
 }
 
-void TCPStoreMasterDaemon::sendKeyUpdatesToClients(
-    const std::string& key,
-    const enum WatchResponseType& type,
-    const std::vector<uint8_t>& oldData,
-    const std::vector<uint8_t>& newData) {
-  for (int socket : watchedSockets_[key]) {
-    tcputil::sendValue<WatchResponseType>(socket, type);
-    tcputil::sendString(socket, key, true);
-    tcputil::sendVector<uint8_t>(socket, oldData);
-    tcputil::sendVector<uint8_t>(socket, newData);
-  }
-}
-
 void TCPStoreMasterDaemon::doSet(
     const std::string& key,
     const std::vector<uint8_t>& newData) {
-  std::vector<uint8_t> oldData;
-  bool newKey = true;
-  auto it = tcpStore_.find(key);
-  if (it != tcpStore_.end()) {
-    oldData = it->second;
-    newKey = false;
-  }
   tcpStore_[key] = newData;
   // On "set", wake up all clients that have been waiting
   wakeupWaitingClients(key);
-  // Send key update to all watching clients
-  newKey ? sendKeyUpdatesToClients(
-               key, WatchResponseType::KEY_CREATED, oldData, newData)
-         : sendKeyUpdatesToClients(
-               key, WatchResponseType::KEY_UPDATED, oldData, newData);
 }
 
 void TCPStoreMasterDaemon::setHandler(int socket) {
@@ -378,10 +341,6 @@ void TCPStoreMasterDaemon::compareSetHandler(int socket) {
   if (pos == tcpStore_.end()) {
     if (currentValue.empty()) {
       tcpStore_[key] = newValue;
-
-      // Send key update to all watching clients
-      sendKeyUpdatesToClients(
-          key, WatchResponseType::KEY_CREATED, currentValue, newValue);
       tcputil::sendVector<uint8_t>(socket, newValue);
     } else {
       // TODO: This code path is not ideal as we are "lying" to the caller in
@@ -391,10 +350,6 @@ void TCPStoreMasterDaemon::compareSetHandler(int socket) {
   } else {
     if (pos->second == currentValue) {
       pos->second = std::move(newValue);
-
-      // Send key update to all watching clients
-      sendKeyUpdatesToClients(
-          key, WatchResponseType::KEY_UPDATED, currentValue, pos->second);
     }
     tcputil::sendVector<uint8_t>(socket, pos->second);
   }
@@ -404,15 +359,11 @@ void TCPStoreMasterDaemon::addHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   int64_t addVal = tcputil::recvValue<int64_t>(socket);
 
-  bool newKey = true;
-  std::vector<uint8_t> oldData;
   auto it = tcpStore_.find(key);
   if (it != tcpStore_.end()) {
-    oldData = it->second;
     auto buf = reinterpret_cast<const char*>(it->second.data());
     auto len = it->second.size();
     addVal += std::stoll(std::string(buf, len));
-    newKey = false;
   }
   auto addValStr = std::to_string(addVal);
   std::vector<uint8_t> newData =
@@ -422,11 +373,6 @@ void TCPStoreMasterDaemon::addHandler(int socket) {
   tcputil::sendValue<int64_t>(socket, addVal);
   // On "add", wake up all clients that have been waiting
   wakeupWaitingClients(key);
-  // Send key update to all watching clients
-  newKey ? sendKeyUpdatesToClients(
-               key, WatchResponseType::KEY_CREATED, oldData, newData)
-         : sendKeyUpdatesToClients(
-               key, WatchResponseType::KEY_UPDATED, oldData, newData);
 }
 
 void TCPStoreMasterDaemon::getHandler(int socket) const {
@@ -441,14 +387,6 @@ void TCPStoreMasterDaemon::getNumKeysHandler(int socket) const {
 
 void TCPStoreMasterDaemon::deleteHandler(int socket) {
   std::string key = tcputil::recvString(socket);
-  auto it = tcpStore_.find(key);
-  if (it != tcpStore_.end()) {
-    std::vector<uint8_t> oldData = it->second;
-    // Send key update to all watching clients
-    std::vector<uint8_t> newData;
-    sendKeyUpdatesToClients(
-        key, WatchResponseType::KEY_DELETED, oldData, newData);
-  }
   auto numDeleted = tcpStore_.erase(key);
   tcputil::sendValue<int64_t>(socket, numDeleted);
 }
@@ -491,36 +429,17 @@ void TCPStoreMasterDaemon::waitHandler(int socket) {
   }
 }
 
-void TCPStoreMasterDaemon::watchHandler(int socket) {
-  std::string key = tcputil::recvString(socket);
-
-  // Record the socket to respond to when the key is updated
-  watchedSockets_[key].push_back(socket);
-
-  // Send update to TCPStoreWorkerDaemon on client
-  tcputil::sendValue<WatchResponseType>(
-      socket, WatchResponseType::KEY_CALLBACK_REGISTERED);
-}
-
 void TCPStoreMasterDaemon::appendHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   std::vector<uint8_t> newData = tcputil::recvVector<uint8_t>(socket);
-  bool newKey = true;
   auto it = tcpStore_.find(key);
   if (it != tcpStore_.end()) {
     it->second.insert(it->second.end(), newData.begin(), newData.end());
-    newKey = false;
   } else {
     tcpStore_[key] = newData;
   }
   // we should not have clients waiting if we're appending, so it's all fine
   wakeupWaitingClients(key);
-  // Send key update to all watching clients
-  std::vector<uint8_t> oldData;
-  newKey ? sendKeyUpdatesToClients(
-               key, WatchResponseType::KEY_CREATED, oldData, newData)
-         : sendKeyUpdatesToClients(
-               key, WatchResponseType::KEY_APPENDED, oldData, newData);
 }
 
 void TCPStoreMasterDaemon::multiGetHandler(int socket) {
@@ -542,6 +461,14 @@ void TCPStoreMasterDaemon::multiSetHandler(int socket) {
     auto value = tcputil::recvVector<uint8_t>(socket);
     doSet(key, value);
   }
+}
+
+void TCPStoreMasterDaemon::cancelWaitHandler(int socket) {
+  clearSocketWaitState(socket);
+
+  // Send update to TCPStoreWorkerDaemon on client
+  tcputil::sendValue<WaitResponseType>(
+      socket, detail::WaitResponseType::WAIT_CANCELED);
 }
 
 bool TCPStoreMasterDaemon::checkKeys(
@@ -652,169 +579,6 @@ void TCPStoreMasterDaemon::run() {
 }
 #endif
 
-// Separate thread that is launched on all instances (including master)
-// Right now only handles callbacks registered from watchKey()
-class TCPStoreWorkerDaemon : public BackgroundThread {
- public:
-  explicit TCPStoreWorkerDaemon(Socket&& listenSocket);
-  ~TCPStoreWorkerDaemon() override;
-  // Set the callback to run key change
-  void setCallback(std::string key, WatchKeyCallback cb);
-  void waitForCallbackRegistration() {
-    // Block until callback has been registered successfully
-    std::unique_lock<std::mutex> callbackRegistrationLock(
-        callbackRegistrationMutex_);
-    callbackRegisteredCV_.wait(
-        callbackRegistrationLock, [&] { return callbackRegisteredData_; });
-
-    // Reset payload for next callback
-    callbackRegisteredData_ = false;
-  }
-  void setCallbackRegistered() {
-    {
-      std::unique_lock<std::mutex> callbackRegistrationLock(
-          callbackRegistrationMutex_);
-      callbackRegisteredData_ = true;
-    }
-    callbackRegisteredCV_.notify_one();
-  }
-
- private:
-  void run();
-  void callbackHandler(int socket);
-  // List of callbacks map each watched key
-  std::unordered_map<std::string, WatchKeyCallback> keyToCallbacks_{};
-  std::mutex keyToCallbacksMutex_{};
-  std::mutex callbackRegistrationMutex_{};
-  std::condition_variable callbackRegisteredCV_{};
-  bool callbackRegisteredData_ = false;
-};
-
-// TCPStoreListener class methods
-TCPStoreWorkerDaemon::TCPStoreWorkerDaemon(Socket&& listenSocket)
-    : BackgroundThread{std::move(listenSocket)} {
-  daemonThread_ = std::thread{&TCPStoreWorkerDaemon::run, this};
-}
-
-TCPStoreWorkerDaemon::~TCPStoreWorkerDaemon() {
-  dispose();
-}
-
-void TCPStoreWorkerDaemon::setCallback(
-    std::string key,
-    WatchKeyCallback callback) {
-  const std::lock_guard<std::mutex> lock(keyToCallbacksMutex_);
-  keyToCallbacks_[key] = callback;
-}
-
-// Runs all the callbacks that the worker has registered
-void TCPStoreWorkerDaemon::callbackHandler(int socket) {
-  auto watchResponse = tcputil::recvValue<WatchResponseType>(socket);
-  if (watchResponse == WatchResponseType::KEY_CALLBACK_REGISTERED) {
-    // Notify the waiting "watchKey" operation to return
-    setCallbackRegistered();
-    return;
-  }
-  std::string key = tcputil::recvString(socket);
-  std::vector<uint8_t> currentValueVec = tcputil::recvVector<uint8_t>(socket);
-  std::vector<uint8_t> newValueVec = tcputil::recvVector<uint8_t>(socket);
-  c10::optional<std::string> currentValue;
-  if (watchResponse == WatchResponseType::KEY_CREATED) {
-    assert(currentValueVec.empty());
-    currentValue = c10::nullopt;
-  } else {
-    currentValue = std::string(currentValueVec.begin(), currentValueVec.end());
-  }
-  c10::optional<std::string> newValue;
-  if (watchResponse == WatchResponseType::KEY_DELETED) {
-    assert(newValueVec.empty());
-    newValue = c10::nullopt;
-  } else {
-    newValue = std::string(newValueVec.begin(), newValueVec.end());
-  }
-  const std::lock_guard<std::mutex> lock(keyToCallbacksMutex_);
-  keyToCallbacks_.at(key)(currentValue, newValue);
-}
-
-#ifdef _WIN32
-void TCPStoreWorkerDaemon::run() {
-  std::vector<struct pollfd> fds;
-  tcputil::addPollfd(fds, storeListenSocket_.handle(), POLLIN);
-
-  while (true) {
-    // Check control and exit early if triggered
-    int res;
-    SYSCHECK_ERR_RETURN_NEG1(
-        res = WSAPoll(fds.data(), fds.size(), checkTimeout_.count()))
-    if (res == 0) {
-      auto rvPoll = WaitForSingleObject(ghStopEvent_, 0);
-      if (rvPoll != WAIT_TIMEOUT) {
-        break;
-      }
-      continue;
-    }
-
-    // if connection is closed gracefully by master, peeked data will return 0
-    char data;
-    int ret = recv(fds[0].fd, &data, 1, MSG_PEEK);
-    if (ret == 0) {
-      auto rvData = WaitForSingleObject(ghStopEvent_, 0);
-      if (rvData != WAIT_TIMEOUT) {
-        break;
-      }
-      continue;
-    }
-
-    // valid request, perform callback logic
-    callbackHandler(fds[0].fd);
-  }
-}
-#else
-void TCPStoreWorkerDaemon::run() {
-  std::vector<struct pollfd> fds;
-  // Although we haven't found any documentation or literature describing this,
-  // we've seen cases that, under certain circumstances, the read end of the
-  // pipe won't receive POLLHUP when the write end is closed. However, under
-  // the same circumstances, writing to the pipe will guarantee POLLIN to be
-  // received on the read end.
-  //
-  // For more reliable termination, the main thread will write a byte to the
-  // pipe before closing it, and the background thread will poll for both
-  // POLLIN and POLLHUP.
-  tcputil::addPollfd(fds, controlPipeFd_[0], POLLIN | POLLHUP);
-  tcputil::addPollfd(fds, storeListenSocket_.handle(), POLLIN);
-
-  while (true) {
-    SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
-
-    // Check control and exit early if triggered
-    // The pipe receives an event which tells us to shutdown the listener thread
-    if (fds[0].revents != 0) {
-      // The main thread will write a byte to the pipe then close it before
-      // joining the background thread
-      if (fds[0].revents & ~(POLLIN | POLLHUP)) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
-            "Unexpected poll revent on the control pipe's reading fd: " +
-                std::to_string(fds[0].revents));
-      }
-      break;
-    }
-
-    // if connection is closed gracefully by master, peeked data will return 0
-    char data = 0;
-    int ret = recv(fds[1].fd, &data, 1, MSG_PEEK);
-    if (ret == 0) {
-      continue;
-    }
-
-    // valid request, perform callback logic
-    callbackHandler(fds[1].fd);
-  }
-}
-#endif
-
 } // namespace
 
 // Manages the lifecycle of a server daemon.
@@ -850,7 +614,9 @@ std::mutex TCPServer::cache_mutex_{};
 
 std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
   auto startCore = [&opts]() {
-    Socket socket = Socket::listen(opts.port);
+    Socket socket = opts.masterListenFd.has_value()
+        ? Socket::listenFromFd(*opts.masterListenFd, opts.port)
+        : Socket::listen(opts.port);
 
     std::uint16_t port = socket.port();
 
@@ -896,24 +662,8 @@ class TCPClient {
       const SocketAddress& addr,
       const TCPStoreOptions& opts);
 
-  void sendCommand(QueryType type) {
-    tcputil::sendValue<QueryType>(socket_.handle(), type);
-  }
-
-  void sendCommandForKey(QueryType type, const std::string& key);
-
-  void sendBytes(const std::vector<std::uint8_t>& value) {
-    tcputil::sendVector<std::uint8_t>(socket_.handle(), value);
-  }
-
-  void sendString(const std::string& value, bool more = true) {
-    tcputil::sendString(socket_.handle(), value, more);
-  }
-  void sendStrings(c10::ArrayRef<std::string> value);
-
-  template <typename T>
-  void sendValue(const T& value) {
-    tcputil::sendValue<T>(socket_.handle(), value);
+  void sendRaw(uint8_t* data, size_t lenght) {
+    tcputil::sendBytes(socket_.handle(), data, lenght);
   }
 
   std::vector<std::uint8_t> receiveBits() {
@@ -924,7 +674,13 @@ class TCPClient {
   T receiveValue() {
     return tcputil::recvValue<T>(socket_.handle());
   }
-
+  template <typename T>
+  bool receiveValueWithTimeout(T& t, std::chrono::milliseconds timeout) {
+    if (!socket_.waitForInput(timeout))
+      return false;
+    t = tcputil::recvValue<T>(socket_.handle());
+    return true;
+  }
   void setTimeout(std::chrono::milliseconds value);
 
   explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
@@ -941,29 +697,6 @@ std::unique_ptr<TCPClient> TCPClient::connect(
       addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
 
   return std::make_unique<TCPClient>(std::move(socket));
-}
-
-void TCPClient::sendCommandForKey(QueryType type, const std::string& key) {
-  tcputil::sendValue<QueryType>(socket_.handle(), type);
-
-  bool withValue = type == QueryType::SET || type == QueryType::COMPARE_SET ||
-      type == QueryType::ADD;
-
-  tcputil::sendString(socket_.handle(), key, withValue);
-}
-
-void TCPClient::sendStrings(c10::ArrayRef<std::string> value) {
-  std::size_t size = value.size();
-
-  tcputil::sendBytes<std::size_t>(socket_.handle(), &size, 1, size > 0);
-
-  if (value.empty()) {
-    return;
-  }
-
-  for (auto pos = value.begin(), last = value.end() - 1; pos <= last; ++pos) {
-    tcputil::sendString(socket_.handle(), *pos, pos != last);
-  }
 }
 
 void TCPClient::setTimeout(std::chrono::milliseconds value) {
@@ -989,52 +722,51 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
       sizeof(timeoutTV)));
 }
 
-class TCPCallbackClient {
+class SendBuffer {
+  // ethernet mtu 1500 - 40 (ip v6 header) - 20 (tcp header)
+  const size_t FLUSH_WATERMARK = 1440;
+  std::vector<uint8_t> buffer;
+  detail::TCPClient& client;
+
+  void maybeFlush() {
+    if (buffer.size() >= FLUSH_WATERMARK) {
+      flush();
+    }
+  }
+
  public:
-  static std::unique_ptr<TCPCallbackClient> connect(
-      const SocketAddress& addr,
-      const TCPStoreOptions& opts);
+  SendBuffer(detail::TCPClient& client, detail::QueryType cmd)
+      : client(client) {
+    buffer.reserve(32); // enough for most commands
+    buffer.push_back((uint8_t)cmd);
+  }
 
-  void setCallback(const std::string& key, WatchKeyCallback callback);
+  void appendString(const std::string& str) {
+    appendValue<uint64_t>(str.size());
+    buffer.insert(buffer.end(), str.begin(), str.end());
+    maybeFlush();
+  }
 
-  explicit TCPCallbackClient(
-      int rawSocket,
-      std::unique_ptr<TCPStoreWorkerDaemon>&& daemon)
-      : rawSocket_{rawSocket}, daemon_{std::move(daemon)} {}
+  void appendBytes(const std::vector<uint8_t>& vec) {
+    appendValue<uint64_t>(vec.size());
+    buffer.insert(buffer.end(), vec.begin(), vec.end());
+    maybeFlush();
+  }
 
- private:
-  int rawSocket_;
-  std::unique_ptr<TCPStoreWorkerDaemon> daemon_;
-  std::mutex mutex_;
+  template <typename T>
+  void appendValue(T value) {
+    uint8_t* begin = (uint8_t*)&value;
+    buffer.insert(buffer.end(), begin, begin + sizeof(T));
+    maybeFlush();
+  }
+
+  void flush() {
+    if (buffer.size() > 0) {
+      client.sendRaw(buffer.data(), buffer.size());
+      buffer.clear();
+    }
+  }
 };
-
-std::unique_ptr<TCPCallbackClient> TCPCallbackClient::connect(
-    const SocketAddress& addr,
-    const TCPStoreOptions& opts) {
-  auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
-  Socket socket = Socket::connect(
-      addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
-
-  int rawSocket = socket.handle();
-
-  auto daemon = std::make_unique<TCPStoreWorkerDaemon>(std::move(socket));
-
-  return std::make_unique<TCPCallbackClient>(rawSocket, std::move(daemon));
-}
-
-void TCPCallbackClient::setCallback(
-    const std::string& key,
-    WatchKeyCallback callback) {
-  std::lock_guard<std::mutex> guard{mutex_};
-
-  daemon_->setCallback(key, callback);
-
-  tcputil::sendValue<QueryType>(rawSocket_, QueryType::WATCH_KEY);
-
-  tcputil::sendString(rawSocket_, key);
-
-  daemon_->waitForCallbackRegistration();
-}
 
 } // namespace detail
 
@@ -1066,6 +798,8 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
   if (opts.isServer) {
     server_ = detail::TCPServer::start(opts);
+    // server successfully started
+    C10D_DEBUG("The server has started on port = {}.", server_->port());
 
     addr_.port = server_->port();
   } else {
@@ -1073,12 +807,12 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   }
 
   client_ = detail::TCPClient::connect(addr_, opts);
+  // TCP connection established
+  C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
 
   if (opts.waitWorkers) {
     waitForWorkers();
   }
-
-  callbackClient_ = detail::TCPCallbackClient::connect(addr_, opts);
 }
 
 TCPStore::~TCPStore() = default;
@@ -1116,8 +850,10 @@ void TCPStore::waitForWorkers() {
 
 void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
-  client_->sendCommandForKey(detail::QueryType::SET, keyPrefix_ + key);
-  client_->sendBytes(data);
+  detail::SendBuffer buffer(*client_, detail::QueryType::SET);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.appendBytes(data);
+  buffer.flush();
 }
 
 std::vector<uint8_t> TCPStore::compareSet(
@@ -1125,9 +861,11 @@ std::vector<uint8_t> TCPStore::compareSet(
     const std::vector<uint8_t>& expectedValue,
     const std::vector<uint8_t>& desiredValue) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
-  client_->sendCommandForKey(detail::QueryType::COMPARE_SET, keyPrefix_ + key);
-  client_->sendBytes(expectedValue);
-  client_->sendBytes(desiredValue);
+  detail::SendBuffer buffer(*client_, detail::QueryType::COMPARE_SET);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.appendBytes(expectedValue);
+  buffer.appendBytes(desiredValue);
+  buffer.flush();
 
   return client_->receiveBits();
 }
@@ -1139,7 +877,10 @@ std::vector<uint8_t> TCPStore::get(const std::string& key) {
 
 std::vector<uint8_t> TCPStore::doGet(const std::string& key) {
   doWait(key, timeout_);
-  client_->sendCommandForKey(detail::QueryType::GET, key);
+  detail::SendBuffer buffer(*client_, detail::QueryType::GET);
+  buffer.appendString(key);
+  buffer.flush();
+
   return client_->receiveBits();
 }
 
@@ -1150,38 +891,40 @@ int64_t TCPStore::add(const std::string& key, int64_t value) {
 
 bool TCPStore::deleteKey(const std::string& key) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
-  client_->sendCommandForKey(detail::QueryType::DELETE_KEY, keyPrefix_ + key);
+  detail::SendBuffer buffer(*client_, detail::QueryType::DELETE_KEY);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.flush();
+
   auto numDeleted = client_->receiveValue<std::int64_t>();
   return numDeleted == 1;
 }
 
-void TCPStore::watchKey(const std::string& key, WatchKeyCallback callback) {
-  const std::lock_guard<std::mutex> lock(activeOpLock_);
-  callbackClient_->setCallback(keyPrefix_ + key, callback);
-}
-
 int64_t TCPStore::incrementValueBy(const std::string& key, int64_t delta) {
-  client_->sendCommandForKey(detail::QueryType::ADD, key);
-  client_->sendValue<std::int64_t>(delta);
+  detail::SendBuffer buff(*client_, detail::QueryType::ADD);
+  buff.appendString(key);
+  buff.appendValue<std::int64_t>(delta);
+  buff.flush();
+
   return client_->receiveValue<std::int64_t>();
 }
 
 int64_t TCPStore::getNumKeys() {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
-  client_->sendCommand(detail::QueryType::GETNUMKEYS);
+  detail::SendBuffer buffer(*client_, detail::QueryType::GETNUMKEYS);
+  buffer.flush();
+
   return client_->receiveValue<std::int64_t>();
 }
 
 bool TCPStore::check(const std::vector<std::string>& keys) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
-  std::vector<std::string> prefixedKeys{};
-  prefixedKeys.reserve(keys.size());
-  for (const std::string& key : keys) {
-    prefixedKeys.emplace_back(keyPrefix_ + key);
-  }
+  detail::SendBuffer buffer(*client_, detail::QueryType::CHECK);
+  buffer.appendValue(keys.size());
 
-  client_->sendCommand(detail::QueryType::CHECK);
-  client_->sendStrings(prefixedKeys);
+  for (const std::string& key : keys) {
+    buffer.appendString(keyPrefix_ + key);
+  }
+  buffer.flush();
 
   auto response = client_->receiveValue<detail::CheckResponseType>();
   if (response == detail::CheckResponseType::READY) {
@@ -1213,24 +956,53 @@ void TCPStore::wait(
 void TCPStore::doWait(
     c10::ArrayRef<std::string> keys,
     std::chrono::milliseconds timeout) {
-  // TODO: Should we revert to the original timeout at the end of the call?
-  client_->setTimeout(timeout);
-
-  client_->sendCommand(detail::QueryType::WAIT);
-  client_->sendStrings(keys);
-
-  auto response = client_->receiveValue<detail::WaitResponseType>();
-  if (response != detail::WaitResponseType::STOP_WAITING) {
-    TORCH_CHECK(false, "Stop_waiting response is expected");
+  {
+    detail::SendBuffer buffer(*client_, detail::QueryType::WAIT);
+    buffer.appendValue(keys.size());
+    for (const std::string& key : keys) {
+      buffer.appendString(key);
+    }
+    buffer.flush();
   }
+
+  detail::WaitResponseType response;
+  if (client_->receiveValueWithTimeout<detail::WaitResponseType>(
+          response, timeout)) {
+    if (response != detail::WaitResponseType::STOP_WAITING) {
+      TORCH_CHECK(false, "Stop_waiting response is expected");
+    }
+    return;
+  }
+  // this is the cancel wait timeout, once here we expect the server to respond
+  // in a timely fashion
+  {
+    detail::SendBuffer buffer(*client_, detail::QueryType::CANCEL_WAIT);
+    buffer.flush();
+  }
+
+  response = client_->receiveValue<detail::WaitResponseType>();
+  // this can happen if the server responds before we cancel, just ignore it
+  if (response != detail::WaitResponseType::WAIT_CANCELED) {
+    if (response != detail::WaitResponseType::STOP_WAITING) {
+      TORCH_CHECK(false, "Stop_waiting response is expected");
+    }
+
+    response = client_->receiveValue<detail::WaitResponseType>(); // ignore
+    if (response != detail::WaitResponseType::WAIT_CANCELED) {
+      TORCH_CHECK(false, "wait_canceled response is expected");
+    }
+  }
+  TORCH_CHECK(false, "Socket Timeout");
 }
 
 void TCPStore::append(
     const std::string& key,
     const std::vector<uint8_t>& data) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
-  client_->sendCommandForKey(detail::QueryType::APPEND, keyPrefix_ + key);
-  client_->sendBytes(data);
+  detail::SendBuffer buffer(*client_, detail::QueryType::APPEND);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.appendBytes(data);
+  buffer.flush();
 }
 
 std::vector<std::vector<uint8_t>> TCPStore::multiGet(
@@ -1243,8 +1015,12 @@ std::vector<std::vector<uint8_t>> TCPStore::multiGet(
   }
   doWait(prefixedKeys, timeout_);
 
-  client_->sendCommand(detail::QueryType::MULTI_GET);
-  client_->sendStrings(prefixedKeys);
+  detail::SendBuffer buffer(*client_, detail::QueryType::MULTI_GET);
+  buffer.appendValue(keys.size());
+  for (auto& key : prefixedKeys) {
+    buffer.appendString(key);
+  }
+  buffer.flush();
 
   std::vector<std::vector<uint8_t>> result;
   result.reserve(keys.size());
@@ -1262,12 +1038,13 @@ void TCPStore::multiSet(
       "multiSet keys and values vectors must be of same size");
   const std::lock_guard<std::mutex> lock(activeOpLock_);
 
-  client_->sendCommand(detail::QueryType::MULTI_SET);
-  client_->sendValue<std::int64_t>(keys.size());
+  detail::SendBuffer buffer(*client_, detail::QueryType::MULTI_SET);
+  buffer.appendValue<std::int64_t>(keys.size());
   for (auto i : c10::irange(keys.size())) {
-    client_->sendString(keyPrefix_ + keys[i], true);
-    client_->sendBytes(values[i]);
+    buffer.appendString(keyPrefix_ + keys[i]);
+    buffer.appendBytes(values[i]);
   }
+  buffer.flush();
 }
 
 bool TCPStore::hasExtendedApi() const {

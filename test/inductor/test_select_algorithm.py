@@ -8,10 +8,11 @@ import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import BenchmarkRequest
 
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
@@ -43,6 +44,14 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
+    def check_counter(self, counter, expected):
+        if not inductor_config.cpp_wrapper:
+            self.assertEqual(counter, expected)
+        else:
+            # cpp_wrapper for the CUDA backend runs two passes
+            self.assertEqual(counter, 2 * expected)
+
+    @expectedFailureDynamicWrapper
     @patches
     def test_linear_relu(self):
         @torch.compile
@@ -52,13 +61,14 @@ class TestSelectAlgorithm(TestCase):
         foo(
             torch.randn(64, 32, device="cuda"),
             torch.randn(16, 32, device="cuda"),
-            torch.randn(16, device="cuda"),
+            torch.randn(1, 16, device="cuda"),
         )
         # Autotuning checks correctness of each version
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
         # It would be nice to assert this got fused into a single kernel, but that
         # only happens if we select a triton template (and not aten).
 
+    @expectedFailureDynamicWrapper
     @patches
     def test_addmm(self):
         @torch.compile
@@ -72,8 +82,7 @@ class TestSelectAlgorithm(TestCase):
         )
 
         foo(*inps)
-        # Autotuning checks correctness of each version
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
     @patches
@@ -92,6 +101,7 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocm
     @patches
     def test_mm(self):
         @torch.compile
@@ -102,7 +112,7 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(8, 32, device="cuda"),
             torch.randn(32, 8, device="cuda"),
         )
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     def test__int_mm(self):
@@ -184,6 +194,43 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
+    def test_mm_plus_mm2(self):
+        @torch.compile
+        def foo(a, b, c, d):
+            return (a @ b) + (c @ d)
+
+        foo(
+            torch.randn(512, 512, device="cuda"),
+            torch.randn(512, 512, device="cuda"),
+            torch.randn(512, 512, device="cuda"),
+            torch.randn(512, 512, device="cuda"),
+        )
+        # Autotuning checks correctness of each version
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_mm_dup_args(self):
+        @torch.compile
+        def foo(a):
+            return torch.mm(a, a)
+
+        foo(torch.randn(32, 32, device="cuda"))
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_mm_dup_args_view(self):
+        @torch.compile
+        def foo(a):
+            q = a[:32, :]
+            k = a[32:, :]
+            return torch.mm(q, k.transpose(0, 1))
+
+        foo(torch.randn(64, 64, device="cuda"))
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @skipIfRocm
+    @expectedFailureDynamicWrapper
+    @patches
     def test_convolution1(self):
         @torch.compile
         def foo(x, w, b):
@@ -205,8 +252,9 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(34, device="cuda"),
         )
         # Autotuning checks correctness of each version
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocm
     @patches
     def test_mm_dropout(self):
         @torch.compile
@@ -223,6 +271,7 @@ class TestSelectAlgorithm(TestCase):
         )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocm
     @patches
     @torch._inductor.config.patch(conv_1x1_as_mm=False)
     def test_convolution2(self):
@@ -299,5 +348,5 @@ class TestSelectAlgorithm(TestCase):
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
-    if IS_LINUX and HAS_CUDA and is_big_gpu(0) and not TEST_WITH_ROCM:
+    if IS_LINUX and HAS_CUDA and is_big_gpu(0):
         run_tests()

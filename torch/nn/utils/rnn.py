@@ -61,7 +61,7 @@ class PackedSequence(PackedSequence_):
 
     """
     def __new__(cls, data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
-        return super(PackedSequence, cls).__new__(
+        return super().__new__(
             cls,
             *_packed_sequence_init_args(data, batch_sizes, sorted_indices,
                                         unsorted_indices))
@@ -248,7 +248,7 @@ def pack_padded_sequence(
                           'values, and it will treat them as constants, likely rendering '
                           'the trace incorrect for any other combination of lengths.',
                           stacklevel=2)
-        lengths = torch.as_tensor(lengths, dtype=torch.int64)
+        lengths = torch.as_tensor(lengths, dtype=torch.int64, device='cpu')
     else:
         lengths = lengths.to(dtype=torch.int64)
 

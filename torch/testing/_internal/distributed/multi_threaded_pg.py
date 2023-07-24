@@ -12,6 +12,7 @@ from torch._C._distributed_c10d import (
     AllgatherOptions,
     AllreduceOptions,
     AllToAllOptions,
+    BarrierOptions,
     BroadcastOptions,
     ReduceScatterOptions,
     ScatterOptions,
@@ -105,6 +106,7 @@ class AllGather:
             for dest in data:
                 dest_tensor = dest[0][0][src_rank]
                 dest_tensor.copy_(src_tensor)
+
 
 class Scatter:
     def __init__(self, src):
@@ -298,6 +300,9 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
+    def barrier(self, opts=BarrierOptions()):
+        return self.allreduce(tensor_list=[torch.ones(1)])
+
     def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
         coll = ProcessLocalGroup._start_coll(AllGather(), self)
         res = coll.join(self._rank, (output_tensors, input_tensor))
@@ -336,6 +341,12 @@ class ProcessLocalGroup(dist.ProcessGroup):
         tensor_list = list(torch.chunk(input_tensor, self._world_size))
         return self.reduce_scatter([output_tensor], [tensor_list], opts)
 
+    def allgather_into_tensor_coalesced(self, output_tensor_list, input_tensor_list):
+        res = None
+        for o_t, i_t in zip(output_tensor_list, input_tensor_list):
+            res = self._allgather_base(o_t, i_t)
+        return res
+
     def __init__(self, rank, world_size):
         super().__init__(rank, world_size)
         self._rank = rank
@@ -344,6 +355,8 @@ class ProcessLocalGroup(dist.ProcessGroup):
         if isinstance(world, ThreadLocalWorld):
             world = world._get_world()
         self._world = weakref.ref(world)
+        self._ctx = torch.autograd.set_multithreading_enabled(False)
+
         ProcessLocalGroup._register(self)
 
     def size(self):
@@ -442,12 +455,16 @@ class ThreadLocalWorld:
 
 
 _old_pg_world = None
+_ctx_manager = None
 
 
 def _install_threaded_pg():
     global _old_pg_world
+    global _ctx_manager
     _old_pg_world = dist.distributed_c10d._world
     dist.distributed_c10d._world = ThreadLocalWorld()
+    _ctx_manager = torch.autograd.set_multithreading_enabled(False)
+
     return dist.distributed_c10d._world
 
 

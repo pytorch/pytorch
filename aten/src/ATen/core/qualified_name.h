@@ -28,7 +28,7 @@ struct QualifiedName {
       pos = name.find(delimiter_, startSearchFrom);
     }
 
-    auto finalAtom = name.substr(startSearchFrom, pos - startSearchFrom);
+    auto finalAtom = name.substr(startSearchFrom);
     TORCH_INTERNAL_ASSERT(
         !finalAtom.empty(), "Invalid name for qualified name: '", name, "'");
     atoms_.emplace_back(std::move(finalAtom));

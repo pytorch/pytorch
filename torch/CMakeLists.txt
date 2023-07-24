@@ -87,6 +87,16 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
 
+if(USE_ASAN AND TARGET Sanitizer::address)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::address)
+endif()
+if(USE_ASAN AND TARGET Sanitizer::undefined)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::undefined)
+endif()
+if(USE_TSAN AND TARGET Sanitizer::thread)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::thread)
+endif()
+
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
 set(TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS)
