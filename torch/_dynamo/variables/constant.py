@@ -9,12 +9,29 @@ from ..utils import HAS_NUMPY, istype, np
 from .base import typestr, VariableTracker
 
 
+_type_to_assert_reason = {
+    # NB - We CAN have ConstantVariable(set) because of how sets interact with guards.
+    # A locally created set should always become a SetVariable, as the items in the set will already either be sourced
+    # from somewhere else, or unsourced. An input set would imply sources derived from set contents. For example, an
+    # input list's contents will have a source like some_list[0], some_list[1][1], etc. For a set, arbitrary access is
+    # not possible. This is a solvable problem, but one we have not taken on yet. As such, input sets are not allowed to
+    # become SetVariables. The solution here is to create a ConstantSetVariable that is more like a ConstantVariable.
+    # As this does not exist, we cannot add sets to this invariant.
+    list: "List types must use ListVariable.",
+    dict: "Dict types must use ConstDictVariable.",
+    torch.Tensor: "Tensor types must use TensorVariable.",
+    torch.SymInt: "SymInts must use SymNodeVariable. "
+    "If the underlying value is static, we will create a ConstantVariable and specialize.",
+    torch.SymFloat: "SymInts must use SymNodeVariable",
+}
+
+
 class ConstantVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
-        assert not isinstance(value, torch.Tensor)
-        assert not isinstance(value, torch.SymInt)
-        assert not isinstance(value, torch.SymFloat)
+        if not ConstantVariable.is_literal(value):
+            for disallowed_type, reason in _type_to_assert_reason.items():
+                assert not isinstance(value, disallowed_type), reason
 
         if HAS_NUMPY and isinstance(value, np.number):
             self.value = value.item()
