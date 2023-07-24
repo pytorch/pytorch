@@ -20,7 +20,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def outer_fn(x, y):
             return inner_fn(x) * y
 
-        x, y = [torch.rand((2, 2)) for _ in range(2)]
+        x, y = (torch.rand((2, 2)) for _ in range(2))
 
         with torch.profiler.profile(with_stack=False) as prof:
             outer_fn(x, y)
@@ -40,7 +40,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return x.sin() * y.cos()
 
-        x, y = [torch.rand((2, 2)) for _ in range(2)]
+        x, y = (torch.rand((2, 2)) for _ in range(2))
 
         with torch.profiler.profile(with_stack=False) as prof:
             torch._dynamo.optimize("aot_eager")(fn)(x, y)
