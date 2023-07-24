@@ -171,6 +171,10 @@ class Interpreter:
 
     @contextmanager
     def _set_current_node(self, node):
+        if "from_node" not in node.meta:
+            node.meta["from_node"] = []
+        if not node.meta["from_node"] or node.meta["from_node"][-1][0] != node.name:
+            node.meta["from_node"].append((node.name, node.target))
         with fx_traceback.set_current_meta(node.meta):
             yield
 

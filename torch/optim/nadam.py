@@ -136,7 +136,7 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
        \end{aligned}
 
     For further details regarding the algorithm we refer to `Incorporating Nesterov Momentum into Adam`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -147,13 +147,13 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         momentum_decay (float, optional): momentum momentum_decay (default: 4e-3)
-        {foreach}
-        {differentiable}
+        {_foreach_doc}
+        {_differentiable_doc}
 
     .. _Incorporating Nesterov Momentum into Adam:
         https://openreview.net/forum?id=OM0jvwB8jIp57ZJjtNEZ
 
-    """.format(foreach=_foreach_doc, differentiable=_differentiable_doc)
+    """
 
 
 def nadam(params: List[Tensor],
