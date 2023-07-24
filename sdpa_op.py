@@ -23,8 +23,7 @@ sdpa = HigherOrderOperator("sdpa")
 
 @sdpa.py_impl(DispatchKey.CompositeExplicitAutograd)
 def sdpa_dense(q, k, v, score_mod):
-    out = F.scaled_dot_product_attention(q, k, v)
-    print(out.shape)
+    out = F.scaled_dot_product_attention(q, k, v, scale=1).contiguous()
     return out
 
 @sdpa.py_impl(DispatchKey.Autograd)
@@ -73,9 +72,12 @@ H = 4
 N_CTX = 512
 D_HEAD = 64
 dtype = torch.float16
+torch.manual_seed(0)
 q = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 k = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
 v = torch.randn((Z, H, N_CTX, D_HEAD), dtype=dtype, device="cuda")
+# v[0][0] *= 2
+# v[0][1:] = 0
 
 # @torch.compile
 def foo(q, k, v):
@@ -89,4 +91,7 @@ with fake_mode:
     out_graph = make_fx(foo)(q_, k_, v_)
     out_graph.print_readable()
     out_graph = compile_fx_inner(out_graph, (q_, k_, v_))
+o1 = out_graph([q, k, v])
+print(o1)
+print(foo(q, k, v))
 breakpoint()
