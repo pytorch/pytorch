@@ -868,7 +868,7 @@ def get_traced_sample_variant_pairs(device, dtype, op):
         return outputs
 
     for sample in samples:
-        for func_type, variant in variants.items():
+        for variant in variants.values():
             if variant is None:
                 continue
 

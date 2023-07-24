@@ -285,6 +285,14 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
   return check(PyObject_CallMethodOneArg(self, method_name, pyinput.get()));
 }
 
+struct ClosingTHPObjectPtr : public THPObjectPtr {
+  ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
+  ~ClosingTHPObjectPtr() {
+    static PyObject* method_name = PyUnicode_InternFromString("close");
+    check(PyObject_CallMethodNoArgs(get(), method_name));
+  }
+};
+
 variable_list compiled_autograd(
     const std::shared_ptr<Node>& graph_root,
     GraphTask& graph_task,
@@ -350,7 +358,7 @@ variable_list compiled_autograd(
   // TODO(jansel): some dynamic sizes seem to be ints not symints
   if (!cache->check_dynamic_sizes(compiler_call)) {
     // cache miss, need to capture FX graph
-    THPObjectPtr py_compiler(
+    ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
     TraceState state = call_begin_capture(
         py_compiler, *cache, compiler_call, output_edges.size());
