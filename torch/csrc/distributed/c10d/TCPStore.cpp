@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
+#include <distributed/c10d/Backend.hpp>
 #include <fcntl.h>
 #include <algorithm>
 #include <array>
