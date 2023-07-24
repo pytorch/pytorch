@@ -162,7 +162,7 @@ def export(
                 **kwargs,
             )
 
-            params_buffers: "OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]]" = OrderedDict()
+            params_buffers: OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]] = OrderedDict()
             for name, param in gm_torch_level.named_parameters(recurse=True, remove_duplicate=False):
                 params_buffers[name] = param
 
