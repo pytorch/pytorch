@@ -309,6 +309,9 @@ class cpp:
     # using atomic_add.
     fallback_scatter_reduce_sum = True
 
+    # Use oneDNN Graph fusions for compute intensive ops
+    onednn_graph = False
+
 
 # config specific to codegen/triton.py
 class triton:

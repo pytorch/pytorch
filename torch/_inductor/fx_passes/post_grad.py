@@ -14,7 +14,6 @@ from torch._prims_common import is_integer_dtype
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
-
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
@@ -35,6 +34,8 @@ from ..pattern_matcher import (
 from ..utils import decode_device
 from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_post_grad_passes
+
+from .onednn_graph_fusion import onednn_graph_fuse_fx
 
 
 log = logging.getLogger(__name__)
@@ -67,6 +68,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
     if config.pattern_matcher:
+        if config.cpp.onednn_graph and torch._C._onednn:
+            onednn_graph_fuse_fx(gm, is_inference)
         lazy_init()
 
         group_batch_fusion_post_grad_passes(gm.graph)
@@ -89,7 +92,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
 @init_once_fakemode
 def lazy_init():
-    if torch._C._has_mkldnn:
+    if torch._C._has_mkldnn and not config.cpp.onednn_graph:
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()

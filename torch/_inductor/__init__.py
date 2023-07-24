@@ -91,6 +91,10 @@ def list_mode_options(
             "max_autotune": True,
             "triton.cudagraphs": True,
         },
+        # enable onednn graph for c++ backend
+        "onednn-graph": {
+            "cpp.onednn_graph": True,
+        },
     }
     return mode_options[mode] if mode else mode_options  # type: ignore[return-value]
 

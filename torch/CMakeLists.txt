@@ -368,6 +368,7 @@ endif()
 if(BUILD_ONEDNN_GRAPH)
   target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
   target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
+  target_link_libraries(torch_python PRIVATE caffe2::dnnl_graph)
 endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
