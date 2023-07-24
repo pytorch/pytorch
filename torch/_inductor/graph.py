@@ -7,7 +7,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Set, Tuple
+from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
 import sympy
 
@@ -192,7 +192,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_inputs: Set[str] = set()
         self.unaligned_buffers: Set[str] = set()
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
-        self.name_to_users: Dict[str, Set[ir.IRNode]] = defaultdict(list)
+        self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self.cpp_wrapper = cpp_wrapper
