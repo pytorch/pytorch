@@ -792,7 +792,7 @@ inline at::Device toDevice(PyObject* obj) {
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
     TORCH_WARN_ONCE(
         "For the `device` argument, `device=index will be deprecated as of "
-        "PyTorch 2.1, you should use `device=device_type:index` instead.");
+        "PyTorch 2.2, you should use `device=device_type:index` instead.");
     return at::Device(DeviceType::CUDA, device_index);
   }
   const std::string& device_str = THPUtils_unpackString(obj);
