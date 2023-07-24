@@ -41,7 +41,7 @@ class TestCompile(FSDPTest):
                     ShardingStrategy.NO_SHARD,
                 ],
                 "skip_fsdp_guards": [True, False],
-                "act_checkpoint": [True],
+                "act_checkpoint": [True, False],
             },
             self._test_compile,
         )
