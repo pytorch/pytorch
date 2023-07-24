@@ -3438,7 +3438,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             check_shape_only = op.name in ('empty_like', 'new_empty')
             for sample_input in sample_inputs_itr:
                 args = (sample_input.input,) + sample_input.args
-                if not any((isinstance(arg, torch.Tensor) for arg in args)):
+                if not any(isinstance(arg, torch.Tensor) for arg in args):
                     # Atleast one tensor required for vmap.
                     continue
                 kwargs = sample_input.kwargs
@@ -3515,7 +3515,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('histogramdd'),  # expected Tensor as element 0 in argument 0, but got tuple
         xfail('nn.functional.gaussian_nll_loss'),  # data-dependent control flow error
         xfail('nn.functional.embedding_bag'),  # embedding renorm vmap inplace incompatible
-        xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
 
         # required rank 4 tensor to use channels_last format

@@ -1705,12 +1705,12 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         for layer in range(num_layers):
             for direction in range(num_directions):
                 suffix = '_reverse' if direction == 1 else ''
-                key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name1 = f'weight_ih_l{layer}{suffix}'
+                key_name2 = f'weight_hh_l{layer}{suffix}'
                 weight_keys.append(key_name1)
                 weight_keys.append(key_name2)
-                key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name1 = f'bias_ih_l{layer}{suffix}'
+                key_name2 = f'bias_hh_l{layer}{suffix}'
                 bias_keys.append(key_name1)
                 bias_keys.append(key_name2)
 
