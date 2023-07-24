@@ -64,7 +64,7 @@ class Decompose(_pass.Transform):
             tracing_mode = "symbolic" if self.enable_dynamic_axes else "fake"
 
         # Apply decomposition table to the input graph.
-        assert fake_mode is not None
+        assert fake_mode is not None  # for mypy
         with python_dispatch.enable_python_dispatcher(), fake_mode:
             decomposed_module = proxy_tensor.make_fx(
                 module,
