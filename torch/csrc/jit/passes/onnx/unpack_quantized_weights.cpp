@@ -313,7 +313,8 @@ void unpackQuantizedWeightsHelper(
     const std::string& pattern,
     const std::string& unpack_fn,
     QuantizedParamsType params_type,
-    bool caffe2 = true) {
+    bool caffe2 = true,
+    bool expect_output_padding = false) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
   parseIR(pattern, &pattern_graph, vmap);
@@ -334,8 +335,17 @@ void unpackQuantizedWeightsHelper(
     c10::optional<at::Tensor> bias;
     constexpr int64_t stride_idx = 2;
     constexpr int64_t padding_idx = 3;
-    constexpr int64_t dilation_idx = 4;
-    constexpr int64_t groups_idx = 5;
+    int64_t output_padding_idx;
+    int64_t dilation_idx;
+    int64_t groups_idx;
+    if (expect_output_padding) {
+      output_padding_idx = 4;
+      dilation_idx = 5;
+      groups_idx = 6;
+    } else {
+      dilation_idx = 4;
+      groups_idx = 5;
+    }
     c10::optional<torch::List<int64_t>> stride, padding, dilation,
         output_padding;
     c10::optional<int64_t> groups;
@@ -413,6 +423,9 @@ void unpackQuantizedWeightsHelper(
         dilation = dilation_int;
         groups = groups_int;
         transpose = transpose_int;
+        if (expect_output_padding) {
+          output_padding = output_padding_int;
+        }
       } else if (
           (params_type == QuantizedParamsType::CONV ||
            params_type == QuantizedParamsType::CONV1D) &&
@@ -478,6 +491,9 @@ void unpackQuantizedWeightsHelper(
         dilation = dilation_int;
         groups = groups_int;
         transpose = transpose_int;
+        if (expect_output_padding) {
+          output_padding = output_padding_int;
+        }
       } else { // Legacy
         unpacked_weight = ser_tup->elements()[0].toTensor();
         bias = ser_tup->elements()[1].toOptional<at::Tensor>();
@@ -502,6 +518,15 @@ void unpackQuantizedWeightsHelper(
           padding = padding_int;
           dilation = dilation_int;
           groups = groups_int;
+
+          if (expect_output_padding) {
+            auto output_padding_ivalue =
+                ser_tup->elements()[output_padding_idx].toListRef();
+            for (const auto& d : output_padding_ivalue) {
+              output_padding_int.emplace_back(d.toTensor()[0].item<int64_t>());
+            }
+            output_padding = output_padding_int;
+          }
         }
       }
     } else {
@@ -569,12 +594,16 @@ void unpackQuantizedWeightsHelper(
       qlinear_node->insertInput(2, bias->output());
     }
 
-    // add conv arguments: stride, padding, dilation, groups
+    // add conv arguments: stride, padding, dilation, groups, output_padding
     if (stride.has_value() && padding.has_value() && dilation.has_value() &&
-        groups.has_value()) {
+        groups.has_value() &&
+        (!expect_output_padding || output_padding.has_value())) {
       std::vector<c10::optional<torch::List<int64_t>>> conv_ints_args;
       conv_ints_args.push_back(stride);
       conv_ints_args.push_back(padding);
+      if (expect_output_padding) {
+        conv_ints_args.push_back(output_padding);
+      }
       conv_ints_args.push_back(dilation);
       // skip (input, weight, bias)
       const size_t arg_offset = 3;
@@ -650,6 +679,10 @@ void UnpackQuantizedWeights(
   graph(%input, %packed_weight, %w_scale, %w_zero_point):
         %r = quantized::linear(%input, %packed_weight, %w_scale, %w_zero_point)
         return (%r) )";
+  std::string qconv1d = R"(
+  graph(%input, %packed_params, %scale, %zero_point):
+        %r = quantized::conv1d(%input, %packed_params, %scale, %zero_point)
+        return (%r) )";
   std::string qconv1d_relu = R"(
   graph(%input, %packed_params, %scale, %zero_point):
         %r = quantized::conv1d_relu(%input, %packed_params, %scale, %zero_point)
@@ -670,12 +703,31 @@ void UnpackQuantizedWeights(
   graph(%input, %packed_params, %scale, %zero_point):
         %r = quantized::conv3d_relu(%input, %packed_params, %scale, %zero_point)
         return (%r) )";
+  std::string qconv_transpose1d = R"(
+  graph(%input, %packed_params, %scale, %zero_point):
+        %r = quantized::conv_transpose1d(%input, %packed_params, %scale, %zero_point)
+        return (%r) )";
+  std::string qconv_transpose2d = R"(
+  graph(%input, %packed_params, %scale, %zero_point):
+        %r = quantized::conv_transpose2d(%input, %packed_params, %scale, %zero_point)
+        return (%r) )";
+  std::string qconv_transpose3d = R"(
+  graph(%input, %packed_params, %scale, %zero_point):
+        %r = quantized::conv_transpose3d(%input, %packed_params, %scale, %zero_point)
+        return (%r) )";
   unpackQuantizedWeightsHelper(
       graph,
       paramsDict,
       qlinear,
       "quantized::linear_unpack",
       QuantizedParamsType::LINEAR,
+      caffe2);
+  unpackQuantizedWeightsHelper(
+      graph,
+      paramsDict,
+      qconv1d,
+      "quantized::conv1d_unpack",
+      QuantizedParamsType::CONV1D,
       caffe2);
   unpackQuantizedWeightsHelper(
       graph,
@@ -712,6 +764,30 @@ void UnpackQuantizedWeights(
       "quantized::conv3d_unpack",
       QuantizedParamsType::CONV,
       caffe2);
+  unpackQuantizedWeightsHelper(
+      graph,
+      paramsDict,
+      qconv_transpose1d,
+      "quantized::conv_transpose1d_unpack",
+      QuantizedParamsType::CONV1D,
+      caffe2,
+      true);
+  unpackQuantizedWeightsHelper(
+      graph,
+      paramsDict,
+      qconv_transpose2d,
+      "quantized::conv_transpose2d_unpack",
+      QuantizedParamsType::CONV,
+      caffe2,
+      true);
+  unpackQuantizedWeightsHelper(
+      graph,
+      paramsDict,
+      qconv_transpose3d,
+      "quantized::conv_transpose3d_unpack",
+      QuantizedParamsType::CONV,
+      caffe2,
+      true);
   if (!caffe2) {
     UnpackQuantizedTensorInputs(graph);
   }

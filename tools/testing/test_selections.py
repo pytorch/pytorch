@@ -1,3 +1,4 @@
+import heapq
 import json
 import math
 import os
@@ -10,17 +11,24 @@ from warnings import warn
 from tools.shared.logging_utils import duration_to_str, pluralize
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
+from tools.stats.upload_stats_lib import emit_metric
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 
+# NUM_PROCS_FOR_SHARDING_CALC must remain consistent across all shards of a job
+# to ensure that sharding is consistent, NUM_PROCS is the actual number of procs
+# used to run tests.  If they are not equal, the only consequence should be
+# unequal shards.
+IS_ROCM = os.path.exists("/opt/rocm")
 NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 2
+NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
 THRESHOLD = 60 * 10  # 10 minutes
 
 # See Note [ROCm parallel CI testing]
 # Special logic for ROCm GHA runners to query number of GPUs available.
 # torch.version.hip was not available to check if this was a ROCm self-hosted runner.
 # Must check for ROCm runner in another way. We look for /opt/rocm directory.
-if os.path.exists("/opt/rocm") and not IS_MEM_LEAK_CHECK:
+if IS_ROCM and not IS_MEM_LEAK_CHECK:
     try:
         # This is the same logic used in GHA health check, see .github/templates/common.yml.j2
         lines = (
@@ -57,7 +65,7 @@ class ShardJob:
         self.parallel: List[ShardedTest] = []
 
     def get_total_time(self) -> float:
-        procs = [0.0 for _ in range(NUM_PROCS)]
+        procs = [0.0 for _ in range(NUM_PROCS_FOR_SHARDING_CALC)]
         for test in self.parallel:
             min_index = procs.index(min(procs))
             procs[min_index] += test.get_time()
@@ -155,7 +163,7 @@ def _get_previously_failing_tests() -> Set[str]:
         )
         return set()
 
-    with open(PYTEST_FAILED_TESTS_CACHE_FILE_PATH, "r") as f:
+    with open(PYTEST_FAILED_TESTS_CACHE_FILE_PATH) as f:
         last_failed_tests = json.load(f)
 
     prioritized_tests = _parse_prev_failing_test_files(last_failed_tests)
@@ -195,6 +203,74 @@ def _python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
     return valid_tests
 
 
+class PoolTimes:
+    def __init__(self, num_procs: int) -> None:
+        self.pool_times = [0.0 for _ in range(num_procs)]
+        self.serial_times = 0.0
+
+    def next_test_start_time(self, serial: bool) -> float:
+        if serial:
+            # Serial tests are run after all parallel tests complete
+            return max(self.pool_times) + self.serial_times
+
+        return self.pool_times[0]
+
+    def schedule_test(self, test: ShardedTest, serial: bool) -> None:
+        if serial:
+            self.serial_times += test.get_time()
+        else:
+            # pool_times[0] is always the thread with the least amount of time scheduled
+            heapq.heappushpop(self.pool_times, self.pool_times[0] + test.get_time())
+
+
+def log_time_savings(
+    selected_tests: List[ShardedTest],
+    prioritized_tests: List[ShardedTest],
+    is_serial_test_fn: Callable[[str], bool],
+    num_procs: int = NUM_PROCS,  # make this customizable for testing
+) -> float:
+    # The tests will be run in [num_procs] parallel threads, so we assume each test
+    # is allocated to the thread that'll free up first.
+    # This isn't an exact match (since other factors could change which thread
+    # pool a test gets scheduled on) but it's a good approximation.
+
+    # Simulates the scheduled tests on each thread pool
+    default_pool = PoolTimes(num_procs)  # originally scheduled run
+    prioritized_pool = PoolTimes(num_procs)  # run for prioritized tests
+    max_time_savings_sec = 0.0
+
+    # It's easier to look up prioritized tests by name
+    prioritized_test_names = {test.name for test in prioritized_tests}
+
+    for test in selected_tests:
+        serial = is_serial_test_fn(test.name)
+        if test.name in prioritized_test_names:
+            # Successive tests will always have a greater time savings
+            max_time_savings_sec = default_pool.next_test_start_time(
+                serial
+            ) - prioritized_pool.next_test_start_time(serial)
+
+            # "schedule" this test on the prioritized pool to get time savings for future prioritized tests
+            prioritized_pool.schedule_test(test, serial)
+
+        # always schedule on the default pool to know what the unprioritized timeline would've looked like
+        default_pool.schedule_test(test, serial)
+
+    print(
+        f"Prioritized tests will run about {duration_to_str(max_time_savings_sec)} sooner than they would've otherwise"
+    )
+
+    emit_metric(
+        "test_reordering_time_savings",
+        {
+            "time_savings_sec": max_time_savings_sec,
+        },
+    )
+
+    # Return value used by tests
+    return max_time_savings_sec
+
+
 def get_reordered_tests(
     tests: List[ShardedTest],
 ) -> Tuple[List[ShardedTest], List[ShardedTest]]:
@@ -228,18 +304,11 @@ def get_reordered_tests(
     bring_to_front = []
     the_rest = []
 
-    test_time_for_regular_tests_so_far = 0.0
-    # how much sooner did we run prioritized tests compared to a naive ordering
-    time_savings_sec = 0.0
-
     for test in tests:
         if test.name in prioritized_tests:
             bring_to_front.append(test)
-            # Calculate approx time saved by reordering
-            time_savings_sec = test_time_for_regular_tests_so_far
         else:
             the_rest.append(test)
-            test_time_for_regular_tests_so_far += test.get_time()
 
     if len(tests) != len(bring_to_front) + len(the_rest):
         print(
@@ -248,13 +317,11 @@ def get_reordered_tests(
         )
         return ([], tests)
 
-    # TODO: Would be great to upload these stats to RDS/Rockset!
+    prioritized_test_names = []
+    remaining_test_names = []
     if bring_to_front:
         test_cnt_str = pluralize(len(tests), "test")
         print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
-        print(
-            f"Prioritized tests estimated to run up to {duration_to_str(time_savings_sec)} sooner than they would've otherwise"
-        )
 
         prioritized_test_names = [t.name for t in bring_to_front]
         print(f"Prioritized: {prioritized_test_names}")
@@ -262,6 +329,16 @@ def get_reordered_tests(
         print(f"The Rest: {remaining_test_names}")
     else:
         print("Didn't find any tests to prioritize")
+
+    emit_metric(
+        "test_reordering_prioritized_tests",
+        {
+            "prioritized_test_cnt": len(bring_to_front),
+            "total_test_cnt": len(tests),
+            "prioritized_tests": prioritized_test_names,
+            "remaining_tests": remaining_test_names,
+        },
+    )
 
     return (bring_to_front, the_rest)
 

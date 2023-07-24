@@ -1,5 +1,4 @@
 import collections
-import dataclasses
 import inspect
 from typing import Any, Dict, List, Optional
 
@@ -15,53 +14,47 @@ from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import LocalSource, Source
 from .utils import nn_module_new, object_new
-from .variables.base import VariableTracker
+from .variables.base import (
+    is_side_effect_safe,
+    MutableLocalBase,
+    MutableLocalSource,
+    VariableTracker,
+)
 
 
-@dataclasses.dataclass
-class MutableSideEffects:
+class MutableSideEffects(MutableLocalBase):
     """
     VariableTracker.mutable_local marker to indicate a list passed as
     an input that if we mutate we need to re-apply those mutations after
     the graph runs.
     """
 
-    source: Source
-    is_modified: bool = False
-
-    def __hash__(self):
-        return id(self)
-
-    def __eq__(self, other):
-        return self is other
+    def __init__(self, source: Source, is_modified: bool = False):
+        super().__init__(MutableLocalSource.Existing)
+        self.source = source
+        self.is_modified = is_modified
 
 
-@dataclasses.dataclass
-class AttributeMutation:
+class AttributeMutation(MutableLocalBase):
     """
     VariableTracker.mutable_local marker to track changes to attributes
     """
 
-    source: Source
+    def __init__(self, typ: MutableLocalSource, source: Source):
+        super().__init__(typ)
+        self.source = source
 
 
 class AttributeMutationExisting(AttributeMutation):
-    def __hash__(self):
-        return id(self)
-
-    def __eq__(self, other):
-        return self is other
+    def __init__(self, source: Source):
+        super().__init__(MutableLocalSource.Existing, source)
+        self.source = source
 
 
-@dataclasses.dataclass
 class AttributeMutationNew(AttributeMutation):
-    cls_source: Source
-
-    def __hash__(self):
-        return id(self)
-
-    def __eq__(self, other):
-        return self is other
+    def __init__(self, source: Source, cls_source: Source):
+        super().__init__(MutableLocalSource.Local, source)
+        self.cls_source = cls_source
 
 
 class SideEffects:
@@ -150,8 +143,21 @@ class SideEffects:
     def __getitem__(self, item):
         return self.id_to_variable[id(item)]
 
+    def check_allowed_side_effect(self, item):
+        from torch._dynamo.variables.misc import AutogradFunctionContextVariable
+
+        # People do things like self.dim = dim inside autograd.Function.
+        # These are benign.
+        if isinstance(item, AutogradFunctionContextVariable):
+            return True
+        if not is_side_effect_safe(item.mutable_local):
+            unimplemented(
+                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
+            )
+
     def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
         assert self.is_attribute_mutation(item)
+        self.check_allowed_side_effect(item)
         if item.mutable_local not in self.store_attr_mutations:
             self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
         self.store_attr_mutations[item.mutable_local][name] = value
@@ -317,6 +323,7 @@ class SideEffects:
         )
 
     def mutation(self, oldvar, newvar):
+        self.check_allowed_side_effect(oldvar)
         return newvar.clone(
             mutable_local=MutableSideEffects(oldvar.mutable_local.source, True)
         )

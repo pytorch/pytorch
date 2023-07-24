@@ -16,19 +16,23 @@ from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 from .. import config
 
 from ..fx_utils import matches_module_function_pattern
-from ..mkldnn import mkldnn_fuse_fx
-from ..pattern_matcher import init_once_fakemode, PatternMatcherPass
+from ..pattern_matcher import (
+    init_once_fakemode,
+    PatternMatcherPass,
+    stable_topological_sort,
+)
 from ..utils import is_cpu_device
+from .group_batch_fusion import group_batch_fusion_pre_grad_passes
 
 log = logging.getLogger(__name__)
 
-normalize_split_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+normalization_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_splits_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
-    normalize_split_pass,
+    normalization_pass,
     merge_splits_pass,
     split_cat_pass,
     unbind_stack_pass,
@@ -59,9 +63,11 @@ def pre_grad_passes(gm, example_inputs):
     if config.pattern_matcher:
         lazy_init()
         gm = fuse_fx(gm, example_inputs)
+        group_batch_fusion_pre_grad_passes(gm.graph)
         for pattern_matcher_pass in pattern_matcher_passes:
             pattern_matcher_pass.apply(gm.graph)
 
+    stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
 
@@ -89,7 +95,6 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         return gm
     gm = remove_identity(gm)
     gm = fuse_conv_bn(gm)
-    gm = mkldnn_fuse_fx(gm, example_inputs)
     return gm
 
 

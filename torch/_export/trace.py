@@ -113,7 +113,6 @@ def _aot_capture(mod, flat_args):
         num_params_buffers=params_len,
         aot_id=-1,
         keep_inference_input_mutations=False,
-        dynamic_shapes=True,
     )
 
     def exported_call(*args):

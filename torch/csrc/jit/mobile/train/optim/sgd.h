@@ -21,6 +21,7 @@ class SGDParamState {
     return std::make_unique<SGDParamState>(
         static_cast<const SGDParamState&>(*this));
   }
+  friend bool operator==(const SGDParamState& lhs, const SGDParamState& rhs);
   ~SGDParamState() = default;
 };
 

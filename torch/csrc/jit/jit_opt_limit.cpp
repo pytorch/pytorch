@@ -14,7 +14,7 @@
 namespace torch {
 namespace jit {
 
-std::unordered_map<std::string, int64_t>& passes_to_current_counter() {
+static std::unordered_map<std::string, int64_t>& passes_to_current_counter() {
   static std::unordered_map<std::string, int64_t> passes_to_current_counter;
   return passes_to_current_counter;
 }

@@ -7,6 +7,7 @@ from functools import reduce, cmp_to_key
 import operator
 import sympy
 import weakref
+import warnings
 import torch
 from torch import sym_float, sym_int, sym_max
 
@@ -53,6 +54,7 @@ NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
 # NumberType = Union[bool, int, float, complex, torch.SymInt, torch.SymFloat]
 NumberType = Union[bool, int, float, complex]
+RealNumberType = Union[bool, int, float]
 
 Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat)
 # I don't call it Integral because numbers.Integral includes bool, but IntLike
@@ -118,11 +120,11 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     assert isinstance(b, TensorLike)
 
     if not same_shape(a.shape, b.shape):
-        msg = "Shapes {0} and {1} are not equal!".format(a.shape, b.shape)
+        msg = f"Shapes {a.shape} and {b.shape} are not equal!"
         raise AssertionError(msg)
 
     if a.dtype != b.dtype:
-        msg = "Dtypes {0} and {1} are not equal!".format(a.dtype, b.dtype)
+        msg = f"Dtypes {a.dtype} and {b.dtype} are not equal!"
         raise AssertionError(msg)
 
     if a.device != b.device:
@@ -133,7 +135,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
         ):
             pass
         else:
-            msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
+            msg = f"Devices {a.device} and {b.device} are not equal!"
             raise AssertionError(msg)
 
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
@@ -141,17 +143,13 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
         same_strides, idx = check_significant_strides(a, b)
         if not same_strides:
             msg = (
-                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-                    a.stride(), b.stride(), idx
-                )
+                f"Stride mismatch! Strides are {a.stride()} and {b.stride()} (mismatched at {idx})!"
             )
             raise RuntimeError(msg)
 
         if a.storage_offset() != b.storage_offset():
             msg = (
-                "Storage offset mismatch! Storage offsets are {0} and {1}!".format(
-                    a.storage_offset(), b.storage_offset()
-                )
+                f"Storage offset mismatch! Storage offsets are {a.storage_offset()} and {b.storage_offset()}!"
             )
             raise RuntimeError(msg)
 
@@ -268,7 +266,7 @@ _memory_formats = {
 
 
 def validate_memory_format(memory_format: torch.memory_format):
-    check(
+    torch._check(
         memory_format in _memory_formats,
         lambda: f"Received unknown memory format {memory_format}!",
     )
@@ -286,7 +284,7 @@ def is_contiguous_for_memory_format(  # type: ignore[return]
     if memory_format == torch.channels_last_3d:
         return is_channels_last_contiguous_3d(a)
 
-    check(
+    torch._check(
         False,
         lambda: f"is_contiguous received unsupported memory format {memory_format}",
     )
@@ -582,9 +580,7 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 
     if _idx < 0 or _idx >= rank:
         # Same error message as in aten/src/ATen/WrapDimUtils.h:49
-        msg = "Dimension out of range (expected to be in range of [{0}, {1}], but got {2})".format(
-            -rank, rank - 1, idx
-        )
+        msg = f"Dimension out of range (expected to be in range of [{-rank}, {rank - 1}], but got {idx})"
         raise IndexError(msg)
 
     return _idx
@@ -708,9 +704,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
                 shape = arg.shape
 
             if not is_same_shape(shape, arg.shape):
-                msg = "Shape {0} is not the expected shape {1}!".format(
-                    arg.shape, shape
-                )
+                msg = f"Shape {arg.shape} is not the expected shape {shape}!"
                 raise RuntimeError(msg)
         else:
             msg = (
@@ -795,13 +789,13 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
     newsize = 1
     for i, d in enumerate(shape):
         if d == -1:
-            check(dim is None, lambda: "only one dimension can be inferred")
+            torch._check(dim is None, lambda: "only one dimension can be inferred")
             dim = i
         elif d >= 0:
             newsize *= d
         else:
-            check(False, lambda: f"invalid shape dimension {d}")
-    check(
+            torch._check(False, lambda: f"invalid shape dimension {d}")
+    torch._check(
         numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
         lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
     )
@@ -809,7 +803,7 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         # Convert to list to produce a compatible error message with core
         # PyTorch, which prints sequences in square brackets.
         shape = list(shape)
-        check(
+        torch._check(
             newsize != 0,
             lambda: (f"cannot reshape tensor of 0 elements into shape {shape} because the "
                      f"unspecified dimension size -1 can be any value and is ambiguous"),
@@ -954,18 +948,18 @@ def check_fp_or_complex(
     Checks whether the input is floating point or complex.
     If allow_low_precision_dtypes is True, it allows having float16, bfloat16, and complex32
     """
-    check(
+    torch._check(
         is_float_dtype(dtype) or is_complex_dtype(dtype),
         lambda: f"{fn_name}: Expected a floating point or complex tensor as input. Got {dtype}",
     )
-    check(
+    torch._check(
         allow_low_precision_dtypes or not is_low_precision_dtype(dtype),
         lambda: f"{fn_name}: Half precision dtypes not supported. Got {dtype}",
     )
 
 
 def check_is_matrix(A: TensorLikeType, f_name: str, arg_name: str = "A"):
-    check(
+    torch._check(
         len(A.shape) >= 2,
         lambda: f"{f_name}: The input tensor {arg_name} must have at least 2 dimensions.",
     )
@@ -1060,11 +1054,11 @@ def get_higher_dtype(
 
 
 def check_pin_memory(pin_memory: bool):
-    check(not pin_memory, lambda: "PrimTorch does not support pinned memory", NotImplementedError)
+    torch._check_not_implemented(not pin_memory, lambda: "PrimTorch does not support pinned memory")
 
 
 def check_layout(layout: torch.layout):
-    check(layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}", NotImplementedError)
+    torch._check_not_implemented(layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}")
 
 
 # TODO: maybe unify with can_cast_to?
@@ -1100,7 +1094,7 @@ def can_safe_cast_to(*, cast_to: torch.dtype, cast_from: torch.dtype) -> bool:
         if fn(cast_from):
             return False
 
-    raise ValueError("Received unknown dtypes {0}, {1}!".format(cast_to, cast_from))
+    raise ValueError(f"Received unknown dtypes {cast_to}, {cast_from}!")
 
 
 def check_same_dtype(*args):
@@ -1338,9 +1332,7 @@ def elementwise_dtypes(
     for x in args:
         if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
             msg = (
-                "Unexpected type {0} when computing elementwise type promotion!".format(
-                    str(type(x))
-                )
+                f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
             )
             raise ValueError(msg)
 
@@ -1422,7 +1414,7 @@ def elementwise_dtypes(
         return get_computation_dtype(result_dtype), torch.bool
     else:
         raise ValueError(
-            "Unknown type promotion kind {0}".format(str(type_promotion_kind))
+            f"Unknown type promotion kind {str(type_promotion_kind)}"
         )
 
 
@@ -1484,9 +1476,26 @@ def make_contiguous_strides_for(
         return result[:-2] + (1, max(shape[-2], 1))
 
 
+def make_channels_last_1d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+    torch._check(
+        len(shape) == 3,
+        lambda: "Only tensors of rank 3 can use the channels_last_1d memory format",
+    )
+
+    multiplier = 1
+    strides = [0] * 3
+    for idx in (1, -1, 0):
+        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # This is consistent with eager
+        strides[idx] = multiplier
+        multiplier *= shape[idx]
+
+    return tuple(strides)
+
+
 def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     # TODO: maybe inform the user of channels_last_3d if rank of the tensor is 5?
-    check(
+    torch._check(
         len(shape) == 4,
         lambda: "Only tensors of rank 4 can use the channels_last memory format",
     )
@@ -1503,7 +1512,7 @@ def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
 
 
 def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
-    check(
+    torch._check(
         len(shape) == 5,
         lambda: "Only tensors of rank 5 can use the channels_last_3d memory format",
     )
@@ -1521,7 +1530,9 @@ def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
 
 def make_channels_last_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     ndim = len(shape) if isinstance(shape, Sequence) else 1
-    if ndim == 4:
+    if ndim == 3:
+        return make_channels_last_1d_strides_for(shape)
+    elif ndim == 4:
         return make_channels_last_2d_strides_for(shape)
     elif ndim == 5:
         return make_channels_last_3d_strides_for(shape)
@@ -1627,14 +1638,17 @@ def check_in_bounds_for_storage(
     required_length = compute_required_storage_length(shape, strides, storage_offset)
     if a.size() < required_length:
         msg = (
-            "Can't view a storage of size {0} with an offset of {1}, shape of {2}, and strides of {3}, "
-            "which requires a storage of size {4}".format(
+            "Can't view a storage of size {} with an offset of {}, shape of {}, and strides of {}, "
+            "which requires a storage of size {}".format(
                 a.size(), storage_offset, str(shape), str(strides), required_length
             )
         )
         raise ValueError(msg)
 
 
+# NOTE: This function should ideally be removed, but some Meta internal models
+# packaged with `torch.package` are using it, so it will have to be removed
+# at some point in the future when those models no longer use this function.
 def check(
     b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
 ) -> None:
@@ -1643,9 +1657,14 @@ def check(
     Error message is a callable producing a string (to avoid wasting time
     string formatting in non-error case, and also to make it easier for torchdynamo
     to trace.)
+
+    .. note:: This function is planned for removal in the future. Please use
+        `torch._check*` functions instead.
     """
-    if not b:
-        raise exc_type(s())
+    warnings.warn(DeprecationWarning(
+        "'torch._prims_common.check' will be removed in the future. Please use "
+        "'torch._check*' functions instead"))
+    torch._check_with(exc_type, b, s)
 
 
 # This combines is_channels_last_strides_2d and is_channels_last_strides_3d in
@@ -1773,6 +1792,26 @@ def clone_preserve_strides(x):
         return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     finally:
         torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, old)
+
+
+def alert_not_deterministic(caller: str):
+    if torch.are_deterministic_algorithms_enabled():
+        if torch.is_deterministic_algorithms_warn_only_enabled():
+            warnings.warn(
+                f"{caller} does not have a deterministic implementation, but you set "
+                f"'torch.use_deterministic_algorithms(True, warn_only=True)'. "
+                f"You can file an issue at https://github.com/pytorch/pytorch/issues "
+                f"to help us prioritize adding deterministic support for this operation.")
+        else:
+            torch._check(
+                False,
+                lambda: (f"{caller} does not have a deterministic implementation, but you set "
+                         f"'torch.use_deterministic_algorithms(True)'. You can turn off "
+                         f"determinism just for this operation, or you can use the "
+                         f"'warn_only=True' option, if that's acceptable for your application. "
+                         f"You can also file an issue at https://github.com/pytorch/pytorch/issues "
+                         f"to help us prioritize adding deterministic support for this operation."))
+
 
 class CUDARngStateHelper:
     @staticmethod
