@@ -148,7 +148,7 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
        \end{aligned}
 
     For further details regarding the algorithm we refer to `ADADELTA: An Adaptive Learning Rate Method`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -159,14 +159,14 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        {foreach}
-        {maximize}
-        {differentiable}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_differentiable_doc}
 
     .. _ADADELTA\: An Adaptive Learning Rate Method:
         https://arxiv.org/abs/1212.5701
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """
 
 
 def adadelta(

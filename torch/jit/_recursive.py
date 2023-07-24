@@ -112,13 +112,13 @@ def _get_valid_constant(attr, v, owner_type):
     elif isinstance(v, (tuple, list)):
         return tuple(_get_valid_constant(attr, x, owner_type) for x in v)
     constants = ", ".join(torch.typename(typ) for typ in _constant_types)
-    raise TypeError(textwrap.dedent("""
-        '{}' object in attribute '{}.{}' is not a valid constant.
+    raise TypeError(textwrap.dedent(f"""
+        '{torch.typename(type(v))}' object in attribute '{owner_type}.{attr}' is not a valid constant.
         Valid constants are:
         1. a nn.ModuleList
-        2. a value of type {{{}}}
+        2. a value of type {{{constants}}}
         3. a list or tuple of (2)
-        """.format(torch.typename(type(v)), owner_type, attr, constants)))
+        """))
 
 
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
@@ -509,7 +509,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     def init_fn(script_module):
         # Initialize the ScriptModule:
         # 1. Copy the attributes/parameters/buffers from the original `nn_module` to the new ScriptModule.
-        for name, (attr_type, is_param) in concrete_type.get_attributes().items():
+        for name in concrete_type.get_attributes().keys():
             orig_value = getattr(nn_module, name)
             orig_value = orig_value.value if isinstance(orig_value, torch.jit.Attribute) else orig_value
             cpp_module.setattr(name, orig_value)
