@@ -322,9 +322,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
             }
             partial_kwargs.update(kwargs)
-            breakpoint()
-            return variables.functions.UserFunctionVariable(self.value.func, **options).call_function(tx, partial_args, partial_kwargs)
-
+            return variables.functions.UserFunctionVariable(
+                self.value.func, **options
+            ).call_function(tx, partial_args, partial_kwargs)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -407,7 +407,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif callable(self.value):
             self.add_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
-        breakpoint()
         return super().call_function(tx, args, kwargs)
 
     def _check_for_getattribute(self):
@@ -505,6 +504,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             if source:
+                print("REWRAPPING? getatr", name, value)
                 return VariableBuilder(tx, source)(subobj).add_options(options)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable(subobj, **options)

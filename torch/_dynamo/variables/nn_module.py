@@ -294,9 +294,7 @@ class NNModuleVariable(VariableTracker):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
-                    breakpoint()
                     self.convert_to_unspecialized(tx)
-                    breakpoint()
                     unimplemented(
                         f"Forward/backward hooks aren't yet supported on 'allowed' modules (e.g. {mod.__class__}), "
                         "which don't get traced through by dynamo. Graph-breaking to run hooks without compile."

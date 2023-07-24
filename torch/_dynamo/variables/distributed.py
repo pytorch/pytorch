@@ -5,11 +5,12 @@ import torch
 from ..exc import unimplemented
 from ..utils import istype
 from .base import VariableTracker
+from .user_defined import UserDefinedObjectVariable
 
 
-class DistributedVariable(VariableTracker):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+class DistributedVariable(UserDefinedObjectVariable):
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
         if not DistributedVariable.is_available():
             unimplemented("torch.distributed package is not available!")
 
@@ -28,10 +29,6 @@ def is_from_local(value):
 
 
 class PlacementClassVariable(DistributedVariable):
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
     @staticmethod
     def is_placement_type(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
@@ -61,10 +58,6 @@ class PlacementClassVariable(DistributedVariable):
 
 
 class PlacementVariable(DistributedVariable):
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
     @staticmethod
     def is_placement(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
@@ -112,10 +105,6 @@ class PlacementVariable(DistributedVariable):
 
 
 class DeviceMeshVariable(DistributedVariable):
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
     @staticmethod
     def is_device_mesh(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.

@@ -1836,7 +1836,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self._forward_hook_test_helper(model)
 
     def test_hooks_allowed_modules_compiles(self):
-        # this test shouldn't care whether hook guards are enabled or not
         class ToyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1861,7 +1860,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             )
 
         cnt = torch._dynamo.testing.CompileCounter()
-        model = torch._dynamo.optimize(cnt)(model)
+        model = torch._dynamo.optimize(cnt, nopython=True)(model)
         for i in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
@@ -1870,8 +1869,50 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             pred = model(x)
             loss = pred.sum()
             loss.backward()
+        self.assertEqual(len(activations), 1)
         self.assertEqual(cnt.frame_count, 1)
-        breakpoint()
+
+    def test_hooks_allowed_modules_compiles_self_contained(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = torch.nn.Sequential(
+                    *[torch.nn.Linear(10, 10000), torch.nn.ReLU()]
+                    + [torch.nn.Linear(10000, 5), torch.nn.ReLU()]
+                )
+
+            def forward(self, x):
+                return self.net(x) * self.net(x)
+
+        model = ToyModel()
+        forward_handles = {}
+
+        def output_modifying_hook(mod, inp, out):
+            return 2 * out + 1
+
+        for name, module in model.named_modules():
+            forward_handles[name] = module.register_forward_hook(output_modifying_hook)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        x = torch.randn((20, 10))
+        pred_eager = model(x)
+        loss_eager = pred_eager.sum()
+        eager_loss_bwd = loss_eager.backward()
+
+        model = torch._dynamo.optimize(cnt, nopython=True)(model)
+        pred = model(x)
+
+        loss = pred.sum()
+        loss_bwd = loss.backward()
+
+        self.assertEqual(eager_loss_bwd, loss_bwd)
+        # Why 2? Its a little odd. This feels like a bug, but maybe is not?
+        # There are no graph breaks.
+        # The first graph is the full model, with hooks inlined.
+        # The second is just the hook, compiled alone, potentially due to how we are hooking into the
+        # interpreter? unclear, needs debugging. Do not land like this.
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_dunder_call_explicitly(self):
         # hooks should be triggered if explicit calling `__call__`

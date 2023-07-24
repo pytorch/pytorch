@@ -503,6 +503,8 @@ class GetAttrVariable(VariableTracker):
         assert isinstance(name, str)
         self.obj = obj
         self.name = name
+        if name == "ndim":
+            raise RuntimeError("noo")
 
     def __str__(self):
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
