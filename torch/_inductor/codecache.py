@@ -469,7 +469,42 @@ class VecISA:
     _macro: str
     _arch_flags: str
     _dtype_nelements: Dict[torch.dtype, int]
-    _capability: str
+
+    # Note [Checking for Vectorized Support in Inductor]
+    # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
+    # Hence, TorchInductor would depend on Sleef* to accelerate mathematical functions
+    # like exp, pow, sin, cos and etc.
+    # But PyTorch and TorchInductor might use different compilers to build code. If
+    # PyTorch uses gcc-7/g++-7 to build the release package, the libtorch_cpu.so
+    # will not expose the Sleef* AVX512 symbols since gcc-7/g++-7 cannot pass
+    # avx512 check in CMake - FindAVX.cmake. But TorchInductor install the latest
+    # gcc/g++ compiler by default while it could support the AVX512 compilation.
+    # Therefore, there would be a conflict sleef version between PyTorch and
+    # TorchInductor. Hence, we dry-compile the following code to check whether current
+    # HW platform and PyTorch both could support AVX512 or AVX2. And suppose ARM
+    # also needs the logic
+    # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
+    # making the runtime check unnecessary.
+    _avx_code = """
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#endif
+
+__attribute__((aligned(64))) float in_out_ptr0[16] = {0.0};
+
+extern "C" void __avx_chk_kernel() {
+    auto tmp0 = at::vec::Vectorized<float>(1);
+    auto tmp1 = tmp0.exp();
+    tmp1.store(in_out_ptr0);
+}
+"""
+
+    _avx_py_load = """
+import torch
+from ctypes import cdll
+cdll.LoadLibrary("__lib_path__")
+"""
 
     def bit_width(self):
         return self._bit_width
@@ -483,9 +518,6 @@ class VecISA:
     def build_arch_flags(self):
         return self._arch_flags
 
-    def capability(self):
-        return self._capability
-
     def __hash__(self) -> int:
         return hash(str(self))
 
@@ -494,7 +526,32 @@ class VecISA:
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
-        return torch.backends.cpu.get_cpu_capability() == self._capability
+        key, input_path = write(VecISA._avx_code, "cpp")
+        from filelock import FileLock
+
+        lock_dir = get_lock_dir()
+        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        with lock:
+            output_path = input_path[:-3] + "so"
+            build_cmd = cpp_compile_command(
+                input_path, output_path, warning_all=False, vec_isa=self
+            ).split(" ")
+            try:
+                # Check build result
+                compile_file(input_path, output_path, build_cmd)
+                subprocess.check_call(
+                    [
+                        sys.executable,
+                        "-c",
+                        VecISA._avx_py_load.replace("__lib_path__", output_path),
+                    ],
+                    stderr=subprocess.DEVNULL,
+                    env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
+                )
+            except Exception as e:
+                return False
+
+            return True
 
 
 @dataclasses.dataclass
@@ -503,7 +560,6 @@ class VecAVX512(VecISA):
     _macro = "CPU_CAPABILITY_AVX512"
     _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32}
-    _capability = "AVX512"
 
     def __str__(self) -> str:
         return "avx512"
@@ -517,7 +573,6 @@ class VecAVX2(VecISA):
     _macro = "CPU_CAPABILITY_AVX2"
     _arch_flags = "-mavx2 -mfma"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
-    _capability = "AVX2"
 
     def __str__(self) -> str:
         return "avx2"
@@ -530,7 +585,6 @@ class InvalidVecISA(VecISA):
     _macro = ""
     _arch_flags = ""
     _dtype_nelements = {}
-    _capability = "INVALID"
 
     def __str__(self) -> str:
         return "INVALID_VEC_ISA"
@@ -658,8 +712,8 @@ def get_include_and_linking_paths(
             libs += ["omp"]
         macros = vec_isa.build_macro()
         if macros:
-            if config.is_fbcode():
-                cap = vec_isa.capability()
+            if config.is_fbcode() and vec_isa != invalid_vec_isa:
+                cap = str(vec_isa).upper()
                 macros = " ".join(
                     [
                         vec_isa.build_arch_flags(),
