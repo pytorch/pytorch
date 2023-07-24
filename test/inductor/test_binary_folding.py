@@ -43,7 +43,7 @@ class BinaryFoldingTemplate(TestCase):
                 __constants__ = ["use_scalar"]
 
                 def __init__(self, in_channels, out_channels, device, **kwargs):
-                    super(ConvOp, self).__init__()
+                    super().__init__()
                     self.conv = module(
                         in_channels, out_channels, bias=use_bias, **kwargs
                     ).to(device)
