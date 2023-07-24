@@ -1757,7 +1757,7 @@ def generate_elementwise_binary_large_value_tensors(
 ):
     _large_int_vals = (-1113, 1113, -10701, 10701)
     _large_float16_vals = (-501, 501, -1001.2, 1001.2, -13437.7, 13437.7)
-    _large_float_vals = _large_float16_vals + (-4988429.2, 4988429.2, -1e19, 1e19)
+    _large_float_vals = _large_float16_vals + (-4988429.2, 4988429.2, -1e20, 1e20)
 
     l_vals = []
     r_vals = []

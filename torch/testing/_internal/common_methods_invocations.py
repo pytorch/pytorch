@@ -8739,6 +8739,7 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
     ),
+
     ForeachFuncInfo(
         'neg',
         dtypes=all_types_and_complex(),
@@ -10114,12 +10115,7 @@ op_db: List[OpInfo] = [
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                   ),
-                   reference_numerics_filter=NumericsFilter(
-                       condition=lambda x: ((x.imag < 1e2).to(torch.bool) | (x.real < 1e4).to(torch.bool)
-                                            if x.is_complex() else torch.ones_like(x, dtype=torch.bool)),
-                       safe_val=2)
-                   ),
+                   )),
     UnaryUfuncInfo('atan',
                    aliases=('arctan', ),
                    ref=np.arctan,
@@ -13760,11 +13756,6 @@ op_db: List[OpInfo] = [
                          dtypes=(torch.complex64, torch.complex128), device_type='cpu',
                          active_if=(IS_MACOS or IS_WINDOWS)),
         ),
-        # tan(j * pi/2 * odd_number) is nan
-        reference_numerics_filter=NumericsFilter(
-            condition=lambda x: (close_to_int(x / (math.pi * 0.5j))
-                                 if x.is_complex() else x.new_tensor(False, dtype=torch.bool)),
-            safe_val=0)
     ),
     UnaryUfuncInfo(
         'nn.functional.threshold',

@@ -20,7 +20,7 @@ void acos_kernel_cuda(TensorIteratorBase& iter) {
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR()
     static const auto acos_string = jiterator_stringify(
-        template <typename T> T acos_impl(T a) { return std::acos(a); });
+        template <typename T> T acos_impl(T a) { return thrust::acos(a); });
     AT_DISPATCH_COMPLEX_TYPES_AND(
         kComplexHalf, common_dtype, "acos_name", [&]() {
           jitted_gpu_kernel<

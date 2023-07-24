@@ -23,7 +23,7 @@ void acosh_kernel_cuda(TensorIteratorBase& iter) {
   static const auto acosh_string = jiterator_stringify(
     template <typename T>
     T acosh_impl(T a) {
-        return std::acosh(a);
+        return thrust::acosh(a);
     }
   );
   AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "acosh_name", [&]() {
