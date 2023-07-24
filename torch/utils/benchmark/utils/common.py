@@ -233,7 +233,7 @@ class Measurement:
         Merge will extrapolate times to `number_per_run=1` and will not
         transfer any metadata. (Since it might differ between replicates)
         """
-        grouped_measurements: DefaultDict[TaskSpec, List["Measurement"]] = collections.defaultdict(list)
+        grouped_measurements: DefaultDict[TaskSpec, List[Measurement]] = collections.defaultdict(list)
         for m in measurements:
             grouped_measurements[m.task_spec].append(m)
 
