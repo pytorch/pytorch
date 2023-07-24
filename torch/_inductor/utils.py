@@ -276,15 +276,22 @@ def cache_on_self(fn):
 
 
 def aggregate_origins(node_schedule):
-    return functools.reduce(
-        operator.or_,
-        [
-            node.node.origins
-            for node in node_schedule
-            if hasattr(node, "node") and node.node
-        ],
-        set(),
-    )
+    from . import ir
+
+    if isinstance(node_schedule, list):
+        return functools.reduce(
+            operator.or_,
+            [
+                node.node.origins
+                for node in node_schedule
+                if hasattr(node, "node") and node.node
+            ],
+            set(),
+        )
+    elif isinstance(node_schedule, ir.ExternKernel):
+        return node_schedule.origins
+    else:
+        return set()
 
 
 def get_fused_kernel_name(node_schedule, descriptive_names):
@@ -317,21 +324,30 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
     return "_".join(["fused"] + sources)
 
 
-def get_kernel_metadata(node_schedule):
+def get_kernel_metadata(node_schedule, wrapper):
     all_origins = aggregate_origins(node_schedule)
     inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
+
+    from_node_dict = collections.defaultdict(list)
     original_aten_dict = collections.defaultdict(list)
     for node in inductor_nodes:
         if "original_aten" in node.meta:
-            original_aten_dict[str(node.meta["original_aten"]._overloadpacket)].append(
-                node.name
-            )
-    metadata = [
-        f"# Original ATen: {', '.join(sorted(original_aten_dict.keys()))}\n",
-    ]
-    for original_aten, nodes in sorted(original_aten_dict.items()):
-        metadata.append(f"# {original_aten} => {', '.join(sorted(nodes))}")
-    return "\n".join(metadata)
+            key = str(node.meta["original_aten"]._overloadpacket)
+            original_aten_dict[key].append(node.name)
+        if "from_node" in node.meta:
+            key = node.meta["from_node"][0][0]
+            from_node_dict[key].append(node.name)
+    metadata = (
+        f"{wrapper.comment} Source Nodes: [{', '.join(sorted(from_node_dict.keys()))}], "
+        f"Original ATen: [{', '.join(sorted(original_aten_dict.keys()))}]"
+    )
+    # trace back to original node here
+    detailed_metadata = []
+    for original_node, nodes in sorted(from_node_dict.items()):
+        detailed_metadata.append(
+            f"{wrapper.comment} {original_node} => {', '.join(sorted(nodes))}"
+        )
+    return metadata, "\n".join(detailed_metadata)
 
 
 def dominated_nodes(initial_queue: Iterable[torch.fx.Node], skip_filter=None):
