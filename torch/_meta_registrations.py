@@ -2596,7 +2596,7 @@ def _check_foreach_binop_tensor_lists(self, other):
         aten._foreach_sub.List,
         aten._foreach_mul.List,
         aten._foreach_div.List,
-        aten._foreach_maximum.List
+        aten._foreach_maximum.List,
     ]
 )
 def meta__foreach_binop_list(self, other, alpha=1):
@@ -2610,7 +2610,7 @@ def meta__foreach_binop_list(self, other, alpha=1):
         aten._foreach_sub_.List,
         aten._foreach_mul_.List,
         aten._foreach_div_.List,
-        aten._foreach_maximum_.List
+        aten._foreach_maximum_.List,
     ]
 )
 def meta__foreach_binop__list(self, other):
