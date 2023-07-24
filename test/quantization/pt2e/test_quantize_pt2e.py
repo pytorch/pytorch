@@ -821,9 +821,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         ) -> Tuple[Tensor, Tensor]:
                             assert (
                                 len(obs_or_fqs) == 2
-                            ), "Expecting two obs/fqs, one for activation and one for weight, got: {}".format(
-                                len(obs_or_fq)
-                            )
+                            ), f"Expecting two obs/fqs, one for activation and one for weight, got: {len(obs_or_fq)}"
                             act_obs_or_fq = obs_or_fqs[0]
                             weight_obs_or_fq = obs_or_fqs[1]
                             act_scale, act_zp = act_obs_or_fq.calculate_qparams()
@@ -1805,6 +1803,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m_eager = M().eval()
 
         example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
+        ref_node_occurrence = {
+            ns.call_function(torch._higher_order_ops.out_dtype.out_dtype): 1,
+        }
 
         self._test_representation(
             M().eval(),

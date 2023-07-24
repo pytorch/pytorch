@@ -226,39 +226,44 @@ def filter_stack(stack):
     return user_stack
 
 
+def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
+    msg = str(
+        format_bytecode(
+            "WON'T CONVERT",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            code,
+        )
+    )
+    msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
+    msg += format_exc()
+    if hasattr(exc, "real_stack"):
+        msg += (
+            "\n"
+            + "=" * 10
+            + " The above exception occurred while processing the following code "
+            + "=" * 10
+            + "\n\n"
+        )
+        stack_above_dynamo = []
+        if frame is not None:
+            stack_above_dynamo = filter_stack(extract_stack(frame))
+
+        msg += "".join(
+            format_list(stack_above_dynamo + list(reversed(get_real_stack(exc))))
+        )
+        msg += "\n"
+        msg += "=" * 10
+
+    return msg
+
+
 def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = str(
-            format_bytecode(
-                "WON'T CONVERT",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                code,
-            )
-        )
-        msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
-        msg += format_exc()
-        if hasattr(exc, "real_stack"):
-            msg += (
-                "\n"
-                + "=" * 10
-                + " The above exception occurred while processing the following code "
-                + "=" * 10
-                + "\n\n"
-            )
-            stack_above_dynamo = []
-            if frame is not None:
-                stack_above_dynamo = filter_stack(extract_stack(frame))
-
-            msg += "".join(
-                format_list(stack_above_dynamo + list(reversed(get_real_stack(exc))))
-            )
-            msg += "\n"
-            msg += "=" * 10
-
+        msg = format_error_msg_verbose(exec, code, record_filename, frame)
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
  line {code.co_firstlineno} \ndue to: \n{format_exc(limit=-1)}"
