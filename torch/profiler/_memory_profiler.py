@@ -310,6 +310,8 @@ class SchemaMatcher:
             # Note that record_function annotations also go through this path,
             # so it is expected that some names will not correspond to PyTorch
             # operators.
+            if "::" not in name:
+                return None
             return tuple(torch._C._jit_get_schemas_for_operator(name))
         except RuntimeError:
             return None
@@ -1127,12 +1129,12 @@ class MemoryProfileTimeline:
 
         with open(tmpfile.name, 'rb') as tmp:
             encoded = b64encode(tmp.read()).decode('utf-8')
-            html = """<html>
+            html = f"""<html>
 <head><meta charset="utf-8" /><title>GPU Memory Timeline HTML</title></head>
 <body>
-  <img src=\'data:image/png;base64,{}\'>
+  <img src='data:image/png;base64,{encoded}'>
 </body>
-</html>""".format(encoded)
+</html>"""
 
             with open(path, 'w') as f:
                 f.write(html)
