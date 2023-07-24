@@ -66,6 +66,11 @@ assume_static_by_default = True
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
 automatic_dynamic_shapes = True
 
+# This flag changes how the shapes of parameters are treated. 
+# If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static.
+# If this flag is set to True, then the shapes of torch.nn.Parameter are assumed to be dynamic
+assume_parameters_shapes_static_by_default = False
+
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so
 # that we don't error at all.  This is helpful for our CI where I'm using a
