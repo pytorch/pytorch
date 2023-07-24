@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+
 import io
 import itertools
 import os
@@ -1490,29 +1492,31 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 1, 7)
         self.run_test(model, x)
 
+    # TODO: ceil_mode is not included in the test, because of
+    # https://github.com/microsoft/onnxruntime/issues/16203
+    # The ORT and PyTorch has different calculation for ceil_mode (the last value).
     @common_utils.parametrize(
         "padding",
         (0, 1),
     )
     @common_utils.parametrize(
-        "ceil_mode",
-        (True, False),
-    )
-    @common_utils.parametrize(
         "count_include_pad",
         (True, False),
     )
-    def test_avgpool_2d(self, padding, ceil_mode, count_include_pad):
+    def test_avgpool_2d(self, padding, count_include_pad):
         model = torch.nn.AvgPool2d(
             3,
             3,
             padding=padding,
-            ceil_mode=ceil_mode,
             count_include_pad=count_include_pad,
         )
         x = torch.randn(20, 16, 50, 32)
         self.run_test(model, x)
 
+    # TODO: ceil_mode is not included in the test, because of
+    # https://github.com/microsoft/onnxruntime/issues/16203
+    # The ORT and PyTorch has different calculation for ceil_mode (the last value).
+    @skipIfUnsupportedMinOpsetVersion(19)
     def test_avgpool_3d_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31)
@@ -1523,6 +1527,33 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             input_names=["x"],
             dynamic_axes={"x": [0, 1]},
             additional_test_inputs=[y],
+        )
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_avgpool_dynamic(self):
+        class test(torch.nn.Module):
+            def __init__(self, in_channels, out_channels):
+                super().__init__()
+                norm_layer = functools.partial(torch.nn.BatchNorm2d, eps=0.0009)
+                self.avgpool = torch.nn.AvgPool2d(
+                    (2, 2), stride=2, ceil_mode=True, count_include_pad=False
+                )
+                self.conv = torch.nn.Conv2d(
+                    in_channels, out_channels, kernel_size=1, stride=1, bias=False
+                )
+                self.norm = norm_layer(out_channels)
+
+            def forward(self, x):
+                return self.norm(self.conv(self.avgpool(x)))
+
+        model = test(8, 16)
+        inputs = torch.randn(2, 8, 64, 64)
+        self.run_test(
+            model,
+            inputs,
+            input_names=["input_0"],
+            dynamic_axes={"input_0": {3: "x", 2: "y"}, "output_0": {3: "x", 2: "y"}},
+            output_names=["output_0"],
         )
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -13028,6 +13059,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipScriptTest()  # Scale and Zero-point must be a scalar in ORT:optimization
     def test_qat_avg_pool2d(self):
         model = torch.nn.Sequential(
             torch.ao.quantization.QuantStub(),

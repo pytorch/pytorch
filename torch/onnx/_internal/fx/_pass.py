@@ -177,12 +177,7 @@ class Transform(abc.ABC):
 
         Scan through all nodes in graph and their meta['val'] to detect fake mode.
         """
-        fake_tensors = []
-        for node in self.module.graph.nodes:
-            try:
-                fake_tensors.append(node.meta.get("val"))
-            except RuntimeError:
-                continue
+        fake_tensors = [node.meta.get("val") for node in self.module.graph.nodes]
         return torch._dynamo.utils.detect_fake_mode(fake_tensors)
 
     def _maybe_fakefy_args(
