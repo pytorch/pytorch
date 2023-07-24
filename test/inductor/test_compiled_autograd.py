@@ -1,9 +1,11 @@
 # Owner(s): ["module: inductor"]
 import functools
 import re
+import sys
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from unittest import mock
 
 import torch
 from torch import _inductor as inductor
@@ -268,9 +270,11 @@ class TestCompiledAutograd(TestCase):
         self.check_output_and_recompiles(fn, count=1)
 
 
-test_autograd = SourceFileLoader(
-    "test_autograd", str(Path(__file__).absolute().parent.parent / "test_autograd.py")
-).load_module()
+testdir = Path(__file__).absolute().parent.parent
+with mock.patch("sys.path", [*sys.path, str(testdir)]):
+    test_autograd = SourceFileLoader(
+        "test_autograd", str(testdir / "test_autograd.py")
+    ).load_module()
 
 
 class EagerAutogradTests(TestCase):
@@ -278,6 +282,7 @@ class EagerAutogradTests(TestCase):
     def add_test(cls, name, fn):
         @functools.wraps(fn)
         def wrapped(self: EagerAutogradTests):
+            torch._dynamo.reset()
             try:
                 with compiled_autograd.enable(compiler_fn):
                     return fn(self)
