@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import contextlib
 
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 import torch
 import torch._ops
 import torch.func
 import torch.fx
+from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
@@ -104,7 +105,9 @@ class Functionalize(_pass.Transform):
 
         functionalized_callable = self._functionalize(module)
 
-        fake_mode: Any = self.fake_mode
+        # Mimic `torch._dynamo.export(aten_graph=True)` behavior in invoking `make_fx`.
+        # TODO: May need revisit for user fake mode export + dynamic shape scenario.
+        fake_mode: Optional[fake_tensor.FakeTensorMode] = self.fake_mode
         maybe_fake_args = self._maybe_fakefy_args(fake_mode, *args)
         if fake_mode is not None:
             # Using existing fake mode as context, signal `make_fx` that it does not need
@@ -112,9 +115,10 @@ class Functionalize(_pass.Transform):
             tracing_mode = "real"
         else:
             # Existing fake mode not found, signal `make_fx` to create one.
-            fake_mode = contextlib.nullcontext()
+            fake_mode = contextlib.nullcontext()  # type: ignore[assignment]
             tracing_mode = "symbolic" if self.enable_dynamic_axes else "fake"
 
+        assert fake_mode is not None
         with fake_mode:
             graph_module = proxy_tensor.make_fx(
                 functionalized_callable,

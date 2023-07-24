@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import contextlib
 
-from typing import Any, Callable, Mapping, Optional
+from typing import Callable, Mapping, Optional
 
 import torch
 import torch._ops
 import torch.fx
 from torch._dispatch import python as python_dispatch
+from torch._subclasses import fake_tensor
 from torch.fx.experimental import proxy_tensor
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
@@ -49,7 +50,9 @@ class Decompose(_pass.Transform):
         #  mul = sym_size_2 * sym_size_3;  sym_size_2 = sym_size_3 = None
         #  view: f32[3, 5, 20] = torch.ops.aten.view.default(x, [sym_size, sym_size_1, mul])
 
-        fake_mode: Any = self.fake_mode
+        # Mimic `torch._dynamo.export(aten_graph=True)` behavior in invoking `make_fx`.
+        # TODO: May need revisit for user fake mode export + dynamic shape scenario.
+        fake_mode: Optional[fake_tensor.FakeTensorMode] = self.fake_mode
         maybe_fake_args = self._maybe_fakefy_args(fake_mode, *args)
         if fake_mode is not None:
             # Using existing fake mode as context, signal `make_fx` that it does not need
@@ -57,10 +60,11 @@ class Decompose(_pass.Transform):
             tracing_mode = "real"
         else:
             # Existing fake mode not found, signal `make_fx` to create one.
-            fake_mode = contextlib.nullcontext()
+            fake_mode = contextlib.nullcontext()  # type: ignore[assignment]
             tracing_mode = "symbolic" if self.enable_dynamic_axes else "fake"
 
         # Apply decomposition table to the input graph.
+        assert fake_mode is not None
         with python_dispatch.enable_python_dispatcher(), fake_mode:
             decomposed_module = proxy_tensor.make_fx(
                 module,
