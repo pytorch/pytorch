@@ -57,6 +57,7 @@ from .utils import compile_times
 log = logging.getLogger(__name__)
 
 from torch._dispatch.python import enable_python_dispatcher
+from torch.utils._python_dispatch import _disable_current_modes
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
@@ -160,7 +161,7 @@ def remove_from_cache(f):
     elif hasattr(getattr(f, "forward", None), "__code__"):
         reset_code(f.forward.__code__)
     else:
-        from . import reset
+        from . import reset  # type: ignore[attr-defined]
 
         reset()
         log.warning("could not determine __code__ for %s", f)
@@ -206,6 +207,7 @@ class _TorchDynamoContext:
         *,
         export=False,
         dynamic=False,
+        compiler_config=None,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -216,6 +218,7 @@ class _TorchDynamoContext:
         self.first_ctx = first_ctx
         self.export = export
         self.dynamic = dynamic
+        self.compiler_config = compiler_config
         patch_fn()
 
     def __enter__(self):
@@ -241,6 +244,10 @@ class _TorchDynamoContext:
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
+        # public api for compiler config/options
+        def get_compiler_config():
+            return self.compiler_config
+
         fn = innermost_fn(fn)
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
@@ -249,6 +256,12 @@ class _TorchDynamoContext:
             # Save the function pointer to find the original callable while nesting
             # of decorators.
             new_mod._torchdynamo_orig_callable = mod.forward
+
+            # when compiling torch.nn.Module,
+            # provide public api OptimizedModule.get_compiler_config()
+            assert not hasattr(new_mod, "get_compiler_config")
+            new_mod.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+
             return new_mod
         assert callable(fn)
 
@@ -307,6 +320,11 @@ class _TorchDynamoContext:
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
+        # when compiling user function instead of nn.Module
+        # provide public api _fn.get_compiler_config()
+        assert not hasattr(_fn, "get_compiler_config")
+        _fn.get_compiler_config = get_compiler_config  # type: ignore[attr-defined]
+
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
         if callback not in (None, False):
@@ -362,6 +380,7 @@ class OptimizeContext(_TorchDynamoContext):
         *,
         export=False,
         dynamic=False,
+        compiler_config=None,
     ):
         def on_enter():
             global most_recent_backend
@@ -385,6 +404,7 @@ class OptimizeContext(_TorchDynamoContext):
             first_ctx=first_ctx,
             export=export,
             dynamic=dynamic,
+            compiler_config=compiler_config,
         )
 
 
@@ -443,7 +463,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                     )
                     return hijacked_callback(frame, cache_size, hooks, frame_state)
 
-        with compile_lock:
+        with compile_lock, _disable_current_modes():
             return callback(frame, cache_size, hooks, frame_state)
 
     catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
@@ -451,7 +471,12 @@ def catch_errors_wrapper(callback, hooks: Hooks):
 
 
 def _optimize_catch_errors(
-    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, export=False, dynamic=False
+    compile_fn,
+    hooks: Hooks,
+    backend_ctx_ctor=null_context,
+    export=False,
+    dynamic=False,
+    compiler_config=None,
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
@@ -459,6 +484,7 @@ def _optimize_catch_errors(
         first_ctx=True,
         export=export,
         dynamic=dynamic,
+        compiler_config=compiler_config,
     )
 
 
@@ -556,6 +582,9 @@ def optimize(
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
+        compiler_config=backend.get_compiler_config()
+        if hasattr(backend, "get_compiler_config")
+        else None,
     )
 
 
@@ -563,7 +592,7 @@ def optimize(
 @patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
     # TODO(voz): Do we want a decorator for this?
-    from . import reset
+    from . import reset  # type: ignore[attr-defined]
 
     reset()
 
@@ -750,9 +779,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
         self.new_args = []
         for i in range(0, len(flat_args)):
-            arg = super(FlattenInputOutputSignature, self).placeholder(
-                f"arg{i}", (), {}
-            )
+            arg = super().placeholder(f"arg{i}", (), {})
             if i in matched_input_elements_to_fake:
                 arg.node.meta["val"] = matched_input_elements_to_fake[i]
             else:
@@ -813,7 +840,7 @@ def export(
 
         pre_dispatch (bool): If True, exports a graph with ATen operators,
         but before any logic in the PyTorch dispatcher has run.
-        This can be useful if you want to apply further tranformations on a graph before running it
+        This can be useful if you want to apply further transformations on a graph before running it
         through autograd, autocast, or any other functionalities that are integrated into the dispatcher.
         This flag is only valid if aten_graph=True is set.
         Default is False.
@@ -825,7 +852,7 @@ def export(
 
         fake_mode (fake_tensor.FakeTensorMode): Use this fake_mode instead of creating an internal one.
         Useful during symbolic tracing, when user input is already fakefied. Implies free fake tensors
-        are allowed on `make_fx`.
+        are allowed on `make_fx`. `fake_mode` must contain a valid (not None) `shape_env` instance.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
@@ -854,10 +881,14 @@ def export(
     call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
     original_signature = inspect.signature(call_to_inspect)
 
+    assert (
+        not fake_mode or fake_mode.shape_env is not None
+    ), "The specified fake_mode must contain a valid shape_env"
     graph = None
     out_guards = None
     graph_captured_input = None
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
+    fake_mode = fake_mode or _guards.detect_fake_mode(args)
     _allow_fake_constant: bool = (
         fake_mode is not None
     )  # Allow fake constants during symbolic tracing
@@ -1132,11 +1163,6 @@ def export(
     return (new_graph, out_guards)
 
 
-def assume_constant_result(fn):
-    fn._dynamo_marked_constant = True
-    return fn
-
-
 def optimize_assert(
     backend,
     *,
@@ -1164,49 +1190,6 @@ def optimize_assert(
     )
 
 
-def run(fn=None):
-    """Don't do any dynamic compiles, just use prior optimizations"""
-    if fn is not None:
-        fn = innermost_fn(fn)
-        assert callable(fn)
-        return RunOnlyContext()(fn)
-    return RunOnlyContext()
-
-
-def disable(fn=None, recursive=True):
-    """
-    Decorator and context manager to disable TorchDynamo
-
-    If recursive=True, Dynamo is completely skipped on the decorated function
-    frame as well as the recursively invoked functions.
-
-    If recursive=False, Dynamo skips frames associated with the function code,
-    but still process recursively invoked frames.
-    """
-    if recursive:
-        if fn is not None:
-            fn = innermost_fn(fn)
-            assert callable(fn)
-            return DisableContext()(fn)
-        return DisableContext()
-    else:
-        return skip(fn)
-
-
-def skip(fn=None):
-    """
-    Skip frames associated with the function code, but still process recursively
-    invoked frames
-    """
-    if fn is None:
-        return skip
-    fn = innermost_fn(fn)
-    assert callable(fn)
-    skip_code(fn.__code__)
-    fn._torchdynamo_disable = True
-    return fn
-
-
 class TorchPatcher:
     @staticmethod
     @functools.lru_cache(None)
@@ -1214,6 +1197,8 @@ class TorchPatcher:
         # A better way to disable the following would be decorate the source
         # functions with @torch._disable_dynamo. However, this causes issues
         # with torch.deploy internally.
+        from .decorators import disable
+
         torch.jit.trace = disable(torch.jit.trace)
         torch.jit.trace_module = disable(torch.jit.trace_module)
         torch.jit._get_trace_graph = disable(torch.jit._get_trace_graph)
@@ -1232,6 +1217,7 @@ class TorchPatcher:
         from ..optim import (
             adadelta,
             adagrad,
+            adam,
             adamax,
             adamw,
             asgd,
@@ -1241,9 +1227,10 @@ class TorchPatcher:
             sgd,
         )
 
-        for opt_mod in (
+        all_opts = {
             adadelta,
             adagrad,
+            adam,
             adamax,
             adamw,
             asgd,
@@ -1251,11 +1238,22 @@ class TorchPatcher:
             rmsprop,
             rprop,
             sgd,
-        ):
+        }
+
+        disabled_multi_tensor_opts = {
+            adamax,
+            nadam,
+            sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
+        }
+
+        for opt_mod in all_opts:
             opt_name = opt_mod.__name__.split(".")[-1]
             multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
             fused_fn_name = f"_fused_{opt_name}"
-            if hasattr(opt_mod, multi_tensor_fn_name):
+            if (
+                hasattr(opt_mod, multi_tensor_fn_name)
+                and opt_mod in disabled_multi_tensor_opts
+            ):
                 setattr(
                     opt_mod,
                     multi_tensor_fn_name,
