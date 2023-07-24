@@ -9,7 +9,6 @@ from .pt2e.qat_utils import (
 from .pt2e.utils import (
     _get_node_name_to_scope,
     _fuse_conv_bn_,
-    _rearrange_weight_observer_for_decomposed_linear,
     _replace_dropout_for_eval,
 )
 from .pt2e.representation import reference_representation_rewrite
@@ -28,7 +27,7 @@ from torch.ao.quantization.pt2e.quantizer import (  # noqa: F401
     SharedQuantizationSpec,
     DerivedQuantizationSpec,
     QuantizationAnnotation,
-    QNNPackQuantizer,
+    XNNPACKQuantizer,
     EmbeddingQuantizer,
     ComposableQuantizer,
 )
@@ -38,14 +37,20 @@ from torch.ao.quantization.pt2e.quantizer.utils import (  # noqa: F401
     get_output_act_qspec,
     get_weight_qspec,
 )
-from torch.ao.quantization.pt2e.quantizer.qnnpack_quantizer import (  # noqa: F401
+from torch.ao.quantization.pt2e.quantizer.xnnpack_quantizer import (  # noqa: F401
     get_symmetric_quantization_config,
 )
 from torch.ao.quantization.backend_config import BackendConfig
 
 from typing import Any, Tuple
 
-def prepare_pt2e(
+__all__ = [
+    "prepare_pt2e",
+    "prepare_qat_pt2e",
+    "convert_pt2e",
+]
+
+def _prepare_pt2e_deprecated(
     model: GraphModule,
     qconfig_mapping: QConfigMapping,
     example_inputs: Tuple[Any, ...],
@@ -65,15 +70,9 @@ def prepare_pt2e(
         example_inputs,
         backend_config=backend_config
     )
-
-    # TODO: remove hack when we have better support for pattern matching
-    # move around the observer for addmm
-    _rearrange_weight_observer_for_decomposed_linear(model)
     return model
 
-# TODO: update this to prepare_pt2e after we have a usable quantizer
-# implemented
-def prepare_pt2e_quantizer(
+def prepare_pt2e(
     model: GraphModule,
     quantizer: Quantizer,
 ) -> GraphModule:
@@ -88,8 +87,7 @@ def prepare_pt2e_quantizer(
     model = prepare(model, node_name_to_scope, is_qat=False)
     return model
 
-# TODO: update this to prepare_qat_pt2e
-def prepare_qat_pt2e_quantizer(
+def prepare_qat_pt2e(
     model: GraphModule,
     quantizer: Quantizer,
 ) -> GraphModule:
@@ -102,9 +100,6 @@ def prepare_qat_pt2e_quantizer(
     # TODO: only fuse if conv and bn are both configured to be quantized
     _fuse_conv_bn_qat(model)
     model = prepare(model, node_name_to_scope, is_qat=True)
-    # TODO: remove hack when we have better support for pattern matching
-    # move around the observer for addmm
-    _rearrange_weight_observer_for_decomposed_linear(model)
     return model
 
 def convert_pt2e(

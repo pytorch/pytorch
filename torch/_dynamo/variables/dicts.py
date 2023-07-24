@@ -432,19 +432,25 @@ class DataClassVariable(ConstDictVariable):
 
 class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
-    @functools.lru_cache(None)
-    def _patch_once(user_cls):
-        for attr_name in ("__init__", "__post_init__", "__setattr__", "__setitem__"):
-            if hasattr(user_cls, attr_name):
-                fn = getattr(user_cls, attr_name)
-                assert callable(fn), f"expect callable attr {attr_name}"
-                if hasattr(fn, "__code__"):
-                    skip_code(fn.__code__)
-
-    @staticmethod
     def is_matching_cls(cls):
         try:
-            return issubclass(cls, collections.OrderedDict)
+            # True if using default OrderedDict.__init__ and did not implement __post_init__
+            if (
+                issubclass(cls, collections.OrderedDict)
+                and cls.__init__ is collections.OrderedDict.__init__
+                and not hasattr(cls, "__post_init__")
+            ):
+                return True
+            # hack for HF usecase:
+            #   assume dataclass annotation for ModelOutput subclass
+            #   assume self.create is AA to ModelOutput.__post_init__
+            # for non-HF usecase:
+            #   check __module__ string to avoid costy HF import
+            if cls.__module__ != "transformers.modeling_outputs":
+                return False
+            from transformers.file_utils import ModelOutput
+
+            return issubclass(cls, ModelOutput)
         except ImportError:
             return False
 
@@ -456,7 +462,13 @@ class CustomizedDictVariable(ConstDictVariable):
     # when is_matching_cls(cls) is true
     @classmethod
     def create(cls, user_cls, args, kwargs, options):
-        CustomizedDictVariable._patch_once(user_cls)
+        # avoid tracing when returnning ModelOutput from forward func
+        for attr_name in ("__init__", "__post_init__", "__setattr__", "__setitem__"):
+            if hasattr(user_cls, attr_name):
+                fn = getattr(user_cls, attr_name)
+                assert callable(fn), f"expect callable attr {attr_name}"
+                if hasattr(fn, "__code__"):
+                    skip_code(fn.__code__)
 
         if not args and not kwargs:
             # CustomDict() init with empty arguments
