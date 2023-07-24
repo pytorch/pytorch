@@ -266,7 +266,7 @@ class BaseSchedulerNode:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
                 )
-                if input_node and V.graph.wrapper_code.can_reuse(input_node):
+                if input_node and V.graph.wrapper_code.can_reuse(input_node, self):
                     remaining_uses = [
                         x
                         for x in input_node.users
