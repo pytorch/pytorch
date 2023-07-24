@@ -2056,8 +2056,7 @@ except RuntimeError as e:
                         if exit_method == 'loader_error':
                             if not isinstance(loader_p.exception, RuntimeError) or \
                                     'Loader error' not in str(loader_p.exception):
-                                fail('loader process did not raise expected exception, but had {}'.format(
-                                    loader_p.exception))
+                                fail(f'loader process did not raise expected exception, but had {loader_p.exception}')
                         elif exit_method == 'worker_kill':
                             if isinstance(loader_p.exception, RuntimeError):
                                 if 'DataLoader worker (pid' not in str(loader_p.exception):
@@ -2073,13 +2072,11 @@ except RuntimeError as e:
                                 # After all, we are happy as long as it terminates.
                                 pass
                             else:
-                                fail('loader process did not raise expected exception, but had {}'.format(
-                                    loader_p.exception))
+                                fail(f'loader process did not raise expected exception, but had {loader_p.exception}')
                         elif exit_method == 'worker_error':
                             if not isinstance(loader_p.exception, RuntimeError) or \
                                     'Worker error' not in str(loader_p.exception):
-                                fail('loader process did not raise expected exception, but had {}'.format(
-                                    loader_p.exception))
+                                fail(f'loader process did not raise expected exception, but had {loader_p.exception}')
                 finally:
                     loader_p.terminate()
 

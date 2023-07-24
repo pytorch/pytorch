@@ -2542,13 +2542,13 @@ for padding_mode, cpp_padding_mode in zip(
             dict(
                 module_name=f'Conv{d}d',
                 constructor_args=(2, 3, 3, 2, padding, 1, 1, True, padding_mode),
-                cpp_constructor_args='''torch::nn::Conv{}dOptions(2, 3, 3)
+                cpp_constructor_args=f'''torch::nn::Conv{d}dOptions(2, 3, 3)
                                         .stride(2)
-                                        .padding({})
+                                        .padding({cpp_padding})
                                         .dilation(1)
                                         .groups(1)
                                         .bias(true)
-                                        .padding_mode({})'''.format(d, cpp_padding, cpp_padding_mode),
+                                        .padding_mode({cpp_padding_mode})''',
                 input_size=input_size,
                 output_size=output_size,
                 cudnn=True,
