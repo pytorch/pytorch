@@ -1728,7 +1728,7 @@ def miopen_batch_norm(
     exponential_average_factor: float,
     epsilon: float,
 ):
-    a, b, c =  aten.native_batch_norm(
+    a, b, c = aten.native_batch_norm(
         input,
         weight,
         bias,
