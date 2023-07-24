@@ -506,7 +506,6 @@ class TestCommon(TestCase):
             device,
             dtype,
             op,
-            skip_zero_dim=skip_zero_dim,
         )
 
     @skipMeta
