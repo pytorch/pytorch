@@ -1,7 +1,6 @@
 import functools
 from contextlib import nullcontext
 from typing import Any, Callable, Dict, Optional, Sequence
-from warnings import warn
 
 import torch
 
@@ -15,7 +14,6 @@ import torch._refs.special
 import torch.overrides
 
 from torch._prims_common import torch_function_passthrough
-from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
 
 
 @functools.lru_cache(None)
