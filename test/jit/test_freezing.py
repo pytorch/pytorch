@@ -1993,7 +1993,6 @@ class TestFrozenOptimizations(JitTestCase):
     def setUp(self):
         super().setUp()
         self.default_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(torch.double)
 
     def tearDown(self):
         super().tearDown()
