@@ -1898,8 +1898,8 @@ class TestDistributions(DistributionsTestCase):
         self._check_sampler_sampler(
             MixtureSameFamily(Categorical(probs=probs), Normal(loc, scale)),
             ScipyMixtureNormal(probs.numpy(), loc.numpy(), scale.numpy()),
-            '''MixtureSameFamily(Categorical(probs={}),
-            Normal(loc={}, scale={}))'''.format(probs, loc, scale))
+            f'''MixtureSameFamily(Categorical(probs={probs}),
+            Normal(loc={loc}, scale={scale}))''')
 
     def test_normal(self):
         loc = torch.randn(5, 5, requires_grad=True)

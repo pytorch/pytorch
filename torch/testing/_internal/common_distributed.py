@@ -152,7 +152,7 @@ def import_transformers_or_skip():
         @wraps(func)
         def wrapper(*args, **kwargs):
             try:
-                from transformers import (  # noqa: Unused
+                from transformers import (  # noqa: F401
                     AutoModelForMaskedLM,
                     BertConfig,
                 )
@@ -760,7 +760,7 @@ class MultiProcessTestCase(TestCase):
                 self._check_return_codes(elapsed_time)
         finally:
             # Close all pipes
-            for pid, pipe in self.pid_to_pipe.items():
+            for pipe in self.pid_to_pipe.values():
                 pipe.close()
 
     def _check_no_test_errors(self, elapsed_time) -> None:
