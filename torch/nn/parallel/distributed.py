@@ -850,6 +850,7 @@ class DistributedDataParallel(Module, Joinable):
             upcast_hook_state = _AllreduceUpcastHookState(
                 ddp_weakref=weakref.ref(self),
                 upcast_stream=_get_device_module(self._device_module_type).Stream(),
+                device_module=_get_device_module(self._device_module_type),
             )
             self.register_comm_hook(
                 upcast_hook_state,

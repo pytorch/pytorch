@@ -5,7 +5,6 @@ from torch.autograd import Variable
 from dataclasses import dataclass
 from typing import Any, no_type_check
 from torch.distributed.utils import _free_storage
-from torch._utils import _get_device_module
 
 @dataclass
 class _AllreduceUpcastHookState:
@@ -17,6 +16,7 @@ class _AllreduceUpcastHookState:
     ddp_weakref: Any
     upcast_stream: torch.Stream
     wait_for_stream_enqueued: bool = False
+    device_module: Any = torch.cuda
 
 @no_type_check
 def _reducer_allreduce_and_upcast_hook(
@@ -39,8 +39,7 @@ def _reducer_allreduce_and_upcast_hook(
     fut = reducer._run_allreduce_hook(bucket)
     ret_fut = torch.futures.Future()
     stream = hook_state.upcast_stream
-    device_module = _get_device_module(stream.device.type)
-    with device_module.stream(stream):
+    with hook_state.device_module.stream(stream):
         fut.wait()
         bucket.buffer().div_(process_group.size())
         ret_fut.set_result(bucket.buffer())
@@ -56,7 +55,7 @@ def _reducer_allreduce_and_upcast_hook(
 
     # enqueue a callback to wait for this stream at end of backward
     def wait_for_stream_cb():
-        device_module.current_stream().wait_stream(stream)
+        hook_state.device_module.current_stream().wait_stream(stream)
         # Remove post-backward hooks since they are re-installed in next
         # iteration, similar to FSDP.
         # Parameters that don't require grad still needed to be casted since
