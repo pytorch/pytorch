@@ -20,6 +20,12 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 
 
+def maybe_clone(x):
+    if x is not None:
+        return x.clone()
+    return x
+
+
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
         self.compiler_fn = compiler_fn
@@ -98,7 +104,7 @@ class AutogradCompilerInstance:
             inputs[i],
         )
         with disable_proxy_modes_tracing():
-            inputs[i] = inputs[i].clone()
+            inputs[i] = maybe_clone(inputs[i])
             self.bind_tensors_to_proxies([inputs[i]], [proxy])
         return inputs
 
@@ -109,7 +115,7 @@ class AutogradCompilerInstance:
             inputs,
         )
         with disable_proxy_modes_tracing():
-            inputs = [x.clone() for x in inputs]
+            inputs = [maybe_clone(x) for x in inputs]
             self.bind_tensors_to_proxies(inputs, proxies)
         return inputs
 
@@ -121,7 +127,7 @@ class AutogradCompilerInstance:
             inputs,
         )
         with disable_proxy_modes_tracing():
-            outputs = [x.clone() for x in outputs]
+            outputs = [maybe_clone(x) for x in outputs]
             self.bind_tensors_to_proxies(outputs, proxies)
         return outputs
 
@@ -151,8 +157,6 @@ class AutogradCompilerInstance:
         if isinstance(proxies, torch.fx.Proxy):
             proxies = [proxies[i] for i in range(len(tensors))]
         assert len(tensors) == len(proxies)
-        assert all(x is not None for x in tensors)
-        assert all(x is not None for x in proxies)
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
 
 

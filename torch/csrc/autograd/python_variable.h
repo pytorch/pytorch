@@ -98,7 +98,13 @@ inline torch::autograd::variable_list THPVariable_UnpackList(
   torch::autograd::variable_list result;
   result.reserve(result_len);
   for (const auto i : c10::irange(result_len)) {
-    result.emplace_back(THPVariable_Unpack(PyList_GET_ITEM(pyresult, i)));
+    PyObject* item = PyList_GET_ITEM(pyresult, i);
+    if (item != Py_None) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(THPVariable_Check(item));
+      result.emplace_back(THPVariable_Unpack(item));
+    } else {
+      result.emplace_back();
+    }
   }
   return result;
 }
