@@ -215,7 +215,7 @@ Adam.__doc__ = r"""Implements Adam algorithm.
        \end{aligned}
 
     For further details regarding the algorithm we refer to `Adam: A Method for Stochastic Optimization`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -228,18 +228,17 @@ Adam.__doc__ = r"""Implements Adam algorithm.
         amsgrad (bool, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
-        {foreach}
-        {maximize}
-        {capturable}
-        {differentiable}
-        {fused}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_capturable_doc}
+        {_differentiable_doc}
+        {_fused_doc}
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, capturable=_capturable_doc,
-               differentiable=_differentiable_doc, fused=_fused_doc)
+    """
 
 
 def adam(params: List[Tensor],

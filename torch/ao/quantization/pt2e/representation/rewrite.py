@@ -319,14 +319,9 @@ def _replace_ph_qdq_per_channel_replacement(gm: torch.fx.GraphModule):
 
 # (example inputs, pattern, replacement, post_transformation_pattern, post_transformation_replacement)
 _EXAMPLE_INPUTS_PATTERN_AND_REPLACEMENTS = [
-<<<<<<< HEAD
+    (_QUANTIZED_CONV2d_EXAMPLE_INPUTS, _qdq_quantized_conv2d, _reference_quantized_conv2d, replace_literals_with_new_placeholders, replace_literals_with_new_placeholders),
     (_QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS, _qdq_quantized_add_relu, _reference_quantized_add_relu, None, None),
     (_QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS, _qdq_quantized_add, _reference_quantized_add, None, None),
-=======
-    (_QUANTIZED_CONV2d_EXAMPLE_INPUTS, _qdq_quantized_conv2d, _reference_quantized_conv2d, replace_literals_with_new_placeholders, replace_literals_with_new_placeholders),
-    (_QUANTIZED_ADD_EXAMPLE_INPUTS, _qdq_quantized_add_relu, _reference_quantized_add_relu, None, None),
-    (_QUANTIZED_ADD_EXAMPLE_INPUTS, _qdq_quantized_add, _reference_quantized_add, None, None),
->>>>>>> bdad4feef10 ([quant][pt2e] Add reference representation for quantized conv2d)
     (_QUANTIZED_MAX_POOL2D_EXAMPLE_INPUTS, _qdq_quantized_max_pool2d, _reference_quantized_max_pool2d, replace_literals_with_new_placeholders, replace_literals_with_new_placeholders),
     (_QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS, _qdq_quantized_adaptive_avg_pool2d, _reference_quantized_adaptive_avg_pool2d, replace_literals_with_new_placeholders, replace_literals_with_new_placeholders),
     (_QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS, _quantize_per_tensor_int8, _reference_quantize_per_tensor_int8, None, None),
