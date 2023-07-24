@@ -1460,6 +1460,25 @@ void set_fwd_bwd_enabled_val(bool val) {
   fwd_bwd_enabled_fn() = [val]() { return val; };
 }
 
+namespace {
+std::function<bool()>& cuda_sync_enabled_fn() {
+  static std::function<bool()> fn = []() { return true; };
+  return fn;
+}
+} // namespace
+
+bool get_cuda_sync_enabled() {
+  return cuda_sync_enabled_fn()();
+}
+
+void set_cuda_sync_enabled_fn(std::function<bool()> fn) {
+  cuda_sync_enabled_fn() = std::move(fn);
+}
+
+void set_cuda_sync_enabled_val(bool val) {
+  cuda_sync_enabled_fn() = [val]() { return val; };
+}
+
 } // namespace impl
 } // namespace profiler
 } // namespace torch
