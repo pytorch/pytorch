@@ -469,7 +469,6 @@ class VecISA:
     _macro: str
     _arch_flags: str
     _dtype_nelements: Dict[torch.dtype, int]
-    _capability: str
 
     # Note [Checking for Vectorized Support in Inductor]
     # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
@@ -519,9 +518,6 @@ cdll.LoadLibrary("__lib_path__")
     def build_arch_flags(self):
         return self._arch_flags
 
-    def capability(self):
-        return self._capability
-
     def __hash__(self) -> int:
         return hash(str(self))
 
@@ -543,15 +539,14 @@ cdll.LoadLibrary("__lib_path__")
             try:
                 # Check build result
                 compile_file(input_path, output_path, build_cmd)
-                # TODO: get vectorization working in fbcode.
-                # For now, this always fails, so we fall back to generating non-vectorized cpu code.
                 subprocess.check_call(
                     [
-                        "python",
+                        sys.executable,
                         "-c",
                         VecISA._avx_py_load.replace("__lib_path__", output_path),
                     ],
                     stderr=subprocess.DEVNULL,
+                    env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
             except Exception as e:
                 return False
@@ -565,7 +560,6 @@ class VecAVX512(VecISA):
     _macro = "CPU_CAPABILITY_AVX512"
     _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32}
-    _capability = "AVX512"
 
     def __str__(self) -> str:
         return "avx512"
@@ -579,7 +573,6 @@ class VecAVX2(VecISA):
     _macro = "CPU_CAPABILITY_AVX2"
     _arch_flags = "-mavx2 -mfma"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
-    _capability = "AVX2"
 
     def __str__(self) -> str:
         return "avx2"
@@ -592,7 +585,6 @@ class InvalidVecISA(VecISA):
     _macro = ""
     _arch_flags = ""
     _dtype_nelements = {}
-    _capability = "INVALID"
 
     def __str__(self) -> str:
         return "INVALID_VEC_ISA"
@@ -625,26 +617,21 @@ def valid_vec_isa_list():
 
 
 def pick_vec_isa():
-    def inner():
-        _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
-        if not _valid_vec_isa_list:
-            return invalid_vec_isa
-
-        # If the simdlen is None, it indicates determin the vectorization length automatically
-        if config.cpp.simdlen is None:
-            assert _valid_vec_isa_list
-            return _valid_vec_isa_list[0]
-
-        for isa in _valid_vec_isa_list:
-            if config.cpp.simdlen == isa.bit_width():
-                return isa
-
+    _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
+    if not _valid_vec_isa_list:
         return invalid_vec_isa
 
-    isa = inner()
-    cap = torch.backends.cpu.get_cpu_capability()
-    log.warning(f"Picking ISA {isa}; capability {cap}")
-    return isa
+    # If the simdlen is None, it indicates determin the vectorization length automatically
+    if config.cpp.simdlen is None:
+        assert _valid_vec_isa_list
+        return _valid_vec_isa_list[0]
+
+    for isa in _valid_vec_isa_list:
+        if config.cpp.simdlen == isa.bit_width():
+            return isa
+
+    return invalid_vec_isa
+
 
 def get_shared(shared=True):
     return "-shared -fPIC" if shared else ""
@@ -724,8 +711,8 @@ def get_include_and_linking_paths(
             libs += ["omp"]
         macros = vec_isa.build_macro()
         if macros:
-            if config.is_fbcode():
-                cap = vec_isa.capability()
+            if config.is_fbcode() and vec_isa != invalid_vec_isa:
+                cap = str(vec_isa).upper()
                 macros = " ".join(
                     [
                         vec_isa.build_arch_flags(),
