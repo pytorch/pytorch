@@ -1880,6 +1880,7 @@ def cudnn_batch_norm_backward(
         [True, True, True],
     )
 
+
 @register_decomposition(aten.miopen_batch_norm_backward)
 def miopen_batch_norm_backward(
     input: Tensor,
@@ -1904,6 +1905,7 @@ def miopen_batch_norm_backward(
         epsilon,
         [True, True, True],
     )
+
 
 @register_decomposition(aten._adaptive_avg_pool2d)
 @pw_cast_for_opmath
