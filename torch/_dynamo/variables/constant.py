@@ -29,8 +29,9 @@ _type_to_assert_reason = {
 class ConstantVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
-        for disallowed_type, reason in _type_to_assert_reason.items():
-            assert not isinstance(value, disallowed_type), reason
+        if not ConstantVariable.is_literal(value):
+            for disallowed_type, reason in _type_to_assert_reason.items():
+                assert not isinstance(value, disallowed_type), reason
 
         if HAS_NUMPY and isinstance(value, np.number):
             self.value = value.item()
