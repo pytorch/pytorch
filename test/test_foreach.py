@@ -809,7 +809,7 @@ class TestForeach(TestCase):
                 kwargs["weight"] = args[1]
                 ref_kwargs["weight"] = args[1]
 
-            if dtype in integral_types() or dtype == torch.bool or (not self.is_cuda and dtype == torch.half):
+            if dtype in integral_types() or dtype == torch.bool:
                 with self.assertRaises(RuntimeError):
                     wrapped_op(inputs, self.is_cuda, is_fastpath, **kwargs)
                 return

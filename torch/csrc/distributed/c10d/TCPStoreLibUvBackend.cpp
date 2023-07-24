@@ -16,7 +16,6 @@
 namespace c10d {
 namespace detail {
 
-
 std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(
     const TCPStoreOptions& opts) {
 #ifdef TORCH_USE_LIBUV
