@@ -71,6 +71,7 @@ from torch.ao.quantization import (
     default_dynamic_qconfig,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
+from torch._higher_order_ops.out_dtype import out_dtype
 
 # TODO: Move to common utils or use existing quant utils to fetch model instances
 class TestHelperModules:
@@ -1804,14 +1805,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
         ref_node_occurrence = {
-            ns.call_function(torch._higher_order_ops.out_dtype.out_dtype): 1,
+            ns.call_function(out_dtype): 2,
         }
 
         self._test_representation(
             M().eval(),
             example_inputs,
             quantizer,
-            ref_node_occurrence={},
+            ref_node_occurrence=ref_node_occurrence,
             non_ref_node_occurrence={}
         )
 

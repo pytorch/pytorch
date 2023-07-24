@@ -225,7 +225,7 @@ def build_cpp_tests(unit_test_class, print_cpp_source=False):
     assert len(unit_test_class.functional_test_params_map) > 0
     cpp_sources = TORCH_NN_COMMON_TEST_HARNESS + SAMPLE_FUNCTIONAL_CPP_SOURCE
     functions = []
-    for test_name, test_params in unit_test_class.functional_test_params_map.items():
+    for test_params in unit_test_class.functional_test_params_map.values():
         cpp_sources += generate_test_cpp_sources(test_params=test_params, template=TORCH_NN_FUNCTIONAL_TEST_FORWARD)
         functions.append(f'{test_params.functional_variant_name}_test_forward')
     if print_cpp_source:
