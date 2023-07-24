@@ -43,7 +43,7 @@ def python_call_stack(frames_to_skip: int = 0, frames_to_log: int = 16) -> _infr
     return stack
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def _function_source_info(fn: Callable) -> Tuple[Sequence[str], int, Optional[str]]:
     """Returns the source lines, line number, and source file path for the given function.
 

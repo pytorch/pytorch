@@ -48,11 +48,17 @@ pattern_matcher = True
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
+# enable pattern match with group fusion (using fbgemm)
+group_fusion = False
+
 # enable reordering pass
 reordering = True
 
-# inductor engine name
-dll_name = "inductor_engine.so"
+# AOTInductor output path
+# If an absolute path is specified, the generated lib files will be stored under the directory;
+# If a relative path is specified, it will be used as a subdirectory under the default caching path;
+# If not specified, a temp directory will be created under the default caching path
+aot_inductor_output_path = ""
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -170,7 +176,14 @@ compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    global_cache_dir = "fb/cache"
+    from libfb.py import parutil
+
+    try:
+        global_cache_dir = parutil.get_dir_path(
+            os.path.join(__package__.replace(".", os.sep), "fb/cache")
+        )
+    except ValueError:
+        global_cache_dir = None
 else:
     global_cache_dir = None
 
