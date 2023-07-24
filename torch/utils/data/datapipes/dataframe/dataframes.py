@@ -177,7 +177,7 @@ class CaptureF(Capture):
 
 class CaptureA(CaptureF):
     def __str__(self):
-        return '{name}'.format(name=self.kwargs['name'])
+        return f"{self.kwargs['name']}"
 
     def execute(self):
         value = self.kwargs['real_attribute']
@@ -247,7 +247,7 @@ class CaptureVariable(Capture):
             raise Exception('Attempting to create capture variable with capture off')
         self.ctx = ctx
         self.value = value
-        self.name = 'var_%s' % CaptureVariable.names_idx
+        self.name = f'var_{CaptureVariable.names_idx}'
         CaptureVariable.names_idx += 1
         self.ctx['variables'].append(self)
 
@@ -352,7 +352,7 @@ def get_val(capture):
     if isinstance(capture, Capture):
         return capture.execute()
     elif isinstance(capture, str):
-        return '"%s"' % capture
+        return f'"{capture}"'
     else:
         return capture
 
@@ -361,7 +361,7 @@ class CaptureInitial(CaptureVariable):
     def __init__(self, schema_df=None):
         new_ctx: Dict[str, List[Any]] = {'operations': [], 'variables': [], 'schema_df': schema_df}
         super().__init__(None, new_ctx)
-        self.name = 'input_%s' % self.name
+        self.name = f'input_{self.name}'
 
 
 class CaptureDataFrame(CaptureInitial):

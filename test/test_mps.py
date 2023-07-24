@@ -407,7 +407,6 @@ def mps_ops_modifier(ops):
         'cumprod': None,
         'digamma': None,
         'erfc': None,
-        'erfinv': None,
         'frexp': None,
         'gcd': None,
         'geqrf': None,
@@ -7548,6 +7547,8 @@ class TestNLLLoss(TestCaseMPS):
         helper((2, 8, 3, 5), torch.expm1)
         helper((2, 8, 3, 5), torch.log)
         helper((2, 8, 3, 5), torch.cos)
+        helper((2, 8, 3, 5), torch.erfinv)
+
 
     def test_non_dense_in_storage_unary_ops(self):
         def helper(op):
@@ -10471,7 +10472,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.huber_loss',
         'true_divide', 'kron',
         'gradient', 'var', 'std', 'ldexp',
-        'linalg.vector_norm',
+        'linalg.vector_norm', 'lerp',
         'addr', 'var_mean',
         'var_mean_unbiased',
         'acosh', 'asinh', 'asin',

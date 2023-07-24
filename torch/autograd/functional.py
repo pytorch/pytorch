@@ -107,8 +107,7 @@ def _validate_v(v, other, is_other_tuple):
             prepend = ""
             if is_other_tuple:
                 prepend = f"Entry {idx} in "
-            raise RuntimeError("{}v has invalid size: should be {} but got {}.".format(
-                               prepend, el_other.size(), el_v.size()))
+            raise RuntimeError(f"{prepend}v has invalid size: should be {el_other.size()} but got {el_v.size()}.")
 
 
 def _check_requires_grad(inputs, input_type, strict):

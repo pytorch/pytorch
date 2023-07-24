@@ -305,14 +305,12 @@ class DataLoader(Generic[T_co]):
             # We cannot check `shuffle is not None` here, since previously `shuffle=False` was the default.
             elif shuffle not in {False, None}:
                 raise ValueError(
-                    "DataLoader with IterableDataset: expected unspecified "
-                    "shuffle option, but got shuffle={}".format(shuffle))
+                    f"DataLoader with IterableDataset: expected unspecified shuffle option, but got shuffle={shuffle}")
 
             if sampler is not None:
                 # See NOTE [ Custom Samplers and IterableDataset ]
                 raise ValueError(
-                    "DataLoader with IterableDataset: expected unspecified "
-                    "sampler option, but got sampler={}".format(sampler))
+                    f"DataLoader with IterableDataset: expected unspecified sampler option, but got sampler={sampler}")
             elif batch_sampler is not None:
                 # See NOTE [ Custom Samplers and IterableDataset ]
                 raise ValueError(
@@ -418,8 +416,7 @@ class DataLoader(Generic[T_co]):
     def __setattr__(self, attr, val):
         if self.__initialized and attr in (
                 'batch_size', 'batch_sampler', 'sampler', 'drop_last', 'dataset', 'persistent_workers'):
-            raise ValueError('{} attribute should not be set after {} is '
-                             'initialized'.format(attr, self.__class__.__name__))
+            raise ValueError(f'{attr} attribute should not be set after {self.__class__.__name__} is initialized')
 
         super().__setattr__(attr, val)
 
