@@ -1463,28 +1463,20 @@ def _slice_meta(
     _strides = strides if strides is not None else [1] * len(start_indices)
 
     if a.ndim != len(start_indices):
-        msg = "Attempting to slice tensor of rank {} with start_indices of length {}!".format(
-            a.ndim, len(start_indices)
-        )
+        msg = f"Attempting to slice tensor of rank {a.ndim} with start_indices of length {len(start_indices)}!"
         raise ValueError(msg)
 
     if a.ndim != len(limit_indices):
-        msg = "Attempting to slice tensor of rank {} with limit_indices of length {}!".format(
-            a.ndim, len(limit_indices)
-        )
+        msg = f"Attempting to slice tensor of rank {a.ndim} with limit_indices of length {len(limit_indices)}!"
         raise ValueError(msg)
 
     if a.ndim != len(_strides):
-        msg = "Attempting to slice tensor of rank {} with strides of length {}!".format(
-            a.ndim, len(limit_indices)
-        )
+        msg = f"Attempting to slice tensor of rank {a.ndim} with strides of length {len(limit_indices)}!"
         raise ValueError(msg)
 
     for x, y in zip(start_indices, a.shape):
         if x < 0:
-            msg = "Attempting to slice a tensor with a negative start index of {}!".format(
-                x
-            )
+            msg = f"Attempting to slice a tensor with a negative start index of {x}!"
             raise ValueError(msg)
         if x > y:
             msg = (
@@ -1497,11 +1489,7 @@ def _slice_meta(
 
     for x, y, z in zip(limit_indices, a.shape, start_indices):
         if x < 0:
-            msg = (
-                "Attempting to slice a tensor with a negative stop index of {}!".format(
-                    x
-                )
-            )
+            msg = f"Attempting to slice a tensor with a negative stop index of {x}!"
             raise ValueError(msg)
         if x > y:
             msg = (
@@ -1519,9 +1507,7 @@ def _slice_meta(
 
     for x in _strides:
         if x <= 0:
-            msg = "Attempting to slice a tensor with a non-positive step of {}!".format(
-                x
-            )
+            msg = f"Attempting to slice a tensor with a non-positive step of {x}!"
             raise ValueError(msg)
 
     new_shape = []
@@ -1582,9 +1568,7 @@ def _slice_in_dim_meta(
         msg = f"slice_in_dim: received a negative axis {axis}"
         raise ValueError(msg)
     if axis >= a.ndim:
-        msg = "slice_in_dim: axis {} is greater or equal to the rank {} of the tensor".format(
-            axis, a.ndim
-        )
+        msg = f"slice_in_dim: axis {axis} is greater or equal to the rank {a.ndim} of the tensor"
         raise ValueError(msg)
 
     if start_index < 0:
@@ -1592,21 +1576,15 @@ def _slice_in_dim_meta(
         raise ValueError(msg)
 
     if start_index > a.shape[axis]:
-        msg = "slice_in_dim: start_index is greater than the length {} of dimension {}".format(
-            start_index, axis
-        )
+        msg = f"slice_in_dim: start_index is greater than the length {start_index} of dimension {axis}"
         raise ValueError(msg)
 
     if limit_index > a.shape[axis]:
-        msg = "slice_in_dim: limit_index is greater than the length {} of dimension {}".format(
-            limit_index, axis
-        )
+        msg = f"slice_in_dim: limit_index is greater than the length {limit_index} of dimension {axis}"
         raise ValueError(msg)
 
     if limit_index < start_index:
-        msg = "slice_in_dim: received a limit_index {} less than the start_index {}".format(
-            limit_index, start_index
-        )
+        msg = f"slice_in_dim: received a limit_index {limit_index} less than the start_index {start_index}"
         raise ValueError(msg)
 
     if stride < 0:
@@ -1936,9 +1914,7 @@ def _reshape_meta(a: TensorLikeType, shape: ShapeType):
     # same number of elements
     numel = reduce(operator.mul, shape)
     if numel != a.numel():
-        msg = "Attempting to reshape a tensor with {} elements to a shape with {} elements!".format(
-            a.numel(), numel
-        )
+        msg = f"Attempting to reshape a tensor with {a.numel()} elements to a shape with {numel} elements!"
         raise ValueError(msg)
 
     return TensorMeta(a, shape=shape, strides=utils.make_contiguous_strides_for(shape))
@@ -2188,9 +2164,7 @@ def _copy_to_meta(a: TensorLikeType, b: TensorLikeType):
 
     # Validates the tensors have the same number of elements
     if a.numel() != b.numel():
-        msg = "Attempting to copy {} elements to a tensor with {} elements!".format(
-            b.numel(), a.numel()
-        )
+        msg = f"Attempting to copy {b.numel()} elements to a tensor with {a.numel()} elements!"
         raise RuntimeError(msg)
 
     return a
