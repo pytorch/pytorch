@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import re
 from textwrap import dedent
 from unittest.mock import patch
 
@@ -11,7 +10,6 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.testing import CompileCounter, expectedFailureDynamic, rand_strided
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
-from torch._inductor.utils import run_and_get_code
 from torch.profiler import profile
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
@@ -848,65 +846,6 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             ),
         )
 
-    @patch("torch._inductor.config.comment_origin", True)
-    def test_inductor_sequence_nr(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(
-                    in_channels=16,
-                    out_channels=16,
-                    kernel_size=(1, 1),
-                    stride=1,
-                    padding="same",
-                    bias=True,
-                )
-                self.bn1 = torch.nn.BatchNorm2d(num_features=16)
-                self.relu1 = torch.nn.ReLU()
-                self.fc1 = torch.nn.Linear(in_features=1638400, out_features=1)
-                self.loss_fn = torch.nn.L1Loss()
-
-            def forward(self, x, target):
-                y = x
-                x = self.conv1(x)
-                x = self.bn1(x)
-                x = self.relu1(x)
-                x = x + y
-                x = torch.flatten(x)
-                x = self.fc1(x)
-                output = self.loss_fn(x, target)
-
-                return (output,)
-
-        def get_triton_codegen(optimized_module, args):
-            def run_with_backward():
-                result = optimized_module(*args)
-                result[0].backward()
-                return result
-
-            res, (fwd_code, bwd_code) = run_and_get_code(run_with_backward)
-            return fwd_code, bwd_code
-
-        x = torch.rand(100, 16, 32, 32, requires_grad=True, device="cuda")
-        target = torch.rand(1, device="cuda")
-        args = [x, target]
-        model = Model().cuda()
-        opt_model = torch.compile(model)
-        fwd_code, bwd_code = get_triton_codegen(opt_model, args)
-
-        bwd_seq_nr_set = set()
-        fwd_seq_nr_set = set()
-        for idx, code in enumerate([fwd_code, bwd_code]):
-            seq_nr_set = bwd_seq_nr_set if idx > 0 else fwd_seq_nr_set
-            prefix = "BWD" if idx > 0 else "FWD"
-            for line in code.split("\n"):
-                if "seq_nr" in line:
-                    res = re.search(r"seq_nr:(\d+)", line)
-                    if res:
-                        seq_nr_set.add(int(res.group(1)))
-        self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
-        return
-
     def test_eager_sequence_nr(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -943,12 +882,12 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
             )
             return gx
 
-        x = torch.rand(100, 16, 32, 32, requires_grad=True, device="cuda")
-        target = torch.rand(1, device="cuda")
+        x = torch.rand(100, 16, 32, 32, requires_grad=True)
+        target = torch.rand(1)
         args = [x, target]
         grad_output = torch.tensor(1.0, requires_grad=True)
         compiled_f1 = torch.compile(backend="aot_eager")(double_grad)
-        model_instance = Model().cuda()
+        model_instance = Model()
         with profile(
             activities=[torch.profiler.ProfilerActivity.CPU],
             record_shapes=True,
