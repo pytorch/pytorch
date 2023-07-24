@@ -1649,7 +1649,8 @@ class InsertTypePromotion(_pass.Transform):
         assert not kwargs, "`kwargs` is not supported"
 
         fake_args = self._fetch_fake_args()
-        fake_mode = self.fake_mode or torch._dynamo.utils.detect_fake_mode(fake_args)
+        fake_mode = self.fake_mode
+        assert fake_mode is not None, "Cannot detect fake_mode."
 
         with fake_mode, fx_traceback.preserve_node_meta():
             self.interpreter.run(*fake_args)
