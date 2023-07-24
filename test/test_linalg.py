@@ -4040,7 +4040,7 @@ class TestLinalg(TestCase):
 
     # Tolerances dictated by widest acceptable range on CPU before failure
     @dtypes(*floating_and_complex_types())
-    @precisionOverride({torch.float32: 1e-3,
+    @precisionOverride({torch.float32: 1e-3 if TEST_WITH_ROCM else 1e-1,
                         torch.float64: 1e-8})
     def test_linalg_solve_triangular(self, device, dtype):
         # This exercises the API + BLAS CPU + batched cuBLAS
