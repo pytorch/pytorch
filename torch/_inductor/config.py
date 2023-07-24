@@ -305,6 +305,9 @@ class cpp:
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = 16
 
+    # Use oneDNN Graph fusions for compute intensive ops
+    onednn_graph = False
+
 
 # config specific to codegen/triton.py
 class triton:
