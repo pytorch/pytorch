@@ -148,6 +148,9 @@ void PyTorchStreamReader::init() {
         static_cast<const char*>(serialization_id_ptr.get()),
         serialization_id_size);
   }
+  c10::LogAPIUsageMetadata(
+      "pytorch.stream.reader.metadata",
+      {{"serialization_id", serialization_id_}});
 
   // version check
   at::DataPtr version_ptr;
@@ -553,6 +556,19 @@ void PyTorchStreamWriter::writeEndOfFile() {
       writeRecord("version", version.c_str(), version.size());
     }
   }
+
+  // If no "byteorder" record in the output model, rewrites byteorder info
+  if(allRecords.find("byteorder") == allRecords.end()) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    std::string byteorder = "little";
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    std::string byteorder = "big";
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
+    writeRecord("byteorder", byteorder.c_str(), byteorder.size());
+  }
+
   writeSerializationId();
 
   AT_ASSERT(!finalized_);
@@ -604,6 +620,9 @@ void PyTorchStreamWriter::writeSerializationId() {
         kSerializationIdRecordName,
         serialization_id_.c_str(),
         serialization_id_.size());
+    c10::LogAPIUsageMetadata(
+      "pytorch.stream.writer.metadata",
+      {{"serialization_id", serialization_id_}});
   }
 }
 

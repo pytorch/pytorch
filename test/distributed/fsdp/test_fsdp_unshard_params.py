@@ -236,7 +236,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         NOTE: This method depends on FSDP internals.
         """
         model = FSDP(nn.Linear(1, 1, bias=False, device=self.device))
-        flat_param = model._handles[0].flat_param
+        flat_param = model._handle.flat_param
         self.assertEqual(1, flat_param.numel())
         # Write a known value to the *sharded* `FlatParameter`
         with torch.no_grad():
@@ -288,8 +288,8 @@ class TestUnshardParams(TestUnshardParamsBase):
             ),
             **fsdp_kwargs,
         )
-        outer_flat_param = model._handles[0].flat_param
-        inner_flat_param = model.module[0]._handles[0].flat_param
+        outer_flat_param = model._handle.flat_param
+        inner_flat_param = model.module[0]._handle.flat_param
         # NOTE: This assumes uniform sharding with padding across ranks.
         expected_outer_flat_param_unsharded_numel = (
             outer_flat_param.numel() * self.world_size
@@ -387,8 +387,8 @@ class TestUnshardParams(TestUnshardParamsBase):
         # Round up the sharded numel to account for padding
         sharded_inner_numel = int(math.ceil(unsharded_inner_numel / self.world_size))
         sharded_outer_numel = int(math.ceil(unsharded_outer_numel / self.world_size))
-        inner_flat_param = model.module[0]._handles[0].flat_param
-        outer_flat_param = model._handles[0].flat_param
+        inner_flat_param = model.module[0]._handle.flat_param
+        outer_flat_param = model._handle.flat_param
         self.assertEqual(sharded_inner_numel, inner_flat_param.numel())
         self.assertEqual(sharded_outer_numel, outer_flat_param.numel())
         expected_outer_numel = (
@@ -605,8 +605,8 @@ class TestUnshardParams(TestUnshardParamsBase):
             },
         )
         for fsdp_module in FSDP.fsdp_modules(fsdp_model):
-            for handle in fsdp_module._handles:
-                assert handle.flat_param.grad is None
+            if fsdp_module._handle:
+                assert fsdp_module._handle.flat_param.grad is None
         with FSDP.summon_full_params(fsdp_model, with_grads=True):
             for param in fsdp_model.parameters():
                 self.assertTrue(param.grad is None)

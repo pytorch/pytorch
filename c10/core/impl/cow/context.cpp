@@ -2,6 +2,7 @@
 
 #include <c10/core/impl/cow/deleter.h>
 #include <c10/util/Exception.h>
+#include <mutex>
 
 namespace c10::impl {
 

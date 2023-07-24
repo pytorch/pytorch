@@ -20,21 +20,19 @@ class Stream(torch._C._CudaStreamBase):
         device(torch.device or int, optional): a device on which to allocate
             the stream. If :attr:`device` is ``None`` (default) or a negative
             integer, this will use the current device.
-        priority(int, optional): priority of the stream. Can be either
-            -1 (high priority) or 0 (low priority). By default, streams have
-            priority 0.
+        priority(int, optional): priority of the stream, should be 0 or
+            negative, where negative numbers indicate higher priority. By default,
+            streams have priority 0.
 
-    .. note:: Although CUDA versions >= 11 support more than two levels of
-        priorities, in PyTorch, we only support two levels of priorities.
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
         # setting device manager is expensive, so we avoid it unless necessary
         if device is None or ("stream_id" in kwargs and "device_index" in kwargs):
-            return super(Stream, cls).__new__(cls, priority=priority, **kwargs)
+            return super().__new__(cls, priority=priority, **kwargs)
         else:
             with torch.cuda.device(device):
-                return super(Stream, cls).__new__(cls, priority=priority, **kwargs)
+                return super().__new__(cls, priority=priority, **kwargs)
 
     def wait_event(self, event):
         r"""Makes all future work submitted to the stream wait for an event.
@@ -110,8 +108,7 @@ class Stream(torch._C._CudaStreamBase):
         return hash((self.cuda_stream, self.device))
 
     def __repr__(self):
-        return ('<torch.cuda.Stream device={0} cuda_stream={1:#x}>'
-                .format(self.device, self.cuda_stream))
+        return (f'<torch.cuda.Stream device={self.device} cuda_stream={self.cuda_stream:#x}>')
 
 
 class ExternalStream(Stream):
@@ -134,7 +131,7 @@ class ExternalStream(Stream):
 
     def __new__(cls, stream_ptr, device=None, **kwargs):
         with torch.cuda.device(device):
-            return super(ExternalStream, cls).__new__(cls, stream_ptr=stream_ptr, **kwargs)
+            return super().__new__(cls, stream_ptr=stream_ptr, **kwargs)
 
 
 class Event(torch._C._CudaEventBase):
@@ -161,14 +158,14 @@ class Event(torch._C._CudaEventBase):
     """
 
     def __new__(cls, enable_timing=False, blocking=False, interprocess=False):
-        return super(Event, cls).__new__(
+        return super().__new__(
             cls,
             enable_timing=enable_timing, blocking=blocking, interprocess=interprocess)
 
     @classmethod
     def from_ipc_handle(cls, device, handle):
         r"""Reconstruct an event from an IPC handle on the given device."""
-        return super(Event, cls).from_ipc_handle(device, handle)
+        return super().from_ipc_handle(device, handle)
 
     def record(self, stream=None):
         r"""Records the event in a given stream.
@@ -229,6 +226,6 @@ class Event(torch._C._CudaEventBase):
 
     def __repr__(self):
         if self.cuda_event:
-            return '<torch.cuda.Event {0:#x}>'.format(self._as_parameter_.value)
+            return f'<torch.cuda.Event {self._as_parameter_.value:#x}>'
         else:
             return '<torch.cuda.Event uninitialized>'

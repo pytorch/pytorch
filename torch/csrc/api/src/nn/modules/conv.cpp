@@ -17,7 +17,7 @@
 
 namespace F = torch::nn::functional;
 
-F::PadFuncOptions::mode_t _get_pad_mode_from_conv_padding_mode(
+static F::PadFuncOptions::mode_t _get_pad_mode_from_conv_padding_mode(
     torch::nn::detail::conv_padding_mode_t conv_padding_mode) {
   F::PadFuncOptions::mode_t pad_mode;
   if (c10::get_if<torch::enumtype::kReflect>(&conv_padding_mode)) {

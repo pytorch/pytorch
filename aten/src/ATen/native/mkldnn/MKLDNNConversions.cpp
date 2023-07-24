@@ -25,13 +25,23 @@ namespace at { namespace native {
 
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype, c10::optional<bool> masked_grad) {
   TORCH_CHECK(mkldnn_tensor.scalar_type() == ScalarType::Float ||
-              mkldnn_tensor.scalar_type() == ScalarType::BFloat16,
-              "mkldnn_to_dense expects float or bfloat16 tensor input");
+              mkldnn_tensor.scalar_type() == ScalarType::BFloat16 ||
+              mkldnn_tensor.scalar_type() == ScalarType::Byte ||
+              mkldnn_tensor.scalar_type() == ScalarType::Char,
+              "mkldnn_to_dense expects float, bfloat16, uint8, int8 tensor input");
   ideep::tensor& stensor = itensor_from_mkldnn(mkldnn_tensor);
   auto dims = stensor.get_dims();
   auto data_type = dtype.has_value() ? dtype.value() : mkldnn_tensor.scalar_type();
-  TORCH_CHECK(data_type == ScalarType::Float || data_type == ScalarType::BFloat16,
-              "mkldnn tensor only can be converted to be a float or bfloat16 cpu tensor")
+  TORCH_CHECK(data_type == ScalarType::Float ||
+              data_type == ScalarType::BFloat16 ||
+              data_type == ScalarType::Byte ||
+              data_type == ScalarType::Char,
+              "mkldnn tensor only can be converted to be a float, bfloat16, uint8, int8 cpu tensor")
+  if (mkldnn_tensor.scalar_type() == ScalarType::Byte || mkldnn_tensor.scalar_type() == ScalarType::Char) {
+    // For int8, uint8 input, we should not change the data type.
+    TORCH_CHECK(mkldnn_tensor.scalar_type() == data_type,
+            "For int8, uint8 mkldnn_tensor input, we should not change the data type.");
+  }
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   Tensor cpu_tensor = at::empty(
     std::vector<int64_t>(dims.begin(), dims.end()),
@@ -41,8 +51,16 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dt
       data_type == ScalarType::Float
       ? stensor.to_public(cpu_tensor.template data_ptr<float>(),
                           ideep::tensor::data_type::f32)
-      : stensor.to_public(cpu_tensor.template data_ptr<BFloat16>(),
-                         ideep::tensor::data_type::bf16);
+      : (data_type == ScalarType::BFloat16
+         ? stensor.to_public(cpu_tensor.template data_ptr<BFloat16>(),
+                         ideep::tensor::data_type::bf16)
+         : (data_type == ScalarType::Byte
+            ? stensor.to_public(cpu_tensor.template data_ptr<uint8_t>(),
+                            ideep::tensor::data_type::u8)
+            : stensor.to_public(cpu_tensor.template data_ptr<int8_t>(),
+                            ideep::tensor::data_type::s8)
+         )
+      );
   cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
   return cpu_tensor.contiguous();
 }
@@ -53,15 +71,25 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype
   TORCH_CHECK(cpu_tensor.layout() == Layout::Strided,
              "dense_to_mkldnn expects strided tensor input");
   TORCH_CHECK(cpu_tensor.scalar_type() == ScalarType::Float ||
-              cpu_tensor.scalar_type() == ScalarType::BFloat16,
-             "dense_to_mkldnn expects float or bfloat16 tensor input");
+              cpu_tensor.scalar_type() == ScalarType::BFloat16 ||
+              cpu_tensor.scalar_type() == ScalarType::Byte ||
+              cpu_tensor.scalar_type() == ScalarType::Char,
+             "dense_to_mkldnn expects float, bfloat16, uint8, int8 tensor input");
   TORCH_CHECK(cpu_tensor.dim() <= 5,
              "Can't convert cpu tensor with the number of dimensions > 5");
   // NOTE: forbid direct convert from non-contiguous (or channels last) to `ideep::tensor`.
   auto cpu_tensor_cont = cpu_tensor.contiguous();
   auto data_type = dtype.has_value() ? dtype.value() : cpu_tensor.scalar_type();
-  TORCH_CHECK(data_type == ScalarType::Float || data_type == ScalarType::BFloat16,
-              "cpu tensor only can be converted to be a float or bfloat16 mkldnn tensor")
+  if (cpu_tensor.scalar_type() == ScalarType::Byte || cpu_tensor.scalar_type() == ScalarType::Char) {
+    // For int8, uint8 input, we should not change the data type.
+    TORCH_CHECK(cpu_tensor.scalar_type() == data_type,
+            "For int8, uint8 cpu_tensor input, we should not change the data type.");
+  }
+  TORCH_CHECK(data_type == ScalarType::Float ||
+              data_type == ScalarType::BFloat16 ||
+              data_type == ScalarType::Byte ||
+              data_type == ScalarType::Char,
+              "cpu tensor only can be converted to be a float, bfloat16, uint8, int8 mkldnn tensor")
   Tensor mkldnn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), data_type,
                                       cpu_tensor_cont.options().layout_opt(), cpu_tensor_cont.options().device_opt(),
                                       cpu_tensor_cont.options().pinned_memory_opt());
@@ -70,10 +98,20 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype
     dtensor.feed_from(dtensor.get_dims(),
                       ideep::tensor::data_type::f32,
                       (cpu_tensor_cont.template data_ptr<float>()));
-  } else {
+  } else if (cpu_tensor.scalar_type() == ScalarType::BFloat16) {
     dtensor.feed_from(dtensor.get_dims(),
                       ideep::tensor::data_type::bf16,
                       cpu_tensor_cont.template data_ptr<BFloat16>());
+  } else if (cpu_tensor.scalar_type() == ScalarType::Byte) {
+    dtensor.feed_from(dtensor.get_dims(),
+                      ideep::tensor::data_type::u8,
+                      cpu_tensor_cont.template data_ptr<uint8_t>());
+  } else {
+    TORCH_CHECK(cpu_tensor.scalar_type() == ScalarType::Char,
+            "Expect int8 input of cpu_tensor");
+    dtensor.feed_from(dtensor.get_dims(),
+                      ideep::tensor::data_type::s8,
+                      cpu_tensor_cont.template data_ptr<int8_t>());
   }
   return mkldnn_tensor;
 }
@@ -98,7 +136,19 @@ Tensor mkldnn_reorder_conv2d_weight(
   const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
-  auto w = itensor_from_mkldnn(self);
+
+  ideep::dims src_dims = ideep::dims();
+  bool is_channels_last = false;
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (input_size.has_value()) {
+    src_dims = input_size.value().vec();
+    // if has input size, we always use channels last.
+    is_channels_last = true;
+    memory_format = at::MemoryFormat::ChannelsLast;
+  }
+
+  auto self_ = self.is_mkldnn() ? self : self.contiguous(memory_format);
+  auto w = itensor_from_tensor(self_);
 
   // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
   // dimension when groups > 1, having dimension [g, o/g, i, h, w] instead of
@@ -108,14 +158,6 @@ Tensor mkldnn_reorder_conv2d_weight(
   if (w.ndims() == 5) {
     auto wdims = w.get_dims();
     w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
-  }
-
-  ideep::dims src_dims = ideep::dims();
-  bool is_channels_last = false;
-  if (input_size.has_value()) {
-    src_dims = input_size.value().vec();
-    // if has input size, we always use channels last.
-    is_channels_last = true;
   }
 
   auto desc = ideep::convolution_forward::expected_weights_desc(
@@ -172,7 +214,7 @@ Tensor mkldnn_reorder_conv3d_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
-Tensor mkldnn_reorder_linear_weight(
+static Tensor mkldnn_reorder_linear_weight(
     const Tensor& self,
     c10::optional<int64_t> batch_size_opt) {
   if (self.scalar_type() == ScalarType::BFloat16) {
@@ -181,7 +223,8 @@ Tensor mkldnn_reorder_linear_weight(
   }
   auto out_features = self.size(0);
   auto in_features = self.size(1);
-  auto w = itensor_from_mkldnn(self);
+  auto self_ = self.contiguous();
+  auto w = itensor_from_tensor(self_);
   ideep::dims input_size;
   auto dtype = w.get_data_type();
   if (batch_size_opt.has_value()) {
@@ -198,7 +241,7 @@ Tensor mkldnn_reorder_linear_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
-ideep::tensor::desc get_conv_transpose_expected_weights_desc(
+static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
     const ideep::tensor::dims& weights_dims,
     ideep::tensor::data_type w_dtype,
     const ideep::tensor::dims& strides,
@@ -237,7 +280,7 @@ ideep::tensor::desc get_conv_transpose_expected_weights_desc(
   }
 }
 
-Tensor mkldnn_reorder_conv_transpose2d_weight(
+static Tensor mkldnn_reorder_conv_transpose2d_weight(
     const Tensor& self,
     IntArrayRef padding,
     IntArrayRef output_padding,
@@ -254,15 +297,19 @@ Tensor mkldnn_reorder_conv_transpose2d_weight(
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
   const auto output_padding_expanded = expand_param_if_needed(output_padding, "output_padding", 2);
-  ideep::tensor w = itensor_from_tensor(self);
 
   ideep::dims src_dims = ideep::dims();
   bool is_channels_last = false;
+  auto memory_format = at::MemoryFormat::Contiguous;
   if (input_size.has_value()) {
     src_dims = input_size.value().vec();
     // if has input size, we always use channels last.
     is_channels_last = true;
+    memory_format = at::MemoryFormat::ChannelsLast;
   }
+
+  auto self_ = self.contiguous(memory_format);
+  ideep::tensor w = itensor_from_tensor(self_);
 
   auto expected_desc = get_conv_transpose_expected_weights_desc(
       w.get_dims(),
@@ -292,13 +339,16 @@ Tensor mkldnn_reorder_conv_transpose2d_weight(
                                  self.options().device_opt());
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_transpose_weight"),
       TORCH_FN(mkldnn_reorder_conv_transpose2d_weight));
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_linear_weight"),
       TORCH_FN(mkldnn_reorder_linear_weight));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_weight"),
+      TORCH_FN(mkldnn_reorder_conv2d_weight));
 }
 
 #else
@@ -335,7 +385,7 @@ Tensor mkldnn_reorder_conv3d_weight(
 #if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
 #include <mkl.h>
 
-Tensor mkl_reorder_linear_weight(
+static Tensor mkl_reorder_linear_weight(
     const Tensor& weight,
     const int64_t batch_size) {
   TORCH_CHECK(
@@ -354,7 +404,8 @@ Tensor mkl_reorder_linear_weight(
       weight.options().device_opt(),
       weight.options().pinned_memory_opt());
   ideep::tensor& mkl_weight = itensor_from_mkldnn(packed_weight);
-  ideep::tensor& orig_w = itensor_from_mkldnn(weight);
+  auto weight_ = weight.contiguous();
+  const ideep::tensor orig_w = itensor_view_from_dense(weight_);
   cblas_sgemm_pack(
       CblasRowMajor,
       CblasBMatrix,
@@ -369,10 +420,10 @@ Tensor mkl_reorder_linear_weight(
   return packed_weight;
 }
 
-TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(mkl, CPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkl::_mkl_reorder_linear_weight"),
-      TORCH_FN(mkl_reorder_linear_weight));
+    TORCH_SELECTIVE_NAME("mkl::_mkl_reorder_linear_weight"),
+    TORCH_FN(mkl_reorder_linear_weight));
 }
 
 #endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED

@@ -340,7 +340,11 @@ class NNModuleVariable(VariableTracker):
             # Try inlining instead of adding call_method/call_module to the
             # graph, and if we failed to inline we fallback to the logic as if
             # `config.inline_nn_modules=False`
-            if is_allowed(mod.__class__):
+            #
+            # If we are tracing the higher order op, we want Dynamo to step
+            # inside the module call so that Dynamo can see the underlying
+            # parameters and buffers and raise them as inputs to the graph.
+            if tx.output.is_root_tracer() or is_allowed(mod.__class__):
                 if torch._dynamo.config.inline_nn_modules:
                     try:
                         return inline(args)
@@ -523,6 +527,8 @@ class NNModuleVariable(VariableTracker):
             return wrap_values(module.named_modules())
         elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
+        elif name == "buffers":
+            return wrap_values(module.named_buffers(**get_kwargs("recurse")))
         elif name == "keys":
             assert not (args or kwargs)
             result = []
@@ -555,6 +561,7 @@ class NNModuleVariable(VariableTracker):
             builtin_supported = (
                 torch.nn.ModuleDict.__getitem__,
                 torch.nn.ModuleList.__getitem__,
+                torch.nn.ParameterDict.__getitem__,
                 torch.nn.ParameterList.__getitem__,
                 torch.nn.Sequential.__getitem__,
             )
@@ -616,12 +623,23 @@ class NNModuleVariable(VariableTracker):
                 source=NNModuleSource(GetItemSource(self.source, key)),
                 **options,
             )
-        elif name == "_get_abs_string_index":
+        elif (
+            name == "_get_abs_string_index"
+            or (
+                isinstance(module, torch.nn.modules.conv._ConvNd)
+                and name == "_conv_forward"
+            )
+            or (
+                isinstance(module, torch.nn.modules.conv._ConvTransposeNd)
+                and name == "_output_padding"
+            )
+        ):
             # Inline the function
             fn = getattr(module, name).__func__
-            src = AttrSource(AttrSource(self.source, name), "__func__")
+            fn_source = AttrSource(self.source, "__func__")
+            options["source"] = fn_source
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, source=src, **options),
+                variables.UserFunctionVariable(fn, **options),
                 [self] + args,
                 kwargs,
             )

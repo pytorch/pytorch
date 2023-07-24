@@ -6,17 +6,17 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*)
 }
 
-# If UPSTREAM_BUILD_ID is set (see trigger job), then we can
-# use it to tag this build with the same ID used to tag all other
-# base image builds. Also, we can try and pull the previous
-# image first, to avoid rebuilding layers that haven't changed.
-
-#until we find a way to reliably reuse previous build, this last_tag is not in use
-# last_tag="$(( CIRCLE_BUILD_NUM - 1 ))"
 tag="${DOCKER_TAG}"
-
-
 registry="308535385114.dkr.ecr.us-east-1.amazonaws.com"
+
+# NB: The image name could now be both the short form, like pytorch-linux-bionic-py3.11-clang9, or the
+# full name, like 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.11-clang9
+if [[ "${IMAGE_NAME}" == *"${registry}/pytorch/"* ]]; then
+  # Extract the image name from the long name
+  EXTRACTED_IMAGE_NAME=$(echo ${IMAGE_NAME#"${registry}/pytorch/"} | awk -F '[:,]' '{print $1}')
+  IMAGE_NAME="${EXTRACTED_IMAGE_NAME}"
+fi
+
 image="${registry}/pytorch/${IMAGE_NAME}"
 
 login() {
@@ -34,11 +34,6 @@ if [[ -z "${GITHUB_ACTIONS}" ]]; then
   # Logout on exit
   trap "docker logout ${registry}" EXIT
 fi
-
-# Try to pull the previous image (perhaps we can reuse some layers)
-# if [ -n "${last_tag}" ]; then
-#   docker pull "${image}:${last_tag}" || true
-# fi
 
 # Build new image
 ./build.sh ${IMAGE_NAME} -t "${image}:${tag}"

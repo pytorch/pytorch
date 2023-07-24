@@ -27,11 +27,11 @@ demonstration of these components in action:
     print(symbolic_traced.graph)
     """
     graph():
-        %x : [#users=1] = placeholder[target=x]
-        %param : [#users=1] = get_attr[target=param]
-        %add : [#users=1] = call_function[target=operator.add](args = (%x, %param), kwargs = {})
-        %linear : [#users=1] = call_module[target=linear](args = (%add,), kwargs = {})
-        %clamp : [#users=1] = call_method[target=clamp](args = (%linear,), kwargs = {min: 0.0, max: 1.0})
+        %x : [num_users=1] = placeholder[target=x]
+        %param : [num_users=1] = get_attr[target=param]
+        %add : [num_users=1] = call_function[target=operator.add](args = (%x, %param), kwargs = {})
+        %linear : [num_users=1] = call_module[target=linear](args = (%add,), kwargs = {})
+        %clamp : [num_users=1] = call_method[target=clamp](args = (%linear,), kwargs = {min: 0.0, max: 1.0})
         return clamp
     """
 

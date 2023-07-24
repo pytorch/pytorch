@@ -323,38 +323,45 @@ def _validate_sample_input_sparse_reduction_sum(sample, check_validate=False):
     dim = t_kwargs.get("dim")
     keepdim = t_kwargs.get("keepdim")
     layout = t_inp.layout
-    if layout in {
-        torch.sparse_csr,
-        torch.sparse_csc,
-        torch.sparse_bsr,
-        torch.sparse_bsc,
-    }:
-        if (isinstance(dim, int) and (t_inp.dim() != 2 or keepdim)) or (
-            isinstance(dim, (list, tuple))
-            and (((t_inp.dim() != 2 and len(dim) != t_inp.dim()) or keepdim))
-        ):
-            if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+    if isinstance(dim, (int, list, tuple)):
+        if layout in {
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        }:
+            if layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
                 return ErrorInput(
                     sample,
                     error_regex=(
-                        "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor"
-                        " layout but got Sparse(Bsr|Bsc)"
+                        "Currently the only compressed sparse format supported for sum.dim_IntList is CSR, but got layout"
                     ),
                 )
-            else:
+            if layout in {torch.sparse_csr, torch.sparse_csc} and not keepdim:
                 return ErrorInput(
                     sample,
-                    error_type=NotImplementedError,
-                    error_regex="Could not run 'aten::sum.IntList_out' with arguments from the 'SparseCsr(CPU|CUDA)' backend",
+                    error_regex=(
+                        "reduction operations on CSR tensors with keepdim=False is unsupported"
+                    ),
                 )
-        elif t_kwargs and not keepdim:
-            # reductions on sparse compressed tensors require
-            # keepdim==True when reduction is over sparse dimensions
-            return ErrorInput(
-                sample,
-                # FIXME: raise a better exception message
-                error_regex="torch.empty: Only batched sparse compressed [(]non-block[)] tensors are supported",
-            )
+            if t_inp.dim() != 2:
+                return ErrorInput(
+                    sample,
+                    error_regex=("input_dim == 2 INTERNAL ASSERT"),
+                )
+            if layout == torch.sparse_csr:
+                if t_inp.dtype == torch.bool:
+                    return ErrorInput(
+                        sample,
+                        error_regex=("_sparse_csr_sum_cpu not implemented for 'Bool'"),
+                    )
+                if t_inp.dtype == torch.complex32:
+                    return ErrorInput(
+                        sample,
+                        error_regex=(
+                            "_sparse_csr_sum_cuda not implemented for 'ComplexHalf'"
+                        ),
+                    )
     return sample
 
 
@@ -585,40 +592,19 @@ def _validate_sample_input_elementwise_binary_sparse_mul(sample):
         )
     elif (
         layout is torch.sparse_coo
-        and dtype is torch.complex32
-        and t_inp.numel() > 0
-        and t_args[0].numel() > 0
-        and t_args[0].ndim > 0
-    ):
-        return ErrorInput(
-            sample,
-            error_regex="\"mul_out_sparse\" not implemented for 'ComplexHalf'",
-        )
-    elif (
-        layout is torch.sparse_csr
-        and dtype is torch.complex32
-        and t_inp.numel() > 0
-        and t_args[0].numel() > 0
-        and t_args[0].ndim > 0
-    ):
-        return ErrorInput(
-            sample,
-            error_regex="\"mul_out_sparse\" not implemented for 'ComplexHalf'",
-        )
-    elif (
-        layout is torch.sparse_coo
-        and dtype in {torch.bool, torch.float16}
+        and dtype is torch.bool
         and t_args[0].ndim > 0
         and t_inp.is_cpu
         and t_inp.numel() > 0
         and t_inp.dense_dim() > 0
     ):
         return ErrorInput(
-            sample, error_regex="\"addcmul_cpu_out\" not implemented for '(Bool|Half)'"
+            sample, error_regex="\"addcmul_cpu_out\" not implemented for 'Bool'"
         )
     elif (
         layout in {torch.sparse_coo, torch.sparse_csr}
         and dtype is torch.bool
+        and t_inp._nnz() > 0
         and t_args[0].ndim > 0
         and t_inp.is_cpu
         and t_inp.numel() > 0
@@ -649,6 +635,7 @@ def _validate_sample_input_elementwise_binary_sparse_mul(sample):
     elif (
         layout is torch.sparse_csr
         and t_inp.dense_dim() > 0
+        and t_inp._nnz() > 0
         and t_inp.is_cpu
         and dtype is torch.float16
         and t_args[0].ndim > 0
@@ -656,7 +643,6 @@ def _validate_sample_input_elementwise_binary_sparse_mul(sample):
         return ErrorInput(
             sample, error_regex="\"addcmul_cpu_out\" not implemented for 'Half'"
         )
-
     return sample
 
 
@@ -749,6 +735,150 @@ def error_inputs_sparse_mul(op_info, device, layout, **kwargs):
     yield from _error_inputs_sparse(
         _maybe_failing_sample_inputs_sparse_elementwise_binary_mul,
         _validate_sample_input_sparse_elementwise_binary_operation,
+        op_info,
+        device,
+        dtype,
+        requires_grad,
+        layout,
+        **kwargs,
+    )
+
+
+def _sample_inputs_sparse_like_fns(
+    op_info, device, dtype, requires_grad, layout, **kwargs
+):
+    from torch.testing._internal.common_utils import TestCase
+
+    for tensor in TestCase().generate_simple_inputs(
+        layout,
+        device=device,
+        dtype=dtype,
+        enable_batch=True,
+        enable_hybrid=True,
+        enable_zero_sized=True,
+        enable_non_contiguous_indices=False,
+        enable_non_contiguous_values=False,
+    ):
+        yield SampleInput(tensor, args=(), kwargs={})
+        yield SampleInput(
+            tensor, args=(), kwargs=dict(device=device, dtype=dtype, layout=layout)
+        )
+
+        if dtype is not torch.float64:
+            yield SampleInput(tensor, args=(), kwargs=dict(dtype=torch.float64))
+
+        if torch.cuda.is_available():
+            other_device = "cuda" if tensor.device.type == "cpu" else "cpu"
+            yield SampleInput(tensor, args=(), kwargs=dict(device=other_device))
+
+        if layout is torch.sparse_csr:
+            other_layout = torch.sparse_csc
+        elif layout is torch.sparse_csc:
+            other_layout = torch.sparse_csr
+        elif layout is torch.sparse_bsr:
+            other_layout = torch.sparse_bsc
+        elif layout is torch.sparse_bsc:
+            other_layout = torch.sparse_bsr
+        else:
+            other_layout = torch.strided
+        yield SampleInput(tensor, args=(), kwargs=dict(layout=other_layout))
+
+        if layout is not torch.sparse_coo:
+            yield SampleInput(tensor, args=(), kwargs=dict(layout=torch.sparse_coo))
+
+
+def _validate_sample_input_sparse_like_fns(op_info, sample, check_validate=False):
+    if sample.input.layout in {
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }:
+        if sample.kwargs.get("device", sample.input.device) != sample.input.device:
+            return ErrorInput(
+                sample,
+                error_regex=(
+                    "device of (ccol|crow)_indices \\(=(cpu|cuda.*)\\) must"
+                    " match device of values \\(=(cuda.*|cpu)\\)"
+                ),
+            )
+        if sample.kwargs.get("layout", sample.input.layout) != sample.input.layout:
+            return ErrorInput(
+                sample,
+                error_regex=(
+                    "empty_like with different sparse layout is not supported"
+                    " \\(self is Sparse(Csc|Csr|Bsc|Bsr) but you requested Sparse(Csr|Csc|Bsr|Bsc)\\)"
+                ),
+            )
+    if sample.input.layout is torch.sparse_coo:
+        return ErrorInput(
+            sample,
+            error_regex=(
+                "Could not run 'aten::normal_' with arguments from the 'Sparse(CPU|CUDA)' backend."
+            ),
+        )
+    if check_validate:
+        _check_validate(op_info, sample)
+    return sample
+
+
+def _maybe_failing_sample_inputs_sparse_like_fns(
+    op_info, device, dtype, requires_grad, layout, **kwargs
+):
+    if torch.cuda.is_available() and layout is not torch.sparse_coo:
+        other_device = "cuda" if torch.device(device).type == "cpu" else "cpu"
+        if layout is torch.sparse_csr:
+            other_layout = torch.sparse_csc
+        elif layout is torch.sparse_csc:
+            other_layout = torch.sparse_csr
+        elif layout is torch.sparse_bsr:
+            other_layout = torch.sparse_bsc
+        elif layout is torch.sparse_bsc:
+            other_layout = torch.sparse_bsr
+        else:
+            other_layout = torch.strided
+
+        blocksize = (1, 1) if layout in {torch.sparse_bsr, torch.sparse_bsc} else None
+
+        yield SampleInput(
+            torch.tensor([[0, 1], [2, 3]], dtype=dtype, device=device).to_sparse(
+                layout=layout, blocksize=blocksize
+            ),
+            kwargs=dict(device=other_device),
+        )
+
+        yield SampleInput(
+            torch.tensor([[0, 1], [2, 3]], dtype=dtype, device=device).to_sparse(
+                layout=layout, blocksize=blocksize
+            ),
+            kwargs=dict(layout=other_layout),
+        )
+
+
+def sample_inputs_sparse_like_fns(
+    op_info, device, dtype, requires_grad, layout, **kwargs
+):
+    """Sample inputs for like-functions on sparse tensors."""
+    yield from _sample_inputs_sparse(
+        _sample_inputs_sparse_like_fns,
+        _maybe_failing_sample_inputs_sparse_like_fns,
+        _validate_sample_input_sparse_like_fns,
+        op_info,
+        device,
+        dtype,
+        requires_grad,
+        layout,
+        **kwargs,
+    )
+
+
+def error_inputs_sparse_like_fns(op_info, device, layout, **kwargs):
+    """Error inputs for like-functions on sparse tensors."""
+    dtype = torch.float64
+    requires_grad = False
+    yield from _error_inputs_sparse(
+        _maybe_failing_sample_inputs_sparse_like_fns,
+        _validate_sample_input_sparse_like_fns,
         op_info,
         device,
         dtype,

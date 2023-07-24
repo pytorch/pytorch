@@ -1,10 +1,11 @@
+#include <array>
 #include <cstdio>
 #include <string>
-#include <array>
 
 #include <gtest/gtest.h>
 
 #include "caffe2/serialize/inline_container.h"
+#include <c10/util/Logging.h>
 #include "c10/util/irange.h"
 
 namespace caffe2 {
@@ -23,14 +24,14 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
 
-  for (auto i: c10::irange( data1.size())) {
+  for (auto i : c10::irange(data1.size())) {
     data1[i] = data1.size() - i;
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 64> data2;
-  for (auto i: c10::irange(data2.size())) {
+  for (auto i : c10::irange(data2.size())) {
     data2[i] = data2.size() - i;
   }
   writer.writeRecord("key2", data2.data(), data2.size());
@@ -112,14 +113,14 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
 
-  for (auto i: c10::irange(data1.size())) {
+  for (auto i : c10::irange(data1.size())) {
     data1[i] = data1.size() - i;
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 64> data2;
-  for (auto i: c10::irange(data2.size())) {
+  for (auto i : c10::irange(data2.size())) {
     data2[i] = data2.size() - i;
   }
   writer.writeRecord("key2", data2.data(), data2.size());
@@ -171,14 +172,14 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
 
-  for (auto i: c10::irange(data1.size())) {
+  for (auto i : c10::irange(data1.size())) {
     data1[i] = data1.size() - i;
   }
   writer.writeRecord("key1.debug_pkl", data1.data(), data1.size());
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 64> data2;
-  for (auto i: c10::irange(data2.size())) {
+  for (auto i : c10::irange(data2.size())) {
     data2[i] = data2.size() - i;
   }
   writer.writeRecord("key2.debug_pkl", data2.data(), data2.size());
@@ -294,6 +295,40 @@ TEST(PytorchStreamWriterAndReader, SkipDuplicateSerializationIdRecords) {
   EXPECT_EQ(reader.serializationId(), writer_serialization_id);
   // clean up
   remove(file_name);
+}
+
+TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
+  std::map<std::string, std::map<std::string, std::string>> logs;
+
+  SetAPIUsageMetadataLogger(
+      [&](const std::string& context,
+          const std::map<std::string, std::string>& metadata_map) {
+        logs.insert({context, metadata_map});
+      });
+  std::ostringstream oss;
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
+  writer.writeEndOfFile();
+
+  std::istringstream iss(oss.str());
+  // read records through readers
+  PyTorchStreamReader reader(&iss);
+
+  ASSERT_EQ(logs.size(), 2);
+  std::map<std::string, std::map<std::string, std::string>> expected_logs = {
+      {"pytorch.stream.writer.metadata",
+       {{"serialization_id", writer.serializationId()}}},
+      {"pytorch.stream.reader.metadata",
+       {{"serialization_id", writer.serializationId()}}}
+  };
+  ASSERT_EQ(expected_logs, logs);
+
+  // reset logger
+  SetAPIUsageMetadataLogger(
+      [&](const std::string& context,
+          const std::map<std::string, std::string>& metadata_map) {});
 }
 
 } // namespace
