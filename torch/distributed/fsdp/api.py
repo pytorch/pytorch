@@ -274,10 +274,17 @@ class StateDictType(Enum):
 @dataclass
 class StateDictConfig:
     """
-    ``StateDictConfig`` is the base class for all state_dict configuration classes.
-    Users should instantiate a child version (i.e. ``FullStateDictConfig``) in
-    order to configure settings for the particular type of ``state_dict``
-    implementation FSDP will use.
+    ``StateDictConfig`` is the base class for all ``state_dict`` configuration
+    classes. Users should instantiate a child class (e.g.
+    ``FullStateDictConfig``) in order to configure settings for the
+    corresponding ``state_dict`` type.
+
+    Attributes:
+        offload_to_cpu (bool): If ``True``, then FSDP will offload the state
+            dict values to CPU.
+        use_dtensor (bool): If ``True``, then FSDP will save the state dict
+            values as ``DTensor``, and if ``False``, then FSDP will save them
+            as ``ShardedTensor``. 
     """
 
     offload_to_cpu: bool = False

@@ -20,3 +20,6 @@ FullyShardedDataParallel
 
 .. autoclass:: torch.distributed.fsdp.api.StateDictConfig
   :members:
+
+.. autoclass:: torch.distributed.fsdp.api.FullStateDictConfig
+  :members:
