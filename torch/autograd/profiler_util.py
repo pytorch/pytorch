@@ -110,9 +110,7 @@ class EventList(list):
                         parent.append_cpu_child(event)
                         assert (
                             event.cpu_parent is None
-                        ), "There is already a CPU parent event for {}".format(
-                            event.key
-                        )
+                        ), f"There is already a CPU parent event for {event.key}"
                         event.set_cpu_parent(parent)
                         break
 
@@ -328,7 +326,7 @@ def _format_time_share(time_us, total_time_us):
     if total_time_us == 0:
         assert time_us == 0, f"Expected time_us == 0 but got {time_us}"
         return "NaN"
-    return '{:.2f}%'.format(time_us * 100.0 / total_time_us)
+    return f'{time_us * 100.0 / total_time_us:.2f}%'
 
 def _format_memory(nbytes):
     """Returns a formatted memory size string"""
@@ -336,11 +334,11 @@ def _format_memory(nbytes):
     MB = 1024 * KB
     GB = 1024 * MB
     if (abs(nbytes) >= GB):
-        return '{:.2f} Gb'.format(nbytes * 1.0 / GB)
+        return f'{nbytes * 1.0 / GB:.2f} Gb'
     elif (abs(nbytes) >= MB):
-        return '{:.2f} Mb'.format(nbytes * 1.0 / MB)
+        return f'{nbytes * 1.0 / MB:.2f} Mb'
     elif (abs(nbytes) >= KB):
-        return '{:.2f} Kb'.format(nbytes * 1.0 / KB)
+        return f'{nbytes * 1.0 / KB:.2f} Kb'
     else:
         return str(nbytes) + ' b'
 
@@ -906,7 +904,7 @@ def _build_table(
             if evt.flops <= 0:
                 row_values.append("--")
             else:
-                row_values.append('{:8.3f}'.format(evt.flops * flops_scale))
+                row_values.append(f'{evt.flops * flops_scale:8.3f}')
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:
