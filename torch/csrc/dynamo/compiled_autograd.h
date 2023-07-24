@@ -279,6 +279,11 @@ class CompiledNodeArgs {
   void collect(const caffe2::TypeMeta& t) {
     specialize_on_bytes(t.id());
   }
+  void collect(const std::shared_ptr<Node>& t) {
+    if (cond((bool)t)) {
+      collect(_compiler.node_calls.lookup(t));
+    }
+  }
   void collect(const NodeCall& t) {
     collect_size(t.id);
     collect(t.graph_output);
