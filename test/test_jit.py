@@ -3497,12 +3497,12 @@ class TestScript(JitTestCase):
         ]
         for exp, result in tests:
             cu = torch.jit.CompilationUnit()
-            full = """
+            full = f"""
 def bar(x, y):
     return x + y
 def foo(x):
-    {}
-            """.format(exp)
+    {exp}
+            """
             if isinstance(result, str):
                 with self.assertRaisesRegex(RuntimeError, result):
                     cu.define(full)
@@ -4006,7 +4006,7 @@ def foo(x):
                 return e.getattr('name')
 
             return e
-        for k, v in result.items():
+        for v in result.values():
             for i in range(len(v)):
                 if isinstance(v[i], tuple):
                     n, v2 = v[i]
@@ -6561,8 +6561,7 @@ a")
                             continue
                         if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
                             continue
-                    msg = ("Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}"
-                           .format(func_name=func_name, a=a, b=b, res_python=res_python, res_script=res_script))
+                    msg = (f"Failed on {func_name} with inputs {a} {b}. Python: {res_python}, Script: {res_script}")
                     # math.pow() behavior has changed in 3.11, see https://docs.python.org/3/library/math.html#math.pow
                     if sys.version_info >= (3, 11) and func_name == "pow" and a == 0.0 and b == -math.inf:
                         self.assertTrue(res_python == math.inf and type(res_script) is RuntimeError)
@@ -7641,8 +7640,7 @@ dedent """
             self.assertEqual(
                 cu.func(),
                 scope['func'](),
-                msg="Failed with op: {}, lhs: {}, rhs: {}"
-                .format(op, args[0], args[1])
+                msg=f"Failed with op: {op}, lhs: {args[0]}, rhs: {args[1]}"
             )
 
         ops = ['is', 'is not']
@@ -7723,8 +7721,7 @@ dedent """
             self.assertEqual(
                 cu.func(inp),
                 scope['func'](inp),
-                msg="Failed with typ: {}"
-                .format(typ)
+                msg=f"Failed with typ: {typ}"
             )
 
         inputs = [True, 1, 1.0, torch.tensor(1), [1, 2], (1.0,), [1, 2], 1]
@@ -13068,10 +13065,10 @@ dedent """
         ]
 
         for cast_type in cast_types:
-            cu = torch.jit.CompilationUnit('''
+            cu = torch.jit.CompilationUnit(f'''
             def cast_to(x):
                 return x.{cast_type}()
-            '''.format(cast_type=cast_type))
+            ''')
 
             x = torch.rand(3, 4, 5) * 128
             cu_result = cu.cast_to(x)
@@ -14257,7 +14254,7 @@ dedent """
         self.assertEqual(out, torch.tensor(6.0))
 
     def test_namedtuple_type_inference(self):
-        _AnnotatedNamedTuple = NamedTuple('_NamedTupleAnnotated', [('value', int)])
+        _AnnotatedNamedTuple = NamedTuple('_NamedTupleAnnotated', [('value', int)])  # noqa: UP014
         _UnannotatedNamedTuple = namedtuple('_NamedTupleUnAnnotated', ['value'])
 
         def test_check_named_tuple_value():
