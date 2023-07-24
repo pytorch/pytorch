@@ -415,7 +415,6 @@ def get_current_node_opt_ctx() -> OptimizationContext:
 def get_computation_dtype(dtype) -> torch.dtype:
     opt_ctx: OptimizationContext = get_current_node_opt_ctx()
     assert opt_ctx
-    assert opt_ctx.dtype in [torch.int32, torch.float32, torch.bfloat16]
     assert opt_ctx.dtype == DTYPE_TO_COMPUTATION_DTYPE[dtype]
     return opt_ctx.dtype
 
@@ -638,6 +637,10 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def constant(val, dtype):
         proposed_dtype = get_computation_dtype(dtype)
+        assert proposed_dtype in [
+            torch.float,
+            torch.int32,
+        ]
         if val == float("inf"):
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif val == float("-inf"):
