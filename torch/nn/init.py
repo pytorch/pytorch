@@ -540,8 +540,7 @@ def _make_deprecate(meth):
     old_name = new_name[:-1]
 
     def deprecated_init(*args, **kwargs):
-        warnings.warn("nn.init.{} is now deprecated in favor of nn.init.{}."
-                      .format(old_name, new_name), stacklevel=2)
+        warnings.warn(f"nn.init.{old_name} is now deprecated in favor of nn.init.{new_name}.", stacklevel=2)
         return meth(*args, **kwargs)
 
     deprecated_init.__doc__ = r"""

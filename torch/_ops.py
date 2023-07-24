@@ -403,9 +403,7 @@ class OpOverload(OperatorBase):
         self._name = self._schema.name
         if schema.overload_name:
             self._name += "." + schema.overload_name
-        self.__name__ = "{}.{}".format(
-            self._schema.name.split("::")[1], self._overloadname
-        )
+        self.__name__ = f"{self._schema.name.split('::')[1]}.{self._overloadname}"
         self.__module__ = overloadpacket.__module__
         op.__module__ = overloadpacket.__module__
         self.__qualname__ = self._name
@@ -669,9 +667,7 @@ class OpOverloadPacket:
             return overload
         except RuntimeError:
             raise AttributeError(
-                "The underlying op of '{}' has no overload name '{}'".format(
-                    str(self), key
-                )
+                f"The underlying op of '{str(self)}' has no overload name '{key}'"
             ) from None
 
     def __iter__(self):

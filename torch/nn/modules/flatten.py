@@ -47,9 +47,7 @@ class Flatten(Module):
         return input.flatten(self.start_dim, self.end_dim)
 
     def extra_repr(self) -> str:
-        return 'start_dim={}, end_dim={}'.format(
-            self.start_dim, self.end_dim
-        )
+        return f'start_dim={self.start_dim}, end_dim={self.end_dim}'
 
 
 class Unflatten(Module):

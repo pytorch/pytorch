@@ -116,8 +116,7 @@ def set_per_process_memory_fraction(fraction, device: Union[Device, int] = None)
     if not isinstance(fraction, float):
         raise TypeError('Invalid type for fraction argument, must be `float`')
     if fraction < 0 or fraction > 1:
-        raise ValueError('Invalid fraction value: {}. '
-                         'Allowed range: 0~1'.format(fraction))
+        raise ValueError(f'Invalid fraction value: {fraction}. Allowed range: 0~1')
 
     torch._C._cuda_setMemoryFraction(fraction, device)
 

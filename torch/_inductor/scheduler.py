@@ -58,7 +58,7 @@ def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
 
 class BaseSchedulerNode:
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
-        self.scheduler: "Scheduler" = scheduler
+        self.scheduler: Scheduler = scheduler
         self.node: ir.Buffer = node
         self.users: Optional[List[NodeUser]] = None
         self.inverse_users: List[BaseSchedulerNode] = []
@@ -511,9 +511,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         )
 
         self.set_read_writes(
-            functools.reduce(
-                dependencies.ReadWrites.merge, [x.read_writes for x in snodes]
-            )
+            dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
         )
 
         self.unmet_dependencies = {
