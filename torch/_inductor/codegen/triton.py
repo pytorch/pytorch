@@ -2158,11 +2158,12 @@ class TritonScheduling:
                 if V.graph.cpp_wrapper:
                     kernel_IndentedBuffer.writeline(f"{{")
                 else:
-                    kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
-                with kernel_IndentedBuffer.indent():
-                        kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
+                    kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream{stream_id}_raw)")
+                kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
                 if V.graph.cpp_wrapper:
                     kernel_IndentedBuffer.writeline(f"}}")
+                else:
+                    kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream0_raw)")
             else:
                 kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
             if ssnode.cuda_event:

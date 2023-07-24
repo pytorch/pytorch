@@ -227,9 +227,9 @@ class AllocateLine(MemoryPlanningLine):
                             code.writeline(line)
                         code.writeline(f"}}")
                     else:
-                        code.writeline(f"with torch.cuda.stream(stream{self.user_streams[0]}_raw):")
-                        with code.indent():
-                            code.writeline(line)
+                        code.writeline(f"torch.cuda.set_stream(stream{self.user_streams[0]}_raw)")
+                        code.writeline(line)
+                        code.writeline(f"torch.cuda.set_stream(stream0_raw)")
                     return
             for user_stream in self.user_streams:
                 if user_stream != 0:
@@ -524,17 +524,18 @@ class WrapperCodeGen(CodeGen):
                     kernel_IndentedBuffer.writeline(f"at::Tensor {node_name};")
                 kernel_IndentedBuffer.writeline(f"{{")
             else:
-                kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
-            with kernel_IndentedBuffer.indent():
-                if V.graph.cpp_wrapper:
-                    kernel_IndentedBuffer.writeline(f"at::cuda::CUDAStreamGuard streamGuard(stream{stream_id});")
-                if isinstance(call_strs, list):
-                    for call_str in call_strs:
-                        kernel_IndentedBuffer.writeline(call_str)
-                else:
-                    kernel_IndentedBuffer.writeline(call_strs)
+                kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream{stream_id}_raw)")
+            if V.graph.cpp_wrapper:
+                kernel_IndentedBuffer.writeline(f"at::cuda::CUDAStreamGuard streamGuard(stream{stream_id});")
+            if isinstance(call_strs, list):
+                for call_str in call_strs:
+                    kernel_IndentedBuffer.writeline(call_str)
+            else:
+                kernel_IndentedBuffer.writeline(call_strs)
             if V.graph.cpp_wrapper:
                 kernel_IndentedBuffer.writeline(f"}}")
+            else:
+                kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream0_raw)")
         else:
             if isinstance(call_strs, list):
                 for call_str in call_strs:
