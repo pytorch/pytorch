@@ -30,7 +30,7 @@ from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUDNN
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
@@ -580,6 +580,17 @@ class CommonTemplate:
             return (a / (torch.abs(a) + 1),)
 
         self.common(fn, (torch.randn(17),))
+
+    def test_angle(self):
+        def fn(a, b, c):
+            return torch.angle(a), torch.angle(b), torch.angle(c)
+
+        complex_input = torch.tensor(
+            [1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1, float("nan")]
+        )
+        real_input = torch.tensor([-1.0, 0.0, 1.0, float("nan")])
+        interger_real_input = torch.tensor([-1, 0, 1])
+        self.common(fn, (complex_input, real_input, interger_real_input))
 
     def test_sgn(self):
         def fn(a):
@@ -2023,6 +2034,19 @@ class CommonTemplate:
 
         with self.assertRaisesRegex(RuntimeError, ""):
             fn(torch.randn(1, 5))
+
+    def test_softshrink_backward(self):
+        grad_output = torch.randn(1)
+        lambd = 0.5
+
+        def fn(a, grad_output, lambd):
+            a = a.cos()
+            return torch.ops.aten.softshrink_backward(grad_output, a, lambd)
+
+        self.common(
+            fn,
+            (torch.randn(10), grad_output, lambd),
+        )
 
     def test_inductor_assert(self):
         @torch._dynamo.optimize("inductor", dynamic=True)
@@ -3656,6 +3680,7 @@ class CommonTemplate:
                 ),
             )
 
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":

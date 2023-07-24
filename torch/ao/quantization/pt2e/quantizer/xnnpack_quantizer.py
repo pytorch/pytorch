@@ -116,7 +116,7 @@ def _get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
         get_symmetric_quantization_config(is_per_channel=True, is_qat=True),
     ]:
         ops = _supported_symmetric_quantized_operators()
-        for op_string, pattern_list in ops.items():
+        for pattern_list in ops.values():
             supported_config_and_operators.append(
                 OperatorConfig(quantization_config, pattern_list)
             )
@@ -517,7 +517,7 @@ class XNNPACKQuantizer(Quantizer):
         output_act_qspec = get_output_act_qspec(quantization_config)
         weight_qspec = get_weight_qspec(quantization_config)
         bias_qspec = get_bias_qspec(quantization_config)
-        for module_or_fn_type, partitions in module_partitions.items():
+        for partitions in module_partitions.values():
             for p in partitions:
                 act_nodes = [
                     n

@@ -293,8 +293,6 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._default_stream = root_state._default_stream
         fsdp_state._exec_order_data = root_state._exec_order_data
         fsdp_state._free_event_queue = root_state._free_event_queue
-        fsdp_state._handles_prefetched = root_state._handles_prefetched
-        fsdp_state._needs_pre_backward_unshard = root_state._needs_pre_backward_unshard
         fsdp_state._device_mesh = root_state._device_mesh
         handle = fsdp_state._handle
         if handle:
@@ -381,7 +379,7 @@ def _reshard(
     # Since we prefetch entire handles keys at a time, conservatively mark
     # the entire key as no longer prefetched once we free at least one
     if free_unsharded_flat_param:
-        state._handles_prefetched.pop(handle, None)
+        handle._prefetched = False
 
 
 def _unshard_grads(
@@ -463,9 +461,9 @@ def _pre_forward_unshard(
         return
     # If the handles have been prefetched, then there is no need to call
     # `_unshard()` again
-    if not state._handles_prefetched.get(handle, False):
+    if not handle._prefetched:
         _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
-    state._needs_pre_forward_unshard[handle] = False
+    handle._needs_pre_forward_unshard = False
     state._device_handle.current_stream().wait_stream(state._unshard_stream)
     _prefetch_handle(state, handle, _PrefetchMode.FORWARD)
 
@@ -608,7 +606,7 @@ def _root_pre_forward(
                 if fsdp_state._handle:
                     handles.append(fsdp_state._handle)
             for handle in handles:
-                state._needs_pre_forward_unshard[handle] = True
+                handle._needs_pre_forward_unshard = True
         _wait_for_computation_stream(
             state._device_handle.current_stream(),
             state._unshard_stream,
@@ -688,10 +686,10 @@ def _pre_backward_hook(
             return
         handle._training_state = HandleTrainingState.BACKWARD_PRE
 
-        if state._needs_pre_backward_unshard[handle]:
+        if handle._needs_pre_backward_unshard:
             # If the handles have been prefetched, then there is no need to
             # call `_unshard()` again
-            if not state._handles_prefetched.get(handle, False):
+            if not handle._prefetched:
                 _unshard(
                     state,
                     handle,
@@ -702,7 +700,7 @@ def _pre_backward_hook(
 
         # Set this to `False` to ensure that a mistargeted prefetch does not
         # actually unshard these handles
-        state._needs_pre_backward_unshard[handle] = False
+        handle._needs_pre_backward_unshard = False
         _prefetch_handle(state, handle, _PrefetchMode.BACKWARD)
         handle.prepare_gradient_for_backward()
         state._ran_pre_backward_hook[handle] = True
@@ -1031,13 +1029,11 @@ def _post_backward_final_callback(
     for fsdp_state in state._all_fsdp_states:
         _catch_all_reshard(fsdp_state)
         _finalize_params(fsdp_state)
-        fsdp_state._needs_pre_backward_unshard.clear()
         fsdp_state._ran_pre_backward_hook.clear()
         fsdp_state.training_state = TrainingState.IDLE
         handle = fsdp_state._handle
         if handle:
             handle._training_state = HandleTrainingState.IDLE
-        fsdp_state._handles_prefetched.clear()
     # Reset for cases like one forward and multiple backwards
     root_state._post_backward_callback_queued = False
 
@@ -1142,7 +1138,7 @@ def _prefetch_handle(
     # the sync to happen as late as possible to maximize overlap
     _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
     handle._training_state = prev_training_state
-    state._handles_prefetched[handle] = True
+    handle._prefetched = True
 
 
 @no_type_check
@@ -1179,17 +1175,21 @@ def _get_handle_to_prefetch(
         and state.backward_prefetch == BackwardPrefetch.BACKWARD_POST
     ):
         target_handle_candidate = eod.get_handle_to_backward_prefetch(current_handle)
-        if state._needs_pre_backward_unshard.get(
-            target_handle_candidate, False
-        ) and not state._handles_prefetched.get(target_handle_candidate, False):
+        if (
+            target_handle_candidate
+            and target_handle_candidate._needs_pre_backward_unshard
+            and not target_handle_candidate._prefetched
+        ):
             target_handle = target_handle_candidate
         else:
             target_handle = None
     elif training_state == HandleTrainingState.FORWARD and state.forward_prefetch:
         target_handle_candidate = eod.get_handle_to_forward_prefetch(current_handle)
-        if state._needs_pre_forward_unshard.get(
-            target_handle_candidate, False
-        ) and not state._handles_prefetched.get(target_handle_candidate, False):
+        if (
+            target_handle_candidate
+            and target_handle_candidate._needs_pre_forward_unshard
+            and not target_handle_candidate._prefetched
+        ):
             target_handle = target_handle_candidate
         else:
             target_handle = None
@@ -1300,7 +1300,7 @@ def _register_pre_backward_hooks(
         state._post_backward_callback_queued = False  # only defined on the root
 
     if handle:
-        state._needs_pre_backward_unshard[handle] = False
+        handle._needs_pre_backward_unshard = False
         # Since these handles' `FlatParameter`s participated in a forward, we
         # conservatively assume that they will be used in the backward
         state._ran_pre_backward_hook[handle] = False
@@ -1310,7 +1310,8 @@ def _register_pre_backward_hooks(
             t.register_hook(
                 functools.partial(_pre_backward_hook, state, module, handle)
             )
-            state._needs_pre_backward_unshard[handle] = True
+            if handle:
+                handle._needs_pre_backward_unshard = True
         return t
 
     return _apply_to_tensors(_register_hook, outputs)
