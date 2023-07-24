@@ -18,5 +18,5 @@ FullyShardedDataParallel
 .. autoclass:: torch.distributed.fsdp.CPUOffload
   :members:
 
-.. autoclass:: torch.distributed.fsdp.StateDictConfig
+.. autoclass:: torch.distributed.fsdp.api.StateDictConfig
   :members:
