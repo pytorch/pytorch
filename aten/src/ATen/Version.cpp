@@ -105,6 +105,11 @@ std::string get_cpu_capability() {
       return "DEFAULT";
     case native::CPUCapability::ZVECTOR:
       return "Z VECTOR";
+#elif defined(HAVE_NEON_CPU_DEFINITION)
+    case native::CPUCapability::DEFAULT:
+      return "DEFAULT";
+    case native::CPUCapability::NEON:
+      return "NEON";
 #else
     case native::CPUCapability::DEFAULT:
       return "NO AVX";

@@ -48,10 +48,11 @@ enum class CPUCapability {
   VSX = 1,
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
   ZVECTOR = 1,
+#elif defined(HAVE_NEON_CPU_DEFINITION)
+  NEON = 1,
 #else
   AVX2 = 1,
   AVX512 = 2,
-  NEON = 3,
 #endif
   NUM_OPTIONS
 };
