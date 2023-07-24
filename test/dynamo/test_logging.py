@@ -112,20 +112,20 @@ class LoggingTests(LoggingTestCase):
         self.assertEqual(len([r for r in records if ".__bytecode" in r.name]), 0)
         self.assertEqual(len([r for r in records if ".__output_code" in r.name]), 0)
 
-    @make_logging_test(dynamo=logging.ERROR)
+    @make_logging_test()
     def test_dynamo_error(self, records):
         try:
             fn_opt = torch._dynamo.optimize("inductor")(dynamo_error_fn)
             fn_opt(*ARGS)
         except Exception:
             pass
-        self.assertEqual(len(records), 1)
+        self.assertEqual(len(records), 2)
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
     test_inductor_debug = within_range_record_test(3, 15, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
 
-    @make_logging_test(dynamo=logging.ERROR)
+    @make_logging_test()
     def test_inductor_error(self, records):
         exitstack = contextlib.ExitStack()
         import torch._inductor.lowering
@@ -148,7 +148,7 @@ class LoggingTests(LoggingTestCase):
             fn_opt(*ARGS)
         except Exception:
             pass
-        self.assertEqual(len(records), 1)
+        self.assertEqual(len(records), 2)
         self.assertIsInstance(records[0].msg, str)
 
         exitstack.close()

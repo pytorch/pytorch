@@ -79,7 +79,7 @@ class _ExecOrderData:
             index = len(self.all_handles)
             self.all_handles.append(handle)
             handle._handle_index = index
-            self.param_to_fqn = _get_param_to_fqns(root_module)
+        self.param_to_fqn = _get_param_to_fqns(root_module)
         # TODO (awgu): We can broadcast the metadata of rank 0's `all_handles`
         # to check that all ranks have the same handles in the same order.
         # https://github.com/pytorch/pytorch/issues/79620
