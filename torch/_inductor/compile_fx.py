@@ -1132,6 +1132,19 @@ def compile_fx(
             boxed_forward_device_index=forward_device,
         )
 
+    if config.cpp.onednn_graph:
+        decompositions = dict(decompositions)
+        from .fx_passes.onednn_graph_fusion import lowerings as onednn_graph_lowerings
+
+        for op in onednn_graph_lowerings.keys() & decompositions.keys():
+            del decompositions[op]
+
+
+        # TODO: disable this pass for onednn_graph fusion for MHA pattern
+        # it removes the add op before softmax
+        # will re-enable after onednn graph update the MHA pattern
+        config.joint_graph_constant_folding = False
+
     # TODO: can add logging before/after the call to create_aot_dispatcher_function
     # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
     # once torchdynamo is merged into pytorch

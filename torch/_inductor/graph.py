@@ -221,6 +221,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self._warned_fallback = {"aten.convolution_backward"}
         self.user_visible_outputs = user_visible_outputs
+        self.opaque_ops = {}
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[
@@ -404,6 +405,8 @@ class GraphLowering(torch.fx.Interpreter):
 
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
+            if getattr(name, "name", False):
+                name = name.name()
             self._warned_fallback.add(name)
             perf_hint_log.info("Using FallbackKernel: %s", name)
 
@@ -595,6 +598,9 @@ class GraphLowering(torch.fx.Interpreter):
                     error.operator_str(target, args, kwargs),
                 )
                 make_fallback(target)
+                if getattr(target, "is_opaque", False):
+                    name = target.name()
+                    self.opaque_ops[name] = target
             elif get_decompositions([target]):
                 # There isn't a good way to dynamically patch this in
                 # since AOT Autograd already ran.  The error message tells
@@ -969,6 +975,9 @@ class GraphLowering(torch.fx.Interpreter):
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
         output_code_log.info("Output code written to: %s", mod.__file__)
+        for name, value in self.opaque_ops.items():
+            setattr(mod, name, value)
+
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
         if config.benchmark_kernel:

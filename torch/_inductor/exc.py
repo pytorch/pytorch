@@ -19,9 +19,9 @@ else:
 class OperatorIssue(RuntimeError):
     @staticmethod
     def operator_str(target, args, kwargs):
-        lines = [f"target: {target}"] + [
-            f"args[{i}]: {arg}" for i, arg in enumerate(args)
-        ]
+        lines = [f"target: {target}"]
+        if not getattr(target, "is_opaque", False):
+            lines += [f"args[{i}]: {arg}" for i, arg in enumerate(args)]
         if kwargs:
             lines.append(f"kwargs: {kwargs}")
         return textwrap.indent("\n".join(lines), "  ")

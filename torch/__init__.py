@@ -1513,12 +1513,12 @@ class _TorchCompileInductorWrapper:
     def apply_mode(self, mode: Optional[str]):
         if mode is None or mode == "default":
             pass
-        elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
+        elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs", "onednn-graph"):
             from torch._inductor import list_mode_options
             self.apply_options(list_mode_options(mode, self.dynamic))
         else:
             raise RuntimeError(
-                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
+                f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs, onednn-graph"
             )
 
     def apply_options(self, options: Optional[Dict[str, Any]]):
