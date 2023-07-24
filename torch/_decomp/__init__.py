@@ -267,6 +267,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.mish,
             aten.mish_,
             aten.miopen_batch_norm,
+            aten.miopen_batch_norm_backward,
             aten.mse_loss,
             aten.mse_loss_backward,
             aten.multi_margin_loss,
