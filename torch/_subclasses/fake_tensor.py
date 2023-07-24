@@ -521,7 +521,12 @@ def nonzero(fake_mode, func, arg):
         # with N >= 2, it will work with N = 1 and N = 0.
         maxval = sys.maxsize - 1
         if not free_symbols(arg.numel()):
-            maxval = arg.numel()
+            # Don't upgrade the range if numel is less than two, since we then
+            # have an empty range which makes things go explodey.  We also
+            # don't allow for 2 because that would specialize the unbacked
+            # SymInt to 2, which is also likely to be buggy.
+            if arg.numel() >= 2:
+                maxval = arg.numel()
         constrain_range(nnz, min=2, max=maxval)
 
         arg._nonzero_memo = nnz
