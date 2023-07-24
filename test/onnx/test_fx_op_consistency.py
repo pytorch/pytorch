@@ -133,6 +133,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.dropout",
         "nn.functional.elu",
         "nn.functional.embedding",
+        "nn.functional.embedding_bag",
         "nn.functional.max_pool1d",
         "nn.functional.max_pool2d",
         "nn.functional.max_pool3d",
