@@ -98,6 +98,7 @@ class BinaryFoldingTemplate(TestCase):
                 inps.append(inps[-1])
                 inps.append(inps[-1])
 
+            torch.manual_seed(1234)
             inp = torch.rand(inps).to(self.device)
             out_eager = mod_eager(inp)
             out_optimized = out_optimized(inp)
