@@ -325,7 +325,7 @@ def _make_temp_dir(prefix: Optional[str] = None, gc_dev_shm: bool = False) -> st
                 if not os.path.exists(owner_file):
                     continue
 
-                with open(owner_file, "rt") as f:
+                with open(owner_file) as f:
                     owner_pid = int(f.read())
 
                 if owner_pid == os.getpid():
@@ -349,7 +349,7 @@ def _make_temp_dir(prefix: Optional[str] = None, gc_dev_shm: bool = False) -> st
     os.makedirs(path, exist_ok=False)
 
     if use_dev_shm:
-        with open(os.path.join(path, "owner.pid"), "wt") as f:
+        with open(os.path.join(path, "owner.pid"), "w") as f:
             f.write(str(os.getpid()))
 
     return path
