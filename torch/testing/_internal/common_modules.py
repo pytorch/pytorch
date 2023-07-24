@@ -1506,7 +1506,7 @@ def module_inputs_torch_nn_FractionalMaxPool2d(module_info, device, dtype, requi
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     def make_random_samples():
-        return torch.empty((1, 3, 2), dtype=torch.double).uniform_()
+        return torch.empty((1, 3, 2), dtype=torch.double, device=device).uniform_()
 
     return [
         ModuleInput(
@@ -1540,7 +1540,7 @@ def module_inputs_torch_nn_FractionalMaxPool3d(module_info, device, dtype, requi
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     def make_random_samples():
-        return torch.empty((2, 4, 3), dtype=torch.double).uniform_()
+        return torch.empty((2, 4, 3), dtype=torch.double, device=device).uniform_()
 
     return [
         ModuleInput(
@@ -1633,6 +1633,8 @@ def module_inputs_torch_nn_TransformerEncoder(module_info, device, dtype, requir
         # Construct a TransformerEncoderLayer object to pass to TransformerEncoder.
         l_args, l_kwargs = (layer_module_input.constructor_input.args,
                             layer_module_input.constructor_input.kwargs)
+        l_kwargs['device'] = device
+        l_kwargs['dtype'] = dtype
         encoder_layer = torch.nn.TransformerEncoderLayer(*l_args, **l_kwargs)
         num_layers = 2
         # Note: TransformerEncoderLayer takes a "src_mask" while
