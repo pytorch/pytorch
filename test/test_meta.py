@@ -1343,7 +1343,7 @@ def print_op_str_if_not_supported(op_str):
 if __name__ == "__main__":
     COMPARE_XLA = os.getenv('PYTORCH_COMPARE_XLA', None)
     if COMPARE_XLA is not None:
-        with open(COMPARE_XLA, "r") as f:
+        with open(COMPARE_XLA) as f:
             d = yaml.load(f, Loader=YamlLoader)
             ops = d.get("full_codegen", []) + d.get("supported", []) + d.get("autograd", [])
             for op_str in ops:
@@ -1352,7 +1352,7 @@ if __name__ == "__main__":
 
     COMPARE_TEXT = os.getenv('PYTORCH_COMPARE_TEXT', None)
     if COMPARE_TEXT is not None:
-        with open(COMPARE_TEXT, "r") as f:
+        with open(COMPARE_TEXT) as f:
             for op_str in f:
                 print_op_str_if_not_supported(op_str.strip())
         sys.exit(0)

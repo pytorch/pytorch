@@ -218,7 +218,7 @@ class FileTimerServer:
         #  1. No client case usually does not happen.
         #  2. We are running the watchdog loop in a separate daemon
         #     thread, which will not block the process to stop.
-        with open(self._file_path, "rt") as fd:
+        with open(self._file_path) as fd:
             while not self._stop_signaled:
                 try:
                     run_once = self._run_once
