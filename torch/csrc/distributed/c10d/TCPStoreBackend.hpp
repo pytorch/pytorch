@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <torch/csrc/distributed/c10d/socket.h>
+#include <torch/csrc/distributed/c10d/TCPStore.hpp>
 
 #ifdef _WIN32
 #include <io.h>
@@ -44,6 +45,7 @@ class BackgroundThread {
   explicit BackgroundThread(Socket&& storeListenSocket);
 
   virtual ~BackgroundThread() = 0;
+  virtual std::uint16_t port() const = 0;
 
  protected:
   void dispose();
@@ -68,6 +70,8 @@ class BackgroundThread {
   // Clean up the shutdown signal
   void closeStopSignal();
 };
+
+std::unique_ptr<BackgroundThread> create_tcpstore_backend(const TCPStoreOptions& opts);
 
 } // namespace detail
 } // namespace c10d
