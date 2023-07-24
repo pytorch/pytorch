@@ -1460,10 +1460,7 @@ def emit_body(
                 or type == ListCType(OptionalCType(BaseCType(tensorT)))
                 or type == BaseCType(iTensorListRefT)
             ):
-                if is_foreach and is_output:
-                    expr = f"make_saved_variable_list_foreach_output({name})"
-                else:
-                    expr = f"make_saved_variable_list({name})"
+                expr = f"make_saved_variable_list({name}, {str(is_foreach and is_output).lower()})"
                 name += "_"
             elif type == BaseCType(intArrayRefT):
                 expr = expr + ".vec()"
