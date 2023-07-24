@@ -188,12 +188,16 @@ const std::string jit_common_types = R"ESCAPE(
   #define NAN __int_as_float(0x7fffffff)
 
   typedef long long int int64_t;
+  typedef unsigned long long int uint64_t;
   typedef unsigned int uint32_t;
+  typedef signed int int32_t;
   typedef signed char int8_t;
-  typedef unsigned char uint8_t;  // NOTE: this MUST be "unsigned char"! "char" is equivalent to "signed char"
+  typedef unsigned char uint8_t; // NOTE: this MUST be "unsigned char"! "char" is equivalent to "signed char"
   typedef short int16_t;
   static_assert(sizeof(int64_t) == 8, "expected size does not match");
+  static_assert(sizeof(uint64_t) == 8, "expected size does not match");
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
+  static_assert(sizeof(int32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
   constexpr int num_threads = CUDA_OR_ROCM_NUM_THREADS;
   constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
@@ -1525,6 +1529,9 @@ NvrtcFunction jit_pwise_function(
   }
 
   // Just-in-time compiles the program
+  std::ofstream fout("jit.cu");
+  fout << code;
+  fout.close();
 
   // Creates the NVRTC program
   nvrtcProgram program;
