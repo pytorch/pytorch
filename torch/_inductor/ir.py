@@ -40,6 +40,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
+from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
@@ -57,6 +58,7 @@ from .utils import (
     sympy_product,
     sympy_subs,
     sympy_symbol,
+    try_find_schema,
 )
 from .virtualized import ops, V
 
@@ -226,6 +228,14 @@ class OptionalList(OptionalAttr):
 class OptionalScalar(OptionalAttr):
     def __init__(self):
         self.name = "optional_scalar"
+
+
+class OptionalLayout(OptionalAttr):
+    def __init__(self):
+        self.name = "optional_layout"
+
+
+default_value_map = {"Optional[Layout]": OptionalLayout}
 
 
 def may_convert_to_optional(optional_value, value):
@@ -1808,9 +1818,9 @@ class FixedLayout(Layout):
         self,
         device: torch.device,
         dtype: torch.dtype,
-        size: List[Expr],
-        stride: List[Expr] = None,
-        offset: Expr = Integer(0),
+        size: Union[List[Expr], List[int]],
+        stride: Optional[Union[List[Expr], List[int]]] = None,
+        offset: Union[Expr, int] = Integer(0),
     ):
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
@@ -2219,11 +2229,17 @@ class ComputedBuffer(Buffer):
                 for r in reads
             ]
             # only consider reads to buffer of same size
+            # ignore StarDeps because they don't contribute stride information
+            assert all(
+                isinstance(r, (dependencies.StarDep, dependencies.MemoryDep))
+                for r in reads
+            )
             reads = [
                 sympy_subs(
                     r.index, {v: sympy.Integer(0) for v in reduction_vars if v != 0}
                 )
                 for r in reads
+                if isinstance(r, dependencies.MemoryDep)
             ]
 
             if reads:
@@ -2618,6 +2634,19 @@ class ExternKernel(InputsKernel):
     @classmethod
     def process_kernel(cls, kernel, *args, **kwargs):
         binded_args = signature(kernel).bind(*args, **kwargs).arguments
+
+        _, schemas = get_signature_for_torch_op(kernel, return_schemas=True)
+
+        schema = None
+        # For cpp wrapper, when kwargs is not empty, for OpOverloadPacket kernel, we need to
+        # know the exact overload schema to handle the kwargs properly when calling the cpp kernel.
+        if (
+            V.graph.cpp_wrapper
+            and kwargs
+            and isinstance(kernel, torch._ops.OpOverloadPacket)
+        ):
+            schema = try_find_schema(schemas, args, kwargs)
+
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
         is_arg_tensor = []
@@ -2669,7 +2698,7 @@ class ExternKernel(InputsKernel):
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
-        return example_output, tensor_args, non_tensor_args, unflatten_args
+        return example_output, tensor_args, non_tensor_args, unflatten_args, schema
 
     @classmethod
     def convert_to_reinterpret_view(cls, x):
@@ -2823,6 +2852,27 @@ class ExternKernel(InputsKernel):
         args.extend(self.codegen_const_args())
         return args
 
+    def get_kwargs_value(self, arg_name):
+        if arg_name in self.kwargs:
+            return self.kwargs.get(arg_name)
+        if (
+            hasattr(self, "kwargs_default_value")
+            and arg_name in self.kwargs_default_value
+        ):
+            default_value = self.kwargs_default_value.get(arg_name).get("value")
+            if default_value is None:
+                arg_type = self.kwargs_default_value.get(arg_name).get("type")
+                # TODO: extend the support here
+                assert (
+                    str(arg_type) in default_value_map
+                ), f"unsupported default_value arg_type: {str(arg_type)}"
+                return default_value_map[str(arg_type)]()
+            else:
+                return default_value
+        raise AssertionError(
+            f"arg {arg_name} not found in self.kwargs or self.kwargs_default_value"
+        )
+
     def codegen_kwargs(self):
         kwargs = []
         if self.kwargs:
@@ -2832,10 +2882,7 @@ class ExternKernel(InputsKernel):
                     self.ordered_kwargs_for_cpp_kernel
                 ), "ordered_kwargs_for_cpp_kernel has to be provided"
                 for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                    assert arg_name in self.kwargs, (
-                        "arg %s not found in self.kwargs" % arg_name
-                    )
-                    v = self.kwargs.get(arg_name)
+                    v = self.get_kwargs_value(arg_name)
                     kwargs.append(V.graph.wrapper_code.val_to_str(v))
             else:
                 kwargs = [
@@ -2995,7 +3042,7 @@ class InplaceBernoulliFallback(ExternKernel):
     kernel = "aten.bernoulli_"
 
     def codegen(self, wrapper):
-        (x,) = [t.codegen_reference() for t in self.inputs]
+        (x,) = (t.codegen_reference() for t in self.inputs)
         wrapper.writeline(
             f"{self.kernel}({x}, {', '.join(map(repr, self.constant_args))})"
         )
@@ -3026,9 +3073,9 @@ class ScatterFallback(ExternKernel):
 
     def codegen(self, wrapper):
         if self.src_is_tensor:
-            (x, index, src) = [t.codegen_reference() for t in self.inputs]
+            (x, index, src) = (t.codegen_reference() for t in self.inputs)
         else:
-            (x, index) = [t.codegen_reference() for t in self.inputs]
+            (x, index) = (t.codegen_reference() for t in self.inputs)
             src = self.constant_args[1]
         wrapper.generate_scatter_fallback(
             x,
@@ -3069,7 +3116,7 @@ class ScatterFallback(ExternKernel):
         index,
         src,
         *,
-        reduce: str = None,
+        reduce: Optional[str] = None,
         include_self: bool = True,
     ):
         assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
@@ -3109,7 +3156,7 @@ class IndexPutFallback(ExternKernel):
     """
 
     def codegen(self, wrapper):
-        (x, values, *valid_indices) = [t.codegen_reference() for t in self.inputs]
+        (x, values, *valid_indices) = (t.codegen_reference() for t in self.inputs)
         indices = []
         iter_valid_indices = iter(valid_indices)
         for i, _ in enumerate(self.indices):
@@ -3198,6 +3245,7 @@ class FallbackKernel(ExternKernelAlloc):
         nontensor_args,
         unflatten_args,
         kwargs=None,
+        schema=None,
     ):
         super().__init__(
             layout,
@@ -3221,6 +3269,15 @@ class FallbackKernel(ExternKernelAlloc):
                 if V.graph.cpp_wrapper
                 else f"aten.{kernel.__name__}"
             )
+            if schema is not None:
+                self.ordered_kwargs_for_cpp_kernel = [
+                    x.name for x in schema.arguments if x.kwarg_only
+                ]
+                self.kwargs_default_value = {
+                    x.name: {"type": x.real_type, "value": x.default_value}
+                    for x in schema.arguments
+                    if x.kwarg_only
+                }
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
                 self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
@@ -3330,6 +3387,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                schema,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
         device = FallbackKernel.find_device(tensor_args, example_output)
@@ -3340,6 +3398,7 @@ class FallbackKernel(ExternKernelAlloc):
             tensor_args,
             non_tensor_args,
             unflatten_args,
+            schema=schema,
         )
 
         def generate_output(output, indices):
@@ -4635,7 +4694,7 @@ class Wait(ExternKernelAlloc):
         wrapper.add_import_once(
             "from torch.distributed._functional_collectives_impl import _wait_tensor"
         )
-        (input_collective,) = [t.codegen_reference() for t in self.inputs]
+        (input_collective,) = (t.codegen_reference() for t in self.inputs)
         wrapper.writeline(f"{input_collective} = _wait_tensor({input_collective})")
 
         # wait op still needs to produce a 'buffer' that represents the tensor output.
