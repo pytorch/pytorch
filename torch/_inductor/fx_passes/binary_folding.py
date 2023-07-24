@@ -3,7 +3,7 @@ import itertools
 
 import torch
 from ..pattern_matcher import Arg, CallFunction, KeywordArg
-from .freezing_patterns import register_freezing_graph_pattern
+from .freezing_patterns import register_binary_folding_pattern
 
 aten = torch.ops.aten
 
@@ -161,7 +161,7 @@ def binary_folding_init():
         _computation_calls, _binary_ops
     ):
 
-        @register_freezing_graph_pattern(
+        @register_binary_folding_pattern(
             CallFunction(binary_op, _computation_call, KeywordArg("other")),
             extra_check=_is_foldable_pattern,
         )
