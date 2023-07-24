@@ -51,6 +51,5 @@ def check_onnx_broadcast(dims1, dims2):
                 supported = False
 
     if not supported:
-        raise ValueError("Numpy style broadcasting is not supported in ONNX. "
-                         "Input dims are: {}, {}".format(dims1, dims2))
+        raise ValueError(f"Numpy style broadcasting is not supported in ONNX. Input dims are: {dims1}, {dims2}")
     return broadcast
