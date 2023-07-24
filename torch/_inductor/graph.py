@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import time
+from collections import defaultdict
 from contextlib import contextmanager
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -191,6 +192,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_inputs: Set[str] = set()
         self.unaligned_buffers: Set[str] = set()
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
+        self.name_to_users: Dict[str, Set[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self.cpp_wrapper = cpp_wrapper
@@ -436,6 +438,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.lists[name] = buffer_names
         return name
 
+    def register_is_user_of(self, ir_node):
+        if isinstance(ir_node, ir.Buffer):
+            for read_name in ir_node.get_read_names():
+                self.name_to_users[read_name].append(ir_node)
+
     def mark_buffer_mutated(self, name: str):
         """
         When a buffer is mutated we need to make sure all the reads to
@@ -444,19 +451,9 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(name, str)
         self.mutated_buffers.add(name)
 
-        def visit(value):
-            if isinstance(value, (list, tuple)):
-                return [visit(x) for x in value]
-            if isinstance(value, ir.IRNode):
-                if value.is_user_of(name):
-                    value.realize()
-            return value
-
-        for value in self.env.values():
-            try:
-                visit(value)
-            except Exception:
-                log.warning("error in mark_buffer_mutated", exc_info=True)
+        assert name in self.name_to_users
+        for user in self.name_to_users[name]:
+            user.realize()
 
     def add_tensor_constant(self, data):
         def allocate():
