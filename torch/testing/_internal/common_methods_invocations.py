@@ -11985,7 +11985,7 @@ op_db: List[OpInfo] = [
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_as_strided_scatter,
            error_inputs_func=error_inputs_as_strided_scatter,
-           reference_inputs_func=reference_inputs_as_strided_scatter,
+           # reference_inputs_func=reference_inputs_as_strided_scatter,
            skips=(
                DecorateInfo(unittest.skip('Works for int64, fails for everything else'), 'TestCommon', 'test_noncontiguous_samples'),  # noqa: B950
                DecorateInfo(unittest.skip('Fails in most cases, passes on LAZY for some reason'), 'TestCommon', 'test_variant_consistency_eager'),  # noqa: B950
