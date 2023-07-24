@@ -18,7 +18,7 @@ namespace at {
 // "shallow copy" in order to add support.
 
 template <typename OpaqueHandle>
-struct TORCH_API OpaqueTensorImpl : public TensorImpl {
+struct OpaqueTensorImpl : public TensorImpl {
   // public constructor for now...
   OpaqueTensorImpl(
       at::DispatchKeySet key_set,
