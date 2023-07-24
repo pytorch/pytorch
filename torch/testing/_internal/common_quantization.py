@@ -772,8 +772,7 @@ class QuantizationTestCase(TestCase):
 
             self.assertTrue(
                 len(matched_subgraph_pairs) == len(expected_types),
-                'Expected length of results to match, but got %d and %d' %
-                (len(matched_subgraph_pairs), len(expected_types))
+                f'Expected length of results to match, but got {len(matched_subgraph_pairs)} and {len(expected_types)}'
             )
             for k, v in expected_types.items():
                 expected_types_a, expected_types_b = v
