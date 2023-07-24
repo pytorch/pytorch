@@ -66,6 +66,7 @@ def _aot_capture(mod, flat_args):
     out_spec = None
 
     graph_module = None
+    num_fwd_returns = None
 
     def fw_compiler(gm, inputs):
         nonlocal graph_module
@@ -101,8 +102,6 @@ def _aot_capture(mod, flat_args):
         for i, input_info in enumerate(fw_metadata.input_info)
         if input_info.mutates_data or input_info.mutates_metadata
     ]
-
-    num_fwd_returns = None
 
     def set_state_proxies(state_args):
         modes = get_torch_dispatch_modes()
