@@ -915,7 +915,7 @@ def load(
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
             are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
             second step is a no-op if the final location is CPU. When the ``mmap`` flag is set, instead of copying the
-            tensor storages from disk to CPU memory in the first step, f is mmaped.
+            tensor storages from disk to CPU memory in the first step, ``f`` is mmaped.
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
