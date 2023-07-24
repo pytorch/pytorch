@@ -135,14 +135,14 @@ CONTAINER_PYTHON_TO_CPP = {
     "Optional": "c10::optional",
 }
 
-DTYPE_16BIT = [
+DTYPE_LOWP_FP = [
     torch.bfloat16,
     torch.float16,
 ]
 
 
 def reduction_init(reduction_type, dtype):
-    if dtype in DTYPE_16BIT:
+    if dtype in DTYPE_LOWP_FP:
         # Since load promotes all half-precision inputs to float, the initial
         # constant for reduction must be promoted as well
         dtype = torch.float32
@@ -746,10 +746,10 @@ class CppVecOverrides(OpOverrides):
             return f"vec_convert_to_mask({x})"
         if opt_ctx_x.dtype == torch.bool and dtype in (torch.float, torch.float32):
             return f"mask_convert_to_float({x})"
-        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype in DTYPE_16BIT:
-            return f"cvt_fp32_to_16bit<{DTYPE_TO_CPP[dtype]}>({x})"
-        if opt_ctx_x.dtype in DTYPE_16BIT and dtype in (torch.float, torch.float32):
-            return f"cvt_16bit_to_fp32<{DTYPE_TO_CPP[opt_ctx_x.dtype]}>({x})"
+        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype in DTYPE_LOWP_FP:
+            return f"cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[dtype]}>({x})"
+        if opt_ctx_x.dtype in DTYPE_LOWP_FP and dtype in (torch.float, torch.float32):
+            return f"cvt_lowp_fp_to_fp32<{DTYPE_TO_CPP[opt_ctx_x.dtype]}>({x})"
         if opt_ctx_x.dtype == torch.uint8 and dtype in (torch.float, torch.float32):
             # Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
             return f"at::vec::convert_uint8_to_float({x})"
@@ -1042,7 +1042,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
-        if dtype in DTYPE_16BIT:
+        if dtype in DTYPE_LOWP_FP:
             # Since load promotes all half-precision inputs to float, constants
             # must be promoted as well
             dtype = torch.float32
@@ -1465,7 +1465,7 @@ class CppVecKernel(CppKernel):
             # should always be broadcast as float for vectorization since we always use float to compute
             if is_mask:
                 loadbuf = f"flag_to_float_scalar({loadbuf})"
-            if dtype in DTYPE_16BIT:
+            if dtype in DTYPE_LOWP_FP:
                 line = f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({loadbuf})"
             else:
                 line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
@@ -1473,14 +1473,14 @@ class CppVecKernel(CppKernel):
             line = f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
         elif is_mask:
             line = f"flag_to_float_vec({loadbuf})"
-        elif dtype in DTYPE_16BIT:
+        elif dtype in DTYPE_LOWP_FP:
             line = f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>::loadu({loadbuf}, {self.tiling_factor})"
         else:
             line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
         if non_contiguous:
             tmpbuftype = "float" if is_mask else f"{DTYPE_TO_CPP[dtype]}"
             tmpbufsize = f"{self.tiling_factor}"
-            if dtype in DTYPE_16BIT:
+            if dtype in DTYPE_LOWP_FP:
                 tmpbufsize += " * 2"
             tmpbufdeclare = f"__at_align__ {tmpbuftype} tmpbuf[{tmpbufsize}];"
             inner = sympy_symbol(f"{tiling_var}_inner")
@@ -1511,7 +1511,7 @@ class CppVecKernel(CppKernel):
         non_contiguous = stride_at(tiling_var, index) != 1 or "tmp" in f"{index}"
         if non_contiguous:
             var_expr = "tmpbuf"
-        if V.graph.get_dtype(name) in DTYPE_16BIT:
+        if V.graph.get_dtype(name) in DTYPE_LOWP_FP:
             line = f"{value}.store({var_expr}, {self.tiling_factor});"
         elif V.graph.get_dtype(name) in [torch.uint8]:
             line = f"{value}.store({var_expr}, {self.tiling_factor});"
@@ -1643,16 +1643,16 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                 DeferredLine(name, f"{value}.store({var} + {cexpr_index(index)});")
             ]
             if out_dtype != dtype:
-                if out_dtype in DTYPE_16BIT and dtype == torch.float:
-                    _16bit_tmpvar_vec = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
+                if out_dtype in DTYPE_LOWP_FP and dtype == torch.float:
+                    _lowp_fp_tmpvar_vec = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
                     store_lines = [
                         DeferredLine(
                             name,
-                            f"auto {_16bit_tmpvar_vec} = cvt_fp32_to_16bit<{DTYPE_TO_CPP[out_dtype]}>({value});",
+                            f"auto {_lowp_fp_tmpvar_vec} = cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[out_dtype]}>({value});",
                         ),
                         DeferredLine(
                             name,
-                            f"{_16bit_tmpvar_vec}.store({var} + {cexpr_index(index)}, {self.tiling_factor});",
+                            f"{_lowp_fp_tmpvar_vec}.store({var} + {cexpr_index(index)}, {self.tiling_factor});",
                         ),
                     ]
                 else:
@@ -1761,7 +1761,7 @@ class CppTile2DKernel(CppVecKernel):
             # vector load inside the kernel inner loop
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             dtype = V.graph.get_dtype(name)
-            if dtype in DTYPE_16BIT:
+            if dtype in DTYPE_LOWP_FP:
                 line = f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>::loadu({loadbuf}, {self.tiling_factor})"
             elif (
                 V.graph.get_dtype(name) in [torch.uint8]
@@ -1793,7 +1793,7 @@ class CppTile2DKernel(CppVecKernel):
             )
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
-            if V.graph.get_dtype(name) in DTYPE_16BIT:
+            if V.graph.get_dtype(name) in DTYPE_LOWP_FP:
                 line = f"{value}.store({storebuf}, {self.tiling_factor});"
             elif V.graph.get_dtype(name) in [torch.uint8]:
                 line = f"{value}.store({storebuf}, {self.tiling_factor});"
@@ -2261,7 +2261,7 @@ class CppVecKernelChecker(CppVecKernel):
                                     self.disable_vec(f"to_dtype: dtype {dtype}")
                             else:
                                 self.disable_vec(f"to_dtype: dtype {dtype}")
-                    elif dtype in DTYPE_16BIT:
+                    elif dtype in DTYPE_LOWP_FP:
                         if not all(usr.target == "store" for usr in cur_node.users):
                             self.disable_vec(
                                 "to_dtype: bfloat16/float16 expecting users are all stores"
@@ -2319,11 +2319,11 @@ class CppKernelProxy(CppKernel):
             DataTypePropagation.propagate_scheduler_node(_node)
 
     # Check if all the nodes of a given fx graph can support BF16/FP16
-    def is_16bit_scheduler(self, scheduler_node: SchedulerNode):
+    def is_lowp_fp_scheduler(self, scheduler_node: SchedulerNode):
         if not isinstance(scheduler_node._body, ir.LoopBody):
             return True
 
-        _16bit_type: torch.dtype = None
+        _lowp_fp_type: torch.dtype = None
 
         # Propagate the dtype to check if all the fx node is bf16/fp16
         DataTypePropagation.propagate_scheduler_node(scheduler_node)
@@ -2355,23 +2355,23 @@ class CppKernelProxy(CppKernel):
                 if hasattr(_node, "meta") and _node.meta:
                     assert OptimizationContext.key in _node.meta
                     opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
-                    if not opt_ctx.dtype or opt_ctx.dtype not in DTYPE_16BIT:
+                    if not opt_ctx.dtype or opt_ctx.dtype not in DTYPE_LOWP_FP:
                         return False
-                    if _16bit_type:
+                    if _lowp_fp_type:
                         assert (
-                            _16bit_type == opt_ctx.dtype
+                            _lowp_fp_type == opt_ctx.dtype
                         ), "scheduler node do not support bf16/fp16 mix"
                     else:
-                        _16bit_type = opt_ctx.dtype
+                        _lowp_fp_type = opt_ctx.dtype
                 else:
                     return False
 
-        scheduler_node._16bit_type = _16bit_type
+        scheduler_node._lowp_fp_type = _lowp_fp_type
         return True
 
-    def legalize_16bit_dtype(self, nodes):
+    def legalize_lowp_fp_dtype(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
-            def is_16bit_load_or_constant(node: torch.fx.Node):
+            def is_lowp_fp_load_or_constant(node: torch.fx.Node):
                 if node.target not in ["load", "constant"]:
                     return False
                 assert len(node.args) == 3
@@ -2381,19 +2381,19 @@ class CppKernelProxy(CppKernel):
                     if node.target == "load"
                     else node.args[-1]
                 )
-                return load_dtype in DTYPE_16BIT
+                return load_dtype in DTYPE_LOWP_FP
 
-            def is_16bit_store(node: torch.fx.Node):
+            def is_lowp_fp_store(node: torch.fx.Node):
                 if node.target != "store":
                     return False
                 _, store_var, _, _, _ = node.args
                 store_dtype = V.graph.get_dtype(store_var)
-                return store_dtype in DTYPE_16BIT
+                return store_dtype in DTYPE_LOWP_FP
 
             sub_graph_nodes = list(sub_graph.nodes)
-            to_16bit_legalized_nodes = []
+            to_lowp_fp_legalized_nodes = []
             for _node in sub_graph_nodes:
-                if is_16bit_load_or_constant(_node):
+                if is_lowp_fp_load_or_constant(_node):
                     ops = _node.args[0]
                     with sub_graph.inserting_after(_node):
                         to_type_node = sub_graph.call_method(
@@ -2403,7 +2403,7 @@ class CppKernelProxy(CppKernel):
                         _node.replace_all_uses_with(to_type_node)
                         to_type_node.args = to_type_node_args
                         metrics.cpp_to_dtype_count += 1
-                elif is_16bit_store(_node):
+                elif is_lowp_fp_store(_node):
                     ops, name, _, value_var, _ = _node.args
                     dtype = V.graph.get_dtype(name)
                     with sub_graph.inserting_before(_node):
@@ -2420,7 +2420,7 @@ class CppKernelProxy(CppKernel):
                         reduction_type,
                         value,
                     ) = _node.args
-                    if src_dtype in DTYPE_16BIT:
+                    if src_dtype in DTYPE_LOWP_FP:
                         # Since we always convert the load/store value to float if the tensor is bfloat16/float16.
                         # Therefore, the reduction should never work with bfloat16/float16 value. Hence, we update
                         # the bfloat16/float16 reduction by
@@ -2434,12 +2434,12 @@ class CppKernelProxy(CppKernel):
                         ]
                         _node.args = (
                             ops,
-                            torch.float if dtype in DTYPE_16BIT else dtype,
+                            torch.float if dtype in DTYPE_LOWP_FP else dtype,
                             torch.float,
                             reduction_type,
                             value,
                         )
-                elif _node.target == "to_dtype" and _node.args[-1] in DTYPE_16BIT:
+                elif _node.target == "to_dtype" and _node.args[-1] in DTYPE_LOWP_FP:
                     (ops, x, _) = _node.args
                     # The legalization always loads the BF16/FP16 tensor as FP32 for computation
                     # and converts back to BF16/FP16 after the computation.
@@ -2448,12 +2448,12 @@ class CppKernelProxy(CppKernel):
                     # Save the legalized to_dtype node for the elimination(eliminate_to_dtype step):
                     #  1) Eliminate the redundant to_dtype node if we have a pattern as follows:
                     #     graph():
-                    #       %16bit_legalized = call_method[target=to_dtype](args = (%ops, %input, torch.float))
-                    #       %to_dtype2 = call_method[target=to_dtype](args = (%ops, %16bit_legalized, torch.bfloat16/float16))
+                    #       %lowp_fp_legalized = call_method[target=to_dtype](args = (%ops, %input, torch.float))
+                    #       %to_dtype2 = call_method[target=to_dtype](args = (%ops, %lowp_fp_legalized, torch.bfloat16/float16))
                     # Regarding the first to_dtype, it is redundant because
                     # the second to_type also converts to the torch.bfloat16/torch.float16.
                     # Hence, we remove the first to_type.
-                    to_16bit_legalized_nodes.append(_node)
+                    to_lowp_fp_legalized_nodes.append(_node)
                     _node.args = (ops, x, torch.float)
                 else:
                     pass
@@ -2480,9 +2480,9 @@ class CppKernelProxy(CppKernel):
                             if node in sub_graph.nodes and (
                                 all(usr.args[-1] == node.args[-1] for usr in users)
                                 or (
-                                    node in to_16bit_legalized_nodes
+                                    node in to_lowp_fp_legalized_nodes
                                     and all(
-                                        usr.args[-1] in DTYPE_16BIT for usr in users
+                                        usr.args[-1] in DTYPE_LOWP_FP for usr in users
                                     )
                                 )
                             ):
@@ -2504,13 +2504,13 @@ class CppKernelProxy(CppKernel):
 
             eliminate_to_dtype(sub_graph)
 
-        def _legalize_16bit(loop_body: ir.LoopBody):
+        def _legalize_lowp_fp(loop_body: ir.LoopBody):
             sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
             for sub_block in sub_blocks:
                 add_to_dtype(sub_block.graph)
 
         if all(
-            isinstance(_node, SchedulerNode) and self.is_16bit_scheduler(_node)
+            isinstance(_node, SchedulerNode) and self.is_lowp_fp_scheduler(_node)
             for _node in nodes
         ):
             # Mark the load node to load bf16/fp16
@@ -2526,7 +2526,7 @@ class CppKernelProxy(CppKernel):
                             opt_ctx: OptimizationContext = fx_node.meta[
                                 OptimizationContext.key
                             ]
-                            assert opt_ctx.dtype in DTYPE_16BIT
+                            assert opt_ctx.dtype in DTYPE_LOWP_FP
 
             # Bypass the legalization as the kernel can run with bf16/fp16 directly
             return
@@ -2545,20 +2545,20 @@ class CppKernelProxy(CppKernel):
             should_legalize = not is_memory_copy_scheduler_node(node)
             if should_legalize:
                 body: ir.LoopBody = node._body
-                _legalize_16bit(body)
+                _legalize_lowp_fp(body)
 
     def codegen_nodes(self, nodes):
         # Legalize BF16 node by adding to_dtype explicitly
-        self.legalize_16bit_dtype(nodes)
+        self.legalize_lowp_fp_dtype(nodes)
         self.data_type_propagation(nodes)
 
         assert len(nodes) >= 1
         first_node = nodes[0]
         vec_dtype = (
-            first_node._16bit_type
+            first_node._lowp_fp_type
             if all(
-                hasattr(_node, "_16bit_type")
-                and _node._16bit_type == first_node._16bit_type
+                hasattr(_node, "_lowp_fp_type")
+                and _node._lowp_fp_type == first_node._lowp_fp_type
                 for _node in nodes
             )
             else torch.float
