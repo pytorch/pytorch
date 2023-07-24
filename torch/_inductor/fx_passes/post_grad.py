@@ -28,7 +28,7 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 from ..virtualized import V
-from .group_batch_fusion import group_batch_fusion_passes
+from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
 
 log = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         if is_inference:
             inference_patterns.apply(gm.graph)
 
-        group_batch_fusion_passes(gm.graph)
+        group_batch_fusion_post_grad_passes(gm.graph)
 
     stable_topological_sort(gm.graph)
     gm.recompile()

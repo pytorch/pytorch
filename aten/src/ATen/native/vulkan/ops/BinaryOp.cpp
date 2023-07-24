@@ -560,6 +560,30 @@ Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
       self, other_arg, c10::optional<Scalar>(), VK_KERNEL(div_));
 }
 
+Tensor pow(const Tensor& self, const Tensor& other) {
+  return binary_op_tensor(self, other, c10::optional<Scalar>(), VK_KERNEL(pow));
+}
+
+Tensor& pow_(Tensor& self, const Tensor& other) {
+  return binary_op_tensor_(
+      self, other, c10::optional<Scalar>(), VK_KERNEL(pow_));
+}
+
+Tensor pow_tensor_scalar(const Tensor& self, const Scalar& other) {
+  return binary_op_scalar(
+      self, other, c10::optional<Scalar>(), VK_KERNEL(pow_tensor_scalar));
+}
+
+Tensor& pow_tensor_scalar_(Tensor& self, const Scalar& other) {
+  return binary_op_scalar_(
+      self, other, c10::optional<Scalar>(), VK_KERNEL(pow_tensor_scalar_));
+}
+
+Tensor pow_scalar_tensor(const Scalar& self, const Tensor& other) {
+  return binary_op_scalar(
+      other, self, c10::optional<Scalar>(), VK_KERNEL(pow_scalar_tensor));
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
@@ -579,6 +603,14 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::div_.Scalar"), TORCH_FN(div_scalar_));
   m.impl(TORCH_SELECTIVE_NAME("aten::div.Tensor"), TORCH_FN(div_tensor));
   m.impl(TORCH_SELECTIVE_NAME("aten::div_.Tensor"), TORCH_FN(div_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::pow.Tensor_Tensor"), TORCH_FN(pow));
+  m.impl(TORCH_SELECTIVE_NAME("aten::pow_.Tensor"), TORCH_FN(pow_));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::pow.Tensor_Scalar"),
+      TORCH_FN(pow_tensor_scalar));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::pow_.Scalar"), TORCH_FN(pow_tensor_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::pow.Scalar"), TORCH_FN(pow_scalar_tensor));
 }
 
 #endif /* USE_VULKAN_API */

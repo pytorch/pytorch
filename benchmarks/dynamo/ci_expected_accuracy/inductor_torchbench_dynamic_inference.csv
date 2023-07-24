@@ -55,3 +55,4 @@ timm_vovnet,pass,0
 tts_angular,pass,2
 vgg16,pass,0
 yolov3,pass,2
+sam,pass,0
