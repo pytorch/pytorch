@@ -532,7 +532,14 @@ bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
 }
 
 bool check_nonzero_mask_size(sdp_params params, bool debug) {
-  // In some cases people will pass in
+  if (has_for_nested_inputs(params)){
+    // Currently we do not support any masking with NestedTensors
+    // This is checked in validate_sdpa_input so this filter func
+    // Should have no actually bearing on the kernel selection
+    return true;
+  }
+  // In some cases people will pass in 0 sized tensors, this will
+  // cause the fused path to error with unaligned mask
   bool zero_seq_len_q = params.query.sym_size(-2) == 0;
   bool zero_seq_len_k = params.key.sym_size(-2) == 0;
   if (zero_seq_len_q || zero_seq_len_k) {
