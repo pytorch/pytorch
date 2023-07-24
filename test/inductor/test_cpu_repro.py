@@ -45,7 +45,7 @@ except unittest.SkipTest:
 
 
 vec_dtypes = test_torchinductor.vec_dtypes
-_16bit_dtypes = (
+_lowp_fp_dtypes = (
     torch.bfloat16,
     torch.float16,
 )
@@ -411,19 +411,19 @@ class CPUReproTests(TestCase):
         )
 
     @patch("torch.cuda.is_available", lambda: False)
-    def test_max_reduction_16bit(self):
+    def test_max_reduction_lowp_fp(self):
         def fn(x):
             return torch.ops.aten.max(x, 1, keepdim=True)[0].float()
 
-        for dtype in _16bit_dtypes:
+        for dtype in _lowp_fp_dtypes:
             self.common(
                 fn,
                 (torch.randn(1, 32, 4, 4).to(dtype),),
             )
 
     @patch("torch.cuda.is_available", lambda: False)
-    def test_vec_transpose_16bit(self):
-        for dtype in _16bit_dtypes:
+    def test_vec_transpose_lowp_fp(self):
+        for dtype in _lowp_fp_dtypes:
 
             def fn(x):
                 return x.to(memory_format=torch.channels_last).to(dtype)
@@ -447,7 +447,7 @@ class CPUReproTests(TestCase):
             )
 
     @patch("torch.cuda.is_available", lambda: False)
-    def test_fp32_load_with_to_16bit(self):
+    def test_fp32_load_with_to_lowp_fp(self):
         # From llama model.
         class Model(torch.nn.Module):
             def __init__(self):
@@ -460,7 +460,7 @@ class CPUReproTests(TestCase):
                 self.cache_k[:bsz, 1 : 1 + seqlen] = xk
                 return self.cache_k
 
-        for dtype in _16bit_dtypes:
+        for dtype in _lowp_fp_dtypes:
             ref_model = Model().eval()
             opt_model = torch.compile()(Model().eval())
             x = torch.randn(4, 2, 2).to(dtype)
@@ -990,12 +990,12 @@ class CPUReproTests(TestCase):
             set(cpp_op_list).issubset(union), f"unexpected: {set(cpp_op_list) - union}"
         )
 
-    def test_atomic_add_16bit(self):
+    def test_atomic_add_lowp_fp(self):
         def fn(test_args):
             res = torch.gather(**test_args)
             return res
 
-        for dtype in _16bit_dtypes:
+        for dtype in _lowp_fp_dtypes:
             input_tensor_for_ref = torch.tensor(
                 [[3.0, -5.0]], dtype=dtype, requires_grad=True
             )
@@ -1233,13 +1233,13 @@ class CPUReproTests(TestCase):
 
             self.assertEqual(model(x), model_f(x))
 
-    def test_redundant_to_node_elimination_16bit(self):
+    def test_redundant_to_node_elimination_lowp_fp(self):
         def fn(x, y):
             res = x + y
             res = torch.mean(res)
             return res
 
-        for dtype in _16bit_dtypes:
+        for dtype in _lowp_fp_dtypes:
             x = torch.randn((2, 9), dtype=dtype)
             y = torch.randn((2, 9), dtype=dtype)
 
@@ -1823,11 +1823,11 @@ class CPUReproTests(TestCase):
             self.assertEqual(metrics.generated_kernel_count, 1)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
 
-    def test_16bit_neg_abs(self):
+    def test_lowp_fp_neg_abs(self):
         def fn(x):
             return x.neg().abs()
 
-        for dtype in _16bit_dtypes:
+        for dtype in _lowp_fp_dtypes:
             metrics.reset()
             x = torch.randn(100, 100).to(dtype)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
@@ -1988,19 +1988,19 @@ class CPUReproTests(TestCase):
         x = torch.rand(4, 5)
         self.common(f, (x,))
 
-    def test_to_channels_last_16bit(self):
+    def test_to_channels_last_lowp_fp(self):
         def f(a):
             return a.to(memory_format=torch.channels_last)
 
-        for dtype in _16bit_dtypes:
+        for dtype in _lowp_fp_dtypes:
             x = torch.rand(2, 3, 14, 14).to(dtype)
             self.common(f, (x,))
 
-    def test_broadcast_mul_16bit(self):
+    def test_broadcast_mul_lowp_fp(self):
         def f(a, b):
             return a * b
 
-        for dtype in _16bit_dtypes:
+        for dtype in _lowp_fp_dtypes:
             a = torch.randn(2, 16, 16).to(dtype)
             b = torch.randn(2, 1, 1).to(dtype)
             self.common(f, (a, b))

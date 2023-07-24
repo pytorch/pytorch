@@ -259,7 +259,7 @@ inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
 }
 
 template <typename scalar_t>
-inline at::vec::Vectorized<float> cvt_16bit_to_fp32(
+inline at::vec::Vectorized<float> cvt_lowp_fp_to_fp32(
     at::vec::Vectorized<scalar_t> src) {
   at::vec::Vectorized<float> res_vec1(0);
   at::vec::Vectorized<float> res_vec2(0);
@@ -268,7 +268,7 @@ inline at::vec::Vectorized<float> cvt_16bit_to_fp32(
 }
 
 template <typename scalar_t>
-inline at::vec::Vectorized<scalar_t> cvt_fp32_to_16bit(
+inline at::vec::Vectorized<scalar_t> cvt_fp32_to_lowp_fp(
     at::vec::Vectorized<float> src) {
   return at::vec::convert_from_float<scalar_t>(src, src);
 }
