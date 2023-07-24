@@ -223,9 +223,10 @@ class AllocateLine(MemoryPlanningLine):
                         code.writeline(f"{{")
                         line = self.wrapper.make_buffer_allocation(self.node, need_declare=False)
                         with code.indent():
-                            code.writeline(f"at::cuda::CUDAStreamGuard streamGuard(stream{self.user_streams[0]});")
+                            code.writeline(f"at::cuda::setCurrentCUDAStream(stream{self.user_streams[0]});")
                             code.writeline(line)
                         code.writeline(f"}}")
+                        code.writeline(f"at::cuda::setCurrentCUDAStream(stream0);")
                     else:
                         code.writeline(f"torch.cuda.set_stream(stream{self.user_streams[0]}_raw)")
                         code.writeline(line)
@@ -526,7 +527,7 @@ class WrapperCodeGen(CodeGen):
             else:
                 kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream{stream_id}_raw)")
             if V.graph.cpp_wrapper:
-                kernel_IndentedBuffer.writeline(f"at::cuda::CUDAStreamGuard streamGuard(stream{stream_id});")
+                kernel_IndentedBuffer.writeline(f"at::cuda::setCurrentCUDAStream(stream{stream_id});")
             if isinstance(call_strs, list):
                 for call_str in call_strs:
                     kernel_IndentedBuffer.writeline(call_str)
@@ -534,6 +535,7 @@ class WrapperCodeGen(CodeGen):
                 kernel_IndentedBuffer.writeline(call_strs)
             if V.graph.cpp_wrapper:
                 kernel_IndentedBuffer.writeline(f"}}")
+                kernel_IndentedBuffer.writeline(f"at::cuda::setCurrentCUDAStream(stream0);")
             else:
                 kernel_IndentedBuffer.writeline(f"torch.cuda.set_stream(stream0_raw)")
         else:
@@ -624,7 +626,7 @@ class WrapperCodeGen(CodeGen):
                     self.wrapper_call.splice(
                         f"""
                         if (cuda_stream{index} == nullptr){{
-                            cudaStreamCreate(&cuda_stream{index});
+                            cudaStreamCreate(&cuda_stream{index},cudaStreamNonBlocking);
                         }}
                         at::cuda::CUDAStream stream{index} = at::cuda::getStreamFromExternal(cuda_stream{index}, 0);
                         """
@@ -1591,9 +1593,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                             arg_IndentedBuffer.writeline(f"CUdeviceptr {var_name};")
                             arg_IndentedBuffer.writeline(f"{{")
                             with arg_IndentedBuffer.indent():
-                                arg_IndentedBuffer.writeline(f"at::cuda::CUDAStreamGuard streamGuard(stream{tmp_stream_id});")
+                                arg_IndentedBuffer.writeline(f"at::cuda::setCurrentCUDAStream(stream{tmp_stream_id});")
                                 arg_IndentedBuffer.writeline(f"{var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());")
                             arg_IndentedBuffer.writeline(f"}}")
+                            arg_IndentedBuffer.writeline(f"at::cuda::setCurrentCUDAStream(stream0);")
                             for line in [ _ for _ in arg_IndentedBuffer.getrawvalue().split("\n") if _]:
                                 self.writeline(line)
                             written = True
