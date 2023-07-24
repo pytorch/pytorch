@@ -118,7 +118,7 @@ class Functionalize(_pass.Transform):
             fake_mode = contextlib.nullcontext()  # type: ignore[assignment]
             tracing_mode = "symbolic" if self.enable_dynamic_axes else "fake"
 
-        assert fake_mode is not None
+        assert fake_mode is not None  # for mypy
         with fake_mode:
             graph_module = proxy_tensor.make_fx(
                 functionalized_callable,
