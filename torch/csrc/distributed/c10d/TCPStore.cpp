@@ -1,5 +1,6 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
 #include <fcntl.h>
@@ -29,114 +30,6 @@
 namespace c10d {
 namespace detail {
 namespace {
-
-// Abstract base class to handle thread state for TCPStoreMasterDaemon.
-// Contains the windows/unix implementations to signal a
-// shutdown sequence for the thread
-class BackgroundThread {
- public:
-  explicit BackgroundThread(Socket&& storeListenSocket);
-
-  virtual ~BackgroundThread() = 0;
-
- protected:
-  void dispose();
-
-  Socket storeListenSocket_;
-  std::thread daemonThread_{};
-  std::vector<Socket> sockets_{};
-#ifdef _WIN32
-  const std::chrono::milliseconds checkTimeout_ = std::chrono::milliseconds{10};
-  HANDLE ghStopEvent_{};
-#else
-  std::array<int, 2> controlPipeFd_{{-1, -1}};
-#endif
-
- private:
-  // Initialization for shutdown signal
-  void initStopSignal();
-  // Triggers the shutdown signal
-  void stop();
-  // Joins the thread
-  void join();
-  // Clean up the shutdown signal
-  void closeStopSignal();
-};
-
-// Background thread parent class methods
-BackgroundThread::BackgroundThread(Socket&& storeListenSocket)
-    : storeListenSocket_{std::move(storeListenSocket)} {
-  // Signal instance destruction to the daemon thread.
-  initStopSignal();
-}
-
-BackgroundThread::~BackgroundThread() = default;
-
-// WARNING:
-// Since we rely on the subclass for the daemon thread clean-up, we cannot
-// destruct our member variables in the destructor. The subclass must call
-// dispose() in its own destructor.
-void BackgroundThread::dispose() {
-  // Stop the run
-  stop();
-  // Join the thread
-  join();
-  // Close unclosed sockets
-  sockets_.clear();
-  // Now close the rest control pipe
-  closeStopSignal();
-}
-
-void BackgroundThread::join() {
-  daemonThread_.join();
-}
-
-#ifdef _WIN32
-void BackgroundThread::initStopSignal() {
-  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
-  if (ghStopEvent_ == NULL) {
-    TORCH_CHECK(
-        false,
-        "Failed to create the control pipe to start the "
-        "BackgroundThread run");
-  }
-}
-
-void BackgroundThread::closeStopSignal() {
-  CloseHandle(ghStopEvent_);
-}
-
-void BackgroundThread::stop() {
-  SetEvent(ghStopEvent_);
-}
-#else
-void BackgroundThread::initStopSignal() {
-  if (pipe(controlPipeFd_.data()) == -1) {
-    TORCH_CHECK(
-        false,
-        "Failed to create the control pipe to start the "
-        "BackgroundThread run");
-  }
-}
-
-void BackgroundThread::closeStopSignal() {
-  for (int fd : controlPipeFd_) {
-    if (fd != -1) {
-      ::close(fd);
-    }
-  }
-}
-
-void BackgroundThread::stop() {
-  if (controlPipeFd_[1] != -1) {
-    ::write(controlPipeFd_[1], "\0", 1);
-    // close the write end of the pipe
-    ::close(controlPipeFd_[1]);
-    controlPipeFd_[1] = -1;
-  }
-}
-#endif
-
 enum class QueryType : uint8_t {
   SET,
   COMPARE_SET,
