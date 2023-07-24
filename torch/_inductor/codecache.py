@@ -471,6 +471,42 @@ class VecISA:
     _dtype_nelements: Dict[torch.dtype, int]
     _capability: str
 
+    # Note [Checking for Vectorized Support in Inductor]
+    # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
+    # Hence, TorchInductor would depend on Sleef* to accelerate mathematical functions
+    # like exp, pow, sin, cos and etc.
+    # But PyTorch and TorchInductor might use different compilers to build code. If
+    # PyTorch uses gcc-7/g++-7 to build the release package, the libtorch_cpu.so
+    # will not expose the Sleef* AVX512 symbols since gcc-7/g++-7 cannot pass
+    # avx512 check in CMake - FindAVX.cmake. But TorchInductor install the latest
+    # gcc/g++ compiler by default while it could support the AVX512 compilation.
+    # Therefore, there would be a conflict sleef version between PyTorch and
+    # TorchInductor. Hence, we dry-compile the following code to check whether current
+    # HW platform and PyTorch both could support AVX512 or AVX2. And suppose ARM
+    # also needs the logic
+    # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
+    # making the runtime check unnecessary.
+    _avx_code = """
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#endif
+
+__attribute__((aligned(64))) float in_out_ptr0[16] = {0.0};
+
+extern "C" void __avx_chk_kernel() {
+    auto tmp0 = at::vec::Vectorized<float>(1);
+    auto tmp1 = tmp0.exp();
+    tmp1.store(in_out_ptr0);
+}
+"""
+
+    _avx_py_load = """
+import torch
+from ctypes import cdll
+cdll.LoadLibrary("__lib_path__")
+"""
+
     def bit_width(self):
         return self._bit_width
 
@@ -494,7 +530,33 @@ class VecISA:
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
-        return torch.backends.cpu.get_cpu_capability() == self._capability
+        key, input_path = write(VecISA._avx_code, "cpp")
+        from filelock import FileLock
+
+        lock_dir = get_lock_dir()
+        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        with lock:
+            output_path = input_path[:-3] + "so"
+            build_cmd = cpp_compile_command(
+                input_path, output_path, warning_all=False, vec_isa=self
+            ).split(" ")
+            try:
+                # Check build result
+                compile_file(input_path, output_path, build_cmd)
+                # TODO: get vectorization working in fbcode.
+                # For now, this always fails, so we fall back to generating non-vectorized cpu code.
+                subprocess.check_call(
+                    [
+                        "python",
+                        "-c",
+                        VecISA._avx_py_load.replace("__lib_path__", output_path),
+                    ],
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception as e:
+                return False
+
+            return True
 
 
 @dataclasses.dataclass
@@ -563,21 +625,26 @@ def valid_vec_isa_list():
 
 
 def pick_vec_isa():
-    _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
-    if not _valid_vec_isa_list:
+    def inner():
+        _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
+        if not _valid_vec_isa_list:
+            return invalid_vec_isa
+
+        # If the simdlen is None, it indicates determin the vectorization length automatically
+        if config.cpp.simdlen is None:
+            assert _valid_vec_isa_list
+            return _valid_vec_isa_list[0]
+
+        for isa in _valid_vec_isa_list:
+            if config.cpp.simdlen == isa.bit_width():
+                return isa
+
         return invalid_vec_isa
 
-    # If the simdlen is None, it indicates determin the vectorization length automatically
-    if config.cpp.simdlen is None:
-        assert _valid_vec_isa_list
-        return _valid_vec_isa_list[0]
-
-    for isa in _valid_vec_isa_list:
-        if config.cpp.simdlen == isa.bit_width():
-            return isa
-
-    return invalid_vec_isa
-
+    isa = inner()
+    cap = torch.backends.cpu.get_cpu_capability()
+    log.warning(f"Picking ISA {isa}; capability {cap}")
+    return isa
 
 def get_shared(shared=True):
     return "-shared -fPIC" if shared else ""
