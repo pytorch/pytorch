@@ -11,17 +11,17 @@ class NAdam(Optimizer):
                  weight_decay=0, momentum_decay=4e-3, *, foreach: Optional[bool] = None,
                  differentiable: bool = False):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
+            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
         if not 0.0 <= momentum_decay:
-            raise ValueError("Invalid momentum_decay value: {}".format(momentum_decay))
+            raise ValueError(f"Invalid momentum_decay value: {momentum_decay}")
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, momentum_decay=momentum_decay,
                         foreach=foreach, differentiable=differentiable)
@@ -136,7 +136,7 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
        \end{aligned}
 
     For further details regarding the algorithm we refer to `Incorporating Nesterov Momentum into Adam`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -147,13 +147,13 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         momentum_decay (float, optional): momentum momentum_decay (default: 4e-3)
-        {foreach}
-        {differentiable}
+        {_foreach_doc}
+        {_differentiable_doc}
 
     .. _Incorporating Nesterov Momentum into Adam:
         https://openreview.net/forum?id=OM0jvwB8jIp57ZJjtNEZ
 
-    """.format(foreach=_foreach_doc, differentiable=_differentiable_doc)
+    """
 
 
 def nadam(params: List[Tensor],
