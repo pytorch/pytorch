@@ -35,7 +35,7 @@ class TestCodegenTriton(TorchTestCase):
 
     @inductor_config.patch("triton.divisible_by_16", True)
     def test_config_of_sizearg(self):
-        two = sympy.Integer(4)
+        two = sympy.Integer(2)
         eight = sympy.Integer(8)
         sixteen = sympy.Integer(16)
         s0 = sympy.Symbol("s0", positive=True, integer=True)
@@ -45,11 +45,11 @@ class TestCodegenTriton(TorchTestCase):
             (2,),
             triton_utils.config_of(
                 [
-                    SizeArg("A", two),
-                    SizeArg("B", eight),
-                    SizeArg("C", sixteen),
-                    SizeArg("D", s0),
-                    SizeArg("E", s1),
+                    SizeArg("A", two),  # no
+                    SizeArg("B", eight),  # no
+                    SizeArg("C", sixteen),  # yes
+                    SizeArg("D", s0),  # no
+                    SizeArg("E", s1),  # no
                 ]
             ).divisible_by_16,
         )
