@@ -2319,6 +2319,9 @@ class TestSDPACudaOnly(NNTestCase):
             q_padded, q_og_size = pad_last_dim(query, 8)
             k_padded, k_og_size = pad_last_dim(key, 8)
             v_padded, v_og_size = pad_last_dim(value, 8)
+            # scale needs to be calculated on the og head_size
+            if scale is None:
+                scale = 1 / math.sqrt(q_og_size)
             output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
                 q_padded, k_padded, v_padded, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=is_dropout)
             out = output_tuple[0]

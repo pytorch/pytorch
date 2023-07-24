@@ -365,24 +365,23 @@ bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_head_dim_size(sdp_params params, bool debug) {
-  return true;
+bool check_head_dim_size_flash(sdp_params params, bool debug) {
+  // All head_dim sizes must be equal and less than 256
+  const auto max_size = c10::SymInt(256);
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
   if (!(query_size_last == key_size_last &&
-        query_size_last == value_size_last && query_size_last % 8 == 0 &&
-        query_size_last <= 128 && value_size_last % 8 == 0 &&
-        value_size_last <= 128)) {
+        query_size_last == value_size_last && query_size_last <= max_size)) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 128.",
+          "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.",
           " Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
-          params.key.sym_size(-1),
+          key_size_last,
           ", Value.size(-1): ",
-          params.value.sym_size(-1),
+          value_size_last,
           " instead.");
     }
     return false;
@@ -622,7 +621,7 @@ bool use_flash_attention(sdp_params params, bool debug) {
       check_tensor_shapes,
       check_batch_size_and_num_heads,
       check_for_attn_mask,
-      check_head_dim_size,
+      check_head_dim_size_flash,
       check_gpu_sm75_or_greater,
       check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90,
       check_for_seq_len_0_nested_tensor,

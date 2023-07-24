@@ -286,6 +286,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
     at::Tensor q_padded, k_padded, v_padded;
     if (head_size_og % 8 != 0) {
+        TORCH_CHECK(false, "head_size must be a multiple of 8 by now!")
         q_padded = at::pad(q, {0, 8 - head_size_og % 8});
         k_padded = at::pad(k, {0, 8 - head_size_og % 8});
         v_padded = at::pad(v, {0, 8 - head_size_og % 8});
@@ -384,6 +385,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
     at::Tensor out_padded = out;
     if (head_size_og % 8 != 0) {
+         TORCH_CHECK(false, "head_size must be a multiple of 8 by now!")
         out = out.index({"...", at::indexing::Slice(at::indexing::None, head_size_og)});
         if (out_.has_value()) { out_.value().copy_(out); }
     }

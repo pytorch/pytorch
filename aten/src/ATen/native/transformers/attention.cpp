@@ -682,9 +682,11 @@ Tensor scaled_dot_product_attention(
       auto [query_padded, q_og_size] = pad_last_dim<8, false>(query_);
       auto [key_padded, k_og_size] = pad_last_dim<8, false>(key);
       auto [value_padded, v_og_size] = pad_last_dim<8, false>(value);
+      // We need to calculate the scale based off the OG head dim size
+      auto og_scale = sdp::calculate_scale(query_, scale);
       // For Flash, all the head sizes need to bre the same but still
       auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
-          query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+          query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
       return std::get<0>(out_lse_softmax).slice_symint(-1, 0, v_og_size);
     }
     case sdp::SDPBackend::efficient_attention: {
