@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
     gradgradcheck)
 from unittest.mock import patch, call
+import torch.utils._pytree as pytree
 
 
 class TestModule(TestCase):
@@ -608,7 +609,7 @@ class TestModule(TestCase):
         atol, rtol = (3e-3, 7e-3) if is_sm86or80 else (None, None)
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
-                                                       requires_grad=False, training=training)
+                                                       requires_grad=True, training=training)
         module_memformat_affects_out = module_info.module_memformat_affects_out
 
         def _get_mem_formats(channels_last=False, channels_last_3d=False):
@@ -637,8 +638,13 @@ class TestModule(TestCase):
                 d = obj.dim()
                 if ((mem_format == torch.channels_last and d != 4)
                    or (mem_format == torch.channels_last_3d and d != 5)):
-                    return obj
-                return obj.to(memory_format=mem_format)
+                    return obj.clone().detach().requires_grad_(obj.requires_grad)
+                return (
+                    obj.clone()
+                    .to(memory_format=mem_format)
+                    .detach()
+                    .requires_grad_(obj.requires_grad)
+                )
 
             return self._traverse_obj(obj, inner_to_mem_format)
 
@@ -654,6 +660,9 @@ class TestModule(TestCase):
                 else:
                     self.assertTrue(output.is_contiguous())
             return self._traverse_obj(output, inner_check_out_mem_format)
+
+        def _req_grad(t):
+            return isinstance(t, torch.Tensor) and t.requires_grad
 
         for module_input in module_inputs:
             if module_input.forward_input is None:
@@ -674,6 +683,27 @@ class TestModule(TestCase):
                 # === Get output in (contiguous, contiguous) configuration. ===
                 args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
                 desired_outputs = m(*args, **kwargs)
+                if isinstance(desired_outputs, torch.Tensor):
+                    desired_outputs = (desired_outputs,)
+                # === Do backward pass. ===
+                ref_diff_outputs = tuple(t for t in desired_outputs if _req_grad(t))
+                if len(ref_diff_outputs) > 0:
+                    params = tuple(p for p in m.parameters())
+                    ref_diff_inputs = tuple(
+                        t
+                        for t in pytree.tree_flatten((args, kwargs, params))[0]
+                        if _req_grad(t)
+                    )
+                    ref_grad_outputs = tuple(
+                        torch.rand_like(t.to(dtype=torch.double)).to(dtype=dtype)
+                        for t in ref_diff_outputs
+                    )
+                    ref_grad_inputs = torch.autograd.grad(
+                        ref_diff_outputs,
+                        ref_diff_inputs,
+                        grad_outputs=ref_grad_outputs,
+                        allow_unused=True,
+                    )
 
                 for input_mem_format in input_mem_formats:
                     # === Change memformat of input. ===
@@ -689,13 +719,52 @@ class TestModule(TestCase):
                         # === Do forward pass. ===
                         args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
                         outputs = m(*args, **kwargs)
-
+                        if isinstance(outputs, torch.Tensor):
+                            outputs = (outputs,)
                         # === Compare outputs to (contiguous, contiguous) output. ===
                         if input_mem_format != torch.contiguous_format or module_mem_formats != torch.contiguous_format:
                             self.assertEqual(outputs, desired_outputs, rtol=rtol, atol=atol)
 
                         # === Check mem format of output. ===
                         _check_out_mem_format(outputs, input_mem_format, module_mem_format)
+
+                        # === Do backward pass. ===
+                        diff_outputs = tuple(t for t in outputs if _req_grad(t))
+                        if len(diff_outputs) > 0:
+                            params = tuple(p for p in m.parameters())
+                            diff_inputs = tuple(
+                                t
+                                for t in pytree.tree_flatten((args, kwargs, params))[0]
+                                if _req_grad(t)
+                            )
+                            grad_outputs = tuple(
+                                torch.rand_like(t.to(dtype=torch.double)).to(
+                                    dtype=dtype
+                                )
+                                for t in diff_outputs
+                            )
+                            grad_outputs = tuple(
+                                t1.copy_(t2)
+                                for (t1, t2) in zip(grad_outputs, ref_grad_outputs)
+                            )
+
+                            grad_inputs = torch.autograd.grad(
+                                diff_outputs,
+                                diff_inputs,
+                                grad_outputs=grad_outputs,
+                                allow_unused=True,
+                            )
+
+                            if (
+                                input_mem_format != torch.contiguous_format
+                                or module_mem_formats != torch.contiguous_format
+                            ):
+                                self.assertEqual(
+                                    grad_inputs, ref_grad_inputs, rtol=rtol, atol=atol
+                                )
+
+                            # === Check mem format of grad_inputs. ===
+                            _check_out_mem_format(grad_inputs, input_mem_format, module_mem_format)
 
     # Test whether train and eval modes differ for each module. Use to verify
     # that the ModuleInfo entry flag is correct.
