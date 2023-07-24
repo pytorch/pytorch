@@ -9124,6 +9124,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: erfinv_out
+    MPS: erfinv_out_mps
     SparseCPU, SparseCUDA: erfinv_sparse_out
     SparseCsrCPU, SparseCsrCUDA: erfinv_sparse_csr_out
   tags: pointwise
