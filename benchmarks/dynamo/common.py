@@ -303,6 +303,10 @@ CI_SKIP_OPTIMIZER = {
     "PegasusForConditionalGeneration",  # OOM
 }
 
+CI_SKIP_DYNAMIC_BATCH_ONLY = {
+    "sam",
+}
+
 
 def model_specified_by_path(path_and_class_str):
     return ":" in path_and_class_str
@@ -342,7 +346,7 @@ def load_model_from_path(path_and_class_str):
 
 def output_csv(filename, headers, row):
     if os.path.exists(filename):
-        with open(filename, "r") as fd:
+        with open(filename) as fd:
             lines = list(csv.reader(fd)) or [[]]
             if headers and len(headers) > len(lines[0]):
                 # if prior results failed the header might not be filled in yet
@@ -1507,7 +1511,7 @@ def read_batch_size_from_file(args, filename, model_name):
     if os.path.exists("benchmarks"):
         filename = os.path.join("benchmarks", filename)
     assert os.path.exists(filename), filename
-    with open(filename, "r") as f:
+    with open(filename) as f:
         lines = f.readlines()
         lines = [i.split(",") for i in lines if len(i.strip()) > 0]
         for val in lines:
@@ -1709,7 +1713,7 @@ class BenchmarkRunner:
 
     def init_optimizer(self, name, device, params):
         if device == "cuda" and self.args.training and name not in CI_SKIP_OPTIMIZER:
-            self.optimizer = torch.optim.SGD(params, lr=0.01)
+            self.optimizer = torch.optim.SGD(params, lr=0.01, foreach=True)
         else:
             self.optimizer = None
 
@@ -2471,6 +2475,9 @@ def parse_args(args=None):
         "--cpp-wrapper", action="store_true", help="turn on cpp/cuda wrapper codegen"
     )
     parser.add_argument(
+        "--freezing", action="store_true", help="turn on freezing", default=False
+    )
+    parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
     )
     parser.add_argument(
@@ -2980,6 +2987,7 @@ def run(runner, args, original_dir=None):
             # https://github.com/pytorch/pytorch/issues/96724
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
+            "sam",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
@@ -3179,6 +3187,8 @@ def run(runner, args, original_dir=None):
         inductor_config.split_reductions = not args.disable_split_reductions
         inductor_config.triton.divisible_by_16 = not args.disable_divisible_by_16
         inductor_config.cpp_wrapper = args.cpp_wrapper
+        if args.inference:
+            inductor_config.freezing = args.freezing
 
     runner.setup_amp()
 
@@ -3312,7 +3322,11 @@ def run(runner, args, original_dir=None):
                         marked = True
                         break
 
-            if args.dynamic_batch_only and batch_size > 1:
+            if (
+                args.dynamic_batch_only
+                and batch_size > 1
+                and model_name not in CI_SKIP_DYNAMIC_BATCH_ONLY
+            ):
                 tree_map_only(torch.Tensor, detect_and_mark_batch, example_inputs)
                 assert marked, f"nothing in example_inputs had a dim with {batch_size}"
 
