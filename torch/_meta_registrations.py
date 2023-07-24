@@ -4443,6 +4443,7 @@ def meta__scaled_dot_product_efficient(
     query: Tensor,
     key: Tensor,
     value: Tensor,
+    attn_bias: Optional[Tensor],
     compute_log_sumexp: bool,
     dropout_p=0.0,
     is_causal: bool = False,
@@ -4487,11 +4488,13 @@ def meta__scaled_dot_product_efficient_backward(
     query: Tensor,
     key: Tensor,
     value: Tensor,
+    attn_bias: Optional[Tensor],
     out: Tensor,
     logsumexp: Tensor,
     philox_seed: Tensor,
     philox_offset: Tensor,
     dropout_p: float,
+    grad_input_mask: List[bool],
     is_causal: bool = False,
     scale: Optional[float] = None,
 ):
@@ -4520,8 +4523,16 @@ def meta__scaled_dot_product_efficient_backward(
         dtype=value.dtype,
         device=value.device,
     )
+    grad_bias = None
+    if attn_bias is not None and grad_input_mask[3]:
+        grad_bias = torch.empty_strided(
+            attn_bias.size(),
+            attn_bias.stride(),
+            dtype=attn_bias.dtype,
+            device=attn_bias.device,
+        )
 
-    return grad_q, grad_k, grad_v
+    return grad_q, grad_k, grad_v, grad_bias
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
