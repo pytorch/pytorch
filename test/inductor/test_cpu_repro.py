@@ -1007,12 +1007,12 @@ class CPUReproTests(TestCase):
             set(cpp_op_list).issubset(union), f"unexpected: {set(cpp_op_list) - union}"
         )
 
-    def test_atomic_add_bfloat16(self):
+    def test_atomic_add_lowp_fp(self):
         def fn(test_args):
             res = torch.gather(**test_args)
             return res
 
-        for dtype in (torch.bfloat16,):  # TODO: haozhe, support fp16
+        for dtype in _lowp_fp_dtypes:
             input_tensor_for_ref = torch.tensor(
                 [[3.0, -5.0]], dtype=dtype, requires_grad=True
             )
