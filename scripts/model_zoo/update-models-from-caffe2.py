@@ -51,20 +51,20 @@ def upload_onnx_model(model_name, zoo_dir, backup=False, only_local=False):
     model_dir = os.path.join(zoo_dir, model_name)
     suffix = '-backup' if backup else ''
     if backup:
-        print('Backing up the previous version of ONNX model {}...'.format(model_name))
-    rel_file_name = '{}{}.tar.gz'.format(model_name, suffix)
+        print(f'Backing up the previous version of ONNX model {model_name}...')
+    rel_file_name = f'{model_name}{suffix}.tar.gz'
     abs_file_name = os.path.join(zoo_dir, rel_file_name)
-    print('Compressing {} model to {}'.format(model_name, abs_file_name))
+    print(f'Compressing {model_name} model to {abs_file_name}')
     with tarfile.open(abs_file_name, 'w:gz') as f:
         f.add(model_dir, arcname=model_name)
     file_size = os.stat(abs_file_name).st_size
-    print('Uploading {} ({} MB) to s3 cloud...'.format(abs_file_name, float(file_size) / 1024 / 1024))
+    print(f'Uploading {abs_file_name} ({float(file_size) / 1024 / 1024} MB) to s3 cloud...')
     client = boto3.client('s3', 'us-east-1')
     transfer = boto3.s3.transfer.S3Transfer(client)
-    transfer.upload_file(abs_file_name, 'download.onnx', 'models/latest/{}'.format(rel_file_name),
+    transfer.upload_file(abs_file_name, 'download.onnx', f'models/latest/{rel_file_name}',
                          extra_args={'ACL': 'public-read'})
 
-    print('Successfully uploaded {} to s3!'.format(rel_file_name))
+    print(f'Successfully uploaded {rel_file_name} to s3!')
 
 
 def download_onnx_model(model_name, zoo_dir, use_cache=True, only_local=False):
@@ -75,7 +75,7 @@ def download_onnx_model(model_name, zoo_dir, use_cache=True, only_local=False):
             return
         else:
             shutil.rmtree(model_dir)
-    url = 'https://s3.amazonaws.com/download.onnx/models/latest/{}.tar.gz'.format(model_name)
+    url = f'https://s3.amazonaws.com/download.onnx/models/latest/{model_name}.tar.gz'
 
     download_file = tempfile.NamedTemporaryFile(delete=False)
     try:
@@ -84,10 +84,10 @@ def download_onnx_model(model_name, zoo_dir, use_cache=True, only_local=False):
             model_name, url, download_file.name))
         urlretrieve(url, download_file.name)
         with tarfile.open(download_file.name) as t:
-            print('Extracting ONNX model {} to {} ...\n'.format(model_name, zoo_dir))
+            print(f'Extracting ONNX model {model_name} to {zoo_dir} ...\n')
             t.extractall(zoo_dir)
     except Exception as e:
-        print('Failed to download/backup data for ONNX model {}: {}'.format(model_name, e))
+        print(f'Failed to download/backup data for ONNX model {model_name}: {e}')
         if not os.path.exists(model_dir):
             os.makedirs(model_dir)
     finally:
@@ -119,7 +119,7 @@ def download_caffe2_model(model_name, zoo_dir, use_cache=True):
                 # (Sep 17, 2017)
                 downloadFromURLToFile(url, dest)
         except Exception as e:
-            print("Abort: {reason}".format(reason=e))
+            print(f"Abort: {e}")
             print("Cleaning up...")
             deleteDirectory(model_dir)
             raise
@@ -131,14 +131,14 @@ def caffe2_to_onnx(caffe2_model_name, caffe2_model_dir):
 
     with open(os.path.join(caffe2_model_dir, 'init_net.pb'), 'rb') as f:
         caffe2_init_proto.ParseFromString(f.read())
-        caffe2_init_proto.name = '{}_init'.format(caffe2_model_name)
+        caffe2_init_proto.name = f'{caffe2_model_name}_init'
     with open(os.path.join(caffe2_model_dir, 'predict_net.pb'), 'rb') as f:
         caffe2_predict_proto.ParseFromString(f.read())
         caffe2_predict_proto.name = caffe2_model_name
     with open(os.path.join(caffe2_model_dir, 'value_info.json'), 'rb') as f:
         value_info = json.loads(f.read())
 
-    print('Converting Caffe2 model {} in {} to ONNX format'.format(caffe2_model_name, caffe2_model_dir))
+    print(f'Converting Caffe2 model {caffe2_model_name} in {caffe2_model_dir} to ONNX format')
     onnx_model = caffe2.python.onnx.frontend.caffe2_net_to_onnx_model(
         init_net=caffe2_init_proto,
         predict_net=caffe2_predict_proto,
@@ -245,7 +245,7 @@ if __name__ == '__main__':
     for onnx_model_name in model_mapping:
         c2_model_name = model_mapping[onnx_model_name]
 
-        print('####### Processing ONNX model {} ({} in Caffe2) #######'.format(onnx_model_name, c2_model_name))
+        print(f'####### Processing ONNX model {onnx_model_name} ({c2_model_name} in Caffe2) #######')
         download_caffe2_model(c2_model_name, caffe2_zoo_dir, use_cache=use_cache)
         download_onnx_model(onnx_model_name, onnx_zoo_dir, use_cache=use_cache, only_local=only_local)
 
@@ -261,19 +261,19 @@ if __name__ == '__main__':
 
         onnx_model, c2_init_net, c2_predict_net = caffe2_to_onnx(c2_model_name, os.path.join(caffe2_zoo_dir, c2_model_name))
 
-        print('Deleteing old ONNX {} model...'.format(onnx_model_name))
+        print(f'Deleteing old ONNX {onnx_model_name} model...')
         for f in glob.glob(os.path.join(onnx_model_dir, 'model*'.format(onnx_model_name))):
             os.remove(f)
 
-        print('Serializing generated ONNX {} model ...'.format(onnx_model_name))
+        print(f'Serializing generated ONNX {onnx_model_name} model ...')
         with open(os.path.join(onnx_model_dir, 'model.onnx'), 'wb') as file:
             file.write(onnx_model.SerializeToString())
 
-        print('Verifying model {} with ONNX model checker...'.format(onnx_model_name))
+        print(f'Verifying model {onnx_model_name} with ONNX model checker...')
         onnx.checker.check_model(onnx_model)
 
         total_existing_data_set = 0
-        print('Verifying model {} with existing test data...'.format(onnx_model_name))
+        print(f'Verifying model {onnx_model_name} with existing test data...')
         for f in glob.glob(os.path.join(onnx_model_dir, '*.npz')):
             test_data = np.load(f, encoding='bytes')
             inputs = list(test_data['inputs'])
@@ -285,41 +285,41 @@ if __name__ == '__main__':
             inputs_num = len(glob.glob(os.path.join(f, 'input_*.pb')))
             for i in range(inputs_num):
                 tensor = onnx.TensorProto()
-                with open(os.path.join(f, 'input_{}.pb'.format(i)), 'rb') as pf:
+                with open(os.path.join(f, f'input_{i}.pb'), 'rb') as pf:
                     tensor.ParseFromString(pf.read())
                 inputs.append(numpy_helper.to_array(tensor))
             ref_outputs = []
             ref_outputs_num = len(glob.glob(os.path.join(f, 'output_*.pb')))
             for i in range(ref_outputs_num):
                 tensor = onnx.TensorProto()
-                with open(os.path.join(f, 'output_{}.pb'.format(i)), 'rb') as pf:
+                with open(os.path.join(f, f'output_{i}.pb'), 'rb') as pf:
                     tensor.ParseFromString(pf.read())
                 ref_outputs.append(numpy_helper.to_array(tensor))
             onnx_verify(onnx_model, inputs, ref_outputs)
             total_existing_data_set += 1
 
         starting_index = 0
-        while os.path.exists(os.path.join(onnx_model_dir, 'test_data_set_{}'.format(starting_index))):
+        while os.path.exists(os.path.join(onnx_model_dir, f'test_data_set_{starting_index}')):
             starting_index += 1
 
         if total_existing_data_set == 0 and add_test_data == 0:
             add_test_data = 3
             total_existing_data_set = 3
 
-        print('Generating {} sets of new test data...'.format(add_test_data))
+        print(f'Generating {add_test_data} sets of new test data...')
         for i in range(starting_index, add_test_data + starting_index):
-            data_dir = os.path.join(onnx_model_dir, 'test_data_set_{}'.format(i))
+            data_dir = os.path.join(onnx_model_dir, f'test_data_set_{i}')
             os.makedirs(data_dir)
             inputs = generate_test_input_data(onnx_model, 255)
             ref_outputs = generate_test_output_data(c2_init_net, c2_predict_net, inputs)
             onnx_verify(onnx_model, inputs, ref_outputs)
             for index, input in enumerate(inputs):
                 tensor = numpy_helper.from_array(input[1])
-                with open(os.path.join(data_dir, 'input_{}.pb'.format(index)), 'wb') as file:
+                with open(os.path.join(data_dir, f'input_{index}.pb'), 'wb') as file:
                     file.write(tensor.SerializeToString())
             for index, output in enumerate(ref_outputs):
                 tensor = numpy_helper.from_array(output)
-                with open(os.path.join(data_dir, 'output_{}.pb'.format(index)), 'wb') as file:
+                with open(os.path.join(data_dir, f'output_{index}.pb'), 'wb') as file:
                     file.write(tensor.SerializeToString())
 
         del onnx_model

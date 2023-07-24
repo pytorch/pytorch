@@ -199,8 +199,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             or not all(isinstance(d, type(hparam_dict[k])) for d in v)
         ):
             raise TypeError(
-                "parameter: hparam_domain_discrete[{}] should be a list of same type as "
-                "hparam_dict[{}].".format(k, k)
+                f"parameter: hparam_domain_discrete[{k}] should be a list of same type as hparam_dict[{k}]."
             )
     hps = []
 

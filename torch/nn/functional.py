@@ -912,9 +912,7 @@ def _unpool_output_size(
             max_size = default_size[d] + stride[d]
             if not (min_size < output_size[d] < max_size):
                 raise ValueError(
-                    'invalid output_size "{}" (dim {} must be between {} and {})'.format(
-                        output_size, d, min_size, max_size
-                    )
+                    f'invalid output_size "{output_size}" (dim {d} must be between {min_size} and {max_size})'
                 )
 
         ret = output_size
@@ -1266,7 +1264,7 @@ def dropout(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool 
     if has_torch_function_unary(input):
         return handle_torch_function(dropout, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return _VF.dropout_(input, p, training) if inplace else _VF.dropout(input, p, training)
 
 
@@ -1278,7 +1276,7 @@ def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace
     if has_torch_function_unary(input):
         return handle_torch_function(alpha_dropout, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return _VF.alpha_dropout_(input, p, training) if inplace else _VF.alpha_dropout(input, p, training)
 
 
@@ -1300,7 +1298,7 @@ def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     if has_torch_function_unary(input):
         return handle_torch_function(dropout1d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
     if inp_dim not in (2, 3):
         raise RuntimeError(f"dropout1d: Expected 2D or 3D input, but received a {inp_dim}D input. "
@@ -1338,7 +1336,7 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     if has_torch_function_unary(input):
         return handle_torch_function(dropout2d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
     if inp_dim not in (3, 4):
         warn_msg = (f"dropout2d: Received a {inp_dim}-D input to dropout2d, which is deprecated "
@@ -1382,7 +1380,7 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     if has_torch_function_unary(input):
         return handle_torch_function(dropout3d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     inp_dim = input.dim()
     if inp_dim not in (4, 5):
         warn_msg = (f"dropout3d: Received a {inp_dim}-D input to dropout3d, which is deprecated "
@@ -1428,7 +1426,7 @@ def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False,
             feature_alpha_dropout, (input,), input, p=p, training=training, inplace=inplace
         )
     if p < 0.0 or p > 1.0:
-        raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
+        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
     return _VF.feature_alpha_dropout_(input, p, training) if inplace else _VF.feature_alpha_dropout(input, p, training)
 
 
@@ -1791,8 +1789,7 @@ See :class:`~torch.nn.Softplus` for more details.
 
 def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
     warnings.warn(
-        "Implicit dimension choice for {} has been deprecated. "
-        "Change the call to include dim=X as an argument.".format(name),
+        f"Implicit dimension choice for {name} has been deprecated. Change the call to include dim=X as an argument.",
         stacklevel=stacklevel,
     )
     if ndim == 0 or ndim == 1 or ndim == 3:
@@ -2575,10 +2572,7 @@ def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: flo
     dim = input.dim()
     if dim < 3:
         raise ValueError(
-            "Expected 3D or higher dimensionality \
-                         input (got {} dimensions)".format(
-                dim
-            )
+            f"Expected 3D or higher dimensionality                          input (got {dim} dimensions)"
         )
 
     if input.numel() == 0:
@@ -3368,7 +3362,7 @@ def margin_ranking_loss(
         reduction_enum = _Reduction.get_enum(reduction)
     if (input1.dim() != input2.dim() or input1.dim() != target.dim()):
         raise RuntimeError(
-            "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
+            f"margin_ranking_loss : All input tensors should have same dimension but got sizes: "
             f"input1: {input1.size()}, input2: {input2.size()}, target: {target.size()} "
         )
     return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
@@ -4277,8 +4271,7 @@ def grid_sample(
         )
     if mode != "bilinear" and mode != "nearest" and mode != "bicubic":
         raise ValueError(
-            "nn.functional.grid_sample(): expected mode to be "
-            "'bilinear', 'nearest' or 'bicubic', but got: '{}'".format(mode)
+            f"nn.functional.grid_sample(): expected mode to be 'bilinear', 'nearest' or 'bicubic', but got: '{mode}'"
         )
     if padding_mode != "zeros" and padding_mode != "border" and padding_mode != "reflection":
         raise ValueError(
@@ -4379,15 +4372,13 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     if len(size) == 4:
         if theta.dim() != 3 or theta.shape[-2] != 2 or theta.shape[-1] != 3:
             raise ValueError(
-                "Expected a batch of 2D affine matrices of shape Nx2x3 "
-                "for size {}. Got {}.".format(size, theta.shape)
+                f"Expected a batch of 2D affine matrices of shape Nx2x3 for size {size}. Got {theta.shape}."
             )
         spatial_size = size[-2:]  # spatial dimension sizes
     elif len(size) == 5:
         if theta.dim() != 3 or theta.shape[-2] != 3 or theta.shape[-1] != 4:
             raise ValueError(
-                "Expected a batch of 3D affine matrices of shape Nx3x4 "
-                "for size {}. Got {}.".format(size, theta.shape)
+                f"Expected a batch of 3D affine matrices of shape Nx3x4 for size {size}. Got {theta.shape}."
             )
         spatial_size = size[-3:]  # spatial dimension sizes
     else:

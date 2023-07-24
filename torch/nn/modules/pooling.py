@@ -249,9 +249,7 @@ class MaxPool3d(_MaxPoolNd):
 class _MaxUnpoolNd(Module):
 
     def extra_repr(self) -> str:
-        return 'kernel_size={}, stride={}, padding={}'.format(
-            self.kernel_size, self.stride, self.padding
-        )
+        return f'kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding}'
 
 
 class MaxUnpool1d(_MaxUnpoolNd):
@@ -489,9 +487,7 @@ class _AvgPoolNd(Module):
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad']
 
     def extra_repr(self) -> str:
-        return 'kernel_size={}, stride={}, padding={}'.format(
-            self.kernel_size, self.stride, self.padding
-        )
+        return f'kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding}'
 
 
 class AvgPool1d(_AvgPoolNd):
@@ -794,8 +790,7 @@ class FractionalMaxPool2d(Module):
             raise ValueError("only one of output_size and output_ratio may be specified")
         if self.output_ratio is not None:
             if not (0 < self.output_ratio[0] < 1 and 0 < self.output_ratio[1] < 1):
-                raise ValueError("output_ratio must be between 0 and 1 (got {})"
-                                 .format(output_ratio))
+                raise ValueError(f"output_ratio must be between 0 and 1 (got {output_ratio})")
 
     def forward(self, input: Tensor):
         return F.fractional_max_pool2d(
@@ -865,8 +860,7 @@ class FractionalMaxPool3d(Module):
             raise ValueError("only one of output_size and output_ratio may be specified")
         if self.output_ratio is not None:
             if not (0 < self.output_ratio[0] < 1 and 0 < self.output_ratio[1] < 1 and 0 < self.output_ratio[2] < 1):
-                raise ValueError("output_ratio must be between 0 and 1 (got {})"
-                                 .format(output_ratio))
+                raise ValueError(f"output_ratio must be between 0 and 1 (got {output_ratio})")
 
     def forward(self, input: Tensor):
         return F.fractional_max_pool3d(
