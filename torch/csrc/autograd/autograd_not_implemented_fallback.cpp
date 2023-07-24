@@ -177,7 +177,6 @@ static void basicAutogradNotImplementedFallbackImpl(
           if (t.requires_grad()) {
             t.register_hook([op_name](const at::Tensor& grad) {
               warnAutogradNotImplemented(op_name);
-              return grad;
             });
             // If history is rebased, then we will attempt to warn
             // on the view's base. This will catch most cases (because
@@ -188,7 +187,6 @@ static void basicAutogradNotImplementedFallbackImpl(
               const_cast<at::TensorBase&>(t._base()).register_hook(
                   [op_name](const at::TensorBase& grad) {
                     warnAutogradNotImplemented(op_name);
-                    return grad;
                   });
             }
             return;
