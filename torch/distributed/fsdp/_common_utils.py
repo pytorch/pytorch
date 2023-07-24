@@ -11,7 +11,6 @@ from typing import (
     cast,
     Dict,
     Generator,
-    Iterable,
     List,
     no_type_check,
     Optional,
@@ -108,9 +107,9 @@ class _FSDPState(_State):
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._optim_state_dict_config: OptimStateDictConfig = FullOptimStateDictConfig()
         self._is_root: Optional[bool] = None
-        self._handles: List[flat_param_file.FlatParamHandle] = []
-        self._fully_sharded_module_to_handles: Dict[
-            nn.Module, List[flat_param_file.FlatParamHandle]
+        self._handle: Optional[flat_param_file.FlatParamHandle] = None
+        self._fully_sharded_module_to_handle: Dict[
+            nn.Module, Optional[flat_param_file.FlatParamHandle]
         ] = {}
         self.compute_device: Optional[torch.device] = None
         # Abstract device handle for fsdp compute device. For now,
@@ -138,7 +137,7 @@ def _get_module_fsdp_state_if_fully_sharded_module(
         return None
     if state == module:  # FullyShardedDataParallel module case.
         return state
-    if module in state._fully_sharded_module_to_handles:  # fully_shard case.
+    if module in state._fully_sharded_module_to_handle:  # fully_shard case.
         return state
     return None
 
@@ -171,51 +170,36 @@ def _is_composable(state: _FSDPState):
 
 
 @no_type_check
-def _module_handles(state: _FSDPState, module: nn.Module) -> List:
+def _module_handle(state: _FSDPState, module: nn.Module) -> Optional["FlatParamHandle"]:
     """
-    Returns the ``FlatParamHandle`` s corresponding to ``module``. These are
-    the handles that contain some parameter in ``module``.
+    Returns the ``FlatParamHandle`` s corresponding to ``module``. This is
+    the handle that contains some parameter in ``module``.
     """
     if _is_composable(state):
         # A valid FSDP state may have no managed parameters and hence no
         # handles, meaning no entry in `_fully_sharded_module_to_handles`
-        if len(state._handles) == 0:
-            return []
+        if state._handle is None:
+            return None
         assert (
-            module in state._fully_sharded_module_to_handles
+            module in state._fully_sharded_module_to_handle
         ), f"Expects a fully sharded module but got {module} on rank {state.rank}"
-        return state._fully_sharded_module_to_handles[module][:]
+        return state._fully_sharded_module_to_handle[module]
     else:
         # NOTE: This assumes `module` is a `FullyShardedDataParallel` instance.
-        return module._handles[:]
+        return module._handle
 
 
 @no_type_check
 def _has_fsdp_params(state: _FSDPState, module: nn.Module) -> bool:
     """Returns if ``module`` has parameters managed by FSDP."""
-    return len(_module_handles(state, module)) > 0
+    return _module_handle(state, module) is not None
 
 
-def _get_sharding_strategy(handles: Iterable):
+def _get_sharding_strategy(handle):
     """
-    Returns the sharding strategy of the group of handles given by ``handles``
-    or ``None`` if ``handles`` is empty. The input should be the handles
-    corresponding to one module, so we enforce that they all share the same
-    sharding strategy.
+    Returns the sharding strategy of the handle.
     """
-    sharding_strategy = None
-    for handle in handles:
-        if sharding_strategy is None:
-            sharding_strategy = handle._sharding_strategy
-        elif (
-            sharding_strategy is not None
-            and sharding_strategy != handle._sharding_strategy
-        ):
-            raise AssertionError(
-                "Expects each group of handles to have the same sharding "
-                f"strategy but got {sharding_strategy} and {handle._sharding_strategy}"
-            )
-    return sharding_strategy
+    return handle._sharding_strategy if handle else None
 
 
 def clean_tensor_name(tensor_name: str) -> str:
