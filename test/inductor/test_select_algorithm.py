@@ -193,6 +193,41 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @patches
+    def test_mm_plus_mm2(self):
+        @torch.compile
+        def foo(a, b, c, d):
+            return (a @ b) + (c @ d)
+
+        foo(
+            torch.randn(512, 512, device="cuda"),
+            torch.randn(512, 512, device="cuda"),
+            torch.randn(512, 512, device="cuda"),
+            torch.randn(512, 512, device="cuda"),
+        )
+        # Autotuning checks correctness of each version
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_mm_dup_args(self):
+        @torch.compile
+        def foo(a):
+            return torch.mm(a, a)
+
+        foo(torch.randn(32, 32, device="cuda"))
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_mm_dup_args_view(self):
+        @torch.compile
+        def foo(a):
+            q = a[:32, :]
+            k = a[32:, :]
+            return torch.mm(q, k.transpose(0, 1))
+
+        foo(torch.randn(64, 64, device="cuda"))
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+
     @skipIfRocm
     @expectedFailureDynamicWrapper
     @patches

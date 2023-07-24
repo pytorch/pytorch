@@ -1,8 +1,9 @@
 # Owner(s): ["module: onnx"]
-from __future__ import annotations
-
+import torch
 import torch._dynamo
 import torch.fx
+
+from torch._custom_op import impl as custom_op
 from torch.onnx._internal.fx.passes import _utils as pass_utils
 from torch.testing._internal import common_utils
 
@@ -55,6 +56,50 @@ class TestFxPasses(common_utils.TestCase):
         assert len({node.name for node in nodes}) == len(
             nodes
         ), f"Expected all names to be unique, got {nodes}"
+
+    def test_onnx_dynamo_export_raises_when_model_contains_unsupported_fx_nodes(self):
+        @custom_op.custom_op("mylibrary::foo_op")
+        def foo_op(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @custom_op.custom_op("mylibrary::bar_op")
+        def bar_op(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo_op.impl_abstract()
+        def foo_op_impl_abstract(x):
+            return torch.empty_like(x)
+
+        @foo_op.impl("cpu")
+        def foo_op_impl(x):
+            return x + 1
+
+        @bar_op.impl_abstract()
+        def bar_op_impl_abstract(x):
+            return torch.empty_like(x)
+
+        @bar_op.impl("cpu")
+        def bar_op_impl(x):
+            return x + 2
+
+        torch._dynamo.allow_in_graph(foo_op)
+        torch._dynamo.allow_in_graph(bar_op)
+
+        def func(x, y, z):
+            return foo_op(x) + bar_op(y) + z
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        z = torch.randn(3)
+        with self.assertRaises(torch.onnx.OnnxExporterError) as ctx:
+            torch.onnx.dynamo_export(func, x, y, z)
+        inner_exception = ctx.exception.__cause__
+        self.assertRegex(
+            str(inner_exception),
+            r"Unsupported FX nodes.*mylibrary\.foo_op.*mylibrary\.bar_op",
+        )
+
+        torch._dynamo.reset()
 
 
 if __name__ == "__main__":

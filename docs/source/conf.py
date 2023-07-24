@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 #
 # PyTorch documentation build configuration file, created by
 # sphinx-quickstart on Fri Dec 23 13:31:47 2016.
@@ -624,7 +623,7 @@ def replace(Klass):
                 anchor = ref_anchor[1]
                 txt = node.parent.astext()
                 if txt == anchor or txt == anchor.split('.')[-1]:
-                    self.body.append('<p id="{}"/>'.format(ref_anchor[1]))
+                    self.body.append(f'<p id="{ref_anchor[1]}"/>')
         return old_call(self, node)
     Klass.visit_reference = visit_reference
 
