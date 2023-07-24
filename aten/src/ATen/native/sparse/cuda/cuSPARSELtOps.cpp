@@ -10,6 +10,7 @@
 #include <c10/util/Half.h>
 #include <cusparse.h>
 #include <cstdint>
+#include "Exceptions.h"
 
 
 #if AT_CUSPARSELT_ENABLED()
@@ -26,9 +27,8 @@ cusparseLtHandle_t handle;
 at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
 #if AT_CUSPARSELT_ENABLED()
-    // is there a better way to do this?
-    TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
 
+    TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
     // create sparse descriptor, dtype
     cusparseLtMatDescriptor_t sparse_input_descriptor;
     cudaDataType type;
@@ -55,9 +55,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
             break;
     }
 
-    // We create the tensor to store the compressed sparse matrix (non-pruned
-    // elements + mask) in python with the same dtype as the sparse input tensor
-    // so we know this wil be correct.
+    // create a new compressed tensor with the same dtype as
     auto compressed_tensor = sparse_input.new_empty(sparse_input.numel() * compression_factor / 16);
 
     TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
@@ -139,6 +137,7 @@ at::Tensor _cslt_sparse_mm(
         compute_type = CUSPARSE_COMPUTE_TF32;
         break;
     default:
+        TORCH_CHECK(false, "Unsupported dtype for cuSPARSE compressed matrix multiplication.")
         break;
   }
 
@@ -158,7 +157,6 @@ at::Tensor _cslt_sparse_mm(
       type,
       CUSPARSE_ORDER_ROW,
       CUSPARSELT_SPARSITY_50_PERCENT));
-
 
   // initalize dense input descriptor
   cusparseLtMatDescriptor_t dense_input_descriptor;
