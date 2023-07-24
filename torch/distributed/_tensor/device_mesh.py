@@ -37,7 +37,7 @@ if TYPE_CHECKING:
         )
 
 
-class _MeshEnv(object):
+class _MeshEnv:
     def __init__(self) -> None:
         self.mesh_stack: List[DeviceMesh] = []
 
@@ -60,7 +60,7 @@ def _get_device_handle(device_type: str = "cuda"):
     return getattr(torch, device_type, None) if device_type != "cpu" else None
 
 
-class DeviceMesh(object):
+class DeviceMesh:
     """
     DeviceMesh represents a mesh of devices, where layout of devices could be
     represented as a n-d dimension array, and each value of the n-d dimensional

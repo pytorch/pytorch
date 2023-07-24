@@ -263,7 +263,7 @@ void add_sub_lerp_template(const Tensor& self,
                            std::string op_name) {
   if (alpha.toDouble() == 0.0) {
     if (!self.is_alias_of(output)) { // if inplace, no-op
-      const_cast<Tensor&>(output) = self.clone();
+      output.copy_(self);
     }
     return;
   }

@@ -290,7 +290,7 @@ class FunctionMeta(type):
         backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
         cls._backward_cls = backward_fn
 
-        super(FunctionMeta, cls).__init__(name, bases, attrs)
+        super().__init__(name, bases, attrs)
 
 
 class _SingleLevelFunction(_C._FunctionBase, FunctionCtx, _HookMixin, metaclass=FunctionMeta):
