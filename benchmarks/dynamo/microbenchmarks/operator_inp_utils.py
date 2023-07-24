@@ -240,7 +240,7 @@ class OperatorInputsLoader:
     def __init__(self, json_file_path):
         self.operator_db = defaultdict(Counter)
 
-        with open(json_file_path, "r") as f:
+        with open(json_file_path) as f:
             lines = f.readlines()
 
         i = 0
