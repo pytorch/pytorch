@@ -72,6 +72,11 @@ class RNNBase(Module):
                           "recurrent layer, so non-zero dropout expects "
                           "num_layers greater than 1, but got dropout={} and "
                           "num_layers={}".format(dropout, num_layers))
+
+        if not isinstance(hidden_size, int):
+            raise TypeError(f"hidden_size should be of type int, got: {type(hidden_size).__name__}")
+        if hidden_size <= 0:
+            raise ValueError("hidden_size must be greater than zero")
         if proj_size < 0:
             raise ValueError("proj_size should be a positive integer or zero to disable projections")
         if proj_size >= hidden_size:
@@ -488,7 +493,8 @@ class RNN(RNNBase):
                 hx = self.permute_hidden(hx, sorted_indices)
         else:
             batch_sizes = None
-            assert (input.dim() in (2, 3)), f"RNN: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
+            if input.dim() not in (2, 3):
+                raise ValueError("RNN: Expected input to be 2D or 3D, got {}D tensor instead".format(input.dim()))
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:
@@ -796,7 +802,8 @@ class LSTM(RNNBase):
                 # the user believes he/she is passing in.
                 hx = self.permute_hidden(hx, sorted_indices)
         else:
-            assert (input.dim() in (2, 3)), f"LSTM: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
+            if input.dim() not in (2, 3):
+                raise ValueError("LSTM: Expected input to be 2D or 3D, got {}D instead".format(input.dim()))
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:
@@ -1014,7 +1021,8 @@ class GRU(RNNBase):
                 hx = self.permute_hidden(hx, sorted_indices)
         else:
             batch_sizes = None
-            assert (input.dim() in (2, 3)), f"GRU: Expected input to be 2-D or 3-D but received {input.dim()}-D tensor"
+            if input.dim() not in (2, 3):
+                raise ValueError("GRU: Expected input to be 2D or 3D, got {}D instead".format(input.dim()))
             is_batched = input.dim() == 3
             batch_dim = 0 if self.batch_first else 1
             if not is_batched:
@@ -1170,8 +1178,8 @@ class RNNCell(RNNCellBase):
         self.nonlinearity = nonlinearity
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
-        assert input.dim() in (1, 2), \
-            f"RNNCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        if input.dim() not in (1, 2):
+            raise ValueError("RNNCell: Expected input to be 1D or 2D, got {}D instead".format(input.dim()))
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1270,8 +1278,8 @@ class LSTMCell(RNNCellBase):
         super().__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
-        assert input.dim() in (1, 2), \
-            f"LSTMCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        if input.dim() not in (1, 2):
+            raise ValueError("LSTMCell: Expected input to be 1D or 2D, got {}D instead".format(input.dim()))
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1361,8 +1369,8 @@ class GRUCell(RNNCellBase):
         super().__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
 
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
-        assert input.dim() in (1, 2), \
-            f"GRUCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
+        if input.dim() not in (1, 2):
+            raise ValueError("GRUCell: Expected input to be 1D or 2D, got {}D instead".format(input.dim()))
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
