@@ -128,8 +128,7 @@ class QuantizationConfig:
 OperatorPatternType = List[Callable]
 OperatorPatternType.__module__ = "torch.ao.quantization.pt2e.quantizer.quantizer"
 
-OperatorConfig = NamedTuple(
-    "OperatorConfig",
+class OperatorConfig(NamedTuple):
     # fix List[str] with List[List[Union[nn.Module, FunctionType, BuiltinFunctionType]]]
     # Basically we are mapping a quantization config to some list of patterns.
     # a pattern is defined as a list of nn module, function or builtin function names
@@ -138,14 +137,8 @@ OperatorConfig = NamedTuple(
     # quantizer hence it does not need communication to user.
     # Note this pattern is not really informative since it does not really
     # tell us the graph structure resulting from the list of ops.
-    [
-        ("config", QuantizationConfig),
-        (
-            "operators",
-            List[OperatorPatternType],
-        ),
-    ],
-)
+    config: QuantizationConfig
+    operators: List[OperatorPatternType]
 
 @dataclass
 class QuantizationAnnotation:

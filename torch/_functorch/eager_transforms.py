@@ -548,7 +548,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
             # Iterate and concat the jacobians of different
             # inputs.
             for idx in range(len(flat_primals)):
-                r = tuple((r_[idx] for r_ in chunked_results))
+                r = tuple(r_[idx] for r_ in chunked_results)
                 flat_results.append(torch.cat(r, 0))
 
             return flat_results
