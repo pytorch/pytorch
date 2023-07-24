@@ -412,6 +412,14 @@ def get_current_node_opt_ctx() -> OptimizationContext:
     return get_opt_ctx(V.interpreter.current_node)
 
 
+def get_computation_dtype(dtype) -> torch.dtype:
+    opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+    assert opt_ctx
+    assert opt_ctx.dtype in [torch.int32, torch.float32, torch.bfloat16]
+    assert opt_ctx.dtype == DTYPE_TO_COMPUTATION_DTYPE[dtype]
+    return opt_ctx.dtype
+
+
 class CppVecOverrides(OpOverrides):
     """Map element-wise ops to aten vectorization C++"""
 
@@ -629,10 +637,7 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx
-        assert opt_ctx.dtype in [torch.int32, torch.float32, torch.bfloat16]
-        proposed_dtype = opt_ctx.dtype
+        proposed_dtype = get_computation_dtype(dtype)
         if val == float("inf"):
             quote = f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif val == float("-inf"):
@@ -1031,20 +1036,16 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
-        if dtype in (torch.float16, torch.bfloat16):
-            # Since load promotes all half-precision inputs to float, constants
-            # must be promoted as well
-            dtype = torch.float32
-
+        proposed_dtype = get_computation_dtype(dtype)
         if val == float("inf"):
-            return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+            return f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif val == float("-inf"):
-            return f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+            return f"-std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::infinity()"
         elif math.isnan(val):
-            return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::quiet_NaN()"
+            return f"std::numeric_limits<{DTYPE_TO_CPP[proposed_dtype]}>::quiet_NaN()"
         elif val is True or val is False:
-            return ops.to_dtype(str(val).lower(), dtype)
-        return ops.to_dtype(repr(val), dtype)
+            return ops.to_dtype(str(val).lower(), proposed_dtype)
+        return ops.to_dtype(repr(val), proposed_dtype)
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -2097,7 +2098,6 @@ class CppVecKernelChecker(CppVecKernel):
                 with RecordOptimizationContext(__name__) as node_ctx:
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    opt_ctx.dtype = dtype
                     i32_iinfo = numpy.iinfo(numpy.int32)
                     if (
                         dtype == torch.int64
@@ -2213,7 +2213,9 @@ class CppVecKernelChecker(CppVecKernel):
                     cur_node = node_ctx.get_fx_node()
                     input_value: torch.fx.Node = cur_node.all_input_nodes[1]
                     if dtype == torch.float:
-                        if input_value.target in ["load", "constant"]:
+                        if input_value.target in [
+                            "load",
+                        ]:
                             # Support masked_load for BF16. Because the legalization will
                             # insert to_dtype to convert the BF16 input to FP32.
                             dtype = (
@@ -2322,7 +2324,6 @@ class CppKernelProxy(CppKernel):
                 # Fast path if all operations can support bf16 without converting to fp32
                 if _node.target not in [
                     "load",
-                    "constant",
                     "store",
                     "abs",
                     "neg",
@@ -2343,16 +2344,13 @@ class CppKernelProxy(CppKernel):
 
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
-            def is_bf16_load_or_constant(node: torch.fx.Node):
-                if node.target not in ["load", "constant"]:
+            def is_bf16_load(node: torch.fx.Node):
+                if node.target not in [
+                    "load",
+                ]:
                     return False
                 assert len(node.args) == 3
-                # If the node is constant, the last arg is dtype
-                load_dtype = (
-                    V.graph.get_dtype(node.args[1])
-                    if node.target == "load"
-                    else node.args[-1]
-                )
+                load_dtype = V.graph.get_dtype(node.args[1])
                 return load_dtype == torch.bfloat16
 
             def is_bf16_store(node: torch.fx.Node):
@@ -2365,7 +2363,7 @@ class CppKernelProxy(CppKernel):
             sub_graph_nodes = list(sub_graph.nodes)
             to_bf16_legalized_nodes = []
             for _node in sub_graph_nodes:
-                if is_bf16_load_or_constant(_node):
+                if is_bf16_load(_node):
                     ops = _node.args[0]
                     with sub_graph.inserting_after(_node):
                         to_type_node = sub_graph.call_method(
@@ -2484,7 +2482,7 @@ class CppKernelProxy(CppKernel):
                 )
                 for sub_block in sub_blocks:
                     for fx_node in sub_block.graph.nodes:
-                        if fx_node.target in ["load", "constant", "store"]:
+                        if fx_node.target in ["load", "store"]:
                             assert fx_node.meta
                             assert OptimizationContext.key in fx_node.meta
                             opt_ctx: OptimizationContext = fx_node.meta[

@@ -2079,6 +2079,22 @@ class CPUReproTests(TestCase):
         )
         self.assertEqual(metrics.generated_kernel_count, 1)
 
+    def test_scalar_mul_bfloat16(self):
+        def f(x):
+            return torch.ops.aten.mul.Tensor(x, 1.7015043497085571)
+
+        metrics.reset()
+        x = torch.randn(4, 5, dtype=torch.bfloat16)
+        self.common(f, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_bf16_zeros(self):
+        def fn():
+            x = torch.zeros(1, 1, 32, dtype=torch.bfloat16)
+            return x
+
+        self.common(fn, ())
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

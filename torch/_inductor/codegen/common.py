@@ -98,6 +98,8 @@ class DataTypePropagation:
         return dtype
 
     def deduce_node_dtype(self, node: torch.fx.Node):
+        from .cpp import DTYPE_TO_COMPUTATION_DTYPE
+
         if node.target in boolean_ops():
             return torch.bool
 
@@ -110,7 +112,6 @@ class DataTypePropagation:
                 return None
 
         if node.target in (
-            "constant",
             "to_dtype",
             "index_expr",
         ):
@@ -138,6 +139,9 @@ class DataTypePropagation:
 
         if node.target == "reduction":
             return node.args[1]
+
+        if node.target == "constant":
+            return DTYPE_TO_COMPUTATION_DTYPE[node.args[-1]]
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
