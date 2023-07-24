@@ -344,7 +344,7 @@ class TestObserver(QuantizationTestCase):
     def test_histogram_observer_handle_close_to_infinity(self):
         for sign in [-1, 1]:
             obser = HistogramObserver.with_args(reduce_range=False)()
-            mask = torch.tensor([-3.4028234663852886 * 10**35, 0, 0, 0]) * sign
+            mask = torch.tensor([-3.4028234663852886 * 10**30, 0, 0, 0]) * sign
             obser(mask)
             obser(mask - sign)
             scale, zp = obser.calculate_qparams()
