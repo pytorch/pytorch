@@ -107,10 +107,8 @@ class BasePruningMethod(ABC):
                     found += 1
             assert (
                 found <= 1
-            ), "Avoid adding multiple pruning hooks to the\
-                same tensor {} of module {}. Use a PruningContainer.".format(
-                name, module
-            )
+            ), f"Avoid adding multiple pruning hooks to the\
+                same tensor {name} of module {module}. Use a PruningContainer."
 
             for k in hooks_to_remove:
                 del module._forward_pre_hooks[k]
@@ -264,7 +262,7 @@ class PruningContainer(BasePruningMethod):
     """
 
     def __init__(self, *args):
-        self._pruning_methods: Tuple["BasePruningMethod", ...] = tuple()
+        self._pruning_methods: Tuple[BasePruningMethod, ...] = tuple()
         if not isinstance(args, Iterable):  # only 1 item
             self._tensor_name = args._tensor_name
             self.add_pruning_method(args)

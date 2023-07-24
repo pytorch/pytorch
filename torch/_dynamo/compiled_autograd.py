@@ -24,6 +24,7 @@ class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
         self.compiler_fn = compiler_fn
         self.stack = contextlib.ExitStack()
+        self.close = self.stack.close
         self.shape_env = ShapeEnv()
         self.fake_tensor_mode = FakeTensorMode(
             allow_fallback_kernels=True,
