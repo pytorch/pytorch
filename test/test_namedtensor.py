@@ -328,7 +328,7 @@ class TestNamedTensor(TestCase):
     def test_big_tensor_repr_has_names(self):
         def check_repr(named_tensor):
             unnamed_tensor = named_tensor.rename(None)
-            names_tag = 'names={}'.format(named_tensor.names)
+            names_tag = f'names={named_tensor.names}'
             self.assertIn(names_tag, repr(named_tensor))
 
         check_repr(torch.randn(128, 3, 64, 64, names=('N', 'C', 'H', 'W')))
@@ -854,7 +854,7 @@ class TestNamedTensor(TestCase):
                 out = testcase.lambd(tensor)
             except RuntimeError as err:
                 # Get a better error message by catching the error and asserting.
-                raise RuntimeError('{}: {}'.format(testcase.name, err)) from err
+                raise RuntimeError(f'{testcase.name}: {err}') from err
             self.assertEqual(out.names, tensor.names,
                              msg=testcase.name)
 

@@ -62,8 +62,8 @@ def get_tasks(op, backward_test, device):
             test_name = device + ":matmul-forward"
             return list(filter(None, [
                 (test_name, device, "torch:" + operation.replace("sparse", "dense"),
-                 "{}(dx, dy)".format(OPS_MAP[operation])),
-                (test_name, device, "torch:" + operation, "{}(x, y)".format(OPS_MAP[operation])),
+                 f"{OPS_MAP[operation]}(dx, dy)"),
+                (test_name, device, "torch:" + operation, f"{OPS_MAP[operation]}(x, y)"),
                 (test_name, device, "scipy:" + operation, "scipy_matmul(sx, sy)") if device == "cpu" else None
             ]))
 
