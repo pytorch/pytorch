@@ -374,7 +374,7 @@ def add_generated_native_functions(
     # First we group of NaitveFunctions by schema kind,
     # then we detect which ones are missing and generate them.
     pre_grouped_native_functions = pre_group_native_functions(rs)
-    for k, d in pre_grouped_native_functions.items():
+    for d in pre_grouped_native_functions.values():
         has_functional = SchemaKind.functional in d
         has_inplace = SchemaKind.inplace in d
         has_mutable = SchemaKind.mutable in d
