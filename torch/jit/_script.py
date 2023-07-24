@@ -198,8 +198,7 @@ class OrderedDictWrapper:
     def __setitem__(self, k, v):
         if k not in self:
             raise RuntimeError(
-                "Can't add a new parameter after ScriptModule construction."
-                " Tried to add '{}".format(k)
+                f"Can't add a new parameter after ScriptModule construction. Tried to add '{k}"
             )
         self._c.setattr(k, v)
 
@@ -798,9 +797,7 @@ if _enabled:
                 # TODO: we don't have _concrete_type set after load(), and in general we lose constant information.
                 # We should encode constants as class type attributes (or something) so it persists across save/load.
                 raise AttributeError(
-                    "Cannot mutate TorchScript constant value: '{}'. Value: '{}'".format(
-                        attr, value
-                    )
+                    f"Cannot mutate TorchScript constant value: '{attr}'. Value: '{value}'"
                 )
             else:
                 # We allow setting Python attributes on the ScriptModule, for
@@ -1296,9 +1293,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         # an instance instead of a Module
         if issubclass(obj, torch.nn.Module):
             raise RuntimeError(
-                "Type '{}' cannot be compiled since it inherits"
-                " from nn.Module,"
-                " pass an instance instead".format(obj)
+                f"Type '{obj}' cannot be compiled since it inherits from nn.Module, pass an instance instead"
             )
 
         # Enums are automatically usable in TorchScript, explicitly scripting

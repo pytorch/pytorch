@@ -336,7 +336,7 @@ class Tensor(torch._C._TensorBase):
                 )
             else:
                 raise NotImplementedError(
-                    "sparse tensor __reduce_ex__ for layout `%s`" % (self.layout)
+                    f"sparse tensor __reduce_ex__ for layout `{self.layout}`"
                 )
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
         elif self.layout in {
@@ -1002,8 +1002,7 @@ class Tensor(torch._C._TensorBase):
             return (element == self).any().item()  # type: ignore[union-attr]
 
         raise RuntimeError(
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a %s."
-            % type(element)
+            f"Tensor.__contains__ only supports Tensor or scalar, but you passed in a {type(element)}."
         )
 
     @property
