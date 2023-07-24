@@ -122,7 +122,7 @@ class Caffe2OperatorTestCase:
         with core.DeviceScope(self.op_bench.dev):
             op = self.op_bench.forward()
         if not workspace.RunOperatorMultiple(op, num_runs):
-            raise ValueError("Unable to run operator test case: {}".format(self.test_name))
+            raise ValueError(f"Unable to run operator test case: {self.test_name}")
 
     def run_backward(self, num_runs, print_per_iter=False):
         """ Run the backward path of an operator in a loop
@@ -130,7 +130,7 @@ class Caffe2OperatorTestCase:
         with core.DeviceScope(self.op_bench.dev):
             op = self.op_bench.backward()
         if not workspace.RunOperatorMultiple(op, num_runs):
-            raise ValueError("Unable to run operator gradient test case: {}".format(self.test_name))
+            raise ValueError(f"Unable to run operator gradient test case: {self.test_name}")
 
     def _print_per_iter(self):
         pass
@@ -140,7 +140,7 @@ def create_caffe2_op_test_case(op_bench, test_config):
     test_case = Caffe2OperatorTestCase(op_bench, test_config)
     test_config = test_case.test_config
     op = test_case.op_bench
-    func_name = "{}{}{}".format(op.module_name(), test_case.framework, str(test_config))
+    func_name = f"{op.module_name()}{test_case.framework}{str(test_config)}"
     return (func_name, test_case)
 
 
