@@ -2,7 +2,7 @@ import inspect
 from collections import defaultdict
 from functools import wraps
 from itertools import chain
-from typing import Callable, Dict, Sequence, Union
+from typing import Callable, Dict, Optional, Sequence, Union
 
 import torch
 import torch.library
@@ -139,6 +139,13 @@ def register_decomposition(aten_op, registry=None, *, type="post_autograd"):
 def get_decompositions(
     aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
     type: str = "post_autograd",
+    *,
+    # Whether or not to include any existing CompositeImplicitAutograd decomps from C++.
+    # If there is both a python and C++ decomp, the python one gets precedence.
+    # Note that this flag only really matters for pre_dispatch tracing. When performing normal
+    # tracing of ATen operations, CompositeImplicitAutograd ops are always decomposed
+    # by the dispatcher.
+    include_cpp_decomps: bool = False,
 ) -> Dict[OpOverload, Callable]:
     """
     Retrieve a dictionary of decompositions corresponding to the list of
@@ -153,6 +160,11 @@ def get_decompositions(
     """
     assert type in {"post_autograd", "pre_autograd", "meta"}
 
+    def maybe_get_composite_implicit_autograd_cpp_kernel(
+        overload: OpOverloadPacket,
+    ) -> Optional[Callable]:
+        return None
+
     registry = global_decomposition_table[type]
     packets_to_overloads = defaultdict(list)
     for opo in registry:
@@ -164,6 +176,28 @@ def get_decompositions(
                 decompositions[op_overload] = registry[op_overload]
         elif isinstance(op, OpOverload) and op in registry:
             decompositions[op] = registry[op]
+
+        if include_cpp_decomps:
+            overloads = []
+            if isinstance(op, OpOverload):
+                overloads.append(op)
+            elif isinstance(op, OpOverloadPacket):
+                for name in op._overload_names:
+                    overload = getattr(op, name)
+                    overloads.append(overload)
+            for overload in overloads:
+                # Maybe use a cpp decomp if one exists, and we haven't already found a python decomp
+                if torch._C._dispatch_has_kernel_for_dispatch_key(
+                    overload.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+                ):
+                    if overload not in decompositions:
+                        # Our synthetic cpp decomp: uses OpOverload.decompose to call
+                        # a CompositeImplicitAutograd kernel, if it exists.
+                        def cpp_decomp(*args, **kwargs):
+                            return overload.decompose(*args, **kwargs)
+
+                        decompositions[overload] = cpp_decomp
+
     return decompositions
 
 
