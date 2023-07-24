@@ -131,7 +131,6 @@ Features described in this documentation are classified by release status:
    sparse
    storage
    torch.testing <testing>
-   torch.utils <utils>
    torch.utils.benchmark <benchmark_utils>
    torch.utils.bottleneck <bottleneck>
    torch.utils.checkpoint <checkpoint>
